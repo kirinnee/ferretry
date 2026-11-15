@@ -4,17 +4,20 @@
  * hand-off and its refusal without touching `window`.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { OpenLinksIn } from '@ferretry/app';
+import { deviceControls, type OpenLinksIn } from '@ferretry/app';
 import { ensureDom, interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { createElement } from 'react';
 import { decideLinkAction, isIosStandalone } from '../../../../app/lib/link-behaviour-model.ts';
 import {
+  browserLinkOpener,
   COMPUTER_REFUSED_WORDS,
   createLinkProvision,
   type LinkOpener,
+  linkProvisionFor,
   SAFARI_HANDOFF_MS,
 } from '../../../../app/lib/link-provision.ts';
-import { LinkSheetStore } from '../../../../app/lib/link-sheet-host.tsx';
+import { LinkSheetHost, LinkSheetStore } from '../../../../app/lib/link-sheet-host.tsx';
+import { recordingClient, refusal } from '../../../support/app/client.ts';
 
 ensureDom();
 
@@ -227,5 +230,204 @@ describe('what Browsers provides for one machine', () => {
     const { provision } = build('panel');
     expect(provision.sheet).toBeTruthy();
     expect(createElement('div')).toBeTruthy();
+  });
+});
+
+/** A window as `browserLinkOpener` reads it: only what it touches, with every effect recorded. */
+const fakeWindow = (
+  over: {
+    readonly navigator?: Partial<Navigator> & { readonly standalone?: boolean };
+    readonly matchMedia?: ((query: string) => { readonly matches: boolean }) | undefined;
+    readonly visibility?: DocumentVisibilityState;
+  } = {},
+) => {
+  const log = { assigned: [] as string[], opened: [] as unknown[][], listeners: new Map<string, Set<() => void>>() };
+  const add = (type: string, fn: () => void): void => {
+    log.listeners.set(type, (log.listeners.get(type) ?? new Set()).add(fn));
+  };
+  const remove = (type: string, fn: () => void): void => {
+    log.listeners.get(type)?.delete(fn);
+  };
+  const doc = { visibilityState: over.visibility ?? 'visible', addEventListener: add, removeEventListener: remove };
+  const win = {
+    navigator: over.navigator ?? { userAgent: 'Mozilla/5.0 (X11; Linux)', maxTouchPoints: 0 },
+    ...('matchMedia' in over ? { matchMedia: over.matchMedia } : { matchMedia: () => ({ matches: false }) }),
+    location: { assign: (href: string) => log.assigned.push(href) },
+    open: (...args: unknown[]) => log.opened.push(args),
+    document: doc,
+    addEventListener: add,
+    removeEventListener: remove,
+    setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms),
+    clearTimeout: (timer: ReturnType<typeof setTimeout>) => clearTimeout(timer),
+  };
+  return { win: win as unknown as Window, doc, log };
+};
+const listening = (log: ReturnType<typeof fakeWindow>['log']): number =>
+  [...log.listeners.values()].reduce((sum, set) => sum + set.size, 0);
+
+describe('the real browser as a link opener', () => {
+  const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X)';
+
+  it('reads "installed iOS app" from the navigator flag, the display mode, and says no for a desktop', () => {
+    const flagged = fakeWindow({ navigator: { userAgent: IPHONE, maxTouchPoints: 5, standalone: true } });
+    expect(browserLinkOpener(flagged.win).iosStandalone()).toBe(true);
+    const displayMode = fakeWindow({
+      navigator: { userAgent: IPHONE, maxTouchPoints: 5 },
+      matchMedia: query => ({ matches: query === '(display-mode: standalone)' }),
+    });
+    expect(browserLinkOpener(displayMode.win).iosStandalone()).toBe(true);
+    const tab = fakeWindow({ navigator: { userAgent: IPHONE, maxTouchPoints: 5, standalone: false } });
+    expect(browserLinkOpener(tab.win).iosStandalone()).toBe(false);
+    expect(browserLinkOpener(fakeWindow().win).iosStandalone()).toBe(false);
+  });
+
+  it('treats a browser with no matchMedia and no touch points as not installed, never as an error', () => {
+    const bare = fakeWindow({ navigator: { userAgent: IPHONE }, matchMedia: undefined });
+    expect(browserLinkOpener(bare.win).iosStandalone()).toBe(false);
+  });
+
+  it('answers "not installed" when the navigator cannot be read', () => {
+    const broken = {
+      get navigator(): never {
+        throw new Error('no navigator');
+      },
+    } as unknown as Window;
+    expect(browserLinkOpener(broken).iosStandalone()).toBe(false);
+  });
+
+  it('hands off by navigating, and opens a tab with no opener and no referrer', () => {
+    const { win, log } = fakeWindow();
+    const opener = browserLinkOpener(win);
+    opener.handOff('x-safari-https://docs.example.test/');
+    opener.openTab(HREF);
+    expect(log.assigned).toEqual(['x-safari-https://docs.example.test/']);
+    expect(log.opened).toEqual([[HREF, '_blank', 'noopener,noreferrer']]);
+  });
+
+  it('runs the fallback when the page stayed put, and lets go of every listener afterwards', async () => {
+    const { win, log } = fakeWindow();
+    let ran = 0;
+    browserLinkOpener(win).unlessLeft(5, () => {
+      ran += 1;
+    });
+    expect(listening(log)).toBe(3);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ran).toBe(1);
+    expect(listening(log)).toBe(0);
+  });
+
+  it('skips the fallback when the page lost focus or was put away: the hand-off worked', async () => {
+    for (const event of ['blur', 'pagehide'] as const) {
+      const { win, log } = fakeWindow();
+      let ran = 0;
+      browserLinkOpener(win).unlessLeft(5, () => {
+        ran += 1;
+      });
+      for (const fn of log.listeners.get(event) ?? []) fn();
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(ran).toBe(0);
+    }
+    const hidden = fakeWindow();
+    let ran = 0;
+    browserLinkOpener(hidden.win).unlessLeft(5, () => {
+      ran += 1;
+    });
+    hidden.doc.visibilityState = 'hidden';
+    for (const fn of hidden.log.listeners.get('visibilitychange') ?? []) fn();
+    hidden.doc.visibilityState = 'visible';
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ran).toBe(0);
+  });
+
+  it('ignores a visibility change that leaves the page visible, but a page that is hidden at the deadline falls through', async () => {
+    const visible = fakeWindow();
+    let ran = 0;
+    browserLinkOpener(visible.win).unlessLeft(5, () => {
+      ran += 1;
+    });
+    for (const fn of visible.log.listeners.get('visibilitychange') ?? []) fn();
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ran).toBe(1);
+    const late = fakeWindow();
+    browserLinkOpener(late.win).unlessLeft(5, () => {
+      ran += 1;
+    });
+    late.doc.visibilityState = 'hidden';
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ran).toBe(1);
+  });
+
+  it('cancelling stops the timer and removes every listener', async () => {
+    const { win, log } = fakeWindow();
+    let ran = 0;
+    const cancel = browserLinkOpener(win).unlessLeft(5, () => {
+      ran += 1;
+    });
+    cancel();
+    expect(listening(log)).toBe(0);
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(ran).toBe(0);
+  });
+
+  it('defaults to the page’s own window', () => {
+    expect(browserLinkOpener().iosStandalone()).toBe(false);
+  });
+});
+
+describe('the live provision for one machine', () => {
+  const previous = deviceControls().snapshot().device.openLinksIn;
+  afterEach(() => {
+    deviceControls().setDeviceControls({ openLinksIn: previous });
+  });
+
+  it('S-0519 reads this device’s choice at the tap and asks THIS machine’s daemon to open the address', async () => {
+    const { client, calls } = recordingClient(() => undefined);
+    const provision = linkProvisionFor({ client } as unknown as Parameters<typeof linkProvisionFor>[0]);
+    deviceControls().setDeviceControls({ openLinksIn: 'computer' });
+    expect(provision.destination(HREF)).toBe('computer');
+    expect(provision.activate(click(), target())).toBe(true);
+    await settle();
+    expect(calls).toEqual([{ route: 'POST /v1/system/open-url', init: { body: { url: HREF } } }]);
+    deviceControls().setDeviceControls({ openLinksIn: 'browser' });
+    expect(provision.activate(click(), target())).toBe(false);
+  });
+
+  it('S-0519 a refusal from the daemon opens the link in a tab of this browser', async () => {
+    const { client } = recordingClient(() => refusal(403, 'not on the host'));
+    const opened: unknown[][] = [];
+    const real = window.open;
+    window.open = ((...args: unknown[]) => opened.push(args)) as unknown as typeof window.open;
+    try {
+      const provision = linkProvisionFor({ client } as unknown as Parameters<typeof linkProvisionFor>[0]);
+      deviceControls().setDeviceControls({ openLinksIn: 'computer' });
+      expect(provision.activate(click(), target())).toBe(true);
+      await settle();
+      expect(opened).toEqual([[HREF, '_blank', 'noopener,noreferrer']]);
+    } finally {
+      window.open = real;
+    }
+  });
+});
+
+describe('closing the preview', () => {
+  it('S-0519 the sheet’s own close puts the preview away and keeps what it showed', async () => {
+    const { provision, store } = build('panel');
+    let close: () => void = () => undefined;
+    mounted = await mount(
+      <LinkSheetHost
+        Sheet={props => {
+          close = props.onClose;
+          return <span data-sheet-open={String(props.open)} />;
+        }}
+        store={store}
+      />,
+    );
+    await interact(() => {
+      provision.activate(click(), target());
+    });
+    expect(mounted.container.querySelector('[data-sheet-open="true"]')).not.toBeNull();
+    await interact(() => close());
+    expect(store.snapshot()).toMatchObject({ open: false, destination: { href: HREF } });
+    expect(mounted.container.querySelector('[data-sheet-open="false"]')).not.toBeNull();
   });
 });

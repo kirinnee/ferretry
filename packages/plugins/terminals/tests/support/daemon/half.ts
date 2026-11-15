@@ -122,6 +122,12 @@ export const ferretSummary = (id: FerretId = FERRET): FerretSummary =>
 export function fakeFerrets(known: readonly FerretSummary[] = [ferretSummary()]): FerretsApi {
   return {
     get: async id => known.find(ferret => ferret.id === id),
+    resolve: async reference => {
+      const found = known.find(
+        ferret => ferret.id === reference || ferret.name.toLowerCase() === reference.toLowerCase(),
+      );
+      return found === undefined ? { kind: 'unknown' } : { kind: 'ferret', id: found.id };
+    },
     list: async () => known,
     mayTouch: (caller, target) => caller === target,
     children: () => [],

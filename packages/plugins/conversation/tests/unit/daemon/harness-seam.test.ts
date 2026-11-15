@@ -2508,3 +2508,44 @@ for (const senderKind of ['human', 'daemon'] as const)
       }
     });
   });
+
+describe('a route that names a ferret takes its callsign as well as its id', () => {
+  test('a send to a callsign reaches that ferret, in any case and with the composer’s colon', async () => {
+    const { host, ferrets, api } = await conversation(new HarnessFerrets(), OPEN, { name: 'joslin' });
+
+    const named = await send(host, 'req-name', 'joslin');
+    const spelled = await send(host, 'req-case', encodeURIComponent(':Joslin'));
+
+    expect(named.status).toBe(200);
+    expect(named.json()).toMatchObject({ ferret: 'f1', sendId: 'req-name' });
+    expect(spelled.status).toBe(200);
+    expect(spelled.json()).toMatchObject({ ferret: 'f1', sendId: 'req-case' });
+    expect(ferrets.delivered.map(each => each.text)).toEqual(['hello there', 'hello there']);
+    expect((await api().sends(F1)).sends.map(row => row.sendId).sort()).toEqual(['req-case', 'req-name']);
+    await host.stop();
+  });
+
+  test('a callsign nobody holds is a 404, not a send', async () => {
+    const { host, ferrets } = await conversation(new HarnessFerrets(), OPEN, { name: 'joslin' });
+
+    const response = await send(host, 'req-none', 'nobody');
+
+    expect(response.status).toBe(404);
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('a callsign two live ferrets hold is refused with both ids, and nothing is typed', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.add({ id: ferretId('f2'), name: 'joslin', state: 'working' });
+    const { host } = await conversation(ferrets, OPEN, { name: 'joslin' });
+
+    const response = await send(host, 'req-two', 'joslin');
+
+    expect(response.status).toBe(409);
+    expect(JSON.stringify(response.json())).toContain('ambiguous_name');
+    expect(JSON.stringify(response.json())).toContain('f2');
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+});

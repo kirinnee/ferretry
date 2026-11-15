@@ -45,7 +45,18 @@ const surfaces: SurfaceEntry[] = [
         ui: { settings },
       } as unknown as Manifest;
       const bodies = Object.fromEntries(
-        settings.map(setting => [setting.id, () => <p>{`${setting.label} settings (fake data)`}</p>]),
+        settings.map(setting => [
+          setting.id,
+          // A real tab is a screenful or more (a list of logins, a form): the fake one is tall enough to scroll to.
+          () => (
+            <div>
+              <p>{`${setting.label} settings (fake data)`}</p>
+              {Array.from({ length: 24 }, (_, row) => row + 1).map(number => (
+                <p key={number}>{`${setting.label}: fake row ${number}`}</p>
+              ))}
+            </div>
+          ),
+        ]),
       );
       return {
         id: entry.id,
