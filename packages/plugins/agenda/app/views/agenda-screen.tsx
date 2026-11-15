@@ -63,7 +63,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
             onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
             readConversation={inboxConversationReader({ daemon, client: runtime.client }, fleet)}
             renderComposer={(card, answerForm) => (
-              <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
+              <AgendaCardConversation answerForm={answerForm} card={card} inbox={inbox} />
             )}
           />
         </AgendaInboxContext.Provider>

@@ -287,17 +287,59 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
       first();
       expect(book.editorFor(desk, ask, edit as never)).toBeUndefined();
     });
+
+    test('releases only the registration being disposed, though every card of a machine registers the SAME function', () => {
+      // The shell hands one cached `editorFor` per machine, so each card's scope registers the identical function.
+      const shared = upon('shared');
+      const book = laneEditorBook();
+      const first = book.register(desk, shared);
+      const second = book.register(desk, shared);
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/shared/lanes:P1:3');
+      second();
+      expect(book.editorFor(desk, ask, edit as never)).toBeUndefined();
+    });
+
+    test('a release is spent once: calling it again does not take the other card’s registration', () => {
+      const shared = upon('shared');
+      const book = laneEditorBook();
+      const first = book.register(desk, shared);
+      book.register(desk, shared);
+      first();
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/shared/lanes:P1:3');
+    });
   });
 
   /** An open card of `daemon`, with the Inbox page binding Board per card exactly as the screens do. */
-  const Page = ({ cards, open, navigated }: { cards: InboxCard[]; open: string; navigated: string[] }) => (
+  const Page = ({
+    cards,
+    open,
+    navigated,
+    reducedMotion,
+  }: {
+    cards: InboxCard[];
+    open: string;
+    navigated: string[];
+    reducedMotion?: boolean;
+  }) => (
     <InboxHarness
       cards={cards}
       fake={fakeInbox()}
-      render={inbox => <BoundPage inbox={inbox} navigated={navigated} open={open} />}
+      render={inbox => <BoundPage inbox={inbox} navigated={navigated} open={open} reducedMotion={reducedMotion} />}
     />
   );
-  function BoundPage({ inbox, open, navigated }: { inbox: AgendaInbox; open: string; navigated: string[] }) {
+  function BoundPage({
+    inbox,
+    open,
+    navigated,
+    reducedMotion,
+  }: {
+    inbox: AgendaInbox;
+    open: string;
+    navigated: string[];
+    reducedMotion: boolean | undefined;
+  }) {
     const { laneEditor, cardBoard } = useCardBoards(to => navigated.push(to));
     return (
       <AgendaInboxPage
@@ -307,6 +349,7 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
         now={NOW}
         onNavigate={to => navigated.push(to)}
         phone
+        {...(reducedMotion === undefined ? {} : { reducedMotion })}
       />
     );
   }
@@ -385,6 +428,43 @@ describe('the Inbox is every machine’s: Board’s hooks are read per card’s 
       ),
     );
     await interact(() => flush());
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('[data-agenda-option="Edit"]'), 'the Edit button').click(),
+    );
+
+    expect(navigated).toContain('/desk-lanes/lanes:P1:3');
+  });
+
+  test('Edit still opens the machine’s lane editor after another card of the same machine has gone', async () => {
+    const navigated: string[] = [];
+    // Listed before the proposal, so Next deals the proposal after it.
+    const first = inboxCard(
+      agendaItem('A1', { ask: choices('Ship', 'Hold') } as Partial<AgendaItem>),
+      undefined,
+      'Desk',
+      desk,
+    );
+    view = await mount(
+      shell(
+        {
+          [desk]: {
+            [AGENDA_LANE_PROPOSAL_HOOK]: {
+              // ONE function for the machine, as the shell caches it: every card's scope registers this same value.
+              editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
+            },
+          },
+        },
+        <Page cards={[first, proposal]} navigated={navigated} open={first.key} reducedMotion={false} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Next').click(),
+    );
+    // The leaving card unmounts once its fly-out ends, releasing its scope's registration.
+    await interact(() => new Promise(resolve => setTimeout(resolve, 400)));
+    await interact(() => flush());
+    expect(root().querySelector('.fy-attn-deck__leaving')).toBeNull();
     await interact(() =>
       must(root().querySelector<HTMLButtonElement>('[data-agenda-option="Edit"]'), 'the Edit button').click(),
     );

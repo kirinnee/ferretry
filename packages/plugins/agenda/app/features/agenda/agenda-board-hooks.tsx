@@ -73,18 +73,21 @@ export interface LaneEditorBook {
 }
 
 export const laneEditorBook = (): LaneEditorBook => {
-  const held = new Map<DaemonId, AgendaLaneEditor[]>();
+  // One entry per REGISTRATION, not per function: every scope of one machine registers the same cached `editorFor`, so a
+  // release that matched by function would erase every card's editor on that machine at once.
+  const held = new Map<DaemonId, { readonly editor: AgendaLaneEditor }[]>();
   return {
     register: (daemonId, editor) => {
       if (editor === undefined) return () => undefined;
-      held.set(daemonId, [...(held.get(daemonId) ?? []), editor]);
+      const registration = { editor };
+      held.set(daemonId, [...(held.get(daemonId) ?? []), registration]);
       return () => {
-        const rest = (held.get(daemonId) ?? []).filter(known => known !== editor);
+        const rest = (held.get(daemonId) ?? []).filter(known => known !== registration);
         if (rest.length === 0) held.delete(daemonId);
         else held.set(daemonId, rest);
       };
     },
-    editorFor: (daemonId, ask, answer) => held.get(daemonId)?.at(-1)?.(ask, answer),
+    editorFor: (daemonId, ask, answer) => held.get(daemonId)?.at(-1)?.editor(ask, answer),
   };
 };
 
