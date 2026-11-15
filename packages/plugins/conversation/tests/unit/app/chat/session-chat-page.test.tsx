@@ -582,7 +582,11 @@ describe('the ferret’s harness reaches the composer', () => {
         .findByType('textarea')
         .props.onChange({ currentTarget: { value: '/summary', selectionStart: 8, selectionEnd: 8 } });
     });
-    await runAsync(async () => await new Promise<void>(resolve => setTimeout(resolve, 20)));
+    // The skills read is asynchronous: wait for the menu (up to ~2 s) rather than one fixed tick, which a slow CI runner misses.
+    for (let tries = 0; tries < 100; tries += 1) {
+      if (page.root.findAllByProps({ className: 'fy-ac-foot' }).length > 0) break;
+      await runAsync(async () => await new Promise<void>(resolve => setTimeout(resolve, 20)));
+    }
     return textOf(page.root.findByProps({ className: 'fy-ac-foot' }));
   };
 
