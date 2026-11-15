@@ -207,7 +207,7 @@ describe('the account routes through the kernel', () => {
     should(removed.json<{ defaults: { sites?: unknown } }>().defaults.sites ?? {}).eql({});
   });
 
-  it('S92 should refuse a seed while no device holds a passkey, and offer the secure-copy tools now built but not the two unbuilt (M2)', async () => {
+  it('S92 should refuse a seed while no device holds a passkey, and answer every agent tool as built, the asking tools saying what is wrong with a call', async () => {
     const h = await host(
       undefined,
       new StandInAdmission(request =>
@@ -221,12 +221,12 @@ describe('the account routes through the kernel', () => {
     should(seed.status).equal(409);
     should(seed.json<{ code: string }>().code).equal('passkey_required');
     should((await h.request('GET', '/v1/accounts/look-alike')).json()).match({ v: 1, groups: [] });
-    // The secure-copy tools are built (a ferret with no copies is told so); a tool that is not built is not offered at all (M2).
+    // The secure-copy tools are built (a ferret with no copies is told so), and so are the two asking tools.
     should(await h.tool('secure_list', {}, { as: ferret('F1') })).match({ text: 'This session holds no copies.' });
-    await h.tool('task_plan', {}, { as: ferret('F1') }).then(
-      () => should.fail(undefined, undefined, 'task_plan is offered'),
-      error => should(String(error)).containEql('no agent tool task_plan'),
-    );
+    should(await h.tool('task_plan', {}, { as: ferret('F1') })).match({
+      isError: true,
+      text: 'the plan is not usable: Invalid input: expected array, received undefined',
+    });
   });
 
   it('S99 should add, relabel and remove a 2FA key with no value and no passkey', async () => {

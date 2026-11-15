@@ -1387,7 +1387,7 @@ export function accountHintLine(hint: AccountHint, site: string): string {
 
 /**
  * How a ferret uses a 2FA key a hint listed. NOT YET SERVED: a hint says it only once the request tools take `factor`
- * and `push` (the code-card and approve-on-phone changes), as the unbuilt `account_propose` tool (M2, after merge) would be named in {@link ACCOUNT_HINT_NEXT}.
+ * and `push` (the code-card and approve-on-phone changes), as the `account_propose` tool is named in {@link ACCOUNT_HINT_NEXT}.
  */
 export const ACCOUNT_HINT_FACTOR_NEXT =
   "For a code, request input with the key's id (factor); for a push, request approval (push: true) and wait.";

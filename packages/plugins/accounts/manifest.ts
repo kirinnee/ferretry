@@ -602,9 +602,21 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: 'ask the owner to paste sealed:<name> into a terminal, a page field or a saved secret',
       }),
-      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose and task_plan are declared here again once
-      // each is built. Until then they are NOT listed, because the CLI builds the agents' MCP tool list from this array and
-      // a listed tool that answers "not built" is a lie (docs/design/rebuild-parity.tsv T-0002, T-0043: still open).
+      // ASKING TOOLS: each raises one card for the owner and changes nothing the owner has not allowed. A ferret's own call
+      // only (a person's route has no agenda to raise on); each parses its own call (the contract's
+      // `AccountProposeCallSchema`, `TaskPlanCallSchema`).
+      tool('account_propose', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: "propose a sign-in's recipe and/or suggest a standing rule; the owner decides",
+      }),
+      tool('task_plan', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: 'ask the owner once to pre-approve the sign-ins and pastes your work needs',
+      }),
     ],
     cli: [
       verb('copy ls', {

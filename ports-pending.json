@@ -148,9 +148,7 @@
       "[cross: board] GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
       "[cross: access] GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
       "[own] GAP(accounts): the sign-in grant engine (`daemon/lib/sign-in-grants/**`) is built and tested (rules, ledger, matcher, clear, plans, sources) but nothing in production calls it: Agenda already mounts `ask:sign-in-approval` (app/features/agenda/ask-renderers.tsx), so the missing wire is Accounts' own, TaskPlanService and SignInRuleService do not yet call the engine",
-      "[own] GAP(accounts): Accounts still carries stopgap copies of the Vault's InputSavedSchema (contract/routes/login-entries.ts) and codeTargetProblem (daemon/lib/vault-inputs.ts), pinned to the Vault's by tests/unit/daemon/sign-in-grants/vault-parity.test.ts; rows I34 I163 I164 I168 I170 are now owned and proved by Vault: delete the copies in favour of Vault contract exports once the Vault contract exports them",
-      "[own] GAP(agenda): a paste plan's pre-approval (`secure.preapprove`, today's `proposePastes`) is not ported, so nothing turns its items into task-plan paste lines (`taskPlanLinesOfCopyItems` in `contract/routes/task-plan.ts`)",
-      "[own] GAP(accounts): account_propose, secure_copy, secure_list, secure_discard, secure_paste and task_plan are not built and are not offered to agents (T-0002, T-0039 to T-0043) (&F1787, M2 after merge)"
+      "[own] GAP(accounts): Accounts still carries stopgap copies of the Vault's InputSavedSchema (contract/routes/login-entries.ts) and codeTargetProblem (daemon/lib/vault-inputs.ts), pinned to the Vault's by tests/unit/daemon/sign-in-grants/vault-parity.test.ts; rows I34 I163 I164 I168 I170 are now owned and proved by Vault: delete the copies in favour of Vault contract exports once the Vault contract exports them"
     ],
     "agenda": [
       "[cross: conversation] knip.production.json keeps app/components/agenda-message.tsx out of its unused-file report: GAP(agenda), Agenda's card replaces an agenda message's words in Conversation's transcript, but `conversation.row` draws a panel BESIDE a row (it would repeat the words), so Conversation needs a seam that lets a contributed card stand in for a row's body (and its open-items reader for a message on its way)",
@@ -289,11 +287,6 @@
       "seam": "code:packages/plugins/accounts/daemon/index.ts:notBuiltRoute",
       "card": "&F1787",
       "why": "Any declared Accounts route without a handler answers 'not built'."
-    },
-    {
-      "seam": "code:packages/plugins/accounts/daemon/index.ts:notBuiltTool",
-      "card": "&F1787",
-      "why": "account_propose, secure_copy, secure_list, secure_discard, secure_paste and task_plan answer 'not built' (M2, after merge)."
     },
     {
       "seam": "code:packages/core/ferrets/daemon/moves-deps.ts:*",
