@@ -77,6 +77,7 @@ import { StateCallsignCounters } from './adapters/names/state-callsign-counters.
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
+import type { TokenCutOff } from './lib/tokens/cut-off-mark.ts';
 import { instructionsAnswer } from './lib/agent-control/instructions.ts';
 import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/launch-environment.ts';
 import { agentControlReader } from './lib/agent-control/reader.ts';
@@ -306,7 +307,31 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     serial: callsignSerial,
   });
 
+  const saveTokens = async (entries: readonly TokenEntry[]): Promise<void> =>
+    await kernel.state.write(FerretTokensFile, {
+      format: 1,
+      tokens: entries.map(entry => ({ ...entry })) as never,
+    });
+  // The token directory's half of an owner's cut-off, as the lifecycle's hash store reaches it: after the held tokens
+  // load (an unloaded directory would read "not cut off"), and each write persists `tokens.json`.
+  const tokenCutOff: TokenCutOff = {
+    isCutOff: async ferret => {
+      await ready();
+      return tokens.isCutOff(ferret as FerretId);
+    },
+    cutOff: async ferret => {
+      await ready();
+      tokens.cutOff(ferret as FerretId, kernel.clock.now());
+      await saveTokens(tokens.snapshot());
+    },
+    restore: async ferret => {
+      await ready();
+      tokens.restore(ferret as FerretId);
+      await saveTokens(tokens.snapshot());
+    },
+  };
   const sessionFiles = new SessionFiles({
+    tokenCutOff,
     roots: kernel.roots,
     storage: sessionStore,
     clock: { now: () => kernel.clock.now() },
@@ -456,11 +481,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     newName: taken =>
       DEFAULT_CALLSIGN_POOL.find(candidate => !taken(candidate)) ?? `ferret-${randomBytes(3).toString('hex')}`,
     save: async (record: FerretRecord) => await kernel.state.write(FerretFiles, record, record.id),
-    saveTokens: async entries =>
-      await kernel.state.write(FerretTokensFile, {
-        format: 1,
-        tokens: entries.map(entry => ({ ...entry })) as never,
-      }),
+    saveTokens,
+    // ONE queue and ONE cut-off fact with the lifecycle (`SessionFiles`): a start, a stop and a resume here and a
+    // lifecycle's launch of the same ferret never interleave, and a cut-off is read from and written to both halves.
+    serial: sessionFiles.serial,
+    cutOffMark: sessionFiles.cutOffMark,
     harness: key => {
       const found = hooks.provider(Harnesses, key);
       return found === 'unavailable' ? undefined : found;
