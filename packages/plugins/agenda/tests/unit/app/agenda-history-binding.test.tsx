@@ -50,7 +50,7 @@ const daemon = (item: AgendaItem): { readonly client: PluginClient; readonly cal
               path: 'direct',
               message: '!A2 is staging green?',
               attachmentIds: [],
-              fate: 'cancelled',
+              fate: 'delivered',
             },
           ],
         };
@@ -105,7 +105,7 @@ for (const surface of ['agenda', 'agenda-ask'] as const) {
       const history = root.querySelector('[data-agenda-history]');
       expect(history?.textContent).toContain('is staging green?');
       expect(history?.textContent).toContain('yes, all green.');
-      expect(history?.querySelector('[data-send-receipt]')?.getAttribute('data-send-receipt')).toBe('cancelled');
+      expect(history?.querySelector('[data-send-receipt]')?.getAttribute('data-send-receipt')).toBe('answered');
       expect(calls).toContain(`GET /v1/ferrets/:ferretId/messages ${FERRET}`);
       expect(calls).toContain(`GET /v1/ferrets/:ferretId/sends ${FERRET}`);
     });
