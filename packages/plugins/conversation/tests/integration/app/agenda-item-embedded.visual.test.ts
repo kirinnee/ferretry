@@ -59,6 +59,56 @@ const VIEWPORTS = [
   { name: '390', width: 390, height: 844, phone: true },
 ] as const;
 
+describe('an open agenda item whose ferret is waiting on a question', () => {
+  for (const viewport of VIEWPORTS)
+    for (const scheme of ['light', 'dark'] as const)
+      it(`keeps the reply box and its Send beside the question's form (${viewport.name}, ${scheme})`, async () => {
+        const context = await browser.newContext({
+          viewport: { width: viewport.width, height: viewport.height },
+          colorScheme: scheme,
+          deviceScaleFactor: viewport.phone ? 2 : 1,
+          hasTouch: viewport.phone,
+          isMobile: viewport.phone,
+        });
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        const problems: string[] = [];
+        tab.on('pageerror', error => problems.push(error.message));
+        try {
+          await tab.goto(`${origin}/?theme=studio-${scheme}&question=1`);
+          try {
+            await tab.waitForSelector('[data-fake-conversation] [data-embedded]', { timeout: 8_000 });
+          } catch (error) {
+            throw new Error(`the scene did not draw: ${String(error)}\n${problems.join('\n')}`);
+          }
+          await tab.waitForTimeout(300);
+          const found = await tab.evaluate(() => {
+            const send = [...document.querySelectorAll('button')].find(button =>
+              (button.getAttribute('aria-label') ?? button.textContent ?? '').trim().toLowerCase().startsWith('send'),
+            );
+            const box = send?.getBoundingClientRect();
+            return {
+              form: document.querySelector('.fy-question-form') !== null,
+              send: send !== undefined,
+              sendVisible: box !== undefined && box.bottom <= window.innerHeight && box.top >= 0,
+              overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+            };
+          });
+          expect(found.form, 'the chat’s own question form is there').toBe(true);
+          expect(found.send, 'the item’s reply box has its Send').toBe(true);
+          expect(found.sendVisible, 'Send is on screen').toBe(true);
+          expect(found.overflow, 'no sideways scroll').toBeLessThanOrEqual(0);
+          if (shotsDir !== '')
+            await tab.screenshot({ path: join(shotsDir, `${viewport.name}-${scheme}-question-send.png`) });
+        } finally {
+          await context.close();
+        }
+      });
+});
+
 describe('an open agenda item', () => {
   for (const viewport of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const)

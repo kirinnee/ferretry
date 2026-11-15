@@ -158,6 +158,12 @@ export interface ComposerProps {
   readonly disabled?: boolean;
   /** Send is allowed with an empty box: the host's send needs no words (a form card whose fields carry the answer). */
   readonly allowEmptySend?: boolean;
+  /**
+   * Send answers a FORM CARD, not the chat: the press runs this, from that press and no later, and nothing is sent as a
+   * message (no outbox entry, no wait on the shared draft), so it can never be replayed as chat or reach another item. It
+   * may throw the one sentence the box shows. The host empties the box itself when the answer goes.
+   */
+  readonly onFormSend?: (() => void) | undefined;
   /** A count the host bumps when the thing an error was about changed: the error line goes away with it. */
   readonly clearErrorOn?: number;
   readonly placeholder?: string;
@@ -425,6 +431,7 @@ export function Composer({
   busy = false,
   disabled = false,
   allowEmptySend = false,
+  onFormSend,
   clearErrorOn,
   placeholder = 'Message this ferret',
   draftStore = documentDraftStore,
@@ -898,6 +905,16 @@ export function Composer({
     // and when that changed the text this press goes once the composer holds it (the effect below).
     if (inputRef.current?.endComposition?.() === true) {
       setResubmit({ interrupt });
+      return;
+    }
+    // A form card's Send is the form's answer: it runs now, bound to this press's item, outside the chat's send path.
+    if (onFormSend !== undefined) {
+      try {
+        setError(null);
+        onFormSend();
+      } catch (cause) {
+        setError(sendFailure(cause));
+      }
       return;
     }
     submitLock.current = true;

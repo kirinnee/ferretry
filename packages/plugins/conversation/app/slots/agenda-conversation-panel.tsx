@@ -22,6 +22,8 @@ export interface AgendaConversationProps {
   readonly onReplied?: AskReply['onReplied'];
   readonly restore?: string;
   readonly onRestored?: () => void;
+  readonly answerForm?: () => void;
+  readonly formChanges?: number;
 }
 
 export function isAgendaConversationProps(props: unknown): props is AgendaConversationProps {
@@ -32,7 +34,7 @@ export function isAgendaConversationProps(props: unknown): props is AgendaConver
 
 export function AgendaConversationPanel(props: PanelProps): ReactNode {
   if (!isAgendaConversationProps(props) || props.ferret.trim() === '') return null;
-  const { ask, onReplied, restore, onRestored } = props;
+  const { ask, onReplied, restore, onRestored, answerForm, formChanges } = props;
   return (
     <ChatScreen
       ask={{
@@ -40,6 +42,8 @@ export function AgendaConversationPanel(props: PanelProps): ReactNode {
         ...(typeof onReplied === 'function' ? { onReplied } : {}),
         ...(typeof restore === 'string' ? { restore } : {}),
         ...(typeof onRestored === 'function' ? { onRestored } : {}),
+        ...(typeof answerForm === 'function' ? { answerForm } : {}),
+        ...(typeof formChanges === 'number' ? { formChanges } : {}),
       }}
       embedded
       params={{ ferret: props.ferret }}

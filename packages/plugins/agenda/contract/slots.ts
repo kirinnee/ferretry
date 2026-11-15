@@ -36,6 +36,13 @@ export interface AgendaConversationSlotProps {
   /** The words of a reply the owner took back (Undo): they go into the ask's box once, then `onRestored` fires. */
   readonly restore?: string;
   readonly onRestored?: () => void;
+  /**
+   * The ask is a form card: Send answers THE FORM (the picks on the card and the words in the box as one answer, through
+   * the Agenda's answer route) instead of chatting. Absent: Send is a reply to the ask, as for any other ask.
+   */
+  readonly answerForm?: () => void;
+  /** A count the page bumps when a pick on the open form changes, so a "nothing to send" line goes away with it. */
+  readonly formChanges?: number;
 }
 
 /** A narrowing for a contributing panel: the props are untyped at the shell, so the panel checks what it reads. */

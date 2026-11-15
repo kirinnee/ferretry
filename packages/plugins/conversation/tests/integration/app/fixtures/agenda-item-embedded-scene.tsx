@@ -5,6 +5,8 @@
  * reach another plugin only through its contract). Everything on screen is fake data.
  *
  *   ?theme=<family>-<mode>
+ *   ?question=1   the ferret is waiting on a question and the item is a form card: the reply box keeps its Send beside the
+ *                 chat's own question form
  */
 
 import { createRoot } from 'react-dom/client';
@@ -30,6 +32,17 @@ const entries: readonly TranscriptEntry[] = [
 ];
 
 const client = { call: async () => ({}) } as never;
+const asking = params.get('question') === '1';
+const QUESTION = {
+  toolUseId: 'toolu_scene',
+  questions: [
+    {
+      question: 'Which fix should I apply?',
+      options: [{ label: 'Patch the parser' }, { label: 'Rewrite the test' }],
+      multiSelect: false,
+    },
+  ],
+};
 
 function Scene() {
   return (
@@ -56,7 +69,11 @@ function Scene() {
             daemonId="ws"
             embedded
             entries={entries}
-            session={ferretView('zoe', { config: { teammate: 'zoe' } })}
+            {...(asking ? { ask: { id: 'A1', answerForm: () => undefined, formChanges: 0 }, question: QUESTION } : {})}
+            session={ferretView('zoe', {
+              config: { teammate: 'zoe' },
+              ...(asking ? { state: { status: 'awaiting_question' } } : {}),
+            })}
           />
         </div>
       </div>
