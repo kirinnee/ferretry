@@ -470,3 +470,32 @@ describe('the component item verbs (V-0183 … V-0187)', () => {
     should(transport.sent).deepEqual([]);
   });
 });
+
+describe('fy config, when the thing it needs is missing', () => {
+  it('should name the file `show` needs, with the command to run, and exit 2 without asking the daemon', async () => {
+    const { world: w, io, transport } = world({});
+    should(await runFy(['config', 'show'], w)).equal(2);
+    should(io.stderr()).equal('name the file: `fy config show <file>`\n');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should name the file `write` needs, and exit 2 without asking the daemon', async () => {
+    const { world: w, io, transport } = world({}, {}, 'enabled: true\n');
+    should(await runFy(['config', 'write'], w)).equal(2);
+    should(io.stderr()).equal('name the file: `fy config write <file> < text.yaml`\n');
+    should(transport.sent).deepEqual([]);
+  });
+
+  it('should say no schema is published yet when no file is in effect', async () => {
+    const { world: w, io } = world({ 'GET /v1/config/status': STATUS({ files: [] }) });
+    should(await runFy(['config', 'schema'], w)).equal(0);
+    should(io.stdout()).equal('no configuration file is in effect yet, so no schema is published\n');
+  });
+
+  it('should say the daemon has not published a schema it names, when the schema file is not on disk', async () => {
+    const { world: w, io } = world({ 'GET /v1/config/status': STATUS() });
+    should(await runFy(['config', 'schema', 'warden'], w)).equal(1);
+    should(io.stderr()).equal(`the daemon has not published warden.json under ${DIRECTORY}/.schema yet\n`);
+    should(io.stdout()).equal('');
+  });
+});
