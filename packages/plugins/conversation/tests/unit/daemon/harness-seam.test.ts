@@ -2390,12 +2390,12 @@ test('RV5 RETRY ROUTE: a ferret is refused owner_only before the pending handler
   }
 });
 
-test('RV5 RETRY ROUTE: a person still gets the pending answer (the public route is not wired yet)', async () => {
+test('RV5 RETRY ROUTE: a person reaches the wired Retry, which refuses a send it has no record of', async () => {
   const w = await conversation();
   try {
     const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/retry', { as: owner(), body: {} });
-    expect(response.status).toBe(503);
-    expect(response.json()).toMatchObject({ code: 'conversation_terminal_unavailable' });
+    expect(response.status).toBe(409);
+    expect(response.json()).toMatchObject({ code: 'send_refused' });
   } finally {
     await w.host.stop();
   }
