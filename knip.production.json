@@ -175,8 +175,7 @@
     },
     "packages/plugins/accounts": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/sign-in-grants/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/shells": {
       "entry": ["app/views/*.tsx"],

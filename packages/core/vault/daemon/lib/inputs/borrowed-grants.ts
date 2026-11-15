@@ -404,6 +404,16 @@ export interface SignInGrantSource {
   projectOf(sessionId: string): Promise<string | undefined>;
   /** Where page scripts ran across the machine (a rule's check 15b). */
   scriptedOrigins(): ScriptedOriginsView;
+  /**
+   * AN AGENT SCRIPT IS ABOUT TO RUN (Browsers, via the Vault): until the returned function is called, no standing rule
+   * fills anywhere. A source with no standing rule has nothing to stop and omits it.
+   */
+  running?(): () => void;
+  /**
+   * A PAGE SCRIPT RAN on `host`, or somewhere unreadable (`undefined`): every standing rule pinned there is stopped, in
+   * RAM at once and on disk after. A source with no standing rule omits it.
+   */
+  scriptedOn?(host: string | undefined): void;
 }
 
 // ─── from sign-in-grants/clear.ts ───

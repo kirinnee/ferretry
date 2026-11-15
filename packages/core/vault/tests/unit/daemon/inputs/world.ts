@@ -95,6 +95,8 @@ export interface WorldOptions {
   /** The grants the source reports; read at every call, so a test may change them mid-flight. */
   readonly grants?: SignInGrant[];
   readonly grantsEnabled?: boolean;
+  /** A grant source of the test's own (the production hook adapter over a provider); wins over `grants`. */
+  readonly grantPort?: SignInGrantSource;
   /** Whether the ferret ran a page script / acted since (the login observer's `tainted`); never by default. */
   readonly tainted?: boolean;
   readonly history?: readonly InputEvent[];
@@ -328,7 +330,11 @@ export function world(options: WorldOptions = {}) {
     hostName: 'kirin-box',
     ...((options.withLogins ?? true) ? { logins: options.loginPort ?? logins } : {}),
     ...(options.choicePort === undefined ? {} : { choice: options.choicePort }),
-    ...(options.grants === undefined ? {} : { grants: grantSource }),
+    ...(options.grantPort === undefined
+      ? options.grants === undefined
+        ? {}
+        : { grants: grantSource }
+      : { grants: options.grantPort }),
     ...(options.withSealed === true
       ? {
           sealed: {

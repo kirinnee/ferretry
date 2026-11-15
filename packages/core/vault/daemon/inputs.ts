@@ -21,6 +21,7 @@ import {
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
+import { SignInGrantsThroughHook } from './adapters/inputs/grants.ts';
 import { SavedLoginsThroughHook } from './adapters/inputs/saved-logins.ts';
 import { SecureCopiesThroughHook } from './adapters/inputs/secure-copy.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
@@ -88,6 +89,11 @@ export interface Inputs {
   readonly phoneReach: PhoneApprovalReach;
   /** Where page scripts ran across the machine (`VaultApi.scriptRunning` / `scriptedOn`, I98). */
   readonly scripts: MachineScripts;
+  /**
+   * What the owner approved in advance (Accounts', through `input.saved`): told of every script Browsers runs, so no
+   * standing rule fills while one runs and every rule pinned where one ran is stopped.
+   */
+  readonly grants: SignInGrantSource;
   /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
   readonly routes: ReturnType<typeof inputRequestRoutes>;
   /** The agent tools, by the names `manifest.ts` declares (`input_wait`): spread into Vault's `tools`. */
@@ -148,12 +154,15 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     return found === 'unavailable' ? undefined : found;
   };
   const saved = new SavedLoginsThroughHook(savedLogins);
+  // The sign-ins the owner approved in advance are Accounts' as well (`SavedLoginsProvider.grants`), looked up on every call.
+  const grants = new SignInGrantsThroughHook(savedLogins);
   const accounts = {
     sealed: copies,
     rules: copies,
     logins: saved,
     choice: saved,
     loginFacts: saved,
+    grants,
     ...(deps.accounts ?? {}),
   };
   // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
@@ -197,7 +206,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     ...(accounts.choice === undefined ? {} : { choice: accounts.choice }),
     ...(accounts.sealed === undefined ? {} : { sealed: accounts.sealed }),
     ...(accounts.rules === undefined ? {} : { rules: accounts.rules }),
-    ...(accounts.grants === undefined ? {} : { grants: accounts.grants }),
+    grants: accounts.grants,
     // A terminal's saved-login key names this machine (`program@host`): today's `hostname()`, the kernel's daemon name.
     hostName: deps.hostName ?? ctx.kernel.identity.daemonName,
   });
@@ -214,6 +223,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     identities,
     observer,
     scripts,
+    grants: accounts.grants,
     routes: inputRequestRoutes(service),
     tools: inputTools(service, phone),
     phone,
