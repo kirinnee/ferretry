@@ -79,11 +79,11 @@ one-time converter at `migration/v4-to-v5/` and of the runbook [`v4-to-v5-prompt
 - **M2 yes.** The Vault keeps each sealed document by name under the same key file. No merge.
 - **M3 yes.** Attach keeps the pane and the conversation. The runner then restarts the harness in the same pane, with
   resume, at its next idle turn. **As built** (proof run 6 found it missing): the converter queues that restart in
-  `state/ferrets/restarts.json` and starts the record `idle` when its carried turn says so (`steps/ferrets.ts`); the
-  v4 conversation is not in the new agent home (!A516), so the relaunch starts a NEW conversation and says so
-  (`Harness.hasConversation`, docs/launch-settings.md). Old paths are deliberately not kept alive: v5 publishes its
-  own `fleet/homes`, `fleet/shared` and `fleet/bin` in the new home, and every v4 home links back into those by
-  absolute path.
+  `state/ferrets/restarts.json` and carries the record `working` with no v4 turn, so it waits for v5's own idle
+  look (`steps/ferrets.ts`), and stops the old harness outright before relaunching it. The v4 conversation is not in
+  the new agent home (!A516), so the relaunch starts a NEW conversation and says so (`Harness.hasConversation`,
+  docs/launch-settings.md). Old paths are deliberately not kept alive: v5 publishes its own `fleet/homes`,
+  `fleet/shared` and `fleet/bin` in the new home, and every v4 home links back into those by absolute path.
 - **M4 yes, only because** v5 keeps today's token hash scheme unchanged, so the carried `sessionCapabilityHash` is plain
   v5 data with no special path. If the scheme ever differs, the ferret gets a new token at that restart instead.
 - **M5 owners:** `pins.json` and `agent-pins.json` → Conversation; `state/learning/sessions.json` → Lessons;

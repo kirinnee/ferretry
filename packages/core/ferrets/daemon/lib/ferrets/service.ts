@@ -633,7 +633,7 @@ const NO_LONGER_OWED = 'it is no longer owed this resume: it was stopped, resume
  * harness proved it absent), so it started a new one: the agent is told it remembers nothing from before. Fixed text.
  */
 export const CONVERSATION_NOT_FOUND =
-  'Your earlier conversation could not be resumed: it is not on this machine (a ferret moved from Ferretry 4 leaves its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
+  'Your earlier conversation could not be resumed: it is not on this machine (a ferret moved from Ferretry 4, for one, leaves its old chats behind), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
 
 /** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
 interface LaunchSaid {
@@ -1909,6 +1909,7 @@ export class FerretsService implements FerretsApi {
       const said: LaunchSaid = {};
       const result = await this.launchAttempt(record, prompt, conversation, tracked, bound, said);
       if (result.ok && said.conversationNotFound !== undefined)
+        // A history that cannot be written never undoes a launch that started (this is inside the launch's cleanup).
         await this.ports
           .history?.(record.id, 'session.conversation_not_found', { conversation: said.conversationNotFound })
           .catch(() => undefined);

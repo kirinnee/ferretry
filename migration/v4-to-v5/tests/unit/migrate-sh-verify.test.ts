@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, setDefaultTimeout, test } from 'bun:test';
-import { rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
@@ -163,6 +163,56 @@ describe('verify: compares each field with its own v5 destination', () => {
     expect(result.out).toMatch(/panes .* FAIL/);
     expect(result.out).toMatch(/logins .* FAIL/);
     expect(result.out).toMatch(/secret names .* FAIL/);
+  });
+
+  /** f1's v5 history, as Ferrets journals it: one JSON event per line, `type` naming it. */
+  const history = async (...types: string[]) => {
+    await mkdir(join(sb.v4home, 'state', 'ferrets', 'f1'), { recursive: true });
+    await writeFile(
+      join(sb.v4home, 'state', 'ferrets', 'f1', 'history.jsonl'),
+      types
+        .map((type, index) => JSON.stringify({ format: 1, sequence: index + 1, sessionId: 'f1', type, data: {} }))
+        .join('\n') + '\n',
+    );
+  };
+  const panesNow = async (line: string) =>
+    await sb.fake('tmux', [
+      { match: '*session_name*', out: line },
+      { match: '*window_activity*', out: '%1 1' },
+    ]);
+
+  test('M3: a pane v5 replaced by restarting its ferret passes: same session, a new pane, and session.restarted', async () => {
+    // The converter queues a restart for every ferret in its v4 pane; a restart ends the old harness and starts a new
+    // pane. Counting pane ids alone failed every migration with a live ferret once the restart worked.
+    await panesNow('fy-f1 %7');
+    await history('session.created', 'session.stopped', 'session.resumed', 'session.restarted');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +OK +0 baseline panes still present, 1 restarted by v5 in a new pane/);
+  });
+
+  test('M3: a new pane with no session.restarted in its history is still a missing pane (FAIL)', async () => {
+    await panesNow('fy-f1 %7');
+    await history('session.created');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('M3: a restart that gave up is a FAIL naming the ferret, even with its old pane still there', async () => {
+    // A failed restart leaves the ferret stopped in v5; its old pane surviving proves nothing.
+    await history('session.restarted', 'session.restart_gave_up');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(1);
+    expect(result.out).toMatch(/panes +FAIL +v5 could not restart: f1 .*session.restart_gave_up/);
+  });
+
+  test('M3: the LAST restart event decides: a later successful restart clears an earlier give-up', async () => {
+    await panesNow('fy-f1 %8');
+    await history('session.restart_gave_up', 'session.resumed', 'session.restarted');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +OK .*1 restarted by v5/);
   });
 
   test('a different ask count is shown to the owner (REVIEW), not hidden', async () => {

@@ -432,8 +432,49 @@ describe('mig-harness-home: whether `codex resume <id>` would find its conversat
     expect(await w.rollouts.has('f1' as FerretId, 'native-a')).toBeUndefined();
   });
 
-  test('a ferret with no home folder at all proves nothing either way', async () => {
+  test('a ferret with no sessions folder at all has no rollout: proved absent (nothing hides one)', async () => {
     const w = await world();
-    expect(await w.rollouts.has('f3' as FerretId, 'native-a')).not.toBe(true);
+    expect(await w.rollouts.has('f3' as FerretId, 'native-a')).toBe(false);
+  });
+
+  /** A rollouts reader over a stub root: `entries` and `resolve` answer per path, so each doubt can be staged. */
+  const over = (root: { resolve: (relative: string) => unknown; entries: (path: string) => Promise<unknown> }) =>
+    new CodexRollouts({ roots: { root: () => root } } as unknown as KernelPorts, async () => undefined);
+  const fenced = (relative: string) => ({ ok: true, value: `/home/sessions/${relative}` });
+
+  test('a walk that could not see everything never proves a rollout absent', async () => {
+    // The sessions folder itself refused by the root.
+    expect(
+      await over({ resolve: () => ({ ok: false }), entries: async () => [] }).has('f1' as FerretId, 'n'),
+    ).toBeUndefined();
+    // A dated subfolder that cannot be listed (it might hold the rollout).
+    const unlistable = over({
+      resolve: fenced,
+      entries: async path => {
+        if (path === '/home/sessions/') return [{ name: '2026', kind: 'directory' }];
+        throw new Error('permission denied');
+      },
+    });
+    expect(await unlistable.has('f1' as FerretId, 'n')).toBeUndefined();
+    // A rollout file whose path the root refuses.
+    const refused = over({
+      resolve: relative => (relative.endsWith('.jsonl') ? { ok: false } : fenced(relative)),
+      entries: async () => [{ name: 'rollout-a.jsonl', kind: 'file' }],
+    });
+    expect(await refused.has('f1' as FerretId, 'n')).toBeUndefined();
+  });
+
+  test('a root that cannot be had at all answers undefined, never false', async () => {
+    const broken = new CodexRollouts(
+      {
+        roots: {
+          root: () => {
+            throw new Error('the agent-homes root is unavailable');
+          },
+        },
+      } as unknown as KernelPorts,
+      async () => undefined,
+    );
+    expect(await broken.has('f1' as FerretId, 'n')).toBeUndefined();
   });
 });

@@ -50,8 +50,10 @@ ferret is bound to — as if only the process had restarted:
   **Start fresh** (`conversation: "fresh"`, `fy migrate … --conversation fresh`) is the person's explicit way
   past.
 - A relaunch on the **same login** (resume, Restart CLI, a queued restart) whose conversation the harness
-  **proves is not in the ferret's home** (`Harness.hasConversation` answers `false`: Claude finds no
-  `projects/<folder>/<id>.jsonl`, Codex walks every rollout under `sessions/` and none names it) starts a NEW
+  **proves is not in the ferret's home** (`Harness.hasConversation` answers `false`: Claude finds `<id>.jsonl` in NO
+  `projects/*` folder of the home, after listing them all, because its own folder spelling can differ from Ferretry's
+  for a folder reached through a link or one spelled over 200 characters; Codex walks every rollout under `sessions/`
+  and none names it) starts a NEW
   conversation instead of a `--resume` the CLI would fail ("No conversation found…"), and says so out loud: the
   ferret's history gets `session.conversation_not_found` naming the old id, and an autonomous ferret's revive turn
   is typed after a fixed sentence telling it so and pointing at its assigned task (`turn-001.md`). The old id and

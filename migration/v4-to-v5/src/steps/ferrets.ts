@@ -32,17 +32,16 @@ export const v5FerretName = (config: { id: string; name: string; teammate?: stri
   config.id;
 
 /**
- * The registry state of a ferret v4 left running (its harness is still in its pane): what its carried `state.json` says
- * of the turn when it says anything, so the two agree. v5's turn watch moves the registry ONLY when it writes a turn
- * change; a record left `working` beside a carried `your-turn` (v4 status `running`, an idle harness) would therefore
- * stay `working` for good, and nothing waiting for its idle moment (the restart that makes it a v5 harness) would run.
- * With no recorded turn, the v4 status decides, as before.
+ * The registry state of a ferret v4 did not see finish. One still in its pane (`attached`) is carried `working`, whatever
+ * v4 last recorded: v4 stopped watching it before the switch, and the harness may have taken a turn since (a background
+ * job finishing, a monitor, a wake-up). Its `state.json` is carried WITHOUT v4's last turn (`sessionStateDocument`),
+ * so v5's turn watch WRITES the first turn it sees itself, and only that moves the record to `idle`: the restart queued
+ * for it (`queuedRestarts`) runs on v5's own evidence, never on a stale v4 turn. With no pane, the v4 status decides.
  */
-export function liveState(state: { status?: string; turnState?: string } | undefined): 'starting' | 'idle' | 'working' {
+export function liveState(state: { status?: string } | undefined, attached: boolean): 'starting' | 'idle' | 'working' {
+  if (attached) return 'working';
   const status = state?.status;
   if (status === 'created' || status === 'starting') return 'starting';
-  if (state?.turnState === 'your-turn' || state?.turnState === 'needs-input') return 'idle';
-  if (state?.turnState === 'working') return 'working';
   return ['awaiting_user', 'awaiting_question', 'waiting', 'rate_limited'].includes(status ?? '') ? 'idle' : 'working';
 }
 
@@ -256,6 +255,8 @@ export const ferretsStep: Step = {
           status === undefined || ['completed', 'failed', 'stalled', 'stopped', 'interrupted'].includes(status);
         const runtime = runtimeOf(config);
         const preview = ctx.preview === true;
+        // Still in its v4 pane at the switch: v5 attaches to it, then restarts it (M3).
+        const attached = !stopped && !preview && pane !== undefined;
         const record = FerretRecordSchema.parse({
           format: 1,
           id: config.id,
@@ -268,7 +269,7 @@ export const ferretsStep: Step = {
           runtime,
           login: preview ? undefined : loginOf.get(runtime),
           folder: previewFolder(ctx, config.cwd, ledgers.worktreeFolders),
-          state: stopped || preview ? 'stopped' : liveState(state),
+          state: stopped || preview ? 'stopped' : liveState(state, attached),
           harnessConversation: preview ? undefined : config.transcript?.harnessSessionId,
           transcript:
             config.transcript === undefined || preview
@@ -283,7 +284,7 @@ export const ferretsStep: Step = {
           stateAt: state?.finishedAt ?? state?.lastActivityAt ?? state?.startedAt ?? config.updatedAt,
         });
         records.push(record);
-        details.push({ config, runtime, transcript: record.transcript, stopped: stopped || preview });
+        details.push({ config, runtime, transcript: record.transcript, stopped: stopped || preview, attached });
         // M4: v4 hashes the full fys_ bearer with SHA-256, exactly the v5 token contract.
         // v4 has no issuance timestamp; creation is the known lower bound, not conversion time.
         // A person's cut-off (v4 `credentialRevoked`) is v5's `cutOff`. v4 drops the hash when it cuts a ferret off,
@@ -319,11 +320,11 @@ export const ferretsStep: Step = {
       // CODEX_HOME is `<home>/fleet/homes/<uuid>`, which the new home does not have). Each is queued for v5's own
       // restart, which runs it again as a v5 harness at its next idle moment and never cuts a turn short (the drain waits
       // for `idle`); a restart that fails is journalled on the ferret (`session.restart_gave_up`), never dropped silently.
-      const attached = queuedRestarts(records, new Date().toISOString());
-      if (attached.length > 0)
+      const restarts = queuedRestarts(records, new Date().toISOString());
+      if (restarts.length > 0)
         await ctx.v5.stamped(
           { path: join('state/ferrets', RestartsFile.path), format: RestartsFile.format, schema: RestartsBody },
-          { queued: attached },
+          { queued: restarts },
         );
       await ledgers.write();
       await documents.write();

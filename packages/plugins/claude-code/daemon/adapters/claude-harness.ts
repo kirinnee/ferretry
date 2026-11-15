@@ -93,6 +93,11 @@ export interface ClaudeHarnessDeps {
 }
 
 const TMUX_TIMEOUT_MS = 5_000;
+/**
+ * The most `projects/*` folders `hasConversation` lists before it says "cannot tell". One ferret's home holds the
+ * folders it was launched in (a handful); a home with more proves nothing either way.
+ */
+const MAX_PROJECT_FOLDERS = 1_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
@@ -210,19 +215,41 @@ export class ClaudeHarness implements Harness {
   }
 
   /**
-   * Whether `claude --resume <id>` would find its conversation: the transcript Claude keeps for it in THIS ferret's home
-   * (`<home>/projects/<encoded folder>/<id>.jsonl`, the file a start with `--session-id` writes). `false` only when the
-   * home answers that nothing is there; a path the root refuses, a link or any other doubt is `undefined`, so a resume
-   * is never given up on a guess. A ferret converted from v4 names a conversation whose transcript was left behind.
+   * Whether `claude --resume <id>` would find its conversation in THIS ferret's home, where Claude keeps it as
+   * `projects/<its own spelling of the folder>/<id>.jsonl`. Claude's spelling is NOT always the one Ferretry computes
+   * (`claudeTranscriptPath`): it keys by the physical working folder (a folder reached through a link spells its real
+   * path) and shortens a spelling over 200 characters with a hash. So `false` is answered ONLY when the id is in no
+   * `projects/*` folder at all, after a complete listing of at most {@link MAX_PROJECT_FOLDERS} plain folders. Found under
+   * Ferretry's own spelling is `true`; found under any other is `undefined` (Claude may well find it), and so is every
+   * doubt: a linked or odd entry, a folder too many, a path the root refuses. A resume is never given up on a guess. A
+   * ferret converted from v4 names a conversation whose transcript was left behind, and its home has no such file.
    */
   async hasConversation(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined> {
     if (!isConversationId(harnessConversation) || !isConversationId(spec.ferret)) return undefined;
     try {
       const home = this.home(spec.ferret);
-      const path = home.resolve(claudeTranscriptPath(spec.folder, harnessConversation));
-      if (!path.ok) return undefined;
-      const found = await home.lstat(path.value);
-      return found !== undefined;
+      const projects = home.resolve('projects');
+      if (!projects.ok) return undefined;
+      const folder = await home.lstat(projects.value);
+      // No `projects` folder: Claude has written no conversation in this home.
+      if (folder === undefined) return false;
+      if (folder.kind !== 'directory') return undefined;
+      const entries = await home.entries(projects.value);
+      if (entries.length > MAX_PROJECT_FOLDERS) return undefined;
+      const ours = claudeTranscriptPath(spec.folder, harnessConversation);
+      let elsewhere = false;
+      for (const entry of entries) {
+        // A link could lead to the conversation, and is never followed to find out.
+        if (entry.kind === 'symlink' || entry.kind === 'other') return undefined;
+        if (entry.kind !== 'directory') continue;
+        const relative = `projects/${entry.name}/${harnessConversation}.jsonl`;
+        const file = home.resolve(relative);
+        if (!file.ok) return undefined;
+        if ((await home.lstat(file.value)) === undefined) continue;
+        if (relative === ours) return true;
+        elsewhere = true;
+      }
+      return elsewhere ? undefined : false;
     } catch {
       return undefined;
     }

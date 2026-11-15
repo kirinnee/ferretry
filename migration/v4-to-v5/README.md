@@ -94,9 +94,10 @@ real schemas in a subprocess.
 
 Declared files without a v5 schema are **not written**: moves, auto-resume and terminals.json. v4's own restart queue
 is not carried either; instead `state/ferrets/restarts.json` queues a v5 restart for every ferret still in its v4 pane
-(not stopped, with a pane handle), so v5 relaunches it as a v5 harness at its next idle moment (M3). Such a ferret's
-registry state is taken from the turn its carried `state.json` records (`your-turn`/`needs-input` is `idle`), because
-v5's turn watch moves the registry only when it writes a turn change. Runtime
+(not stopped, with a pane handle), so v5 relaunches it as a v5 harness at its next idle moment (M3). Such a ferret is
+carried `working` and its `state.json` without v4's last turn (`turnState`, `turnStateAt`; a `created`/`starting` status
+becomes `running`), so the record goes `idle` only when v5's turn watch writes the first turn it sees itself: the
+restart runs on v5's own evidence, never on a stale v4 turn. Runtime
 `formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The card a session
 was anchored to is shown through `details.json`;
 name counters, extra history artifacts and pin/option leftovers are listed in `notCarried`. Frozen

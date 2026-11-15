@@ -90,11 +90,6 @@ export const State = z.object({
     'stalled',
     'stopped',
   ]),
-  /**
-   * The turn v4's watch last RECORDED. v5 carries `state.json` with it, and v5's turn watch moves a ferret's registry
-   * state only when it writes a turn CHANGE, so the registry state a converted record starts in must agree with it.
-   */
-  turnState: z.enum(['working', 'your-turn', 'needs-input']).optional(),
   startedAt: Instant.optional(),
   finishedAt: Instant.optional(),
   lastActivityAt: Instant.optional(),

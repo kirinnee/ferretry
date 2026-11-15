@@ -1662,6 +1662,24 @@ describe('mig-harness-home a relaunch whose conversation the harness proves abse
     expect(w.history.map(event => event.type)).toContain('session.conversation_not_found');
   });
 
+  test('a history that cannot be written never undoes the new conversation: the ferret runs and is still told', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    spied(w, async () => false);
+    const push = w.history.push.bind(w.history);
+    w.history.push = (...events) => {
+      if (events.some(event => event.type === 'session.conversation_not_found')) throw new Error('the disk is full');
+      return push(...events);
+    };
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    expect(w.runner.deliveries.slice(typed)[0]?.delivery.text.startsWith(CONVERSATION_NOT_FOUND)).toBe(true);
+  });
+
   test('a harness that offers no answer keeps every resume as it was', async () => {
     const w = await world();
     const id = await started(w);
