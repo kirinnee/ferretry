@@ -75,6 +75,7 @@ interface SurfaceFullscreen {
 import { BrowserBar } from './browser-bar.tsx';
 import { type BrowserBarControl, browserChip } from './browser-bar-model.ts';
 import { BrowserChallengeBanner, shownChallenge } from './browser-challenge-banner.tsx';
+import { BrowserLoginBanner } from './browser-login-banner.tsx';
 import { BrowserSurfaceList, browserPageLabel } from './browser-surface-list.tsx';
 import { browserDestination, type BrowserDestination } from './in-app-browser-model.ts';
 import { InAppBrowserFrame, type InAppBrowserFrameProps } from './in-app-browser.tsx';
@@ -131,6 +132,10 @@ export interface UnifiedBrowserSurfaceProps {
    * implying it can reach one.
    */
   readonly onOpenLoginWindow?: () => Promise<BrowserLoginSnapshot>;
+  /** What the daemon's login window is doing (`null`: not read yet). Drawn as the status banner above the bar. */
+  readonly loginStatus?: BrowserLoginSnapshot | null;
+  /** The banner's explicit close ("I signed in" / "not signed in"), bound by the host to the same daemon. */
+  readonly onCloseLoginWindow?: (primed: boolean) => Promise<BrowserLoginSnapshot>;
   readonly dependencies?: UnifiedBrowserDependencies;
   /** What the session workspace knows that this surface cannot: the page's name, who drives it, its pages. */
   readonly host?: BrowserBarHost;
@@ -196,6 +201,8 @@ export function UnifiedBrowserSurface({
   onClose,
   isActive = true,
   onOpenLoginWindow,
+  loginStatus = null,
+  onCloseLoginWindow,
   dependencies = DEFAULT_UNIFIED_BROWSER_DEPENDENCIES,
   host,
 }: UnifiedBrowserSurfaceProps) {
@@ -805,6 +812,7 @@ export function UnifiedBrowserSurface({
       <Heading id={titleId} className="sr-only">
         Browser
       </Heading>
+      {onCloseLoginWindow !== undefined && <BrowserLoginBanner status={loginStatus} onClose={onCloseLoginWindow} />}
       <BrowserBar
         name={barName}
         address={address}

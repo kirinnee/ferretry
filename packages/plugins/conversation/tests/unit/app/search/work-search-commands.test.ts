@@ -65,7 +65,10 @@ interface Pending {
 }
 
 /** A source over a port whose answers a case hands out, and a clock a case turns by hand. */
-const harness = (screenHref: PluginCommandContext['screenHref'] = testHref) => {
+const harness = (
+  screenHref: PluginCommandContext['screenHref'] = testHref,
+  appHook?: PluginCommandContext['appHook'],
+) => {
   const pending: Pending[] = [];
   const port: WorkSearchPort = {
     search: (request, signal) =>
@@ -95,6 +98,7 @@ const harness = (screenHref: PluginCommandContext['screenHref'] = testHref) => {
     changed: () => {
       changes += 1;
     },
+    ...(appHook === undefined ? {} : { appHook }),
   };
   const built = workSearchCommandSource(context, { port, schedule, debounceMs: 7 });
   /** The entries the source lists for the words, with the chips at `filters` (resting: everything). */
@@ -373,5 +377,167 @@ describe('S11 the work search chips, pending line and muted rows', () => {
     await land();
     expect(source('relay', { kind: 'card', state: 'everything' })).toHaveLength(9);
     expect(source('relay', RESTING)).toHaveLength(6);
+  });
+});
+
+/** A name list as a provider gives it: read once on the first ask, kept, and told to its listeners when it lands. */
+const nameList = (initial: ReadonlyMap<string, string> = new Map()) => {
+  let known = initial;
+  let settled = false;
+  const listeners = new Set<() => void>();
+  const asked = { names: 0, subscribed: 0 };
+  return {
+    asked,
+    listeners,
+    value: {
+      subscribe: (listener: () => void) => {
+        asked.subscribed += 1;
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+      settled: () => settled,
+      names: () => {
+        asked.names += 1;
+        return known;
+      },
+    },
+    arrive: (next: ReadonlyMap<string, string>) => {
+      known = next;
+      settled = true;
+      for (const listener of [...listeners]) listener();
+    },
+  };
+};
+
+const hooksOf =
+  (given: Readonly<Record<string, unknown>>): NonNullable<PluginCommandContext['appHook']> =>
+  name =>
+    given[name];
+
+describe('S11 the work search rows are named by Projects and Ferrets', () => {
+  it("names a card's project from Projects' list and an ask's owner from Ferrets', each under its row", async () => {
+    const projects = nameList(new Map([[RELAY_PROJECT, 'Relay']]));
+    const owners = nameList(new Map([['f1', 'Hayden']]));
+    const { source, pending, pause, land } = harness(
+      testHref,
+      hooksOf({ 'conversation.work-project-names': projects.value, 'conversation.ask-owners': owners.value }),
+    );
+    source('relay');
+    pause();
+    pending[0]?.resolve(answer(card('F10'), ask('A3', { ferret: 'f1' }), ask('A4', { ferret: 'stranger' })));
+    await land();
+    const [named, owned, unowned] = source('relay');
+    expect(named?.detail).toBe('Relay');
+    expect(owned?.detail).toBe('Hayden');
+    // An ask whose ferret is not listed shows no owner, never the id.
+    expect(unowned?.detail).toBeUndefined();
+    expect(unowned?.description).not.toContain('stranger');
+  });
+
+  it('lists again when a list lands after the rows, and shows the names then', async () => {
+    const projects = nameList();
+    const { source, pending, pause, land, changes } = harness(
+      testHref,
+      hooksOf({ 'conversation.work-project-names': projects.value }),
+    );
+    source('relay');
+    pause();
+    pending[0]?.resolve(answer(card('F10')));
+    await land();
+    expect(source('relay')[0]?.detail).toBeUndefined();
+    const before = changes();
+
+    projects.arrive(new Map([[RELAY_PROJECT, 'Relay']]));
+
+    expect(changes()).toBe(before + 1);
+    expect(source('relay')[0]?.detail).toBe('Relay');
+  });
+
+  it('listens to a list once however often the bar lists, and stops when the list has spoken', async () => {
+    const projects = nameList();
+    const { source, pending, pause, land } = harness(
+      testHref,
+      hooksOf({ 'conversation.work-project-names': projects.value }),
+    );
+    source('relay');
+    pause();
+    pending[0]?.resolve(answer(card('F10')));
+    await land();
+    source('relay');
+    source('relay');
+    expect(projects.asked.subscribed).toBe(1);
+    expect(projects.listeners.size).toBe(1);
+
+    projects.arrive(new Map());
+
+    expect(projects.listeners.size).toBe(0);
+  });
+
+  it('asks only for the lists the hits need: no ferrets for cards, no projects for asks', async () => {
+    const projects = nameList();
+    const owners = nameList();
+    const { source, pending, pause, land } = harness(
+      testHref,
+      hooksOf({ 'conversation.work-project-names': projects.value, 'conversation.ask-owners': owners.value }),
+    );
+    source('relay');
+    pause();
+    pending[0]?.resolve(answer(card('F10')));
+    await land();
+    source('relay');
+    expect(projects.asked.names).toBeGreaterThan(0);
+    expect(owners.asked.names).toBe(0);
+
+    const asks = harness(
+      testHref,
+      hooksOf({ 'conversation.work-project-names': projects.value, 'conversation.ask-owners': owners.value }),
+    );
+    const projectReads = projects.asked.names;
+    asks.source('relay');
+    asks.pause();
+    asks.pending[0]?.resolve(answer(ask('A3')));
+    await asks.land();
+    asks.source('relay');
+    expect(owners.asked.names).toBeGreaterThan(0);
+    expect(projects.asked.names).toBe(projectReads);
+  });
+
+  it('draws the rows as it did without a provider when the hook is missing, of the wrong shape or throws', async () => {
+    const wrong = { subscribe: () => () => undefined, settled: () => false, names: 'not a function' };
+    const brokenNames = {
+      subscribe: () => () => undefined,
+      settled: () => false,
+      names: () => {
+        throw new Error('broken');
+      },
+    };
+    const notAMap = { subscribe: () => () => undefined, settled: () => false, names: () => ['x'] };
+    const noSettled = { subscribe: () => () => undefined, names: () => new Map([['f1', 'Hayden']]) };
+    const cases: readonly PluginCommandContext['appHook'][] = [
+      undefined,
+      () => undefined,
+      hooksOf({ 'conversation.work-project-names': wrong, 'conversation.ask-owners': wrong }),
+      () => {
+        throw new Error('the shell broke');
+      },
+      hooksOf({ 'conversation.work-project-names': brokenNames, 'conversation.ask-owners': brokenNames }),
+      hooksOf({ 'conversation.work-project-names': notAMap, 'conversation.ask-owners': notAMap }),
+      // A list that cannot say whether its read is over is not the contract's shape.
+      hooksOf({ 'conversation.work-project-names': noSettled, 'conversation.ask-owners': noSettled }),
+    ];
+    for (const appHook of cases) {
+      const { source, pending, pause, land } = harness(testHref, appHook);
+      source('relay');
+      pause();
+      pending[0]?.resolve(answer(card('F10'), card('F11', { project: 'unfiled' }), ask('A3')));
+      await land();
+      const [orphan, unfiled, owned] = source('relay');
+      expect(orphan?.detail).toBeUndefined();
+      expect(unfiled?.detail).toBe('Unfiled');
+      expect(owned?.detail).toBeUndefined();
+      expect(orphan?.label).toContain('Card F10');
+    }
   });
 });

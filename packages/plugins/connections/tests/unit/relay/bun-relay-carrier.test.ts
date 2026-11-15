@@ -154,7 +154,7 @@ function redialingCarrier(patch: Record<string, unknown> = {}, random = 1) {
 }
 
 describe('a carrier that survives a dropped rendezvous', () => {
-  it('R140 should redial at once after a drop and say what happened, naming the origin and never the path', () => {
+  it('R140 J-0177 should redial at once after a drop and say what happened, naming the origin and never the path', () => {
     // Arrange — a configured address WITH a path, which is exactly what must not reach a log line.
     const { carrier, fake, clock, lines, socketAt } = redialingCarrier({ url: 'wss://relay.example/hosted/path' });
     carrier.start();

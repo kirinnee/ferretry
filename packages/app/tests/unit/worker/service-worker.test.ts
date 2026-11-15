@@ -468,6 +468,7 @@ test('a machine’s push carries the page it named, and its tap opens exactly th
           count: 1,
           latestBody: 'Ship the build?',
           tag: 'agenda-A3',
+          eventKey: 'e1',
         },
       },
     },
@@ -485,7 +486,7 @@ test('the app-wide registration’s push always opens /app/, whatever page it na
     '/d/laptop/settings/access',
     '/ferrets/../../../d/other/ferrets/x/chat',
   ]) {
-    await appWide.dispatch('push', { data: { json: () => ({ ...SENT, url }) } });
+    await appWide.dispatch('push', { data: { json: () => ({ ...SENT, url, eventKey: url }) } });
   }
   expect(appWide.shown.map(notification => (notification.options.data as { url: string }).url)).toEqual(
     Array(3).fill(`${APP_ORIGIN}/app/`),
@@ -546,13 +547,40 @@ const APPLE = 'https://web.push.apple.com/abc';
 
 test('S6 a repeat under one tag replaces the line and says how many; the number never goes backwards', async () => {
   const machine = await startWorker(ABC);
-  await machine.dispatch('push', show({ body: 'First', count: 1 }));
-  await machine.dispatch('push', show({ body: 'Second', count: 1 }));
-  await machine.dispatch('push', show({ body: 'Third', count: 1 }));
+  await machine.dispatch('push', show({ body: 'First', count: 1, eventKey: 'e1' }));
+  await machine.dispatch('push', show({ body: 'Second', count: 1, eventKey: 'e2' }));
+  await machine.dispatch('push', show({ body: 'Third', count: 1, eventKey: 'e3' }));
   expect(machine.shown.map(line => line.options.body)).toEqual(['First', 'Second\n+1 more', 'Third\n+2 more']);
   expect(machine.live()).toHaveLength(1);
   expect(machine.shown.every(line => line.options.tag === 'fy-push:abc:agenda-A3')).toBe(true);
   expect(machine.shown.every(line => line.options.renotify === false)).toBe(true);
+});
+
+test('S6 a push service’s re-delivery (the same eventKey) shows nothing new and does not grow "+N more"', async () => {
+  const machine = await startWorker(ABC);
+  await machine.dispatch('push', show({ body: 'First', eventKey: 'e1' }));
+  await machine.dispatch('push', show({ body: 'First', eventKey: 'e1' }));
+  await machine.dispatch('push', show({ body: 'Second', eventKey: 'e2' }));
+  expect(machine.shown.map(line => line.options.body)).toEqual(['First', 'Second\n+1 more']);
+});
+
+test('S6 an older daemon’s push with no eventKey or sessionId, and one carrying fields this worker does not know, still shows', async () => {
+  const machine = await startWorker(ABC);
+  const { eventKey: _key, ...older } = SENT;
+  await machine.dispatch('push', { data: { json: () => ({ ...older, kind: 'failed' }) } });
+  await machine.dispatch('push', {
+    data: { json: () => ({ ...older, kind: 'failed', futureField: [1], body: 'Again' }) },
+  });
+  expect(machine.shown.map(line => line.options.body)).toEqual(['Ship the build?', 'Again\n+1 more']);
+});
+
+test('S6 a push naming a page the shell refuses taps to the conversation its sessionId names, not the machine home', async () => {
+  const machine = await startWorker(ABC);
+  await machine.dispatch('push', { data: { json: () => ({ ...SENT, url: '/nowhere', sessionId: 'f9' }) } });
+  const data = machine.shown[0]?.options.data as { url: string };
+  expect(data.url).toBe(`${APP_ORIGIN}/d/abc/ferrets/f9/chat`);
+  await machine.dispatch('notificationclick', { notification: { data, close: () => {} } });
+  expect(machine.opened).toEqual([`${APP_ORIGIN}/d/abc/ferrets/f9/chat`]);
 });
 
 test('S6 an urgent push stays on screen and sounds again', async () => {

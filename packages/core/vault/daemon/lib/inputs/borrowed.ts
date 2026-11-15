@@ -1343,6 +1343,23 @@ const AccountDefaultsFileSchema = z.strictObject({
 
 type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
 
+/**
+ * WHAT ACCOUNTS ANSWERS to "who is asking" through `input.saved` (a {@link SignInChoiceContext} without the ferret's own
+ * hint), parsed here so a provider that sent more than the order needs is refused whole, never read.
+ */
+export const SignInChoiceContextSchema = z.strictObject({
+  project: z
+    .strictObject({
+      id: z.string().min(1).max(SIGN_IN_PROJECT_MAX_LENGTH),
+      name: z.string().min(1).max(SIGN_IN_PROJECT_MAX_LENGTH),
+      nameIsUnique: z.boolean(),
+    })
+    .optional(),
+  folder: z.string().min(1).max(4_096).optional(),
+  home: z.string().min(1).max(4_096).optional(),
+  defaults: AccountDefaultsFileSchema.optional(),
+});
+
 /** What {@link chosenSignIn} needs of a sign-in. */
 export interface SignInCandidate {
   readonly id: SignInId;

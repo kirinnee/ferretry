@@ -625,6 +625,8 @@ describe('the tag grammar and the push-service table are the kernel’s (K-push,
           tag: 'session-1',
           count: kernel.PUSH_COUNT_MAX,
           kind: 'agenda',
+          eventKey: payloadBase.eventKey,
+          sessionId: 'session-1',
         },
       });
     }
@@ -633,7 +635,13 @@ describe('the tag grammar and the push-service table are the kernel’s (K-push,
   it('should read every payload Access composes as the worker’s show or clear, tagged or untagged', () => {
     // Arrange
     const { tag: _tag, ...untagged } = sessionPayload;
-    const envelope = { title: payloadBase.title, body: payloadBase.body, url: payloadBase.url };
+    const envelope = {
+      title: payloadBase.title,
+      body: payloadBase.body,
+      url: payloadBase.url,
+      eventKey: payloadBase.eventKey,
+      sessionId: 'session-1',
+    };
 
     // Act / Assert
     should(kernel.readPushMessage(push.PushNotificationPayloadSchema.parse(sessionPayload))).deepEqual({
