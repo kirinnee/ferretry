@@ -8,7 +8,10 @@ import { RuntimeCatalogSchema } from '@ferretry/plugin-runtimes/contract';
 import { SpeedupsViewSchema } from '@ferretry/plugin-voice/contract';
 import app from '../../../app/index.ts';
 import { configChangeEffect } from '../../../app/hooks/use-config-change-effect.ts';
-import { ConfigChanged } from '@ferretry/kernel/contract';
+import { ConfigChanged, headersFrom, queryFrom, type ApiRequest } from '@ferretry/kernel/contract';
+import { config as kernelConfig } from '@ferretry/kernel/host';
+import { device, fixedClock, standInAdmission, testArrival, testPrincipal } from '@ferretry/kernel/testing';
+import { WardenConfigChanged } from '../../../contract/index.ts';
 import { useFerretsOf } from '../../../app/hooks/use-ferrets-of.ts';
 import { readGrants } from '../../../app/lib/grants.ts';
 import { daemonConnection } from '../../../app/lib/machine.ts';
@@ -379,7 +382,14 @@ describe('the settings card hears the files it reads move on the daemon', () => 
         for (const listener of [...(listeners.get(name) ?? [])]) listener(payload);
       });
     };
-    return { client, publish, count: (name: string) => listeners.get(name)?.size ?? 0 };
+    /** Several events delivered in one turn, as the daemon does for one edit. */
+    const burst = async (events: readonly (readonly [string, unknown])[]): Promise<void> => {
+      await interact(() => {
+        for (const [name, payload] of events)
+          for (const listener of [...(listeners.get(name) ?? [])]) listener(payload);
+      });
+    };
+    return { client, publish, burst, count: (name: string) => listeners.get(name)?.size ?? 0 };
   };
 
   const settleReach = async (): Promise<void> => {
@@ -441,16 +451,32 @@ describe('the settings card hears the files it reads move on the daemon', () => 
       'accounts.yaml',
       'runtimes.yaml',
       'runtimes/claude.yaml',
+      'profiles/dev.yaml',
+      'model-sets/claude.yaml',
+      'models/opus.yaml',
+      'endpoints/proxy.yaml',
       'logins/work.yaml',
       'warden.yaml',
       'logins.yaml',
+      'profiles.yaml',
+      'models.yaml',
       'voice.yaml.bak',
     ]) {
       const before = rereads;
       await live.publish(ConfigChanged.name, frame(path));
       if (rereads > before) heard.push(path);
     }
-    expect(heard).toEqual(['voice.yaml', 'accounts.yaml', 'runtimes.yaml', 'runtimes/claude.yaml', 'logins/work.yaml']);
+    expect(heard).toEqual([
+      'voice.yaml',
+      'accounts.yaml',
+      'runtimes.yaml',
+      'runtimes/claude.yaml',
+      'profiles/dev.yaml',
+      'model-sets/claude.yaml',
+      'models/opus.yaml',
+      'endpoints/proxy.yaml',
+      'logins/work.yaml',
+    ]);
     await counting.unmount();
   });
 
@@ -511,12 +537,116 @@ describe('the settings card hears the files it reads move on the daemon', () => 
     const useLive = configChangeEffect(async () => {
       throw new Error('no client');
     });
+    let rereads = 0;
     function Probe() {
-      useLive('alpha', ['warden'], () => undefined);
+      useLive('alpha', ['warden'], () => (rereads += 1));
       return null;
     }
     const view = await mount(<Probe />);
     await settleReach();
+    // Nothing to hear, nothing read: not on mount, and no unhandled rejection.
+    expect(rereads).toBe(0);
+    const visibility = (hidden: boolean) =>
+      interact(() => {
+        Object.defineProperty(document, 'visibilityState', {
+          configurable: true,
+          value: hidden ? 'hidden' : 'visible',
+        });
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    await visibility(true);
+    await visibility(false);
+    // The tab coming back is the one thing that still reads.
+    expect(rereads).toBe(1);
+    await view.unmount();
+  });
+
+  it('also hears warden.config-changed for its own file, and the two sources together are one reread', async () => {
+    const live = liveClient();
+    const useLive = configChangeEffect(async () => live.client);
+    let rereads = 0;
+    function Probe({ kinds }: { readonly kinds: readonly string[] }) {
+      useLive('alpha', kinds, () => (rereads += 1));
+      return null;
+    }
+    const view = await mount(<Probe kinds={['warden']} />);
+    await settleReach();
+    await live.publish(WardenConfigChanged.name, {});
+    expect(rereads).toBe(1);
+    // One edit said twice, in the same turn: one coalesced reread.
+    await live.burst([
+      [ConfigChanged.name, frame('warden.yaml')],
+      [WardenConfigChanged.name, {}],
+    ]);
+    expect(rereads).toBe(2);
+    await view.unmount();
+    expect(live.count(WardenConfigChanged.name)).toBe(0);
+    expect(live.count(ConfigChanged.name)).toBe(0);
+
+    // A card that does not show the Warden's own settings does not wake for them.
+    const other = await mount(<Probe kinds={['credentials']} />);
+    await settleReach();
+    await live.publish(WardenConfigChanged.name, {});
+    expect(rereads).toBe(2);
+    await other.unmount();
+  });
+
+  it('refreshes an open card for a device that may use the Warden but not the fleet, through the real bus filter', async () => {
+    // The device's grants: warden.use allowed, fleet.use denied (the stand-in admits by the route's own capability).
+    const caller = device('phone', ['warden.use']);
+    const admission = standInAdmission(() => caller);
+    const request: ApiRequest = {
+      method: 'GET',
+      path: '/v1/bus',
+      query: queryFrom([]),
+      headers: headersFrom({}),
+      arrival: testArrival(caller),
+      principal: testPrincipal(caller, fixedClock('2026-11-06T09:00:00Z').now()),
+      text: async () => '',
+    };
+    const declared = <Route extends { readonly key: string }>(
+      route: string,
+      manifestRoutes: readonly Route[] | undefined,
+    ): Route => {
+      const found = manifestRoutes?.find(entry => entry.key === route);
+      if (found === undefined) throw new Error(`no declaration for ${route}`);
+      return found;
+    };
+    const fileRead = kernelConfig.CONFIG_FILE_READ;
+    const cardRead = declared('GET /v1/warden/config', manifest.actions?.routes);
+    // The card opens (warden.use), and the kernel would not show this device a config frame (fleet.use).
+    expect(admission.admit({ table: 'route', descriptor: cardRead, request, params: new Map() }).outcome).toBe(
+      'admitted',
+    );
+    expect(kernelConfig.configFrameShown(admission, request, frame('warden.yaml'), fileRead)).toBe(false);
+
+    // The daemon's bus as this device sees it: a config frame only where the kernel shows it, every other event as sent.
+    const live = liveClient();
+    const through = {
+      subscribe: (event: { readonly name: string }, listener: (payload: unknown) => void) =>
+        live.client.subscribe(event as never, (payload: unknown) => {
+          if (
+            event.name === ConfigChanged.name &&
+            !kernelConfig.configFrameShown(admission, request, payload, fileRead)
+          )
+            return;
+          listener(payload);
+        }),
+    } as unknown as PluginClient;
+    const useLive = configChangeEffect(async () => through);
+    let rereads = 0;
+    function Probe() {
+      useLive('alpha', ['warden'], () => (rereads += 1));
+      return null;
+    }
+    const view = await mount(<Probe />);
+    await settleReach();
+    // An ordinary warden.yaml edit: the daemon publishes both, the kernel's filter drops the config frame.
+    await live.burst([
+      [ConfigChanged.name, frame('warden.yaml')],
+      [WardenConfigChanged.name, {}],
+    ]);
+    expect(rereads).toBe(1);
     await view.unmount();
   });
 
