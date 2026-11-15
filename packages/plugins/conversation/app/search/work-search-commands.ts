@@ -11,7 +11,15 @@
 import type { CommandBarAnswer, CommandBarEntry, CommandBarFilter } from '@ferretry/app/ui';
 import type { PluginCommandContext } from '@ferretry/app';
 import { formatReference } from '@ferretry/app';
-import type { WorkHit, WorkKind, WorkSearchResponse } from '../../contract/index.ts';
+import {
+  CONVERSATION_ASK_OWNERS_HOOK,
+  CONVERSATION_WORK_PROJECT_NAMES_HOOK,
+  type ConversationNameList,
+  isConversationNameList,
+  type WorkHit,
+  type WorkKind,
+  type WorkSearchResponse,
+} from '../../contract/index.ts';
 import {
   WORK_SEARCH_DEBOUNCE_MS,
   WORK_SEARCH_MIN_LENGTH,
@@ -58,6 +66,28 @@ const WORK_FILTERS: readonly CommandBarFilter[] = [
 /** The heading each kind is listed under. */
 export const WORK_GROUPS = { card: 'Cards', ask: 'Asks' } as const;
 
+/** The names a row is drawn with, when the machine's Projects and Ferrets have given them (each absent until then). */
+export interface WorkRowNames {
+  /** Project id to project name (`conversation.work-project-names`). */
+  readonly projects?: ReadonlyMap<string, string>;
+  /** Ferret id to callsign (`conversation.ask-owners`). */
+  readonly owners?: ReadonlyMap<string, string>;
+}
+
+/**
+ * A name list the shell's one provider of `hook` gives, or `undefined`: no shell, no provider, two, one not allowed yet,
+ * or a value without the shape (the hook is narrowed before it is read). The row then draws without those names.
+ */
+const nameListOf = (context: Pick<PluginCommandContext, 'appHook'>, hook: string): ConversationNameList | undefined => {
+  let value: unknown;
+  try {
+    value = context.appHook?.(hook);
+  } catch {
+    return undefined;
+  }
+  return isConversationNameList(value) ? value : undefined;
+};
+
 /** Where Enter on a hit goes: the card's screen, or the ask in the Agenda. `undefined` when no plugin draws it. */
 export const workHitHref = (hit: WorkHit, context: Pick<PluginCommandContext, 'daemon' | 'screenHref'>) =>
   hit.kind === 'card'
@@ -72,6 +102,7 @@ export const workHitEntry = (
   hit: WorkHit,
   query: string,
   context: Pick<PluginCommandContext, 'daemon' | 'screenHref' | 'navigate'>,
+  names: WorkRowNames = {},
 ): CommandBarEntry | undefined => {
   const href = workHitHref(hit, context);
   if (href === undefined) return undefined;
@@ -79,10 +110,11 @@ export const workHitEntry = (
     hit.kind === 'card' ? { kind: 'task', id: hit.id } : { kind: 'attention', id: hit.id },
   );
   const matched = workHitDescription(hit);
-  // The project a card is filed under, as today's palette named it under the row ('Unfiled', or nothing for a project
-  // whose name this source does not have). GAP: the project names and an ask's owner need the Board's and Ferrets'
-  // lists, which no contract hands this source yet (app/NEEDS-APP-SHELL.txt).
-  const project = hit.kind === 'card' ? workProjectLabel(hit.project, undefined) : '';
+  // The second line: the project a card is filed under ('Unfiled', its name, or nothing for a project whose name this
+  // source does not have: an id no reader can use is never shown), and whose ask an ask is (its owner's callsign, or
+  // nothing while the callsigns are not known).
+  const project =
+    hit.kind === 'card' ? workProjectLabel(hit.project, names.projects) : (names.owners?.get(hit.ferret) ?? '');
   const description = [hit.standing, matched].filter(part => part !== '').join(' · ');
   return {
     id: `work-${workHitKey(hit)}`,
@@ -128,6 +160,31 @@ export function workSearchCommandSource(
   /** The words and chips whose search failed: not pending any more. */
   let failed: string | null = null;
   let answer: { readonly key: string; readonly query: string; readonly response: WorkSearchResponse } | null = null;
+
+  /** The name lists already listened to: each provider's list is one object per daemon, listened to once. */
+  const listened = new Set<ConversationNameList>();
+  /**
+   * The names the one provider of `hook` has read so far, or `undefined` when there is none (no provider, a value of the
+   * wrong shape, a throw). The first ask starts the provider's one read; when it lands the bar is asked to list again.
+   */
+  const namesOf = (hook: string): ReadonlyMap<string, string> | undefined => {
+    const list = nameListOf(context, hook);
+    if (list === undefined) return undefined;
+    try {
+      if (!listened.has(list)) {
+        listened.add(list);
+        // A list is read once, so it has one thing to say: it is told, and the bar is asked to list again.
+        const stop = list.subscribe(() => {
+          stop();
+          context.changed();
+        });
+      }
+      const names = list.names();
+      return names instanceof Map ? names : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   const ask = (query: string, kind: WorkKind | undefined, open: boolean, key: string): void => {
     cancel?.();
@@ -184,9 +241,20 @@ export function workSearchCommandSource(
       const listed = { card: 0, ask: 0 };
       // One kind alone shows all the daemon returned; while both are listed each is capped (today's palette).
       const capped = kind === undefined;
+      // Only the lists a hit needs are asked for, so a search that finds no ask never reads the ferrets.
+      const projects = shown.response.hits.some(hit => hit.kind === 'card')
+        ? namesOf(CONVERSATION_WORK_PROJECT_NAMES_HOOK)
+        : undefined;
+      const owners = shown.response.hits.some(hit => hit.kind === 'ask')
+        ? namesOf(CONVERSATION_ASK_OWNERS_HOOK)
+        : undefined;
+      const names: WorkRowNames = {
+        ...(projects === undefined ? {} : { projects }),
+        ...(owners === undefined ? {} : { owners }),
+      };
       const entries = shown.response.hits.flatMap(hit => {
         if (capped && listed[hit.kind] >= MAX_WORK_ROWS_PER_KIND) return [];
-        const entry = workHitEntry(hit, shown.query, context);
+        const entry = workHitEntry(hit, shown.query, context, names);
         if (entry === undefined) return [];
         listed[hit.kind] += 1;
         return [entry];

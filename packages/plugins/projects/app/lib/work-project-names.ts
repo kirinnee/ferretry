@@ -19,3 +19,41 @@ export const workProjectNames = (
 
 export const readWorkProjectNames = async (client: ProjectsClient): Promise<ReadonlyMap<string, string>> =>
   workProjectNames(BoardProjectNamesSchema.parse(await client.call(BOARD_PROJECTS_ROUTE)).projects);
+
+/**
+ * `conversation.work-project-names` (Conversation's app hook): the project names, read ONCE and kept. The first ask for
+ * the names starts the one read, so a machine whose work search is never opened is never asked; a listing after that
+ * fetches nothing. A read that fails (Board off, refused) leaves the map empty and is not repeated: the search then
+ * shows what it shows without a name, never a guess.
+ */
+export const workProjectNamesList = (
+  client: ProjectsClient,
+): {
+  readonly subscribe: (listener: () => void) => () => void;
+  readonly names: () => ReadonlyMap<string, string>;
+} => {
+  let known: ReadonlyMap<string, string> = new Map();
+  let started = false;
+  const listeners = new Set<() => void>();
+  return {
+    subscribe: listener => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    names: () => {
+      if (!started) {
+        started = true;
+        readWorkProjectNames(client).then(
+          read => {
+            known = read;
+            for (const listener of [...listeners]) listener();
+          },
+          () => undefined,
+        );
+      }
+      return known;
+    },
+  };
+};
