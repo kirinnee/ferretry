@@ -17,6 +17,7 @@ import { buildConversationA } from './host.ts';
 import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
+import { addressedByCallsign } from './seams/ferret-address.ts';
 import { maskedBody } from './seams/masked-body.ts';
 import { referenceCatalogRoute } from './references/catalog.ts';
 
@@ -104,8 +105,12 @@ export const conversationDaemon = (gate: HarnessGate) =>
         manifest.actions.routes.map(route => route.key),
         Object.fromEntries(
           manifest.actions.routes.flatMap(route => {
-            const handler = served[route.key];
-            if (handler === undefined) return [];
+            const declaredHandler = served[route.key];
+            if (declaredHandler === undefined) return [];
+            // A path that names a ferret takes its callsign as well as its id.
+            const handler = route.key.includes(':ferretId')
+              ? addressedByCallsign(ctx.needs.ferrets, declaredHandler)
+              : declaredHandler;
             const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
             return [
               [route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler],

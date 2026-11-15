@@ -1632,4 +1632,26 @@ describe('ManagedWorktreeAdapter defaults, guarded directories and checkout iden
     should(removed.branchBlockers).match([{ code: 'git_error', message: /could not start: repository vanished/u }]);
     should(await files.type(created.managed.path)).equal('missing');
   });
+
+  it('should list a checkout whose path no root this daemon may open reaches as an inspection finding, not a failure', async () => {
+    // Arrange
+    const base = await scenario('svc-remove-unreachable');
+    const created = await adapter().create(request(base));
+    const unreachable = Object.assign(Object.create(files) as WorktreeFileSystem, {
+      type: async (target: string): ReturnType<WorktreeFileSystem['type']> => {
+        if (path.resolve(target) === path.resolve(created.managed.path))
+          throw new Error('this daemon may not reach it');
+        return await files.type(target);
+      },
+    });
+
+    // Act
+    const actual = (await adapterOver(unreachable).examine(removal(base, created.managed))).decision;
+
+    // Assert
+    should(actual.removable).be.false();
+    should(actual.blockers.map(item => item.message)).containEql(
+      'checkout path inspection failed: this daemon may not reach it',
+    );
+  });
 });
