@@ -434,7 +434,7 @@ describe('rollback: by recorded state', () => {
     await advance(sb, 'start');
     const result = await sb.run('rollback', ['--owner-yes']);
     expect(result.code).toBe(0);
-    expect(result.out).toContain('relaunched none of the 1 recorded ferret(s)');
+    expect(result.out).toContain('relaunched or resumed none of the 2 baseline ferret(s)');
     expect((await sb.calls()).filter(line => line.startsWith('fy restart'))).toEqual([]);
   });
 
