@@ -206,6 +206,12 @@ export interface UseAgendaInput {
    * no Board path). Absent: the answer is sent and the page stays.
    */
   readonly laneEditor?: LaneEditor;
+  /**
+   * Where a tapped row goes when this host has no message list to lay the item's view over (the line mounted in the
+   * `conversation.above-composer` slot, which draws only above the composer): the item opens on its own page instead,
+   * and no view opens here. Absent: the view opens over the chat, as the chat's own host draws it.
+   */
+  readonly onOpenItem?: (item: AgendaItem | AgendaListRecord) => void;
   readonly now?: number;
 }
 
@@ -265,6 +271,7 @@ export const useAgenda = ({
   onAnswered,
   onItemOpened,
   laneEditor,
+  onOpenItem,
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
@@ -422,6 +429,11 @@ export const useAgenda = ({
 
   const openCard = (item: AgendaItem | AgendaListRecord): void => {
     setSentForm(null);
+    if (onOpenItem !== undefined) {
+      update(() => ({ drawer: false }));
+      onOpenItem(item);
+      return;
+    }
     update(() => ({ card: item.id, drawer: false }));
   };
 
