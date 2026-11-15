@@ -130,6 +130,36 @@ describe('ClientLoginsGateway — each call goes to its own route, with a body t
     should(await unreadable.gateway.authority()).eql({ mayApply: false, applyRefusal: 'undetermined' });
   });
 
+  it('lists the secret names the Vault holds and files one, its value only in the request body', async () => {
+    const summary = { name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT };
+    const { gateway, calls } = gatewayAnswering({
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [summary], references: [] },
+      'POST /v1/secrets': summary,
+    });
+
+    should(await gateway.secretNames()).eql(new Set(['ZAI_API_KEY']));
+    await gateway.putSecret('ZAI_API_KEY', 'SENTINEL-key');
+
+    should(calls).eql([
+      { route: 'GET /v1/secrets', init: undefined },
+      { route: 'POST /v1/secrets', init: { body: { name: 'ZAI_API_KEY', value: 'SENTINEL-key' } } },
+    ]);
+  });
+
+  it('refuses a secret name the Vault could not hold, and an answer with more than a summary, never repeating the value', async () => {
+    const leaky = gatewayAnswering({
+      'POST /v1/secrets': { name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT, value: 'SENTINEL-echo' },
+    });
+    const badName = await gatewayAnswering({})
+      .gateway.putSecret('not a name', 'SENTINEL-key')
+      .catch((e: Error) => e);
+    const echoed = await leaky.gateway.putSecret('ZAI_API_KEY', 'SENTINEL-key').catch((e: Error) => e);
+
+    should(badName).be.an.Error();
+    should(echoed).be.an.Error();
+    should(String((badName as Error).message) + String((echoed as Error).message)).not.match(/SENTINEL/u);
+  });
+
   it('stages a change and applies it by the id the daemon gave', async () => {
     const { gateway, calls } = gatewayAnswering({
       [ROUTES.stage]: CHANGE_VIEW,

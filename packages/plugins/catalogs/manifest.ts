@@ -1,3 +1,4 @@
+import { ACTIONS_ROW_SLOT, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { Credentials, GatePort } from '@ferretry/core-gate/contract';
 import { VaultPort, SealedDocumentsPort } from '@ferretry/core-vault/contract';
 import { CatalogLinkKeys, CatalogInstallPrefs } from './contract/storage.ts';
@@ -69,7 +70,14 @@ export default definePlugin({
   needs: { access: AccessPort, gate: GatePort, vault: VaultPort, sealed: SealedDocumentsPort },
   /** Projects is optional: off, an install can only target the project folders the item providers name. */
   // Skills: the app half reads the skills.add slot's props shape (add-skills page) and Skills' machine inventory (`GET /v1/skills`).
-  uses: { connections: ConnectionsPort, projects: ProjectsPort, skills: SkillsPort, runtimes: RuntimesPort },
+  // Ferrets: the app half contributes the "Add skills…" row to its `ferrets.actions-row` slot; off, the menu has no such row.
+  uses: {
+    connections: ConnectionsPort,
+    ferrets: FerretsPort,
+    projects: ProjectsPort,
+    skills: SkillsPort,
+    runtimes: RuntimesPort,
+  },
   provides: { catalogs: CatalogsPort, shareWindow: ShareWindowPort },
 
   // The install mapping offers the person the NAMES of their secrets for a `${secret:NAME}` placeholder (never a value),
@@ -760,8 +768,12 @@ export default definePlugin({
   },
 
   ui: {
-    // "+ Add skills" in a ferret's Skills tab: Skills offers the slot, Catalogs contributes the way in.
-    panels: [panel(SKILLS_ADD_SLOT, { id: 'add-skills', order: 10 })],
+    // "+ Add skills" in a ferret's Skills tab: Skills offers the slot, Catalogs contributes the way in. The same way in is
+    // a row in Ferrets' Actions ▾ menu ("Add skills…").
+    panels: [
+      panel(SKILLS_ADD_SLOT, { id: 'add-skills', order: 10 }),
+      panel(ACTIONS_ROW_SLOT, { id: 'add-skills-row', order: 20 }),
+    ],
     screens: [
       screen('sharing', { path: 'sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),
       // Reached from Skills' `skills.add` slot (the panel above); the ferret's place rides in the query.

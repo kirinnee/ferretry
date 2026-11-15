@@ -216,6 +216,7 @@ describe('login add', () => {
       variables: [{ name: 'OPENAI_API_KEY', kind: 'secret', secret: 'OPENAI_API_KEY' }],
     };
     const world = fakeWorld({
+      hidden: ['SENTINEL-openai'],
       gateway: {
         logins: () => loginList(),
         presets: () => ({ presets: [preset] }) as never,
@@ -236,7 +237,8 @@ describe('login add', () => {
         env: { OPENAI_API_KEY: '${secret:OPENAI_API_KEY}' },
       },
     ]);
-    should(world.out.text('report')).containEql('Store each secret it names with `fz secret set NAME`');
+    should(world.gateway.called('putSecret').map(call => call.args)).eql([['OPENAI_API_KEY', 'SENTINEL-openai']]);
+    should(world.out.text('report')).containEql('Test it: fz login test codex-openai-api-key');
     should(world.gateway.called('startSignIn')).be.empty();
   });
 

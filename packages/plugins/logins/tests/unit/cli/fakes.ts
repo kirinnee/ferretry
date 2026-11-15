@@ -73,6 +73,8 @@ export interface FakeAnswers {
   authority: () => ChangeAuthority;
   stage: () => LoginChangeView;
   apply: () => LoginChangeOutcome;
+  secretNames: () => ReadonlySet<string>;
+  putSecret: () => void;
 }
 
 interface Call {
@@ -88,6 +90,8 @@ class FakeGateway implements ILoginsGateway {
     this.#answers = {
       recheckSignIn: () => ({ outcome: 'accepted', flow: flow({ state: 'complete' }) }),
       authority: () => ({ mayApply: true, applyRefusal: 'granted' }),
+      secretNames: () => new Set<string>(),
+      putSecret: () => undefined,
       ...answers,
     };
   }
@@ -139,6 +143,12 @@ class FakeGateway implements ILoginsGateway {
   async authority() {
     return this.#answer('authority', []);
   }
+  async secretNames() {
+    return this.#answer('secretNames', []);
+  }
+  async putSecret(name: string, value: string) {
+    return this.#answer('putSecret', [name, value]);
+  }
   async stage(change: LoginChange) {
     return this.#answer('stage', [change]);
   }
@@ -185,25 +195,50 @@ export interface FakeWorld {
   readonly out: FakeOutput;
   readonly prompt: FakePrompt;
   readonly slept: number[];
+  /** The questions a hidden prompt was asked: names only. */
+  readonly hiddenQuestions: string[];
 }
 
 /** A whole set of collaborators, every one a recording fake. */
 export function fakeWorld(
-  options: { gateway?: Partial<FakeAnswers>; answers?: string[]; interactive?: boolean; now?: () => number } = {},
+  options: {
+    gateway?: Partial<FakeAnswers>;
+    answers?: string[];
+    interactive?: boolean;
+    now?: () => number;
+    /** What a hidden prompt answers, in order (`undefined`: no terminal). Absent: this world has no hidden prompt. */
+    hidden?: (string | undefined)[];
+    /** The shell's variables. Absent: this command line cannot read any. Like the shell, it answers only the names asked. */
+    shell?: Record<string, string>;
+  } = {},
 ): FakeWorld {
   const gateway = new FakeGateway(options.gateway);
   const out = new FakeOutput();
   const prompt = new FakePrompt(options.answers);
   const slept: number[] = [];
+  const prompts: string[] = [];
+  const hidden = options.hidden === undefined ? undefined : [...options.hidden];
+  const shell = options.shell;
   const deps: LoginsCommandDeps = {
     gateway,
     out,
     ...(options.interactive === false ? {} : { prompt }),
+    ...(hidden === undefined
+      ? {}
+      : {
+          promptHidden: async (question: string) => {
+            prompts.push(question);
+            return hidden.shift();
+          },
+        }),
+    ...(shell === undefined
+      ? {}
+      : { readEnvironment: (names: readonly string[]) => Object.fromEntries(names.map(name => [name, shell[name]])) }),
     binaryName: 'fz',
     sleep: async milliseconds => {
       slept.push(milliseconds);
     },
     now: options.now ?? (() => Date.parse(AT)),
   };
-  return { deps, gateway, out, prompt, slept };
+  return { deps, gateway, out, prompt, slept, hiddenQuestions: prompts };
 }
