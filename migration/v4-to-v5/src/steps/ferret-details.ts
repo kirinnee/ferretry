@@ -48,6 +48,11 @@ export interface DetailsSource {
   readonly transcript: TranscriptProvenance | undefined;
   /** v4 last saw it finished (or never started): v5 keeps no credential hash for it. */
   readonly stopped: boolean;
+  /**
+   * Still in its v4 pane at the switch: its `state.json` is carried without v4's last turn, so v5's turn watch records the
+   * first turn it sees itself (`liveState` in ferrets.ts says why). Absent: false.
+   */
+  readonly attached?: boolean;
 }
 
 type Json = Record<string, unknown>;
@@ -145,10 +150,25 @@ export function sessionConfigDocument(
   return { format: 1, ...listedOnly(body, CONFIG_KEYS, dropped) };
 }
 
+/** An attached ferret's state without v4's last turn, and with a status v5's turn watch describes. */
+function attachedState(state: Json): Json {
+  const { turnState: _turn, turnStateAt: _turnAt, ...rest } = state;
+  return rest.status === 'created' || rest.status === 'starting' ? { ...rest, status: 'running' } : rest;
+}
+
 /** `state.json`: `format` first, the old `attention` key and cleared (`null`) values left out, then v5's list only. */
-export function sessionStateDocument(raw: Json, dropped: Set<string> = new Set(), preview = false): Json {
+export function sessionStateDocument(
+  raw: Json,
+  dropped: Set<string> = new Set(),
+  preview = false,
+  attached = false,
+): Json {
   const { format: _format, attention: _attention, ...rest } = raw;
-  const live = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== null));
+  const kept = Object.fromEntries(Object.entries(rest).filter(([, value]) => value !== null));
+  // A ferret still in its pane: v4's last recorded turn is left out (v5's watch writes the first one it sees, and only a
+  // WRITTEN turn moves the record), and a status v5's watch does not describe (`created`, `starting`: v4 had not seen
+  // the harness up yet, but its pane is live) is carried as `running`, so the watch looks at it at all.
+  const live = attached ? attachedState(kept) : kept;
   // The preview's ferrets are all stopped: no process id, no live-pane facts, no remote-control link.
   const body = preview
     ? Object.fromEntries(
@@ -248,7 +268,9 @@ export async function prepareDetails(ctx: StepContext, sources: readonly Details
 
     const state = await json(join(folder, 'state.json'), Document);
     if (state !== undefined) {
-      const document = StateDocument.parse(sessionStateDocument(state, droppedState, ctx.preview === true));
+      const document = StateDocument.parse(
+        sessionStateDocument(state, droppedState, ctx.preview === true, source.attached === true),
+      );
       if (document.id !== id) throw new Error('v4 state identity mismatch');
       writes.push(() => ctx.v5.json(file(target('state.json'), StateDocument), document));
       counts.states += 1;

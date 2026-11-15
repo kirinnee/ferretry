@@ -871,15 +871,57 @@ verify)
     row "ferrets" FAIL "v5 'fy ps -a --json' failed or is not a list"
   fi
 
-  # Live panes: every baseline pane is still there (skipped, said so, on an empty fleet).
+  # Live panes, by session. Each baseline pane is still there, OR v5 restarted its ferret (M3: the converter queues a restart
+  # for every ferret in its v4 pane, and a restart ends the old harness and starts it again in a NEW pane of the same
+  # session): then the session has a pane again and the ferret's v5 history says `session.restarted`. A restart that
+  # failed (`session.restart_gave_up`, the last restart event in that history) is a FAIL whatever the pane shows. The
+  # owner of a pane comes from the baseline's terminal-pane.json map; the history is read for event TYPES only.
   if [ "$(note_get PANES)" = none ]; then
     row "panes" "SKIP" "no live ferret at baseline"
   else
     psock="${H}/state/terminals/tmux.sock"
     if panes="$(tmux -S "${psock}" list-panes -a -F '#{session_name} #{pane_id}')"; then
       sort <<<"${panes}" >"${work}/panes.now"
-      lost="$(comm -23 "${base}/panes.txt" "${work}/panes.now")"
-      if [ -z "${lost}" ]; then row "panes" OK "$(wc -l <"${base}/panes.txt" | tr -d ' ') baseline panes still present"; else row "panes" FAIL "$(wc -l <<<"${lost}" | tr -d ' ') baseline panes missing"; fi
+      # The last restart event in a ferret's v5 history: restarted, gave_up, none, or unreadable.
+      restart_of() {
+        local file="${H}/state/ferrets/$1/history.jsonl" last
+        [ -f "${file}" ] || {
+          echo none
+          return 0
+        }
+        last="$(jq -r 'select(.type == "session.restarted" or .type == "session.restart_gave_up") | .type' "${file}" 2>/dev/null)" || {
+          echo unreadable
+          return 0
+        }
+        case "$(tail -n 1 <<<"${last}")" in
+        session.restarted) echo restarted ;;
+        session.restart_gave_up) echo gave_up ;;
+        *) echo none ;;
+        esac
+      }
+      kept=0 restarted=0 missing=0 gave_up=""
+      while read -r session pane; do
+        [ -n "${session}" ] || continue
+        owner="$(awk -F'\t' -v p="${pane}" '$3 == p {print $1; exit}' "${base}/pane-owners.tsv")"
+        how=none
+        if [ -n "${owner}" ]; then how="$(restart_of "${owner}")"; fi
+        if [ "${how}" = gave_up ]; then
+          gave_up="${gave_up}${gave_up:+, }${owner}"
+        elif grep -qxF "${session} ${pane}" "${work}/panes.now"; then
+          kept=$((kept + 1))
+        elif [ "${how}" = restarted ] && awk -v s="${session}" '$1 == s {found = 1} END {exit !found}' "${work}/panes.now"; then
+          restarted=$((restarted + 1))
+        else
+          missing=$((missing + 1))
+        fi
+      done <"${base}/panes.txt"
+      if [ -n "${gave_up}" ]; then
+        row "panes" FAIL "v5 could not restart: ${gave_up} (its history says session.restart_gave_up with the reason: show the owner)"
+      elif [ "${missing}" -gt 0 ]; then
+        row "panes" FAIL "${missing} baseline panes missing (not restarted by v5 either)"
+      else
+        row "panes" OK "${kept} baseline panes still present, ${restarted} restarted by v5 in a new pane"
+      fi
     else
       row "panes" FAIL "tmux could not be read at ${psock}"
     fi
