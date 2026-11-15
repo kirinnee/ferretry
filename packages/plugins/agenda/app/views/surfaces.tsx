@@ -10,6 +10,7 @@ import { createAgendaModePanel } from './agenda-mode-panel.tsx';
 import { createAgendaPanel } from './agenda-panel.tsx';
 import { createAgendaScreen } from './agenda-screen.tsx';
 import { createAgendaSettings } from './agenda-settings.tsx';
+import { NotificationMutePanel } from './notification-mute-panel.tsx';
 
 export interface AgendaSurfaces {
   readonly screens: { readonly agenda: AppComponent<ScreenProps>; readonly 'agenda-ask': AppComponent<ScreenProps> };
@@ -19,6 +20,9 @@ export interface AgendaSurfaces {
   };
   readonly settings: { readonly agenda: AppComponent<SettingsProps> };
 }
+
+/** Agenda's `device.settings` panels (no daemon, no client): drawn once, under no shell. */
+export const deviceSettingsPanels = { 'notification-mute': NotificationMutePanel };
 
 /** `holder` is the half's own: every machine's surfaces built with it share one fleet (alone, a fleet of its own). */
 export const createSurfaces = (client: PluginClient, holder?: object): AgendaSurfaces => {
