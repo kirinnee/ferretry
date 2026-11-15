@@ -1,4 +1,4 @@
-import { provideToShell } from '@ferretry/app';
+import { type BackgroundViewProps, provideToShell, type ShellProvides } from '@ferretry/app';
 import type { AppComponent, PanelProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
@@ -14,10 +14,30 @@ type ViewName = 'updates-settings' | 'behind-panel' | 'whats-new-panel';
  */
 const loadView = (name: ViewName): Promise<Record<string, unknown>> => import(`./views/${name}.tsx`);
 
+/** Drawn from `shell.deviceSettings` (no daemon), never from a machine's half, so the per-daemon entry draws nothing. */
+const notDrawnPerDaemon: AppComponent<PanelProps> = () => null;
+
+/**
+ * The install offer's `device.settings` panel (Settings › This device › Install app, S4): no daemon and no client,
+ * because it reads only this device's install prompt (`useInstallPrompt`, S13).
+ */
+const installAppPanel = lazyComponent<Record<string, never>>(
+  async () => (await import('./views/install-offer.tsx')).InstallAppPanel as AppComponent<Record<string, never>>,
+) as NonNullable<ShellProvides['deviceSettings']>[string];
+
+/**
+ * The install offer's `background` toast (S5): mounted once per paired machine at the frame root, it draws on the
+ * first machine's mount only, because the offer is this device's and not a machine's.
+ */
+const installToast = lazyComponent<BackgroundViewProps>(
+  async () => (await import('./views/install-offer.tsx')).InstallToast as AppComponent<BackgroundViewProps>,
+) as NonNullable<ShellProvides['background']>[string];
+
 /**
  * Updates' app half: its Settings tab (how this daemon was installed, whether it is behind, the update and the
- * automatic-install switch), the `behind` notice on the daemon-status panel, and "What's new" (a Settings › This device
- * panel that owns the release-notes sheet, and the command bar entry that opens it).
+ * automatic-install switch), the `behind` notice on the daemon-status panel, "What's new" (a Settings › This device
+ * panel that owns the release-notes sheet, and the command bar entry that opens it), and the offer to install Ferretry
+ * as an app — a `device.settings` panel and a `background` toast over the shell's install prompt.
  */
 export default provideToShell(
   implementApp(manifest, {
@@ -33,6 +53,7 @@ export default provideToShell(
           const view = await loadView('behind-panel');
           return (view.createPanel as (client: unknown) => AppComponent<PanelProps>)(client);
         }),
+        'install-app': notDrawnPerDaemon,
         // Drawn from `shell.deviceSettings` below (no machine), never from a machine's half.
         'whats-new': () => null,
       },
@@ -41,10 +62,12 @@ export default provideToShell(
   {
     commands: whatsNewCommands,
     deviceSettings: {
+      'install-app': installAppPanel,
       'whats-new': lazyComponent<Record<string, never>>(async () => {
         const view = await loadView('whats-new-panel');
         return view.WhatsNewPanel as AppComponent<Record<string, never>>;
       }) as (props: Record<string, never>) => ReactNode,
     },
+    background: { 'install-offer': installToast },
   },
 );

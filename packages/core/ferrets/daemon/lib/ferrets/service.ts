@@ -107,7 +107,11 @@ import {
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
-import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
+import {
+  type LaunchEnvironmentRecord,
+  modeSwitchDefaults,
+  recordedSwitches,
+} from '../agent-control/launch-environment.ts';
 import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
 /**
@@ -263,6 +267,11 @@ export interface FerretsPorts {
    * `Redaction.read` (`FerretsApi.prompt`). Unbound: nothing is asked.
    */
   promptState?(ferret: FerretId): Promise<FerretPrompt>;
+  /**
+   * The ferret's stored last screen (`last-snapshot.txt`), MASKED AGAIN with the Vault's values now; `undefined` when
+   * there is none, it cannot be read or it cannot be masked. Unbound: no stored screen is answered.
+   */
+  storedLastSnapshot?(ferret: FerretId): Promise<string | undefined>;
   /**
    * The environment the named login defines for `harness` (`LoginKind.env` of the kind that holds it): literal settings
    * and `${secret:NAME}` references, never a value read from the Vault. An error is a sentence for the owner (no such
@@ -1945,6 +1954,18 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * The ferret's stored last screen (`FerretsApi.lastSnapshot`), masked again on this read. The same `mayTouch` rule as
+   * `harness`, checked BEFORE the file is touched. `undefined` for a ferret this daemon does not know, with no stored
+   * screen, or when it cannot be read or masked (fail closed: never the raw text).
+   */
+  async lastSnapshot(ferret: FerretId, caller?: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    return await this.ports.storedLastSnapshot?.(ferret).catch(() => undefined);
+  }
+
+  /**
    * The turn watch recorded a turn change (U4): a `working` turn makes the ferret `working`, a `your-turn` or a
    * `needs-input` makes it `idle`, and `ferret.changed {change: 'state'}` follows the durable write (what
    * Conversation's `turn.ended` reads). Only a ferret that is already `working` or `idle` moves: a start's
@@ -2202,7 +2223,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, record.mode, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2650,13 +2671,15 @@ export class FerretsService implements FerretsApi {
 
   private async environment(
     ferret: FerretId,
+    mode: FerretRecord['mode'],
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
     signedIn: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, string>> {
     // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
-    const env: Record<string, string> = { ...login };
+    // The mode's own defaults come next and BEFORE the parts, so an owner's switch (a part) still overrides them.
+    const env: Record<string, string> = { ...login, ...modeSwitchDefaults(mode) };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)

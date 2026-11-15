@@ -727,6 +727,15 @@ export interface FerretsApi {
    */
   prompt?(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined>;
   /**
+   * A stopped ferret's last screen (additive): the frame kept when it stopped, MASKED AGAIN with the Vault's values at
+   * the moment of THIS read (a value added to the Vault after the capture is masked too), so the text is never the raw
+   * file. Same `mayTouch` rule as `harness`: a `caller` reaching beyond itself and its helpers is refused with a 403
+   * `forbidden`, before the file is read. `undefined` (never an error, never the raw text) for a ferret this daemon does
+   * not know, one that kept no frame, a store that is unreadable or damaged, and a frame that could not be masked.
+   * Read only.
+   */
+  lastSnapshot?(ferret: FerretId, caller?: FerretId): Promise<string | undefined>;
+  /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.
    */

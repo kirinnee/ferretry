@@ -32,6 +32,8 @@ interface ChatSessionConfig {
   readonly teammate?: string | undefined;
   /** The runtime it runs on. */
   readonly agent?: string | undefined;
+  /** The harness family it runs (Ferrets' `harness`), spelled as the composer takes it: how a picked skill is invoked. */
+  readonly harness?: 'claude' | 'codex' | undefined;
 }
 
 export type ChatSessionState = Partial<
@@ -110,6 +112,7 @@ export const chatSessionOf = (summary: FerretSummary): ChatSession => ({
     teammate: summary.name,
     ...(summary.title === undefined ? {} : { name: summary.title }),
     ...(summary.runtime === undefined ? {} : { agent: summary.runtime }),
+    harness: summary.harness === 'codex' ? 'codex' : 'claude',
   },
   state: {
     ...usageOf(summary.quota),

@@ -2,6 +2,7 @@ import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { accessClaims } from './connect.ts';
+import { agendaItemOpenedHook, pageRegistration } from './lib/item-opened-hook.ts';
 import { accessPasskey } from './step-up-shell.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
 import { pairPhoneCommands } from './pair-phone-host.tsx';
@@ -52,5 +53,7 @@ export default provideToShell(
     daemonless: ports => ({ pair: pairPage(ports) }),
     // Settings › This device: this browser's permissions and each machine's Web Push, one section per machine (S4).
     deviceSettings: { notifications: NotificationsDevicePanel },
+    // Agenda's `agenda.item-opened`: opening an ask closes this device's alert lines for it and tells the machine.
+    hooks: { 'agenda.item-opened': agendaItemOpenedHook(pageRegistration) },
   },
 );

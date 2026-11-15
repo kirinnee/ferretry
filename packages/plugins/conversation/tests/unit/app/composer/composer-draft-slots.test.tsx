@@ -87,13 +87,11 @@ class Daemon {
     return found;
   }
 
-  /**
-   * GAP(app-shell): the client socket takes no query, so every stream is the chat's — an item's card opens none and
-   * its draft stays on this device. `asked` still records one `null` per stream opened.
-   */
+  /** A stream with no query is the chat's; `?item=` names an Agenda item's own draft. `asked` records each one's. */
   readonly open: DaemonStreamOpener = request => {
-    this.asked.push(null);
-    const slot = 'chat';
+    const item = request.query?.item ?? null;
+    this.asked.push(item);
+    const slot = item ?? 'chat';
     let alive = true;
     const deliver = (frame: SharedDraftServerFrame): void =>
       queueMicrotask(() => {
@@ -108,6 +106,7 @@ class Daemon {
       snapshot: {
         v: 1,
         ferret: 's1' as FerretId,
+        ...(item === null ? {} : { slot: item }),
         generation: 'g',
         epoch: now.epoch,
         rev: now.rev,
@@ -239,8 +238,8 @@ describe('a draft slot (B142)', () => {
     const drafts = store();
     const chat = await box(machine, drafts);
     const card = await box(machine, drafts, { slot: A5 });
-    // GAP(app-shell): only the chat opens a stream; the card's draft has none in 5.0.
-    expect(machine.asked).toEqual([null]);
+    // The chat's stream names no item; the card's names its own.
+    expect(machine.asked).toEqual([null, 'A5']);
 
     // Act
     await chat.it.type('chat words');
@@ -253,6 +252,7 @@ describe('a draft slot (B142)', () => {
     expect(machine.held('chat').text).toBe('chat words');
     expect(drafts.load(chatScope)).toBe('chat words');
     expect(drafts.load(cardScope(A5))).toBe('card words');
+    expect(machine.held('A5').text).toBe('card words');
     await chat.unmount();
     await card.unmount();
   });
@@ -287,8 +287,8 @@ describe('a draft slot (B142)', () => {
     await card.it.send();
 
     expect(card.sent.map(body => body.message)).toEqual(['done here']);
-    // GAP(app-shell): a card has no stream, so its send carries no shared-draft clear to name the slot in.
-    expect(card.sent[0]?.sharedDraft).toBeUndefined();
+    // The card streams its own draft, so its send names that slot for the daemon to clear.
+    expect(card.sent[0]?.sharedDraft?.slot).toBe('A5');
     expect(card.it.shown()).toBe('');
     expect(machine.held('chat').text).toBe('still typing in the chat');
     expect(chat.it.shown()).toBe('still typing in the chat');

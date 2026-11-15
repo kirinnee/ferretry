@@ -26,6 +26,7 @@ function subject(
     readonly watched?: boolean;
     readonly redaction?: Redaction;
     readonly screen?: string;
+    readonly yieldToLoop?: () => Promise<void>;
   } = {},
 ) {
   const handle = '%7' as RunnerHandle;
@@ -105,6 +106,7 @@ function subject(
             }),
             redaction: options.redaction ?? redaction,
             digest: text => `digest:${text.length}:${text.includes(SECRET) ? 'raw' : 'masked'}`,
+            ...(options.yieldToLoop === undefined ? {} : { yieldToLoop: options.yieldToLoop }),
           },
         }),
   });
@@ -372,6 +374,28 @@ export function runnerLookCases(): void {
       should(failed).equal(undefined);
       should(again).equal(undefined);
       should(pane.captures()).equal(2);
+    });
+
+    it('C58-15 look masks a big screen in slices (the loop gets the thread back between readings) and still masks the value', async () => {
+      // Arrange: a screen past the slice size with the secret on its last row.
+      let yields = 0;
+      const filler = Array.from({ length: 300 }, () =>
+        'ordinary terminal output with nothing secret in it'.padEnd(78, '.'),
+      );
+      const pane = subject({
+        screen: [...filler, `$ curl https://example.com/?key=${SECRET}`, '> '].join('\n'),
+        yieldToLoop: async () => {
+          yields += 1;
+        },
+      });
+
+      // Act
+      const look = await pane.runner.look(pane.handle);
+
+      // Assert: six readings (the `> ` prompt row draws a gutter) → five yields between them, one before the row check, one before the final pass.
+      should(yields).equal(7);
+      should(JSON.stringify(look)).not.containEql(SECRET);
+      should(look?.status).containEql('*'.repeat(SECRET.length));
     });
 
     it('should answer nothing for a dead pane, a handle that is not a pane id, or a runner with no watch', async () => {

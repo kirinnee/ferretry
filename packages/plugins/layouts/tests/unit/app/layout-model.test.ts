@@ -20,9 +20,13 @@ describe('the layout settings', () => {
       }
       for (const option of setting.options) {
         const edited = structuredClone(DEFAULT_LAYOUT) as Record<string, unknown>;
-        const [head, tail] = setting.path.split('.') as [string, string | undefined];
-        if (tail === undefined) edited[head] = option.id;
-        else edited[head] = { ...(edited[head] as object), [tail]: option.id };
+        const keys = setting.path.split('.');
+        let cursor = edited;
+        for (const key of keys.slice(0, -1)) {
+          cursor[key] = { ...(cursor[key] as object) };
+          cursor = cursor[key] as Record<string, unknown>;
+        }
+        cursor[keys[keys.length - 1] as string] = option.id;
         expect(LayoutSchema.safeParse(edited).success).toBe(true);
       }
       expect(setting.options.map(option => option.id)).toContain(choiceOf(DEFAULT_LAYOUT, setting.path));
@@ -45,6 +49,41 @@ describe('the layout settings', () => {
     expect(listOf(LayoutSchema.parse({ id: 'bare', nav: { side: 'left', items: [] } }), 'panels.ferret.side')).toEqual(
       [],
     );
+  });
+
+  test('every phone key has a row, named `phone.*` as `fy layout set` takes it', () => {
+    const phone = LAYOUT_SETTINGS.filter(setting => setting.path.startsWith('phone.')).map(setting => setting.path);
+    expect(phone).toEqual([
+      'phone.nav.side',
+      'phone.nav.style',
+      'phone.side.show',
+      'phone.density',
+      'phone.nav.items',
+      'phone.top',
+    ]);
+  });
+
+  test('a phone key is what the layout sets for a phone, else what the wide layout holds', () => {
+    expect(choiceOf(DEFAULT_LAYOUT, 'phone.nav.side')).toBe('bottom');
+    expect(choiceOf(DEFAULT_LAYOUT, 'nav.side')).toBe('left');
+    expect(listOf(DEFAULT_LAYOUT, 'phone.nav.items')).toEqual(['ferrets', 'agenda', 'board']);
+    const bare = LayoutSchema.parse({ id: 'bare', nav: { side: 'right', style: 'bar', items: ['agenda'] } });
+    expect(choiceOf(bare, 'phone.nav.side')).toBe('right');
+    expect(choiceOf(bare, 'phone.nav.style')).toBe('bar');
+    expect(choiceOf(bare, 'phone.side.show')).toBe('never');
+    expect(choiceOf(bare, 'phone.density')).toBe('comfortable');
+    expect(listOf(bare, 'phone.nav.items')).toEqual(['agenda']);
+    expect(listOf(bare, 'phone.top')).toEqual(['daemon-picker', 'search']);
+    const phone = LayoutSchema.parse({
+      id: 'p',
+      nav: { side: 'left', items: [] },
+      phone: { nav: { side: 'top', style: 'list' }, side: { show: 'always' }, density: 'compact', top: ['search'] },
+    });
+    expect(choiceOf(phone, 'phone.nav.side')).toBe('top');
+    expect(choiceOf(phone, 'phone.nav.style')).toBe('list');
+    expect(choiceOf(phone, 'phone.side.show')).toBe('always');
+    expect(choiceOf(phone, 'phone.density')).toBe('compact');
+    expect(listOf(phone, 'phone.top')).toEqual(['search']);
   });
 
   test('a list is shown with commas and typed back the way the daemon splits it', () => {

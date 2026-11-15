@@ -11,6 +11,7 @@ import { AgendaCardConversation } from '../features/agenda/agenda-conversation-s
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
+import { useItemOpened } from '../hooks/use-item-opened.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
@@ -25,6 +26,8 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
     const links = useAgendaLinks();
     // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
     const board = useAgendaBoardHooks(daemon);
+    // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
+    const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
     const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
     const phone = useLayoutMode() === 'drawer';
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
@@ -33,6 +36,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
       <AgendaBoardProviders hooks={board} onNavigate={to => navigate(to)}>
         <AgendaClientContext.Provider value={runtime.client}>
           <AgendaInboxContext.Provider value={inbox}>
+            {itemOpened.host}
             <AgendaInboxPage
               inbox={inbox}
               phone={phone}
@@ -54,7 +58,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               }}
               from={inboxSourceFromSearch(window.location.search)}
               onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
-              onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
+              onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
               renderComposer={(card, answerForm) => (
                 <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
               )}
