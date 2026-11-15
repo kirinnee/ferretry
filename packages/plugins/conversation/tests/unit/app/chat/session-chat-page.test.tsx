@@ -287,6 +287,55 @@ describe('the question the ferret is asking', () => {
     expect(refreshed).toBe(1);
   });
 
+  test('under an agenda item the reply box stays with the question’s form: the item is answered through the Agenda, not the chat', () => {
+    const page = draw({
+      ask: { id: 'A6' },
+      embedded: true,
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    });
+
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
+  });
+
+  test('a form card’s Send answers the form, not the chat, even while the ferret waits on its question', async () => {
+    const sent: unknown[] = [];
+    const replied: unknown[] = [];
+    let answered = 0;
+    const client = fakeClient({
+      'POST /v1/ferrets/:ferretId/send': call => {
+        sent.push(call.body);
+        return { sendId: 's1', disposition: 'delivered' };
+      },
+    });
+    const page = draw(
+      {
+        ask: { id: 'A6', answerForm: () => (answered += 1), formChanges: 3, onReplied: reply => replied.push(reply) },
+        embedded: true,
+        question: QUESTION,
+        session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+      },
+      client,
+    );
+    const composer = page.root.findByType(Composer);
+
+    expect(composer.props.allowEmptySend).toBe(true);
+    expect(composer.props.clearErrorOn).toBe(3);
+    await composer.props.api.send('shared', { message: '' });
+    run(() => composer.props.onSent({ words: '' }));
+
+    expect(answered).toBe(1);
+    expect(sent).toEqual([]);
+    // A form's Send is an answer, not a reply: the Inbox is told nothing.
+    expect(replied).toEqual([]);
+  });
+
+  test('without a form the item’s reply box is still a reply to the item', () => {
+    const page = draw({ ask: { id: 'A6' }, embedded: true });
+    expect(page.root.findByType(Composer).props.allowEmptySend).toBeUndefined();
+  });
+
   test('a waiting status with no validated question is damaged evidence: no form, no composer, and no invented answer', () => {
     const page = draw({ question: null, session: ferretView('shared', { state: { status: 'awaiting_question' } }) });
     expect(page.root.findAllByProps({ 'data-question-unavailable': '' }).length).toBeGreaterThan(0);

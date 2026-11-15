@@ -55,6 +55,14 @@ describe('the open ask’s conversation (slot agenda.conversation)', () => {
     await mounted.unmount();
   });
 
+  test('hands the form card’s Send on to the chat, which answers the form with it', async () => {
+    let answered = 0;
+    const { mounted } = await open({ ferret: 'f1', ask: 'A3', answerForm: () => (answered += 1), formChanges: 2 });
+    expect(mounted.container.querySelector('[data-session="f1"]')).not.toBeNull();
+    expect(answered).toBe(0);
+    await mounted.unmount();
+  });
+
   test('draws the conversation embedded: not the whole ferret page', async () => {
     const { mounted, client } = await open({ ferret: 'f1', ask: 'A3' });
     expect(client.callsTo('GET /v1/ferrets/:ferretId').length).toBeGreaterThan(0);

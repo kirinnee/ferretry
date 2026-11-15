@@ -70,6 +70,13 @@ export interface AskReply {
   /** The words of a reply that was taken back: they go in the box once. */
   readonly restore?: string | undefined;
   readonly onRestored?: (() => void) | undefined;
+  /**
+   * The item is a form card: Send answers THE FORM (the picks on the card and the words in the box, as one answer through
+   * the Agenda's answer route) instead of sending a message. It may throw the one sentence the composer shows.
+   */
+  readonly answerForm?: (() => void) | undefined;
+  /** Bumped when a pick on the open form changes, so the "nothing to send" line goes away with it. */
+  readonly formChanges?: number | undefined;
 }
 
 export interface SessionChatPageProps {
@@ -219,19 +226,37 @@ export function SessionChatPage({
   const [pinSignal, setPinSignal] = useState(0);
   const askId = ask?.id;
   const askReplied = ask?.onReplied;
+  const answerForm = ask?.answerForm;
+  const forForm = answerForm !== undefined;
   const onSent = useCallback(
     (sent?: ComposerSent) => {
       setPinSignal(signal => signal + 1);
       onRefresh?.();
-      if (sent !== undefined) askReplied?.(sent);
+      // A form's Send is an answer, not a reply to the ask: the Inbox is told nothing.
+      if (sent !== undefined && !forForm) askReplied?.(sent);
     },
-    [onRefresh, askReplied],
+    [onRefresh, askReplied, forForm],
   );
   // The ask's reply carries its reference; the ferret's own chat box has none, and keeps the composer's default calls.
-  const askApi = useMemo(
-    () => (askId === undefined ? undefined : withReferencePrefix(composerApi(client), () => [askId])),
-    [client, askId],
-  );
+  // A FORM card's Send answers the form instead: the message the composer would have sent is dropped and `answerForm`
+  // runs (it may throw the composer's one error line), whatever the ferret's chat is doing.
+  const answerRef = useRef(answerForm);
+  answerRef.current = answerForm;
+  const askApi = useMemo(() => {
+    if (askId === undefined) return undefined;
+    const reply = withReferencePrefix(composerApi(client), () => [askId]);
+    if (!forForm) return reply;
+    return new Proxy(reply, {
+      get(target, key, receiver) {
+        const value = Reflect.get(target, key, receiver);
+        if (key !== 'send') return typeof value === 'function' ? value.bind(target) : value;
+        return () => {
+          answerRef.current?.();
+          return Promise.resolve({});
+        };
+      },
+    });
+  }, [client, askId, forForm]);
   // LIVE is not WORKING. `running` means the agent's terminal is up; whose turn it is comes from the daemon's turn
   // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
   // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
@@ -244,6 +269,10 @@ export function SessionChatPage({
   const busy = turn === 'working' || (turn === null && statusLive);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (asked ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
+  // The ferret's own chat box gives way to the question's form (a typed message would not answer it). An agenda item's
+  // reply box is not that box: it answers THE ITEM, through the Agenda's answer route, so a question the ferret is
+  // waiting on never takes it away (the item is a card of that very question as often as not).
+  const showComposer = askId !== undefined || !awaitingAnswer;
   // The answer goes through the question form's own route reader; the chat re-reads once it lands.
   const questionApi = useMemo<QuestionAnswerApi>(() => {
     const api = questionAnswerApi(client);
@@ -361,7 +390,8 @@ export function SessionChatPage({
                 can be sent safely; refresh the session or interrupt the turn to abandon it.
               </p>
             </section>
-          ) : (
+          ) : null}
+          {showComposer ? (
             <>
               {isUnread(session) ? (
                 <p className="m-0 px-3 py-1 text-meta text-warn" data-composer-unread="" role="status">
@@ -380,12 +410,18 @@ export function SessionChatPage({
                 {...(account === undefined ? {} : { account })}
                 {...(askApi === undefined ? {} : { api: askApi })}
                 {...(askId === undefined ? {} : { draftSlot: askId })}
+                {...(forForm
+                  ? {
+                      allowEmptySend: true,
+                      ...(ask?.formChanges === undefined ? {} : { clearErrorOn: ask.formChanges }),
+                    }
+                  : {})}
                 {...(ask?.restore === undefined ? {} : { restore: ask.restore })}
                 {...(ask?.onRestored === undefined ? {} : { onRestored: ask.onRestored })}
                 onSent={onSent}
               />
             </>
-          )}
+          ) : null}
         </div>
       </div>
     </div>
