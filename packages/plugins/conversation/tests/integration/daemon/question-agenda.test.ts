@@ -528,3 +528,48 @@ describe("an answer on the Agenda is typed into the ferret's own question form",
 
 /** The events the daemon published, by name (a placeholder that keeps the assertion readable). */
 const published = (d: { published: string[] }): string[] => d.published;
+
+describe('a ferret parked on a permission prompt reaches the Agenda on the same watch tick', () => {
+  const parkedOn = { current: undefined as unknown };
+  const withPrompt = () => {
+    const w = world();
+    const ferrets = {
+      get: async () => ({ id: 'cody', state: 'working' }),
+      list: async () => [{ id: 'cody', harness: 'claude', state: 'working' }],
+      prompt: async () => parkedOn.current,
+    };
+    return { w, d: daemon({ files: w.files, asks: w.asks, events: w.events, ferrets }) };
+  };
+
+  test('one card is raised for the prompt, however many ticks, and it is closed when the pane moves on', async () => {
+    const { w, d } = withPrompt();
+    parkedOn.current = {
+      turnState: 'needs-input',
+      permissionRequest: { id: '0123456789abcdef', tool: 'Bash', what: 'ls', question: 'Proceed?' },
+    };
+    await d.tick();
+    await d.tick();
+    expect(w.asks.open()).toHaveLength(1);
+    expect(w.asks.open()[0]?.draft).toMatchObject({
+      source: 'prompt',
+      kind: 'task',
+      ferret: 'cody',
+      subject: 'Permission: Bash ls',
+      blocking: true,
+    });
+
+    parkedOn.current = { turnState: 'working' };
+    await d.tick();
+    expect(w.asks.open()).toHaveLength(0);
+    expect(w.asks.items[0]).toMatchObject({ state: 'closed', reason: 'withdrawn' });
+  });
+
+  test('an Asks that cannot be read is said and the watch goes on', async () => {
+    const { w, d } = withPrompt();
+    w.asks.api.open = async () => {
+      throw new Error('asks is unavailable');
+    };
+    await d.tick();
+    expect(d.warned.some(line => line.includes('could not follow the prompts'))).toBe(true);
+  });
+});

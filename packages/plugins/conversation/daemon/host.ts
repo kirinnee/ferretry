@@ -87,6 +87,8 @@ import type { TranscriptEvent } from './seams/transcript-types.ts';
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { agendaAnswers } from './questions/lib/agenda-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
+import { PromptAsks } from './prompts/adapters/prompt-asks.ts';
+import type { PromptRead } from './prompts/lib/prompt-wait.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
@@ -350,6 +352,12 @@ export function buildConversationA(deps: {
         ? `conversation could not raise the agenda card of the question of ${ferret} and will not try again: ${String(error)}`
         : `conversation could not raise the agenda card of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
     ),
+  );
+  /** The Agenda's card for a ferret parked on a permission prompt or a dialog (Asks' source `prompt`). */
+  const promptAsks = new PromptAsks(
+    asks,
+    async ferret => (await ferrets.prompt?.(parseSessionId(ferret))) as PromptRead | undefined,
+    message => kernel.log.warn(message),
   );
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
@@ -1360,6 +1368,10 @@ export function buildConversationA(deps: {
             questionAsksReconciled = true;
           }, askFailure('reconcile'));
         } else await questionAsks.settle();
+        // A pane parked on a permission prompt or a dialog moves no ferret state, so it is looked at on this tick.
+        await promptAsks
+          .sweep((await ferrets.list()).map(ferret => ({ id: ferret.id, live: ferret.state !== 'stopped' })))
+          .catch(error => kernel.log.warn(`conversation could not follow the prompts: ${String(error)}`));
         await questionWatch.sweep();
       })()
         .catch(() => undefined)

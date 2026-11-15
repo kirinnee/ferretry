@@ -50,8 +50,9 @@ const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, dead
  * - **Agent ferrets.** Ferrets records a role, not "interactive or not": a helper ferret counts as an agent ferret.
  * - **Taking a buzz down on other devices.** Access's port has no clear; opening an ask records it as seen and answers
  *   the tags, and clears only when Access offers `clear`.
- * - **The turn-end and rest nudges, the harness-prompt asks.** They read a ferret's transcript and type into it
- *   (Conversation's); they stay unported until Conversation provides those seams.
+ * - **The turn-end and rest nudges.** The turn-end check reads a ferret's transcript and types into it; the rest nudge
+ *   needs Asks to expose resting items and their nudge counts. Both stay unported. (A ferret parked on a permission
+ *   prompt or a dialog is Conversation's `prompt` Asks source, not Agenda's.)
  */
 export default implementDaemon(manifest, {
   build({ needs, uses, kernel }) {
