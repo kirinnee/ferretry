@@ -39,6 +39,10 @@ export interface ILoginsGateway {
   /** Look in the store of a sign-in that ended `recheck` again, launching nothing. */
   recheckSignIn(flowId: string): Promise<HarnessLoginSubmission>;
   cancelSignIn(flowId: string): Promise<HarnessLoginFlow>;
+  /** The NAMES of the secrets the Vault holds (`GET /v1/secrets`): never a value. */
+  secretNames(): Promise<ReadonlySet<string>>;
+  /** Store one secret in the Vault (`POST /v1/secrets`). The value goes in and is never read back or kept. */
+  putSecret(name: string, value: string): Promise<void>;
   /** What this caller may do to the machine: Gate's grants for the fleet's `configure` axis. */
   authority(): Promise<ChangeAuthority>;
   /** Hold one change and say what applying it would do. Nothing is written. */
@@ -69,6 +73,13 @@ export interface LoginsCommandDeps {
   readonly out: ILoginsOutput;
   /** Absent when nobody can be asked (no terminal): a sign-in that needs a pasted code is then refused. */
   readonly prompt?: ILoginsPrompt;
+  /** A secret typed without echo; `undefined` when there is no terminal. Its answer is only ever stored, never shown. */
+  readonly promptHidden?: (question: string) => Promise<string | undefined>;
+  /**
+   * The shell variables among `names` this plugin's manifest declares and the shell has set (`--from-env`). Absent
+   * when the command line cannot say: nothing is read then.
+   */
+  readonly readEnvironment?: (names: readonly string[]) => Readonly<Record<string, string | undefined>>;
   /** The shipped command name, so every hint names a command that exists. */
   readonly binaryName: string;
   readonly sleep: (milliseconds: number) => Promise<void>;

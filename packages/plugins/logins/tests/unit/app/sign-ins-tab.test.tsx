@@ -471,6 +471,8 @@ describe('the add-login panel', () => {
         [GRANTS]: OPEN,
         [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
         [APPLY]: { outcome: 'applied' },
+        'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+        'POST /v1/secrets': { name: 'ZAI_API_KEY' },
       },
       calls,
     );
@@ -497,14 +499,20 @@ describe('the add-login panel', () => {
     await interact(() =>
       must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
     );
+    await until(() => view.container.querySelector('[data-add-login-form="zai-glm"]') !== null, 'the prefilled form');
     const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the prefilled form');
     // The plain value the paste carried fills its field; the secret stays a reference to a NAME.
     const fields = Array.from(form.querySelectorAll('input'));
     expect(fields.map(field => field.value)).toEqual(['https://api.z.ai/api/paas/v4', `\${secret:ZAI_API_KEY}`, '']);
     expect(form.querySelector('[data-paste-secrets]')?.textContent).toContain(
-      'paste ZAI_API_KEY into the secret store',
+      'Your pasted ZAI_API_KEY is in the secret store',
     );
-    // The pasted key never reaches the tree, before or after the form opens.
+    // The pasted key went to the Vault under the preset's secret name, and reaches nothing else.
+    expect(calls.find(call => call.route === 'POST /v1/secrets')?.body).toEqual({
+      name: 'ZAI_API_KEY',
+      value: 'sk-zai-very-secret',
+    });
+    expect(JSON.stringify(calls.filter(call => call.route !== 'POST /v1/secrets'))).not.toContain('sk-zai-very-secret');
     expect(view.container.innerHTML).not.toContain('sk-zai-very-secret');
     await click(form.querySelector('[data-change-submit]'), 'Add');
     await until(() => added.length > 0, 'the login to be added');
@@ -619,6 +627,8 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+      'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);
     await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the preset');
@@ -638,7 +648,10 @@ describe('the add-login panel', () => {
       });
       await press('[data-paste-read]', 'Read');
       await press('[data-paste-continue]', 'Continue');
-      expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
+      await until(
+        () => view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]') !== null,
+        'the prefilled form',
+      );
     };
     // The next form opened by hand starts from the preset: no paste note, no pasted address.
     const expectFreshForm = async (): Promise<void> => {
@@ -719,6 +732,8 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai, openrouter] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+      'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);
     await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the presets');
@@ -734,7 +749,10 @@ describe('the add-login panel', () => {
     });
     await click(view.container.querySelector('[data-paste-read]'), 'Read');
     await click(view.container.querySelector('[data-paste-continue]'), 'Continue');
-    expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
+    await until(
+      () => view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]') !== null,
+      'the prefilled form',
+    );
     // Change of mind: leave the form, then open the OTHER provider by hand.
     await click(view.container.querySelector('[data-add-login-form] button:not([data-change-submit])'), 'Cancel');
     await click(view.container.querySelector('[data-provider-tile="openrouter"]'), 'Use this provider');

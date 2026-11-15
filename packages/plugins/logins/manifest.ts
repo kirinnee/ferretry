@@ -4,6 +4,7 @@ import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
+import { PRESET_ENV_NAMES } from './contract/preset-env-names.ts';
 import {
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
@@ -363,6 +364,8 @@ export default definePlugin({
       '127.0.0.1',
     ],
     spawn: ['claude', 'codex', 'ollama', 'lsof', 'ss', 'ps'],
+    // `fy login add --from-env` reads these shell variables and no others: the names the presets declare.
+    cliEnvReads: PRESET_ENV_NAMES,
     secrets: [],
   },
 });
