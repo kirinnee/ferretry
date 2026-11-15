@@ -6,6 +6,8 @@ import { ApiError } from '@ferretry/kernel/contract';
 import { applicableInstructions, sectionDigests } from './launch-sections.ts';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { KeyedSerialExecutor } from './serial.ts';
+import type { SerialExecutor } from '../ports.ts';
+import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../protocol/agent-address.ts';
 import {
   type FerretBirth,
@@ -167,6 +169,18 @@ export interface FerretsPorts {
   newName(taken: (name: string) => boolean): string;
   save(record: FerretRecord): Promise<void>;
   saveTokens(entries: readonly TokenEntry[]): Promise<void>;
+  /**
+   * The ONE per-ferret mutation queue the whole daemon shares (`SessionFiles.serial`): a start, a stop, a resume and a
+   * token cut-off run on it, so a lifecycle launching the same ferret is never interleaved with them. Unbound only in a
+   * unit fixture, which gets a queue of its own.
+   */
+  serial?: Pick<SerialExecutor, 'run'>;
+  /**
+   * The session document's half of the owner's cut-off (`credentialRevoked`), kept in step with the token directory's:
+   * a ferret is cut off when EITHER says so, and a cut-off or a restore is written to BOTH. Unbound only in a unit
+   * fixture, where the token directory alone is the fact.
+   */
+  cutOffMark?: SessionCutOffMark;
   harness(key: HarnessKey): Harness | undefined;
   harnessKeys(): readonly HarnessKey[];
   runner(): Runner | undefined;
@@ -703,7 +717,7 @@ export const RENAME_HTTP: Readonly<Record<RenameFailure, { readonly status: numb
 
 export class FerretsService implements FerretsApi {
   /** Today's lifecycle gate: read the current record only after acquiring its key. */
-  private readonly serial = new KeyedSerialExecutor();
+  private readonly serial: Pick<SerialExecutor, 'run'>;
   /**
    * The pin-marked summary made from one registry summary, so the same summary with the same pin answers the same
    * object (R501: the fleet read reuses its body while nothing moved). Held weakly by the input summary.
@@ -717,7 +731,18 @@ export class FerretsService implements FerretsApi {
     private readonly registry: FerretRegistry,
     private readonly tokens: FerretTokenDirectory,
     private readonly ports: FerretsPorts,
-  ) {}
+  ) {
+    this.serial = ports.serial ?? new KeyedSerialExecutor();
+  }
+
+  /**
+   * Whether the owner cut `ferret` off: the token directory says so, OR the session document's mark does (so a cut-off
+   * written by only one of the two, or by the lifecycle's own revoke, is never read as "not cut off"). A document that
+   * cannot be read throws, so the launch refuses rather than guessing.
+   */
+  private async isCutOff(ferret: FerretId): Promise<boolean> {
+    return this.tokens.isCutOff(ferret) || (await this.ports.cutOffMark?.isCutOff(ferret)) === true;
+  }
 
   async get(ferret: FerretId): Promise<FerretSummary | undefined> {
     const summary = this.registry.summary(ferret);
@@ -1216,7 +1241,7 @@ export class FerretsService implements FerretsApi {
       this.requireTokens();
       try {
         return await resumeUnderCutOff(
-          this.tokens.isCutOff(ferret) ? 'restore' : 'proceed',
+          (await this.isCutOff(ferret)) ? 'restore' : 'proceed',
           {
             confirm: confirmRestore,
             unconfirmed: () =>
@@ -1224,19 +1249,23 @@ export class FerretsService implements FerretsApi {
                 code: 'refused',
                 reason: 'only a confirmed owner resume may restore a cut-off ferret',
               }),
+            // The document's mark is cleared FIRST: one that fails leaves the directory's mark in place (still cut off).
             restore: async () => {
+              await this.ports.cutOffMark?.restore(ferret);
               this.tokens.restore(ferret);
               try {
                 await this.ports.saveTokens(this.tokens.snapshot());
               } catch (error) {
                 this.tokens.cutOff(ferret, this.ports.now());
                 await this.ports.saveTokens(this.tokens.snapshot());
+                await this.ports.cutOffMark?.cutOff(ferret);
                 throw error;
               }
             },
             markAgain: async () => {
               this.tokens.cutOff(ferret, this.ports.now());
               await this.ports.saveTokens(this.tokens.snapshot());
+              await this.ports.cutOffMark?.cutOff(ferret);
             },
           },
           async () => {
@@ -1484,6 +1513,10 @@ export class FerretsService implements FerretsApi {
       const revoked = this.tokens.holds(ferret);
       this.tokens.cutOff(ferret, this.ports.now());
       await this.ports.saveTokens(this.tokens.snapshot());
+      // The session document's mark follows, in the same queue: the lifecycle's rotation reads it, and no launch of
+      // either kind may hand the ferret a credential again. A failure here is the owner's to see; the directory's
+      // cut-off above already holds, and a launch reads both.
+      await this.ports.cutOffMark?.cutOff(ferret);
       return revoked;
     });
   }
@@ -1538,7 +1571,7 @@ export class FerretsService implements FerretsApi {
    */
   private async launchable(record: FerretRecord): Promise<Result<void, StartFailure>> {
     this.requireTokens();
-    if (this.tokens.isCutOff(record.id))
+    if (await this.isCutOff(record.id))
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
     const harness = this.ports.harness(record.harness);
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
@@ -2164,7 +2197,7 @@ export class FerretsService implements FerretsApi {
     said: LaunchSaid = {},
   ): Promise<Result<FerretId, StartFailure>> {
     this.requireTokens();
-    if (this.tokens.isCutOff(record.id))
+    if (await this.isCutOff(record.id))
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
     const harness = this.ports.harness(record.harness);
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);

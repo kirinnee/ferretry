@@ -251,7 +251,6 @@ daemon/src/adapters/session/resume/storage-consistency-pass.ts
 daemon/src/adapters/session/resume/storage-health-inventory.ts
 daemon/src/adapters/session/resume/storage-resume-repository.ts
 daemon/src/adapters/session/resume/system-monotonic-clock.ts
-daemon/src/adapters/session/resume/tmux-resume-launcher.ts
 daemon/src/adapters/session/resume/unmounted-repair.ts
 daemon/src/adapters/session/session-address-candidates.ts
 daemon/src/adapters/session/signal/file-signal-artifacts.ts
