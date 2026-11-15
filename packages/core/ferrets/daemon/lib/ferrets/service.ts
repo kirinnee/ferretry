@@ -1153,6 +1153,23 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * Whether this ferret's runtime can start NOW, without touching it: its runtime (or the login it names) resolves and may
+   * be spent, its harness and runner are on, and its login is usable (signed in, readable). A restart asks this BEFORE it
+   * replaces a live pane, so a login that needs sign-in leaves the ferret running and the restart waits for the owner to
+   * sign it in, instead of stopping a harness that could not start again. Only reads.
+   */
+  async startable(ferret: FerretId): Promise<Result<void, StartFailure>> {
+    const found = this.registry.get(ferret);
+    if (found === undefined) return failed('failed', `no ferret `);
+    const account = await this.resolveRuntime(found.runtime, { harness: found.harness }, found.login);
+    if (!account.ok) return account;
+    const record = account.value === undefined ? found : withLogin(found, account.value.login);
+    if (this.ports.harness(record.harness) === undefined) return failed('harness_unavailable', ` is off`);
+    if (this.ports.runner() === undefined) return failed('runner_unavailable', 'no runner plugin is on');
+    return await this.loginUsable(record);
+  }
+
+  /**
    * Revives a stopped ferret. A `message` is recorded with today's `session.resumed` event; delivering it into the
    * conversation is the Conversation's (not wired in this build).
    */
@@ -1489,7 +1506,24 @@ export class FerretsService implements FerretsApi {
     if (harness === undefined) return failed('harness_unavailable', `${record.harness} is off`);
     if (this.ports.runner() === undefined) return failed('runner_unavailable', 'no runner plugin is on');
     const home = await this.home(record, harness);
-    return home.ok ? ok(undefined) : home;
+    if (!home.ok) return home;
+    return await this.loginUsable(record);
+  }
+
+  /**
+   * The login reads a launch makes AFTER a live pane is gone, made first (they only read): a login that cannot be used
+   * refuses a relaunch while the old harness still runs, never once it is stopped. Nothing with no login.
+   */
+  private async loginUsable(record: FerretRecord): Promise<Result<void, StartFailure>> {
+    for (const read of [
+      async () => await this.loginEnvironment(record),
+      async () => await this.loginLaunchEnvironment(record),
+      async () => await this.loginCredential(record),
+    ]) {
+      const answer = await read();
+      if (!answer.ok) return failed('login_unavailable', answer.error);
+    }
+    return ok(undefined);
   }
 
   /**

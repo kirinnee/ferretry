@@ -40,8 +40,10 @@ export type RestartRequest = z.infer<typeof RestartRequestSchema>;
  *   mid-turn     the ferret is working, or its turn waits on someone — it is not at a your-turn or a declared wait
  *   in-flight    it is idle, but the move inventory found work a restart would lose (a tool, a process)
  *   own-session  the ferret that asked is the one to restart; it goes when its own turn ends
+ *   blocked      its runtime cannot start now (a login that needs sign-in, a runtime switched off): its harness is left
+ *                running as it was, and the restart is tried again until it can start
  */
-export const RestartQueueReasonSchema = z.enum(['mid-turn', 'in-flight', 'own-session']);
+export const RestartQueueReasonSchema = z.enum(['mid-turn', 'in-flight', 'own-session', 'blocked']);
 export type RestartQueueReason = z.infer<typeof RestartQueueReasonSchema>;
 
 /** Why a ferret was left alone by a restart that named it or matched it. */

@@ -215,6 +215,46 @@ describe('verify: compares each field with its own v5 destination', () => {
     expect(result.out).toMatch(/panes +OK .*1 restarted by v5/);
   });
 
+  test('run 7: a restart blocked on a login is a REVIEW naming the login and what to do, never a FAIL', async () => {
+    // The restart judged the runtime first and found its login needs sign-in: the v4 harness was never stopped, the
+    // restart is still queued, and v5 restarts it once the login is signed in.
+    await sb.state(
+      'ps.v5.json',
+      JSON.stringify([
+        { id: 'f1', name: 'ashlie', title: 'Review Migration Prompt Fixes', login: 'codex-main' },
+        { id: 'f2', name: 'bob', title: 'Child task', parent: 'f1' },
+      ]),
+    );
+    await history('session.created', 'session.restart_blocked');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(
+      /panes +REVIEW +0 baseline panes still present; not restarted yet: f1 \(still on v4 until codex-main is signed in\)\. Sign each in \(fy login signin codex-main\)/,
+    );
+    expect(result.out).toContain(
+      'Some running ferrets are still on v4 until a login is signed in: fy login signin codex-main',
+    );
+  });
+
+  test('run 7: a blocked restart with no login on record points to fy login ls; a blocked one whose pane is gone FAILs', async () => {
+    await history('session.restart_blocked');
+    const unnamed = await sb.run('verify');
+    expect(unnamed.code).toBe(0);
+    expect(unnamed.out).toMatch(/panes +REVIEW .*f1 \(still on v4 until its login is signed in\).*fy login ls/);
+    await panesNow('fy-other %9');
+    const gone = await sb.run('verify');
+    expect(gone.code).toBe(1);
+    expect(gone.out).toMatch(/panes +FAIL +1 baseline panes missing/);
+  });
+
+  test('run 7: a blocked restart that later went through is OK', async () => {
+    await panesNow('fy-f1 %8');
+    await history('session.restart_blocked', 'session.resumed', 'session.restarted');
+    const result = await sb.run('verify');
+    expect(result.code).toBe(0);
+    expect(result.out).toMatch(/panes +OK .*1 restarted by v5/);
+  });
+
   test('a different ask count is shown to the owner (REVIEW), not hidden', async () => {
     await sb.fake('fy', [
       { match: 'ps -a --json', run: 'cat "$D/ps.v5.json"' },
