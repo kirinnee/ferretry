@@ -55,7 +55,9 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               from={inboxSourceFromSearch(window.location.search)}
               onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
               onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
-              renderComposer={card => <AgendaCardConversation card={card} daemon={daemon} inbox={inbox} />}
+              renderComposer={(card, answerForm) => (
+                <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
+              )}
             />
           </AgendaInboxContext.Provider>
         </AgendaClientContext.Provider>

@@ -69,6 +69,7 @@ const mount = async (
   withStore = true,
   chips: readonly AgendaId[] = [],
   uploadAttachment?: ComposerAttachmentUploader,
+  onFormSend?: () => void,
 ) => {
   const store = await storeWith(send);
   const direct: unknown[] = [];
@@ -85,6 +86,7 @@ const mount = async (
       draftStore={new DaemonDraftStore(new Memory())}
       ferretId="s1"
       {...(uploadAttachment === undefined ? {} : { uploadAttachment })}
+      {...(onFormSend === undefined ? {} : { allowEmptySend: true, onFormSend })}
     />
   );
   const tree = render(withStore ? store.provide(composer) : composer);
@@ -103,6 +105,56 @@ const mount = async (
     });
   return { store, direct, tree, type, submit, attach };
 };
+
+describe('a form card’s Send, with an earlier message stuck in the device outbox', () => {
+  test('answers the form once from the press and never enters the chat outbox, so nothing replays as a message later', async () => {
+    let online = false;
+    const arrived: string[] = [];
+    let answered = 0;
+    const { store, type, submit, tree } = await mount(
+      async (_session: unknown, body: unknown) => {
+        if (!online) throw noCarrier();
+        arrived.push((body as { readonly message: string }).message);
+        return { disposition: 'queued' };
+      },
+      true,
+      [],
+      undefined,
+      () => (answered += 1),
+    );
+    // An earlier message of this ferret waits for the connection: the oldest entry, blocked.
+    await store.outbox.submit({ daemonId: daemon.daemonId, ferretId: 's1', message: 'earlier, still waiting' });
+    expect(store.outbox.snapshot().map(entry => entry.message)).toEqual(['earlier, still waiting']);
+
+    type('the form’s words');
+    await submit();
+    expect(answered).toBe(1);
+    expect(store.outbox.snapshot().map(entry => entry.message)).toEqual(['earlier, still waiting']);
+    void tree;
+
+    // The connection returns: only the earlier message goes; the form is never sent as chat.
+    online = true;
+    await runAsync(async () => await store.outbox.drainAll());
+    expect(arrived).toEqual(['earlier, still waiting']);
+    expect(answered).toBe(1);
+  });
+
+  test('says the one sentence the form gives when it cannot answer yet, and sends nothing', async () => {
+    const { store, type, submit, tree } = await mount(
+      async () => ({ disposition: 'queued' }),
+      true,
+      [],
+      undefined,
+      () => {
+        throw new Error('Pick an answer or type something before you send the form.');
+      },
+    );
+    type('');
+    await submit();
+    expect(JSON.stringify(tree.toJSON())).toContain('Pick an answer or type something before you send the form.');
+    expect(store.outbox.snapshot()).toEqual([]);
+  });
+});
 
 describe('the composer with a device outbox', () => {
   test('saves the message on this device, then the machine hears it under the same id', async () => {
