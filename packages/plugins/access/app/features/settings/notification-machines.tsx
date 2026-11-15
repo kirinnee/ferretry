@@ -5,8 +5,9 @@
  * status, and a machine that wants its unlock says so with an Unlock instead of a switch. Render-only;
  * `use-machines-notifications.ts` owns the reads and the enrolment, and `machine-notifications.ts` the row model.
  *
- * Each row also carries v4's Mute (`machine-mute.tsx`): the reader's local notification filter is Agenda's store, so
- * Agenda provides it through the `access.machine-mute` hook.
+ * NO MUTE HERE: v4's per-row Mute is the reader's local notification filter, Agenda's store, and a `device.settings`
+ * panel is drawn with no shell to read another plugin's app hook from. Agenda draws it as its own Settings › This
+ * device panel, one Mute per machine, next to this one (`agenda/app/views/notification-mute-panel.tsx`).
  */
 import { BellOff } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -17,7 +18,6 @@ import {
   offEverywhereSentence,
   turnOnAllTargets,
 } from '../../lib/machine-notifications.ts';
-import { MachineMute } from './machine-mute.tsx';
 
 export interface MachineNotificationListProps {
   readonly rows: readonly MachineNotificationRow[];
@@ -88,7 +88,6 @@ function MachineRow({
             </Button>
           </>
         )}
-        <MachineMute daemon={row.daemonId} />
         {unlock === undefined ? (
           <button
             type="button"

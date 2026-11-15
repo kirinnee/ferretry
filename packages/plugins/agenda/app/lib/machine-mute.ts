@@ -1,6 +1,6 @@
 /**
- * ONE MACHINE'S MUTE, as this browser keeps it: the `access.machine-mute` hook Agenda provides to Access's
- * Settings › This device › Notifications row. The state is the device-wide notification filter's `machines` map
+ * ONE MACHINE'S MUTE, as this browser keeps it: what Agenda's Settings › This device › Notifications mute panel
+ * (`views/notification-mute-panel.tsx`) flips for a machine's row. The state is the device-wide notification filter's `machines` map
  * (`lib/notification-filter.ts`): a machine marked `false` is silenced, anything else shows. Setting it writes the
  * same document the worker reads, so a mute in Settings is the one the closed app honours.
  */
@@ -8,7 +8,7 @@
 import { deviceFilterStore } from './device-filter-store.ts';
 import type { DeviceNotificationFilterStore } from './notification-filter.ts';
 
-/** The shape Access narrows (`AccessMachineMute` in Access's contract; named only by the hook's agreement). */
+/** One machine's mute: a live boolean this browser keeps. */
 export interface MachineMute {
   readonly subscribe: (listener: () => void) => () => void;
   readonly muted: () => boolean;

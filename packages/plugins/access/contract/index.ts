@@ -1,6 +1,5 @@
 /** `@ferretry/plugin-access/contract` (§2.1): wire schemas, port + token, events, policy refs, words. */
 export * from './address.ts';
-export * from './app-hooks.ts';
 export * from './grants.ts';
 export * from './pairing.ts';
 export * from './pairing-redirect.ts';

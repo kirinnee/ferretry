@@ -4,7 +4,6 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
-import { machineMute } from './lib/machine-mute.ts';
 import { createNeedsYou } from './lib/needs-you-hook.ts';
 
 type Surfaces = {
@@ -18,6 +17,16 @@ type Surfaces = {
  * the registry generator, which only inspects this module, never loads React.
  */
 const loadSurfaces = (): Promise<Record<string, unknown>> => import(`./views/${'surfaces'}.tsx`);
+
+/** A `device.settings` panel (no daemon, no client), loaded on first use with the rest of the surfaces. */
+const deviceSetting = (id: 'notification-mute') =>
+  lazyComponent<Record<string, never>>(async () => {
+    const panels = (await loadSurfaces()).deviceSettingsPanels as Record<string, AppComponent<Record<string, never>>>;
+    return panels[id] as AppComponent<Record<string, never>>;
+  }) as NonNullable<ShellProvides['deviceSettings']>[string];
+
+/** The typed `panels` name every manifest panel; a `device.settings` one is drawn from `shell.deviceSettings`, not per machine. */
+const notDrawnPerDaemon: AppComponent<PanelProps> = () => null;
 
 /** What every machine's surfaces and the device view share their one fleet through (`lib/agenda-fleet.ts`). */
 const fleet = {};
@@ -42,6 +51,7 @@ const half = implementApp(manifest, {
     return {
       screens: { agenda: screen('agenda'), 'agenda-ask': screen('agenda-ask') },
       panels: {
+        'notification-mute': notDrawnPerDaemon,
         'ferret-agenda': lazyComponent<PanelProps>(
           async () => (await surfacesOf()).panels['ferret-agenda'] as AppComponent<PanelProps>,
         ),
@@ -94,7 +104,7 @@ export default provideToShell(half, {
   // Ferrets' list gathers the ferrets that wait on the owner (`ferrets.needs-you`); which they are is this half's fact.
   hooks: {
     'ferrets.needs-you': ({ client }) => createNeedsYou(client),
-    // Access's per-machine Mute row (`access.machine-mute`): which machines this browser silences is this half's filter.
-    'access.machine-mute': ({ daemon }) => machineMute(daemon),
   },
+  // Settings › This device (S4): one Mute per machine, next to Access's Notifications panel. No machine, no client.
+  deviceSettings: { 'notification-mute': deviceSetting('notification-mute') },
 });
