@@ -492,6 +492,7 @@ describe('POST /v1/warden/run answers a ferret through the projection', () => {
     report: unreached,
     config: unreached,
     updateConfig: unreached,
+    nameJevKey: unreached,
     agenda: unreached,
     investigate: unreached,
     leave: unreached,

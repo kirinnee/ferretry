@@ -16,6 +16,7 @@ const built = halfB({
   pasteRuleStages: {} as never,
   secureCopyHook: {} as never,
   secureCopyTools: {} as never,
+  proposalTools: {} as never,
   sessionEnded: () => undefined,
 });
 

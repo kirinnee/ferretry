@@ -141,6 +141,13 @@ automatic-install setting (`PATCH /v1/daemon/update/settings`, subject `daemon-u
 `autoInstall` in `detail`), and updating an agent CLI (`POST /v1/harnesses/update`, subject `harness-update`),
 are also `security.changed`: each lets new code run on the machine ([updating.md](updating.md)).
 
+**A plugin's own key on a request** (`kernel.secrets.send`, [secrets.md](secrets.md#a-plugins-own-key-placed-by-the-kernel))
+writes `secrets.used` itself, once for every send that put the key on a request. The subject is the secret's name
+(`JEV_API_KEY`). The detail holds the plugin, the host and the outcome's kind (`completion`, `status`, `timeout`,
+`network`, …) and nothing else: never the key, the request or the reply. The actor is this computer, with the daemon
+as the cause, because the machine spent it on the plugin's behalf. A send the kernel refused before it opened the
+Vault (not declared, not named, a host it may not reach) put nothing on a request and writes nothing.
+
 **Standing sign-in rules** ([secrets.md](secrets.md#standing-sign-in-rules)) write `security.changed` themselves.
 The subject is the rule id (`sr_…`). The detail holds the revision, the sign-in, the account handle, the fields, the
 scope's kind, the end and any use cap. It never holds a username or a value. These are the actions:

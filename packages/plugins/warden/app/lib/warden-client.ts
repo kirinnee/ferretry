@@ -32,6 +32,8 @@ export interface WardenClient {
   config(): Promise<WardenConfigView>;
   /** The effective settings, and the sentences of any edit held for the owner (`held`). */
   updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
+  /** Names the Jev key in `warden.yaml` (the owner's act; held for the owner otherwise, as `held`). Never a value. */
+  nameJevKey(): Promise<WardenConfigView>;
 }
 
 /** The Warden client of one daemon, over that daemon's plugin client. */
@@ -46,4 +48,5 @@ export const wardenClientOf = (client: PluginClient): WardenClient => ({
   config: () => client.call<WardenConfigView>('GET /v1/warden/config'),
   updateConfig: async patch =>
     WardenConfigViewSchema.parse(await client.call<unknown>('PATCH /v1/warden/config', { body: patch })),
+  nameJevKey: async () => WardenConfigViewSchema.parse(await client.call<unknown>('POST /v1/warden/jev-key')),
 });

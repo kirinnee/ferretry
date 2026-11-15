@@ -33,3 +33,19 @@ export function codexFixedArguments(permissionMode: HarnessConfig['permissionMod
     `notice={${CODEX_HIDDEN_NOTICES.map(key => `${/^[A-Za-z0-9_-]+$/.test(key) ? key : tomlString(key)}=true`).join(',')}}`,
   ];
 }
+
+/**
+ * Codex gates `request_user_input` outside Plan mode behind this feature (copied from the Runtimes wrapper's
+ * `CODEX_QUESTIONS_FEATURE`): only an interactive ferret, who has an owner at the pane, is given it.
+ */
+export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
+
+/**
+ * The question tool, per ferret (O3, v4 parity with the Runtimes wrapper): an interactive ferret gets
+ * `--enable default_mode_request_user_input`, an auto one (or one with no mode) gets nothing. Deliberately NOT part of
+ * {@link codexFixedArguments}, whose fingerprint is the launch record's `fixed-layer` section: a ferret's mode is fixed
+ * for its life, so it can never make a recorded launch read as outdated.
+ */
+export function codexQuestionArguments(mode: 'interactive' | 'auto' | undefined): readonly string[] {
+  return mode === 'interactive' ? ['--enable', CODEX_QUESTIONS_FEATURE] : [];
+}

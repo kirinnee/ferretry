@@ -1237,7 +1237,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 
-After merge (M2; the tool is not declared on 5.0 yet), a ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
 else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
 
 ### The owner's command: `fy rules`
@@ -1527,7 +1527,8 @@ the first caller. It is the holder above with the same rules, held by the kernel
 - **Facts only come back.** The answer is a 2xx reply's parsed JSON, a status, `timeout`, `network`, `too_large`,
   `unreadable`, `vault_damaged` or a refusal. A reply that echoes the value is `unreadable`. A thrown error becomes a
   kind, so its message never leaves. The Vault is asked last, after every other check.
-- **Logged by name and host only.**
+- **Logged by name and host only.** The plugin's own log says so, and so does the security log: a `secrets.used`
+  entry names the secret, the plugin, the host and the outcome's kind, never a value ([audit.md](audit.md)).
 
 The Warden names its key in `warden.yaml`, as the owner writes it:
 
@@ -1537,11 +1538,14 @@ jev:
 ```
 
 `jev.key` takes only that one reference. An agent's write that adds it is held for the owner, like any new secret
-reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: the settings
-screen neither shows it nor saves it, and a save keeps the line as it is.
+reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: a settings
+save never writes it and keeps the line as it is.
 
-GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
-key is set from Speed-ups, not whether `warden.yaml` names it.
+The settings card says which of these a key is in. **Key set** means it is stored and `warden.yaml` names it. **Key not
+named** means it is stored but `warden.yaml` has no `jev.key` line, so nothing is sent; the card offers **Use stored
+key**, which writes that one reference (`POST /v1/warden/jev-key`, no body, no value) as the caller's own act: in effect
+when the caller is the owner, otherwise held for the owner and shown as "Waiting for your approval". The settings read
+says only `jevKey: named | not_named`.
 
 ## A secret a plugin minted, placed on its request by the Vault
 
