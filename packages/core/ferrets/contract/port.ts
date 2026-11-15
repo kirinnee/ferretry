@@ -590,10 +590,22 @@ export interface FerretPaneLimit {
  * and runner plugins. "A ferret touches only its own; a lead also its helpers'" is `mayTouch`, decided here and
  * nowhere else.
  */
+/** What an id-or-callsign reference addresses (see {@link FerretsApi.resolve}). */
+export type FerretAddress =
+  | { readonly kind: 'ferret'; readonly id: FerretId }
+  /** Two ferrets hold the name on one footing: refused with this sentence, never guessed between. */
+  | { readonly kind: 'ambiguous'; readonly message: string }
+  | { readonly kind: 'unknown' };
+
 export interface FerretsApi {
   /** The effective `limits.yaml` settings, read fresh on every call; Ferrets serves it (a consumer may still bind it optionally). */
   effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
+  /**
+   * The ferret an id or a callsign (`:name`, case-insensitive) addresses: the ONE rule every surface that takes a ferret in a
+   * path applies. An exact id wins; a live holder of a name wins over a dormant one; two on one footing are `ambiguous`.
+   */
+  resolve(reference: string): Promise<FerretAddress>;
   list(filter?: {
     readonly state?: FerretState;
     readonly parent?: FerretId;

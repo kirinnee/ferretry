@@ -43,7 +43,7 @@ export interface LinkOpener {
 }
 
 /** The real browser's `LinkOpener`. Every read is guarded: a missing API is "not standalone". */
-const browserLinkOpener = (win: Window = window): LinkOpener => ({
+export const browserLinkOpener = (win: Window = window): LinkOpener => ({
   iosStandalone: () => {
     try {
       const navigator = win.navigator as Navigator & { readonly standalone?: boolean };

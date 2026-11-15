@@ -105,6 +105,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
   return {
     effectiveLimits: () => service.effectiveLimits(),
     get: ferret => service.get(ferret),
+    resolve: reference => service.resolve(reference),
     list: filter => service.list(filter),
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),

@@ -187,3 +187,104 @@ describe('installing a catalog MCP server into a runtime', () => {
     expect(w.calls).toEqual(['remove-everywhere mcp/acme', 'remove acme']);
   });
 });
+
+// ── the file as the root reports it, when the root misbehaves ─────────────────────────────────────────────────────────
+
+describe('the .mcp.json of a project, when the root cannot give a straight answer', () => {
+  /** A root handle that answers as told: the real root is proved above, this is for what a disk does when it fails. */
+  function stub(over: Partial<Record<'resolve' | 'lstat' | 'readBytes' | 'writeBytes', unknown>> = {}) {
+    const handle = {
+      resolve: () => ({ ok: true as const, value: '/project/.mcp.json' }),
+      lstat: async () => ({ kind: 'file' as const, size: 3 }),
+      readBytes: async () => new TextEncoder().encode('abc'),
+      writeBytes: async () => undefined,
+      ...over,
+    };
+    return new CatalogMcpProjectFile(
+      async () => ['/project'],
+      () => handle as never,
+    );
+  }
+  const FILE = '/project/.mcp.json';
+  const refusal = async (promise: Promise<unknown>) => {
+    const error = await promise.then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(CatalogItemRefusal);
+    return (error as CatalogItemRefusal).message;
+  };
+
+  test('refuses a file larger than 1 MiB without reading it', async () => {
+    const w = await world();
+    await writeFile(w.file, Buffer.alloc(1024 * 1024 + 1, 'a'));
+    expect(await refusal(w.files.read(w.file))).toBe(
+      `${w.file} is larger than 1 MiB, so Ferretry will not read or replace it.`,
+    );
+    await writeFile(w.file, Buffer.alloc(1024 * 1024, 'a'));
+    expect((await w.files.read(w.file)).text).toHaveLength(1024 * 1024);
+  });
+
+  test('says the name cannot be reached when the root will not resolve it', async () => {
+    const files = stub({ resolve: () => ({ ok: false as const, reason: 'outside' }) });
+    expect(await refusal(files.read(FILE))).toBe(`${FILE} cannot be reached, so it will not be read or replaced.`);
+  });
+
+  test('refuses a file the root cannot look at, or cannot read', async () => {
+    const unlooked = stub({
+      lstat: async () => {
+        throw new Error('not_a_file');
+      },
+    });
+    const message = `${FILE} is a link, or not a regular file, so Ferretry will not read or replace it.`;
+    expect(await refusal(unlooked.read(FILE))).toBe(message);
+    const unread = stub({
+      readBytes: async () => {
+        throw new Error('changed');
+      },
+    });
+    expect(await refusal(unread.read(FILE))).toBe(message);
+  });
+
+  test('says why a write failed, in the disk’s own words, and “refused” when it gave none', async () => {
+    const gone = { lstat: async () => undefined };
+    const worded = stub({
+      ...gone,
+      writeBytes: async () => {
+        throw new Error('EACCES: permission denied');
+      },
+    });
+    expect(await refusal(worded.replace(FILE, '{}', null))).toBe(
+      `${FILE} could not be written (EACCES: permission denied).`,
+    );
+    const wordless = stub({
+      ...gone,
+      writeBytes: async () => {
+        throw 'no';
+      },
+    });
+    expect(await refusal(wordless.replace(FILE, '{}', null))).toBe(`${FILE} could not be written (refused).`);
+  });
+
+  test('reads a failed first write as someone else having created the file first', async () => {
+    let created = false;
+    const raced = stub({
+      lstat: async () => (created ? { kind: 'file' as const, size: 1 } : undefined),
+      writeBytes: async () => {
+        created = true;
+        throw new Error('exists');
+      },
+    });
+    await expect(raced.replace(FILE, '{}', null)).rejects.toBeInstanceOf(McpProjectFileChanged);
+  });
+
+  test('keeps a failed replace of an existing file a refusal, never a change', async () => {
+    const files = stub({
+      writeBytes: async () => {
+        throw new Error('disk full');
+      },
+    });
+    const { etag } = await files.read(FILE);
+    expect(await refusal(files.replace(FILE, '{}', etag))).toBe(`${FILE} could not be written (disk full).`);
+  });
+});
