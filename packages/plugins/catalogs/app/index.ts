@@ -23,6 +23,11 @@ const addSkillsPanel = (client: PluginClient): AppComponent<PanelProps> =>
     ((await loadAddSkills()).createAddSkillsPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
   );
 
+const addSkillsRowPanel = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadAddSkills()).createAddSkillsRowPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
+  );
+
 const sharingScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
     ((await loadViews()).createSharingScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
@@ -64,7 +69,7 @@ export default provideToShell(
         join: daemonlessPlaceholder,
         shared: daemonlessPlaceholder,
       },
-      panels: { 'add-skills': addSkillsPanel(client) },
+      panels: { 'add-skills': addSkillsPanel(client), 'add-skills-row': addSkillsRowPanel(client) },
       settings: {},
       renderers: {},
     }),
