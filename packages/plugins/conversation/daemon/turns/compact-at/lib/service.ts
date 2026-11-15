@@ -37,9 +37,9 @@ export interface CompactAtFacts {
 
 export interface SessionCompactAtPorts {
   /** `undefined` when there is no such session. */
-  facts(sessionId: string): Promise<CompactAtFacts | undefined>;
+  facts(sessionId: string, caller?: string): Promise<CompactAtFacts | undefined>;
   /** Records the value on the session document (`undefined` drops it, so the login's default applies again). */
-  write(sessionId: string, value: CompactAt | undefined, at: string): Promise<void>;
+  write(sessionId: string, value: CompactAt | undefined, at: string, caller?: string): Promise<void>;
   now(): string;
 }
 
@@ -81,8 +81,8 @@ const restartClause = (facts: CompactAtFacts): string =>
 export class SessionCompactAtService {
   constructor(private readonly ports: SessionCompactAtPorts) {}
 
-  async get(sessionId: string): Promise<CompactAtReading> {
-    const facts = await this.require(sessionId);
+  async get(sessionId: string, caller?: string): Promise<CompactAtReading> {
+    const facts = await this.require(sessionId, caller);
     const { effective, ignored } = resolveCompactAt(facts, facts.window);
     const source =
       facts.own === undefined && facts.accountDefault !== undefined && ignored === undefined
@@ -103,13 +103,13 @@ export class SessionCompactAtService {
   }
 
   /** `inherit` drops the ferret's own value, so its login's default applies again. */
-  async set(sessionId: string, wanted: CompactAt | 'inherit'): Promise<CompactAtOutcome> {
-    const facts = await this.require(sessionId);
+  async set(sessionId: string, wanted: CompactAt | 'inherit', caller?: string): Promise<CompactAtOutcome> {
+    const facts = await this.require(sessionId, caller);
     const value = wanted === 'inherit' ? undefined : wanted;
     const refusal = this.refusal(facts, value);
     if (refusal !== undefined) throw new SessionCompactAtError('invalid', refusal);
     const before = resolveCompactAt(facts, facts.window).effective;
-    await this.ports.write(sessionId, value, this.ports.now());
+    await this.ports.write(sessionId, value, this.ports.now(), caller);
     // A request that passed `refusal` resolves to a value the model honours, so nothing is dropped here.
     const { effective } = resolveCompactAt({ own: value, accountDefault: facts.accountDefault }, facts.window);
     const restartRequired = pending(facts, effective, before);
@@ -142,8 +142,8 @@ export class SessionCompactAtService {
       : `This login’s default can’t be used by this ferret: ${problem} Set a size or Auto on the ferret instead.`;
   }
 
-  private async require(sessionId: string): Promise<CompactAtFacts> {
-    const facts = await this.ports.facts(sessionId);
+  private async require(sessionId: string, caller?: string): Promise<CompactAtFacts> {
+    const facts = await this.ports.facts(sessionId, caller);
     if (facts === undefined) throw new SessionCompactAtError('not-found', `no session ${sessionId}`);
     return facts;
   }

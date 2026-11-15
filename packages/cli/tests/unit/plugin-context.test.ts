@@ -27,17 +27,32 @@ const probeManifest = definePlugin({
   kinds: ['command'],
   actions: { routes: [route('GET /v1/probe', { ...SCOPE, caller: 'any' })], cli: [verb('probe')] },
   data: { state: [OWN] },
+  permissions: { cliEnvReads: ['PROBE_DECLARED_KEY'] },
 });
 
-function recordingProbe(): { half: ReturnType<typeof entry>; context: () => CliContext<Manifest> } {
+/** A plugin that declares no shell variable at all, asking for the probe's declared name. */
+const bystanderManifest = definePlugin({
+  id: 'bystander',
+  title: 'Bystander',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['command'],
+  actions: { routes: [route('GET /v1/bystander', { ...SCOPE, caller: 'any' })], cli: [verb('bystander')] },
+});
+
+function recordingProbe(manifest: Manifest = probeManifest): {
+  half: ReturnType<typeof entry>;
+  context: () => CliContext<Manifest>;
+} {
   let seen: CliContext<Manifest> | undefined;
   const half = entry(
-    probeManifest,
-    'h-probe',
-    implementCli(probeManifest, {
+    manifest,
+    `h-${manifest.id}`,
+    implementCli(manifest as typeof probeManifest, {
       build: ctx => {
         seen = ctx as CliContext<Manifest>;
-        return { verbs: { probe: async () => 0 } };
+        return { verbs: { [manifest.id]: async () => 0 } } as never;
       },
     }),
   );
@@ -263,6 +278,68 @@ describe('the context every plugin cli half is handed', () => {
     should({ ...env }).deepEqual({ FY_SESSION_ID: 'ferret-1', FY_HYPERMEDIA: '1', PWD: '/work' });
     should(env?.FY_TOKEN).be.undefined();
     should(env?.FY_SESSION_TOKEN).be.undefined();
+  });
+
+  it('should read a shell variable for a half only when ITS manifest declares the name, never for another plugin', async () => {
+    const environment = { PROBE_DECLARED_KEY: 'SENTINEL-declared', UNDECLARED_KEY: 'SENTINEL-undeclared' };
+    const probe = recordingProbe();
+    const bystander = recordingProbe(bystanderManifest);
+    const { world } = fakeWorld({
+      registry: registryOf(probe.half, bystander.half),
+      inventory: inventoryOf({ id: 'probe', contract: 'h-probe' }, { id: 'bystander', contract: 'h-bystander' }),
+      environment,
+    });
+    await runFy(['probe'], world);
+    await runFy(['bystander'], world);
+
+    const asked = ['PROBE_DECLARED_KEY', 'UNDECLARED_KEY', 'NOT_SET', '*'];
+    should({ ...probe.context().readEnvironment?.(asked) }).eql({ PROBE_DECLARED_KEY: 'SENTINEL-declared' });
+    should({ ...bystander.context().readEnvironment?.(asked) }).eql({});
+    should({ ...probe.context().env }).not.have.property('PROBE_DECLARED_KEY');
+  });
+
+  it('should refuse Ferretry’s own variables and any non-POSIX name whatever the manifest declares', async () => {
+    const greedyManifest = definePlugin({
+      id: 'greedy',
+      title: 'Greedy',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      actions: { routes: [route('GET /v1/greedy', { ...SCOPE, caller: 'any' })], cli: [verb('greedy')] },
+      permissions: {
+        cliEnvReads: [
+          'FY_SESSION_TOKEN',
+          'FY_TOKEN',
+          'FY_SESSION_BOARD_CAPABILITY',
+          'FY_HOME',
+          'bad-name',
+          '1BAD',
+          'OK_NAME',
+        ],
+      },
+    });
+    const environment = {
+      FY_SESSION_TOKEN: 'SENTINEL-session',
+      FY_TOKEN: 'SENTINEL-admin',
+      FY_SESSION_BOARD_CAPABILITY: 'SENTINEL-board',
+      FY_HOME: 'SENTINEL-home',
+      'bad-name': 'SENTINEL-bad',
+      '1BAD': 'SENTINEL-digit',
+      OK_NAME: 'fine',
+    };
+    const greedy = recordingProbe(greedyManifest);
+    const { world } = fakeWorld({
+      registry: registryOf(greedy.half),
+      inventory: inventoryOf({ id: 'greedy', contract: 'h-greedy' }),
+      environment,
+    });
+    await runFy(['greedy'], world);
+
+    const read = greedy.context().readEnvironment?.(Object.keys(environment));
+
+    should({ ...read }).eql({ OK_NAME: 'fine' });
+    should(JSON.stringify(read)).not.containEql('SENTINEL');
   });
 
   it('should let a half write only its own declared state and refuse another plugin’s', async () => {

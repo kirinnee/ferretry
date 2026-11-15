@@ -56,6 +56,7 @@ import {
   FerretLaunchEnvironmentFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
+  MonitorTickFile,
   DAEMON_ORIGIN,
 } from '../contract/index.ts';
 import { SubtreeService } from './lib/session/pack/subtree.ts';
@@ -112,6 +113,9 @@ import {
   FerretSignalRepository,
   FerretSignalTerminal,
 } from './adapters/session/signal/ferret-signal.ts';
+import { FerretMonitorSend, MonitorFiles, StorageMonitorWaits } from './adapters/session/monitor/index.ts';
+import { defaultSessionMonitorSettings } from './lib/session/monitor/index.ts';
+import { buildMonitor, MONITOR_RECORD_NAME, MONITOR_TICK_JOB } from './modules/monitor.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { SessionFiles } from './modules/session-files.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
@@ -1042,18 +1046,45 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // `signal done` is the ferret ending on its own word: its cause is `completed`, not a stop.
     stop: async (ferret, reason) => await service.stop(ferret, 'now', reason, { kind: 'completed' }),
   };
+  const signalRepository = new FerretSignalRepository(signalHost);
+  const signalService = new SessionSignalService({
+    repository: signalRepository,
+    artifacts: new FerretSignalArtifacts(signalHost),
+    terminal: new FerretSignalTerminal(signalHost),
+    serial: new KeyedSerialExecutor(),
+    clock: { now: () => kernel.clock.now() },
+  });
   const signalRoutes = sessionSignalRoutes(
-    new FerretSignals(
-      new SessionSignalService({
-        repository: new FerretSignalRepository(signalHost),
-        artifacts: new FerretSignalArtifacts(signalHost),
-        terminal: new FerretSignalTerminal(signalHost),
-        serial: new KeyedSerialExecutor(),
-        clock: { now: () => kernel.clock.now() },
-      }),
-      { resolve: resolveFerret, view: async ferret => await service.get(ferret) },
-    ),
+    new FerretSignals(signalService, { resolve: resolveFerret, view: async ferret => await service.get(ferret) }),
   );
+  // The declared-wait monitor: a wait that ends wakes its ferret. The loop's own record sits in Ferrets' state, a
+  // ferret's heartbeat in its own session folder; the tick is one job at the loop's own cadence.
+  const monitor = buildMonitor({
+    waits: new StorageMonitorWaits(sessionStore, signalRepository, signalService, defaultSessionMonitorSettings),
+    files: new MonitorFiles(ferret => sessionFiles.root(ferret), {
+      name: MONITOR_RECORD_NAME,
+      write: async text => await kernel.state.write(MonitorTickFile, JSON.parse(text)),
+    }),
+    sends: new FerretMonitorSend(async ferret => await service.harness(ferret)),
+    clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
+  });
+  let monitorArmed = false;
+  kernel.jobs.add({
+    id: MONITOR_TICK_JOB,
+    schedule: { every: milliseconds(monitor.intervalMs) },
+    run: async signal => {
+      await ready();
+      await storeLoaded.catch(() => undefined);
+      // A stop that landed while this waited arms nothing: `close()` has already said the loop is not running.
+      if (signal.aborted) return;
+      if (!monitorArmed) {
+        monitorArmed = true;
+        monitor.arm();
+        kernel.lifecycle.onStop(async () => await monitor.close());
+      }
+      await monitor.run(signal);
+    },
+  });
   // A ferret signals for itself and its helpers; a person for any ferret (the same rule as stop, resume and rename).
   const signals = {
     'POST /v1/ferrets/:ferretId/signal': async (call: CallContext): Promise<ApiResponse> => {

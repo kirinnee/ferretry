@@ -303,6 +303,12 @@ export interface Permissions {
    */
   readonly whichOverrides?: readonly string[];
   /**
+   * The shell variables this plugin's `fy` half may read through `CliContext.readEnvironment` (Logins: the variable
+   * names its provider presets declare, for `fy login add --from-env`), by exact name; `'*'` or a pattern matches no
+   * variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
+   */
+  readonly cliEnvReads?: readonly string[];
+  /**
    * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
    * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
    * is refused by name.

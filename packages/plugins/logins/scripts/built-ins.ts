@@ -17,6 +17,7 @@ import { builtInModelCatalogs } from '../daemon/lib/catalog/catalog.ts';
 import { builtInPresets } from '../daemon/lib/presets/catalog.ts';
 
 const BUILT_INS_FILE = resolve(import.meta.dir, '..', 'daemon', 'lib', 'built-ins.json');
+const ENV_NAMES_FILE = resolve(import.meta.dir, '..', 'contract', 'preset-env-names.json');
 
 /** What the shipped YAML parses to NOW: the value the file must hold. Parses every file. */
 export function parsedBuiltIns(): BuiltIns {
@@ -28,15 +29,30 @@ export function builtInsText(values: BuiltIns): string {
   return `${JSON.stringify(values, null, 2)}\n`;
 }
 
-/** Whether the file on disk holds exactly what the shipped YAML parses to now (values, not formatting). */
-export function builtInsFresh(file: string = BUILT_INS_FILE): boolean {
-  let written: unknown;
+/**
+ * The variable names the presets declare, sorted, each once: the one list `permissions.cliEnvReads` is built from
+ * (`contract/preset-env-names.ts`), so `fy login add --from-env` may read exactly these shell variables.
+ */
+export function presetEnvNames(presets: BuiltIns['presets']): readonly string[] {
+  const names = presets
+    .flatMap(preset => [preset, ...Object.values(preset.halves)])
+    .flatMap(from => Object.keys(from?.env ?? {}));
+  return [...new Set(names)].sort();
+}
+
+/** Whether `file` holds `expected` (values, not formatting); an unreadable or unparseable file does not. */
+function holds(file: string, expected: unknown): boolean {
   try {
-    written = JSON.parse(readFileSync(file, 'utf8'));
+    return Bun.deepEquals(JSON.parse(readFileSync(file, 'utf8')), JSON.parse(JSON.stringify(expected)), true);
   } catch {
     return false;
   }
-  return Bun.deepEquals(written, JSON.parse(builtInsText(parsedBuiltIns())), true);
+}
+
+/** Whether both files on disk hold exactly what the shipped YAML parses to now (values, not formatting). */
+export function builtInsFresh(file: string = BUILT_INS_FILE, namesFile: string = ENV_NAMES_FILE): boolean {
+  const parsed = parsedBuiltIns();
+  return holds(file, parsed) && holds(namesFile, presetEnvNames(parsed.presets));
 }
 
 if (import.meta.main) {
@@ -53,8 +69,10 @@ if (import.meta.main) {
     );
     process.exit(1);
   }
-  writeFileSync(BUILT_INS_FILE, builtInsText(parsedBuiltIns()));
-  const biome = spawnSync('biome', ['format', '--write', BUILT_INS_FILE], {
+  const parsed = parsedBuiltIns();
+  writeFileSync(BUILT_INS_FILE, builtInsText(parsed));
+  writeFileSync(ENV_NAMES_FILE, `${JSON.stringify(presetEnvNames(parsed.presets), null, 2)}\n`);
+  const biome = spawnSync('biome', ['format', '--write', BUILT_INS_FILE, ENV_NAMES_FILE], {
     cwd: join(import.meta.dir, '..', '..', '..', '..'),
     stdio: 'inherit',
   });

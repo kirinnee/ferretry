@@ -60,8 +60,8 @@ function PresetForm({
     ),
   );
   const [cloud, setCloud] = useState(preset.cloudCredential?.suggested ?? '');
-  // The secrets a paste carried, by NAME only: this form takes a `${secret:NAME}` reference, so each
-  // key is pasted into the secret store itself — its value never reaches this screen.
+  // The secrets a paste carried, by NAME only: Continue already filed each key in the Vault, and this form
+  // takes a `${secret:NAME}` reference — a key's value never reaches this screen.
   const pastedSecrets = prefill?.secrets ?? [];
   const withheld = withheldSentence(prefill?.withheld ?? []);
 
@@ -96,8 +96,8 @@ function PresetForm({
     <div className="flex flex-col gap-2" data-add-login-form={preset.id}>
       {pastedSecrets.length === 0 ? null : (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-paste-secrets="">
-          A pasted key is never typed here: paste {pastedSecrets.join(', ')} into the secret store, then write the NAME
-          it is stored under as {'${secret:NAME}'} below.
+          Your pasted {pastedSecrets.join(', ')} {pastedSecrets.length === 1 ? 'is' : 'are'} in the secret store, and
+          the fields below name {pastedSecrets.length === 1 ? 'it' : 'them'} as {'${secret:NAME}'}.
         </p>
       )}
       {withheld === null ? null : (
@@ -267,6 +267,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
     return (
       <section className="flex min-w-0 flex-col gap-3" data-add-login="">
         <PasteVariables
+          client={client}
           presets={catalog.presets}
           onBack={() => {
             setHeld(undefined);
