@@ -21,6 +21,7 @@ function world() {
   const state = new Map<string, unknown>();
   const refused = new Set<string>();
   const unreadable = new Set<string>();
+  const faults = { state: false };
   const exists = (path: string) =>
     path === '/fixture/codex' || files.has(path) || [...files.keys()].some(file => file.startsWith(`${path}/`));
   const root = (_name: string, scope?: { subfolder?: string }) => {
@@ -62,7 +63,8 @@ function world() {
       roots: { root },
       clock: { now: () => '2026-11-15T00:00:00.000Z' },
       state: {
-        read: async (_def: unknown, ferret: string) => ({ ok: true, value: state.get(ferret) }),
+        read: async (_def: unknown, ferret: string) =>
+          faults.state ? { ok: false } : { ok: true, value: state.get(ferret) },
         write: async (_def: unknown, value: unknown, ferret: string) => {
           state.set(ferret, value);
         },
@@ -73,7 +75,7 @@ function world() {
   const launch = async (native?: string) =>
     await rollouts.launched({ ferret: 'f1', home: HOME } as never, ...(native === undefined ? [] : [native]));
   const proved = async () => await rollouts.provedConversation('f1' as FerretId);
-  return { files, state, refused, unreadable, rollouts, launch, proved };
+  return { files, state, refused, unreadable, faults, rollouts, launch, proved };
 }
 
 describe('a recorded Codex conversation proof needs complete discovery', () => {
@@ -154,6 +156,25 @@ describe('a recorded Codex conversation proof needs complete discovery', () => {
     const w = world();
     w.files.set(`${SESSIONS}/current/rollout-new.jsonl`, header('current-launch'));
     w.state.set('f1', { format: 1, home: '/fixture/codex/f2', baseline: [], baselineComplete: true });
+    expect(await w.proved()).toBeUndefined();
+  });
+});
+
+describe('a doubt the proof cannot settle answers nothing', () => {
+  test('a sessions folder that cannot be listed, under a home that cannot be listed either, is no proof of absence', async () => {
+    const w = world();
+    w.files.set(`${SESSIONS}/old/rollout-old.jsonl`, header('previous-launch'));
+    w.refused.add(SESSIONS);
+    w.refused.add(HOME);
+    await w.launch();
+    expect(w.state.get('f1')).toMatchObject({ baselineComplete: false });
+  });
+
+  test('damaged rollout ownership state proves nothing instead of failing the stop or resume that asked', async () => {
+    const w = world();
+    await w.launch();
+    w.files.set(`${SESSIONS}/current/rollout-new.jsonl`, header('current-launch'));
+    w.faults.state = true;
     expect(await w.proved()).toBeUndefined();
   });
 });
