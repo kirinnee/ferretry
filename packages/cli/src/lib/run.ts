@@ -126,14 +126,12 @@ function asksForHelp(tokens: readonly string[]): boolean {
 
 type Unknown = Extract<ReturnType<typeof resolveVerb>, { kind: 'unknown' }>;
 type Subverb = Extract<ReturnType<typeof resolveVerb>, { kind: 'subverb' }>;
-/** Words that name no verb: nothing at all, or a known verb with a sub-verb that is none of its own. */
-type NoVerb = Unknown | Subverb;
 
 /** What a help request resolved to: text to print, or the words that name nothing. */
 type HelpRequest =
   | { readonly kind: 'text'; readonly text: (binary: string) => string }
   | { readonly kind: 'root' }
-  | { readonly kind: 'unknown'; readonly resolution: NoVerb };
+  | { readonly kind: 'unknown'; readonly resolution: Unknown };
 
 /**
  * `fy help [verb ...]` and `fy <group> --help`: help for words that are a verb or the first words of several (a group).
@@ -228,10 +226,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
   }
   const asked = helpRequest(table, leading.rest);
   if (asked !== undefined) {
-    if (asked.kind === 'unknown')
-      return asked.resolution.kind === 'unknown'
-        ? unknownVerb(world, asked.resolution)
-        : subverbRefusal(world, asked.resolution);
+    if (asked.kind === 'unknown') return unknownVerb(world, asked.resolution);
     io.out(
       `${asked.kind === 'root' ? renderRootHelp(identity.binary, table, { ...surfaces.titles }) : asked.text(identity.binary)}\n`,
     );
