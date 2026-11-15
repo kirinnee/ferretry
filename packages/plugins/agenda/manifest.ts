@@ -416,6 +416,9 @@ export default definePlugin({
     panels: [
       panel('ferret.side', { id: 'ferret-agenda', order: 10 }),
       panel('ferret.toolbar', { id: 'ferret-agenda-mode', order: 60 }),
+      // The agenda line and its drawer, directly above the composer. The slot is Conversation's (its contract names it,
+      // `CONVERSATION_ABOVE_COMPOSER_SLOT`); written out here as Claude Code writes it, and the shell's slot test pairs the names.
+      panel('conversation.above-composer', { id: 'ferret-agenda-line', order: 40 }),
       // Settings › This device: one Mute per machine, right after Access's Notifications (order 30).
       panel('device.settings', { id: 'notification-mute', order: 31 }),
     ],

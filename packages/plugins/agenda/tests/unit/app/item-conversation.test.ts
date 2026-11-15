@@ -1,9 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { FyHttpError } from '../../../app/shell.ts';
-import { type ItemConversationClient, itemSince, readItemConversation } from '../../../app/lib/item-conversation.ts';
+import {
+  conversationClientOf,
+  type ItemConversationClient,
+  itemSince,
+  readItemConversation,
+} from '../../../app/lib/item-conversation.ts';
 
 const row = (offset: number, role: string, text: string, timestamp?: string) => ({
-  point: { v: 1, byteOffset: offset, blockIndex: 0 },
+  point: `p${offset}`,
   role,
   text,
   selectionBinding: 'x',
@@ -142,6 +147,171 @@ describe('readItemConversation', () => {
     const entries = await readItemConversation(client, 'sess', 'A4');
     expect(entries).toHaveLength(3);
     expect(client.tails).toHaveLength(3);
+  });
+});
+
+/** A ledger record as Conversation's `GET …/sends` answers it. */
+const sendRecord = (message: string, fate: string, extra: object = {}) => ({
+  v: 1,
+  sendId: `s-${message}`,
+  acceptedAt: '2026-08-01T10:05:00.000Z',
+  acceptedTurn: 1,
+  path: 'direct',
+  message,
+  attachmentIds: [],
+  fate,
+  ...extra,
+});
+
+describe('the receipts of the owner’s rows', () => {
+  const thread = [
+    row(1, 'user', 'reply !A4: ship it', '2026-08-01T10:05:00.000Z'),
+    row(2, 'assistant', 'Shipped.', '2026-08-01T10:06:00.000Z'),
+    row(3, 'user', 'also !A4 please', '2026-08-01T10:07:00.000Z'),
+  ];
+  const withLedger = (sends: ItemConversationClient['sends']): ItemConversationClient => ({
+    ...daemonOf(thread),
+    ...(sends === undefined ? {} : { sends }),
+  });
+
+  it('gives each owner row the ledger record of the send whose words it is, and the ferret’s rows none', async () => {
+    const client = withLedger(async () => [
+      { sendId: 'a', fate: 'cancelled', message: 'also !A4 please', acceptedAt: '2026-08-01T10:07:00.000Z' },
+      { sendId: 'b', fate: 'delivered', message: ' reply !A4: ship it ', acceptedAt: '2026-08-01T10:05:00.000Z' },
+      { sendId: 'c', fate: 'delivered', message: 'about something else' },
+    ]);
+    const entries = await readItemConversation(client, 'sess', 'A4');
+    expect(entries.map(entry => [entry.kind, entry.send?.sendId])).toEqual([
+      ['user', 'b'],
+      ['assistant', undefined],
+      ['user', 'a'],
+    ]);
+  });
+
+  it('spends a record once: two rows with the same words take the newest two sends, not one twice', async () => {
+    const twice = [
+      row(1, 'user', '!A4 again', '2026-08-01T10:05:00.000Z'),
+      row(2, 'user', '!A4 again', '2026-08-01T10:06:00.000Z'),
+    ];
+    const client = {
+      ...daemonOf(twice),
+      sends: async () => [
+        { sendId: 'old', fate: 'delivered', message: '!A4 again', acceptedAt: '2026-08-01T10:05:00.000Z' },
+        { sendId: 'new', fate: 'queued', message: '!A4 again', acceptedAt: '2026-08-01T10:06:00.000Z' },
+      ],
+    };
+    const entries = await readItemConversation(client, 'sess', 'A4');
+    expect(entries.map(entry => entry.send?.sendId)).toEqual(['new', 'old']);
+  });
+
+  it('takes a record that carries no instant of its own, as long as its words match', async () => {
+    const client = withLedger(async () => [{ sendId: 'x', fate: 'queued', message: 'reply !A4: ship it' }]);
+    const entries = await readItemConversation(client, 'sess', 'A4');
+    expect(entries[0]?.send?.sendId).toBe('x');
+  });
+
+  it('keeps the History when the ledger cannot be read, and when the host has no ledger', async () => {
+    const failing = withLedger(async () => {
+      throw new Error('offline');
+    });
+    for (const client of [failing, withLedger(undefined)]) {
+      const entries = await readItemConversation(client, 'sess', 'A4');
+      expect(entries.map(entry => entry.text)).toEqual(['reply !A4: ship it', 'Shipped.', 'also !A4 please']);
+      expect(entries.every(entry => entry.send === undefined)).toBe(true);
+    }
+  });
+});
+
+describe('conversationClientOf', () => {
+  const page = (messages: object[], previousCursor: string | null = null) => ({
+    v: 1,
+    ferret: 'sess',
+    messages,
+    nextCursor: null,
+    previousCursor,
+  });
+  const message = (point: string, text: string) => ({
+    point,
+    role: 'user',
+    text,
+    selectionBinding: `b-${point}`,
+  });
+  const scripted = (answer: (route: string, init: { query?: Record<string, string> }) => unknown) => {
+    const calls: { route: string; params?: Record<string, string>; query?: Record<string, string> }[] = [];
+    return {
+      calls,
+      call: async (route: string, init: { params?: Record<string, string>; query?: Record<string, string> } = {}) => {
+        calls.push({ route, ...init });
+        return answer(route, init);
+      },
+    };
+  };
+
+  it('reads the newest page with `tail`, an older one `through` its cursor, by Conversation’s route key', async () => {
+    const daemon = scripted(() => page([message('p1', 'hello')], 'c0'));
+    const client = conversationClientOf(daemon as never);
+    const newest = await client.messagesTail('sess', { limit: 200 });
+    await client.messagesTail('sess', { limit: 200, through: 'c0' });
+    expect(newest.messages.map(entry => entry.point)).toEqual(['p1']);
+    expect(newest.previousCursor).toBe('c0');
+    expect(daemon.calls).toEqual([
+      {
+        route: 'GET /v1/ferrets/:ferretId/messages',
+        params: { ferretId: 'sess' },
+        query: { limit: '200', tail: '1' },
+      },
+      {
+        route: 'GET /v1/ferrets/:ferretId/messages',
+        params: { ferretId: 'sess' },
+        query: { limit: '200', through: 'c0' },
+      },
+    ]);
+  });
+
+  it('refuses a page that is not Conversation’s, rather than trusting its rows', async () => {
+    const client = conversationClientOf(scripted(() => ({ messages: 'nope' })) as never);
+    await expect(client.messagesTail('sess', { limit: 200 })).rejects.toThrow();
+  });
+
+  it('reads the send ledger and keeps only what a receipt claims: the flags a record carries when true', async () => {
+    const daemon = scripted(() => ({
+      sends: [
+        sendRecord('a', 'queued', { held: true, withdrawn: true, typedNotSent: true }),
+        sendRecord('b', 'delivered', { held: false, withdrawn: false, typedNotSent: false }),
+      ],
+    }));
+    const sends = await conversationClientOf(daemon as never).sends?.('sess');
+    expect(daemon.calls).toEqual([{ route: 'GET /v1/ferrets/:ferretId/sends', params: { ferretId: 'sess' } }]);
+    expect(sends).toEqual([
+      {
+        sendId: 's-a',
+        fate: 'queued',
+        acceptedAt: '2026-08-01T10:05:00.000Z',
+        message: 'a',
+        attachmentIds: [],
+        held: true,
+        withdrawn: true,
+        typedNotSent: true,
+      },
+      {
+        sendId: 's-b',
+        fate: 'delivered',
+        acceptedAt: '2026-08-01T10:05:00.000Z',
+        message: 'b',
+        attachmentIds: [],
+      },
+    ]);
+  });
+
+  it('carries a refusal of the daemon as this half’s error, which the stale-cursor retry reads', async () => {
+    const daemon = scripted(() => {
+      throw Object.assign(new Error('old cursor'), { status: 409, code: 'message_cursor_stale' });
+    });
+    const client = conversationClientOf(daemon as never);
+    await expect(client.messagesTail('sess', { limit: 1 })).rejects.toMatchObject({
+      status: 409,
+      code: 'message_cursor_stale',
+    });
   });
 });
 
