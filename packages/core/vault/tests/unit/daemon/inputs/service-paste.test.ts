@@ -350,6 +350,22 @@ describe('a sealed paste is protected INSIDE the write turn, before any byte (se
     should(JSON.stringify([w.events, w.told, w.closed, w.audits])).not.containEql(COPY_VALUE);
   });
 
+  it('should say it could not protect the paste, in its own words, when the protection fails without saying why', async () => {
+    const w = world({ withSealed: true, facts: githubPageFacts() });
+    w.copy();
+    await w.service.raise(SESSION_ID, FIELD_RAISE);
+    const request = await w.pending();
+    w.state.protectRefusal = '';
+
+    const error = await refusal(w.service.deliver(SESSION_ID, request.id, w.send(request, { sealed: true }), OWNER));
+
+    should(error.code).equal('unavailable');
+    should(error.message).equal('Ferretry could not protect this paste, so nothing was typed.');
+    should(w.writes).eql([]);
+    should(w.used).eql([]);
+    should(w.events.at(-1)).match({ state: 'refused' });
+  });
+
   it('should leave the protection ON when the write may have landed (uncertain), never undoing it', async () => {
     const w = world({ withSealed: true, facts: SECRET_STORE(true) });
     w.copy();

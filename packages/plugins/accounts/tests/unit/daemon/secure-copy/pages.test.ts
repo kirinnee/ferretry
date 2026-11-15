@@ -351,3 +351,18 @@ describe('BrowserCopyPages', () => {
     should(calls.filter(call => call.startsWith('seal'))).have.length(2);
   });
 });
+
+describe('the page host reads elements only', () => {
+  it('should refuse a clipboard read, which is Browsers’ own reach, rather than answer an empty copy', async () => {
+    const host = { copyOnPage: async () => Promise.reject(new Error('a clipboard read runs no page job')) };
+
+    const error = await new BrowserCopyPages(host).clipboard().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    should(error).be.instanceOf(SecureCopyError);
+    should((error as SecureCopyError).code).equal('unavailable');
+    should((error as SecureCopyError).message).equal("Copying from a page's clipboard is not available here.");
+  });
+});

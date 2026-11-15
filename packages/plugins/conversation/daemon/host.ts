@@ -1,6 +1,6 @@
 import { basename, dirname } from 'node:path';
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
-import { type AskId, AskIdSchema, type AskOwnerChat, type AsksApi } from '@ferretry/core-asks/contract';
+import { type AskAnswer, type AskId, AskIdSchema, type AskOwnerChat, type AsksApi } from '@ferretry/core-asks/contract';
 import {
   AGENT_ORIGIN,
   type FerretsApi,
@@ -79,11 +79,13 @@ import {
   buildQuestionAnswering,
   clearAskedQuestion,
   QuestionAsks,
+  questionEntry,
   writeAskedQuestion,
   writeProjectedQuestion,
 } from './questions/adapters/index.ts';
 import type { TranscriptEvent } from './seams/transcript-types.ts';
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
+import { agendaAnswers } from './questions/lib/agenda-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
@@ -299,6 +301,13 @@ export interface ConversationAHalf {
   withdrawQuestion(ferret: string): Promise<void>;
   /** An ask was answered: the draft of its item goes with it. */
   onAskAnswered(answered: { readonly ferret: string; readonly askId: AskId }): Promise<void>;
+  /** The board changed (an ask was answered, closed or changed): a question card it refused for now is raised again. */
+  onAsksChanged(): Promise<void>;
+  /**
+   * The owner answered a question's card on the Agenda: the answer is typed into the ferret's own question form BEFORE the
+   * card counts as answered (`ask.sources:question` `apply`). A refusal keeps the card open, in the sentence it says.
+   */
+  applyQuestionAnswer(answer: AskAnswer): Promise<'applied' | { readonly refused: string }>;
   /** What Ferrets says of a ferret's phase, for `turn.ended`. */
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
   /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
@@ -336,7 +345,13 @@ export function buildConversationA(deps: {
   /** The one lane of each ferret's `question.json`: its writer, the exact-id clear and the withdrawal (r4 #2). */
   const questionSerial = new KeyedSerialExecutor();
   /** The Agenda's card for each stored question (Asks' source `question`), for either harness: one path. */
-  const questionAsks = new QuestionAsks(asks);
+  const questionAsks = new QuestionAsks(asks, (ferret, error, outcome) =>
+    kernel.log.warn(
+      outcome === 'permanent'
+        ? `conversation could not raise the agenda card of the question of ${ferret} and will not try again: ${String(error)}`
+        : `conversation could not raise the agenda card of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
+    ),
+  );
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
     (what: string) =>
@@ -348,8 +363,17 @@ export function buildConversationA(deps: {
     if (read.ok && read.value?.toolUseId === toolUseId)
       await questionAsks.raise(ferret, read.value).catch(askFailure('raise'));
   };
-  const closeQuestionAsk = async (ferret: string, toolUseId: string, reason: 'answered' | 'withdrawn'): Promise<void> =>
+  /** The questions an Agenda answer is typing into the form now: their card is the Agenda's to resolve, not the drive's. */
+  const applying = new Set<string>();
+  const applyingKey = (ferret: string, toolUseId: string): string => JSON.stringify([ferret, toolUseId]);
+  const closeQuestionAsk = async (
+    ferret: string,
+    toolUseId: string,
+    reason: 'answered' | 'withdrawn',
+  ): Promise<void> => {
+    if (reason === 'answered' && applying.has(applyingKey(ferret, toolUseId))) return;
     await questionAsks.close(ferret, toolUseId, reason).catch(askFailure('close'));
+  };
   /**
    * The Agenda says what the stored questions say, after a restart (the one-time event is gone): every stored question
    * has its card, a card without a stored question is closed. An unreadable file or roster refuses the whole pass: it is
@@ -1603,6 +1627,40 @@ export function buildConversationA(deps: {
     },
     onAskAnswered: async ({ ferret, askId }) => {
       await drafts.discard(ferret, askId).catch(() => undefined);
+    },
+    onAsksChanged: async () => await questionAsks.retryWaiting(),
+    applyQuestionAnswer: async answer => {
+      // The card's entry names the ferret and the tool-use id together: the question it was raised for, if it still waits.
+      let found: { readonly ferret: string; readonly question: Question } | undefined;
+      for (const { id } of await ferrets.list()) {
+        const read = await kernel.state.read(QUESTION_STATE, id);
+        if (read.ok && read.value !== undefined && questionEntry(id, read.value.toolUseId) === answer.entry) {
+          found = { ferret: id, question: read.value };
+          break;
+        }
+      }
+      if (found === undefined)
+        return { refused: 'That question is not waiting any more, so nothing was sent to the ferret.' };
+      const mapped = agendaAnswers(found.question, { values: answer.values, text: answer.text });
+      if (!mapped.ok) return { refused: `${mapped.reason}. The question is still open.` };
+      const { toolUseId } = found.question;
+      const key = applyingKey(found.ferret, toolUseId);
+      applying.add(key);
+      try {
+        // One id per Agenda answer: a repeat of the same answer finds the drive already done, never a second one.
+        await answering.answer(found.ferret, {
+          toolUseId,
+          labels: [],
+          answers: mapped.answers,
+          requestId: `agenda:${answer.id}`,
+        });
+        return 'applied';
+      } catch (error) {
+        const why = error instanceof Error ? error.message : String(error);
+        return { refused: `The answer did not reach the ferret, so the question stays open: ${why}` };
+      } finally {
+        applying.delete(key);
+      }
     },
     turns: {
       look: (ferret, phase) => {

@@ -10,6 +10,7 @@ import {
   type AskKind,
   AskOwnerActionSchema,
   AskOwnerActionError,
+  AskRefusedError,
   type AskRef,
   type AskSourceSpec,
   type AsksApi,
@@ -74,11 +75,6 @@ class UnknownAskSourceError extends Error {
   constructor(source: string) {
     super(`no plugin registers the ask source "${source}" (it may be turned off), so nothing was raised`);
   }
-}
-
-/** Thrown when the engine refused a raise or a close: its own sentence. */
-class AskRefusedError extends Error {
-  override readonly name = 'AskRefusedError';
 }
 
 /** The board a draft is raised on: the ferret it is about, else the ferret raising it. */
@@ -335,12 +331,13 @@ export function asksPort(
       kind,
       ...(parsed.context === undefined ? {} : { context: parsed.context }),
       ...(ask === undefined ? {} : { ask }),
+      ...(parsed.fields === undefined ? {} : { fields: parsed.fields }),
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
       ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
-    if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+    if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
     // The mutation says where the ask landed: a daemon raise about a sub-ferret goes to its lineage's home, not to `ferret`.
     const landed = mutation.snapshot.sessionId;
     const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, refOnBoard(landed, ferret, sourceRef)));
@@ -419,7 +416,7 @@ export function asksPort(
           },
           PORT_ACTOR,
         );
-        if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+        if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
         // The mutation says where the notice landed: a daemon notice about a sub-ferret goes to its lineage's home, so
         // both the unchanged-item lookup and the returned ref name that board, not `ferret` (as `raise` does).
         const landed = mutation.snapshot.sessionId;
