@@ -4,7 +4,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
-import { createNeedsYou } from './lib/needs-you-hook.ts';
+import { inboxBadgeOf, needsYouOf } from './lib/agenda-nav-badge.ts';
 
 type Surfaces = {
   readonly screens: Record<string, AppComponent<ScreenProps>>;
@@ -47,6 +47,8 @@ const half = implementApp(manifest, {
         'ferret-agenda-mode': lazyComponent<PanelProps>(
           async () => (await surfacesOf()).panels['ferret-agenda-mode'] as AppComponent<PanelProps>,
         ),
+        // Drawn from `shell.navPanels` below (no machine), never from a machine's half.
+        'needs-you': () => null,
       },
       settings: {
         agenda: lazyComponent<SettingsProps>(
@@ -76,6 +78,17 @@ const filterBootView = lazyComponent<DeviceViewProps>(
 ) as NonNullable<ShellProvides['device']>[string];
 
 /**
+ * The Needs you panel (shell contract S4): the ferrets waiting on the owner, drawn once under the nav entries, in a
+ * column or a rail. Device-level: it lists the machines itself and reads each through its own runtime.
+ */
+const needsYouPanel = lazyComponent<Record<string, never>>(
+  async () =>
+    (await import('./views/agenda-needs-you-panel.tsx')).agendaNeedsYouPanel(fleet) as AppComponent<
+      Record<string, never>
+    >,
+) as NonNullable<ShellProvides['navPanels']>[string];
+
+/**
  * The in-app notification watch (shell contract S5): mounted once per paired daemon at the frame root, so a ferret that
  * dies while the app is open is notified whichever page is showing. It draws nothing and never asks for permission.
  */
@@ -91,5 +104,8 @@ export default provideToShell(half, {
   device: { 'deep-link': deepLinkView, 'notification-filter': filterBootView },
   background: { 'notification-watch': notificationWatchView },
   // Ferrets' list gathers the ferrets that wait on the owner (`ferrets.needs-you`); which they are is this half's fact.
-  hooks: { 'ferrets.needs-you': ({ client }) => createNeedsYou(client) },
+  hooks: { 'ferrets.needs-you': ({ client }) => needsYouOf(client) },
+  // The count on the Agenda nav entry: this machine's share, summed by the shell across every paired machine.
+  navBadges: { agenda: ({ client }) => inboxBadgeOf(needsYouOf(client)) },
+  navPanels: { 'needs-you': needsYouPanel },
 });

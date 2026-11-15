@@ -416,6 +416,8 @@ export default definePlugin({
     panels: [
       panel('ferret.side', { id: 'ferret-agenda', order: 10 }),
       panel('ferret.toolbar', { id: 'ferret-agenda-mode', order: 60 }),
+      // The ferrets waiting on the owner, under the nav entries (S4): device-level, in the column and the rail.
+      panel('nav', { id: 'needs-you', order: 10 }),
     ],
     settings: [settingsTab('agenda', { group: 'agent-settings', label: 'Agenda', order: 20 })],
     // The ask page OFFERS the `agenda.conversation` slot (contract/slots.ts, lead decision Q9): Conversation contributes

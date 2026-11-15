@@ -27,7 +27,7 @@ const draw = async (rows: Parameters<typeof SessionsBarNeedsYou>[0]['rows']) => 
       reading={false}
       render={inbox => (
         <AgendaInboxContext.Provider value={inbox}>
-          <SessionsBarNeedsYou isActive={() => false} learns={() => false} onNavigate={() => {}} rows={rows} />
+          <SessionsBarNeedsYou isActive={() => false} onNavigate={() => {}} rows={rows} />
         </AgendaInboxContext.Provider>
       )}
     />,
@@ -45,11 +45,11 @@ describe('the sidebar Needs you rows', () => {
     expect(root.textContent).not.toContain('asked for you');
   });
 
-  test('open the conversation at its first open item', async () => {
+  test('open the ask page at its first open item', async () => {
     const root = await draw([{ daemonId: DAEMON, view }]);
 
     const link = must(root.querySelector<HTMLAnchorElement>('[data-sbar-needs-you-group] a'), 'row link');
-    expect(link.getAttribute('href')).toContain('ask=A1');
+    expect(link.getAttribute('href')).toBe('/d/alpha/agenda/s-1/A1');
   });
 
   test('count the rows in the heading, and draw nothing when there are none', async () => {

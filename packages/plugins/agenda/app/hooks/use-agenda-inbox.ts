@@ -63,6 +63,8 @@ import {
 } from '../lib/agenda-replied.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import { answeredSuggestions } from '../lib/answered-suggestions.ts';
+import { ruleClientOf } from '../lib/rule-client.ts';
+import { useAnsweredSuggestionSweep } from './use-answered-suggestion-sweep.ts';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import { withMachineAgendas } from '../lib/machine-agenda.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
@@ -588,6 +590,17 @@ export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor,
   );
   const machines = useInboxMachines(store, reach.pairings);
   const inbox = useAgendaInboxModel(reach.agenda, machines);
+  // A rule suggestion the owner answered elsewhere leaves the Inbox: each machine's owner list is read through that
+  // machine's own client (Accounts' `GET /v1/sign-in-rules/suggestions`); a machine that cannot answer hides nothing.
+  const ruleClientFor = useCallback(
+    async (connection: DaemonConnection) => {
+      const runtime = reach.runtimes.find(each => each.connection.daemonId === connection.daemonId);
+      if (runtime === undefined) throw new Error('That machine is no longer paired with this browser.');
+      return ruleClientOf(runtime.client);
+    },
+    [reach],
+  );
+  useAnsweredSuggestionSweep(inbox.cards, inbox.connectionFor, ruleClientFor);
   // The machine this page is drawn for, when it is locked, is not in the Inbox (it is not read): nothing is settled
   // until it is unlocked and read, or the reader would be sent away from a card that was never looked for.
   const ownLocked = reach.locked.some(line => line.daemonId === runtime.connection.daemonId);
