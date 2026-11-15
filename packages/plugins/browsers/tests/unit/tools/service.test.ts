@@ -1216,3 +1216,102 @@ describe('the browser tools — two ferrets on one browser profile', () => {
     should(byOther.code).equal('not_found');
   });
 });
+
+describe('the address of a ferret’s page, for the plugin that reads it on its behalf (pageAddressOf)', () => {
+  const TOKEN_URL = 'https://app.example.test:8443/cb/reset?token=SECRET-TOKEN#frag-SECRET';
+  const mine = { by: 'agent', sessionId: 's1' } as const;
+
+  /** A ferret `s1` with its own page `app` at `url`, and the owner's Browsers switch as `reader` answers it. */
+  async function world(reader: () => AgentControlReader | undefined, url = TOKEN_URL) {
+    const made = await harness({ control: reader });
+    made.browser.pages.push({ id: 'p1', name: 'app', url, title: 'App', text: '', session: 's1', openedBy: mine });
+    return made;
+  }
+
+  it('PA1 refuses, in the agents’ sentence, while Browsers is off or the port is unbound, and reads no page', async () => {
+    const off = switches('files', 'scripts');
+    for (const reader of [() => off.reader, () => undefined]) {
+      const { tools, browser } = await world(reader);
+      let looked = 0;
+      const status = browser.status;
+      browser.status = async (sessionId: string) => {
+        looked += 1;
+        return await status(sessionId);
+      };
+      const refused = await failure(tools.pageAddressOf('s1', 'app'));
+      should(refused).be.instanceOf(ApiError);
+      should((refused as ApiError).status).equal(403);
+      should((refused as ApiError).code).equal('forbidden');
+      should((refused as ApiError).message).equal(agentControlRefusal('browser'));
+      should(looked).equal(0);
+    }
+    should(off.asked[0]).deepEqual(['s1', 'browser']);
+  });
+
+  it('PA2 answers the page’s origin and nothing after it while Browsers is on: no path, query, fragment or credentials', async () => {
+    const { reader } = switches('browser');
+    const { tools } = await world(() => reader);
+
+    const answer = await tools.pageAddressOf('s1', 'app');
+
+    should(answer).equal('https://app.example.test:8443');
+    should(String(answer)).not.containEql('SECRET');
+    should(await (await world(() => reader, 'http://user:pw@host.test/p?x=1')).tools.pageAddressOf('s1', 'app')).equal(
+      'http://host.test',
+    );
+  });
+
+  it('PA3 reads the switch live on every call: a ferret switched off after an answer is refused the next time', async () => {
+    let on = true;
+    const { tools } = await world(() => ({ allows: async () => on }));
+
+    should(await tools.pageAddressOf('s1', 'app')).equal('https://app.example.test:8443');
+    on = false;
+    const refused = await failure(tools.pageAddressOf('s1', 'app'));
+
+    should((refused as ApiError).message).equal(agentControlRefusal('browser'));
+  });
+
+  it('PA4 never answers another ferret’s page of the same name: each is looked up in its own listing only', async () => {
+    const { reader } = switches('browser');
+    const { tools, browser } = await world(() => reader);
+    browser.pages.push({
+      id: 'p2',
+      name: 'app',
+      url: 'https://other.example.test/',
+      title: 'Other',
+      text: '',
+      session: 's2',
+      openedBy: { by: 'agent', sessionId: 's2' },
+    });
+
+    should(await tools.pageAddressOf('s1', 'app')).equal('https://app.example.test:8443');
+    should(await tools.pageAddressOf('s2', 'app')).equal('https://other.example.test');
+    should(await tools.pageAddressOf('s3', 'app')).be.undefined();
+  });
+
+  it('PA5 answers nothing when there is no such page, or the page is a person’s, or a person holds it, or has no web address', async () => {
+    const { reader } = switches('browser');
+    const { tools, browser } = await world(() => reader);
+    browser.pages.push(
+      {
+        id: 'p2',
+        name: 'theirs',
+        url: 'https://theirs.test/',
+        title: '',
+        text: '',
+        session: 's1',
+        openedBy: { by: 'local' },
+      },
+      { id: 'p3', name: 'blank', url: 'about:blank', title: '', text: '', session: 's1', openedBy: mine },
+      { id: 'p4', name: 'odd', url: 'not a url', title: '', text: '', session: 's1', openedBy: mine },
+    );
+
+    should(await tools.pageAddressOf('s1', 'missing')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'theirs')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'blank')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'odd')).be.undefined();
+    await takeOver(tools, 'app');
+    should(await tools.pageAddressOf('s1', 'app')).be.undefined();
+  });
+});
