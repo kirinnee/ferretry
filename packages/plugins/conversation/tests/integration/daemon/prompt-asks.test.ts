@@ -359,7 +359,7 @@ describe('a failing Asks or state', () => {
     state.read = () => new Error('pane unreadable');
 
     await prompts.sweep(idle('f1'));
-    state.read = () => undefined;
+    state.read = () => ({ turnState: 'your-turn' }); // a POSITIVE reading: an unknown one is not "it worked"
     await prompts.sweep(idle('f1'));
     state.read = () => new Error('pane unreadable');
     prompts.changed('f1');
@@ -430,6 +430,52 @@ describe('what a tick reads', () => {
     expect(reads).toEqual(['f7']);
     await prompts.sweep(idle(...twenty));
     expect(reads).toEqual(['f7']);
+  });
+
+  test('a changed ferret whose first reading is unknown (the real service returns {}) is read again until a positive reading', async () => {
+    const { prompts, asks, reads, state, said } = harness();
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle('f1', 'f2'));
+    reads.length = 0;
+
+    state.read = () => ({});
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1', 'f2'));
+    await prompts.sweep(idle('f1', 'f2'));
+    expect(reads).toEqual(['f1', 'f1']); // one read per sweep, and no other ferret
+    expect(asks.raises).toHaveLength(0);
+    expect(said).toEqual([]); // an unknown reading is not a failure
+
+    state.read = () => parked();
+    await prompts.sweep(idle('f1', 'f2'));
+    await prompts.sweep(idle('f1', 'f2'));
+    expect(asks.raises).toHaveLength(1);
+    expect(asks.open()).toHaveLength(1);
+  });
+
+  test('a positive empty reading ends the retry: no read per tick forever', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({});
+    prompts.changed('f1');
+    await prompts.sweep(idle('f1'));
+    state.read = () => ({ turnState: 'your-turn' });
+    await prompts.sweep(idle('f1'));
+    reads.length = 0;
+
+    await prompts.sweep(idle('f1'));
+    await prompts.sweep(idle('f1'));
+    expect(reads).toEqual([]);
+  });
+
+  test('an unknown reading of a ferret nobody reported changed is not retried every tick', async () => {
+    const { prompts, reads, state } = harness();
+    state.read = () => ({});
+    await prompts.sweep(idle('f1'));
+    reads.length = 0;
+
+    await prompts.sweep(idle('f1'));
+    await prompts.sweep(idle('f1'));
+    expect(reads).toEqual([]);
   });
 
   test('an event for a ferret that is working, stopped or unknown reads nothing', async () => {
