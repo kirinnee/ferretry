@@ -2,14 +2,14 @@
  * Parity rows T-0039 … T-0042 (docs/design/rebuild-parity.tsv): today's four secure-copy agent tools. Each is declared by
  * the manifest AND answered by the daemon half, through the test host, as the ferret that calls it. What each one does
  * (the sealed value, the paste, the takeover, the sentinel's absence) is `daemon/secure-copy/composition.test.ts`.
- * `task_plan` (T-0043) is not built and has no test here.
+ * `account_propose` (T-0002) and `task_plan` (T-0043) are the same, below; what each one does is `daemon/lib/proposal-tools.test.ts`.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeSealedDocuments, FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
-import { ferret, type TestHost, testHost } from '@ferretry/kernel/testing';
+import { ferret, owner, type TestHost, testHost } from '@ferretry/kernel/testing';
 import accounts from '../../../daemon/index.ts';
 import manifest from '../../../manifest.ts';
 
@@ -62,4 +62,27 @@ describe("today's secure-copy agent tools", () => {
   test('T-0042 secure_paste (secure.paste) is declared and answered by the daemon half', async () => {
     await proves('secure_paste', true);
   });
+
+  test('T-0002 account_propose (account.propose) is declared and answered by the daemon half', async () => {
+    await proves('account_propose', true);
+  });
+
+  test('T-0043 task_plan (task.plan) is declared and answered by the daemon half', async () => {
+    await proves('task_plan', true);
+  });
+
+  test.each(['account_propose', 'task_plan'])(
+    '%s asks for a ferret only: a person’s call is refused in a sentence',
+    async name => {
+      // Arrange
+      host = await built();
+
+      // Act
+      const answer = await host.tool(name, {}, { as: owner() });
+
+      // Assert
+      expect(answer.isError).toBe(true);
+      expect(answer.text).toContain('Only an agent');
+    },
+  );
 });

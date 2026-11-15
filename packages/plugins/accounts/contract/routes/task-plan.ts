@@ -416,19 +416,6 @@ export const TaskPlanCallSchema = z
     });
   });
 
-/**
- * A paste plan's items (`secure.preapprove`) read as task-plan paste lines: one use each, as a paste plan allowed.
- * @pending accounts: a paste plan's pre-approval (`secure.preapprove`, today's `proposePastes`) is not ported, so nothing turns its items into task-plan paste lines (`taskPlanLinesOfCopyItems` in `contract/routes/task-plan.ts`)
- */
-export const taskPlanLinesOfCopyItems = (items: CopyPlan['items']): readonly TaskPlanPasteAsk[] =>
-  items.map(item => ({
-    kind: 'paste',
-    from: item.from,
-    to: item.to,
-    uses: TASK_PLAN_LINE_DEFAULT_USES,
-    why: item.why,
-  }));
-
 // ── What the daemon keeps (RAM only) and the owner reads ─────────────────────────────────────────────
 
 /** One account a sign-in line may use, as the daemon found it in the listing. THE OWNER'S VIEW ONLY. */

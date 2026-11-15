@@ -820,3 +820,168 @@ describe('the investigation login the daemon resolved', () => {
     run(() => renderer.unmount());
   });
 });
+
+describe('c58-22 the Jev key warden.yaml does or does not name', () => {
+  const jevOn = wardenConfig({ layers: { jev: true, llm: false } });
+  const unnamed = (): WardenConfigView => ({ ...view(jevOn), jevKey: 'not_named' });
+  const stored = quiet({ speedups: async () => speedups(true) });
+
+  it('should call a stored key "not named" until warden.yaml names it, and read an older daemon as before', () => {
+    // Arrange + Act + Assert
+    const keyUrl = 'https://keys.example.test/';
+    expect(jevKeyStatus(speedups(true), 'not_named')).toEqual({ state: 'not_named', keyUrl });
+    expect(jevKeyStatus(speedups(true), 'named')).toEqual({ state: 'set', keyUrl });
+    expect(jevKeyStatus(speedups(true))).toEqual({ state: 'set', keyUrl });
+    // no key stored: it is missing whatever warden.yaml says, so the owner adds it in Speed-ups first
+    expect(jevKeyStatus(speedups(false), 'not_named')).toEqual({ state: 'missing', keyUrl });
+    expect(jevKeyStatus('off', 'not_named')).toEqual({ state: 'off' });
+  });
+
+  it('should show that the key is not named, and offer "Use stored key" that names it and turns the card to set', async () => {
+    // Arrange
+    let named = 0;
+    const renderer = render(
+      <Surface
+        connection={connection('a')}
+        deps={stored}
+        createClient={async () =>
+          client({
+            config: async () => unnamed(),
+            nameJevKey: async () => {
+              named += 1;
+              return { ...view(jevOn), jevKey: 'named' };
+            },
+          })
+        }
+      />,
+    );
+    await settle();
+    expect(json(renderer)).toContain('key not named');
+    expect(json(renderer)).toContain('A Jev key is stored, but the Warden is not told to use it.');
+    expect(json(renderer)).not.toContain('key set');
+
+    // Act
+    await runAsync(async () => {
+      button(renderer, 'Use stored key').props.onClick();
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert — one call, no value anywhere on the card, and the card now reads set
+    expect(named).toBe(1);
+    expect(json(renderer)).toContain('key set');
+    expect(json(renderer)).not.toContain('key not named');
+    expect(json(renderer)).not.toContain('Use stored key');
+    expect(json(renderer)).not.toContain('JEV_API_KEY');
+    run(() => renderer.unmount());
+  });
+
+  it('should keep "not named" and show what waits for the owner when the daemon holds the naming', async () => {
+    // Arrange
+    const sentence = 'names the secret JEV_API_KEY, which only the owner may add to a configuration';
+    const renderer = render(
+      <Surface
+        connection={connection('a')}
+        deps={stored}
+        createClient={async () =>
+          client({
+            config: async () => unnamed(),
+            nameJevKey: async () => ({ ...unnamed(), held: [sentence] }),
+          })
+        }
+      />,
+    );
+    await settle();
+
+    // Act
+    await runAsync(async () => {
+      button(renderer, 'Use stored key').props.onClick();
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert
+    expect(json(renderer)).toContain(`Waiting for your approval: ${sentence}`);
+    expect(json(renderer)).toContain('key not named');
+    run(() => renderer.unmount());
+  });
+
+  it('should show a refusal and keep the button when naming fails', async () => {
+    // Arrange
+    const renderer = render(
+      <Surface
+        connection={connection('a')}
+        deps={stored}
+        createClient={async () =>
+          client({ config: async () => unnamed(), nameJevKey: async () => Promise.reject(new Error('not allowed')) })
+        }
+      />,
+    );
+    await settle();
+
+    // Act
+    await runAsync(async () => {
+      button(renderer, 'Use stored key').props.onClick();
+      await Promise.resolve();
+    });
+    await settle();
+
+    // Assert
+    expect(json(renderer)).toContain('not allowed');
+    expect(json(renderer)).toContain('key not named');
+    expect(button(renderer, 'Use stored key').props.disabled).toBe(false);
+    run(() => renderer.unmount());
+  });
+
+  it('should drop an answer, or a refusal, that lands after the reader moved to another daemon', async () => {
+    // Arrange
+    let finish: ((value: WardenConfigView) => void) | undefined;
+    let refuse: ((reason: Error) => void) | undefined;
+    const createClient: WardenClientFactory = async active =>
+      active.daemonId === 'a'
+        ? client({
+            config: async () => unnamed(),
+            nameJevKey: () =>
+              new Promise<WardenConfigView>((resolve, reject) => {
+                finish = resolve;
+                refuse = reject;
+              }),
+          })
+        : client();
+    for (const settleLate of ['answer', 'refusal'] as const) {
+      const renderer = render(<Surface connection={connection('a')} createClient={createClient} deps={stored} />);
+      await settle();
+      run(() => button(renderer, 'Use stored key').props.onClick());
+
+      // Act
+      run(() => renderer.update(<Surface connection={connection('b')} createClient={createClient} deps={stored} />));
+      await settle();
+      await runAsync(async () => {
+        if (settleLate === 'answer') finish?.({ ...view(jevOn), jevKey: 'named', warnings: ['from daemon a'] });
+        else refuse?.(new Error('daemon a refused'));
+        await Promise.resolve();
+      });
+      await settle();
+
+      // Assert
+      expect(json(renderer)).not.toContain('from daemon a');
+      expect(json(renderer)).not.toContain('daemon a refused');
+      run(() => renderer.unmount());
+    }
+  });
+
+  it('should show the action as in flight, and offer none without a handler', () => {
+    // Arrange + Act
+    const common = { view: unnamed(), draft: jevOn, onChange: () => {}, onSave: () => {} };
+    const naming = render(
+      <WardenConfigCard {...common} jevKey={{ state: 'not_named' }} onUseStoredKey={() => {}} namingKey />,
+    );
+    const bare = render(<WardenConfigCard {...common} jevKey={{ state: 'not_named' }} />);
+
+    // Assert
+    expect(button(naming, 'Using stored key…').props.disabled).toBe(true);
+    expect(json(bare)).toContain('key not named');
+    expect(json(bare)).not.toContain('Use stored key');
+    for (const renderer of [naming, bare]) run(() => renderer.unmount());
+  });
+});

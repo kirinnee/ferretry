@@ -272,6 +272,22 @@ Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--
 for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
 the user-settings control and the `--rc` argv in the unit tests.
 
+## The question tool is per ferret, from its mode
+
+Only an **interactive** ferret has an owner at the pane, so only it can ask a question. The ferret's mode reaches the
+launch through the one builder as `LaunchSpec.mode` (the record's own mode, set on every launch: a start, a resume,
+Restart CLI, a migration, a revive), and each harness spells it:
+
+| Harness     | Interactive                                               | Auto, or no mode                     |
+| ----------- | --------------------------------------------------------- | ------------------------------------ |
+| Claude Code | keeps `AskUserQuestion`                                   | `--disallowed-tools=AskUserQuestion` |
+| Codex       | `--enable default_mode_request_user_input` (Default mode) | nothing added                        |
+
+The pane is also handed `FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part,
+so it can never disagree with what the harness decided; `instructions` and the Runtimes wrappers read it. A ferret's
+mode never changes, so these arguments are outside the recorded launch's fixed-layer fingerprint: they cannot make a
+running ferret read as outdated.
+
 ## Claude's questions reach the app through a hook
 
 An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the
