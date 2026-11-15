@@ -94,8 +94,8 @@ export function UnlockPanel({ subject }: PanelProps) {
  * permission and notes once, ONE list with a row per machine (its switch, status and registered devices) and "Turn on
  * for all machines". Drawn with NO machine and no client (shell contract S4): the machines come from `useEveryDaemon`,
  * each row reads and writes only through its OWN row's client, a machine this device may not use (`not-granted`) is not
- * listed, and a locked machine says so and offers Unlock. v4's per-row Mute is Agenda's notification filter, which
- * Access has no seam to (GAP in ports-pending.json).
+ * listed, and a locked machine says so and offers Unlock. v4's per-row Mute is Agenda's notification filter: Agenda
+ * draws it as its own panel under this one (this panel has no shell to read Agenda's hook from).
  */
 export function NotificationsDevicePanel({ host }: { readonly host?: PushHost } = {}) {
   const rows = useEveryDaemon();

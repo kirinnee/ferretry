@@ -23,6 +23,7 @@ import manifest from '../../../manifest.ts';
 import {
   AGENDA_CARD_ANSWER_HOOK,
   AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_ITEM_OPENED_HOOK,
   AGENDA_LANE_PROPOSAL_HOOK,
 } from '../../../contract/app-hooks.ts';
 import { agendaItem, choices, LANE_PROPOSAL_ANSWERS, testLaneEditor } from '../../support/app/agenda-inbox.tsx';
@@ -148,6 +149,16 @@ for (const surface of ['screen', 'ask'] as const) {
       await interact(() => doneClose(root)?.click());
       await interact(() => new Promise<void>(done => setTimeout(done, 0)));
       expect(doneCalls(calls)).toEqual(['done:F12']);
+    });
+
+    test('tells the `agenda.item-opened` hook which ask was opened', async () => {
+      const told: string[] = [];
+      await ask(
+        [closing],
+        { [AGENDA_ITEM_OPENED_HOOK]: async (ferret: string, id: string) => void told.push(`${ferret}/${id}`) },
+        node => node.textContent?.includes('Try') === true,
+      );
+      expect(told).toContain(`${MACHINE_AGENDA_ID}/A9`);
     });
 
     test('offers no Done · closes without Board’s hook (it fails closed)', async () => {

@@ -219,7 +219,6 @@
         "app/features/onboarding/device-kind.ts",
         "app/harness/pair-from-menu.tsx",
         "app/lib/device-preference.ts",
-        "app/lib/push-seen.ts",
         "cli/lib/grants/commands.ts",
         "cli/lib/grants/controller.ts",
         "cli/lib/grants/gateway.ts",

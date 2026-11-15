@@ -45,6 +45,11 @@ export class AgendaFleet {
     return runtime;
   }
 
+  /** The client of ONE machine this device holds, or `undefined` for one it does not (never another machine's). */
+  clientOf(daemon: DaemonId): AgendaCall | undefined {
+    return this.#clients.get(daemon);
+  }
+
   #clientFor(daemon: DaemonConnection): AgendaCall {
     return this.#clients.get(daemon.daemonId) ?? UNREACHABLE;
   }

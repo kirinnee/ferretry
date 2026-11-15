@@ -416,6 +416,8 @@ export default definePlugin({
     panels: [
       panel('ferret.side', { id: 'ferret-agenda', order: 10 }),
       panel('ferret.toolbar', { id: 'ferret-agenda-mode', order: 60 }),
+      // Settings › This device: one Mute per machine, right after Access's Notifications (order 30).
+      panel('device.settings', { id: 'notification-mute', order: 31 }),
     ],
     settings: [settingsTab('agenda', { group: 'agent-settings', label: 'Agenda', order: 20 })],
     // The ask page OFFERS the `agenda.conversation` slot (contract/slots.ts, lead decision Q9): Conversation contributes
