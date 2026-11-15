@@ -190,7 +190,15 @@ function LoginPage({ login, machineName, client, reload, onBack, now, clock, pol
       </div>
 
       {login.environment === undefined ? null : (
-        <LoginEnvironmentSection loginId={login.id} environment={login.environment} client={client} online />
+        <LoginEnvironmentSection
+          loginId={login.id}
+          environment={login.environment}
+          client={client}
+          online
+          machineName={machineName}
+          changes={changes}
+          reload={reload}
+        />
       )}
 
       {ollama ? <LocalModelsPanel machineName={machineName} read={local} onCheck={local.check} /> : null}

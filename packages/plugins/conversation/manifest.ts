@@ -536,6 +536,11 @@ export default definePlugin({
       // The owner's chat as `fy agenda log` copies it onto an item: this plugin's own queue and send ledger. The one
       // provider of this hook (`takers: ['conversation']`).
       { hook: AskOwnerChats, key: ASK_OWNER_CHAT_KEY },
+      // The composer's `:` (the ferrets, by callsign) and `@` (one folder of the ferret's files) menus: the facts are
+      // Ferrets', read through its port, and the composer's reference catalog is this plugin's own (a core piece may not
+      // take a plugin's hook, so Ferrets cannot provide them).
+      { hook: ReferenceCatalog, key: ':' },
+      { hook: ReferenceCatalog, key: '@' },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

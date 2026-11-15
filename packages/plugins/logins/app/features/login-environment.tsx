@@ -4,8 +4,12 @@
  * provider, what it still needs, and its Test. No value of a secret is ever on this wire.
  */
 
+import { useState } from 'react';
 import type { LoginEnvironment, LoginEnvironmentVariable } from '../../contract/index.ts';
 import type { LoginsClient } from '../lib/client.ts';
+import type { LoginChanges } from '../lib/login-changes.ts';
+import { Button } from '../ui.ts';
+import { EnvironmentEditor } from './environment-editor.tsx';
 import { LoginTest } from './login-test.tsx';
 import { SecretPill } from './secret-pill.tsx';
 
@@ -33,9 +37,21 @@ export interface LoginEnvironmentSectionProps {
   readonly environment: LoginEnvironment;
   readonly client: LoginsClient;
   readonly online: boolean;
+  readonly machineName: string;
+  readonly changes: LoginChanges;
+  readonly reload: () => Promise<void>;
 }
 
-export function LoginEnvironmentSection({ loginId, environment, client, online }: LoginEnvironmentSectionProps) {
+export function LoginEnvironmentSection({
+  loginId,
+  environment,
+  client,
+  online,
+  machineName,
+  changes,
+  reload,
+}: LoginEnvironmentSectionProps) {
+  const [editing, setEditing] = useState(false);
   return (
     <div className="kt-panel flex min-w-0 flex-col gap-3 p-panel" data-login-environment={loginId}>
       <p className="m-0 text-cell leading-base text-muted">
@@ -53,18 +69,39 @@ export function LoginEnvironmentSection({ loginId, environment, client, online }
           Preset {environment.missingPreset} is not on this machine any more.
         </p>
       )}
-      <ul className="m-0 flex list-none flex-col gap-2 p-0">
-        {environment.variables.map(variable => (
-          <li
-            key={variable.name}
-            className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-cell"
-            data-login-variable={variable.name}
-          >
-            <span className="break-all font-mono font-semibold text-fg">{variable.name}</span>
-            <VariableValue variable={variable} />
-          </li>
-        ))}
-      </ul>
+      {editing ? (
+        <EnvironmentEditor
+          loginId={loginId}
+          environment={environment}
+          machineName={machineName}
+          changes={changes}
+          reload={reload}
+          onDone={() => {
+            changes.clear();
+            setEditing(false);
+          }}
+        />
+      ) : (
+        <>
+          <ul className="m-0 flex list-none flex-col gap-2 p-0">
+            {environment.variables.map(variable => (
+              <li
+                key={variable.name}
+                className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-cell"
+                data-login-variable={variable.name}
+              >
+                <span className="break-all font-mono font-semibold text-fg">{variable.name}</span>
+                <VariableValue variable={variable} />
+              </li>
+            ))}
+          </ul>
+          <div>
+            <Button type="button" data-login-env-edit="" disabled={!online} onClick={() => setEditing(true)}>
+              Edit variables
+            </Button>
+          </div>
+        </>
+      )}
       {environment.cloudCredential === undefined ? null : (
         <p className="m-0 text-cell leading-base text-fg" data-login-cloud="">
           <span className="font-mono">{environment.cloudCredential.reference}</span> —{' '}

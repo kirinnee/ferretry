@@ -54,6 +54,8 @@ export function rowSlotEntry(entry: TranscriptEntry): ConversationRowEntry | nul
     text: entry.text,
     ...(entry.at === undefined ? {} : { at: entry.at }),
     ...(entry.label === undefined ? {} : { label: entry.label }),
+    ...(entry.send === undefined ? {} : { send: { sendId: entry.send.sendId } }),
+    ...(entry.peer === undefined ? {} : { peer: true as const }),
     ...(tools.length === 0 ? {} : { tools }),
   };
 }

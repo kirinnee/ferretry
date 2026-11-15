@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import type { LoginEnvironment, LoginTestAct } from '../../../contract/index.ts';
 import { LoginScopeChip } from '../../../app/components/login-scope-chip.tsx';
-import { LoginEnvironmentSection } from '../../../app/features/login-environment.tsx';
 import { LoginTest } from '../../../app/features/login-test.tsx';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
+import { EnvironmentSection } from './support/environment-section.tsx';
 
 const TEST = 'POST /v1/logins/:loginId/test';
 
@@ -125,7 +125,7 @@ describe('LoginEnvironmentSection', () => {
 
   it('shows plain values, secret NAMES with set ✓ or needs, the reference, the provider and what is missing', async () => {
     const view = await mount(
-      <LoginEnvironmentSection
+      <EnvironmentSection
         loginId="zai-glm"
         environment={{
           ...base,
@@ -162,7 +162,7 @@ describe('LoginEnvironmentSection', () => {
 
   it('leaves out what a login without a preset, reference or provider does not have', async () => {
     const view = await mount(
-      <LoginEnvironmentSection
+      <EnvironmentSection
         loginId="hand"
         environment={{
           variables: [],
