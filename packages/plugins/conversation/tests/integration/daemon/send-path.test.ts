@@ -1347,3 +1347,78 @@ describe('a CLI send crosses the real send route', () => {
     await host.stop();
   });
 });
+
+describe('c58-16 an explicit retry types a send again only when the daemon proved it absent', () => {
+  /** A send the tracker proved absent and gave up on (`timed_out`, retryable), with the pane then asked the same question. */
+  const lost = async () => {
+    const world = await conversation();
+    world.ferrets.transcript = [otherEntry];
+    await world.api().send(F1, { kind: 'owner' }, { message: 'FIXTURE lost', sendId: 's-lost' });
+    await world.advance(180_000, 5_000);
+    expect(await world.stored('s-lost')).toMatchObject({ fate: 'timed_out', retryable: true });
+    return world;
+  };
+
+  test('c58-16 the port retries the send under its own id, as one more attempt, and answers the row', async () => {
+    const { host, ferrets, api, stored } = await lost();
+    const before = ferrets.typed.length;
+
+    const retried = await api().retrySend(F1, 's-lost');
+
+    expect(retried).toMatchObject({ ok: true, value: { sendId: 's-lost', fate: 'accepted' } });
+    expect(ferrets.typed.slice(before)).toEqual(['FIXTURE lost']);
+    expect(await stored('s-lost')).toMatchObject({ fate: 'accepted' });
+    await host.stop();
+  });
+
+  test('c58-16 the route retries the same send and answers its record', async () => {
+    const { host, ferrets } = await lost();
+    const before = ferrets.typed.length;
+
+    const answer = await host.request('POST', '/v1/ferrets/f1/sends/s-lost/retry', { as: owner(), body: {} });
+
+    expect(answer.status).toBe(200);
+    expect(ferrets.typed.slice(before)).toEqual(['FIXTURE lost']);
+    await host.stop();
+  });
+
+  test('c58-16 a send nobody made, and one already delivered, are refused in the tracker’s words and type nothing', async () => {
+    const { host, ferrets, api, advance } = await conversation();
+    ferrets.transcript = [userEntry('FIXTURE seen')];
+    await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE seen', sendId: 's-seen' });
+    await advance(30_000, 5_000);
+    const typed = ferrets.typed.length;
+
+    expect(await api().retrySend(F1, 's-none')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('has no send s-none') },
+    });
+    expect(await api().retrySend(F1, 's-seen')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('already delivered') },
+    });
+    const route = await host.request('POST', '/v1/ferrets/f1/sends/s-none/retry', { as: owner(), body: {} });
+    expect(route.status).toBe(409);
+    expect(ferrets.typed).toHaveLength(typed);
+    await host.stop();
+  });
+
+  test('c58-16 a send that may have landed is retried only when the caller forces it', async () => {
+    const { host, ferrets, api, stored, advance } = await conversation();
+    ferrets.transcript = [];
+    await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE unread', sendId: 's-unread' });
+    await advance(150_000, 5_000);
+    expect(await stored('s-unread')).toMatchObject({ fate: 'unaccounted' });
+    const typed = ferrets.typed.length;
+
+    expect(await api().retrySend(F1, 's-unread')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('may still have landed') },
+    });
+    expect(ferrets.typed).toHaveLength(typed);
+
+    expect(await api().retrySend(F1, 's-unread', true)).toMatchObject({ ok: true, value: { sendId: 's-unread' } });
+    expect(ferrets.typed.slice(typed)).toEqual(['FIXTURE unread']);
+    await host.stop();
+  });
+});

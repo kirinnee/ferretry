@@ -3,7 +3,8 @@ import { LayeredProfileCatalogSchema, type MachineView } from '../../../../../..
 import { AddRuntime } from '../../../../../../app/features/fleet/runtimes/add-runtime.tsx';
 import type { MachineData } from '../../../../../../app/features/fleet/runtimes/machine-data.ts';
 import { useAccountChanges } from '../../../../../../app/features/fleet/shell/apply-change-panel.tsx';
-import { useState } from 'react';
+import { type PlacedPanel, WithSlotPanels } from '@ferretry/app/testing';
+import { type ReactNode, useState } from 'react';
 import { interact, type Mounted, mount as mountView, must } from '../../../../support/dom.ts';
 import {
   APPLIED,
@@ -28,6 +29,12 @@ import {
   withStatus,
 } from '../account-support.ts';
 import { credentialsOf, NOT_INSTALLED_CODEX, refusal, withRuntime } from './support-b.ts';
+import {
+  ADD_RUNTIME_LOGIN_SLOT,
+  ADD_RUNTIME_SIGN_IN_SLOT,
+  isAddRuntimeLoginSlotProps,
+  isAddRuntimeSignInSlotProps,
+} from '../../../../../../contract/index.ts';
 
 const APPLY = `POST /v1/runtimes/proposals/${CHANGE_ID}/apply`;
 const PROPOSE = 'POST /v1/runtimes/proposals';
@@ -100,30 +107,36 @@ interface HostOptions {
   readonly online?: boolean;
   readonly finishes?: (string | null)[];
   readonly reloads?: string[];
+  /** The panels the layout places in the slots the page offers; none: the page as drawn outside a shell. */
+  readonly slots?: Readonly<Record<string, readonly PlacedPanel[]>>;
 }
 
 const mountHost = async (options: HostOptions = {}) => {
   const client = scripted(options.routes ?? READS(), options.calls);
   const initial = options.data ?? DATA;
+  const Shell = ({ children }: { readonly children: ReactNode }) =>
+    options.slots === undefined ? <>{children}</> : <WithSlotPanels slots={options.slots}>{children}</WithSlotPanels>;
 
   function Host() {
     const [data, setData] = useState<MachineData>(initial);
     const changes = useAccountChanges({ client });
     return (
-      <AddRuntime
-        data={data}
-        reload={async () => {
-          options.reloads?.push('reload');
-          const next = options.after ?? data;
-          setData(next);
-          return next;
-        }}
-        changes={changes}
-        machine={options.machine === undefined ? machine() : options.machine}
-        machineName="studio-mac"
-        online={options.online ?? true}
-        onFinish={open => options.finishes?.push(open)}
-      />
+      <Shell>
+        <AddRuntime
+          data={data}
+          reload={async () => {
+            options.reloads?.push('reload');
+            const next = options.after ?? data;
+            setData(next);
+            return next;
+          }}
+          changes={changes}
+          machine={options.machine === undefined ? machine() : options.machine}
+          machineName="studio-mac"
+          online={options.online ?? true}
+          onFinish={open => options.finishes?.push(open)}
+        />
+      </Shell>
     );
   }
 
@@ -207,7 +220,7 @@ describe('Add runtime: Login', () => {
       'There are no logins on studio-mac yet. Add one below: sign in to Claude Code or Codex, or use a provider key.',
     );
     expect(view.container.querySelector('[data-add-runtime-credential]')).toBeNull();
-    // Today's row opened a sign-in in place; this one is a link to Logins' tab (GAP(logins)).
+    // No panel is placed in this suite's shell-less page, so the row is the link to Logins' tab.
     expect(text(view.container, '[data-add-row="login"]')).toBe('Add a new login in Sign-ins');
     expect(view.container.querySelector('[data-add-row="login"]')?.getAttribute('href')).toBe(SIGN_INS);
   });
@@ -241,12 +254,10 @@ describe('Add runtime: Login', () => {
     await click(view.container, '[data-add-runtime-credential="claude-personal"] input');
     expect(view.container.querySelector('[data-add-runtime-needs-sign-in]')).toBeNull();
   });
-
-  it.skip('E13: a login that needs sign-in can be signed in right there … pending port: Logins CredentialSignIn', () => {});
 });
 
 describe('Add runtime: Add a new login', () => {
-  it('links to Logins’ Sign-ins tab instead of opening a sign-in in place', async () => {
+  it('without Logins’ panel placed, links to its Sign-ins tab', async () => {
     const view = await mountHost({ machine: NOT_INSTALLED_CODEX });
     expect(view.container.querySelector('[data-add-runtime-new-login]')).toBeNull();
     const row = must(view.container.querySelector<HTMLAnchorElement>('[data-add-row="login"]'), 'login row');
@@ -260,13 +271,125 @@ describe('Add runtime: Add a new login', () => {
     expect(window.location.pathname).toBe('/d/d1/settings/logins/logins');
     expect(window.location.hash).toBe('#machines/studio-mac/sign-ins');
   });
+});
 
-  it.skip('opens in place under the list, offers a sign-in per tool, and Cancel closes it … pending port: Logins NewLogin', () => {});
-  it.skip('Sign in to Claude Code makes the login, starts its sign-in, and "Use it, sign in later" picks it … pending port: Logins NewLogin', () => {});
-  it.skip('a sign-in finished here picks the new login and re-reads … pending port: Logins CredentialSignIn', () => {});
-  it.skip('a sign-in that cannot start still leaves the login made, says why, and lets it be used … pending port: Logins CredentialSignIn', () => {});
-  it.skip('a login that cannot be made says why right there, and the form below says nothing of it … pending port: Logins NewLogin', () => {});
-  it.skip('Provider key shows the provider grid; Sign in goes back; a key added there comes back picked … pending port: Logins provider grid', () => {});
+/**
+ * The two slots the page offers, filled by stand-in panels: they draw what the page handed them (the props the contract
+ * names, and the subject) and answer through the callbacks only, as Logins' real panels do (its own suite draws those).
+ */
+const PLACED: Record<string, readonly PlacedPanel[]> = {
+  [ADD_RUNTIME_LOGIN_SLOT]: [
+    {
+      plugin: 'logins',
+      id: 'add-runtime-login',
+      view: props => (
+        <div data-fake-add-login={String(isAddRuntimeLoginSlotProps(props))}>
+          <button
+            type="button"
+            data-fake-add=""
+            onClick={() => (props['onAdded'] as (id: string) => void)('claude-new')}
+          >
+            Add
+          </button>
+        </div>
+      ),
+    },
+  ],
+  [ADD_RUNTIME_SIGN_IN_SLOT]: [
+    {
+      plugin: 'logins',
+      id: 'add-runtime-sign-in',
+      view: props => (
+        <div
+          data-fake-sign-in={`${String(props['subject'])}:${String(props['harness'])}:${String(isAddRuntimeSignInSlotProps(props))}`}
+        >
+          <button type="button" data-fake-signed-in="" onClick={() => (props['onSignedIn'] as () => void)()}>
+            Done
+          </button>
+        </div>
+      ),
+    },
+  ],
+};
+
+const NEW_LOGIN: MachineData = {
+  ...DATA,
+  credentials: credentialsOf(
+    credential({ id: 'claude-new', label: 'new', ...withStatus('needs_sign_in'), usedBy: [] }),
+    CREDENTIALS.logins[0] as unknown as Record<string, unknown>,
+  ),
+};
+
+describe('Add runtime: a login added and signed in right here', () => {
+  it('opens Logins’ add-login panel under the list, and Cancel closes it', async () => {
+    const view = await mountHost({ slots: PLACED });
+    const row = must(view.container.querySelector<HTMLButtonElement>('[data-add-row="login"]'), 'login row');
+    expect(row.tagName).toBe('BUTTON');
+    expect(row.getAttribute('href')).toBeNull();
+    expect(row.textContent).toBe('Add a new login');
+    expect(view.container.querySelector('[data-slot]')).toBeNull();
+    await click(view.container, '[data-add-row="login"]');
+    expect(text(view.container, '[data-add-row="login"]')).toBe('Cancel adding a login');
+    expect(
+      view.container.querySelector(`[data-slot="${ADD_RUNTIME_LOGIN_SLOT}"] [data-fake-add-login="true"]`),
+    ).not.toBeNull();
+    expect(window.location.pathname).toBe(SETTINGS);
+    await click(view.container, '[data-add-row="login"]');
+    expect(view.container.querySelector('[data-slot]')).toBeNull();
+  });
+
+  it('a login added there is re-read, listed and picked, and the panel closes', async () => {
+    const reloads: string[] = [];
+    const view = await mountHost({ slots: PLACED, after: NEW_LOGIN, reloads });
+    expect(view.container.querySelector('[data-add-runtime-credential="claude-new"]')).toBeNull();
+    await click(view.container, '[data-add-row="login"]');
+    await click(view.container, '[data-fake-add]');
+    await settle();
+    expect(reloads).toEqual(['reload']);
+    expect(view.container.querySelector('[data-slot]')?.getAttribute('data-slot')).toBe(ADD_RUNTIME_SIGN_IN_SLOT);
+    expect(
+      must(view.container.querySelector<HTMLInputElement>('[data-add-runtime-credential="claude-new"] input'), 'new')
+        .checked,
+    ).toBe(true);
+    expect(view.container.querySelector('[data-add-runtime-part="profile"]')).not.toBeNull();
+  });
+
+  it('E13: a picked login that needs sign-in draws Logins’ sign-in panel for it, and a finished one re-reads', async () => {
+    const reloads: string[] = [];
+    const view = await mountHost({ data: SIGN_IN_NEEDED, slots: PLACED, reloads });
+    await click(view.container, '[data-add-runtime-credential="claude-work"] input');
+    expect(text(view.container, '[data-add-runtime-needs-sign-in]')).toContain(
+      'This login needs sign-in before you launch.',
+    );
+    expect(view.container.querySelector('a[data-add-runtime-sign-in]')).toBeNull();
+    expect(
+      view.container
+        .querySelector(
+          `[data-add-runtime-sign-in-panel="claude-work"] [data-slot="${ADD_RUNTIME_SIGN_IN_SLOT}"] [data-fake-sign-in]`,
+        )
+        ?.getAttribute('data-fake-sign-in'),
+    ).toBe('claude-work:claude-code:true');
+    await click(view.container, '[data-fake-signed-in]');
+    expect(reloads).toEqual(['reload']);
+  });
+
+  it('with no panel placed in a slot each falls back to the link to Logins’ Sign-ins tab', async () => {
+    const view = await mountHost({ data: SIGN_IN_NEEDED, slots: { [ADD_RUNTIME_LOGIN_SLOT]: [] } });
+    expect(view.container.querySelector('[data-add-row="login"]')?.getAttribute('href')).toBe(SIGN_INS);
+    await click(view.container, '[data-add-runtime-credential="claude-work"] input');
+    expect(view.container.querySelector('[data-add-runtime-sign-in]')?.getAttribute('href')).toBe(
+      `${SIGN_INS}/claude-work`,
+    );
+  });
+
+  it('off a machine page there is no daemon to draw the slots for, so the link stays', async () => {
+    window.history.pushState({}, '', '/');
+    const view = await mountHost({ slots: PLACED });
+    expect(view.container.querySelector('[data-add-row="login"]')?.tagName).toBe('A');
+    expect(view.container.querySelector('[data-add-row="login"]')?.getAttribute('href')).toBe(
+      '#machines/studio-mac/sign-ins',
+    );
+  });
 });
 
 describe('Add runtime: Profile', () => {

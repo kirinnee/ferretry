@@ -2,6 +2,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import { forSubject } from '@ferretry/app';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
+import { addRuntimeLoginPanel, addRuntimeSignInPanel } from './features/add-runtime-slots.tsx';
 import { AddLoginPanel, LocalModelsSurface, LoginSignInPanel, QuotaReadout, SignInsTab } from './views.tsx';
 
 /**
@@ -24,6 +25,9 @@ export default implementApp(manifest, {
         }),
       'codex-login': ({ subject }) =>
         createElement(LoginSignInPanel, { client, harness: 'codex', ...(subject === undefined ? {} : { subject }) }),
+      // Runtimes' Add runtime page offers these two slots: a login is added and signed in right there.
+      'add-runtime-login': props => addRuntimeLoginPanel(client, { ...props }),
+      'add-runtime-sign-in': props => addRuntimeSignInPanel(client, { ...props }),
       'local-models': () => createElement(LocalModelsSurface, { client }),
       'quota-readout': () => createElement(QuotaReadout, { client }),
       // The first-run step's body: the sign-ins view, only for its own step.

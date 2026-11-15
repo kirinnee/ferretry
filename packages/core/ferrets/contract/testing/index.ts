@@ -14,6 +14,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import type { LoginStartResolution, RuntimeStartResolution, RuntimeStartSource } from '../hooks.ts';
+import { type CompactAt, CompactAtSchema } from '../view/compact-at.ts';
 import {
   type FerretState,
   type FerretSummary,
@@ -886,6 +887,25 @@ export class FakeFerrets implements FerretsApi {
     if (caller !== undefined && !this.mayTouch(caller, ferret))
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
     return this.#prompts.get(ferret) ?? {};
+  }
+  readonly #compactAt = new Map<FerretId, CompactAt>();
+  /** As the real service: `undefined` for an unknown ferret or one that recorded none, a 403 for a caller that may not touch it. */
+  async compactAt(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined> {
+    if (!this.#ferrets.has(ferret)) return undefined;
+    if (caller !== undefined && !this.mayTouch(caller, ferret))
+      throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
+    return this.#compactAt.get(ferret);
+  }
+  /** As the real service: parsed with the schema (400), 404 for an unknown ferret, 403 for a caller that may not touch it. */
+  async setCompactAt(ferret: FerretId, value: CompactAt | undefined, caller?: FerretId): Promise<void> {
+    if (!this.#ferrets.has(ferret)) throw new ApiError(404, `no ferret ${ferret}`, 'not-found');
+    if (caller !== undefined && !this.mayTouch(caller, ferret))
+      throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
+    const parsed = value === undefined ? undefined : CompactAtSchema.safeParse(value);
+    if (parsed !== undefined && !parsed.success)
+      throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a compact-at value', 'invalid_compact_at');
+    if (parsed === undefined) this.#compactAt.delete(ferret);
+    else this.#compactAt.set(ferret, parsed.data);
   }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */
