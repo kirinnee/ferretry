@@ -121,8 +121,11 @@ async function withUmask(mask: number, act: () => Promise<unknown>): Promise<voi
   }
 }
 
+/** Everything spelled over `/proc/self/fd` runs only where that exists; the `libc` provider runs on both. */
+const ON_LINUX = process.platform === 'linux';
+
 const PROVIDERS: readonly (readonly [string, () => DescriptorCalls])[] = [
-  ['stand-in', standIn],
+  ...(ON_LINUX ? ([['stand-in', standIn]] as const) : []),
   ['libc', () => loadDescriptorCalls()],
 ];
 
@@ -621,104 +624,113 @@ for (const [provider, make] of PROVIDERS) {
 }
 
 describe('BG-001 the seam: what each refusal is made of', () => {
-  test('BG-001 a held folder whose descriptor no longer names the folder it was opened on is refused, and nothing moves', async () => {
-    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-held-`));
-    parents.push(parent);
-    await mkdir(`${parent}/one`);
-    await mkdir(`${parent}/two`);
-    await writeFile(`${parent}/one/a`, 'AAA');
-    const first = openSync(`${parent}/one`, constants.O_RDONLY | constants.O_DIRECTORY);
-    const second = openSync(`${parent}/two`, constants.O_RDONLY | constants.O_DIRECTORY);
-    try {
-      const claim = (fd: number, other: number) => {
-        // a folder that CLAIMS the identity of `other`, as a descriptor number closed and reused by another folder would
-        const stat = fstatSync(other, { bigint: true });
-        return { fd, device: stat.dev, inode: stat.ino };
-      };
-      const calls = standIn();
-      const steps = folderSteps(calls, claim(first, second), async () => {
-        throw new Error('not read');
-      });
-      const target = claim(second, second);
-      holdFolder(target, target);
-      await expect(steps.renameInto('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
-      await expect(steps.identity('a')).rejects.toMatchObject({ code: 'EBADF' });
-      await expect(steps.unlink('a')).rejects.toMatchObject({ code: 'EBADF' });
-      expect(await readFile(`${parent}/one/a`, 'utf8')).toBe('AAA');
-    } finally {
-      closeSync(first);
-      closeSync(second);
-    }
-  });
+  test.skipIf(!ON_LINUX)(
+    'BG-001 a held folder whose descriptor no longer names the folder it was opened on is refused, and nothing moves',
+    async () => {
+      const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-held-`));
+      parents.push(parent);
+      await mkdir(`${parent}/one`);
+      await mkdir(`${parent}/two`);
+      await writeFile(`${parent}/one/a`, 'AAA');
+      const first = openSync(`${parent}/one`, constants.O_RDONLY | constants.O_DIRECTORY);
+      const second = openSync(`${parent}/two`, constants.O_RDONLY | constants.O_DIRECTORY);
+      try {
+        const claim = (fd: number, other: number) => {
+          // a folder that CLAIMS the identity of `other`, as a descriptor number closed and reused by another folder would
+          const stat = fstatSync(other, { bigint: true });
+          return { fd, device: stat.dev, inode: stat.ino };
+        };
+        const calls = standIn();
+        const steps = folderSteps(calls, claim(first, second), async () => {
+          throw new Error('not read');
+        });
+        const target = claim(second, second);
+        holdFolder(target, target);
+        await expect(steps.renameInto('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
+        await expect(steps.identity('a')).rejects.toMatchObject({ code: 'EBADF' });
+        await expect(steps.unlink('a')).rejects.toMatchObject({ code: 'EBADF' });
+        expect(await readFile(`${parent}/one/a`, 'utf8')).toBe('AAA');
+      } finally {
+        closeSync(first);
+        closeSync(second);
+      }
+    },
+  );
 
-  test('BG-001 a DESTINATION folder whose descriptor no longer names the folder it was opened on is refused for a rename and a link, and nothing moves', async () => {
-    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-dest-`));
-    parents.push(parent);
-    await mkdir(`${parent}/one`);
-    await mkdir(`${parent}/two`);
-    await writeFile(`${parent}/one/a`, 'AAA');
-    const first = openSync(`${parent}/one`, constants.O_RDONLY | constants.O_DIRECTORY);
-    const second = openSync(`${parent}/two`, constants.O_RDONLY | constants.O_DIRECTORY);
-    try {
-      const stat = fstatSync(first, { bigint: true });
-      // the SOURCE is exactly the folder it says it is; only the destination descriptor has been closed and reused
-      // by another folder, so it claims the source's identity while naming `two`
-      const source = { fd: first, device: stat.dev, inode: stat.ino };
-      const target = { fd: second, device: stat.dev, inode: stat.ino };
-      holdFolder(target, target);
-      const steps = folderSteps(standIn(), source, async () => {
-        throw new Error('not read');
-      });
-      await expect(steps.renameInto('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
-      await expect(steps.link('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
-      expect(await readFile(`${parent}/one/a`, 'utf8')).toBe('AAA');
-      expect(await readdir(`${parent}/two`)).toEqual([]);
-    } finally {
-      closeSync(first);
-      closeSync(second);
-    }
-  });
+  test.skipIf(!ON_LINUX)(
+    'BG-001 a DESTINATION folder whose descriptor no longer names the folder it was opened on is refused for a rename and a link, and nothing moves',
+    async () => {
+      const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-dest-`));
+      parents.push(parent);
+      await mkdir(`${parent}/one`);
+      await mkdir(`${parent}/two`);
+      await writeFile(`${parent}/one/a`, 'AAA');
+      const first = openSync(`${parent}/one`, constants.O_RDONLY | constants.O_DIRECTORY);
+      const second = openSync(`${parent}/two`, constants.O_RDONLY | constants.O_DIRECTORY);
+      try {
+        const stat = fstatSync(first, { bigint: true });
+        // the SOURCE is exactly the folder it says it is; only the destination descriptor has been closed and reused
+        // by another folder, so it claims the source's identity while naming `two`
+        const source = { fd: first, device: stat.dev, inode: stat.ino };
+        const target = { fd: second, device: stat.dev, inode: stat.ino };
+        holdFolder(target, target);
+        const steps = folderSteps(standIn(), source, async () => {
+          throw new Error('not read');
+        });
+        await expect(steps.renameInto('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
+        await expect(steps.link('a', target, 'b')).rejects.toMatchObject({ code: 'EBADF' });
+        expect(await readFile(`${parent}/one/a`, 'utf8')).toBe('AAA');
+        expect(await readdir(`${parent}/two`)).toEqual([]);
+      } finally {
+        closeSync(first);
+        closeSync(second);
+      }
+    },
+  );
 
-  test('BG-001 BG-003 every descriptor a look, a create and a move open is closed again, on success and on every error path', async () => {
-    const openCount = (): number => readdirSync('/proc/self/fd').length;
-    for (const [provider, make] of PROVIDERS) {
-      const failing: DescriptorCalls = {
-        ...make(),
-        renameat: () => {
-          throw Object.assign(new Error('EXDEV: rename'), { code: 'EXDEV' });
-        },
-      };
-      const f = await fresh(() => failing);
-      const batch = async (): Promise<void> => {
-        await writeFile(`${f.dir}/taken`, 'T', { mode: 0o600 });
-        // looks: a file, nothing at all, a link, and the second look of the denied-for-reading retry
-        await f.fleet
-          .rename(at(f.fleet, 'homes/claude-a/missing'), at(f.fleet, 'homes/claude-a/x'))
-          .catch(() => undefined);
-        await f.fleet
-          .rename(at(f.fleet, 'homes/claude-a/taken'), at(f.fleet, 'homes/claude-a/taken'))
-          .catch(() => undefined);
-        await rm(`${f.dir}/link`, { force: true });
-        await symlink(`${f.parent}/nowhere`, `${f.dir}/link`);
-        await f.fleet
-          .writeText(at(f.fleet, 'homes/claude-a/link'), 'N', { replaceExisting: true })
-          .catch(() => undefined);
-        // creates: onto a taken name (the create fails), and a write whose rename fails after the temp exists
-        await f.fleet.writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { exclusive: true }).catch(() => undefined);
-        await f.fleet.writeText(at(f.fleet, 'homes/claude-a/fresh.json'), 'N').catch(() => undefined);
-        await f.fleet
-          .writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { replaceExisting: true })
-          .catch(() => undefined);
-      };
-      await batch();
-      const before = openCount();
-      for (let round = 0; round < 12; round += 1) await batch();
-      expect({ provider, open: openCount() }).toEqual({ provider, open: before });
-      expect((await readdir(f.dir)).sort()).toEqual(['link', 'taken']);
-    }
-  });
+  test.skipIf(!ON_LINUX)(
+    'BG-001 BG-003 every descriptor a look, a create and a move open is closed again, on success and on every error path',
+    async () => {
+      const openCount = (): number => readdirSync('/proc/self/fd').length;
+      for (const [provider, make] of PROVIDERS) {
+        const failing: DescriptorCalls = {
+          ...make(),
+          renameat: () => {
+            throw Object.assign(new Error('EXDEV: rename'), { code: 'EXDEV' });
+          },
+        };
+        const f = await fresh(() => failing);
+        const batch = async (): Promise<void> => {
+          await writeFile(`${f.dir}/taken`, 'T', { mode: 0o600 });
+          // looks: a file, nothing at all, a link, and the second look of the denied-for-reading retry
+          await f.fleet
+            .rename(at(f.fleet, 'homes/claude-a/missing'), at(f.fleet, 'homes/claude-a/x'))
+            .catch(() => undefined);
+          await f.fleet
+            .rename(at(f.fleet, 'homes/claude-a/taken'), at(f.fleet, 'homes/claude-a/taken'))
+            .catch(() => undefined);
+          await rm(`${f.dir}/link`, { force: true });
+          await symlink(`${f.parent}/nowhere`, `${f.dir}/link`);
+          await f.fleet
+            .writeText(at(f.fleet, 'homes/claude-a/link'), 'N', { replaceExisting: true })
+            .catch(() => undefined);
+          // creates: onto a taken name (the create fails), and a write whose rename fails after the temp exists
+          await f.fleet.writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { exclusive: true }).catch(() => undefined);
+          await f.fleet.writeText(at(f.fleet, 'homes/claude-a/fresh.json'), 'N').catch(() => undefined);
+          await f.fleet
+            .writeText(at(f.fleet, 'homes/claude-a/taken'), 'N', { replaceExisting: true })
+            .catch(() => undefined);
+        };
+        await batch();
+        const before = openCount();
+        for (let round = 0; round < 12; round += 1) await batch();
+        expect({ provider, open: openCount() }).toEqual({ provider, open: before });
+        expect((await readdir(f.dir)).sort()).toEqual(['link', 'taken']);
+      }
+    },
+  );
 
-  test('BG-001 the second folder of a move must be one the host holds', async () => {
+  test.skipIf(!ON_LINUX)('BG-001 the second folder of a move must be one the host holds', async () => {
     const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-stranger-`));
     parents.push(parent);
     await mkdir(`${parent}/one`);
@@ -771,48 +783,75 @@ describe('BG-001 the host without descriptor calls, and the host with /proc, are
     expect(await readFile(`${f.dir}/sub/a`, 'utf8')).toBe('AAA');
   });
 
-  test('BG-001 on Linux with /proc the descriptor calls are never asked for (lazy, unreachable), and no `at` is offered', async () => {
-    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-linux-`));
-    parents.push(parent);
-    let asked = 0;
-    const fs = nodeFs(() => 'x', {
-      descriptorCalls: () => {
-        asked += 1;
-        return standIn();
-      },
-    });
-    const folder = await fs.openDirectory(parent);
-    try {
-      expect(folder.at).toBeUndefined();
-      expect(folder.entryPath('a')).toContain('/proc/self/fd/');
-    } finally {
-      await folder.close();
-    }
-    expect(asked).toBe(0);
-  });
-
-  test('BG-001 a host without /proc asks for the calls once, however many folders it opens', async () => {
-    const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-once-`));
-    parents.push(parent);
-    let asked = 0;
-    const fs = nodeFs(() => 'x', {
-      descriptorFolder: NO_PROC,
-      descriptorCalls: () => {
-        asked += 1;
-        return standIn();
-      },
-    });
-    for (let index = 0; index < 3; index += 1) {
+  test.skipIf(!ON_LINUX)(
+    'BG-001 on Linux with /proc the descriptor calls are never asked for (lazy, unreachable), and no `at` is offered',
+    async () => {
+      const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-linux-`));
+      parents.push(parent);
+      let asked = 0;
+      const fs = nodeFs(() => 'x', {
+        descriptorCalls: () => {
+          asked += 1;
+          return standIn();
+        },
+      });
       const folder = await fs.openDirectory(parent);
-      expect(folder.at).toBeDefined();
-      await folder.close();
-    }
-    expect(asked).toBe(1);
-  });
+      try {
+        expect(folder.at).toBeUndefined();
+        expect(folder.entryPath('a')).toContain('/proc/self/fd/');
+      } finally {
+        await folder.close();
+      }
+      expect(asked).toBe(0);
+    },
+  );
+
+  test.skipIf(!ON_LINUX)(
+    'BG-001 a host without /proc asks for the calls once, however many folders it opens',
+    async () => {
+      const parent = await realpath(await mkdtemp(`${tmpdir()}/root-rename-ffi-once-`));
+      parents.push(parent);
+      let asked = 0;
+      const fs = nodeFs(() => 'x', {
+        descriptorFolder: NO_PROC,
+        descriptorCalls: () => {
+          asked += 1;
+          return standIn();
+        },
+      });
+      for (let index = 0; index < 3; index += 1) {
+        const folder = await fs.openDirectory(parent);
+        expect(folder.at).toBeDefined();
+        await folder.close();
+      }
+      expect(asked).toBe(1);
+    },
+  );
 });
 
-// The same cases against the real macOS library: libSystem.B.dylib, `__error`, and Apple's arm64 handling of the
-// variadic `mode`. A Linux box skips it; the `kernel-darwin` step of the smoke-darwin attempts runs it on macos-15.
+// Apple's arm64 ABI passes openat's variadic `mode` on the stack, where the binding puts it in a register, so the
+// kernel may read ANY mode for a file this binding creates. The guard is the owner-only umask around the create plus the
+// fchmod before any content: whatever the library read, no other user's bit exists while the name does, and the file ends
+// with exactly the asked bits. Swept over modes that would be harmless, narrow and wide if the library read them as given.
+// It drives the REAL binding (`libc.so.6` here, `libSystem.B.dylib` on a Mac, no /proc), so it runs on both boxes.
+describe('BG-003 the variadic openat mode is never what decides the mode a create is seen with, on the real library', () => {
+  for (const asked of [0o000, 0o600, 0o640, 0o777]) {
+    test(`BG-003 on the real library a create asked for mode ${asked.toString(8)} is owner-only at the create and exact after the fchmod`, async () => {
+      const seen: Seen = { umasks: [], modes: [] };
+      const f = await fresh(() => recording(loadDescriptorCalls(), {}, seen));
+      await withUmask(0o000, () =>
+        f.fleet.writeText(at(f.fleet, 'homes/claude-a/variadic.json'), 'V', { mode: asked }),
+      );
+      expect(seen.umasks).toEqual([0o077]);
+      expect(seen.modes.length).toBe(1);
+      for (const mode of seen.modes) expect(mode & 0o077).toBe(0);
+      expect(((await lstat(`${f.dir}/variadic.json`)).mode & 0o7777).toString(8)).toBe(asked.toString(8));
+    });
+  }
+});
+
+// The same cases against the real macOS library: libSystem.B.dylib, `__error`, and the real `fchdir`/`mkdirat`. A Linux
+// box skips it; the `kernel-darwin` step of the smoke-darwin attempts runs it on macos-15.
 describe.skipIf(process.platform !== 'darwin')('BG-001 BG-003 on macOS with the real libSystem calls', () => {
   test('BG-001 BG-003 a parent swap after the check moves and writes inside the held folders only', async () => {
     let swapped = false;
@@ -840,24 +879,6 @@ describe.skipIf(process.platform !== 'darwin')('BG-001 BG-003 on macOS with the 
     await f.fleet.writeText(at(f.fleet, 'homes/claude-a/dest/c.json'), 'NEW', { mode: 0o640 });
     expect(((await lstat(`${f.dir}/dest/c.json`)).mode & 0o7777).toString(8)).toBe('640');
   });
-
-  // Apple's arm64 ABI passes openat's variadic `mode` on the stack, where the binding puts it in a register, so the
-  // kernel may read ANY mode for a file this binding creates. The guard is the owner-only umask around the create plus the
-  // fchmod before any content: whatever the library read, no other user's bit exists while the name does, and the file ends
-  // with exactly the asked bits. Swept over modes that would be harmless, narrow and wide if the library read them as given.
-  for (const asked of [0o000, 0o600, 0o640, 0o777]) {
-    test(`BG-003 on the real library a create asked for mode ${asked.toString(8)} is owner-only at the create and exact after the fchmod`, async () => {
-      const seen: Seen = { umasks: [], modes: [] };
-      const f = await fresh(() => recording(loadDescriptorCalls(), {}, seen));
-      await withUmask(0o000, () =>
-        f.fleet.writeText(at(f.fleet, 'homes/claude-a/variadic.json'), 'V', { mode: asked }),
-      );
-      expect(seen.umasks).toEqual([0o077]);
-      expect(seen.modes.length).toBe(1);
-      for (const mode of seen.modes) expect(mode & 0o077).toBe(0);
-      expect(((await lstat(`${f.dir}/variadic.json`)).mode & 0o7777).toString(8)).toBe(asked.toString(8));
-    });
-  }
 
   test('BG-001 an existing destination and a link at the leaf are refused on the real library', async () => {
     const f = await fresh(() => loadDescriptorCalls());

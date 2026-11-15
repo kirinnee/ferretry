@@ -75,7 +75,10 @@ function replaceDescriptor(fd: number, path: string): void {
   expect(now).toBe(fd);
 }
 
-describe('S179 a held child below a held folder (a host with no /proc/self/fd)', () => {
+/** The stand-in calls and `descriptorOn` read `/proc/self/fd`; only Linux has it, so a Mac runs the real-library cases alone. */
+const ON_LINUX = process.platform === 'linux';
+
+describe.skipIf(!ON_LINUX)('S179 a held child below a held folder (a host with no /proc/self/fd)', () => {
   test('S179 a nested folder is made and opened below a held child, and chmod and sync act on it', async () => {
     const parent = await scratch();
     const disk = macOS();
@@ -147,18 +150,21 @@ describe('S179 openChild refuses a name that is not one plain name, and a descri
     }
   });
 
-  test('S179 a held folder whose descriptor number now names another folder answers EBADF and makes nothing', async () => {
-    const parent = await scratch();
-    await mkdir(`${parent}/held`);
-    await mkdir(`${parent}/other`);
-    const top = await nodeFs(() => crypto.randomUUID()).openDirectory(`${parent}/held`);
-    const fd = Number(/\/proc\/self\/fd\/(\d+)\//.exec(top.entryPath('x') ?? '')?.[1]);
-    replaceDescriptor(fd, `${parent}/other`);
-    await expect(top.openChild('made', { mode: 0o700 })).rejects.toMatchObject({ code: 'EBADF' });
-    expect(await stat(`${parent}/other/made`).catch(() => undefined)).toBeUndefined();
-    expect(await stat(`${parent}/held/made`).catch(() => undefined)).toBeUndefined();
-    await top.close();
-  });
+  test.skipIf(!ON_LINUX)(
+    'S179 a held folder whose descriptor number now names another folder answers EBADF and makes nothing',
+    async () => {
+      const parent = await scratch();
+      await mkdir(`${parent}/held`);
+      await mkdir(`${parent}/other`);
+      const top = await nodeFs(() => crypto.randomUUID()).openDirectory(`${parent}/held`);
+      const fd = Number(/\/proc\/self\/fd\/(\d+)\//.exec(top.entryPath('x') ?? '')?.[1]);
+      replaceDescriptor(fd, `${parent}/other`);
+      await expect(top.openChild('made', { mode: 0o700 })).rejects.toMatchObject({ code: 'EBADF' });
+      expect(await stat(`${parent}/other/made`).catch(() => undefined)).toBeUndefined();
+      expect(await stat(`${parent}/held/made`).catch(() => undefined)).toBeUndefined();
+      await top.close();
+    },
+  );
 
   test('R-0198 openFile refuses a name that is not one plain name (EINVAL) on either host', async () => {
     const parent = await scratch();

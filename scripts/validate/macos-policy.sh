@@ -77,8 +77,10 @@ workflow_job_has "${smoke_workflow}" backoff-1 '!inputs[.]advisory' 'must not re
 kernel_darwin_action=".github/actions/kernel-darwin/action.yml"
 [ -f "${kernel_darwin_action}" ] || fail "${kernel_darwin_action} is missing"
 for file in root-rename-ffi root-remove-bracket node-fs-held-folder; do
-  rg -q -- "bun test --config=bunfig[.]int[.]toml packages/core/kernel/tests/integration/host/${file}[.]test[.]ts\$" "${kernel_darwin_action}" ||
-    fail "${kernel_darwin_action}: must run packages/core/kernel/tests/integration/host/${file}.test.ts with bunfig.int.toml, one file per step"
+  # ... each bounded by coreutils `timeout` (a composite step has no timeout-minutes, so a hung FFI call would run to the
+  # job's limit and read as a cut-short run, green with a warning on a pull request) and given the int tier's per-test budget.
+  rg -q -- "in-devshell[.]sh timeout --kill-after=[0-9]+ [0-9]+ bun test --config=bunfig[.]int[.]toml --timeout 120000 packages/core/kernel/tests/integration/host/${file}[.]test[.]ts\$" "${kernel_darwin_action}" ||
+    fail "${kernel_darwin_action}: must run packages/core/kernel/tests/integration/host/${file}.test.ts as 'timeout --kill-after=<s> <s> bun test --config=bunfig.int.toml --timeout 120000 <file>', one file per step"
   [ -f "packages/core/kernel/tests/integration/host/${file}.test.ts" ] || fail "the darwin test file ${file}.test.ts does not exist"
 done
 workflow_job_has "${smoke_workflow}" verdict 'scripts/ci/macos-smoke-verdict[.]sh' 'must judge through scripts/ci/macos-smoke-verdict.sh'
