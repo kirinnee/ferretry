@@ -63,12 +63,17 @@ async function window(root: RootHandle, file: FencedPath, offset: number, length
     .catch(() => undefined);
 }
 
-/** Whether the rollout's head or tail window contains `needle` (today's `contains`). */
-async function contains(root: RootHandle, rollout: Rollout, needle: string): Promise<boolean> {
-  if ((await window(root, rollout.file, 0, HEAD_BYTES))?.includes(needle) === true) return true;
-  if (rollout.size <= HEAD_BYTES) return false;
+/**
+ * Whether the rollout's head or tail window contains `needle` (today's `contains`): `undefined` when a window it needed
+ * could not be read, which the transcript reader takes as "no" and a recorded proof takes as doubt.
+ */
+async function contains(root: RootHandle, rollout: Rollout, needle: string): Promise<boolean | undefined> {
+  const head = await window(root, rollout.file, 0, HEAD_BYTES);
+  if (head?.includes(needle) === true) return true;
+  if (rollout.size <= HEAD_BYTES) return head === undefined ? undefined : false;
   const tail = await window(root, rollout.file, Math.max(HEAD_BYTES, rollout.size - TAIL_BYTES), TAIL_BYTES);
-  return tail?.includes(needle) === true;
+  if (tail?.includes(needle) === true) return true;
+  return head === undefined || tail === undefined ? undefined : false;
 }
 
 type Ports = Pick<KernelPorts, 'roots' | 'clock' | 'redaction' | 'state'>;
@@ -103,6 +108,7 @@ async function rollouts(root: RootHandle, directory: string): Promise<readonly R
 async function walkRollouts(
   root: RootHandle,
   directory: string,
+  absent?: () => Promise<boolean>,
 ): Promise<{ readonly found: readonly Rollout[]; readonly complete: boolean }> {
   const pending = [directory];
   const found: Rollout[] = [];
@@ -115,9 +121,12 @@ async function walkRollouts(
       complete = false;
       continue;
     }
-    const entries = await root.entries(path.value).catch(() => {
-      // A folder that does not exist hides nothing; one that cannot be listed might.
-      if (relative !== directory) complete = false;
+    const entries = await root.entries(path.value).catch(async () => {
+      // A folder that does not exist hides nothing; one that cannot be listed might. Only the walk's own top folder may
+      // be absent (a home no rollout was written in yet), and only when `absent` PROVES it is not there (the kernel
+      // refuses a missing root folder exactly as it refuses one it may not enter, so the refusal alone proves nothing).
+      const proved = relative === directory && absent !== undefined && (await absent().catch(() => false));
+      if (!proved) complete = false;
       return [];
     });
     for (const entry of entries) {
@@ -158,6 +167,24 @@ export class CodexRollouts {
     return this.kernel.roots.root('agent-homes', { subfolder: ferret });
   }
 
+  /**
+   * Whether this ferret's `sessions` folder is PROVED absent, from the listings above it: the ferret's home is not in the
+   * agent homes, or `sessions` is not in the ferret's home. Any listing that fails is no proof (`false`).
+   */
+  private async sessionsAbsent(ferret: FerretId): Promise<boolean> {
+    const named = async (root: RootHandle, name: string): Promise<boolean> => {
+      const folder = root.resolve('');
+      if (!folder.ok) throw new Error('the folder could not be placed');
+      return (await root.entries(folder.value)).some(entry => entry.name === name);
+    };
+    try {
+      if (!(await named(this.kernel.roots.root('agent-homes'), ferret))) return true;
+      return !(await named(this.owner(ferret), 'sessions'));
+    } catch {
+      return false;
+    }
+  }
+
   private async binding(ferret: FerretId): Promise<Binding | undefined> {
     const read = await this.kernel.state.read(CODEX_ROLLOUTS, ferret);
     if (!read.ok) throw new Error('Codex rollout ownership state is damaged');
@@ -174,13 +201,16 @@ export class CodexRollouts {
     // A new launch (a resume names its own conversation) may prove another rollout: forget the one remembered.
     this.forget(spec.ferret);
     const root = this.kernel.roots.root('agent-homes', { subfolder: `${spec.ferret}/sessions` });
-    const existing = await rollouts(root, '');
+    const existing = await walkRollouts(root, '', async () => await this.sessionsAbsent(spec.ferret));
     await this.kernel.state.write(
       CODEX_ROLLOUTS,
       {
         format: 1,
         home: home.value,
-        baseline: existing.map(item => item.id),
+        baseline: existing.found.map(item => item.id),
+        // Whether that baseline saw EVERY rollout already there: one it missed (a folder or a header it could not read)
+        // is not excluded, and the correlation marker is per HOME, so it could later pass for this launch's.
+        baselineComplete: existing.complete,
         ...(native === undefined ? {} : { native }),
       },
       spec.ferret,
@@ -195,9 +225,30 @@ export class CodexRollouts {
   async has(ferret: FerretId, native: string): Promise<boolean | undefined> {
     try {
       const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
-      const walked = await walkRollouts(root, '');
+      const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
       if (walked.found.some(rollout => rollout.id === native)) return true;
       return walked.complete ? false : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The conversation this ferret's last launch is PROVED to have written (`Harness.provedConversation`): proved afresh,
+   * from the launch's binding (its baseline and the correlation marker only it typed, or the native id it resumed), never
+   * by folder or recency. It is RECORDED and resumed, so it is proved STRICTLY: `undefined` on any doubt — no binding, a
+   * home that is not the ferret's own, none or two candidates, a walk now that did not see everything (a cap, a folder or
+   * a header it could not read, a correlation window it could not read), or, for a launch that named no conversation, a
+   * baseline that did not see everything (or a binding from before that was recorded, which is treated the same way).
+   */
+  async provedConversation(
+    ferret: FerretId,
+  ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined> {
+    try {
+      const found = await this.proveAfresh(ferret, true);
+      return found === undefined
+        ? undefined
+        : { id: found.rollout.id, file: found.rollout.file, home: found.binding.home };
     } catch {
       return undefined;
     }
@@ -233,6 +284,7 @@ export class CodexRollouts {
   /** The proof itself, from the binding and the files on disk, never from the remembered one (which it replaces). */
   private async proveAfresh(
     ferret: FerretId,
+    strict = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
     const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
     this.#proved.forget(ferret);
@@ -240,7 +292,13 @@ export class CodexRollouts {
     if (binding === undefined) return undefined;
     const ownHome = this.owner(ferret).resolve('');
     if (!ownHome.ok || ownHome.value !== binding.home) return undefined;
-    const candidates = await rollouts(root, '');
+    // STRICT (a proof that is recorded): a launch that named no conversation is proved only against a baseline that saw
+    // everything, and only by a walk now that sees everything, so a rollout either one missed cannot be passed over or
+    // taken for this launch's. The transcript reader keeps its own (unrecorded) proof.
+    if (strict && binding.native === undefined && binding.baselineComplete !== true) return undefined;
+    const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
+    if (strict && !walked.complete) return undefined;
+    const candidates = walked.found;
     let chosen: Rollout | undefined;
     if (binding.native !== undefined) {
       const matches = candidates.filter(candidate => candidate.id === binding.native);
@@ -248,8 +306,12 @@ export class CodexRollouts {
     } else {
       const needle = `${binding.home}/codex-correlation/unreachable`;
       const evidence = [];
-      for (const candidate of candidates)
-        evidence.push({ id: candidate.id, file: candidate.file, correlated: await contains(root, candidate, needle) });
+      for (const candidate of candidates) {
+        const correlated = await contains(root, candidate, needle);
+        // A window that could not be read may hide this launch's marker: doubt, for a recorded proof.
+        if (strict && correlated === undefined) return undefined;
+        evidence.push({ id: candidate.id, file: candidate.file, correlated: correlated === true });
+      }
       const selected = selectCodexRollout(evidence, { baseline: binding.baseline });
       chosen = selected === undefined ? undefined : candidates.find(candidate => candidate.file === selected.file);
     }

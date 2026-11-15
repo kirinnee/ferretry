@@ -89,6 +89,7 @@ import {
   REAL_HARNESS_REFUSED,
   runnerDeliveryFailure,
   StartRefusalCodeSchema,
+  TranscriptProvenanceSchema,
   type FerretDetails,
 } from '../../../contract/index.ts';
 import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
@@ -637,8 +638,9 @@ export const CONVERSATION_NOT_FOUND =
 
 /**
  * What a relaunch typed ahead of its turn when it had NO conversation to resume: the machine never recorded which one was
- * the ferret's (Codex mints its id after launch and v5 does not record it; a v4 ferret whose rollout v4 never found was
- * converted without one), so a new one was started and the agent is told it remembers nothing. Fixed text.
+ * the ferret's (a Codex ferret stopped before its launch provably wrote a rollout, see `withProvedConversation`; a v4
+ * ferret whose rollout v4 never found was converted without one), so a new one was started and the agent is told it
+ * remembers nothing. Fixed text.
  */
 export const CONVERSATION_UNKNOWN =
   'Your earlier conversation was not resumed: this machine never recorded which conversation was yours (a Codex ferret, or one moved from Ferretry 4, can be without one), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
@@ -1118,6 +1120,10 @@ export class FerretsService implements FerretsApi {
     await this.settle(record, 'stopped', 'stopped', cause);
     // Today's `session.stopped` journal event, with the reason the caller gave or the lifecycle default.
     await this.ports.history?.(ferret, 'session.stopped', { reason: reason?.trim() || DEFAULT_STOP_REASON });
+    // Once stopped, the conversation its launch provably wrote is recorded (Codex), so the id is on the record before any
+    // resume asks for it. Best effort: a stop never fails over it.
+    const stopped = this.registry.get(ferret);
+    if (stopped !== undefined) await this.withProvedConversation(stopped).catch(() => undefined);
   }
 
   /**
@@ -1287,7 +1293,13 @@ export class FerretsService implements FerretsApi {
     }
     const settled = replacing ? await this.releaseLive(found) : found;
     // The target is written with the record's `starting` state, then launched: one owner of the runtime, login and harness.
-    const record = onAccount(target === undefined ? settled : (this.retarget(settled, target) as FerretRecord));
+    const record =
+      target === undefined
+        ? // A plain resume or Restart of a ferret whose harness names its conversation after launch (Codex): the one its
+          // last launch provably wrote is recorded first, so this relaunch resumes it instead of starting anew. A move
+          // names its own conversation (or chose a fresh one) and is never given one this way.
+          await this.withProvedConversation(onAccount(settled))
+        : onAccount(this.retarget(settled, target) as FerretRecord);
     const { cause: _ended, ...revived } = record;
     const starting: FerretRecord = { ...revived, state: 'starting', stateAt: this.ports.now() };
     // The move's model and effort are start options, so details own them (the record keeps the ones it restamped, and the
@@ -1534,6 +1546,38 @@ export class FerretsService implements FerretsApi {
       if (!answer.ok) return failed('login_unavailable', answer.error);
     }
     return ok(undefined);
+  }
+
+  /**
+   * The record with the conversation its harness PROVES its last launch wrote (`Harness.provedConversation`: Codex names
+   * its conversation after launch, so a start records none), written as `harnessConversation` and a `correlated`
+   * transcript so the next resume names it. Idempotent: a record that already names one is returned as it is, and so is
+   * one whose harness proves nothing (Claude Code names its conversation at launch) or cannot tell (any doubt, an error,
+   * an id or a transcript that does not parse). The id is journalled once, as `session.conversation_recorded`.
+   */
+  private async withProvedConversation(record: FerretRecord): Promise<FerretRecord> {
+    if (record.harnessConversation !== undefined) return record;
+    const found = await this.ports
+      .harness(record.harness)
+      ?.provedConversation?.(record.id)
+      .catch(() => undefined);
+    if (found === undefined) return record;
+    const id = FerretRecordSchema.shape.harnessConversation.safeParse(found.id);
+    const transcript = TranscriptProvenanceSchema.safeParse({
+      v: 1,
+      home: found.home,
+      harnessSessionId: found.id,
+      identity: 'correlated',
+      file: found.file,
+      resolvedAt: this.ports.now(),
+    });
+    if (!id.success || id.data === undefined || !transcript.success) return record;
+    const recorded: FerretRecord = { ...record, harnessConversation: id.data, transcript: transcript.data };
+    await this.write(recorded, record.state, 'state');
+    await this.ports
+      .history?.(record.id, 'session.conversation_recorded', { conversation: id.data })
+      .catch(() => undefined);
+    return recorded;
   }
 
   /**

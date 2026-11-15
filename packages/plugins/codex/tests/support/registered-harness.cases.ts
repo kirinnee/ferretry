@@ -397,6 +397,51 @@ export function registeredHarnessCases(): void {
       expect(await harness.transcript.read(spec.ferret)).toEqual([]);
     });
 
+    test('codex-resume-id: start, rollout proved, stop, then resume names the proved id on the argv (`resume <id>`)', async () => {
+      const box = fixture();
+      const harness = box.build();
+      const spec = box.spec();
+      await harness.start(spec, box.runner, ENV);
+      // Nothing written yet: nothing proved.
+      expect(await harness.provedConversation?.(spec.ferret)).toBeUndefined();
+      const file = `${spec.home}/sessions/2026/10/20/rollout-native.jsonl`;
+      box.files.set(file, header('native-proved', spec.home) + message('first turn'));
+      const stopper = { stop: async () => undefined } as unknown as Parameters<NonNullable<typeof harness.stop>>[2];
+      await harness.stop(spec.ferret, '%1' as never, stopper, 'now');
+
+      // A stopped ferret's rollout is still proved (from the launch's binding), by a daemon that restarted too.
+      const proved = await box.build().provedConversation?.(spec.ferret);
+      expect(proved).toEqual({ id: 'native-proved', file, home: spec.home });
+
+      await harness.resume(spec, box.runner, ENV, proved?.id as string);
+      const argv = box.commands.at(-1)?.command ?? [];
+      const at = argv.indexOf('resume');
+      expect(at).toBeGreaterThan(0);
+      expect(argv[at + 1]).toBe('native-proved');
+      // And the resumed launch proves the same conversation by its native id.
+      expect(await harness.provedConversation?.(spec.ferret)).toEqual({ id: 'native-proved', file, home: spec.home });
+    });
+
+    test('codex-resume-id: never proves a rollout that is not provably this ferret’s (baseline, stranger, two candidates)', async () => {
+      const box = fixture();
+      const harness = box.build();
+      const spec = box.spec();
+      box.files.set(`${spec.home}/sessions/rollout-old.jsonl`, header('baseline', spec.home) + message('old'));
+      await harness.start(spec, box.runner, ENV);
+      // A rollout that was there before the launch is somebody else's, correlated or not.
+      expect(await harness.provedConversation?.(spec.ferret)).toBeUndefined();
+      // A new rollout without this launch's correlation marker is a stranger's, however recent.
+      box.files.set(`${spec.home}/sessions/stranger.jsonl`, header('stranger', '/somebody-else') + message('x'));
+      expect(await harness.provedConversation?.(spec.ferret)).toBeUndefined();
+      box.files.set(`${spec.home}/sessions/one.jsonl`, header('native-one', spec.home) + message('mine'));
+      expect((await harness.provedConversation?.(spec.ferret))?.id).toBe('native-one');
+      // Two correlated: ambiguous, so none is claimed.
+      box.files.set(`${spec.home}/sessions/two.jsonl`, header('native-two', spec.home) + message('also'));
+      expect(await harness.provedConversation?.(spec.ferret)).toBeUndefined();
+      // Another ferret proves nothing from this one's home.
+      expect(await harness.provedConversation?.(box.spec('f2').ferret)).toBeUndefined();
+    });
+
     test('discovery reads only head and tail windows; only the owned rollout is read whole', async () => {
       const box = fixture();
       const harness = box.build();

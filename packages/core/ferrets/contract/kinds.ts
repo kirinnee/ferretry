@@ -819,6 +819,17 @@ export interface Harness {
    * so; on `true` or `undefined` it resumes as before. Absent: every resume is attempted as asked.
    */
   hasConversation?(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined>;
+  /**
+   * Additive (codex-resume-id): the conversation this ferret's LAST launch is PROVED to have written, for a harness that
+   * names its own conversation after launch (Codex), so Ferrets can record it and a later resume names it. Proved means
+   * by the harness's own evidence of this launch (Codex: the correlation marker only this launch typed, in a rollout that
+   * was not there before it), never by folder or recency; `undefined` on any doubt, and while none is written yet.
+   * `home` is the harness home the launch exported, `file` the conversation's file in it. Absent (Claude Code, which
+   * names its conversation on the launch argv): nothing is recorded this way.
+   */
+  provedConversation?(
+    ferret: FerretId,
+  ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined>;
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;

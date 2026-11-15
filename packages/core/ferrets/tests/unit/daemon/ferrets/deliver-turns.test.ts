@@ -1760,3 +1760,119 @@ describe('run 8: a relaunch with NO conversation to resume starts a new one and 
     expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
   });
 });
+
+describe('codex-resume-id: the conversation a Codex-like launch provably wrote is recorded and resumed', () => {
+  /** A harness that names no conversation at launch (as Codex) and proves one only once `proof` holds it. */
+  const provingCodex = (w: World, proof: { id?: string; throws?: boolean }) => {
+    const calls: string[] = [];
+    const asked: string[] = [];
+    const start = w.harness.start.bind(w.harness);
+    w.harness.start = async (spec, runner, env) => {
+      calls.push('start');
+      const started = await start(spec, runner, env);
+      if (!started.ok) return started;
+      const { harnessConversation: _minted, ...unnamed } = started.value;
+      return ok(unnamed);
+    };
+    const resume = w.harness.resume.bind(w.harness);
+    w.harness.resume = async (spec, runner, env, conversation) => {
+      calls.push(`resume ${conversation}`);
+      return await resume(spec, runner, env, conversation);
+    };
+    Object.assign(w.harness, {
+      hasConversation: async (_spec: unknown, conversation: string) => conversation === proof.id,
+      provedConversation: async (ferret: string) => {
+        asked.push(ferret);
+        if (proof.throws === true) throw new Error('the sessions folder could not be read');
+        return proof.id === undefined
+          ? undefined
+          : { id: proof.id, file: `/agent-homes/${ferret}/sessions/rollout.jsonl`, home: `/agent-homes/${ferret}` };
+      },
+    });
+    return { calls, asked };
+  };
+
+  test('start, rollout proved, stop records it, resume uses resume <id>: nothing is said about a new conversation', async () => {
+    const w = await world();
+    const proof: { id?: string } = {};
+    const { calls } = provingCodex(w, proof);
+    const id = await started(w);
+    expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+    // The first turn writes the rollout; the harness can prove it from now on.
+    proof.id = 'native-019a';
+    await w.service.stop(id as never, 'now');
+    const record = w.registry.get(id as never);
+    expect(record?.harnessConversation).toBe('native-019a');
+    expect(record?.transcript).toMatchObject({
+      identity: 'correlated',
+      harnessSessionId: 'native-019a',
+      file: `/agent-homes/${id}/sessions/rollout.jsonl`,
+      home: `/agent-homes/${id}`,
+    });
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start', 'resume native-019a']);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe('native-019a');
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 1)),
+    ]);
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+    expect(w.history.filter(event => event.type === 'session.conversation_recorded')).toEqual([
+      { ferret: id, type: 'session.conversation_recorded', data: { conversation: 'native-019a' } },
+    ]);
+  });
+
+  test('a Restart of a RUNNING ferret (the live pane replaced) records the proved conversation and resumes it', async () => {
+    const w = await world();
+    const proof: { id?: string } = {};
+    const { calls } = provingCodex(w, proof);
+    const id = await started(w);
+    proof.id = 'native-live';
+    const relaunched = await w.service.resume(id as never, undefined, {
+      origin: PERSON_ORIGIN,
+      actor: 'daemon',
+      replaceLiveTerminal: true,
+    });
+    expect(relaunched.ok).toBe(true);
+    expect(calls).toEqual(['start', 'resume native-live']);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe('native-live');
+  });
+
+  test('nothing proved (none written yet, or any doubt) records nothing: a new conversation, said as unknown', async () => {
+    for (const proof of [{}, { throws: true }]) {
+      const w = await world();
+      const { calls } = provingCodex(w, proof);
+      const id = await started(w);
+      await w.service.stop(id as never, 'now');
+      expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+      expect(w.registry.get(id as never)?.transcript).toBeUndefined();
+      const typed = w.runner.deliveries.length;
+
+      expect((await revive(w, id)).ok).toBe(true);
+
+      expect(calls).toEqual(['start', 'start']);
+      expect(w.runner.deliveries.slice(typed)[0]?.delivery.text.startsWith(CONVERSATION_UNKNOWN)).toBe(true);
+      expect(w.history.some(event => event.type === 'session.conversation_recorded')).toBe(false);
+    }
+  });
+
+  test('idempotent, and Claude-like harnesses are untouched: a record that names its conversation is never re-proved', async () => {
+    const w = await world();
+    const asked: string[] = [];
+    Object.assign(w.harness, {
+      provedConversation: async (ferret: string) => {
+        asked.push(ferret);
+        return { id: 'someone-else', file: '/x/rollout.jsonl', home: '/x' };
+      },
+    });
+    // FakeHarness names its conversation at launch, as Claude Code does.
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(asked).toEqual([]);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe(`conv-${id}`);
+    expect(w.history.some(event => event.type === 'session.conversation_recorded')).toBe(false);
+  });
+});

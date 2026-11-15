@@ -112,6 +112,8 @@ export const CodexRolloutBindingSchema = z.strictObject({
   format: z.literal(1),
   home: z.string(),
   baseline: z.array(z.string()),
+  /** Whether the baseline saw every rollout already there (absent in a binding written before it was recorded). */
+  baselineComplete: z.boolean().optional(),
   native: z.string().optional(),
 });
 export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
