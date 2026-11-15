@@ -8,6 +8,8 @@ const WHY: Readonly<Record<RestartQueued['reason'], string>> = {
   'mid-turn': 'it is working; it restarts at its next idle moment',
   'in-flight': 'it has work a restart would lose; it restarts once that is done',
   'own-session': 'it is the session that asked; it restarts when its own turn ends',
+  blocked:
+    'its runtime cannot start now (a login may need sign-in); it keeps running as it is and restarts once it can',
 };
 
 /** What a restart did, as lines a person reads: restarted now first, then waiting, left alone and failed. */

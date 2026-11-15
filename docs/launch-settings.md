@@ -159,13 +159,21 @@ in-flight inventory and is **never forced past it**: a running test, a held proc
 question all refuse it. A refusal is not an error; the ferret is **queued** and restarted at its next idle
 moment (its turn is the owner's, or it declared a wait), once the inventory agrees.
 
-| Outcome   | Meaning                                                                                        |
-| --------- | ---------------------------------------------------------------------------------------------- |
-| restarted | idle, and the inventory agreed: restarted now                                                  |
-| queued    | `mid-turn`, `in-flight` (the inventory refused), or `own-session` (see below); restarted later |
-| skipped   | not found, or not running                                                                      |
-| failed    | the restart itself failed; the others carry on                                                 |
+| Outcome   | Meaning                                                                                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------- |
+| restarted | idle, and the inventory agreed: restarted now                                                                     |
+| queued    | `mid-turn`, `in-flight` (the inventory refused), `own-session` (see below), or `blocked` (below); restarted later |
+| skipped   | not found, or not running                                                                                         |
+| failed    | the restart itself failed; the others carry on                                                                    |
 
+- **A restart never stops a ferret it cannot start again.** It is ONE relaunch that replaces the live pane (as a
+  move is): the runtime and its login, the folder, the start gate and the harness are judged first, and only then is
+  the old harness stopped. When the runtime cannot start (a login that needs sign-in, a runtime switched off) the
+  ferret keeps running untouched and the restart is **queued `blocked`**; its history says why once
+  (`session.restart_blocked`, with the reason), not on every try, and the drain tries again on the backoff below, so it
+  restarts by itself once the owner signs the login in (`fy login signin <login>`). Any other refusal (a folder the
+  fence refuses never clears by itself) also leaves the ferret running, and gives up (`session.restart_gave_up`, with
+  the reason), as does a launch that fails after the stop.
 - **The caller's own session is always queued.** A ferret that runs `fy restart` never restarts itself
   mid-turn: the CLI sends its own session id and the daemon waits until its turn has ended.
 - **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
