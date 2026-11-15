@@ -9,7 +9,7 @@ export type SignalPaneControl = Pick<ResumeLauncher, 'snapshot' | 'kill'>;
  * The terminal side of a signal, over the SAME launcher the revive uses.
  *
  * A second tmux adapter would be a second final-frame ledger, and that is the reason this is a seam
- * rather than a copy: `TmuxResumeLauncher.finalFrame` is where the last screen before a pane died is
+ * rather than a copy: the `ResumeLauncher`'s final frame is where the last screen before a pane died is
  * kept, so a completion that snapshotted through its own object would capture a frame no revive could
  * ever find. One launcher per storage, two domains addressing it.
  *
