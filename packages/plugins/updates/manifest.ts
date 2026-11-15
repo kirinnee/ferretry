@@ -72,7 +72,11 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('updates', { group: 'about', label: 'Updates', order: 60 })],
-    panels: [panel('daemon.status', { id: 'behind', order: 30 })],
+    panels: [
+      panel('daemon.status', { id: 'behind', order: 30 }),
+      // Settings › This device: the release notes of the build this browser runs (a device fact, not a machine's).
+      panel('device.settings', { id: 'whats-new', order: 60 }),
+    ],
   },
 
   data: {

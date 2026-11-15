@@ -18,6 +18,7 @@ import type {
   InputAuditEntry,
   InputCaller,
   InputCard,
+  InputChoicePort,
   InputLoginPort,
   InputStoreAuditEntry,
   ObserveResult,
@@ -102,6 +103,10 @@ export interface WorldOptions {
   readonly withSealed?: boolean;
   readonly withRules?: boolean;
   readonly withLogins?: boolean;
+  /** The saved-login port itself (the production adapter over a fake provider), in place of the recording fake. */
+  readonly loginPort?: InputLoginPort;
+  /** Who is asking, for the order of a sign-in card (the production adapter over a fake provider). */
+  readonly choicePort?: InputChoicePort;
   readonly clear?: boolean;
   /** The production routing instead of the recording fake: every request goes to this target (a real router over a real store). */
   readonly route?: InputRequestServiceDependencies['target'];
@@ -321,7 +326,8 @@ export function world(options: WorldOptions = {}) {
     quarantine,
     redact: async text => values.scrubAll(text),
     hostName: 'kirin-box',
-    ...((options.withLogins ?? true) ? { logins } : {}),
+    ...((options.withLogins ?? true) ? { logins: options.loginPort ?? logins } : {}),
+    ...(options.choicePort === undefined ? {} : { choice: options.choicePort }),
     ...(options.grants === undefined ? {} : { grants: grantSource }),
     ...(options.withSealed === true
       ? {

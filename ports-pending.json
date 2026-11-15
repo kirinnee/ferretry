@@ -2,7 +2,6 @@
   "format": 1,
   "pending": [
     "ferrets",
-    "connections",
     "claude-code",
     "codex",
     "logins",
@@ -28,8 +27,7 @@
   ],
   "pendingReasons": {
     "vault": [
-      "[own] GAP(vault): the app and cli halves are built only as far as rows I6 I51 S4 S1 S33 need: the input card draws typed fields (no saved logins or sign-ins, 2FA codes or seed setup, page-field picture, secure-copy paste or \"Always use\"; those need Accounts and Browsers seams), the Secrets tab has no \"Copy to another machine\", and `fy secret` declares `set`, `ls`, `rm` and `use` and the bare `secret`. Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx); the input wire shapes are not in the contract, so the app keeps tolerant readers and a pad copy pinned to the daemon by tests/unit/app/input-wire-agreement.test.ts",
-      "[own] GAP(vault): production buildInputs (packages/core/vault/daemon/index.ts:126) wires no accounts/logins port (inputs.ts:129 deps.accounts ?? {}), so on every input card the saved-login half is off and silent: no saved-login offer or Save-as, generic \"Needs a code\" code card, lock facts empty with no unread flag, sign-in facts not recorded; a value typed by hand is still delivered and nothing typed is lost; a client that sends a saved entry gets a refusal sentence; parity gap, after merge (owner nelly)"
+      "[own] GAP(vault): the app half of the input card draws typed fields only: no saved-login offers or sign-ins (the daemon now offers them through `input.saved`; the card draws none), no 2FA codes or seed setup, page-field picture or \"Always use\" (those need Accounts and Browsers seams), and the Secrets tab has no \"Copy to another machine\" (an accepted omission). Agenda hands the ask:input renderer no request id (only {kind:\"input\"}), so the card finds its request by listing the ferret's open requests and matching the prompt the ask quotes (app/features/input/input-card-host.tsx); the input wire shapes are not in the contract, so the app keeps tolerant readers and a pad copy pinned to the daemon by tests/unit/app/input-wire-agreement.test.ts"
     ],
     "runtimes": [
       "[cross: terminals] GAP(terminals): a Codex ferret whose start failed is told why from what its dead pane last showed (codexLaunchFailure), but that pane text is Terminals' and no Terminals service offers Runtimes a dead pane's read, so RuntimeEndSupervisionSeams.paneText stays unset and the owner hears no offline-failure sentence: daemon/lib/service/runtime-end-supervision.ts",
@@ -82,11 +80,6 @@
       "[own] GAP(logins): Codex passive usage reading is not ported (today's `daemon/src/lib/fleet-reading/service.ts:226` in rebuild-ref), so nothing attributes a rollout to the credential whose session this daemon launched (`attributedTranscripts` in `daemon/lib/credentials/credentials-service.ts`)",
       "[hand-over: runtimes] GAP(logins): parity rows the Runtimes batch found are not its own, re-owned by britnee ruling, each still `[ ]` in docs/design/rebuild-parity.tsv: J-0232 J-0233 J-0234 (the fleet-reading service's timers and file watches that keep a credential's usage current: Logins' own Codex passive reading above is the same missing piece).",
       "[own] GAP(logins): two ferrets on one Codex login whose access token is due in the same instant can both spend its single-use refresh token (Codex has no cross-process lock around a refresh), so one gets refresh_token_reused; the same as v4, not made worse by the credential link (docs/secrets.md, harness sign-ins)"
-    ],
-    "connections": [
-      "[tests] GAP(parity): the J-, S- and V-0245 rows still point at tests/unit/parity files that are not written",
-      "[own] GAP(parity): R88 reconnect nudge not wired: back online or back in the foreground, a daemon that is reconnecting waits for its backoff timer instead of being retried at once (today's connectionHealth.reconnecting/retryNow are passed to watchConnectionSignals; the app half builds no ConnectionHealth yet, so index.ts passes explicit no-ops; WebRTC networkChanged IS wired and drops every peer path, R685)",
-      "[hand-over: runtimes] GAP(connections): parity rows the Runtimes batch found are not its own, re-owned by britnee ruling (none removed), each still `[ ]` in docs/design/rebuild-parity.tsv: J-0177 (the relay carrier's reconnect scheduler in bun-relay-carrier.ts: a Connections jobs test), S-0145 (one machine's outage sheet: the outage, its lost-for time, the automatic attempt count and Retry live in app/lib/connection-health.ts and features/carrier/active-carrier-card.tsx; a Connections app test must name the row)."
     ],
     "browsers": [
       "[compose] GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending)",
@@ -168,7 +161,7 @@
       "[own] GAP(accounts): the sign-in grant engine (`daemon/lib/sign-in-grants/**`) is built and tested (rules, ledger, matcher, clear, plans, sources) but nothing in production calls it: Agenda already mounts `ask:sign-in-approval` (app/features/agenda/ask-renderers.tsx), so the missing wire is Accounts' own, TaskPlanService and SignInRuleService do not yet call the engine",
       "[cross: browsers] GAP(browsers): account_hint with a page name gets no page address, because 5.0 offers none: the address must be read through Browsers and gated on the ferret's What agents may control › Browsers switch (refused with agentControlRefusal('browser') as today), never by adding url to the ungated pagesOf as it is (#42 SF2; daemon/adapters/pending-reads.ts, browsers daemon/index.ts pagesOf)",
       "[cross: asks] GAP(asks): a refused phone approval cannot tell its ferret \"Not me\" in its terminal, because Asks' `tell` is handed to the Vault alone; the service takes an optional notifier that is left unbound, so the ferret learns it from `input_wait` (state refused) and the card closes as refused (daemon/rules.ts, lib/phone-approval/ports.ts PhoneApprovalNotifier)",
-      "[tests] 5 kept rows owned by Accounts are proved only on Accounts' half while the enforcer is the Vault core inputs service (the 17 rows whose enforcer is the card, observer and delivery rules were re-owned to Vault with id-named tests there, I161 and S114 among them): I163 I164 (Accounts' copy of InputSavedSchema; production parses Vault's borrowed.ts copy and saved-logins.ts decides the offers), I168 (Accounts' stopgap codeTargetProblem copy; production runs saved-logins.ts at the card and the write), I34 I170 (the fill half; input.delivered and the result, route and typing clauses are Vault): move their owner to Vault, or port the service",
+      "[own] GAP(accounts): Accounts still carries stopgap copies of the Vault's InputSavedSchema (contract/routes/login-entries.ts) and codeTargetProblem (daemon/lib/vault-inputs.ts), pinned to the Vault's by tests/unit/daemon/sign-in-grants/vault-parity.test.ts; rows I34 I163 I164 I168 I170 are now owned and proved by Vault: delete the copies in favour of Vault contract exports once the Vault contract exports them",
       "[own] GAP(agenda): a paste plan's pre-approval (`secure.preapprove`, today's `proposePastes`) is not ported, so nothing turns its items into task-plan paste lines (`taskPlanLinesOfCopyItems` in `contract/routes/task-plan.ts`)",
       "[own] GAP(accounts): account_propose, secure_copy, secure_list, secure_discard, secure_paste and task_plan are not built and are not offered to agents (T-0002, T-0039 to T-0043) (&F1787, M2 after merge)"
     ],
@@ -282,7 +275,6 @@
       "[cross: ferrets] GAP(projects): app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)"
     ],
     "updates": [
-      "[declare] GAP(updates): app/lib/changelog.ts is not reached by a What's new surface (today: packages/pwa/src/features/whats-new/whats-new-host.tsx:21 and whats-new-sheet.tsx:22) (owner: kaizen, app shell)",
       "[declare] GAP(updates): app/lib/install-prompt.ts is not reached by an install-as-app prompt: the shell captures the browser's install prompt at boot (useInstallPrompt, S13) but Updates has not declared the offer (a device.settings panel and a background toast). Updates also drops its own platform and capture (installPlatform, DeferredInstallPrompt, the boot capture: the shell is the one owner of the browser's fact, shell/install-prompt.ts) and keeps only the offer decisions (installBanner, installSetting, the dismissal), reading useInstallPrompt (today: packages/pwa/src/main.tsx:58, packages/pwa/src/App.tsx:211, packages/pwa/src/features/install/install-app.tsx:19) (owner: kaizen, app shell)"
     ]
   },
