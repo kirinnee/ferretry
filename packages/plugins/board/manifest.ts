@@ -729,7 +729,12 @@ export default definePlugin({
       panel('card.detail', { id: 'card-progress', order: 10 }),
     ],
     settings: [settingsTab('board', { group: 'agent-settings', label: 'Board', order: 40 })],
-    renderers: [renderer('ask', { source: 'card' }), renderer('reference', { prefix: '&' })],
+    renderers: [
+      renderer('ask', { source: 'card' }),
+      renderer('reference', { prefix: '&' }),
+      // A `card` or `board` block in chat (Conversation's fence): the mini board and its lanes, from this board.
+      renderer('reference', { prefix: '&board' }),
+    ],
   },
 
   data: {
