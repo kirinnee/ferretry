@@ -178,28 +178,32 @@ describe('S179 openChild refuses a name that is not one plain name, and a descri
     }
   });
 
+  // The real library on both boxes (libc on Linux, libSystem on a Mac): the stand-in reads /proc, which a Mac has not.
   test('R-0198 openFile on a top folder of a host with the C calls reads the file through the held descriptor', async () => {
     const parent = await scratch();
     await writeFile(`${parent}/f.txt`, 'fixture');
-    const top = await macOS().openDirectory(parent);
+    const top = await macOS(() => loadDescriptorCalls()).openDirectory(parent);
     const file = await top.openFile('f.txt');
     expect(new TextDecoder().decode(await file.read())).toBe('fixture');
     await file.close();
     await top.close();
   });
 
-  test('R-0198 a held folder whose descriptor number now names another folder answers EBADF to openFile and opens nothing', async () => {
-    const parent = await scratch();
-    await mkdir(`${parent}/held`);
-    await mkdir(`${parent}/other`);
-    await writeFile(`${parent}/held/f.txt`, 'held');
-    await writeFile(`${parent}/other/f.txt`, 'other');
-    const top = await nodeFs(() => crypto.randomUUID()).openDirectory(`${parent}/held`);
-    const fd = Number(/\/proc\/self\/fd\/(\d+)\//.exec(top.entryPath('x') ?? '')?.[1]);
-    replaceDescriptor(fd, `${parent}/other`);
-    await expect(top.openFile('f.txt')).rejects.toMatchObject({ code: 'EBADF' });
-    await top.close();
-  });
+  test.skipIf(!ON_LINUX)(
+    'R-0198 a held folder whose descriptor number now names another folder answers EBADF to openFile and opens nothing',
+    async () => {
+      const parent = await scratch();
+      await mkdir(`${parent}/held`);
+      await mkdir(`${parent}/other`);
+      await writeFile(`${parent}/held/f.txt`, 'held');
+      await writeFile(`${parent}/other/f.txt`, 'other');
+      const top = await nodeFs(() => crypto.randomUUID()).openDirectory(`${parent}/held`);
+      const fd = Number(/\/proc\/self\/fd\/(\d+)\//.exec(top.entryPath('x') ?? '')?.[1]);
+      replaceDescriptor(fd, `${parent}/other`);
+      await expect(top.openFile('f.txt')).rejects.toMatchObject({ code: 'EBADF' });
+      await top.close();
+    },
+  );
 });
 
 describe('S179 the real mkdirat refuses with the errno it set', () => {
