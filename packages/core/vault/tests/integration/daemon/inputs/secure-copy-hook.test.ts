@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { InputTargetFacts, SecureCopyProvider } from '../../../../contract/index.ts';
 import { SecureCopiesThroughHook } from '../../../../daemon/adapters/inputs/secure-copy.ts';
-import { COPY_VALUE, copyMeta } from './world.ts';
+import { COPY_VALUE, copyMeta } from '../../../unit/daemon/inputs/world.ts';
 
 /**
  * The Vault's view of Accounts' secure copies (`input.secure-copy:copy`): looked up on every call, parsed at the Vault's
@@ -114,5 +114,63 @@ describe('the Vault’s secure copies, through the hook', () => {
     should(checked.reserve('s1', { kind: 'command', program: 'gh' }, FACTS, 'gh')).equal('rule-1');
     should(seen).eql([['s1', { kind: 'command', program: 'gh' }, FACTS, 'gh']]);
     should(await broken.refusal('s1', 'vercel', { kind: 'page', key: 'app' })).containEql('could not check');
+  });
+});
+
+describe('what the hook does after a write, and before it', () => {
+  const failing = () => {
+    throw new Error(`boom ${COPY_VALUE}`);
+  };
+
+  it('should keep a use, a release and a spend that the provider could not record from changing what was typed', () => {
+    const counted: string[] = [];
+    const fine = new SecureCopiesThroughHook(() =>
+      provider({
+        used: (_session, name) => void counted.push(`used ${name}`),
+        release: id => void counted.push(`release ${id}`),
+        spent: id => void counted.push(`spent ${id}`),
+      }),
+    );
+    const broken = new SecureCopiesThroughHook(() => provider({ used: failing, release: failing, spent: failing }));
+
+    fine.used('s1', 'vercel', { kind: 'terminal', key: 'dev' });
+    fine.release('rule-1');
+    fine.spent('rule-1');
+
+    should(counted).eql(['used vercel', 'release rule-1', 'spent rule-1']);
+    should(() => {
+      broken.used('s1', 'vercel', { kind: 'terminal', key: 'dev' });
+      broken.release('rule-1');
+      broken.spent('rule-1');
+    }).not.throw();
+  });
+
+  it('should hand the protection to the provider with where it goes and the capture it is bound to', () => {
+    const seen: unknown[] = [];
+    const copies = new SecureCopiesThroughHook(() => provider({ protect: (...args) => void seen.push(args) }));
+
+    copies.protect('s1', 'vercel', { kind: 'page', key: 'app' }, { origins: ['https://form.example.test'] }, 'at-1');
+
+    should(seen).eql([
+      ['s1', 'vercel', { kind: 'page', key: 'app' }, { origins: ['https://form.example.test'] }, 'at-1'],
+    ]);
+  });
+
+  it('should refuse the write, never swallow it, when Accounts provides nothing or the protection cannot be installed', () => {
+    const none = new SecureCopiesThroughHook(() => undefined);
+    const broken = new SecureCopiesThroughHook(() =>
+      provider({
+        protect: () => {
+          throw new Error('Ferretry could not guard the page this value goes to, so nothing was typed.');
+        },
+      }),
+    );
+
+    should(() => none.protect('s1', 'vercel', { kind: 'terminal', key: 'dev' }, { origins: [] })).throw(
+      'Secure copy is not available, so Ferretry cannot protect this paste: nothing was typed.',
+    );
+    should(() => broken.protect('s1', 'vercel', { kind: 'page', key: 'app' }, { origins: [] })).throw(
+      'Ferretry could not guard the page this value goes to, so nothing was typed.',
+    );
   });
 });
