@@ -7,12 +7,15 @@
  * the caller's standing — a daemon that refuses them leaves the token as the plain text it was written as. A name the
  * grammar would not read as a skill (`$HOME`) is never asked about.
  */
-import { daemonSettingsHref } from '@ferretry/app';
+import { daemonSettingsHref, useFerretWorkspace } from '@ferretry/app';
 import { RouteLink } from '@ferretry/app/ui';
 import type { AppComponent, PluginClient, RendererProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useEffect, useState } from 'react';
 import { readFerretSkills, readMachineSkills } from '../lib/client.ts';
 import { referenceScope, skillNameOf } from '../lib/skills-model.ts';
+
+/** The id Skills' manifest gives its `ferret.side` panel. */
+const SKILLS_PANEL = 'skills';
 
 type Proof = 'asking' | 'proved' | 'unproved';
 
@@ -41,6 +44,7 @@ export function createSkillReference(
   return function SkillReference({ value }: RendererProps): ReactNode {
     const name = skillNameOf(value);
     const { ferretId, daemon } = referenceScope(value);
+    const workspace = useFerretWorkspace();
     const [proof, setProof] = useState<Proof>('asking');
     useEffect(() => {
       if (name === undefined) return;
@@ -57,8 +61,22 @@ export function createSkillReference(
     const written = `${sigil}${name}`;
     // Unproved — and still being asked — stay plain text. A proved token with no daemon to address has nowhere to go.
     if (proof !== 'proved' || daemon === undefined) return <>{written}</>;
+    // Inside a ferret's workspace on the daemon the reference names, the skill is already one panel away: bring the
+    // Skills panel on screen. A reference written in another ferret's words is never answered by this workspace's panel.
+    const here =
+      workspace !== null && workspace.daemon === daemon && (ferretId === undefined || ferretId === workspace.ferret)
+        ? workspace
+        : null;
     return (
-      <RouteLink to={daemonSettingsHref(daemon, 'skills')} title={`Open the ${written} skill in Settings › Skills`}>
+      <RouteLink
+        to={daemonSettingsHref(daemon, 'skills')}
+        title={
+          here === null
+            ? `Open the ${written} skill in Settings › Skills`
+            : `Show the ${written} skill in the Skills panel`
+        }
+        {...(here === null ? {} : { onNavigate: () => here.showPanel(SKILLS_PANEL) })}
+      >
         {written}
       </RouteLink>
     );
