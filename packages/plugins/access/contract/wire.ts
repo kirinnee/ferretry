@@ -20,6 +20,12 @@ export const BuzzSchema = z.strictObject({
   ...PushEnvelopeFields,
   /** A push about a one-time code or a sign-in the owner approves on their phone is reached at once (`high`); absent is every other. */
   urgency: z.literal('high').optional(),
+  /**
+   * Names the ONE event this buzz is about (a repeat of it, such as a push service's re-delivery, carries the same key). Never
+   * the `tag`, which names the line it replaces and so is shared by distinct events; never words or a secret. Absent: the
+   * buzz is never skipped as a twin.
+   */
+  eventKey: z.string().min(1).max(400).optional(),
   /** How long a push service may hold it undelivered, when it is about something that ends sooner (an approval's seconds left; the daemon clamps it to a high push's own limit). */
   ttlSeconds: z.number().int().min(0).max(3_600).optional(),
   /**

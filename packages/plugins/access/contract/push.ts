@@ -129,7 +129,11 @@ export const PUSH_URGENT_TTL_SECONDS = 600;
  */
 const PushPayloadBaseShape = {
   version: z.literal(1),
-  eventKey: z.string().min(1),
+  /**
+   * Names ONE EVENT, so the worker can skip a push service's re-delivery of it: stable across a retransmission, never a
+   * notification tag, never words or a secret. Absent when the sender cannot name one; such a push is never skipped.
+   */
+  eventKey: z.string().min(1).max(400).optional(),
   ...PushEnvelopeFields,
   /**
    * The kernel's tag grammar, which the worker reads. A sender whose tag would not fit sends the push UNTAGGED

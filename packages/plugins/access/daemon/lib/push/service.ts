@@ -153,7 +153,7 @@ export class PushService {
     // The confirmation is sent, and its fate is NOT reported: an answer that said whether the push service
     // accepted it would be a reachability oracle. A subscription the service has discarded is dropped by
     // the same delivery path every later notification uses.
-    await this.notify({ payload: enrolmentConfirmation(record.deviceName) }, [record.id]);
+    await this.notify({ payload: enrolmentConfirmation(record.deviceName, record.id) }, [record.id]);
     return view;
   }
 
