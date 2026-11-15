@@ -49,6 +49,13 @@ export interface SavedLoginsProvider {
   observeSignIn(id: string, seen: unknown): Promise<void>;
   /** What a one-time code the daemon made from this 2FA key came to. A key that is gone is ignored. */
   checkedByUse(account: string, factor: string, worked: boolean): Promise<void>;
+  /**
+   * THE SIGN-INS THE OWNER APPROVED IN ADVANCE (task-plan lines and standing rules): the one grant source the Vault's
+   * fill path reads, or nothing. It is an object of methods, not data, so it is `unknown` here and the Vault checks its
+   * shape at its own boundary (`SignInGrantsThroughHook`); anything that is not a grant source is no source. Absent: no
+   * card is filled in advance and every sign-in waits for the owner (fail closed).
+   */
+  grants?(): unknown;
 }
 
 /** The one key `input.saved` is provided under. */

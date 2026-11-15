@@ -4,7 +4,7 @@
  *
  * TODO(contract): every name here belongs to the Vault (input requests). The shared grant matcher (I210) must run the
  * SAME `codeTargetProblem`, `identityOf` and `terminalHides` the Vault's tap path runs, so these copies are a stopgap
- * until the Vault's contract exports them (or offers an `input.grants` hook that Accounts provides). The two ports at
+ * until the Vault's contract exports them (the grants themselves now reach the Vault through `input.saved`'s `grants`). The two ports at
  * the bottom are what the Vault's input-request service asks of a secure copy and a paste rule; nothing in the
  * Vault's contract takes them yet.
  */

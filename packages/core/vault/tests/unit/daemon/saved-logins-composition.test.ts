@@ -7,6 +7,7 @@ import { owner, standInAdmission, type TestHost, testHost } from '@ferretry/kern
 import { type InputRequest, padInputValue } from '../../../daemon/lib/inputs/wire.ts';
 import { InputSavedLogins, InputTargets, type SavedLoginsProvider, VaultPort } from '../../../contract/index.ts';
 import { FakeInputTarget } from '../../../contract/testing/index.ts';
+import { SignInGrantLedger, type SignInGrantSource } from '../../../daemon/lib/inputs/borrowed-grants.ts';
 import vault from '../../../daemon/index.ts';
 
 /**
@@ -32,6 +33,20 @@ const terminals = (target: FakeInputTarget) =>
       hooks: { takes: [{ hook: InputTargets, key: 'terminal' }] },
     }),
     { build: () => ({ hooks: { 'input.targets:terminal': target } }) },
+  );
+
+const pages = (target: FakeInputTarget) =>
+  implementDaemon(
+    definePlugin({
+      id: 'browsers',
+      title: 'Input test',
+      version: '1.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: InputTargets, key: 'page' }] },
+    }),
+    { build: () => ({ hooks: { 'input.targets:page': target } }) },
   );
 
 const accountsProviding = (saved: SavedLoginsProvider) =>
@@ -125,5 +140,89 @@ describe('the composed Vault’s saved logins', () => {
 
     expect(without.status).toBe(200);
     expect(broken.status).toBe(200);
+  });
+});
+
+const grantSource = (told: string[]): SignInGrantSource => {
+  const none = { hosts: new Map() };
+  return {
+    enabled: () => {
+      told.push('enabled');
+      return true;
+    },
+    of: () => [],
+    keyOf: async () => undefined,
+    ledger: new SignInGrantLedger(),
+    used: () => undefined,
+    stopped: async () => undefined,
+    verify: async () => ({ ok: false }),
+    holds: () => false,
+    projectOf: async () => undefined,
+    scriptedOrigins: () => none,
+    running: () => {
+      told.push('running');
+      return () => void told.push('ended');
+    },
+    scriptedOn: host => void told.push(`on ${String(host)}`),
+  };
+};
+
+describe('the composed Vault asks the grants Accounts provides, and tells them of every script', () => {
+  test('should ask the grant source on a raised card, and still deliver a typed value when the owner types it', async () => {
+    const told: string[] = [];
+    const host = await testHost({
+      plugins: [
+        vault,
+        pages(new FakeInputTarget('page', 'app')),
+        accountsProviding(provider({ grants: () => grantSource(told) })),
+      ],
+      fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    });
+    hosts.push(host);
+    await host.runJob('inputs-restore');
+
+    const raised = await host.provided(VaultPort).raiseInput(FERRET, {
+      target: { kind: 'page', key: 'app' },
+      prompt: 'Password for the console',
+      fields: [
+        { id: 'pass', label: 'Password', sensitivity: 'secret', element: { kind: 'selector', selector: '#pw' } },
+      ],
+      submit: 'offer-owner',
+    });
+
+    expect(raised.ok).toBe(true);
+    expect(told).toContain('enabled');
+  });
+
+  test('should hand Browsers’ script reports to the grant source, so no standing rule fills while one runs or where one ran', async () => {
+    const told: string[] = [];
+    const source = grantSource(told);
+    const host = await testHost({
+      plugins: [vault, accountsProviding(provider({ grants: () => source }))],
+      fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    });
+    hosts.push(host);
+    const api = host.provided(VaultPort);
+
+    const end = api.scriptRunning?.();
+    end?.();
+    api.scriptedOn?.('github.com');
+    api.scriptedOn?.(undefined);
+
+    expect(told.filter(each => each !== 'enabled')).toEqual(['running', 'ended', 'on github.com', 'on undefined']);
+  });
+
+  test('should report scripts all the same when Accounts provides no grants', async () => {
+    const host = await testHost({
+      plugins: [vault, accountsProviding(provider())],
+      fakes: { asks: new FakeAsks(), gate: new FakeGate() },
+    });
+    hosts.push(host);
+    const api = host.provided(VaultPort);
+
+    expect(() => {
+      api.scriptRunning?.()();
+      api.scriptedOn?.('github.com');
+    }).not.toThrow();
   });
 });
