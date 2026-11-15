@@ -63,10 +63,15 @@ function handler(ctx: CliContext<typeof manifest>, body: VerbBody): VerbHandler 
   return async invocation => {
     const out = outputOver(ctx.io);
     const ask = ctx.prompt;
+    const hidden = ctx.promptHidden;
+    const readEnvironment = ctx.readEnvironment;
     const deps: LoginsCommandDeps = {
       gateway: new ClientLoginsGateway(ctx.client),
       out,
       binaryName: BINARY_NAME,
+      // The shell offers a hidden prompt only at a terminal, and reads a shell variable only for a name this manifest declares.
+      ...(hidden === undefined ? {} : { promptHidden: hidden }),
+      ...(readEnvironment === undefined ? {} : { readEnvironment }),
       ...(ctx.io.isTty && ask !== undefined
         ? { prompt: { ask: async (question: string) => (await ask(question)) ?? '' } }
         : {}),

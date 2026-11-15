@@ -6,6 +6,7 @@ import {
   detectTable,
   detectionSentence,
   pasteTarget,
+  pastedSecrets,
   prefillFrom,
   readPaste,
   withheldSentence,
@@ -92,6 +93,39 @@ describe('prefillFrom', () => {
     });
     expect(actual.values).toEqual({});
     expect(actual.secrets).toEqual([]);
+  });
+});
+
+describe('pastedSecrets — what Continue files in the Vault', () => {
+  it('gives each secret NAME the value pasted for its variable, or under the secret’s own name; the variable wins', () => {
+    expect(pastedSecrets(ZAI, { ANTHROPIC_AUTH_TOKEN: 'by-variable', ZAI_API_KEY: 'by-name' })).toEqual({
+      ZAI_API_KEY: 'by-variable',
+    });
+    expect(pastedSecrets(ZAI, { ZAI_API_KEY: 'by-name' })).toEqual({ ZAI_API_KEY: 'by-name' });
+  });
+
+  it('carries no empty value, no plain variable and nothing the preset does not name', () => {
+    expect(pastedSecrets(ZAI, { ANTHROPIC_AUTH_TOKEN: '', ANTHROPIC_BASE_URL: 'https://x', UNRELATED: 'y' })).toEqual(
+      {},
+    );
+  });
+
+  it('files one value once however many variables carry the secret', () => {
+    const twice = preset({
+      id: 'twice',
+      variables: [
+        { name: 'A_KEY', kind: 'secret', secret: 'SHARED', required: true, allowEmpty: false, harnesses: ['codex'] },
+        {
+          name: 'B_KEY',
+          kind: 'secret',
+          secret: 'SHARED',
+          required: true,
+          allowEmpty: false,
+          harnesses: ['claude-code'],
+        },
+      ],
+    });
+    expect(pastedSecrets(twice, { A_KEY: 'first', B_KEY: 'second' })).toEqual({ SHARED: 'first' });
   });
 });
 

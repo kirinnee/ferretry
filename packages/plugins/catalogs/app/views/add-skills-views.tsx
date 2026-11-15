@@ -19,6 +19,8 @@ import type { SharedController } from '../features/shared/shared-controller.ts';
 import { daemonSharingPath } from '../lib/routes.ts';
 import { useInstallHost } from './catalogs-views.tsx';
 
+export { createAddSkillsRowPanel } from './add-skills-row.tsx';
+
 const THIS_DAEMON = 'this';
 
 /** The panel in Skills' header: one button, to the page, carrying where the ferret is. */
