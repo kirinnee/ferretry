@@ -15,9 +15,10 @@ ensureDom();
 
 const card = inboxCard(agendaItem('A2', { ask: choices('Ship', 'Hold'), waitingSince: '2026-08-01T10:00:00.000Z' }));
 
-const draw = (fake = fakeInbox()) => {
+const draw = (fake = fakeInbox(), answerForm?: () => void) => {
   const page = render(
     <AgendaCardConversation
+      {...(answerForm === undefined ? {} : { answerForm })}
       card={card}
       daemon="alpha"
       inbox={{ replied: fake.replied, repliedState: fake.replied.getSnapshot() }}
@@ -40,5 +41,19 @@ describe('the conversation under an Inbox card', () => {
     expect(fake.replied.getSnapshot().entries.map(entry => [entry.key, entry.words, entry.sendId])).toEqual([
       [card.key, 'hi', 'm1'],
     ]);
+  });
+
+  it('hands a form card’s Send to the conversation, so its box answers the form whatever the chat is doing', () => {
+    let answered = 0;
+    const { props } = draw(fakeInbox(), () => (answered += 1));
+    run(() => (props()['answerForm'] as () => void)());
+    expect(answered).toBe(1);
+    expect(typeof props()['formChanges']).toBe('number');
+  });
+
+  it('hands no form Send for a card that is not a form: its box replies to the ask', () => {
+    const { props } = draw();
+    expect(props()).not.toHaveProperty('answerForm');
+    expect(props()).not.toHaveProperty('formChanges');
   });
 });

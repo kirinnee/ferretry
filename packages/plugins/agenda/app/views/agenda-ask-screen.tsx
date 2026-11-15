@@ -49,7 +49,9 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
               }
               onNavigate={to => navigate(to)}
               onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
-              renderComposer={card => <AgendaCardConversation card={card} daemon={daemon} inbox={inbox} />}
+              renderComposer={(card, answerForm) => (
+                <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
+              )}
             />
           </AgendaInboxContext.Provider>
         </AgendaClientContext.Provider>
