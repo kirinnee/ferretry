@@ -46,6 +46,15 @@ describe('fy lesson suggest', () => {
     should(gateway.suggested).be.empty();
   });
 
+  it('should say a bare --scope needs a value, before asking the daemon', async () => {
+    // Arrange
+    const { subject, gateway } = harness();
+
+    // Act + Assert
+    await should(subject.suggest('a rule', '', {})).be.rejectedWith(/--scope needs a value: global .* or repo .*/u);
+    should(gateway.suggested).be.empty();
+  });
+
   it('should refuse a rule over the contract’s length limit, before asking the daemon', async () => {
     // Arrange
     const { subject, gateway } = harness();

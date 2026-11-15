@@ -35,7 +35,7 @@ const chatter = {
   text: 'waiting',
 } as unknown as TranscriptEvent;
 
-function world(options: { ferrets?: readonly WatchedFerret[] } = {}) {
+function world(options: { ferrets?: readonly WatchedFerret[]; failWrites?: number; failAsked?: boolean } = {}) {
   const state = {
     events: [] as readonly TranscriptEvent[] | 'unreadable',
     question: undefined as Question | undefined,
@@ -43,6 +43,7 @@ function world(options: { ferrets?: readonly WatchedFerret[] } = {}) {
   };
   const events: string[] = [];
   const writes: string[] = [];
+  let attempts = 0;
   const deps: QuestionWatchDeps = {
     roster: async () => options.ferrets ?? [{ id: 'cody', harness: 'codex', state: 'working' }],
     harness: async () => ({ transcript: { read: async () => [] } }),
@@ -52,10 +53,15 @@ function world(options: { ferrets?: readonly WatchedFerret[] } = {}) {
     clear: async (_ferret, toolUseId) => {
       if (state.question?.toolUseId === toolUseId) state.question = undefined;
     },
-    asked: async (ferret, toolUseId) => void events.push(`asked ${ferret} ${toolUseId}`),
+    asked: async (ferret, toolUseId) => {
+      events.push(`asked ${ferret} ${toolUseId}`);
+      if (options.failAsked === true) throw new Error('the bus is down');
+    },
     answered: async (ferret, toolUseId) => void events.push(`answered ${ferret} ${toolUseId}`),
     transcriptEvents: async () => state.events,
     writeProjected: async (_ferret, pending, askedAt) => {
+      attempts += 1;
+      if (attempts <= (options.failWrites ?? 0)) throw new Error('the store is down');
       writes.push(pending.toolUseId);
       const [first, ...more] = pending.questions;
       if (first === undefined) return undefined;
@@ -74,7 +80,7 @@ function world(options: { ferrets?: readonly WatchedFerret[] } = {}) {
       return state.question;
     },
   };
-  return { state, events, writes, watch: new QuestionWatch(deps) };
+  return { state, events, writes, attempts: () => attempts, watch: new QuestionWatch(deps) };
 }
 
 describe('the question watch: a Codex request_user_input becomes question.json (B05)', () => {
@@ -166,5 +172,33 @@ describe('the question watch: a Codex request_user_input becomes question.json (
     await idle.watch.sweep();
     expect(stopped.writes).toEqual([]);
     expect(idle.writes).toEqual([CALL_ID]);
+  });
+
+  it('retries a store write that failed on the next look, and stops writing once it lands', async () => {
+    const w = world({ failWrites: 1 });
+    w.state.events = [call()];
+    await w.watch.sweep();
+    expect(w.state.question).toBeUndefined();
+    await w.watch.sweep();
+    expect(w.state.question?.toolUseId).toBe(CALL_ID);
+    await w.watch.sweep();
+    expect(w.attempts()).toBe(2);
+  });
+
+  it('gives up on a store that keeps failing after five looks, then leaves the call alone', async () => {
+    const w = world({ failWrites: 100 });
+    w.state.events = [call()];
+    for (let look = 0; look < 12; look += 1) await w.watch.sweep();
+    expect(w.attempts()).toBe(5);
+    expect(w.state.question).toBeUndefined();
+  });
+
+  it('never stores or announces the call a second time when only the announcement failed', async () => {
+    const w = world({ failAsked: true });
+    w.state.events = [call()];
+    await w.watch.sweep();
+    await w.watch.sweep();
+    expect(w.writes).toEqual([CALL_ID]);
+    expect(w.events).toEqual([`asked cody ${CALL_ID}`]);
   });
 });

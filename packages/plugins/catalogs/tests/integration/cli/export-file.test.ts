@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -65,5 +65,35 @@ describe('the catalog export file writer (v4 FileCatalogWriter)', () => {
     // Act / Assert
     await should(writer.write(path, 'new', true)).be.rejectedWith(/symbolic link/u);
     should(await readFile(target, 'utf8')).equal('outside');
+  });
+
+  it('should say what went wrong, not that the file exists, when a new file cannot be written for another reason', async () => {
+    // Arrange
+    const writer = new FileCatalogWriter();
+    const path = join(folder, 'no-such-folder', 'team.fycat');
+
+    // Act / Assert
+    await should(writer.write(path, 'new', false)).be.rejectedWith(/ENOENT/u);
+  });
+
+  it('should pass on a destination that cannot even be looked at, and write nothing', async () => {
+    // Arrange: the "folder" it would sit in is a plain file.
+    const writer = new FileCatalogWriter();
+    await writeFile(join(folder, 'plain'), 'x');
+
+    // Act / Assert
+    await should(writer.write(join(folder, 'plain', 'team.fycat'), 'new', true)).be.rejectedWith(/ENOTDIR/u);
+    should(await readdir(folder)).eql(['plain']);
+  });
+
+  it('should leave no temporary file behind when the new one cannot be moved over the destination', async () => {
+    // Arrange: a folder sits where the file would go, so the rename is refused.
+    const writer = new FileCatalogWriter();
+    const path = join(folder, 'team.fycat');
+    await mkdir(path);
+
+    // Act / Assert
+    await should(writer.write(path, 'new', true)).be.rejected();
+    should(await readdir(folder)).eql(['team.fycat']);
   });
 });

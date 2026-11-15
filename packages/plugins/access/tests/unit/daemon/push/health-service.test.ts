@@ -96,4 +96,30 @@ describe('the push service and the notifications row, together (v4 notificationH
       expect(JSON.stringify(finding)).not.toContain('push.example');
     }
   });
+
+  test('a push that is recorded while the clock itself is failing is stamped with the epoch instead of being lost', async () => {
+    const clockFailure = new PushService({
+      store: { list: async () => [enrolled], save: async () => {}, forget: async () => 0 },
+      transport: {
+        deliver: async () => {
+          throw new Error('fixture transport failure');
+        },
+      },
+      keys: { publicKey: async () => 'fixture-public' },
+      devices: { granted: async () => new Set([enrolled.deviceId]) },
+      clock: {
+        now: () => {
+          throw new Error('fixture clock failure');
+        },
+      },
+      ids: { next: () => 'fixture' },
+    });
+    await expect(clockFailure.notify({ payload })).rejects.toThrow('fixture transport failure');
+    expect(clockFailure.latestOutcome()).toEqual({
+      at: '1970-01-01T00:00:00.000Z',
+      delivered: 0,
+      failed: 0,
+      thrown: true,
+    });
+  });
 });
