@@ -96,7 +96,10 @@ export interface SessionFilesDeps {
    * takes the label, parent and stamp from there; this answer is used only for a ferret that has no document yet.
    */
   readonly fleet: () => readonly RegisteredAncestor[];
-  /** What opens a pane: Terminals' to bind. Without it a lifecycle refuses at the launch, before anything is typed. */
+  /**
+   * What opens a pane: the daemon binds an adapter over Ferrets' own launch and stop. Without it (a unit fixture) a
+   * lifecycle refuses at the launch, before anything is typed.
+   */
   readonly launcher?: SessionLifecycleLauncher;
   /**
    * The registry's record of a ferret and its start options, which its session document is made from (ruling #31b).
@@ -520,8 +523,8 @@ export class SessionFiles {
 
   /**
    * One lifecycle for one session: its stores on its own folder, the shared gate and queue. Built without today's
-   * conversation `leases` and board `projects` (GAP(ports-pending: Session adapters)): `leases` must be bound before a
-   * pane launcher is.
+   * conversation `leases` and board `projects` (GAP(ports-pending: Session adapters)): until `leases` is bound, two
+   * lifecycles could each launch a pane over one harness conversation.
    */
   createLifecycle = (id: SessionId, envelope?: SessionProtocolEnvelope): SessionLifecycleService =>
     new SessionLifecycleService(

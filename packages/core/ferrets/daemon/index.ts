@@ -15,6 +15,8 @@ import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from 
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   type FerretId,
+  type Runner,
+  type RunnerHandle,
   FerretChanged,
   FerretStopping,
   FerretStarted,
@@ -63,7 +65,7 @@ import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
 import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
 import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
-import { FerretsService, RENAME_HTTP } from './lib/ferrets/service.ts';
+import { FerretsService, type FerretsPorts, RENAME_HTTP } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
 import { boundedReason } from './lib/ferrets/auto-resume.ts';
 import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
@@ -76,8 +78,9 @@ import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-cl
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
+import { FerretSessionLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
-import type { TokenCutOff } from './lib/tokens/cut-off-mark.ts';
+import { DirectoryCutOff } from './lib/tokens/cut-off-mark.ts';
 import { instructionsAnswer } from './lib/agent-control/instructions.ts';
 import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/launch-environment.ts';
 import { agentControlReader } from './lib/agent-control/reader.ts';
@@ -118,7 +121,7 @@ import { FerretMonitorSend, MonitorFiles, StorageMonitorWaits } from './adapters
 import { defaultSessionMonitorSettings } from './lib/session/monitor/index.ts';
 import { buildMonitor, MONITOR_RECORD_NAME, MONITOR_TICK_JOB } from './modules/monitor.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
-import { SessionFiles } from './modules/session-files.ts';
+import { SessionFiles, type SessionFilesDeps } from './modules/session-files.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
 import { movesDeps } from './moves-deps.ts';
 import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
@@ -173,6 +176,12 @@ function resumeActorOf(call: CallContext): ResumeActor {
 }
 
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
+/**
+ * Types a dependency bag so that the named optional members are REQUIRED at this call site: a unit fixture may leave them
+ * off, the daemon may not (removing one is a compile error here, not a silent second queue or an unbound launcher).
+ */
+const requiring = <T, K extends keyof T>(deps: T & Required<Pick<T, K>>): T => deps;
+
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
 
 function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest> {
@@ -314,46 +323,50 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     });
   // The token directory's half of an owner's cut-off, as the lifecycle's hash store reaches it: after the held tokens
   // load (an unloaded directory would read "not cut off"), and each write persists `tokens.json`.
-  const tokenCutOff: TokenCutOff = {
-    isCutOff: async ferret => {
-      await ready();
-      return tokens.isCutOff(ferret as FerretId);
-    },
-    cutOff: async ferret => {
-      await ready();
-      tokens.cutOff(ferret as FerretId, kernel.clock.now());
-      await saveTokens(tokens.snapshot());
-    },
-    restore: async ferret => {
-      await ready();
-      tokens.restore(ferret as FerretId);
-      await saveTokens(tokens.snapshot());
-    },
+  const tokenCutOff = new DirectoryCutOff({ ready, tokens, save: saveTokens, now: () => kernel.clock.now() });
+  const runnerOf = (): Runner | undefined => {
+    const found = hooks.provider(Runners, 'tmux');
+    return found === 'unavailable' ? undefined : found;
   };
-  const sessionFiles = new SessionFiles({
-    tokenCutOff,
-    roots: kernel.roots,
-    storage: sessionStore,
-    clock: { now: () => kernel.clock.now() },
-    sleep: async delay => await kernel.clock.sleep(delay),
-    paths: kernel.paths,
-    // The requested label and parent: lineage uses them only for a ferret with no session document yet.
-    fleet: () =>
-      registry.list().map(ferret => {
-        const label = registry.detailsOf(ferret.id)?.options?.label;
-        return {
-          id: ferret.id,
-          ...(label === undefined ? {} : { label }),
-          ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
-        };
+  const sessionFiles = new SessionFiles(
+    // The ports below are REQUIRED here (a daemon without them runs a second queue, a second cut-off fact, or no pane
+    // launcher), though a unit fixture may leave them off.
+    requiring<SessionFilesDeps, 'tokenCutOff' | 'launcher'>({
+      tokenCutOff,
+      // The lifecycle's pane launcher: a thin adapter over Ferrets' own launch and stop (the held variants, the lifecycle
+      // holds the ferret's key on the shared queue), so a lifecycle opens a pane through the ONE launch path. `service` is
+      // built below; every call here is made after it exists.
+      launcher: new FerretSessionLifecycleLauncher({
+        launch: async ferret => await service.launchHeld(ferret),
+        stop: async (ferret, how, reason, cause) => await service.stopHeld(ferret, how, reason, cause),
+        handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
+        runner: runnerOf,
+        sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+        nowMs: () => kernel.clock.nowMs(),
       }),
-    // What a ferret's session document is made from (ruling #31b): its record and its start options.
-    seed: id => {
-      const record = registry.get(id as unknown as FerretId);
-      return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
-    },
-    log,
-  });
+      roots: kernel.roots,
+      storage: sessionStore,
+      clock: { now: () => kernel.clock.now() },
+      sleep: async delay => await kernel.clock.sleep(delay),
+      paths: kernel.paths,
+      // The requested label and parent: lineage uses them only for a ferret with no session document yet.
+      fleet: () =>
+        registry.list().map(ferret => {
+          const label = registry.detailsOf(ferret.id)?.options?.label;
+          return {
+            id: ferret.id,
+            ...(label === undefined ? {} : { label }),
+            ...(ferret.parent === undefined ? {} : { parent: ferret.parent }),
+          };
+        }),
+      // What a ferret's session document is made from (ruling #31b): its record and its start options.
+      seed: id => {
+        const record = registry.get(id as unknown as FerretId);
+        return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
+      },
+      log,
+    }),
+  );
   // Every held ferret gets its session document once the records and the store's archive are loaded, before any start
   // or resume reads the fleet's lineage (which refuses while an indexed ferret has none). Each stamp waits for it.
   void sessionFiles
@@ -466,202 +479,203 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return err(`the login ${login} could not be read, so the ferret was not started`);
     }
   };
-  const service = new FerretsService(registry, tokens, {
-    launchEnvironment,
-    launchSections: {
-      write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
-      forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
-    },
-    ready,
-    session: sessionFiles.port,
-    claims,
-    systemCallsign: async prefix => await systemCallsigns.next(prefix),
-    now: () => kernel.clock.now(),
-    newId: () => mintId(kernel.clock.nowMs()),
-    newName: taken =>
-      DEFAULT_CALLSIGN_POOL.find(candidate => !taken(candidate)) ?? `ferret-${randomBytes(3).toString('hex')}`,
-    save: async (record: FerretRecord) => await kernel.state.write(FerretFiles, record, record.id),
-    saveTokens,
-    // ONE queue and ONE cut-off fact with the lifecycle (`SessionFiles`): a start, a stop and a resume here and a
-    // lifecycle's launch of the same ferret never interleave, and a cut-off is read from and written to both halves.
-    serial: sessionFiles.serial,
-    cutOffMark: sessionFiles.cutOffMark,
-    harness: key => {
-      const found = hooks.provider(Harnesses, key);
-      return found === 'unavailable' ? undefined : found;
-    },
-    harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
-    runner: () => {
-      const found = hooks.provider(Runners, 'tmux');
-      return found === 'unavailable' ? undefined : found;
-    },
-    decide: async input => {
-      // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
-      // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
-      // answer from Packs (absent, failed, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, before
-      // anything is written or launched. The kernel bounds and normalizes every taker, Packs included. `by: 'resume'`
-      // is set here by Ferrets' own resume, never by a caller (a start's `by` cannot name it).
-      const decision = helperDecision(input, await hooks.decideAnswered(StartDecide, input));
-      if (decision === 'unanswered') throw noHelperAdmission();
-      return decision;
-    },
-    // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
-    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
-    // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
-    // runtime is refused here, never launched signed out.
-    runtimeStart: async runtime => {
-      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
-      return found === 'unavailable'
-        ? {
-            ok: false,
-            sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
-          }
-        : await found.resolve(runtime);
-    },
-    // The machine's default runtime, for a start that chose nothing: Runtimes alone answers; with no provider there is none.
-    defaultRuntime: async () => {
-      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
-      return found === 'unavailable' ? undefined : await found.defaultRuntime?.();
-    },
-    // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
-    loginStart: async login => {
-      const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
-      return found === 'unavailable'
-        ? {
-            ok: false,
-            sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
-          }
-        : await found.login(login);
-    },
-    launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
-    // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
-    // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.
-    loginEnv: async (login, harness) => {
-      const kind = loginKindOf(login);
-      if (!kind.ok) return kind;
-      return await answered(login, async () => await kind.value.env(login, harness));
-    },
-    // What Ferretry sets so the harness is signed in (`LoginKind.launchEnvironment`); a kind with none adds none.
-    loginLaunchEnv: async (login, harness) => {
-      const kind = loginKindOf(login);
-      if (!kind.ok) return kind;
-      const launch = kind.value.launchEnvironment;
-      if (launch === undefined) return ok({});
-      try {
-        return await launch.call(kind.value, login, harness);
-      } catch {
-        return err(`the login ${login} could not be read, so the ferret was not started`);
-      }
-    },
-    // The sign-in FILE a login hands its harness (`LoginKind.credential`), through the SAME kind resolver; a kind with none
-    // answers `none`, and a hook that throws is `unavailable` with a fixed sentence (a Logins error is never quoted).
-    loginCredential: async (login, harness) => {
-      const kind = loginKindOf(login);
-      if (!kind.ok) return { kind: 'unavailable', sentence: kind.error };
-      const credential = kind.value.credential;
-      if (credential === undefined) return { kind: 'none' };
-      try {
-        return await credential.call(kind.value, login, harness);
-      } catch {
-        return {
-          kind: 'unavailable',
-          sentence: `the login ${login} could not be checked, so the ferret was not started`,
-        };
-      }
-    },
-    openingAttachments: () => {
-      const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
-      return found === 'unavailable' ? undefined : found;
-    },
-    sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
-    instructions: () => kernel.snapshot.current().instructions,
-    folder: path => {
-      if (!path.startsWith('/')) return err('the folder must be an absolute path');
-      return ok(path as FencedPath);
-    },
-    // The launch folder's identity, captured where it is first checked and re-verified as the last step before the
-    // harness starts (the kernel's bound directory).
-    bindFolder: async path => {
-      const bound = await kernel.paths.bindDirectory(path);
-      if (!bound.ok) return err(bound.error.message);
-      return ok({
-        insideStateHome: bound.value.insideStateHome,
-        verify: async () => {
-          const held = await bound.value.verify();
-          return held.ok ? ok(undefined) : err(held.error.message);
-        },
-      });
-    },
-    // The folder the ferret will really work in, judged by the kernel's identity fence (a work folder or a link swapped
-    // in after the route's check lands here).
-    stateHomeHolding: async path => await kernel.paths.stateHomeHolding(path),
-    delivered: ferret => wakeTurnWatch?.(ferret),
-    changed: payload => {
-      followStatus(payload.ferret, payload.state, 'lifecycle');
-      if (payload.state === 'stopped') {
-        forgetTranscript?.(payload.ferret);
-        removeEnvironment(payload.ferret);
-      }
-      hooks.observe(FerretChanged, payload);
-    },
-    stopping: ferret => {
-      hooks.observe(FerretStopping, { ferret });
-    },
-    lastSnapshot: async (ferret, runner, handle) => await lastSnapshots.capture(ferret, runner, handle),
-    started: payload => {
-      hooks.observe(FerretStarted, payload);
-    },
-    saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFile, details, ferret),
-    // A stopped ferret holds no declared wait; the credit it banked stays.
-    endWait: async ferret => {
-      if (registry.waitingOf(ferret) === undefined) return;
-      const { waiting: _ended, ...kept } = await parkedFile(ferret);
-      await kernel.state.write(FerretWaitFiles, kept, ferret);
-      registry.putWaiting(ferret, undefined);
-    },
-    history: appendHistory,
-    limits: () => kernel.config.file(LimitsConfigFile),
-    pinnedAt: async () => await agentPins.pinnedAt(),
-    // `signal done` writes the summary (Packs' result and Clean up read it); a ferret that has not finished has none.
-    summaryText: async ferret => {
-      const read = await kernel.state.read(FerretSummaryFiles, ferret);
-      return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
-    },
-    // The ferret's own `work` root decides: the folder must lie inside what the registry holds for THAT ferret, outside
-    // the daemon's fence, and its links are resolved before the check. A refusal answers no folder (fails closed).
-    realPath: async (ferret, folder) => {
-      const root = kernel.roots.root('work', { ferret });
-      const checked = root.resolve(folder);
-      return checked.ok ? await root.realPath(checked.value) : undefined;
-    },
-    // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
-    managedWorktrees: async () => await worktrees.service.records(),
-    // Bound below, once the moves are built (the moves resume through this very service).
-    move: async (ferret, runtime, options) =>
-      await moves.move.move(ferret, {
-        agent: runtime,
-        ...(options.model === undefined ? {} : { model: options.model }),
-        allowContextDowngrade: options.allowContextDowngrade ?? false,
-        forceInflight: options.forceInflight ?? false,
-        ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
-        ...(options.note === undefined ? {} : { note: options.note }),
-        ...(options.actor === undefined ? {} : { actor: options.actor }),
-        ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
-        origin: options.origin,
-      }),
-    // What the pane is asking (`FerretsApi.prompt`, U4): the turn watch's record, masked again on the way out.
-    promptState: async ferret => {
-      const state = SessionStateSchema.safeParse(
-        await sessionStore.readState(ferret as unknown as SessionId).catch(() => undefined),
-      );
-      if (!state.success) return {};
-      return await kernel.redaction.read(scope => promptOf(state.data, text => scope.text(text)));
-    },
-    // The stored last screen (`FerretsApi.lastSnapshot`): masked again with the Vault's values now; no frame on any failure.
-    storedLastSnapshot: async ferret => await lastSnapshotReading.read(ferret),
-    vault: needs.vault,
-    asks: needs.asks,
-  });
+  const service = new FerretsService(
+    registry,
+    tokens,
+    requiring<FerretsPorts, 'serial' | 'cutOffMark'>({
+      launchEnvironment,
+      launchSections: {
+        write: async (ferret, sections) => await kernel.state.write(FerretLaunchSectionsFiles, { sections }, ferret),
+        forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
+      },
+      ready,
+      session: sessionFiles.port,
+      claims,
+      systemCallsign: async prefix => await systemCallsigns.next(prefix),
+      now: () => kernel.clock.now(),
+      newId: () => mintId(kernel.clock.nowMs()),
+      newName: taken =>
+        DEFAULT_CALLSIGN_POOL.find(candidate => !taken(candidate)) ?? `ferret-${randomBytes(3).toString('hex')}`,
+      save: async (record: FerretRecord) => await kernel.state.write(FerretFiles, record, record.id),
+      saveTokens,
+      // ONE queue and ONE cut-off fact with the lifecycle (`SessionFiles`): a start, a stop and a resume here and a
+      // lifecycle's launch of the same ferret never interleave, and a cut-off is read from and written to both halves.
+      serial: sessionFiles.serial,
+      cutOffMark: sessionFiles.cutOffMark,
+      harness: key => {
+        const found = hooks.provider(Harnesses, key);
+        return found === 'unavailable' ? undefined : found;
+      },
+      harnessKeys: () => [...hooks.providers(Harnesses).keys()] as HarnessKey[],
+      runner: runnerOf,
+      decide: async input => {
+        // RULING #43: today's pack.admit was mandatory for a child start, and Packs owns that answer on start.decide. A
+        // child start or resume is admitted only when Packs ITSELF answered (its yes, or its no with its reason); no
+        // answer from Packs (absent, failed, a hang, a throw, garbage) is 503 `helper_admission_unavailable`, before
+        // anything is written or launched. The kernel bounds and normalizes every taker, Packs included. `by: 'resume'`
+        // is set here by Ferrets' own resume, never by a caller (a start's `by` cannot name it).
+        const decision = helperDecision(input, await hooks.decideAnswered(StartDecide, input));
+        if (decision === 'unanswered') throw noHelperAdmission();
+        return decision;
+      },
+      // Bounds Runtimes' answers below on the kernel clock (RUNTIME_START_DEADLINE_MS).
+      after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
+      // Which harness and login a runtime starts with: Runtimes alone answers. With no Runtimes a start that names a
+      // runtime is refused here, never launched signed out.
+      runtimeStart: async runtime => {
+        const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+        return found === 'unavailable'
+          ? {
+              ok: false,
+              sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
+            }
+          : await found.resolve(runtime);
+      },
+      // The machine's default runtime, for a start that chose nothing: Runtimes alone answers; with no provider there is none.
+      defaultRuntime: async () => {
+        const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+        return found === 'unavailable' ? undefined : await found.defaultRuntime?.();
+      },
+      // Whether a login named with no runtime may be spent: Runtimes alone answers, the same check a runtime's login passes.
+      loginStart: async login => {
+        const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+        return found === 'unavailable'
+          ? {
+              ok: false,
+              sentence: `login ${login} cannot be started: the Runtimes plugin is not running, so it cannot be checked`,
+            }
+          : await found.login(login);
+      },
+      launchParts: () => hooks.contributions(LaunchParts).map(contribution => contribution.item),
+      // The kind that HOLDS the login answers (`LoginKind.holds`): no kind trial, no caught throw. Each failure is a
+      // fixed sentence; a Logins error is never quoted, because it can sit beside a credential.
+      loginEnv: async (login, harness) => {
+        const kind = loginKindOf(login);
+        if (!kind.ok) return kind;
+        return await answered(login, async () => await kind.value.env(login, harness));
+      },
+      // What Ferretry sets so the harness is signed in (`LoginKind.launchEnvironment`); a kind with none adds none.
+      loginLaunchEnv: async (login, harness) => {
+        const kind = loginKindOf(login);
+        if (!kind.ok) return kind;
+        const launch = kind.value.launchEnvironment;
+        if (launch === undefined) return ok({});
+        try {
+          return await launch.call(kind.value, login, harness);
+        } catch {
+          return err(`the login ${login} could not be read, so the ferret was not started`);
+        }
+      },
+      // The sign-in FILE a login hands its harness (`LoginKind.credential`), through the SAME kind resolver; a kind with none
+      // answers `none`, and a hook that throws is `unavailable` with a fixed sentence (a Logins error is never quoted).
+      loginCredential: async (login, harness) => {
+        const kind = loginKindOf(login);
+        if (!kind.ok) return { kind: 'unavailable', sentence: kind.error };
+        const credential = kind.value.credential;
+        if (credential === undefined) return { kind: 'none' };
+        try {
+          return await credential.call(kind.value, login, harness);
+        } catch {
+          return {
+            kind: 'unavailable',
+            sentence: `the login ${login} could not be checked, so the ferret was not started`,
+          };
+        }
+      },
+      openingAttachments: () => {
+        const found = hooks.provider(OpeningAttachments, OPENING_ATTACHMENTS_KEY);
+        return found === 'unavailable' ? undefined : found;
+      },
+      sitrepSources: () => hooks.contributions(SitrepLines).map(contribution => contribution.item),
+      instructions: () => kernel.snapshot.current().instructions,
+      folder: path => {
+        if (!path.startsWith('/')) return err('the folder must be an absolute path');
+        return ok(path as FencedPath);
+      },
+      // The launch folder's identity, captured where it is first checked and re-verified as the last step before the
+      // harness starts (the kernel's bound directory).
+      bindFolder: async path => {
+        const bound = await kernel.paths.bindDirectory(path);
+        if (!bound.ok) return err(bound.error.message);
+        return ok({
+          insideStateHome: bound.value.insideStateHome,
+          verify: async () => {
+            const held = await bound.value.verify();
+            return held.ok ? ok(undefined) : err(held.error.message);
+          },
+        });
+      },
+      // The folder the ferret will really work in, judged by the kernel's identity fence (a work folder or a link swapped
+      // in after the route's check lands here).
+      stateHomeHolding: async path => await kernel.paths.stateHomeHolding(path),
+      delivered: ferret => wakeTurnWatch?.(ferret),
+      changed: payload => {
+        followStatus(payload.ferret, payload.state, 'lifecycle');
+        if (payload.state === 'stopped') {
+          forgetTranscript?.(payload.ferret);
+          removeEnvironment(payload.ferret);
+        }
+        hooks.observe(FerretChanged, payload);
+      },
+      stopping: ferret => {
+        hooks.observe(FerretStopping, { ferret });
+      },
+      lastSnapshot: async (ferret, runner, handle) => await lastSnapshots.capture(ferret, runner, handle),
+      started: payload => {
+        hooks.observe(FerretStarted, payload);
+      },
+      saveDetails: async (ferret, details) => await kernel.state.write(FerretDetailsFile, details, ferret),
+      // A stopped ferret holds no declared wait; the credit it banked stays.
+      endWait: async ferret => {
+        if (registry.waitingOf(ferret) === undefined) return;
+        const { waiting: _ended, ...kept } = await parkedFile(ferret);
+        await kernel.state.write(FerretWaitFiles, kept, ferret);
+        registry.putWaiting(ferret, undefined);
+      },
+      history: appendHistory,
+      limits: () => kernel.config.file(LimitsConfigFile),
+      pinnedAt: async () => await agentPins.pinnedAt(),
+      // `signal done` writes the summary (Packs' result and Clean up read it); a ferret that has not finished has none.
+      summaryText: async ferret => {
+        const read = await kernel.state.read(FerretSummaryFiles, ferret);
+        return read.ok && read.value !== undefined ? new TextDecoder().decode(read.value) : undefined;
+      },
+      // The ferret's own `work` root decides: the folder must lie inside what the registry holds for THAT ferret, outside
+      // the daemon's fence, and its links are resolved before the check. A refusal answers no folder (fails closed).
+      realPath: async (ferret, folder) => {
+        const root = kernel.roots.root('work', { ferret });
+        const checked = root.resolve(folder);
+        return checked.ok ? await root.realPath(checked.value) : undefined;
+      },
+      // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
+      managedWorktrees: async () => await worktrees.service.records(),
+      // Bound below, once the moves are built (the moves resume through this very service).
+      move: async (ferret, runtime, options) =>
+        await moves.move.move(ferret, {
+          agent: runtime,
+          ...(options.model === undefined ? {} : { model: options.model }),
+          allowContextDowngrade: options.allowContextDowngrade ?? false,
+          forceInflight: options.forceInflight ?? false,
+          ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
+          ...(options.note === undefined ? {} : { note: options.note }),
+          ...(options.actor === undefined ? {} : { actor: options.actor }),
+          ...(options.movedBy === undefined ? {} : { movedBy: options.movedBy }),
+          origin: options.origin,
+        }),
+      // What the pane is asking (`FerretsApi.prompt`, U4): the turn watch's record, masked again on the way out.
+      promptState: async ferret => {
+        const state = SessionStateSchema.safeParse(
+          await sessionStore.readState(ferret as unknown as SessionId).catch(() => undefined),
+        );
+        if (!state.success) return {};
+        return await kernel.redaction.read(scope => promptOf(state.data, text => scope.text(text)));
+      },
+      // The stored last screen (`FerretsApi.lastSnapshot`): masked again with the Vault's values now; no frame on any failure.
+      storedLastSnapshot: async ferret => await lastSnapshotReading.read(ferret),
+      vault: needs.vault,
+      asks: needs.asks,
+    }),
+  );
 
   // The turn watch (U4, RULING #44): the session observer's turn part on the main thread, every live ferret's pane looked
   // at through `Runner.look` at today's 2 s tick (a quiet pane backing off to 10 s), one pane per turn of the loop.
