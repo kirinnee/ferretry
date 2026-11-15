@@ -67,10 +67,9 @@ const liveCopies = (count: number): string => `This session holds ${plural(count
 const surfaceWords = (kind: 'terminal' | 'browser', name: string): string => `%${kind}:${name}`;
 
 function firstIssue(error: z.ZodError): string {
-  const [issue] = error.issues;
-  return issue === undefined
-    ? 'the call is not valid'
-    : `${issue.path.length === 0 ? '' : `${issue.path.join('.')}: `}${issue.message}`;
+  // A failed `safeParse` always carries at least one issue.
+  const issue = error.issues[0] as z.ZodError['issues'][number];
+  return `${issue.path.length === 0 ? '' : `${issue.path.join('.')}: `}${issue.message}`;
 }
 
 export function secureCopyTools(deps: SecureCopyToolDeps): {
