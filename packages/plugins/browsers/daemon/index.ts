@@ -350,12 +350,19 @@ export function buildBrowsers(
     provides: {
       browsers: perNeeder(
         (needer): BrowsersApi => ({
-          ...(needer.id === 'accounts' ? { copy: secureCopy } : {}),
+          // For Accounts alone: its `account_hint {name}` names the site the ferret's own page is on. The gate is asked
+          // inside the tool service, live on every call (never a switch read once and kept).
+          ...(needer.id === 'accounts'
+            ? {
+                copy: secureCopy,
+                pageAddressOf: async (ferret: FerretId, name: string) => await tools.pageAddressOf(ferret, name),
+              }
+            : {}),
           state: async () => pages.overview(),
           // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
           // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
           // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks
-          // `AgentControlPort` and refuses with `agentControlRefusal('browser')` (GAP in ports-pending.json, accounts).
+          // `AgentControlPort` and refuses with `agentControlRefusal('browser')`: that is `pageAddressOf`, just below.
           pagesOf: async ferret => {
             const status = await pages.status(ferret);
             return status.pages.map(page => ({

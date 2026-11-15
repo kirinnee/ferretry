@@ -123,7 +123,7 @@ export async function phoneWorld(options: WorldOptions = {}) {
   const clears: { ferret: string; id: string }[] = [];
   const audit: AuditNote[] = [];
   const asked: { ferret: string; kind: string; since: number }[] = [];
-  const told: { ferret: string; message: string }[] = [];
+  const told: { ferret: string; approvalId: string; message: string }[] = [];
   let next = 0;
   const service = new PhoneApprovalService({
     pages: {
@@ -178,8 +178,8 @@ export async function phoneWorld(options: WorldOptions = {}) {
     logins: { listing: async () => await daemon.directory.list() },
     facts: daemon.directory,
     notifier: {
-      tell: async (ferret, message) => {
-        told.push({ ferret, message });
+      tell: async (ferret, approvalId, message) => {
+        told.push({ ferret, approvalId, message });
       },
     },
     hostName: 'kirin-box.local',
