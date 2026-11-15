@@ -26,6 +26,7 @@ import {
   clearAskedQuestion,
   readAskedQuestion,
   writeAskedQuestion,
+  writeProjectedQuestion,
 } from '../../../daemon/questions/adapters/state-asked-question.ts';
 import {
   MESSAGE_TOKEN_KEY_BYTES,
@@ -486,6 +487,30 @@ describe('question.json, the one writer and its readers', () => {
     await clearAskedQuestion(state, lane, 'f1');
     expect(await readAskedQuestion(state, 'f1', TRANSCRIPT)).toBeUndefined();
     await clearAskedQuestion(state, lane, 'f1', 'toolu_none');
+  });
+
+  test('a question the transcript projected is stored without a transcript proof, and one with nothing to show clears the file', async () => {
+    const state = world();
+    const pending = {
+      toolUseId: 'call_1',
+      questions: [{ question: 'Which mode?', options: [{ label: 'Fast' }, { label: 'Slow' }] }],
+    };
+
+    const stored = await writeProjectedQuestion(state, lane, 'f1', pending, 'not a time', () => AT);
+
+    expect(stored).toEqual({
+      format: 1,
+      toolUseId: 'call_1',
+      text: 'Which mode?',
+      options: [{ label: 'Fast' }, { label: 'Slow' }],
+      multiple: false,
+      askedAt: AT,
+    });
+    expect(await state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: stored });
+    expect(await writeProjectedQuestion(state, lane, 'f1', { ...pending, questions: [] }, undefined, () => AT)).toBe(
+      undefined,
+    );
+    expect(await state.read(QUESTION_STATE, 'f1')).toMatchObject({ ok: true, value: undefined });
   });
 
   test('a damaged question file, a question with an unreadable time or a state that throws is no question', async () => {

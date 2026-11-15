@@ -245,6 +245,77 @@ describe('the asks as work for the search', () => {
     expect(open.id).toBeDefined();
   });
 
+  test('an answered ask is findable by what was answered, whichever form the answer took, and by nothing it did not carry', async () => {
+    const asks = new FakeAsks();
+    const draft = (entry: string) => ({
+      source: sourceKey('ferret'),
+      ref: {},
+      entry: entryId(entry),
+      kind: 'task' as const,
+      subject: `Do ${entry}`,
+      why: 'because',
+      raisedBy: { kind: 'ferret' as const, ferret: 'f1' },
+      ferret: 'f1',
+    });
+    const answers = [
+      { kind: 'multiple-choice', choice: 'Blue' },
+      { kind: 'open-question', answer: 'typed words' },
+      { kind: 'other', answer: 'something else' },
+      { kind: 'answer-review', verdict: 'clarify', clarification: 'say more' },
+      { kind: 'answer-review', verdict: 'good' },
+      { kind: 'permission', decision: 'approve' },
+    ] as const;
+    for (const [index] of answers.entries()) asks.answerAs(await asks.raise(draft(`e${index + 1}`)), 'done');
+    const source = asksSource({
+      open: async filter => await asks.open(filter),
+      snapshots: async () =>
+        (await asks.snapshots()).map(board => ({
+          ...board,
+          resolved: board.resolved.map((item, index) => ({ ...item, response: answers[index] })),
+        })),
+    });
+
+    const works = await source.list();
+
+    const resolution = (subject: string) =>
+      works
+        .find(work => work.fields.some(field => field[0] === 'title' && field[1] === subject))
+        ?.fields.find(field => field[0] === 'resolution')?.[1];
+    expect([1, 2, 3, 4].map(number => resolution(`Do e${number}`))).toEqual([
+      'Blue',
+      'typed words',
+      'something else',
+      'say more',
+    ]);
+    expect(resolution('Do e5')).toBeUndefined();
+    expect(resolution('Do e6')).toBeUndefined();
+  });
+
+  test('an ask is still findable by its subject when the boards cannot be read', async () => {
+    const asks = new FakeAsks();
+    await asks.raise({
+      source: sourceKey('ferret'),
+      ref: {},
+      entry: entryId('e1'),
+      kind: 'task' as const,
+      subject: 'Do e1',
+      why: 'because',
+      raisedBy: { kind: 'ferret' as const, ferret: 'f1' },
+      ferret: 'f1',
+    });
+    const source = asksSource({
+      open: async filter => await asks.open(filter),
+      snapshots: async () => {
+        throw new Error('the agenda is not readable');
+      },
+    });
+
+    const works = await source.list();
+
+    expect(works).toHaveLength(1);
+    expect(works[0]?.fields.map(field => field[0])).toEqual(['id', 'title']);
+  });
+
   test('an ask that did not change is the same object, one that did a new one, a gone one is dropped and an unowned one is the owner’s', async () => {
     const summary = (id: string, over: Partial<AskSummary> = {}): AskSummary =>
       ({
