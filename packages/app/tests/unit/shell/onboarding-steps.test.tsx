@@ -99,12 +99,12 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
     await view.unmount();
   });
 
-  test('S14 a paired device is not sent to /onboarding', async () => {
+  test('S14 a paired device is not sent to /onboarding: opening the app lands on its machine', async () => {
     go('/app/');
     const { app } = boot({ paired: true });
     const view = await mount(app);
     await until(() => view.container.textContent?.includes('laptop') === true);
-    expect(window.location.pathname).toBe('/app/');
+    expect(window.location.pathname).toBe('/d/d1');
     expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
     await view.unmount();
   });
