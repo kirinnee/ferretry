@@ -85,22 +85,40 @@ describe('the agenda-message panel in conversation.row-body', () => {
     expect(hydrated).toEqual(['s-1']);
   });
 
-  test.each([
-    ['is not read yet', () => new Promise(() => undefined)],
-    ['cannot be read', () => Promise.reject(new Error('refused'))],
-  ] as const)('while the board %s the card names the ask the message quoted', async (_when, hydrate) => {
+  /** Mounts a recognised agenda message over a runtime whose board read is `hydrate`, on a store of its own. */
+  const drawWith = async (hydrate: (store: DaemonAgendaStore) => Promise<void>) => {
     const message = agendaAnswerMessage({ id: 'A45', quote: ASK }, 'Button only');
     const store = new DaemonAgendaStore();
     const Panel = createAgendaMessagePanel({
       connection,
-      agenda: { store, hydrate },
+      agenda: { store, hydrate: () => hydrate(store) },
     } as unknown as AgendaRuntime) as unknown as ComponentType<Record<string, unknown>>;
     view = await mount(
       <ReferenceSurfaceProvider surface={surface}>
         <Panel entry={{ id: 'r1', kind: 'user', text: message }} fallback={fallback} subject="s-1" />
       </ReferenceSurfaceProvider>,
     );
+  };
+
+  test('while the board is not read yet the card names the ask the message quoted', async () => {
+    await drawWith(() => new Promise(() => undefined));
     expect(text()).toContain(ASK);
+    expect(view?.container.querySelector('[data-agenda-message]')).not.toBeNull();
+  });
+
+  test('a board read that is refused or fails draws the plain words, not a card over no board', async () => {
+    // The real client marks the scope failed (store.fail) and rejects; the panel swallows the rejection.
+    await drawWith(async store => {
+      store.fail(scope);
+      throw new Error('refused');
+    });
+    await settleUntil(
+      () => view?.container.querySelector('[data-fallback]') !== null,
+      () => `the plain words never came back: ${view?.container.innerHTML}`,
+      interact,
+    );
+    expect(text()).toBe('the plain words');
+    expect(view?.container.querySelector('[data-agenda-message]')).toBeNull();
   });
 
   test('a message that is no agenda message returns the plain words as they are, and reads no board', async () => {

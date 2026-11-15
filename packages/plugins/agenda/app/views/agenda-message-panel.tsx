@@ -4,6 +4,8 @@
  * (`../components/agenda-message.tsx`). Conversation hands the row, the plain words as `fallback` and, for a send still
  * on its way, `onItsWay`; a message that is no agenda message returns `fallback` as it is, and reads nothing.
  *
+ * A board read that fails or is refused draws `fallback`, as a blocked or throwing panel does.
+ *
  * Only a message the reader recognises (or one on its way, worded against the open items) reads the ferret's board:
  * every other row of the chat costs this panel one parse.
  */
@@ -57,6 +59,8 @@ function Board({
     useCallback((listener: () => void) => store.subscribe(listener), [store]),
     useCallback(() => store.getSnapshot(), [store]),
   );
+  // A board refused or failed is the plain words: a card over no board would name an item nobody could open.
+  if (store.status(scope) === 'error') return <>{fallback}</>;
   // A board not read yet is not a board without the item: the card falls back to the ask its message quoted.
   const board = store.agenda(scope) ?? null;
   return (
