@@ -15,7 +15,14 @@ import { detectDeviceKind } from '../device-kind.ts';
 import { detectInstallChannel } from '../onboarding-model.ts';
 import { OnboardingPage } from '../onboarding-page.tsx';
 import { OnboardingProgressStore } from '../onboarding-progress.ts';
-import { CHECKING_HOSTED_RELAY } from '../pending-connections.ts';
+import { CHECKING_HOSTED_RELAY, type HostedRelayFallback, settleHostedRelay } from '../hosted-relay-state.ts';
+import {
+  browserPairTripStorage,
+  clearPairTrip,
+  type PairTripStorage,
+  readPairTrip,
+  rememberPairTrip,
+} from '../pair-trip.ts';
 import { setupHandoffFromHref } from '../setup-handoff.ts';
 import type { SetupSharePort } from '../setup-handoff-panel.tsx';
 import { stepsHref } from './steps-screen.tsx';
@@ -33,8 +40,9 @@ export const ONBOARDING_PATH = '/onboarding';
 export const PAIR_AND_RETURN = `${PAIR_PATH}?return=${encodeURIComponent(ONBOARDING_PATH)}`;
 
 /**
- * What the first run remembers across its trip to `/pair`: how many machines were paired when it left. In memory, one
- * per route, gone on a reload; it never holds a code (the pairing page takes its own from the address).
+ * What the first run remembers across its trip to `/pair`: how many machines were paired when it left. In memory (one
+ * per route) and, beside the place the journey keeps, in this browser's storage (`../pair-trip.ts`), so a reload on the
+ * pairing page does not forget it. It never holds a code (the pairing page takes its own from the address).
  */
 interface PairTrip {
   baseline: number | undefined;
@@ -51,7 +59,7 @@ export const browserSetupShare = (
 /**
  * The pairing step. Onboarding cannot draw Access's pairing screen (it imports nothing of Access), so the step says
  * what to do and opens `/pair`, Access's own page, asking it to come back to `/onboarding`. The count of machines when
- * the person left is kept (in memory); on coming back, a machine more than that finishes the step and the journey goes
+ * the person left is kept (memory and storage); on coming back, a machine more than that finishes the step and the journey goes
  * on to its next stage. A pairing seen while the step stays open (another tab) does the same. No code passes through
  * this component — the pairing page takes its own from the address.
  */
@@ -61,17 +69,20 @@ function PairingHandoff({
   onPaired,
   trip,
   progress,
+  storage,
 }: {
   readonly progress: OnboardingProgressStore;
+  readonly storage: PairTripStorage | undefined;
   readonly ports: DaemonlessPorts;
   readonly navigate: DaemonlessScreenProps['navigate'];
   readonly onPaired: () => void;
   readonly trip: PairTrip;
 }): ReactNode {
-  const known = useRef(trip.baseline ?? ports.daemons.snapshot().daemons.length);
+  const known = useRef(trip.baseline ?? readPairTrip(storage) ?? ports.daemons.snapshot().daemons.length);
   useEffect(() => {
     // The trip is over once the step is on the glass again: a later visit to this step starts from the list as it is.
     trip.baseline = undefined;
+    clearPairTrip(storage);
     const look = (): void => {
       const now = ports.daemons.snapshot().daemons.length;
       if (now > known.current) onPaired();
@@ -79,7 +90,7 @@ function PairingHandoff({
     };
     look();
     return ports.daemons.subscribe(look);
-  }, [ports, onPaired, trip]);
+  }, [ports, onPaired, trip, storage]);
   return (
     <div className="flex min-w-0 flex-col gap-2" data-onboarding-pairing="">
       <p className="m-0 text-cell text-muted">
@@ -90,6 +101,7 @@ function PairingHandoff({
         variant="primary"
         onClick={() => {
           trip.baseline = ports.daemons.snapshot().daemons.length;
+          rememberPairTrip(trip.baseline, storage);
           // The place is kept before leaving (a hand-off arrival is otherwise never written), so the return finds it.
           progress.remember();
           navigate(PAIR_AND_RETURN);
@@ -122,6 +134,12 @@ export function createOnboardingRoute(ports: DaemonlessPorts) {
     const write = useMemo(() => browserClipboardWriter(), []);
     const href = useMemo(() => location().replace(/#.*$/u, ''), [location]);
     const share = useMemo(() => browserSetupShare(), []);
+    const tripStorage = useMemo(() => browserPairTripStorage(), []);
+    const [fallback, setFallback] = useState<HostedRelayFallback>(CHECKING_HOSTED_RELAY);
+    useEffect(() => {
+      // The shell hands over what Connections already read: one answer, once (`settleHostedRelay` never rejects).
+      void settleHostedRelay(ports.hostedRelay).then(setFallback);
+    }, []);
     const selected = paired.selected;
     const openFleet = useCallback(() => {
       if (selected !== null) navigate(stepsHref(selected));
@@ -132,12 +150,19 @@ export function createOnboardingRoute(ports: DaemonlessPorts) {
         write={write}
         channel={channel}
         fleetReady={selected !== null}
-        fallback={CHECKING_HOSTED_RELAY}
+        fallback={fallback}
         href={href}
         share={share}
         onOpenFleet={openFleet}
         renderPairing={({ onPaired }) => (
-          <PairingHandoff ports={ports} navigate={navigate} onPaired={onPaired} trip={trip} progress={progress} />
+          <PairingHandoff
+            ports={ports}
+            navigate={navigate}
+            onPaired={onPaired}
+            trip={trip}
+            progress={progress}
+            storage={tripStorage}
+          />
         )}
       />
     );
