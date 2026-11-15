@@ -63,6 +63,7 @@ for attempt in attempt-1 attempt-2 attempt-3; do
   workflow_job_has "${smoke_workflow}" "${attempt}" '^    runs-on: macos-15$' 'must run on the free macos-15 runner'
   workflow_job_has "${smoke_workflow}" "${attempt}" '^    timeout-minutes: [0-9]+$' 'must state timeout-minutes'
   workflow_job_has "${smoke_workflow}" "${attempt}" 'started=true' 'must record that it started, so the verdict can tell "no runner" from "failed"'
+  workflow_job_has "${smoke_workflow}" "${attempt}" '^      - uses: [.]/[.]github/actions/kernel-darwin$' 'must run the kernel darwin-only tests (.github/actions/kernel-darwin), the only place they run'
 done
 for backoff in backoff-1 backoff-2; do
   workflow_job_has "${smoke_workflow}" "${backoff}" "result != 'success' && needs[.]attempt-[12][.]result != 'skipped' && needs[.]attempt-[12][.]outputs[.]started != 'true'" 'must re-queue only an attempt that never started, whatever its result says'
@@ -72,6 +73,16 @@ for backoff in backoff-1 backoff-2; do
   fi
 done
 workflow_job_has "${smoke_workflow}" backoff-1 '!inputs[.]advisory' 'must not retry on an advisory (pull request) run'
+# The kernel's darwin-only test files, one per step, none skipped: a file dropped from the action runs nowhere.
+kernel_darwin_action=".github/actions/kernel-darwin/action.yml"
+[ -f "${kernel_darwin_action}" ] || fail "${kernel_darwin_action} is missing"
+for file in root-rename-ffi root-remove-bracket node-fs-held-folder; do
+  # ... each bounded by coreutils `timeout` (a composite step has no timeout-minutes, so a hung FFI call would run to the
+  # job's limit and read as a cut-short run, green with a warning on a pull request) and given the int tier's per-test budget.
+  rg -q -- "in-devshell[.]sh timeout --kill-after=[0-9]+ [0-9]+ bun test --config=bunfig[.]int[.]toml --timeout 120000 packages/core/kernel/tests/integration/host/${file}[.]test[.]ts\$" "${kernel_darwin_action}" ||
+    fail "${kernel_darwin_action}: must run packages/core/kernel/tests/integration/host/${file}.test.ts as 'timeout --kill-after=<s> <s> bun test --config=bunfig.int.toml --timeout 120000 <file>', one file per step"
+  [ -f "packages/core/kernel/tests/integration/host/${file}.test.ts" ] || fail "the darwin test file ${file}.test.ts does not exist"
+done
 workflow_job_has "${smoke_workflow}" verdict 'scripts/ci/macos-smoke-verdict[.]sh' 'must judge through scripts/ci/macos-smoke-verdict.sh'
 workflow_job_has "${smoke_workflow}" verdict 'ADVISORY: [$][{][{] inputs[.]advisory [}][}]' 'must pass inputs.advisory to the verdict'
 rg -q '^  workflow_call:' "${smoke_workflow}" || fail "${smoke_workflow}: must be a workflow_call"

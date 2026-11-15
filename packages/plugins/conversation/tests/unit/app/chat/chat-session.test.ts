@@ -14,7 +14,18 @@ describe('Ferrets’ summary, as the chat draws it', () => {
     const session = chatSessionOf(
       ferretSummary('f1', { name: 'daisy', title: 'Fix the chat', runtime: 'claude-llm1' }),
     );
-    expect(session.config).toEqual({ id: 'f1', teammate: 'daisy', name: 'Fix the chat', agent: 'claude-llm1' });
+    expect(session.config).toEqual({
+      id: 'f1',
+      teammate: 'daisy',
+      name: 'Fix the chat',
+      agent: 'claude-llm1',
+      harness: 'claude',
+    });
+  });
+
+  test('spells the harness as the composer takes it: Codex is codex, Claude Code is claude', () => {
+    expect(chatSessionOf(ferretSummary('f1', { harness: 'codex' })).config.harness).toBe('codex');
+    expect(chatSessionOf(ferretSummary('f1', { harness: 'claude-code' })).config.harness).toBe('claude');
   });
 
   test('a working ferret is live and working; an idle one is live and waiting on the person', () => {

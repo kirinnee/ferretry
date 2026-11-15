@@ -21,10 +21,10 @@ import { LIBC } from './directory-syscalls.ts';
  * Each is declared below with exactly those argument types (`FFIType.i32` for `int`, `FFIType.ptr` for the NUL-ended
  * names). `mkdirat` is the one NEW symbol (a `project-files` write makes a missing folder below the project through
  * its parent's descriptor); like the other four it is exercised for real on Linux and its darwin symbol only by the
- * darwin-only tests (the same declared limit, runtimes: "[kernel: macOS descriptor calls]"). On a Linux box these are
+ * darwin-only tests (the `kernel-darwin` step of every `smoke-darwin.yaml` attempt runs them on a macos-15 runner). On a Linux box these are
  * the same symbols in `libc.so.6`, so `loadDescriptorCalls` is exercised for real there too; what only a Mac can prove
  * (the `libSystem.B.dylib` name, the `__error` symbol) is covered by the `skipIf(process.platform !== 'darwin')` tests
- * alone, which cannot run on the CI/Linux box (a declared GAP).
+ * alone, which only that macOS step runs (`.github/actions/kernel-darwin`).
  *
  * WHICH FLAG KEEPS A LEAF FROM BEING FOLLOWED. `rename(2)`, `link(2)` (with `flag` 0) and `unlinkat(2)` act on the
  * final component itself and never follow a link there, on macOS as on Linux, so no `RENAME_NOFOLLOW_ANY` is needed:

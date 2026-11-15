@@ -218,8 +218,15 @@ const realLayer = (before: Before): Layer => {
   };
 };
 
+/** Everything spelled over `/proc/self/fd` runs only where that exists; the `libc` provider runs on both. */
+const ON_LINUX = process.platform === 'linux';
+
+const STAND_IN: readonly (readonly [string, (before: Before) => Layer])[] = [
+  ['stand-in', (before: Before) => fakeLayer(before)],
+];
+
 const PROVIDERS: readonly (readonly [string, (before: Before) => Layer])[] = [
-  ['stand-in', before => fakeLayer(before)],
+  ...(ON_LINUX ? STAND_IN : []),
   ['libc', realLayer],
 ];
 
@@ -589,7 +596,7 @@ for (const [provider, make] of PROVIDERS) {
   });
 }
 
-describe('BG-002 the bracket', () => {
+describe.skipIf(!ON_LINUX)('BG-002 the bracket', () => {
   /** A held folder on a real directory, and a bracket whose fake working directory the test can read. */
   async function held() {
     const parent = await realpath(await mkdtemp(`${tmpdir()}/root-remove-bracket-unit-`));
@@ -708,7 +715,7 @@ describe('BG-002 the bracket', () => {
   });
 });
 
-describe('BG-002 the removal steps refuse a name that is not one plain segment', () => {
+describe.skipIf(!ON_LINUX)('BG-002 the removal steps refuse a name that is not one plain segment', () => {
   test('BG-002 NUL, `..`, `.`, `/` and the empty name are refused EINVAL before any bracket or call', async () => {
     const parent = await realpath(await mkdtemp(`${tmpdir()}/root-remove-bracket-names-`));
     parents.push(parent);
@@ -765,7 +772,7 @@ describe('BG-002 the removal steps refuse a name that is not one plain segment',
   });
 });
 
-describe('BG-002 the process relative-name calls and the seam clean up after a failure', () => {
+describe.skipIf(!ON_LINUX)('BG-002 the process relative-name calls and the seam clean up after a failure', () => {
   const identityOfFd = async (fd: number) => {
     const s = await fstatOf(fd);
     return {
@@ -866,7 +873,7 @@ describe('BG-002 the process relative-name calls and the seam clean up after a f
   });
 });
 
-describe('BG-002 without the bracket the answer stays no_descriptor_reach', () => {
+describe.skipIf(!ON_LINUX)('BG-002 without the bracket the answer stays no_descriptor_reach', () => {
   test('BG-002 calls loaded but no bracket: a folder remove refuses no_descriptor_reach, a file is still unlinked', async () => {
     const f = await fresh(
       before => ({ ...fakeLayer(before) }),
@@ -912,7 +919,7 @@ describe('BG-002 without the bracket the answer stays no_descriptor_reach', () =
   });
 });
 
-describe('BG-002 an owner root (project-files) removes a tree through the held folder too', () => {
+describe.skipIf(!ON_LINUX)('BG-002 an owner root (project-files) removes a tree through the held folder too', () => {
   test('BG-002 a skill folder is removed whole, and a parent swapped for a link first never reaches the outside tree', async () => {
     const parent = await realpath(await mkdtemp(`${tmpdir()}/root-remove-bracket-owner-`));
     parents.push(parent);
@@ -955,7 +962,7 @@ describe('BG-002 an owner root (project-files) removes a tree through the held f
 });
 
 // The same key cases against the real macOS library: libSystem.B.dylib, `__error`, and the real `fchdir` of the C
-// library. This box is Linux, so it never runs here (a declared GAP: verified only by this copy on a Mac).
+// library. A Linux box skips it; the `kernel-darwin` step of the smoke-darwin attempts runs it on macos-15.
 describe.skipIf(process.platform !== 'darwin')('BG-002 on macOS with the real libSystem calls and fchdir', () => {
   const real = (before: Before): Layer => {
     const syscalls = loadDirectorySyscalls();

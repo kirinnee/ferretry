@@ -36,6 +36,7 @@ ensureDom();
  */
 interface StreamRequest {
   readonly ferretId: string;
+  readonly query: Readonly<Record<string, string>> | undefined;
   readonly onData: (
     data: { readonly kind: 'text'; readonly text: string } | { readonly kind: 'bytes'; readonly bytes: Uint8Array },
   ) => void;
@@ -48,10 +49,11 @@ interface StreamSession {
 type DaemonStreamOpener = (request: StreamRequest) => StreamSession;
 
 const clientOf = (open: DaemonStreamOpener, keys: string[] = []): Pick<PluginClient, 'socket'> => ({
-  socket: (key, params, listeners) => {
+  socket: (key, params, listeners, query) => {
     keys.push(key);
     const session = open({
       ferretId: params.ferretId ?? '',
+      query,
       onData: data => listeners.onFrame(data.kind === 'text' ? data.text : data.bytes),
     });
     session.onStreamClosed(closed => listeners.onClose(`${closed.code} ${closed.reason}`));
@@ -905,20 +907,46 @@ describe('openSharedDraftStream', () => {
     expect(ended).toEqual([1003, 1003]);
   });
 
-  test('opens no stream for an item’s own draft, nor through a client with no socket', async () => {
-    const opened: StreamRequest[] = [];
-    const client = clientOf(request => {
-      opened.push(request);
-      return fakeSession().session;
-    });
+  test('opens no stream through a client with no socket', async () => {
     const handlers = { onFrame: () => undefined, onClosed: () => undefined };
-    await expect(
-      openSharedDraftStream(client, daemonFerretScope(daemon, 'sess-one', 'A5'), undefined, handlers),
-    ).rejects.toThrow('an item draft has no live stream yet');
     await expect(openSharedDraftStream({}, scope, undefined, handlers)).rejects.toThrow(
       'this client opens no live stream',
     );
-    expect(opened).toEqual([]);
+  });
+
+  test('names an Agenda item’s own draft in the stream’s query, and the chat’s draft with none', async () => {
+    const requests: StreamRequest[] = [];
+    const client = clientOf(request => {
+      requests.push(request);
+      return fakeSession().session;
+    });
+    const handlers = { onFrame: () => undefined, onClosed: () => undefined };
+    await openSharedDraftStream(client, daemonFerretScope(daemon, 'sess-one', 'A5'), undefined, handlers);
+    await openSharedDraftStream(client, scope, undefined, handlers);
+    expect(requests.map(request => request.query)).toEqual([{ item: 'A5' }, undefined]);
+  });
+
+  test('reports the close code the shell gives, even when the reason spells none, and reads the reason when it gives none', async () => {
+    const closers: ((reason: string, code?: number) => void)[] = [];
+    const client: Pick<PluginClient, 'socket'> = {
+      socket: (_key, _params, listeners) => {
+        closers.push(listeners.onClose);
+        return { send: () => undefined, close: () => undefined };
+      },
+    };
+    const ended: [number, string][] = [];
+    const handlers = {
+      onFrame: () => undefined,
+      onClosed: (code: number, reason: string) => ended.push([code, reason]),
+    };
+    await openSharedDraftStream(client, scope, undefined, handlers);
+    await openSharedDraftStream(client, scope, undefined, handlers);
+    closers[0]?.('the daemon asks for the whole draft', 4413);
+    closers[1]?.('4413 read it again');
+    expect(ended).toEqual([
+      [4413, 'the daemon asks for the whole draft'],
+      [4413, '4413 read it again'],
+    ]);
   });
 });
 
