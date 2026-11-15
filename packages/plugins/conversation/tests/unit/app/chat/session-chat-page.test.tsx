@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
-import { createLiveActivityHub, deviceControls, PanelSlot } from '@ferretry/app';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import { createLiveActivityHub, deviceControls, PanelSlot, writeMdComposePref } from '@ferretry/app';
 import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
@@ -14,6 +14,7 @@ import { TranscriptUnboundNotice } from '../../../../app/chat/transcript-unbound
 import { Composer } from '../../../../app/composer/composer.tsx';
 import { QuestionForm } from '../../../../app/questions/question-form.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 import { ferretView } from '../../../support/app/ferret-view.ts';
 
 import * as realSharedDraft from '../../../../app/composer/use-shared-draft.ts';
@@ -543,5 +544,62 @@ describe('search within the conversation', () => {
     const view = draw();
     controlF();
     expect(searchBars(view.root)).toBe(0);
+  });
+});
+
+describe('the ferret’s harness reaches the composer', () => {
+  // The plain textarea: the live editor has its own suites.
+  beforeEach(() => writeMdComposePref('off'));
+  afterEach(() => writeMdComposePref('on'));
+
+  const SKILL_ROUTE = 'GET /v1/ferrets/:ferretId/references';
+  const skillsClient = () =>
+    fakeClient(
+      {
+        [SKILL_ROUTE]: call => ({
+          ferret: call.params.ferretId,
+          prefix: call.query.prefix,
+          provided: true,
+          entries: [{ token: 'summary', label: '', detail: 'Give a fast recap' }],
+        }),
+      },
+      'alpha',
+    );
+
+  /** The page inside the half's client context, which is where its composer reads the ferret's skills. */
+  const drawWith = (session: PageProps['session'], client: FakeClient) => {
+    const page = render(
+      withClient(<SessionChatPage client={client} daemonId="alpha" entries={[]} session={session} />, client),
+    );
+    mounted.push(page);
+    return page;
+  };
+
+  /** Types `/summary` in the page's own composer and reads the menu's header and footer: what Enter would insert. */
+  const menuOffered = async (page: ReturnType<typeof draw>): Promise<string> => {
+    await runAsync(async () => {
+      page.root
+        .findByType('textarea')
+        .props.onChange({ currentTarget: { value: '/summary', selectionStart: 8, selectionEnd: 8 } });
+    });
+    await runAsync(async () => await new Promise<void>(resolve => setTimeout(resolve, 20)));
+    return textOf(page.root.findByProps({ className: 'fy-ac-foot' }));
+  };
+
+  test('a Codex ferret’s picked skill inserts $name', async () => {
+    const page = drawWith(ferretView('shared', { config: { harness: 'codex' } }), skillsClient());
+    expect(page.root.findByType(Composer).props.harness).toBe('codex');
+    expect(await menuOffered(page)).toBe('↵ inserts $summary · ⇥ complete · esc');
+  });
+
+  test('a Claude ferret’s picked skill inserts /name', async () => {
+    const page = drawWith(ferretView('shared', { config: { harness: 'claude' } }), skillsClient());
+    expect(page.root.findByType(Composer).props.harness).toBe('claude');
+    expect(await menuOffered(page)).toBe('↵ inserts /summary · ⇥ complete · esc');
+  });
+
+  test('a ferret the chat could not read names no harness, so the menu offers what every harness accepts', () => {
+    const page = draw({ session: unreadChatSession('shared') });
+    expect(page.root.findByType(Composer).props.harness).toBeUndefined();
   });
 });

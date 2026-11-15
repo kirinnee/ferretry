@@ -147,6 +147,88 @@ describe('one outbox per daemon', () => {
     second.stop();
   });
 
+  describe('when the machine answers again', () => {
+    const flush = async (): Promise<void> => await new Promise<void>(resolve => setTimeout(resolve, 0));
+    const feedOf = () => {
+      const listeners = new Set<(live: boolean) => void>();
+      return {
+        feed: {
+          subscribeLive: (listener: (live: boolean) => void) => {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+          },
+        },
+        listeners,
+        say: (live: boolean) => {
+          for (const listener of [...listeners]) listener(live);
+        },
+      };
+    };
+
+    /** An outbox whose first try is a network failure: the entry waits, and only a recovery moment retries it. */
+    const waitingOutbox = async () => {
+      const delivered: string[] = [];
+      let down = true;
+      const daemonOutbox = createDaemonOutbox({
+        daemonId: 'd1',
+        backend: new MemoryOutboxBackend(),
+        mintId: () => 'm1',
+        setTimer: () => undefined,
+        clearTimer: () => undefined,
+      });
+      const sender = {
+        send: async (_ferret: string, input: { message: string }) => {
+          if (down) throw new TypeError('Failed to fetch');
+          delivered.push(input.message);
+          return { disposition: 'queued' as const };
+        },
+        upload: async () => 'att',
+      };
+      const withdraw = daemonOutbox.offer(sender, undefined);
+      const feeds = feedOf();
+      const submitted = await daemonOutbox.outbox.submit({ daemonId: 'd1', ferretId: 's', message: 'hello' });
+      expect(submitted.outcome.kind).toBe('waiting');
+      return {
+        daemonOutbox,
+        delivered,
+        feeds,
+        withdraw,
+        sender,
+        machineUp: () => {
+          down = false;
+        },
+      };
+    };
+
+    test('sends what waited when the offering client’s feed comes live, and not when it drops', async () => {
+      const { daemonOutbox, delivered, feeds, withdraw, sender, machineUp } = await waitingOutbox();
+      withdraw();
+      const stop = daemonOutbox.offer(sender, feeds.feed);
+      await flush();
+      expect(delivered).toEqual([]);
+      // Nothing but the feed makes the outbox try again from here: the timer is stubbed out.
+      machineUp();
+      feeds.say(false);
+      await flush();
+      expect(delivered).toEqual([]);
+      feeds.say(true);
+      await flush();
+      expect(delivered).toEqual(['hello']);
+      stop();
+      daemonOutbox.stop();
+    });
+
+    test('stops hearing the feed once the sender is taken back', async () => {
+      const { daemonOutbox, feeds, withdraw, sender } = await waitingOutbox();
+      withdraw();
+      const stop = daemonOutbox.offer(sender, feeds.feed);
+      expect(feeds.listeners.size).toBe(1);
+      stop();
+      expect(feeds.listeners.size).toBe(0);
+      daemonOutbox.stop();
+    });
+  });
+
   test('waits for a composer’s sender, and sends what waited once one is offered', async () => {
     const sent: string[] = [];
     const daemonOutbox = createDaemonOutbox({
