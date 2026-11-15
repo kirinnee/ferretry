@@ -101,7 +101,7 @@ interface RecipeBearing {
   readonly proposals?: readonly LoginRecipeProposal[] | undefined;
 }
 
-class RecipeValueError extends Error {
+export class RecipeValueError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'RecipeValueError';

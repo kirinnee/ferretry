@@ -41,13 +41,15 @@ describe('accounts manifest', () => {
       }
     }
   });
-  test('lists the agent tools that are built (account_hint and the four secure-copy tools), none showing a value; the two unbuilt are not offered to agents', () => {
+  test('lists the agent tools (account_hint, the four secure-copy tools and the two asking tools), none showing a value', () => {
     expect(manifest.actions.agentTools.map(entry => entry.name)).toEqual([
       'account_hint',
       'secure_copy',
       'secure_list',
       'secure_discard',
       'secure_paste',
+      'account_propose',
+      'task_plan',
     ]);
     for (const entry of manifest.actions.agentTools) expect(entry.guard).not.toBe('secrets');
   });

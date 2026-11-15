@@ -45,6 +45,11 @@ export interface HalfBServices {
     readonly secure_discard: ToolHandler;
     readonly secure_paste: ToolHandler;
   };
+  /** The agent's two asking tools (`account_propose`, `task_plan`): each raises a card and changes nothing by itself. */
+  readonly proposalTools: {
+    readonly account_propose: ToolHandler;
+    readonly task_plan: ToolHandler;
+  };
   /** A ferret ended: whatever it held (copies, page records) is let go. */
   readonly sessionEnded: (ferret: string) => void;
   readonly pasteRules: PasteRuleService;
@@ -64,7 +69,7 @@ export interface HalfB {
     /** The Vault's paste: the copies it draws from, the owner's rules, and the takeover check. */
     readonly 'input.secure-copy:copy': SecureCopyHook;
   };
-  readonly tools: HalfBServices['secureCopyTools'];
+  readonly tools: HalfBServices['secureCopyTools'] & HalfBServices['proposalTools'];
   readonly subscribers: {
     readonly 'access.devices-changed': (payload: DevicesChangedPayload) => Promise<void>;
     /** A ferret that ended takes its waiting approvals with it. */
@@ -93,7 +98,7 @@ export function halfB(services: HalfBServices): HalfB {
       'input.phone-approval:phone': new PhoneApprovalHook(services.phone),
       'input.secure-copy:copy': services.secureCopyHook,
     },
-    tools: services.secureCopyTools,
+    tools: { ...services.secureCopyTools, ...services.proposalTools },
     subscribers: {
       'access.devices-changed': onDevicesChanged(services.rules, services.purgeFailed),
       'ferrets.changed': async ({ ferret, state, gone }) => {
