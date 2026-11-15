@@ -80,6 +80,18 @@ describe('an audit log that fails is never the call’s failure', () => {
     expect(attempts).toBe(1);
   });
 
+  test('c58-22 a secret send is written to the audit log as secrets.used, and a log that refuses it does not throw', () => {
+    const w = world();
+    const note = { plugin: 'warden', secret: 'JEV_API_KEY', host: 'api.typesafe.ai', outcome: 'completion' };
+    w.gate.secretSent(note);
+    expect(w.recorded).toHaveLength(1);
+    expect(w.recorded[0]).toMatchObject({ event: AUDIT_KINDS['secrets.used'], subject: 'JEV_API_KEY' });
+    w.recorded.push = () => {
+      throw new Error('the audit log is full');
+    };
+    expect(() => w.gate.secretSent(note)).not.toThrow();
+  });
+
   test('a ferret token refused for naming another ferret is still answered 401 when the audit log will not take the refusal', () => {
     const w = world();
     w.audits.push = () => {

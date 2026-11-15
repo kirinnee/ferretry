@@ -4,7 +4,10 @@ import { audit, cap } from '@ferretry/core-gate/contract';
 import { Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
+import { PRESET_ENV_NAMES } from './contract/preset-env-names.ts';
 import {
+  ADD_RUNTIME_LOGIN_SLOT,
+  ADD_RUNTIME_SIGN_IN_SLOT,
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
   LOGINS_AUDIT,
@@ -314,6 +317,9 @@ export default definePlugin({
       panel('daemon.status', { id: 'quota-readout', order: 30 }),
       // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
       panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
+      // Runtimes' Add runtime page offers these two (its contract/slots.ts): a login is added and signed in right there.
+      panel(ADD_RUNTIME_LOGIN_SLOT, { id: 'add-runtime-login', order: 10 }),
+      panel(ADD_RUNTIME_SIGN_IN_SLOT, { id: 'add-runtime-sign-in', order: 10 }),
     ],
     settings: [settingsTab('logins', { group: 'agents', label: 'Logins', order: 25 })],
   },
@@ -363,6 +369,8 @@ export default definePlugin({
       '127.0.0.1',
     ],
     spawn: ['claude', 'codex', 'ollama', 'lsof', 'ss', 'ps'],
+    // `fy login add --from-env` reads these shell variables and no others: the names the presets declare.
+    cliEnvReads: PRESET_ENV_NAMES,
     secrets: [],
   },
 });

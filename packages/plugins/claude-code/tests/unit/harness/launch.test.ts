@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
-import { homeText, launchCommand, settingsDocument } from '../../../daemon/lib/harness/launch.ts';
+import {
+  CLAUDE_NO_QUESTIONS_FLAG,
+  homeText,
+  launchCommand,
+  questionArguments,
+  settingsDocument,
+} from '../../../daemon/lib/harness/launch.ts';
 import {
   API_KEY_SEED_NAME,
   API_KEY_SEED_SCRIPT,
@@ -260,6 +266,8 @@ describe('launchCommand', () => {
     home: '/state/claude-code/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
+    // Interactive keeps the question tool, so these argv assertions are about the rest of the argv only.
+    mode: 'interactive' as const,
     conversation: { kind: 'new' as const, id: 'c-1' },
   };
 
@@ -462,5 +470,40 @@ describe('transcript', () => {
         cacheReadTokens: 100,
       },
     ]);
+  });
+});
+
+describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
+  const inputs = (mode?: 'interactive' | 'auto') => ({
+    binary: '/opt/bin/claude',
+    home: '/fy/agent-homes/f1',
+    permissionMode: 'auto' as const,
+    hasMcp: false,
+    conversation: { kind: 'new' as const, id: 'conv-1' },
+    ...(mode === undefined ? {} : { mode }),
+  });
+
+  it('spells the flag exactly as the Runtimes wrapper does', () => {
+    should(CLAUDE_NO_QUESTIONS_FLAG).equal('--disallowed-tools=AskUserQuestion');
+    should(questionArguments('interactive')).eql([]);
+    should(questionArguments('auto')).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments(undefined)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+  });
+
+  it('keeps the tool for an interactive launch and withholds it from an auto one or one with no mode, new or resumed', () => {
+    for (const conversation of [
+      { kind: 'new' as const, id: 'c' },
+      { kind: 'resume' as const, id: 'c' },
+    ]) {
+      should(launchCommand({ ...inputs('interactive'), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      should(launchCommand({ ...inputs('auto'), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      should(launchCommand({ ...inputs(), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+    }
+  });
+
+  it('adds nothing else: an interactive argv is an auto argv without the one flag', () => {
+    should(launchCommand(inputs('auto')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
+      launchCommand(inputs('interactive')),
+    );
   });
 });

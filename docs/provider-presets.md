@@ -160,7 +160,10 @@ added, like any other.
 - **CLI:** `fy login add glm` (a preset id, or a word of one: `glm`, `kimi`, `deepseek`, `bedrock`…) asks
   for each missing secret with a hidden prompt, or reads it from stdin off a terminal — never from argv,
   so never from shell history — stores it, and adds the login. `--from-env` imports from the current
-  shell, detecting the provider; `--test` runs the Test afterwards.
+  shell, detecting the provider; a setting the shell declares (`AWS_REGION`, `CLOUD_ML_REGION`, a Foundry deployment
+  name) replaces the preset's default, never a credential-named variable or one the preset leaves empty on purpose, and a
+  `*_BASE_URL` on another host than the preset's is not taken (the preset's address stays, said by name; `--env` changes
+  it). `--test` runs the Test afterwards.
 
 ## Test
 
