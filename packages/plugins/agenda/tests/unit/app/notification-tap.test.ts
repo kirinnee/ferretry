@@ -92,7 +92,7 @@ describe('a tap, per kind of push', () => {
     // into the chat. The Inbox page (`agendaAskPath`) is not a tap screen, so a buzz carrying it opens the machine's home.
     const ask = { id: 'A1', subject: 'Badge colour', ferret: 'f1', state: 'open', source: 'card' } as BuzzableAsk;
     expect(notificationUrl(askBuzzWords(ask).url, ORIGIN, MACHINE)).toBe(`${HOME}/ferrets/f1/chat?ask=A1`);
-    expect(notificationUrl(stopBuzzWords('f1', 'build-bot', [ask]).url, ORIGIN, MACHINE)).toBe(
+    expect(notificationUrl(stopBuzzWords('f1', 'build-bot', [ask], '1').url, ORIGIN, MACHINE)).toBe(
       `${HOME}/ferrets/f1/chat?ask=A1`,
     );
     expect(notificationUrl(agendaAskPath('f1', 'A1'), ORIGIN, MACHINE)).toBe(HOME);

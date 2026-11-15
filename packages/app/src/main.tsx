@@ -13,7 +13,7 @@ import { createRoot } from 'react-dom/client';
 import { connector, type DirectDial, pairOverCarriers, pairOverDirect } from './connect/connector.ts';
 import { directoryFetch } from './connect/directory.ts';
 import { setMemberCarriers } from './connect/member.ts';
-import { registeredConnect, registeredDaemonless, registeredPasskey } from './connect/provides.ts';
+import { registeredConnect, registeredDaemonless, registeredPasskey, withHostedRelay } from './connect/provides.ts';
 import { DaemonList } from './daemons/daemon-list.ts';
 import { generated } from './generated/surfaces.ts';
 import { DeviceLayoutStore } from './layout/device-layout.ts';
@@ -99,7 +99,7 @@ const registered = registeredConnect(generated.surfaces, {
   ...(directory === undefined ? {} : { directory }),
 });
 setMemberCarriers(registered.member); // only this composition may install them: the barrel has no setter
-const daemonless = registeredDaemonless(generated.surfaces, sessionPorts); // pairing ports only, no daemon client
+const daemonless = registeredDaemonless(generated.surfaces, withHostedRelay(sessionPorts, registered)); // no daemon client
 for (const failure of [...registered.failures, ...daemonless.failures])
   console.warn(`${failure.plugin} could not set up its connect part: ${failure.reason}`);
 // The one passkey prompt (Access's): its ceremony rides Access's own guarded client, read from the runtime per call.

@@ -286,6 +286,8 @@ export const SessionMcpListingSchema = z.strictObject({
   project: z
     .strictObject({
       path: z.string().min(1),
+      /** The name of the project registered for this folder (Projects owns it), when there is one. */
+      name: z.string().min(1).optional(),
       etag: SessionMcpEtagSchema.nullable(),
       servers: z.array(SessionMcpProjectServerSchema),
     })

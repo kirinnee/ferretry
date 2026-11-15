@@ -192,7 +192,9 @@ export function AddMcpForm({
 
   const projectUnavailable = listing === null ? null : listing.project === null ? listing.projectUnavailable : null;
   const reason = result.kind === 'incomplete' ? result.reason : null;
-  const projectFolder = listing?.project == null ? null : projectFolderName(listing.project.path);
+  // The registered project's name when Projects has one for this folder, else the folder the .mcp.json sits in.
+  const projectFolder =
+    listing?.project == null ? null : (listing.project.name ?? projectFolderName(listing.project.path));
 
   return (
     <form className="fy-action-form__body" data-add-mcp="" noValidate onSubmit={event => void submit(event)}>

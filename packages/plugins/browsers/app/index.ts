@@ -5,6 +5,7 @@ import manifest from '../manifest.ts';
 import { BrowserPanel } from './features/browser/browser-panel.tsx';
 import { BrowserTab } from './features/settings/browser-tab.tsx';
 import { OpenLinksInPanel } from './features/settings/open-links-in-panel.tsx';
+import { browserLoginPort, DaemonBrowserLoginStore } from './lib/browser-login.ts';
 import { linkProvisionFor } from './lib/link-provision.ts';
 import type { BrowserDaemon } from './lib/scope.ts';
 import { daemonOfClient } from '@ferretry/app';
@@ -19,6 +20,9 @@ export default provideToShell(
   implementApp(manifest, {
     build: ({ client }) => {
       const daemon: BrowserDaemon = { daemonId: daemonOfClient(client) ?? 'this-daemon', client };
+      // The human sign-in window is daemon-global and its status is a live credential, so the store is built here,
+      // per daemon, over THIS daemon's own guarded client: no store is shared between two paired daemons.
+      const loginStore = new DaemonBrowserLoginStore(({ client: bound }) => browserLoginPort(bound));
       return {
         panels: {
           // Drawn from `shell.deviceSettings` (no daemon), never from a machine's half.
@@ -29,6 +33,7 @@ export default provideToShell(
               : createElement(BrowserPanel, {
                   daemon,
                   sessionId: subject,
+                  loginStore,
                   ...(intent === undefined ? {} : { intent }),
                 }),
         },

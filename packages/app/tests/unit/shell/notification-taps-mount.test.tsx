@@ -11,6 +11,7 @@ import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
 import { NotificationOpenInbox, notificationOpenMessage } from '../../../src/worker/notification-open.ts';
+import { arriveAtList } from '../../support/arrive-at-list.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -121,7 +122,7 @@ describe('S6 the app root mounts the notification taps', () => {
   });
 
   test('a tap that arrives while the app is up is routed at once', async () => {
-    go('/app/');
+    arriveAtList('/app/');
     heard.length = 0;
     const inbox = new NotificationOpenInbox(window.location.origin);
     const { runtime, storage } = setup(inbox);
@@ -150,7 +151,7 @@ describe('S6 the app root mounts the notification taps', () => {
   });
 
   test('with no inbox nothing is mounted and the app stays where it was', async () => {
-    go('/app/');
+    arriveAtList('/app/');
     heard.length = 0;
     const { runtime, storage } = setup(undefined);
     const view = await render(runtime, storage);

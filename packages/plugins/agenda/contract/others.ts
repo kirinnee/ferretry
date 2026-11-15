@@ -12,6 +12,8 @@ export interface AccessBuzzApi {
     readonly title: string;
     readonly body: string;
     readonly url: string;
+    /** Names the ONE event the buzz is about (never its `tag`): a re-delivery of it is skipped on the phone, a later event is not. */
+    readonly eventKey?: string;
   }): Promise<number>;
   /**
    * Takes buzzes down on every enrolled device but the caller's (`except` is a paired device's id, read from the
