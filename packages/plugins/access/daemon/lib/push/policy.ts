@@ -57,10 +57,10 @@ export function pushDeviceView(record: PushSubscriptionRecord): PushDeviceView {
  * needs the client's own route table, and inventing a path here would be a second opinion about the
  * client's URLs — see the GAPs named on `PushService`.
  */
-export function enrolmentConfirmation(deviceName: string): PushNotificationPayload {
+export function enrolmentConfirmation(deviceName: string, enrolmentId: string): PushNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: 'push-enrolled',
+    eventKey: `push-enrolled:${enrolmentId}`,
     title: 'Notifications are on',
     body: `${deviceName} will be told when this machine needs you.`,
     tag: 'push-enrolment',
@@ -74,13 +74,17 @@ export function enrolmentConfirmation(deviceName: string): PushNotificationPaylo
  *
  * PARSED HERE, NOT TRUSTED: an over-cap title, body or url throws at the sender instead of reaching a phone as an
  * unreadable push. A TAG IS NEVER A REASON TO REFUSE: one the worker could not read (`fittingPushTag`) is left off,
- * so the buzz is shown untagged — not replaced or cleared by tag — rather than lost. The tag still names the event.
+ * so the buzz is shown untagged — not replaced or cleared by tag — rather than lost.
+ *
+ * THE TAG IS NOT THE EVENT KEY. A tag names the LINE a notification replaces, so two distinct events (a ferret's second
+ * stop) share one; the key names ONE event, and only the sender knows which. A buzz that names none sends none, so the
+ * worker never skips it as a twin.
  */
 export function buzzPayload(message: Buzz): PushNotificationPayload {
   const tag = fittingPushTag(message.tag);
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: message.tag,
+    ...(message.eventKey === undefined ? {} : { eventKey: message.eventKey }),
     title: message.title,
     body: message.body,
     ...(tag === undefined ? {} : { tag }),

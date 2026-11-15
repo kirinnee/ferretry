@@ -13,15 +13,13 @@ import { useFullscreen, usePanelIntent } from '@ferretry/app';
 import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { useCallback, useId, useMemo } from 'react';
 import { useBrowserControl } from '../../hooks/use-browser-control.ts';
+import { useBrowserLogin } from '../../hooks/use-browser-login.ts';
+import type { DaemonBrowserLoginStore } from '../../lib/browser-login.ts';
 import { browserPageForKey, useSessionBrowser } from './use-session-browser.ts';
 import { type BrowserDaemon, browserSessionScope } from '../../lib/scope.ts';
 import { BrowserSurfaceList, browserPageLabel } from './browser-surface-list.tsx';
 import { remoteBrowserPage } from './remote-browser-chrome.tsx';
-import {
-  type UnifiedBrowserDependencies,
-  UnifiedBrowserSurface,
-  type UnifiedBrowserSurfaceProps,
-} from './unified-browser-surface.tsx';
+import { type UnifiedBrowserDependencies, UnifiedBrowserSurface } from './unified-browser-surface.tsx';
 import './browser.css';
 
 export interface BrowserPanelProps {
@@ -30,13 +28,18 @@ export interface BrowserPanelProps {
   readonly sessionId: string;
   /** The two engines, as injectable dependencies (a test substitutes them). */
   readonly dependencies?: UnifiedBrowserDependencies;
-  readonly onOpenLoginWindow?: UnifiedBrowserSurfaceProps['onOpenLoginWindow'];
+  /**
+   * This daemon's login-window store (built by the half over the daemon's own client). With it the panel offers the
+   * "Open browser login window" button and draws the status banner; without it, neither.
+   */
+  readonly loginStore?: DaemonBrowserLoginStore;
   /** What the host just asked of this panel: "new-page" opens a page (the phone's "+ New browser"). */
   readonly intent?: PanelIntent;
 }
 
 /** The panel for one ferret. Without a ferret there is no browser to show. */
-export function BrowserPanel({ daemon, sessionId, dependencies, onOpenLoginWindow, intent }: BrowserPanelProps) {
+export function BrowserPanel({ daemon, sessionId, dependencies, loginStore, intent }: BrowserPanelProps) {
+  const login = useBrowserLogin(daemon, loginStore);
   const scope = useMemo(() => browserSessionScope(daemon, sessionId), [daemon, sessionId]);
   const titleId = useId();
   const pages = useSessionBrowser(scope, daemon);
@@ -87,7 +90,9 @@ export function BrowserPanel({ daemon, sessionId, dependencies, onOpenLoginWindo
           ),
         }}
         {...(dependencies === undefined ? {} : { dependencies })}
-        {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
+        loginStatus={login.status}
+        {...(login.open === undefined ? {} : { onOpenLoginWindow: login.open })}
+        {...(login.close === undefined ? {} : { onCloseLoginWindow: login.close })}
       />
       {control.failure === null ? null : (
         <p role="status" className="m-0 px-panel py-1 text-meta text-err" data-browser-control-failure="">

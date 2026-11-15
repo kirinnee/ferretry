@@ -8,6 +8,7 @@ import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   InputPhoneApprovals,
+  InputSavedLogins,
   InputSecureCopies,
   RedactionSources,
   SealedDocumentsPort,
@@ -1066,6 +1067,8 @@ export default definePlugin({
       { hook: InputPhoneApprovals, key: 'phone' },
       /** The Vault's paste draws on the copies, the owner's paste rules and the takeover check, all Accounts'. */
       { hook: InputSecureCopies, key: 'copy' },
+      /** The Vault's input card offers saved logins, Save-as, the card order and sign-in facts from the account store. */
+      { hook: InputSavedLogins, key: 'saved' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
       /** Access issues a passkey challenge for a staged act only through the plugin that staged it (G83): each act is Accounts'. */
       { hook: StepUpStages, key: 'add-2fa-key' },

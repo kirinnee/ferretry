@@ -44,9 +44,12 @@ export function Link({
 }
 
 /**
- * Home: every paired daemon, grouped by machine (§5.1). With none paired, FIRST RUN: the person goes to Onboarding's
- * daemon-less `/onboarding` screen (replacing this entry, so Back does not return to an empty home) — the shell draws
- * no setup steps of its own. If no Onboarding is installed there is nowhere to send them, so the plain sentence stays.
+ * Home: every paired daemon, grouped by machine (§5.1). With a selected, still-paired daemon the app OPENS that machine
+ * (`firstRunEntry`'s `fleet` answer, replacing this entry so Back does not return to a list the person skipped); with
+ * pairings but no valid selection the list stays (the `picker` answer: never guess which machine they meant). With none
+ * paired, FIRST RUN: the person goes to Onboarding's daemon-less `/onboarding` screen (replacing this entry, so Back
+ * does not return to an empty home) — the shell draws no setup steps of its own. If no Onboarding is installed there is
+ * nowhere to send them, so the plain sentence stays.
  */
 export function DaemonListPage() {
   const { runtime, views, routes } = useShell();
@@ -60,12 +63,24 @@ export function DaemonListPage() {
     setupJourney: false,
   });
   const onboarding = views.screens.get(ONBOARDING_SCREEN);
-  const sendTo = entry.kind === 'onboarding' && onboarding !== undefined ? routes.href(onboarding, {}) : undefined;
+  // WHEN THE APP IS OPENED (no entry behind this one: a fresh tab, a deep link, a first entry), a paired device with a
+  // real selection goes straight to that machine. Reaching the list on purpose ("All daemons", the picker) pushes an
+  // entry on top of another, so it is never bounced away from the list it asked for.
+  const opened = router.previousPath === undefined;
+  const sendTo =
+    entry.kind === 'fleet'
+      ? opened
+        ? daemonHomeHref(entry.daemonId)
+        : undefined
+      : entry.kind === 'onboarding' && onboarding !== undefined
+        ? routes.href(onboarding, {})
+        : undefined;
   useEffect(() => {
     if (sendTo !== undefined) router.navigate(sendTo, { replace: true });
   }, [sendTo, router]);
+  if (sendTo !== undefined)
+    return <ShellLine>{entry.kind === 'fleet' ? 'Opening your machine…' : 'Opening setup…'}</ShellLine>;
   if (groups.length === 0) {
-    if (sendTo !== undefined) return <ShellLine>Opening setup…</ShellLine>;
     return (
       <section className="fy-page">
         <h1>No daemons yet</h1>

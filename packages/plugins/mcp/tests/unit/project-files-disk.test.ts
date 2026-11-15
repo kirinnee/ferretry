@@ -56,7 +56,7 @@ async function world() {
       get: async id => ({ id, harness: 'claude-code', folder: project, runtime: 'r1' }),
       list: async () => [],
     },
-    projectRoots: async () => [project],
+    projectFolders: async () => [{ root: project }],
     files,
     login: {
       runtime: async () => undefined,

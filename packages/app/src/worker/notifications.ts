@@ -198,11 +198,32 @@ const machineTarget = (raw: string, machine: PushMachine | null): { path: string
  * The app-wide registration knows no machine and its pushes are named "Unverified", so a PUSH it receives always carries
  * the app, whatever it says (see {@link notificationClickUrl} for a line a page showed).
  */
-export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
-  if (machine === null || typeof raw !== 'string') return machineHomeUrl(machine, origin);
+export const notificationUrl = (
+  raw: unknown,
+  origin: string,
+  machine: PushMachine | null,
+  sessionId?: unknown,
+): string => {
+  const fallback = refusedPageUrl(machine, origin, sessionId);
+  if (machine === null || typeof raw !== 'string') return fallback;
   const target = machineTarget(raw, machine);
-  if (target === null) return machineHomeUrl(machine, origin);
+  if (target === null) return fallback;
   return new URL(target.ask === null ? target.path : `${target.path}?ask=${target.ask}`, origin).href;
+};
+
+/**
+ * Where a tap goes when the page a push (or a notification's data) named is one the shell does not accept: the
+ * conversation the push is ABOUT when it named one (`sessionId`, as v4's fallback did), else the machine's home — or the
+ * app, for the app-wide registration, which has no machine to name a conversation under. The conversation is read through
+ * the same closed grammar as any page, so a `sessionId` that is no ferret's id (a separator, a dot segment, over length)
+ * names nothing and lands on the home.
+ */
+const refusedPageUrl = (machine: PushMachine | null, origin: string, sessionId: unknown): string => {
+  const chat =
+    machine === null || typeof sessionId !== 'string'
+      ? null
+      : machineTarget(`/ferrets/${encodeURIComponent(sessionId)}/chat`, machine);
+  return chat === null ? machineHomeUrl(machine, origin) : new URL(chat.path, origin).href;
 };
 
 /**

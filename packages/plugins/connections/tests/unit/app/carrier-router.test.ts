@@ -182,6 +182,41 @@ describe('hosted relay discovery (R580)', () => {
     expect(asked).toEqual(['https://directory.example/v1/default-relay']);
   });
 
+  test('c58-07 the first run is told the SAME one read (available, or disabled by the operator), never a second request', async () => {
+    const asked: string[] = [];
+    const answer = {
+      current: { version: 1, relayUrl: 'wss://hosted.example' } as { version: 1; relayUrl: string | null },
+    };
+    const directory: ConnectPorts['directory'] = async url => {
+      asked.push(url);
+      return new Response(JSON.stringify(answer.current), { headers: { 'content-type': 'application/json' } });
+    };
+    const portsWith = (): ConnectPorts =>
+      ({
+        openSocket: () => {
+          throw new Error('nothing dials here');
+        },
+        after: () => {},
+        now: () => 0,
+        daemons: { registerCache: () => () => {} },
+        directory,
+      }) as unknown as ConnectPorts;
+    const shell = (connections as unknown as { shell: Required<import('@ferretry/app').ShellProvides> }).shell;
+    const host = globalThis as { __FY_RELAY_DIRECTORY__?: string };
+    host.__FY_RELAY_DIRECTORY__ = 'https://directory.example';
+    try {
+      const ports = portsWith();
+      shell.carriers(ports);
+      const told = await shell.hostedRelay(ports)();
+      expect(told).toEqual({ kind: 'available', relayUrl: 'wss://hosted.example' });
+      expect(asked).toEqual(['https://directory.example/v1/default-relay']);
+      answer.current = { version: 1, relayUrl: null };
+      expect(await shell.hostedRelay(portsWith())()).toEqual({ kind: 'disabled' });
+    } finally {
+      delete host.__FY_RELAY_DIRECTORY__;
+    }
+  });
+
   test('R88 the shell carrier listens for the page coming online, foreground and changing network', () => {
     const added: string[] = [];
     const target = (kind: string) => ({

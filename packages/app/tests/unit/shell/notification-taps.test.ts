@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { routeTable } from '../../../src/router/routes.ts';
 import { PUSH_TAP_SCREENS } from '../../../src/router/tap-target.ts';
+import { notificationUrl } from '../../../src/worker/notifications.ts';
 import { openNotificationTap, tapLanding } from '../../../src/shell/notification-taps.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
@@ -37,6 +38,16 @@ describe('S6 tapLanding (the page’s own check of where a tap lands)', () => {
       url: '/d/a',
       daemon: 'a',
     });
+  });
+
+  test('S6 a push naming a refused page, with the conversation it is about, lands on that ferret’s chat, not the machine home', () => {
+    const machine = { daemonId: 'a', label: 'A' };
+    const sent = notificationUrl('/no/such/page', ORIGIN, machine, 'f1');
+    const path = sent.slice(ORIGIN.length);
+    expect(tapLanding({ path }, ORIGIN, routes, paired('a'))).toEqual({ url: '/d/a/ferrets/f1/chat', daemon: 'a' });
+    // with no session the same push lands on the machine's home
+    const bare = notificationUrl('/no/such/page', ORIGIN, machine).slice(ORIGIN.length);
+    expect(tapLanding({ path: bare }, ORIGIN, routes, paired('a'))).toEqual({ url: '/d/a', daemon: 'a' });
   });
 
   test('anything off the routing table lands on the app’s home', () => {

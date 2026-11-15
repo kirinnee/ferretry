@@ -440,8 +440,24 @@ describe('StepUpService', () => {
 
       // Assert
       should(told.ok && kept.ok).be.true();
-      should(announced.announced).eql([passkeyAddedNotice('Phone')]);
+      should(announced.announced).have.length(1);
+      should(announced.announced[0]).eql(
+        passkeyAddedNotice('Phone', phone.deviceId, announced.store.rows[0]?.createdAt ?? ''),
+      );
       should(failing.store.rows).have.length(1);
+    });
+
+    it('should name each passkey addition by its own event key while every one shares the notice tag (S6)', () => {
+      // Arrange
+      const first = passkeyAddedNotice('Laptop', phone.deviceId, '2026-11-15T10:00:00.000Z');
+      const second = passkeyAddedNotice('New phone', phone.deviceId, '2026-11-15T10:05:00.000Z');
+      const again = passkeyAddedNotice('Laptop', phone.deviceId, '2026-11-15T10:00:00.000Z');
+
+      // Act / Assert — the worker skips a re-delivery by key, so a distinct addition must not share one
+      should(second.tag).equal(first.tag);
+      should(second.eventKey).not.equal(first.eventKey);
+      should(first.eventKey).not.equal(first.tag);
+      should(again.eventKey).equal(first.eventKey);
     });
 
     it('should let the owner at the machine re-open a window for one passkey, ten minutes, audited', async () => {
