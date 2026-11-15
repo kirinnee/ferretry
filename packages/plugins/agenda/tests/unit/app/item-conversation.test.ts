@@ -174,7 +174,7 @@ describe('the receipts of the owner’s rows', () => {
     ...(sends === undefined ? {} : { sends }),
   });
 
-  it('gives each owner row the ledger record of the send whose words it is, and the ferret’s rows none', async () => {
+  it('gives an owner row the record of the delivered send whose words it is, and never a cancelled one; the ferret’s rows none', async () => {
     const client = withLedger(async () => [
       { sendId: 'a', fate: 'cancelled', message: 'also !A4 please', acceptedAt: '2026-08-01T10:07:00.000Z' },
       { sendId: 'b', fate: 'delivered', message: ' reply !A4: ship it ', acceptedAt: '2026-08-01T10:05:00.000Z' },
@@ -184,7 +184,7 @@ describe('the receipts of the owner’s rows', () => {
     expect(entries.map(entry => [entry.kind, entry.send?.sendId])).toEqual([
       ['user', 'b'],
       ['assistant', undefined],
-      ['user', 'a'],
+      ['user', undefined],
     ]);
   });
 
@@ -210,13 +210,38 @@ describe('the receipts of the owner’s rows', () => {
     }
   });
 
-  it('gives no receipt when two sends could both be the row’s, rather than guessing', async () => {
+  it('lets a cancelled send of the same words stand aside: it never reached a row, the one delivered send is the row’s', async () => {
     const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
     const sends = [
       sent('early', 'cancelled', '2026-08-01T09:00:00.000Z'),
       sent('old', 'delivered', '2026-08-01T10:00:00.000Z'),
     ];
+    expect(await receiptsOf(rows, sends)).toEqual(['old']);
+  });
+
+  it('gives no receipt when two delivered sends could both be the row’s, rather than guessing', async () => {
+    const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    const sends = [
+      sent('first', 'delivered', '2026-08-01T09:00:00.000Z'),
+      sent('second', 'delivered', '2026-08-01T10:00:00.000Z'),
+    ];
     expect(await receiptsOf(rows, sends)).toEqual([undefined]);
+  });
+
+  it('puts only a delivered send on a row: every other fate stays its own ledger entry', async () => {
+    const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
+    const at = '2026-08-01T09:59:59.000Z';
+    for (const [fate, extra] of [
+      ['cancelled', {}],
+      ['queued', {}],
+      ['accepted', {}],
+      ['unaccounted', {}],
+      ['timed_out', {}],
+      ['accepted', { held: true }],
+      ['accepted', { typedNotSent: true }],
+    ] as const) {
+      expect(await receiptsOf(rows, [{ ...sent('s', fate, at), ...extra }])).toEqual([undefined]);
+    }
   });
 
   it('gives two rows with the same words a receipt only where one send alone fits, and never one send twice', async () => {
@@ -232,13 +257,13 @@ describe('the receipts of the owner’s rows', () => {
       sent('a', 'delivered', '2026-08-01T10:00:00.000Z'),
       sent('b', 'delivered', '2026-08-01T10:30:00.000Z'),
     ];
-    expect(await receiptsOf(twice, both)).toEqual(['a', undefined]);
+    expect(await receiptsOf(twice, both)).toEqual([undefined, undefined]);
   });
 
   it('takes a send the ledger accepted a few seconds after the row’s stamp, but not minutes after', async () => {
     const rows = [row(1, 'user', '!A4 ship it', '2026-08-01T10:00:00.000Z')];
     expect(await receiptsOf(rows, [sent('skew', 'delivered', '2026-08-01T10:00:04.000Z')])).toEqual(['skew']);
-    expect(await receiptsOf(rows, [sent('late', 'cancelled', '2026-08-01T10:00:06.000Z')])).toEqual([undefined]);
+    expect(await receiptsOf(rows, [sent('late', 'delivered', '2026-08-01T10:00:06.000Z')])).toEqual([undefined]);
   });
 
   it('gives no receipt to a row or a record without an instant, which cannot be ordered', async () => {
