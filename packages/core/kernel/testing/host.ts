@@ -2400,6 +2400,7 @@ async function start(world: World): Promise<TestHost> {
           mayReach,
           transport: outboundSecretTransport(fetchPort, clock),
           log: logFor(manifest.id),
+          sent: note => admission.secretSent?.({ plugin: manifest.id, ...note }),
         },
       ),
       signer: signerFor(manifest.id, identitySigner),

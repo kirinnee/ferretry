@@ -72,6 +72,8 @@ export interface OwnSecretSending {
   readonly transport: OutboundSecretTransport;
   /** This plugin's log: a send is logged by secret name and host, never more. */
   readonly log: Log;
+  /** Told after the log line, for the security log: the secret's NAME, the host and the outcome's kind. Never throws out. */
+  readonly sent?: (note: { readonly secret: string; readonly host: string; readonly outcome: string }) => void;
 }
 
 const DEFAULT_PLACEMENT: CredentialPlacement = { header: 'authorization', scheme: 'Bearer' };
@@ -153,6 +155,11 @@ export function ownSecretsPort(
       outcome = { kind: 'network' };
     }
     sending.log.info('a secret was placed on a request', { secret, host: url.host, outcome: outcome.kind });
+    try {
+      sending.sent?.({ secret, host: url.host, outcome: outcome.kind });
+    } catch {
+      // The security log is Gate's; a failure there never changes what the plugin is told.
+    }
     return outcome;
   };
 
