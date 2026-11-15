@@ -229,7 +229,7 @@ describe('verify: compares each field with its own v5 destination', () => {
     const result = await sb.run('verify');
     expect(result.code).toBe(0);
     expect(result.out).toMatch(
-      /panes +REVIEW +0 baseline panes still present; not restarted yet: f1 \(still on v4 until codex-main is signed in\)\. Sign each in \(fy login signin codex-main\)/,
+      /panes +REVIEW +1 baseline panes still present \(1 not restarted yet: f1 \(still on v4 until codex-main is signed in\)\), 0 restarted by v5 in a new pane\. Sign each in \(fy login signin codex-main\)/,
     );
     expect(result.out).toContain(
       'Some running ferrets are still on v4 until a login is signed in: fy login signin codex-main',
