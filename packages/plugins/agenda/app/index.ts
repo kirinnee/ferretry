@@ -4,6 +4,7 @@ import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
+import type { RuntimeClient } from './lib/agenda-runtime.ts';
 import { inboxBadgeOf, needsYouOf } from './lib/agenda-nav-badge.ts';
 
 type Surfaces = {
@@ -118,8 +119,9 @@ export default provideToShell(half, {
   hooks: {
     'ferrets.needs-you': ({ client }) => needsYouOf(client),
   },
-  // The count on the Agenda nav entry: this machine's share, summed by the shell across every paired machine.
-  navBadges: { agenda: ({ client }) => inboxBadgeOf(needsYouOf(client)) },
+  // The count on the Agenda nav entry: this machine's share of the Inbox page's own number (`lib/inbox-count.ts`),
+  // summed by the shell across every unlocked machine, over this machine's background client.
+  navBadges: { agenda: ({ client }) => inboxBadgeOf(client as unknown as RuntimeClient) },
   navPanels: { 'needs-you': needsYouPanel },
   // Settings › This device (S4): one Mute per machine, next to Access's Notifications panel. No machine, no client.
   deviceSettings: { 'notification-mute': deviceSetting('notification-mute') },

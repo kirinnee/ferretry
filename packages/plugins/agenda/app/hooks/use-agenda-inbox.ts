@@ -12,12 +12,7 @@
  * the board is said to be unavailable on its machine — never "Updating", which is only a first read in flight.
  */
 
-import {
-  type AgendaItem,
-  type AgendaListRecord,
-  isMachineAgendaId,
-  MACHINE_AGENDA_ID,
-} from '@ferretry/core-asks/contract';
+import { type AgendaItem, type AgendaListRecord, MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
 import type { SessionView } from '../shell.ts';
 import {
   createContext,
@@ -41,15 +36,12 @@ import {
   type InboxCard,
   type InboxResolved,
   type InboxUnavailable,
-  inboxCards,
-  inboxCount,
   inboxParked,
   inboxResolved,
   inboxUnavailable,
   sessionsToReadForResolved,
   type UnreadSession,
   UNSNOOZE_ACTION,
-  unreadSessions,
   withFerretCards,
   withFerretSessions,
 } from '../lib/agenda-inbox.ts';
@@ -58,7 +50,6 @@ import {
   RepliedAgenda,
   type RepliedPorts,
   type RepliedState,
-  withRepliedCards,
   withRepliedParked,
 } from '../lib/agenda-replied.ts';
 import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
@@ -67,6 +58,8 @@ import { ruleClientOf } from '../lib/rule-client.ts';
 import { useAnsweredSuggestionSweep } from './use-answered-suggestion-sweep.ts';
 import type { DaemonConnection, DaemonId } from '../shell.ts';
 import { withMachineAgendas } from '../lib/machine-agenda.ts';
+import { boardWants, deriveInbox } from '../lib/inbox-count.ts';
+import { inboxLocal } from '../lib/inbox-local.ts';
 import { daemonSessionKey, daemonSessionScope } from '../shell.ts';
 import type { DaemonFleetStore } from '../lib/ferret-store.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
@@ -300,18 +293,32 @@ export function useAgendaInboxModel(
     [machines, boards],
   );
 
-  const freshUnread = useMemo(
-    () =>
-      unreadSessions(
-        withMachine.map(machine => ({
-          daemonId: machine.connection.daemonId,
-          name: machine.name,
-          sessions: machine.sessions,
-        })),
-      ),
-    [withMachine],
+  // THE INBOX, derived once (`lib/inbox-count.ts`): the Agenda nav count derives it the same way, from the same rules.
+  const answered = useSyncExternalStore(
+    answeredSuggestions.subscribe,
+    answeredSuggestions.getSnapshot,
+    answeredSuggestions.getSnapshot,
   );
-  const unread = useStable(freshUnread, unreadKey(freshUnread));
+  const hidden = useMemo(
+    () => new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+    [deferredState],
+  );
+  const derived = useMemo(
+    () =>
+      deriveInbox(machines, (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })), {
+        hidden,
+        answered,
+        replied: repliedState,
+      }),
+    [machines, boards, hidden, answered, repliedState],
+  );
+  const unread = useStable(derived.unread, unreadKey(derived.unread));
+  // What this Inbox has done locally is published, so the nav count (built where no page is) counts the same deck.
+  const localOwner = useRef({}).current;
+  useEffect(() => {
+    inboxLocal.publish(localOwner, { hidden, replied: repliedState });
+  }, [localOwner, hidden, repliedState]);
+  useEffect(() => () => inboxLocal.publish(localOwner, null), [localOwner]);
   const freshWithFerret = useMemo(
     () =>
       withFerretSessions(
@@ -330,50 +337,15 @@ export function useAgendaInboxModel(
   const boardReads = useMemo(() => new InboxBoardReads(timers ?? browserDeferredTimers), [timers]);
   useEffect(() => () => boardReads.dispose(), [boardReads]);
   useEffect(() => {
-    boardReads.sync(
-      [...unread, ...withFerretEntries].flatMap(entry => {
-        const connection = connectionFor(entry.daemonId);
-        if (connection === undefined) return [];
-        const scope = daemonSessionScope(connection, entry.view.config.id);
-        return [
-          {
-            id: daemonSessionKey(scope),
-            key: agendaSummaryKey(entry.attention),
-            // The fleet stream owns machine-board freshness; rendering its held board needs no refresh.
-            read: () =>
-              isMachineAgendaId(scope.sessionId)
-                ? client.hydrate(connection, scope)
-                : client.revalidate(connection, scope),
-            held: () => client.store.agenda(scope) !== undefined,
-          },
-        ];
-      }),
-    );
+    boardReads.sync(boardWants([...unread, ...withFerretEntries], connectionFor, client));
   }, [boardReads, client, connectionFor, unread, withFerretEntries]);
   const failedBoards = useSyncExternalStore(boardReads.subscribe, boardReads.getSnapshot, boardReads.getSnapshot);
 
   // A ferret's rule suggestion the owner already answered stays open on the ferret's agenda until it expires (C2): it
-  // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card.
-  const answered = useSyncExternalStore(
-    answeredSuggestions.subscribe,
-    answeredSuggestions.getSnapshot,
-    answeredSuggestions.getSnapshot,
-  );
-  const boardCards = useMemo(
-    () =>
-      inboxCards(
-        unread,
-        (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
-        new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
-      ).filter(card => {
-        const suggestion = card.item.signInRuleSuggestion?.suggestion;
-        return suggestion === undefined || !answeredSuggestions.has(answered, card.daemonId, suggestion);
-      }),
-    [unread, boards, deferredState, answered],
-  );
-  // A reply just sent leaves the deck at once, and an Undo's card is back at once, before any board says so.
-  const freshCards = useMemo(() => withRepliedCards(boardCards, repliedState), [boardCards, repliedState]);
-  const cards = useStable(freshCards, cardsKey(freshCards));
+  // leaves the owner's Inbox through the owner's own "answered" set, never by closing the card. A reply just sent leaves
+  // the deck at once, and an Undo's card is back at once, before any board says so.
+  const boardCards = derived.boardCards;
+  const cards = useStable(derived.cards, cardsKey(derived.cards));
   // The overlay goes the moment the boards agree with it: parked or gone (or asked again), or listed open once Undo landed.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `repliedState` is the trigger -- a new entry (or Undo settling) must be checked against the boards at once
   useEffect(() => {
@@ -424,7 +396,7 @@ export function useAgendaInboxModel(
   const failed = (entry: UnreadSession): BoardReadFailure | undefined =>
     held(entry) ? undefined : failedBoards.get(boardKey(entry));
   const reading = unread.some(entry => !held(entry) && failed(entry) === undefined);
-  const total = inboxCount(unread, held, cards);
+  const total = derived.total;
   const freshUnavailable = inboxUnavailable(unread, failed);
   const unavailable = useStable(
     freshUnavailable,
