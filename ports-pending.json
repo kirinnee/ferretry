@@ -70,8 +70,6 @@
       "[tests] S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
       "[own] GAP(logins): `fy login add --from-env` reads only the exact variable names the presets declare (`contract/preset-env-names.json`), so a provider the shell tells only through a `PREFIX_*` detect family is not detected; name it instead.",
       "[own] the budget editor (Usage's) and v4's one-click provider form (it asks only for the key) are not ported; a tile in the provider grid opens a form that lists every variable of the preset",
-      "[own] GAP(logins): Codex passive usage reading is not ported (today's `daemon/src/lib/fleet-reading/service.ts:226` in rebuild-ref), so nothing attributes a rollout to the credential whose session this daemon launched (`attributedTranscripts` in `daemon/lib/credentials/credentials-service.ts`)",
-      "[hand-over: runtimes] GAP(logins): parity rows the Runtimes batch found are not its own, re-owned by britnee ruling, each still `[ ]` in docs/design/rebuild-parity.tsv: J-0232 J-0233 J-0234 (the fleet-reading service's timers and file watches that keep a credential's usage current: Logins' own Codex passive reading above is the same missing piece).",
       "[own] GAP(logins): two ferrets on one Codex login whose access token is due in the same instant can both spend its single-use refresh token (Codex has no cross-process lock around a refresh), so one gets refresh_token_reused; the same as v4, not made worse by the credential link (docs/secrets.md, harness sign-ins)"
     ],
     "browsers": [

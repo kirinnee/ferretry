@@ -417,7 +417,7 @@ export interface FerretHarness {
   readonly transcript: BoundTranscriptReader;
   /**
    * Additive (G162): the seam's own ferret's transcript as raw bytes ({@link HarnessTranscriptBytes}), UNMASKED, for
-   * the ONE reader that parses records itself (Conversation's). Rejects 503 `plugin_unavailable` while the ferret's
+   * the reader that parses records itself (Conversation's; Logins' passive usage pass keeps only the normalized `rate_limits` fields and timestamps). Rejects 503 `plugin_unavailable` while the ferret's
    * harness is off; `undefined` when the harness proves none or offers no bytes. Bound: names no other ferret.
    */
   transcriptBytes?(): Promise<HarnessTranscriptBytes | undefined>;
