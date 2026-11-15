@@ -744,3 +744,58 @@ describe('the ferret folder is held private when a ferret starts', () => {
     expect((await lstat(kernel.first.folder)).mode & 0o777).toBe(0o700);
   });
 });
+
+describe('c58-16 the ferret’s own compact-at is one field of its session config', () => {
+  async function documented() {
+    const kernel = await wired();
+    const { subject, storage, folder } = await files(kernel.roots);
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, { label: 'team', agenda: true }));
+    return { subject, storage, folder };
+  }
+  const configOf = async (storage: Awaited<ReturnType<typeof files>>['storage']) =>
+    (await storage.readConfig(FERRET)) as Record<string, unknown>;
+
+  test('a set records the value and a clear drops only it: every other field survives both, and the launch read sees each', async () => {
+    const { subject, storage } = await documented();
+    const before = await configOf(storage);
+
+    await subject.port.setCompactAt?.(ferretId(FERRET), 250_000);
+    const set = await configOf(storage);
+    expect(set).toEqual({ ...before, compactAt: 250_000 });
+    expect(await subject.port.compactAt?.(ferretId(FERRET))).toBe(250_000);
+
+    await subject.port.setCompactAt?.(ferretId(FERRET), 'auto');
+    expect((await configOf(storage)).compactAt).toBe('auto');
+
+    await subject.port.setCompactAt?.(ferretId(FERRET), undefined);
+    const cleared = await configOf(storage);
+    expect(cleared).toEqual(before);
+    expect('compactAt' in cleared).toBe(false);
+    expect(cleared).toMatchObject({ label: 'team', agenda: true });
+    expect(await subject.port.compactAt?.(ferretId(FERRET))).toBeUndefined();
+  });
+
+  test('a ferret with no session document is refused and none is made from nothing', async () => {
+    const kernel = await wired();
+    const { subject, storage } = await files(kernel.roots);
+
+    await expect(subject.port.setCompactAt?.(ferretId(FERRET), 200_000)).rejects.toBeDefined();
+
+    expect(await storage.readConfig(FERRET).catch(() => undefined)).toBeUndefined();
+  });
+
+  test('a document that is not an object is refused, quoted nowhere, and left as it was', async () => {
+    const kernel = await wired();
+    const { subject, folder } = await files(kernel.roots);
+    folder.plant(FerretConfigFile, '["FIXTURE_SECRET"]', FERRET);
+
+    const failure = await subject.port.setCompactAt?.(ferretId(FERRET), 200_000).then(
+      () => undefined,
+      (error: unknown) => (error instanceof Error ? error : new Error(String(error))),
+    );
+
+    expect(failure).toBeDefined();
+    expect(failure?.message).not.toContain('FIXTURE_SECRET');
+    expect(folder.raw(FerretConfigFile, FERRET)).toBe('["FIXTURE_SECRET"]');
+  });
+});

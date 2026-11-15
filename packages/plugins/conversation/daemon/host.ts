@@ -95,6 +95,7 @@ import { answerOf } from './queue/lib/answer.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
+import { SessionCompactAtError, SessionCompactAtService } from './turns/compact-at/lib/service.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
 import {
@@ -117,10 +118,6 @@ import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferre
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionHandoff, SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
-const TERMINAL_PENDING =
-  "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
-
 /**
  * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off
  * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
@@ -128,13 +125,15 @@ const TERMINAL_PENDING =
  */
 const TURN_PROTOCOL_REMINDER = 'Continue using the same completion and interaction protocol.';
 
-const pending = (sentence: string = TERMINAL_PENDING): never => {
+const pending = (sentence: string): never => {
   throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
 };
-const pendingRefusal = (): ConversationRefusal => ({
-  code: 'conversation_terminal_unavailable',
-  message: TERMINAL_PENDING,
-});
+
+/** A ferret nobody knows has no setting to read (the port answers `undefined`); anything else is a real failure. */
+const compactAtAbsent = (error: unknown): undefined => {
+  if (error instanceof SessionCompactAtError && error.reason === 'not-found') return undefined;
+  throw error;
+};
 
 /** Said by a repeat of a send that was typed and not proven: it is not typed again, and the answer names it. */
 const UNCONFIRMED_AGAIN =
@@ -320,8 +319,8 @@ export interface ConversationAHalf {
  * kernel's state, clock, events and ids. A send and an interrupt go through Ferrets' harness seam, which answers a
  * closed refusal for a send and presses the harness's own stop key (`deps.gate` can still hold either back, 503).
  * The composer actions, a send's cancel and Enter, and answering a question's form (the structured-question drive over
- * the harness's form seam) are wired too. What is not (a send's explicit retry, the harness's own compact-at setting) is
- * wired to a refusal that says so; the queue, the ledger reads, the shared draft and its stream are real.
+ * the harness's form seam) are wired too, and so are a send's explicit retry (the send tracker's re-attempt, which only
+ * types what the daemon proved absent) and the compact-at setting (recorded by Ferrets, applied at the next launch).
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
@@ -1384,6 +1383,29 @@ export function buildConversationA(deps: {
     now: () => kernel.clock.now(),
   });
 
+  // The ferret's own compaction trigger is Ferrets' to record (its session config, which every launch and relaunch reads);
+  // Conversation judges the value, words what it means for a running ferret and asks Ferrets to write it. The model's
+  // window and the login's default are not reachable from here: a value the model cannot honour is dropped at launch.
+  const compactAtSetting = new SessionCompactAtService({
+    facts: async ferret => {
+      const id = tryParseSessionId(ferret);
+      const summary = id === undefined ? undefined : await ferrets.get(id);
+      if (summary === undefined) return undefined;
+      return {
+        own: await ferrets.compactAt?.(summary.id),
+        accountDefault: undefined,
+        window: undefined,
+        running: summary.state !== 'stopped',
+      };
+    },
+    write: async (ferret, value) => {
+      if (ferrets.setCompactAt === undefined)
+        throw new ApiError(503, 'Ferrets cannot record the compact-at setting right now.', 'plugin_unavailable');
+      await ferrets.setCompactAt(parseSessionId(ferret), value);
+    },
+    now: () => kernel.clock.now(),
+  });
+
   const mounts: MountRoute[] = [
     ...sessionSendRoutes(
       {
@@ -1412,7 +1434,10 @@ export function buildConversationA(deps: {
         editQueued: async (id, messageId, text) =>
           await queue.edit(parseSessionId(id), messageId, text).catch(queueFailure),
         cancelQueued: async (id, messageId) => await queue.cancel(parseSessionId(id), messageId).catch(queueFailure),
-        retry: async () => pending(),
+        retry: async (id, sendId, force) =>
+          sendRecordView(
+            await sendActs.reattempt(parseSessionId(id), sendId, { by: 'person', force }).catch(sendActRefusal),
+          ),
         cancel: async (id, sendId) =>
           sendRecordView(await sendActs.cancel(parseSessionId(id), sendId).catch(sendActRefusal)),
         submit: async (id, sendId) =>
@@ -1426,7 +1451,10 @@ export function buildConversationA(deps: {
       sentDraftClearer(drafts),
     ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
-    ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
+    ...sessionCompactAtRoutes({
+      get: async ferret => await compactAtSetting.get(ferret),
+      set: async (ferret, wanted) => await compactAtSetting.set(ferret, wanted),
+    }),
     ...sessionHypermediaRoutes({
       read: async ferret => await hypermedia.read(ferret),
       set: async (ferret, enabled) => await hypermedia.set(ferret, enabled),
@@ -1521,7 +1549,17 @@ export function buildConversationA(deps: {
       await lookFirst(ferret);
       return sendRecordFor(await ledger.list(ferret), await queue.list(ferret), sendId);
     },
-    retrySend: async () => err(pendingRefusal()),
+    retrySend: async (ferret, sendId, force) => {
+      try {
+        return ok(
+          sendRecordView(
+            await sendActs.reattempt(ferret, sendId, { by: 'person', force: force === true }).catch(sendActRefusal),
+          ),
+        );
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
     cancelSend: async (ferret, sendId) => {
       try {
         return ok(sendRecordView(await sendActs.cancel(ferret, sendId).catch(sendActRefusal)));
@@ -1571,8 +1609,20 @@ export function buildConversationA(deps: {
         });
       }
     },
-    compactAt: async () => undefined,
-    setCompactAt: async () => err(pendingRefusal()),
+    compactAt: async ferret => await compactAtSetting.get(ferret).catch(compactAtAbsent),
+    setCompactAt: async (ferret, patch) => {
+      try {
+        return ok(await compactAtSetting.set(ferret, patch.compactAt));
+      } catch (error) {
+        if (error instanceof SessionCompactAtError)
+          return err({
+            code: error.reason === 'not-found' ? 'not-found' : 'invalid_compact_at',
+            message: error.message,
+          });
+        if (error instanceof ApiError) return err({ code: error.code ?? 'compact_at_refused', message: error.message });
+        throw error;
+      }
+    },
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),
     editDraft: async (ferret, slot, edit) => {
       try {

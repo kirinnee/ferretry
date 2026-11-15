@@ -2,7 +2,6 @@ import {
   type SessionCompactAt,
   type SessionCompactAtPatchResult,
   SessionCompactAtPatchSchema,
-  type SessionView,
   type CompactAt,
 } from '../../../seams/protocol.ts';
 import { parseBody } from '../../../seams/api.ts';
@@ -22,10 +21,7 @@ import { type CompactAtOutcome, SessionCompactAtError } from '../../compact-at/l
  */
 export interface SessionCompactAtSubsystem {
   get(sessionId: string): Promise<SessionCompactAt>;
-  set(
-    sessionId: string,
-    wanted: CompactAt | 'inherit',
-  ): Promise<{ readonly view: SessionView; readonly outcome: CompactAtOutcome }>;
+  set(sessionId: string, wanted: CompactAt | 'inherit'): Promise<CompactAtOutcome>;
 }
 
 function refuse(error: unknown): never {
@@ -48,7 +44,7 @@ function sessionOf(context: RouteContext): string {
 async function patch(subsystem: SessionCompactAtSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = sessionOf(context);
   const request = await parseBody(context.request, SessionCompactAtPatchSchema);
-  const { outcome } = await subsystem.set(sessionId, request.compactAt).catch(refuse);
+  const outcome = await subsystem.set(sessionId, request.compactAt).catch(refuse);
   return jsonResponse({ ...outcome } satisfies SessionCompactAtPatchResult);
 }
 

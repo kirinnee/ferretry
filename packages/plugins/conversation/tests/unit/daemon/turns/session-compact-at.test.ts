@@ -20,7 +20,7 @@ const build = (failure?: unknown) => {
     set: async (...args: unknown[]) => {
       calls.push(['set', ...args]);
       if (failure !== undefined) throw failure;
-      return { view: {}, outcome: { effective: 200_000, restartRequired: true, note: 'on restart' } };
+      return { effective: 200_000, restartRequired: true, note: 'on restart' };
     },
   } as unknown as SessionCompactAtSubsystem;
   return { routes: sessionCompactAtRoutes(subsystem), calls };

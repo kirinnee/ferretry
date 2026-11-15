@@ -185,14 +185,95 @@ describe('the queue, through the port and its routes', () => {
   });
 });
 
-describe('what needs the ferret’s terminal and has none says so', () => {
-  test('a retry and a compact-at change are refused with the sentence for a terminal that is not connected', async () => {
-    const { host, api } = await world();
+describe('c58-16 the compact-at setting is read and written through Ferrets', () => {
+  const PATH = '/v1/ferrets/f1/compact-at';
 
-    for (const refused of [await api().retrySend(F1, 's-1'), await api().setCompactAt(F1, {} as never)])
-      expect(refused).toMatchObject({ ok: false, error: { code: 'conversation_terminal_unavailable' } });
-    expect(await api().compactAt(F1)).toBeUndefined();
+  test('a change is recorded by Ferrets, worded for a running ferret, and read back as the ferret’s own value', async () => {
+    const { host, ferrets, api } = await world();
+
+    expect(await api().compactAt(F1)).toEqual({
+      effective: 'auto',
+      restartRequired: false,
+      note: 'Memory is compacted at the harness’s own trigger (Auto).',
+    });
+    const set = await api().setCompactAt(F1, { compactAt: 250_000 });
+
+    expect(set).toMatchObject({ ok: true, value: { effective: 250_000, restartRequired: true } });
+    expect(await ferrets.compactAt(F1)).toBe(250_000);
+    expect(await api().compactAt(F1)).toMatchObject({ own: 250_000, effective: 250_000 });
+
+    const inherited = await api().setCompactAt(F1, { compactAt: 'inherit' });
+    expect(inherited).toMatchObject({ ok: true, value: { effective: 'auto' } });
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
     await host.stop();
+  });
+
+  test('the routes answer the same: GET reads it, PATCH sets it and says a running ferret restarts for it', async () => {
+    const { host, ferrets } = await world();
+
+    const patched = await host.request('PATCH', PATH, { as: owner(), body: { compactAt: 400_000 } });
+    const read = await host.request('GET', PATH, { as: owner() });
+
+    expect(patched.status).toBe(200);
+    expect(patched.json()).toMatchObject({ effective: 400_000, restartRequired: true });
+    expect(read.json()).toMatchObject({ own: 400_000, effective: 400_000 });
+    expect(await ferrets.compactAt(F1)).toBe(400_000);
+    await host.stop();
+  });
+
+  test('a ferret nobody knows has no setting; a value under the floor and a stopped ferret are answered in their own words', async () => {
+    const { host, ferrets, api } = await world();
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+
+    expect(await api().compactAt(ferretId('nobody'))).toBeUndefined();
+    expect(await api().setCompactAt(ferretId('nobody'), { compactAt: 200_000 })).toMatchObject({
+      ok: false,
+      error: { code: 'not-found' },
+    });
+    expect(await api().setCompactAt(F1, { compactAt: 99_999 })).toMatchObject({
+      ok: false,
+      error: { code: 'invalid_compact_at' },
+    });
+    expect(await ferrets.compactAt(F1)).toBeUndefined();
+    const stopped = await api().setCompactAt(ferretId('f2'), { compactAt: 300_000 });
+    expect(stopped).toMatchObject({ ok: true, value: { restartRequired: false } });
+    expect(stopped.ok && stopped.value.note).toContain('not running');
+    const route = await host.request('PATCH', '/v1/ferrets/nobody/compact-at', {
+      as: owner(),
+      body: { compactAt: 200_000 },
+    });
+    expect(route.status).toBe(404);
+    await host.stop();
+  });
+
+  test('a Ferrets that cannot record one is 503 and its refusal is carried; a failure nobody worded is not made into a refusal', async () => {
+    const bare = await world(ferrets => {
+      (ferrets as { setCompactAt?: unknown }).setCompactAt = undefined;
+    });
+
+    expect(await bare.api().setCompactAt(F1, { compactAt: 200_000 })).toMatchObject({
+      ok: false,
+      error: { code: 'plugin_unavailable' },
+    });
+    const route = await bare.host.request('PATCH', PATH, { as: owner(), body: { compactAt: 200_000 } });
+    expect(route.status).toBe(503);
+    await bare.host.stop();
+
+    const broken = await world(ferrets => {
+      ferrets.setCompactAt = async () => {
+        throw new TypeError('FIXTURE_SECRET the disk is gone');
+      };
+    });
+    await expect(broken.api().setCompactAt(F1, { compactAt: 200_000 })).rejects.toThrow('FIXTURE_SECRET');
+    await broken.host.stop();
+
+    const unreadable = await world(ferrets => {
+      ferrets.compactAt = async () => {
+        throw new TypeError('FIXTURE_SECRET the document is gone');
+      };
+    });
+    await expect(unreadable.api().compactAt(F1)).rejects.toThrow('FIXTURE_SECRET');
+    await unreadable.host.stop();
   });
 
   test('an answer is refused with the form-seam sentence, not the terminal one, when Ferrets offers no form acts', async () => {
