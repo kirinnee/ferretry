@@ -203,6 +203,25 @@ export class CodexRollouts {
     }
   }
 
+  /**
+   * The conversation this ferret's last launch is PROVED to have written (`Harness.provedConversation`): proved afresh,
+   * from the launch's binding (its baseline and the correlation marker only it typed, or the native id it resumed), never
+   * by folder or recency. `undefined` on any doubt (no binding, a home that is not the ferret's own, none or two
+   * candidates, an unreadable folder), so nothing is recorded on a guess.
+   */
+  async provedConversation(
+    ferret: FerretId,
+  ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined> {
+    try {
+      const found = await this.proveAfresh(ferret);
+      return found === undefined
+        ? undefined
+        : { id: found.rollout.id, file: found.rollout.file, home: found.binding.home };
+    } catch {
+      return undefined;
+    }
+  }
+
   /** The rollout proved to be the ferret's, found once and remembered: a stamp asked every half second must not walk the home. */
   readonly #proved = new ProofCache<FerretId, Rollout>(PROOF_REUSE_MS);
 
