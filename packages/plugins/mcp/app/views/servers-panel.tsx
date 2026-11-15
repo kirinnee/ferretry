@@ -34,11 +34,19 @@ export interface McpServersPanelProps {
   readonly client: McpClient;
   /** The ferret whose servers these are: Check reaches each one as it does. */
   readonly ferretId: string;
+  /** Whether this connection may control the ferret: "Add…" is offered only then (the daemon refuses the write anyway). */
+  readonly canControl?: boolean;
   readonly now?: () => number;
   readonly searchDebounceMs?: number;
 }
 
-export function McpServersPanel({ client, ferretId, now = Date.now, searchDebounceMs }: McpServersPanelProps) {
+export function McpServersPanel({
+  client,
+  ferretId,
+  canControl = true,
+  now = Date.now,
+  searchDebounceMs,
+}: McpServersPanelProps) {
   const loader = useCallback(async () => await readFerretMcpServers(client, ferretId), [client, ferretId]);
   const read = useContextRead(loader, true);
   const { load, reload } = read;
@@ -88,15 +96,17 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         <span>
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
-        <button
-          className="fy-mcp-link inline-flex items-center gap-1 text-meta"
-          data-mcp-add=""
-          onClick={() => setAdding(true)}
-          type="button"
-        >
-          <Plus aria-hidden="true" size={13} />
-          Add…
-        </button>
+        {canControl ? (
+          <button
+            className="fy-mcp-link inline-flex items-center gap-1 text-meta"
+            data-mcp-add=""
+            onClick={() => setAdding(true)}
+            type="button"
+          >
+            <Plus aria-hidden="true" size={13} />
+            Add…
+          </button>
+        ) : null}
       </div>
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
@@ -126,7 +136,7 @@ export function McpServersPanel({ client, ferretId, now = Date.now, searchDeboun
         </ul>
       )}
       {actions.sheet}
-      {adding ? (
+      {adding && canControl ? (
         <AddMcpDialog
           client={client}
           ferretId={ferretId}
