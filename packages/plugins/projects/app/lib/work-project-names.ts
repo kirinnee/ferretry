@@ -30,27 +30,40 @@ export const workProjectNamesList = (
   client: ProjectsClient,
 ): {
   readonly subscribe: (listener: () => void) => () => void;
+  readonly settled: () => boolean;
   readonly names: () => ReadonlyMap<string, string>;
 } => {
   let known: ReadonlyMap<string, string> = new Map();
   let started = false;
+  let settled = false;
   const listeners = new Set<() => void>();
+  /** The read is over: nobody is kept, since it never speaks again. Returns whoever was waiting. */
+  const settle = (): readonly (() => void)[] => {
+    settled = true;
+    const waiting = [...listeners];
+    listeners.clear();
+    return waiting;
+  };
   return {
+    // A listener added once the read is over would wait for nothing, so it is not kept.
     subscribe: listener => {
+      if (settled) return () => undefined;
       listeners.add(listener);
       return () => {
         listeners.delete(listener);
       };
     },
+    settled: () => settled,
     names: () => {
       if (!started) {
         started = true;
         readWorkProjectNames(client).then(
           read => {
             known = read;
-            for (const listener of [...listeners]) listener();
+            for (const listener of settle()) listener();
           },
-          () => undefined,
+          // A failed read is not repeated and says nothing: the waiting are let go without being told.
+          () => void settle(),
         );
       }
       return known;

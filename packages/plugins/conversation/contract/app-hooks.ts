@@ -53,8 +53,16 @@ export const CONVERSATION_ASK_OWNERS_HOOK = 'conversation.ask-owners' as const;
 
 /** A list a provider read once and keeps, by id. */
 export interface ConversationNameList {
-  /** Calls `listener` whenever the list changed (it arrived, or was read again). Returns how to stop. */
+  /**
+   * Calls `listener` when the list arrives. Returns how to stop. A list is read once, so it has one thing to say: it
+   * lets go of every listener once it has said it (or has failed), and a listener added after that is never kept.
+   */
   readonly subscribe: (listener: () => void) => () => void;
+  /**
+   * Whether the one read is over, landed or failed: the list never speaks again, so there is nothing to listen for and
+   * a listener would be kept for nothing. Cheap, and it does not start the read.
+   */
+  readonly settled: () => boolean;
   /**
    * The names read so far, the same map until it changes. The first call starts the one read of the daemon's list, so
    * a machine whose search is never opened is never asked; until it arrives (or when it failed) the map is empty.
@@ -69,7 +77,10 @@ export type ConversationAskOwners = ConversationNameList;
 
 /** Whether a provided value has the shape of a {@link ConversationNameList}. */
 export const isConversationNameList = (value: unknown): value is ConversationNameList =>
-  isRecord(value) && typeof value.subscribe === 'function' && typeof value.names === 'function';
+  isRecord(value) &&
+  typeof value.subscribe === 'function' &&
+  typeof value.settled === 'function' &&
+  typeof value.names === 'function';
 
 /**
  * THE DECLARATION: every app hook Conversation offers, with the narrowing that says a provided value has its shape. The

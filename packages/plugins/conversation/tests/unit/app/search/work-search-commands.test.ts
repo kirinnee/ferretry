@@ -383,6 +383,7 @@ describe('S11 the work search chips, pending line and muted rows', () => {
 /** A name list as a provider gives it: read once on the first ask, kept, and told to its listeners when it lands. */
 const nameList = (initial: ReadonlyMap<string, string> = new Map()) => {
   let known = initial;
+  let settled = false;
   const listeners = new Set<() => void>();
   const asked = { names: 0, subscribed: 0 };
   return {
@@ -396,6 +397,7 @@ const nameList = (initial: ReadonlyMap<string, string> = new Map()) => {
           listeners.delete(listener);
         };
       },
+      settled: () => settled,
       names: () => {
         asked.names += 1;
         return known;
@@ -403,6 +405,7 @@ const nameList = (initial: ReadonlyMap<string, string> = new Map()) => {
     },
     arrive: (next: ReadonlyMap<string, string>) => {
       known = next;
+      settled = true;
       for (const listener of [...listeners]) listener();
     },
   };
@@ -502,14 +505,16 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
   });
 
   it('draws the rows as it did without a provider when the hook is missing, of the wrong shape or throws', async () => {
-    const wrong = { subscribe: () => () => undefined, names: 'not a function' };
+    const wrong = { subscribe: () => () => undefined, settled: () => false, names: 'not a function' };
     const brokenNames = {
       subscribe: () => () => undefined,
+      settled: () => false,
       names: () => {
         throw new Error('broken');
       },
     };
-    const notAMap = { subscribe: () => () => undefined, names: () => ['x'] };
+    const notAMap = { subscribe: () => () => undefined, settled: () => false, names: () => ['x'] };
+    const noSettled = { subscribe: () => () => undefined, names: () => new Map([['f1', 'Hayden']]) };
     const cases: readonly PluginCommandContext['appHook'][] = [
       undefined,
       () => undefined,
@@ -519,6 +524,8 @@ describe('S11 the work search rows are named by Projects and Ferrets', () => {
       },
       hooksOf({ 'conversation.work-project-names': brokenNames, 'conversation.ask-owners': brokenNames }),
       hooksOf({ 'conversation.work-project-names': notAMap, 'conversation.ask-owners': notAMap }),
+      // A list that cannot say whether its read is over is not the contract's shape.
+      hooksOf({ 'conversation.work-project-names': noSettled, 'conversation.ask-owners': noSettled }),
     ];
     for (const appHook of cases) {
       const { source, pending, pause, land } = harness(testHref, appHook);

@@ -142,4 +142,64 @@ describe('workProjectNamesList', () => {
     expect(list.names().size).toBe(0);
     expect(routes).toEqual([BOARD_PROJECTS_ROUTE]);
   });
+
+  test('should not be settled until the read is over, and then be settled whether it landed or failed', async () => {
+    // Arrange
+    const landed = workProjectNamesList(client(() => ({ projects: [] })).fake);
+    const failed = workProjectNamesList({
+      call: async () => {
+        throw new Error('Board is off');
+      },
+    } as unknown as ProjectsClient);
+
+    // Act
+    const before = [landed.settled(), failed.settled()];
+    landed.names();
+    failed.names();
+    const during = [landed.settled(), failed.settled()];
+    await settle();
+
+    // Assert
+    expect(before).toEqual([false, false]);
+    expect(during).toEqual([false, false]);
+    expect([landed.settled(), failed.settled()]).toEqual([true, true]);
+  });
+
+  test('should let go of a waiting listener once the read fails, without telling it', async () => {
+    // Arrange
+    const list = workProjectNamesList({
+      call: async () => {
+        throw new Error('Board is off');
+      },
+    } as unknown as ProjectsClient);
+    let heard = 0;
+    list.subscribe(() => {
+      heard += 1;
+    });
+
+    // Act
+    list.names();
+    await settle();
+
+    // Assert
+    expect(heard).toBe(0);
+  });
+
+  test('should not keep a listener added after the read is over', async () => {
+    // Arrange
+    const list = workProjectNamesList(client(() => ({ projects: [{ id: 'p1', name: 'ferretry' }] })).fake);
+    list.names();
+    await settle();
+    let heard = 0;
+
+    // Act
+    const stop = list.subscribe(() => {
+      heard += 1;
+    });
+    stop();
+
+    // Assert
+    expect(heard).toBe(0);
+    expect(list.settled()).toBe(true);
+  });
 });

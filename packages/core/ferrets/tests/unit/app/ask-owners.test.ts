@@ -135,4 +135,64 @@ describe('askOwnersList', () => {
     expect(list.names().size).toBe(0);
     expect(routes).toEqual([ASK_OWNERS_ROUTE]);
   });
+
+  test('should not be settled until the read is over, and then be settled whether it landed or failed', async () => {
+    // Arrange
+    const landed = askOwnersList(client(() => []).fake);
+    const failed = askOwnersList({
+      call: async () => {
+        throw new Error('refused');
+      },
+    } as FerretsClient);
+
+    // Act
+    const before = [landed.settled(), failed.settled()];
+    landed.names();
+    failed.names();
+    const during = [landed.settled(), failed.settled()];
+    await settle();
+
+    // Assert
+    expect(before).toEqual([false, false]);
+    expect(during).toEqual([false, false]);
+    expect([landed.settled(), failed.settled()]).toEqual([true, true]);
+  });
+
+  test('should let go of a waiting listener once the read fails, without telling it', async () => {
+    // Arrange
+    const list = askOwnersList({
+      call: async () => {
+        throw new Error('refused');
+      },
+    } as FerretsClient);
+    let heard = 0;
+    list.subscribe(() => {
+      heard += 1;
+    });
+
+    // Act
+    list.names();
+    await settle();
+
+    // Assert
+    expect(heard).toBe(0);
+  });
+
+  test('should not keep a listener added after the read is over', async () => {
+    // Arrange
+    const list = askOwnersList(client(() => [{ id: 'f1', name: 'hayden' }]).fake);
+    list.names();
+    await settle();
+    let heard = 0;
+
+    // Act
+    const stop = list.subscribe(() => {
+      heard += 1;
+    });
+    stop();
+
+    // Assert
+    expect(heard).toBe(0);
+    expect(list.settled()).toBe(true);
+  });
 });

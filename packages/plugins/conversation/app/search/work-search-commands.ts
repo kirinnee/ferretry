@@ -171,7 +171,9 @@ export function workSearchCommandSource(
     const list = nameListOf(context, hook);
     if (list === undefined) return undefined;
     try {
-      if (!listened.has(list)) {
+      // Only a read still out is listened to: a settled list never speaks again, so a listener would be kept for
+      // nothing, and this source is rebuilt on every reopen of the bar. Its value is read as it stands.
+      if (!list.settled() && !listened.has(list)) {
         listened.add(list);
         // A list is read once, so it has one thing to say: it is told, and the bar is asked to list again.
         const stop = list.subscribe(() => {
