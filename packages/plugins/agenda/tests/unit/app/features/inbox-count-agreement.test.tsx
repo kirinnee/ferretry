@@ -1,9 +1,8 @@
 /**
  * EVERY INBOX COUNT IS ONE NUMBER, AND "UPDATING" ENDS. The shell's inbox, built from a fleet like the owner's —
  * several machines, plain notifications, items waiting on a ferret for more information, a snoozed item, a gate
- * card, a card to test, and one machine that does not answer — drawn by every surface this half draws the count on:
- * its navigation entry (`AgendaNavEntry`) and the Inbox page's heading. The top bar and the phone's tab bar are the
- * app shell's, which 5.0 has not given an Inbox count; they are not drawn here.
+ * card, a card to test, and one machine that does not answer — drawn on the Inbox page's heading and by the page's
+ * own total. The navigation entry's count is the shell's pill over `navBadges.agenda` (`agenda-nav-badge.test.ts`).
  */
 import { type SessionAgendaSummary } from '../../../../contract/wire.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
@@ -18,7 +17,6 @@ import { AgendaRollupStore } from '../../../../app/lib/agenda-rollup.ts';
 import { type DaemonConnection, daemonConnection } from '../../../../app/shell.ts';
 import { DaemonResponseError } from '../../../../app/shell.ts';
 import type { DaemonSessionScope } from '../../../../app/shell.ts';
-import { AgendaNavEntry } from '../../../../app/features/agenda/agenda-nav.tsx';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
@@ -135,7 +133,6 @@ function Surfaces({ client }: { readonly client: DaemonAgendaClient }) {
   const inbox = useAgendaInboxModel(client, MACHINES, quietTimers);
   return (
     <div data-total={inbox.total}>
-      <AgendaNavEntry current href="/inbox" onNavigate={() => undefined} rail={false} total={inbox.total} />
       <AgendaInboxPage inbox={inbox} now={NOW} onNavigate={() => undefined} phone={false} />
     </div>
   );
@@ -151,7 +148,6 @@ const counts = (mounted: Mounted) => {
   const of = (selector: string): string | null =>
     mounted.container.querySelector(`${selector} [data-unread-badge]`)?.getAttribute('data-count') ?? null;
   return {
-    sidebar: of('[data-sbar-agenda]'),
     page: of('h1.fy-attn-inbox__title'),
   };
 };
@@ -163,7 +159,7 @@ afterEach(async () => {
 });
 
 describe('the Inbox count across the shell', () => {
-  it('shows one number on the navigation entry and the page, and clears Updating once read', async () => {
+  it('shows the one Inbox number on the page, and clears Updating once read', async () => {
     view = await mount(<Surfaces client={fakeClient()} />);
     await settle();
 
@@ -171,9 +167,7 @@ describe('the Inbox count across the shell', () => {
     // snoozed item is not counted. Laptop: 3 by its summary, its boards unreadable.
     const total = String(2 + 1 + 1 + 3);
     expect(view.container.querySelector('[data-total]')?.getAttribute('data-total')).toBe(total);
-    const shown = counts(view);
-    expect(shown.sidebar).toBe(total);
-    expect(shown.page).toBe(total);
+    expect(counts(view).page).toBe(total);
 
     // Nothing is in flight: no Updating, and the laptop says it could not be read instead of spinning.
     expect(view.container.querySelector('[data-agenda-updating]')).toBeNull();
@@ -190,8 +184,7 @@ describe('the Inbox count across the shell', () => {
     expect(view.container.querySelector('[data-agenda-updating], [data-agenda-reading]')).not.toBeNull();
     // Until the boards answer, every surface counts the summaries, and they agree.
     const before = counts(view);
-    expect(before.sidebar).toBe(String(3 + 1 + 1 + 3));
-    expect(before.page).toBe(before.sidebar);
+    expect(before.page).toBe(String(3 + 1 + 1 + 3));
 
     await interact(() => {
       for (const read of held.splice(0)) read.release();
@@ -200,7 +193,6 @@ describe('the Inbox count across the shell', () => {
     expect(view.container.querySelector('[data-agenda-updating]')).toBeNull();
     expect(view.container.querySelector('[data-agenda-reading]')).toBeNull();
     const after = counts(view);
-    expect(after.sidebar).toBe(String(2 + 1 + 1 + 3));
-    expect(after.page).toBe(after.sidebar);
+    expect(after.page).toBe(String(2 + 1 + 1 + 3));
   });
 });
