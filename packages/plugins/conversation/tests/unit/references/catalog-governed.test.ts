@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
+import type { FerretFolderListing } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { cap, DEFAULT_GATE_CONFIG, DEFAULT_GATE_SECURITY, FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
 import { ApiError } from '@ferretry/kernel/contract';
@@ -20,7 +21,8 @@ import { memoryStatePort } from '../../support/state.ts';
  * The reference menus through Gate's admission and its governance (the stand-in, given the governance a
  * `consultsGrants` route is handed; the real `GateAdmission` is asked about this route in Gate's own suite): a device the operator
  * has not granted filesystem, terminal, browser or fleet (cards) use is refused the lists those facts' own routes refuse it.
- * The providers are fakes that declare the demands the real ones will.
+ * `%terminal`, `%browser`, `&` and `/` are fakes that declare the demands the real ones will; `:` and `@` are Conversation's OWN
+ * providers over a Ferrets fake (the first taker of a key serves it, so a fixture cannot stand in for them).
  */
 const SECRET = 'sk-live-77aa';
 const F1 = ferretId('f1');
@@ -37,6 +39,8 @@ interface Setup {
   readonly gate: GovernedAdmission;
   readonly seen: ReferenceCatalogInput[];
   readonly started: string[];
+  /** Every folder Ferrets was asked to list for `@`, so a refusal can prove the listing never ran. */
+  readonly listed: string[];
 }
 
 const hosts: TestHost[] = [];
@@ -45,12 +49,17 @@ afterEach(async () => {
 });
 
 async function setup(
-  options: { policy?: typeof DEFAULT_GATE_CONFIG; provide?: Record<string, ReferenceCatalogProvider> } = {},
+  options: {
+    policy?: typeof DEFAULT_GATE_CONFIG;
+    provide?: Record<string, ReferenceCatalogProvider>;
+    files?: FerretFolderListing;
+  } = {},
 ): Promise<Setup> {
   const gate = new GovernedAdmission();
   if (options.policy !== undefined) gate.policy = options.policy;
   const seen: ReferenceCatalogInput[] = [];
   const started: string[] = [];
+  const listed: string[] = [];
   const entry = (token: string, label = token): ReferenceCatalogEntry => ({ token, label });
   const provider = (demand: ReferenceCatalogProvider['demand'], token: string): ReferenceCatalogProvider => ({
     ...(demand === undefined ? {} : { demand }),
@@ -61,11 +70,10 @@ async function setup(
     },
   });
   const providers: Record<string, ReferenceCatalogProvider> = options.provide ?? {
-    '@': provider(cap('filesystem', 'use'), 'src/'),
     '%terminal': provider(cap('terminal', 'use'), 'dev'),
     '%browser': provider(cap('browser', 'use'), 'docs'),
     '&': provider(cap('fleet', 'use'), 'F12'),
-    ':': provider(undefined, 'helper'),
+    '/': provider(undefined, 'helper'),
   };
   const fixture = definePlugin({
     id: 'reference-fixture',
@@ -83,8 +91,13 @@ async function setup(
       hooks: Object.fromEntries(Object.entries(providers).map(([key, value]) => [`reference.catalog:${key}`, value])),
     }),
   });
-  const ferrets = new FakeFerrets();
-  ferrets.add({ id: F1 });
+  const ferrets = Object.assign(new FakeFerrets(), {
+    listFolder: async (_ferret: string, path: string | undefined): Promise<FerretFolderListing> => {
+      listed.push(path ?? '');
+      return options.files ?? { path: path ?? '', entries: [{ name: 'src', type: 'dir' }] };
+    },
+  });
+  ferrets.add({ id: F1, name: 'olive' });
   const conversation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
@@ -101,7 +114,7 @@ async function setup(
     gate,
   });
   hosts.push(host);
-  return { host, gate, seen, started };
+  return { host, gate, seen, started, listed };
 }
 
 const ask = (s: Setup, prefix: string, as: 'owner' | 'phone', query: Record<string, string> = {}) =>
@@ -118,7 +131,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     expect(response.status).toBe(403);
     expect(response.json<{ code: string }>().code).toBe('grant_device_not_granted');
     expect(response.body).not.toContain('src/');
-    expect(s.started).toEqual([]);
+    expect(s.listed).toEqual([]);
   });
 
   test('a governed device WITHOUT terminal use is refused 403 on %terminal', async () => {
@@ -212,10 +225,37 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     expect(s.started).toEqual(['dev']);
   });
 
-  test('a provider with no demand (ferrets) is served to a governed device, and is passed the caller standing', async () => {
+  test('a governed device WITHOUT fleet use is refused 403 on :, and no ferret is listed; one with it is served the callsigns', async () => {
+    const s = await setup();
+    s.gate.enrol('phone', withGrants('fleet'));
+    const response = await ask(s, ':', 'phone');
+    expect(response.status).toBe(403);
+    expect(response.json<{ code: string }>().code).toBe('grant_device_not_granted');
+    expect(response.body).not.toContain('olive');
+    s.gate.enrol('tablet', FULL_DEVICE_GRANTS);
+    const granted = await s.host.request('GET', PATH, { query: { prefix: ':' }, as: device('tablet') });
+    expect(granted.status).toBe(200);
+    expect(granted.json<{ provided: boolean; entries: { token: string }[] }>()).toMatchObject({
+      provided: true,
+      entries: [{ token: 'olive' }],
+    });
+  });
+
+  test('a device WITHOUT filesystem use still reads the callsigns, and one without fleet use still browses the files: each menu keeps its own grant', async () => {
+    const s = await setup();
+    s.gate.enrol('files-only', withGrants('fleet'));
+    s.gate.enrol('fleet-only', withGrants('filesystem'));
+    const files = await s.host.request('GET', PATH, { query: { prefix: '@' }, as: device('files-only') });
+    expect(files.status).toBe(200);
+    expect(files.json<{ entries: { token: string }[] }>().entries[0]?.token).toBe('src/');
+    const agents = await s.host.request('GET', PATH, { query: { prefix: ':' }, as: device('fleet-only') });
+    expect(agents.status).toBe(200);
+  });
+
+  test('a provider with no demand (skills) is served to a governed device, and is passed the caller standing', async () => {
     const s = await setup();
     s.gate.enrol('phone', withGrants('filesystem'));
-    const response = await ask(s, ':', 'phone');
+    const response = await ask(s, '/', 'phone');
     expect(response.status).toBe(200);
     expect(s.seen[0]?.caller.governance?.governed).toBe(true);
     expect(s.seen[0]?.caller.actor).toBe('device:phone');
@@ -247,6 +287,8 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     expect((await ask(s, '&', 'owner', { q: 'x'.repeat(4_097) })).status).toBe(400);
     expect((await ask(s, '&', 'owner', { q: 'x'.repeat(4_096) })).status).toBe(200);
     expect(s.seen.every(input => input.query === undefined || !input.query.includes('..'))).toBe(true);
+    // Ferrets never heard a climbing path either: only the one clean folder was asked.
+    expect(s.listed).toEqual(['src/deep']);
   });
 
   test('a failing or non-array provider is a shaped 502 naming only its prefix; a 403 it raises passes through', async () => {
@@ -290,7 +332,11 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
     const many = (count: number): ReferenceCatalogProvider => ({
       entries: async () => Array.from({ length: count }, (_, i) => ({ token: `t${i}`, label: `t${i}` })),
     });
-    const s = await setup({ provide: { '@': many(2_500), '&': many(500) } });
+    const folder: FerretFolderListing = {
+      path: '',
+      entries: Array.from({ length: 2_500 }, (_, i) => ({ name: `t${i}`, type: 'file' as const })),
+    };
+    const s = await setup({ provide: { '&': many(500) }, files: folder });
     const files = await ask(s, '@', 'owner');
     expect(files.json<{ entries: unknown[] }>().entries).toHaveLength(2_000);
     const cards = await ask(s, '&', 'owner');
