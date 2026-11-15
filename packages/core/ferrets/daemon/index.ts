@@ -1071,12 +1071,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: () => registry.list(),
       waitingOf: ferret => registry.waitingOf(ferret),
       outdated: outdatedFor,
-      // NOW, not polite: a polite stop is one Ctrl-C, which Claude Code answers with "Press Ctrl-C again to exit" at an
-      // idle prompt, so the old process stayed in `fy-<id>` and the resume's start refused the occupied session. The drain
-      // only restarts a ferret that is idle (a your-turn or a declared wait), as a move's `releaseLive` stops with `now`.
-      stop: async (ferret, reason) => await service.stop(ferret, 'now', reason),
-      // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
-      resume: async (ferret, origin) => await service.resume(ferret, undefined, { actor: 'daemon', origin }),
+      // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words. It REPLACES the live
+      // pane: the runtime, its login, the folder and the start gate are judged first, and only then is the old harness
+      // stopped (`now`, as a move's `releaseLive` does: a polite stop is one Ctrl-C, which Claude Code answers with "Press
+      // Ctrl-C again to exit"). A login that needs sign-in therefore leaves the ferret running, never stopped and unstarted.
+      resume: async (ferret, origin) =>
+        await service.resume(ferret, undefined, { actor: 'daemon', origin, replaceLiveTerminal: true }),
+      startable: async ferret => await service.startable(ferret),
       history: appendHistory,
       // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
       loadQueue: async () => {

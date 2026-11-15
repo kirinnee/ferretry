@@ -589,3 +589,60 @@ describe('a Runtimes answer that never arrives is refused in time and releases t
     expect(clock.pending()).toBe(0);
   });
 });
+
+describe('a relaunch that replaces a live pane judges the login BEFORE it stops the old harness', () => {
+  test('a login whose sign-in cannot be used refuses the relaunch and leaves the running ferret as it was', async () => {
+    // Proof run 7: the restart stopped the harness, then the launch found the login unusable. Every read of the login the
+    // launch makes after the stop is now made before it.
+    const f = fixture();
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    const stops: string[] = [];
+    f.harness.stop = async (_ferret, _handle, _runner, how) => void stops.push(how);
+    const before = f.registry.get(id);
+    for (const broken of [
+      { loginCredential: async () => ({ kind: 'unavailable' as const, sentence: 'login oauth needs sign-in' }) },
+      { loginLaunchEnv: async () => ({ ok: false as const, error: 'login oauth could not be read' }) },
+      { loginEnv: async () => ({ ok: false as const, error: 'login oauth could not be read' }) },
+    ]) {
+      const ports = { ...f.ports, ...broken } as FerretsPorts;
+      const service = new FerretsService(f.registry, new FerretTokenDirectory(), ports);
+      const relaunched = await service.resume(id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true });
+      expect(relaunched.ok ? '' : relaunched.error.code).toBe('login_unavailable');
+      expect(stops).toEqual([]);
+      expect(f.registry.get(id)?.state).toBe(before?.state);
+      expect(f.registry.get(id)?.handle).toBe(before?.handle);
+      expect(f.harness.launched).toHaveLength(1);
+    }
+  });
+});
+
+describe('startable: whether a running ferret could start again now, touching nothing', () => {
+  test('a runtime whose login needs sign-in, or a login whose credential cannot be used, is not startable', async () => {
+    let signedIn = true;
+    const f = fixture(async runtime =>
+      signedIn
+        ? { ok: true, harness: 'claude-code', login: 'oauth' }
+        : { ok: false, sentence: `runtime ${runtime} was not started: Login oauth needs sign-in` },
+    );
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    const before = f.registry.get(id);
+    expect((await f.service.startable(id)).ok).toBe(true);
+
+    signedIn = false;
+    const needsSignIn = await f.service.startable(id);
+    expect(needsSignIn.ok ? '' : needsSignIn.error.reason).toContain('needs sign-in');
+
+    signedIn = true;
+    const unusable = new FerretsService(f.registry, new FerretTokenDirectory(), {
+      ...f.ports,
+      loginCredential: async () => ({ kind: 'unavailable' as const, sentence: 'login oauth needs sign-in' }),
+    } as FerretsPorts);
+    const refused = await unusable.startable(id);
+    expect(refused.ok ? '' : refused.error.code).toBe('login_unavailable');
+    // Nothing was touched: the same record, one launch.
+    expect(f.registry.get(id)).toEqual(before);
+    expect(f.harness.launched).toHaveLength(1);
+    const missing = await f.service.startable('nobody' as never);
+    expect(missing.ok).toBe(false);
+  });
+});

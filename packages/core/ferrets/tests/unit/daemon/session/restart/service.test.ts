@@ -4,9 +4,11 @@ import type { LaunchInstructionSectionId } from '../../../../../daemon/lib/proto
 import type { RestartQueueEntry } from '../../../../../contract/index.ts';
 import should from 'should';
 import {
+  RESTART_BLOCKED_DETAIL,
   RESTART_BUSY_DETAIL,
   RESTART_RETRY_BASE_MS,
   RESTART_RETRY_CAP_MS,
+  RestartBlocked,
   RestartBusy,
   RestartService,
   type RestartPorts,
@@ -20,6 +22,10 @@ interface World {
   stale: Record<string, LaunchInstructionSectionId[]>;
   busy: Set<string>;
   broken: Map<string, string>;
+  /** Ferrets whose runtime cannot start: the refusal sentence the restart is blocked with. */
+  blockedBy: Map<string, string>;
+  /** Every `blocked` journal entry, in order. */
+  blocked: Array<[string, string]>;
   restarted: string[];
   /** Who each restart was asked by, in the order they ran. */
   askedBy: Array<string | undefined>;
@@ -41,6 +47,8 @@ const world = (subjects: RestartSubject[], stale: World['stale'] = {}): World =>
   stale,
   busy: new Set(),
   broken: new Map(),
+  blockedBy: new Map(),
+  blocked: [],
   restarted: [],
   askedBy: [],
   origins: [],
@@ -73,6 +81,8 @@ const make = (w: World): RestartService => {
       w.askedBy.push(requestedBy);
       w.attempts.push(w.clock.now - Date.parse(AT));
       if (w.busy.has(id)) throw new RestartBusy();
+      const blockedBy = w.blockedBy.get(id);
+      if (blockedBy !== undefined) throw new RestartBlocked(blockedBy);
       const broken = w.broken.get(id);
       if (broken !== undefined) throw new Error(broken);
       w.restarted.push(id);
@@ -80,6 +90,10 @@ const make = (w: World): RestartService => {
     gaveUp: async (id, reason) => {
       if (id === 'noisy') throw new Error('journal is down');
       w.gaveUp.push([id, reason]);
+    },
+    blocked: async (id, reason) => {
+      if (id === 'noisy') throw new Error('journal is down');
+      w.blocked.push([id, reason]);
     },
     queue: {
       load: async () => {
@@ -188,6 +202,7 @@ describe('RestartService.restart', () => {
         throw 'plain text';
       },
       gaveUp: async () => undefined,
+      blocked: async () => undefined,
       queue: {
         load: async () => w.queue,
         save: async e => {
@@ -427,5 +442,84 @@ describe('RestartService.drain stall budget', () => {
     should(w.restarted).eql(['a']);
     should(w.queue).eql([]);
     should(RESTART_RETRY_BASE_MS).be.below(RESTART_RETRY_CAP_MS);
+  });
+});
+
+describe('RestartService: a restart blocked BEFORE the old harness is stopped', () => {
+  const SIGN_IN = 'runtime codex-main-agent was not started: Login codex-main needs sign-in';
+
+  it('should keep a blocked queued restart, journal it once, and restart it once its runtime can start', async () => {
+    // Proof run 7: a migrated Codex ferret on a login that needs sign-in was stopped, then could not start, and the
+    // entry was dropped. A blocked restart leaves the harness running and waits instead.
+    const w = world([idle('wells')]);
+    w.queue = [{ id: 'wells', since: AT, reason: 'mid-turn', onlyIfOutdated: false, origin: { kind: 'daemon' } }];
+    w.blockedBy.set('wells', SIGN_IN);
+    const service = make(w);
+
+    await service.drain();
+    should(w.queue).eql([
+      { id: 'wells', since: AT, reason: 'blocked', onlyIfOutdated: false, origin: { kind: 'daemon' } },
+    ]);
+    should(w.blocked).eql([['wells', SIGN_IN]]);
+    should(w.gaveUp).eql([]);
+
+    // Tried again after the backoff, still blocked: never journalled again (not on every tick).
+    w.clock.now += RESTART_RETRY_CAP_MS;
+    await service.drain();
+    should(w.attempts).have.length(2);
+    should(w.blocked).have.length(1);
+    should(w.queue.map(entry => entry.reason)).eql(['blocked']);
+
+    // The owner signs the login in: the next try restarts it and the entry is gone.
+    w.blockedBy.delete('wells');
+    w.clock.now += RESTART_RETRY_CAP_MS;
+    await service.drain();
+    should(w.restarted).eql(['wells']);
+    should(w.queue).eql([]);
+  });
+
+  it('should wait out the backoff between blocked tries, as for a busy one', async () => {
+    const w = world([idle('wells')]);
+    w.queue = [{ id: 'wells', since: AT, reason: 'mid-turn', onlyIfOutdated: false }];
+    w.blockedBy.set('wells', SIGN_IN);
+    const service = make(w);
+    await service.drain();
+    await service.drain();
+    should(w.attempts).eql([0]);
+    w.clock.now += RESTART_RETRY_BASE_MS;
+    await service.drain();
+    should(w.attempts).have.length(2);
+  });
+
+  it('should answer a person’s restart of a blocked ferret as queued with the fixed sentence, journalled once', async () => {
+    const w = world([idle('wells', 'wells')]);
+    w.blockedBy.set('wells', SIGN_IN);
+    const service = make(w);
+
+    const result = await service.restart({ scope: 'ids', ids: ['wells'] }, PERSON_ORIGIN, undefined, 'owner');
+    should(result).eql({
+      restarted: [],
+      queued: [{ id: 'wells', name: 'wells', reason: 'blocked', detail: RESTART_BLOCKED_DETAIL }],
+      skipped: [],
+      failed: [],
+    });
+    should(w.queue.map(entry => [entry.id, entry.reason])).eql([['wells', 'blocked']]);
+    should(w.blocked).eql([['wells', SIGN_IN]]);
+
+    // Asked again while it is still blocked: still queued, not journalled a second time.
+    await service.restart({ scope: 'ids', ids: ['wells'] }, PERSON_ORIGIN, undefined, 'owner');
+    should(w.blocked).have.length(1);
+  });
+
+  it('should keep a blocked restart even when its journal cannot be written', async () => {
+    const w = world([idle('noisy')]);
+    w.queue = [{ id: 'noisy', since: AT, reason: 'mid-turn', onlyIfOutdated: false }];
+    w.blockedBy.set('noisy', SIGN_IN);
+    await make(w).drain();
+    should(w.queue.map(entry => entry.reason)).eql(['blocked']);
+    const asked = world([idle('noisy')]);
+    asked.blockedBy.set('noisy', SIGN_IN);
+    const result = await make(asked).restart({ scope: 'ids', ids: ['noisy'] }, PERSON_ORIGIN);
+    should(result.queued.map(entry => entry.reason)).eql(['blocked']);
   });
 });

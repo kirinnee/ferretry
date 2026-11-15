@@ -891,32 +891,40 @@ verify)
   # Live panes, by session. Each baseline pane is still there, OR v5 restarted its ferret (M3: the converter queues a restart
   # for every ferret in its v4 pane, and a restart ends the old harness and starts it again in a NEW pane of the same
   # session): then the session has a pane again and the ferret's v5 history says `session.restarted`. A restart that
-  # failed (`session.restart_gave_up`, the last restart event in that history) is a FAIL whatever the pane shows. The
-  # owner of a pane comes from the baseline's terminal-pane.json map; the history is read for event TYPES only.
+  # failed (`session.restart_gave_up`, the last restart event in that history) is a FAIL whatever the pane shows. A restart
+  # that was BLOCKED (`session.restart_blocked`: its runtime cannot start, a login that needs sign-in) left the old v4
+  # harness running untouched and is still queued: a REVIEW naming the login (from `fy ps`), never a FAIL, because v5 goes
+  # on trying and restarts it once the owner signs that login in. The owner of a pane comes from the baseline's
+  # terminal-pane.json map; the history is read for event TYPES only.
   if [ "$(note_get PANES)" = none ]; then
     row "panes" "SKIP" "no live ferret at baseline"
   else
     psock="${H}/state/terminals/tmux.sock"
     if panes="$(tmux -S "${psock}" list-panes -a -F '#{session_name} #{pane_id}')"; then
       sort <<<"${panes}" >"${work}/panes.now"
-      # The last restart event in a ferret's v5 history: restarted, gave_up, none, or unreadable.
+      # The last restart event in a ferret's v5 history: restarted, gave_up, blocked, none, or unreadable.
       restart_of() {
         local file="${H}/state/ferrets/$1/history.jsonl" last
         [ -f "${file}" ] || {
           echo none
           return 0
         }
-        last="$(jq -r 'select(.type == "session.restarted" or .type == "session.restart_gave_up") | .type' "${file}" 2>/dev/null)" || {
+        last="$(jq -r 'select(.type == "session.restarted" or .type == "session.restart_gave_up" or .type == "session.restart_blocked") | .type' "${file}" 2>/dev/null)" || {
           echo unreadable
           return 0
         }
         case "$(tail -n 1 <<<"${last}")" in
         session.restarted) echo restarted ;;
         session.restart_gave_up) echo gave_up ;;
+        session.restart_blocked) echo blocked ;;
         *) echo none ;;
         esac
       }
-      kept=0 restarted=0 missing=0 gave_up=""
+      # The login a blocked ferret waits on, as `fy ps` names it (its runtime when it names no login).
+      login_of() {
+        jq -r --arg id "$1" 'first(.[]? | select(.id == $id) | .login // .runtime) // empty' "${work}/ps.json" 2>/dev/null || true
+      }
+      kept=0 restarted=0 missing=0 gave_up="" blocked="" signins=""
       while read -r session pane; do
         [ -n "${session}" ] || continue
         owner="$(awk -F'\t' -v p="${pane}" '$3 == p {print $1; exit}' "${base}/pane-owners.tsv")"
@@ -924,6 +932,12 @@ verify)
         if [ -n "${owner}" ]; then how="$(restart_of "${owner}")"; fi
         if [ "${how}" = gave_up ]; then
           gave_up="${gave_up}${gave_up:+, }${owner}"
+        elif [ "${how}" = blocked ] && grep -qxF "${session} ${pane}" "${work}/panes.now"; then
+          login="$(login_of "${owner}")"
+          blocked="${blocked}${blocked:+, }${owner} (still on v4 until ${login:-its login} is signed in)"
+          signin="fy login signin ${login}"
+          [ -n "${login}" ] || signin="fy login ls (to find its login)"
+          case "; ${signins}; " in *"; ${signin}; "*) ;; *) signins="${signins}${signins:+; }${signin}" ;; esac
         elif grep -qxF "${session} ${pane}" "${work}/panes.now"; then
           kept=$((kept + 1))
         elif [ "${how}" = restarted ] && awk -v s="${session}" '$1 == s {found = 1} END {exit !found}' "${work}/panes.now"; then
@@ -936,6 +950,8 @@ verify)
         row "panes" FAIL "v5 could not restart: ${gave_up} (its history says session.restart_gave_up with the reason: show the owner)"
       elif [ "${missing}" -gt 0 ]; then
         row "panes" FAIL "${missing} baseline panes missing (not restarted by v5 either)"
+      elif [ -n "${blocked}" ]; then
+        row "panes" REVIEW "${kept} baseline panes still present; not restarted yet: ${blocked}. Sign each in (${signins}) and v5 restarts them by itself"
       else
         row "panes" OK "${kept} baseline panes still present, ${restarted} restarted by v5 in a new pane"
       fi
@@ -998,6 +1014,8 @@ verify)
     cat "${rows}"
   } | awk -F'\t' '{printf "%-34s %-8s %s\n", $1, $2, $3}'
   grep -q $'\tREVIEW\t' "${rows}" && say "⚠️ REVIEW rows are not failures: show them to the owner, who decides."
+  # A ferret whose restart is blocked on a login runs on in its v4 harness: the one thing to do is said on its own line.
+  [ -z "${signins:-}" ] || say "🔑 Some running ferrets are still on v4 until a login is signed in: ${signins}. Nothing was stopped; v5 restarts each by itself (within about 2 minutes) once its login is signed in."
   [ "${bad}" = 0 ] || fail "verify found a difference (FAIL rows above): stop, tell the owner, offer the rollback"
   mark verified
   left_behind "$(note_get B)"
