@@ -29,7 +29,7 @@ import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
 import { AgendaReferenceMenu } from './lib/reference-menu.ts';
-import { AGENDA_NUDGE_ID_PREFIX, AgendaTurnNudge } from './lib/turn-nudge.ts';
+import { AGENDA_NUDGE_ID_PREFIX, AgendaTurnNudge, NudgeSendFailure } from './lib/turn-nudge.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
 import { buzzBody, buzzTitle } from './lib/words.ts';
@@ -178,7 +178,7 @@ export default implementDaemon(manifest, {
           const sent = await uses.conversation
             .current()
             ?.send(ferret as FerretId, { kind: 'agenda' }, { message, sendId, label: 'action' });
-          if (sent?.ok === false) throw new Error(sent.error.message);
+          if (sent?.ok === false) throw new NudgeSendFailure(sent.error.code, sent.error.message);
         },
       },
       BINARY_NAME,

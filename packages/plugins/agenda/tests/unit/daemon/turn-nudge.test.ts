@@ -5,6 +5,7 @@ import {
   AGENDA_NUDGE_SETTLE_MS,
   AGENDA_NUDGE_TAIL,
   AgendaTurnNudge,
+  NudgeSendFailure,
   agendaNudgeMessage,
   agendaNudgeSendId,
   agendaSends,
@@ -203,7 +204,7 @@ describe('the check at a turn end', () => {
       events: TranscriptEvent[];
       sends: NudgeSend[];
       mark: NudgeMark;
-      failSend: boolean;
+      failSend: string | Error;
     }> = {},
   ) => {
     const sent: string[][] = [];
@@ -233,7 +234,8 @@ describe('the check at a turn end', () => {
           released.push(sendId);
         },
         send: async (ferret, sendId, message) => {
-          if (over.failSend === true) throw new Error('refused');
+          if (over.failSend !== undefined)
+            throw typeof over.failSend === 'string' ? new NudgeSendFailure(over.failSend, 'refused') : over.failSend;
           sent.push([ferret, sendId, message]);
         },
       },
@@ -319,11 +321,38 @@ describe('the check at a turn end', () => {
     expect(sent).toEqual([]);
   });
 
-  test('a send that fails takes the reservation back, so nothing was nudged and the next turn may try', async () => {
-    const { check, store, released } = rig({ failSend: true });
-    await expect(check.check('f1')).rejects.toThrow('refused');
-    expect(store.mark).toBeUndefined();
-    expect(released).toHaveLength(1);
+  test('a send answered with a refusal takes the reservation back, so nothing was nudged and the next turn may try', async () => {
+    for (const code of ['send_refused', 'not_found', 'composer_occupied', 'session_launching', 'invalid']) {
+      const { check, store, released } = rig({ failSend: code });
+      await expect(check.check('f1')).rejects.toThrow('refused');
+      expect(store.mark).toBeUndefined();
+      expect(released).toHaveLength(1);
+    }
+  });
+
+  test('a send that may have been typed keeps its mark: send_unconfirmed, a kept session_send_failed, an unknown code, a bare throw', async () => {
+    for (const failSend of ['send_unconfirmed', 'session_send_failed', 'something_new', new Error('boom')]) {
+      const { check, store, released } = rig({ failSend });
+      await expect(check.check('f1')).rejects.toThrow();
+      expect(store.mark).toBeDefined();
+      expect(released).toEqual([]);
+    }
+  });
+
+  test('a nudge answered send_unconfirmed is not followed by another on the next completed turn, even with a pointer opener', async () => {
+    const first = rig({ failSend: 'send_unconfirmed' });
+    await expect(first.check.check('f1')).rejects.toThrow();
+    const mark = first.store.mark as NudgeMark;
+    const { check, sent } = rig({
+      mark,
+      events: [
+        said('user', 'Read the instructions in /state/turns/turn-008.md and follow them.'),
+        said('assistant', ASKING),
+      ],
+      sends: [send(mark.sendId, '2026-11-15T09:59:59.000Z', true)],
+    });
+    expect(await check.check('f1')).toBe(false);
+    expect(sent).toEqual([]);
   });
 
   test('a failure to take the reservation back does not hide the send’s own failure', async () => {
@@ -341,7 +370,7 @@ describe('the check at a turn end', () => {
           throw new Error('disk');
         },
         send: async () => {
-          throw new Error('refused');
+          throw new NudgeSendFailure('send_refused', 'refused');
         },
       },
       'fy',

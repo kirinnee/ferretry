@@ -190,6 +190,36 @@ export function agendaSends(sends: readonly NudgeSend[]): {
 export const agendaNudgeSendId = (ferret: string, reply: string, count: number): string =>
   `${AGENDA_NUDGE_ID_PREFIX}${ferret}-${createHash('sha256').update(reply).digest('hex').slice(0, 16)}-${count}`;
 
+/**
+ * A send the port did not accept, with the code Conversation answered. The code is what tells "nothing was typed" from
+ * "typed, landing not proven": see {@link nothingTyped}.
+ */
+export class NudgeSendFailure extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'NudgeSendFailure';
+  }
+}
+
+/** The answers that prove nothing reached the ferret's box: a refusal, a draft in the way, a launch in flight. */
+const NOTHING_TYPED: ReadonlySet<string> = new Set([
+  'send_refused',
+  'not_found',
+  'composer_occupied',
+  'session_launching',
+  'invalid',
+]);
+
+/**
+ * Whether a failed send is KNOWN to have typed nothing, so the cap may be given back. Anything else (`send_unconfirmed`,
+ * a `session_send_failed` whose record is kept, a code not listed, a throw that is not a {@link NudgeSendFailure}) may
+ * have reached the prompt, and keeps the mark: an under-nudge is harmless, a nudge loop spends the owner's model.
+ */
+const nothingTyped = (error: unknown): boolean => error instanceof NudgeSendFailure && NOTHING_TYPED.has(error.code);
+
 /** What the check reads and how it sends. */
 export interface AgendaNudgePorts extends NudgeStore {
   /** The machine's switch (`agenda.yaml` `agendaNudge`), read per turn so turning it off is immediate. */
@@ -204,11 +234,11 @@ export interface AgendaNudgePorts extends NudgeStore {
   readonly pause: (ms: number) => Promise<void>;
   /** Now, as an instant. */
   readonly now: () => string;
-  /** The send; the same id twice is one message. */
+  /** The send; the same id twice is one message. Throws a {@link NudgeSendFailure} for an answer that is not an acceptance. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
 }
 
-/** Runs the check at a turn end. A check that cannot read the transcript says nothing rather than guessing. */
+/** Runs the check at a turn end. A send that may have been typed keeps its mark.  A check that cannot read the transcript says nothing rather than guessing. */
 export class AgendaTurnNudge {
   constructor(
     private readonly ports: AgendaNudgePorts,
@@ -234,7 +264,7 @@ export class AgendaTurnNudge {
     try {
       await this.ports.send(ferret, sendId, nudge.message);
     } catch (error) {
-      await this.ports.release(ferret, sendId).catch(() => undefined);
+      if (nothingTyped(error)) await this.ports.release(ferret, sendId).catch(() => undefined);
       throw error;
     }
     return true;
