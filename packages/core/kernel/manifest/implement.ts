@@ -553,6 +553,11 @@ export interface CliContext<M extends Manifest> {
   sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
   /** `FY_SESSION_ID` and the shell's allowed names only. */
   readonly env?: CliEnvironment;
+  /**
+   * The caller's shell variables among `names` that this plugin's manifest declares in `permissions.cliEnvReads` and
+   * that are set. An undeclared name answers nothing, set or not. Optional until the fy shell fills it in.
+   */
+  readEnvironment?(names: readonly string[]): CliEnvironment;
   /** Asks a question at the terminal; `undefined` when there is no terminal to ask at. */
   prompt?(question: string): Promise<string | undefined>;
   /** A yes/no at the terminal; `false` when there is no terminal. */

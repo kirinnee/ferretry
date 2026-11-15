@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { checkedBuiltInModelCatalogs, checkedBuiltInPresets } from '../../../daemon/lib/built-ins.ts';
-import { builtInsFresh, builtInsText, parsedBuiltIns } from '../../../scripts/built-ins.ts';
+import { PRESET_ENV_NAMES } from '../../../contract/preset-env-names.ts';
+import manifest from '../../../manifest.ts';
+import { builtInsFresh, builtInsText, parsedBuiltIns, presetEnvNames } from '../../../scripts/built-ins.ts';
 
 const folders: string[] = [];
 afterEach(() => {
@@ -43,6 +45,25 @@ describe('this build’s catalogs, parsed when built-ins.json is written', () =>
     should(builtInsFresh(written(builtInsText(changed as typeof parsed)))).be.false();
     should(builtInsFresh(written('{ "models": '))).be.false();
     should(builtInsFresh(join(tmpdir(), 'logins-built-ins-none', 'built-ins.json'))).be.false();
+  });
+
+  it('should write the shell variable names the presets declare, sorted and once, and call a stale list stale', () => {
+    // Arrange
+    const parsed = parsedBuiltIns();
+    const names = presetEnvNames(parsed.presets);
+    const realBuiltIns = join(import.meta.dir, '..', '..', '..', 'daemon', 'lib', 'built-ins.json');
+
+    // Assert — the checked-in list is exactly what the YAML declares: no name is hand-copied, none is missing.
+    should(PRESET_ENV_NAMES).eql(names);
+    should(names).eql([...new Set(names)].sort());
+    should(names).containEql('ZAI_API_KEY').and.containEql('ANTHROPIC_BASE_URL');
+    should(builtInsFresh(realBuiltIns, written(`${JSON.stringify(names)}\n`))).be.true();
+    should(builtInsFresh(realBuiltIns, written(JSON.stringify([...names, 'SMUGGLED_TOKEN'])))).be.false();
+    should(builtInsFresh(realBuiltIns, join(tmpdir(), 'logins-built-ins-none', 'names.json'))).be.false();
+  });
+
+  it('should declare exactly that list as the shell variables the fy half may read', () => {
+    should(manifest.permissions.cliEnvReads).eql(PRESET_ENV_NAMES);
   });
 
   it('should compare values, not formatting', () => {

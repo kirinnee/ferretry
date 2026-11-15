@@ -4,7 +4,8 @@
  * that opened the page knew it and handed it over (`skills.add`, Skills' contract/slots.ts).
  */
 
-import type { SkillsAddSlotProps } from '@ferretry/plugin-skills/contract';
+import { FerretSkillsInventorySchema, type SkillsAddSlotProps } from '@ferretry/plugin-skills/contract';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import type { SessionPlace } from '../features/add-skills/add-skills-model.ts';
 
 export interface AddSkillsPlace extends SessionPlace {
@@ -29,4 +30,27 @@ export function readPlace(search: string): AddSkillsPlace {
     runtime: query.get('runtime') ?? undefined,
     scopes: (query.get('scopes') ?? '').split(',').filter(scope => scope !== ''),
   };
+}
+
+const FERRET_INVENTORY_ROUTE = 'GET /v1/ferrets/:ferretId/skills/inventory' as const;
+
+/**
+ * The query for a ferret whose place nobody handed over (the Actions menu knows the ferret, not where it works): Skills'
+ * own read of what that ferret sees. A daemon that will not say leaves the page to its defaults (no folder, `claude`).
+ */
+export async function placeQueryOfFerret(client: Pick<PluginClient, 'call'>, ferret: string): Promise<string> {
+  try {
+    const inventory = FerretSkillsInventorySchema.parse(
+      await client.call(FERRET_INVENTORY_ROUTE, { params: { ferretId: ferret } }),
+    );
+    return placeQuery({
+      ferret,
+      folder: inventory.folder,
+      harness: inventory.harness,
+      ...(inventory.runtime === undefined ? {} : { runtime: inventory.runtime }),
+      scopes: [...new Set(inventory.skills.map(skill => skill.scope))],
+    });
+  } catch {
+    return '';
+  }
 }
