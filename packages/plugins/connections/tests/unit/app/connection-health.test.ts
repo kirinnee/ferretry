@@ -486,6 +486,25 @@ describe('DaemonConnectionHealth recovery', () => {
     expect(health.state(laptop)).toEqual({ kind: 'unknown' });
   });
 
+  it('R88 an answer to a read begun before the pairing was cleared cannot end a LATER outage, which still retries', async () => {
+    const w = world();
+    const health = new DaemonConnectionHealth(w.environment, w.attempt);
+    let recovered = 0;
+    health.onRecovered(laptop, () => {
+      recovered += 1;
+    });
+    health.outage(laptop, outage());
+    health.retryNow(laptop);
+    health.clearDaemon(laptop);
+    health.outage(laptop, outage());
+    must(w.calls[0], 'the old attempt').resolve(true);
+    await settle();
+    expect(reconnectingOf(health, laptop).attempt).toBe(0);
+    expect(recovered).toBe(0);
+    // The replacement outage keeps its own loop: its stall timer is live and the old read's end scheduled its next retry.
+    expect(w.retryTimers()).toHaveLength(1);
+  });
+
   it('cancels the retry and the stall timer on recovery', () => {
     const w = world();
     const health = new DaemonConnectionHealth(w.environment, w.attempt);

@@ -363,6 +363,9 @@ export class DaemonConnectionHealth implements ConnectionHealth, ConnectionHealt
       if (health.state.kind !== 'reconnecting' || health.cancelRetry !== undefined) return;
       this.#scheduleNext(daemonId, health);
     };
+    // The outage this read belongs to: every outage start and every stop bumps the epoch, so a read begun
+    // under a pairing that was since cleared (and an outage since begun anew) is no longer this outage's.
+    const epoch = health.epoch;
     let pending: Promise<unknown>;
     try {
       pending = this.attempt(daemonId);
@@ -371,8 +374,9 @@ export class DaemonConnectionHealth implements ConnectionHealth, ConnectionHealt
     }
     void pending.then(answer => {
       // The machine answered this read — over a session that was already accepted, so no new commit told the router:
-      // the answer itself ends the outage, unless it was cleared or settled while the read was in flight.
-      if (answer === true && health.state.kind === 'reconnecting') this.answered(daemonId);
+      // the answer itself ends the outage, unless it was cleared or settled while the read was in flight, or a
+      // replacement outage has begun since (an answer for the cleared pairing proves nothing about this one).
+      if (answer === true && health.epoch === epoch && health.state.kind === 'reconnecting') this.answered(daemonId);
       finish();
     }, finish);
   }
