@@ -27,6 +27,8 @@ export function fakeBrowsers(
     closed,
     state: async () => view,
     pagesOf: async (ferret: FerretId) => [...(pages[ferret] ?? [])],
+    // The fake's own pages carry no address, so it has none to give; the gated read is the daemon's (see its tests).
+    pageAddressOf: async () => undefined,
     closeLeftoverBrowsers: async (ferret: FerretId) => {
       closed.push(ferret);
       return leftovers[ferret] ?? { closed: 0, leftAlone: [] };

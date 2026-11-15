@@ -10,5 +10,4 @@
 @import './features/agenda/agenda-config-change.css';
 @import './features/agenda/agenda-panel.css';
 @import './features/agenda/agenda-inbox.css';
-@import './features/permission-request/approval-card.css';
 @import './components/agenda-message.css';

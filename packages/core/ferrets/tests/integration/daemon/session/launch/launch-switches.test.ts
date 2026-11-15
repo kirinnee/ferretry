@@ -5,11 +5,10 @@ import { join } from 'node:path';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
 import should from 'should';
 import { FileSessionEnvironmentStore } from '../../../../../daemon/adapters/session/lifecycle/file-session-environment-store.ts';
-import { TmuxResumeLauncher } from '../../../../../daemon/adapters/session/resume/tmux-resume-launcher.ts';
 import { TmuxSessionLifecycleLauncher } from '../../../../../daemon/adapters/session/lifecycle/tmux-session-lifecycle-launcher.ts';
 import { createSessionRecord } from '../../../../../daemon/lib/session/lifecycle/policy.ts';
 import { defaultSessionLifecycleSettings } from '../../../../../daemon/lib/session/lifecycle/settings.ts';
-import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
+import { parseSessionId } from '../../../../../daemon/lib/session-id.ts';
 import type {
   TmuxController,
   TmuxLaunch,
@@ -17,12 +16,10 @@ import type {
 } from '../../../../../daemon/lib/session/peers/tmux-lifecycle.ts';
 
 /**
- * EVERY LAUNCH PATH HANDS A FERRET THE SWITCHES ITS RECORD SAYS. There are exactly two pane launches:
- * the first launch — which a start, a fork, a Pack sub-ferret and an imported or continued conversation
- * all reach through the lifecycle — and the relaunch, which a Restart, a same-harness move, a
- * revive and a resume all reach through the resume service. Both read the session's mode from its
- * record and its environment from the one stored environment, so these cases pin both halves for
- * an interactive and an unattended ferret.
+ * THE LIFECYCLE LAUNCH HANDS A FERRET THE SWITCHES ITS RECORD SAYS. The first launch — which a start, a fork, a Pack
+ * sub-ferret and an imported or continued conversation all reach through the lifecycle — reads the session's mode
+ * from its record and its environment from the one stored environment, so these cases pin both for an interactive
+ * and an unattended ferret. (The tmux resume relaunch is superseded by Runner.resume and is not built.)
  */
 
 const homes = new Set<string>();
@@ -106,54 +103,35 @@ async function fixture(mode: 'auto' | 'interactive', stored: Readonly<Record<str
   const controller = tmux;
   const delivery = NO_DELIVERY;
   const first = new TmuxSessionLifecycleLauncher(controller, delivery, environments);
-  const relaunch = new TmuxResumeLauncher(
-    controller,
-    async (_session: SessionId) => ({
-      tmuxSession: record.config.tmuxSession,
-      cwd: record.config.cwd,
-      command: record.config.command,
-      env: await environments.read(id),
-      agent: record.config.agent,
-      mode: record.config.mode,
-    }),
-    delivery,
-  );
-  return { id, record, tmux, first, relaunch };
+  return { id, record, tmux, first };
 }
 
-describe('the switches every launch path hands a ferret', () => {
+describe('the switches the lifecycle launch hands a ferret', () => {
   it.each([
     ['interactive', { FY_HYPERMEDIA: '1', FY_PACK: '1' }],
     ['auto', { FY_HYPERMEDIA: '0', FY_PACK: '1' }],
-  ] as const)('should launch and relaunch an %s ferret its start put in Pack mode with %j', async (mode, expected) => {
+  ] as const)('should launch an %s ferret its start put in Pack mode with %j', async (mode, expected) => {
     // Arrange — the mode and the Pack switch the start stored; hypermedia follows the mode.
     const subject = await fixture(mode, { FY_SESSION_MODE: mode, FY_PACK: '1' });
 
-    // Act — the first launch, then the pane dies and the session is relaunched into it.
+    // Act
     await subject.first.launch(subject.record);
-    subject.tmux.running = false;
-    await subject.relaunch.relaunch(subject.id);
 
     // Assert
-    const [launched, relaunched] = subject.tmux.launches;
-    should(subject.tmux.launches).have.length(2);
+    const [launched] = subject.tmux.launches;
+    should(subject.tmux.launches).have.length(1);
     should(switches(launched ?? {})).deepEqual(expected);
-    should(switches(relaunched ?? {})).deepEqual(expected);
-    should(relaunched?.FY_SESSION_MODE).equal(mode);
+    should(launched?.FY_SESSION_MODE).equal(mode);
   });
 
-  it("should keep the owner's stored switches on every launch, in either direction", async () => {
+  it("should keep the owner's stored switches, in either direction", async () => {
     // Arrange — an interactive ferret the owner switched off, and an auto one switched on.
     const off = await fixture('interactive', { FY_HYPERMEDIA: '0', FY_PACK: '0' });
     const on = await fixture('auto', { FY_HYPERMEDIA: '1', FY_PACK: '1' });
 
     // Act
     await off.first.launch(off.record);
-    off.tmux.running = false;
-    await off.relaunch.relaunch(off.id);
     await on.first.launch(on.record);
-    on.tmux.running = false;
-    await on.relaunch.relaunch(on.id);
 
     // Assert
     for (const env of off.tmux.launches) should(switches(env)).deepEqual({ FY_HYPERMEDIA: '0', FY_PACK: '0' });

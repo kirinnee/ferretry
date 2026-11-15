@@ -48,7 +48,7 @@ import {
 
 export * from './wire.ts';
 export * from './slots.ts';
-export { hasTokenShape, storedEnvironmentIssue } from './secret-shape.ts';
+export { hasTokenShape, nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
 /** The five login kinds this plugin takes under Ferrets' `logins` hook (§4.4). */
 export const LOGIN_KINDS = ['anthropic', 'openai', 'api-key', 'proxy', 'endpoint'] as const;

@@ -51,10 +51,11 @@ async function world() {
 }
 
 describe('which plugin can tell a ferret something through Asks', () => {
-  it('gives tell to the Vault’s view and to no other plugin’s, and a call through a cast finds nothing to call', async () => {
+  it('gives tell to the Vault’s and Accounts’ views and to no other plugin’s, and a call through a cast finds nothing to call', async () => {
     const { half } = await world();
     expect(typeof half.asksFor('vault').tell).toBe('function');
-    for (const id of ['accounts', 'tidy', 'ferrets', 'warden', 'conversation', 'board', 'agenda']) {
+    expect(typeof half.asksFor('accounts').tell).toBe('function');
+    for (const id of ['tidy', 'ferrets', 'warden', 'conversation', 'board', 'agenda']) {
       const view = half.asksFor(id);
       expect('tell' in view).toBe(false);
       expect(typeof view.raise).toBe('function');

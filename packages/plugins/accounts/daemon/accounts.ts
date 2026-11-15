@@ -17,7 +17,7 @@ import { StateAccountIndexStore } from './adapters/state-account-index-store.ts'
 import {
   boardProjectOf,
   ownerFerretOf,
-  pageUrlOf,
+  pageAddressOf,
   registeredProjects,
   workFolderOf,
 } from './adapters/pending-reads.ts';
@@ -156,11 +156,16 @@ export function buildAccounts(
     const parsed = AccountHintInputSchema.safeParse(input ?? {});
     if (!parsed.success) return { text: 'Name a site as a host like github.com, or a URL.', isError: true };
     const ferret = isFerretCall(call) ? ferretOf(call) : undefined;
-    const site =
-      parsed.data.site ??
-      (parsed.data.name === undefined || ferret === undefined
-        ? undefined
-        : await pageUrlOf(ctx.uses.browsers, ferret, parsed.data.name));
+    let site = parsed.data.site;
+    if (site === undefined && parsed.data.name !== undefined && ferret !== undefined) {
+      try {
+        site = await pageAddressOf(ctx.uses.browsers, ferret, parsed.data.name);
+      } catch (error) {
+        // Browsers' refusal (the switch is off) is the agents' own sentence, passed through as Browsers worded it.
+        if (error instanceof ApiError) return { text: error.message, isError: true };
+        throw error;
+      }
+    }
     if (site === undefined)
       return {
         text:
