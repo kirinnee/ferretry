@@ -92,7 +92,7 @@ import {
   TranscriptProvenanceSchema,
   type FerretDetails,
 } from '../../../contract/index.ts';
-import type { FerretRegistry, FerretFilter } from '../registry/registry.ts';
+import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { ResumeActor } from '../session/resume/types.ts';
@@ -2138,6 +2138,9 @@ export class FerretsService implements FerretsApi {
     const ownCompactAt =
       (await this.ports.session?.compactAt?.(record.id).catch(() => undefined)) ??
       this.registry.detailsOf(record.id)?.options?.compactAt;
+    // Resolved ONCE (the record's own, else a converted ferret's persisted start option): the harness's question tool,
+    // the pane's FY_SESSION_MODE and the derived launch switches all read this one fact.
+    const mode = effectiveMode(record, this.registry.detailsOf(record.id));
     const base: Omit<LaunchSpec, 'parts'> = {
       ferret: record.id,
       name: record.name,
@@ -2150,7 +2153,7 @@ export class FerretsService implements FerretsApi {
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
-      ...(record.mode === undefined ? {} : { mode: record.mode }),
+      ...(mode === undefined ? {} : { mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
       home: home.value,
@@ -2176,7 +2179,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, record.mode, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, mode, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)

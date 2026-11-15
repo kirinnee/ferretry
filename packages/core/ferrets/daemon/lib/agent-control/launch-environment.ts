@@ -1,5 +1,6 @@
-import type { FerretId, FerretRecord } from '../../../contract/index.ts';
+import type { FerretDetails, FerretId, FerretRecord } from '../../../contract/index.ts';
 import { LAUNCH_SWITCH_VARIABLES } from '../../../contract/index.ts';
+import { effectiveMode } from '../registry/registry.ts';
 import { HYPERMEDIA_ENV } from '../session/peers/fleet.ts';
 
 /** What a ferret's launch environment is kept in: the switches it was launched with, per ferret. */
@@ -42,8 +43,11 @@ export class LaunchEnvironmentStore implements LaunchEnvironmentRecord {
  * does not contribute yet is simply absent from the record, and `instructions` reads it as off: Pack always records
  * `FY_PACK`, so the record is known, and a switch it does not hold was not handed to the pane.
  */
-export function switchesOfRecord(record: FerretRecord | undefined): Readonly<Record<string, string>> {
-  return sessionModeSwitch(record?.mode);
+export function switchesOfRecord(
+  record: FerretRecord | undefined,
+  details?: FerretDetails,
+): Readonly<Record<string, string>> {
+  return sessionModeSwitch(record === undefined ? undefined : effectiveMode(record, details));
 }
 
 /**

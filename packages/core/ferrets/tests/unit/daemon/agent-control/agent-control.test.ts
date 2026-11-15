@@ -341,7 +341,7 @@ describe('the ferret’s mode reaches the harness and the pane on every launch (
     expect(f.handed.map(env => env.FY_SESSION_MODE)).toEqual(['auto']);
   });
 
-  test('a legacy record with no mode hands the harness no mode and the pane no variable (unattended, as an unset variable reads)', async () => {
+  test('a record with NEITHER a mode nor a persisted start mode hands the harness no mode and the pane no variable (unattended, as an unset variable reads; a converted ferret whose details hold the mode is converted-mode.test.ts)', async () => {
     const f = launching(persisted(), {}, undefined);
     expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
     expect(f.harness.launched[0]).not.toHaveProperty('mode');
