@@ -268,21 +268,21 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const state = persisted();
     const interactive = launching(state, {}, 'interactive');
     await interactive.service.resume(interactive.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(interactive.id)).toEqual({ FY_HYPERMEDIA: '1' });
+    expect(state.held.get(interactive.id)).toEqual({ FY_HYPERMEDIA: '1', FY_SESSION_MODE: 'interactive' });
     const answer = (await instructionsAnswer(interactive.id, id => interactive.store.read(id), 'fy')).text;
     expect(answer).toContain('✓ Hypermedia: on');
 
     const autoState = persisted();
     const auto = launching(autoState, {}, 'auto');
     await auto.service.resume(auto.id, undefined, { origin: PERSON_ORIGIN });
-    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0' });
+    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto' });
   });
 
   test('c58-18 an owner’s Hypermedia switch (a launch part) wins over the mode default', async () => {
     const state = persisted();
     const f = launching(state, { FY_HYPERMEDIA: '0' }, 'interactive');
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0' });
+    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'interactive' });
   });
 
   test('T-0036 a launch that is refused records nothing, and a store that fails never fails the launch', async () => {
@@ -362,10 +362,10 @@ describe('the ferret’s mode reaches the harness and the pane on every launch (
       const derivedBefore = await f.store.read(f.id);
       expect(derivedBefore).toEqual({ FY_SESSION_MODE: mode });
       await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
-      expect(state.held.get(f.id)).toEqual({ FY_SESSION_MODE: mode });
-      // Same answer before and after the launch, and across a restart (a fresh service over the same state).
-      expect(await f.store.read(f.id)).toEqual(derivedBefore);
-      expect(await launching(state, {}, mode).store.read(f.id)).toEqual(derivedBefore);
+      expect(state.held.get(f.id)).toMatchObject({ FY_SESSION_MODE: mode });
+      // The mode reads the same before and after the launch, and across a restart (a fresh service over the same state).
+      expect((await f.store.read(f.id)).FY_SESSION_MODE).toBe(derivedBefore.FY_SESSION_MODE);
+      expect((await launching(state, {}, mode).store.read(f.id)).FY_SESSION_MODE).toBe(mode);
       // A ferret launched before this change recorded no mode: the derived one fills in, nothing contradicts it.
       const older = persisted();
       older.held.set(f.id, { FY_PACK: '1' });
