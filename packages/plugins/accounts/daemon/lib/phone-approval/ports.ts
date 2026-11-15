@@ -67,9 +67,12 @@ export interface PhoneApprovalAudit {
   }): Promise<void>;
 }
 
-/** Tells a ferret something in its own terminal (Asks' `tell`, which only the Vault is handed). Optional. */
+/**
+ * Tells a ferret something in its own terminal (Asks' `tell`, which only the Vault and Accounts are handed). Optional.
+ * `approvalId` names the approval the words are about: one send per approval, however often it is asked. Total.
+ */
 export interface PhoneApprovalNotifier {
-  tell(ferret: string, message: string): Promise<void>;
+  tell(ferret: string, approvalId: string, message: string): Promise<void>;
 }
 
 /** Whether the ferret could have steered a surface of this kind since `since` (`VaultApi.tainted`). */

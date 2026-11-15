@@ -42,6 +42,7 @@ export type ChatSessionState = Partial<
     | 'turn'
     | 'turnState'
     | 'turnStateAt'
+    | 'turnPrompt'
     | 'activity'
     | 'promptReady'
     | 'pendingQuestion'

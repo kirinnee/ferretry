@@ -131,6 +131,73 @@ describe('SessionChatPage', () => {
     });
   });
 
+  const aboveComposerProps = (page: ReturnType<typeof draw>) =>
+    page.root.findAll(node => node.type === PanelSlot && node.props.slot === CONVERSATION_ABOVE_COMPOSER_SLOT)[0]?.props
+      .props;
+
+  test('hands the above-composer slot the rows, the turn, what the ferret waits on and the send ledger ids', () => {
+    const page = draw({
+      entries: [
+        {
+          id: 'u1',
+          kind: 'user',
+          label: 'You',
+          text: 'read this',
+          send: {
+            sendId: 's1',
+            acceptedAt: '2026-11-04T11:00:00.000Z',
+            message: 'read this',
+            attachmentIds: [],
+            fate: 'delivered',
+          },
+        },
+        { id: 'a1', kind: 'assistant', label: 'Assistant', text: 'Done.' },
+      ] as unknown as TranscriptEntry[],
+      question: QUESTION,
+      sends: [{ sendId: 's1', acceptedAt: '2026-11-04T11:00:00.000Z', message: 'read this' }] as unknown as NonNullable<
+        PageProps['sends']
+      >,
+      session: ferretView('shared', { state: { status: 'awaiting_question', turnState: 'needs-input' } }),
+    });
+
+    expect(aboveComposerProps(page)).toEqual({
+      rows: [
+        { id: 'u1', kind: 'user', label: 'You', text: 'read this', send: { sendId: 's1' } },
+        { id: 'a1', kind: 'assistant', label: 'Assistant', text: 'Done.' },
+      ],
+      turn: { state: 'needs-input', live: true },
+      needsInput: {
+        question: {
+          questions: [{ question: 'Ship it?', multiSelect: false, options: [{ label: 'Yes' }, { label: 'No' }] }],
+        },
+      },
+      // The ledger's words stay in Conversation: only the id and the daemon's acceptance instant are offered.
+      sends: [{ sendId: 's1', acceptedAt: '2026-11-04T11:00:00.000Z' }],
+    });
+  });
+
+  test('a page given no ledger offers no sends', () => {
+    expect(aboveComposerProps(draw()).sends).toEqual([]);
+  });
+
+  test('the turn is live only when the ferret was read from the daemon and the latest refresh did not fail', () => {
+    // Read, no failure: live.
+    expect(aboveComposerProps(draw()).turn.live).toBe(true);
+    // Read, but the latest refresh failed: the turn on screen may be stale, so it is not live.
+    expect(aboveComposerProps(draw({ refreshError: 'Conversation issue: offline' })).turn.live).toBe(false);
+    // Never read (the page is drawn from the id alone): not live, and it claims no turn.
+    const unread = aboveComposerProps(draw({ session: unreadChatSession('shared') }));
+    expect(unread.turn).toEqual({ state: null, live: false });
+  });
+
+  test('an ended ferret offers nothing it was waiting on', () => {
+    const page = draw({
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'completed' } }),
+    });
+    expect(aboveComposerProps(page).needsInput).toEqual({});
+  });
+
   test('keeps the slot above a pending question’s form too: a permission card is not hidden by a question', () => {
     const page = draw({
       question: QUESTION,

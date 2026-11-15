@@ -1,5 +1,5 @@
 import type { KernelPorts, Op, Picture, TargetRef } from '@ferretry/kernel/contract';
-import { ApiError } from '@ferretry/kernel/contract';
+import { agentControlRefusal, ApiError } from '@ferretry/kernel/contract';
 import { heldOrMasked, PageHeld } from '../holds/index.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { originOnly, type SealedGate, SealedRefusal, sealedWithheld, selectorsOf } from '../sealed/gate.ts';
@@ -423,6 +423,30 @@ export class BrowserTools {
       await this.assertAgentMay(ferret, await this.resolve(ferret, pageId));
     } catch (error) {
       throw translate(error) ?? error;
+    }
+  }
+
+  /**
+   * The address of the page `name` a FERRET holds, for a plugin that reads it on the ferret's behalf (`BrowsersApi.
+   * pageAddressOf`): the Browsers switch is asked live (it refuses, in the agents' sentence, unless a plain yes), then
+   * the page is looked up in THIS ferret's own listing and must be the ferret's and held by nobody. Answers the origin
+   * only (`scheme://host[:port]`), or `undefined` when there is no such page, it is a person's or is held, or it has no
+   * http(s) address. Never a path, query or fragment.
+   */
+  async pageAddressOf(ferret: string, name: string): Promise<string | undefined> {
+    if (!(await this.ports.policy.allows(ferret, 'browser')))
+      throw new ApiError(403, agentControlRefusal('browser'), 'forbidden');
+    try {
+      const rows = (await this.ports.browser.status(ferret)).pages;
+      const row = rows.find(candidate => candidate.name === name);
+      if (row === undefined) return undefined;
+      await this.assertAgentMay(ferret, surfaceOf(row), rows);
+      const url = new URL(row.url);
+      return (url.protocol === 'http:' || url.protocol === 'https:') && url.host !== ''
+        ? `${url.protocol}//${url.host}`
+        : undefined;
+    } catch {
+      return undefined;
     }
   }
 

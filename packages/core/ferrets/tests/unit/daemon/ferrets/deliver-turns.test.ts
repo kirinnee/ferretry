@@ -1,4 +1,4 @@
-import { PERSON_ORIGIN } from '../../../../contract/index.ts';
+import { PERSON_ORIGIN, START_EXPLAINED_MAX } from '../../../../contract/index.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -683,6 +683,84 @@ describe('GAP(deliver) settleStartup: a pane that dies while its harness is stil
     // The screen was read off this start's own pane, before the cleanup stopped it.
     expect(screens).toEqual(['%1']);
     expect(w.runner.stopped).toEqual(['%1']);
+  });
+
+  /**
+   * What the failed-launch cleanup does in production: it stops the pane (which kills its tmux session) BEFORE anyone can
+   * read it again, so only a read made before that cleanup sees the screen. The harness's sentence is therefore kept on
+   * the stopped record (`cause.explained`), where a plugin that hears the ferret stop (Runtimes) finds it.
+   */
+  const killedWithItsSession = (w: World, screen: string) => {
+    const stop = w.runner.stop.bind(w.runner);
+    let alive = true;
+    w.runner.stop = async handle => {
+      alive = false;
+      await stop(handle);
+    };
+    w.runner.lastScreen = async () => {
+      if (!alive) throw new Error('FIXTURE_SECRET no such tmux session');
+      return screen;
+    };
+  };
+  const SENTENCE = 'Codex needs a network connection to start.';
+  const explaining = (w: World, sentence: string | undefined) =>
+    Object.assign(w.harness, { startFailure: (screen: string) => (screen.includes('routing') ? sentence : undefined) });
+
+  test('GAP(deliver) settleStartup the harness sentence outlives the cleanup that kills the pane: it is on the stopped record as cause.explained', async () => {
+    const w = await world();
+    w.runner.settled = died(true);
+    killedWithItsSession(w, 'Error: FIXTURE_SECRET workspace routing discovery failed');
+    explaining(w, SENTENCE);
+
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+    expect(result.ok).toBe(false);
+    expect(w.runner.stopped).toEqual(['%1']);
+    const record = w.registry.get(IDS[0] as never);
+    expect(record?.state).toBe('stopped');
+    expect(record?.cause).toEqual({ kind: 'start_failed', explained: SENTENCE });
+    expect(JSON.stringify(record)).not.toContain('FIXTURE_SECRET');
+  });
+
+  test('GAP(deliver) settleStartup a first turn that cannot be typed leaves the same sentence on the record', async () => {
+    const w = await world();
+    w.runner.deliver = async () => {
+      throw new Error('FIXTURE_SECRET pane refused');
+    };
+    killedWithItsSession(w, 'Error: workspace routing discovery failed');
+    explaining(w, SENTENCE);
+
+    await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+    expect(w.registry.get(IDS[0] as never)?.cause).toEqual({ kind: 'start_failed', explained: SENTENCE });
+  });
+
+  test('GAP(deliver) settleStartup no sentence, an unreadable screen or a sentence longer than the cause allows leaves a plain start_failed', async () => {
+    const exited = "the ferret's pane exited while its harness was still starting";
+    const tooLong = 'x'.repeat(START_EXPLAINED_MAX + 1);
+    for (const [prepare, why] of [
+      [(w: World) => explaining(w, undefined), exited],
+      [(w: World) => explaining(w, tooLong), tooLong],
+      [
+        (w: World) => {
+          w.runner.lastScreen = async () => {
+            throw new Error('FIXTURE_SECRET unreadable');
+          };
+        },
+        exited,
+      ],
+    ] as const) {
+      const w = await world();
+      w.runner.settled = died(true);
+      killedWithItsSession(w, 'Error: workspace routing discovery failed');
+      prepare(w);
+
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.reason).toBe(`${why}${NEVER_RAN}`);
+      expect(w.registry.get(IDS[0] as never)?.cause).toEqual({ kind: 'start_failed' });
+    }
   });
 
   test('GAP(deliver) settleStartup a first turn that cannot be typed takes the harness explanation too; a harness that throws or says nothing keeps the fixed sentence', async () => {
