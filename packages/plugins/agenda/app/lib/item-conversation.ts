@@ -12,15 +12,18 @@
  */
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
+import { type SendRecord, SendListResponseSchema, TranscriptPageSchema } from '@ferretry/plugin-conversation/contract';
 import { withFreshMessageCursor } from '../shell.ts';
-import type { TranscriptEntry } from './transcript.ts';
+import { type AgendaCall, agendaCall } from './agenda-call.ts';
+import type { LedgerSendRecord, TranscriptEntry } from './transcript.ts';
 
 /**
  * One row of a ferret's conversation, as far as this read looks at it. The conversation is Conversation's; a host that
  * reads it hands this read a {@link ItemConversationClient}, and its rows fit this shape structurally.
  */
 interface SessionTranscriptMessage {
-  readonly point: { readonly byteOffset: number; readonly blockIndex?: number | undefined };
+  /** The row's address: opaque, minted by Conversation's reader, stable across re-reads. */
+  readonly point: string;
   readonly role: string;
   readonly text: string;
   readonly timestamp?: string | undefined;
@@ -38,7 +41,49 @@ export interface ItemConversationClient {
     sessionId: string,
     options: { readonly limit: number; readonly through?: string },
   ) => Promise<SessionTranscriptTail>;
+  /**
+   * The newest page of the ferret's send ledger: where each message the owner sent went. A host without it leaves the
+   * owner's rows with the receipt the item itself can prove.
+   */
+  readonly sends?: (sessionId: string) => Promise<readonly LedgerSendRecord[]>;
 }
+
+/** Conversation's routes for a ferret's rows and its send ledger (its contract names both). */
+const MESSAGES_ROUTE = 'GET /v1/ferrets/:ferretId/messages';
+const SENDS_ROUTE = 'GET /v1/ferrets/:ferretId/sends';
+
+/** The ledger's record as the History's receipt reads it: the booleans a record carries only when true. */
+const ledgerRecordOf = (send: SendRecord): LedgerSendRecord => ({
+  sendId: send.sendId,
+  fate: send.fate,
+  acceptedAt: send.acceptedAt,
+  message: send.message,
+  attachmentIds: send.attachmentIds,
+  ...(send.held === true ? { held: true as const } : {}),
+  ...(send.withdrawn === true ? { withdrawn: true as const } : {}),
+  ...(send.typedNotSent === true ? { typedNotSent: true as const } : {}),
+});
+
+/**
+ * The read through the half's own client, by route key: the newest page (`tail`), then each older one (`through` the
+ * previous page's cursor). Every page is parsed against Conversation's contract before a row is trusted.
+ */
+export const conversationClientOf = (client: AgendaCall): ItemConversationClient => ({
+  messagesTail: async (sessionId, options) =>
+    TranscriptPageSchema.parse(
+      await agendaCall(client, MESSAGES_ROUTE, {
+        params: { ferretId: sessionId },
+        query: {
+          limit: String(options.limit),
+          ...(options.through === undefined ? { tail: '1' } : { through: options.through }),
+        },
+      }),
+    ),
+  sends: async sessionId =>
+    SendListResponseSchema.parse(await agendaCall(client, SENDS_ROUTE, { params: { ferretId: sessionId } })).sends.map(
+      ledgerRecordOf,
+    ),
+});
 
 /** Rows per page when reading from the tail: the route's own default, so a recent item is one small read. */
 const TAIL_PAGE = 200;
@@ -64,11 +109,11 @@ export const itemSince = (item: AgendaItem): number | undefined => {
   return instants.length === 0 ? undefined : Math.min(...instants) - FLOOR_SLACK_MS;
 };
 
-const entryOf = (message: SessionTranscriptMessage, index: number): TranscriptEntry | null => {
+const entryOf = (message: SessionTranscriptMessage): TranscriptEntry | null => {
   if (message.role !== 'user' && message.role !== 'assistant') return null;
   const at = message.timestamp === undefined ? Number.NaN : Date.parse(message.timestamp);
   return {
-    id: `${message.point.byteOffset}:${message.point.blockIndex ?? index}`,
+    id: message.point,
     kind: message.role,
     text: message.text,
     ...(Number.isFinite(at) ? { at } : {}),
@@ -79,15 +124,13 @@ const entryOf = (message: SessionTranscriptMessage, index: number): TranscriptEn
 const threadOf = (itemId: string) => {
   const named = new RegExp(`(?:^|[^\\w])!${itemId}(?![\\w])`, 'u');
   const kept: TranscriptEntry[] = [];
-  let seen = 0;
   // A user row about the item opens its answer: the assistant rows after it are kept until the next user row.
   let answering = false;
   return {
     kept,
     feed: (messages: readonly SessionTranscriptMessage[]): void => {
       for (const message of messages) {
-        seen += 1;
-        const entry = entryOf(message, seen);
+        const entry = entryOf(message);
         if (entry === null) continue;
         const about = named.test(message.text);
         if (entry.kind === 'user') answering = about;
@@ -130,5 +173,49 @@ export const readItemConversation = async (
   withFreshMessageCursor(async () => {
     const thread = threadOf(itemId);
     thread.feed(await readFromTail(client, sessionId, since));
-    return thread.kept;
+    return withSends(thread.kept, await ledgerOf(client, sessionId));
   });
+
+/** The ledger, or nothing: a ledger that cannot be read leaves the receipts the item can prove, never the History. */
+const ledgerOf = async (client: ItemConversationClient, sessionId: string): Promise<readonly LedgerSendRecord[]> => {
+  try {
+    return (await client.sends?.(sessionId)) ?? [];
+  } catch {
+    return [];
+  }
+};
+
+/** A row is stamped when the agent took the message, which is never before the ledger accepted it; this much clock skew is allowed. */
+const RECEIPT_SKEW_MS = 5_000;
+
+/**
+ * Each owner row takes the ledger's record of the send whose words it is — only when that is PROVABLE. A transcript row
+ * is, by definition, a message the agent RECEIVED, so it may only ever carry a delivered send: a cancelled, held,
+ * queued, unconfirmed or typed-not-sent send never reached a row and keeps showing as its own ledger entry. A row
+ * carries no send id, so the words are the join, and the same words are sent (and typed straight into the runtime)
+ * more than once: the join is made only when, across ALL the rows, exactly one row and exactly one delivered send have
+ * those words. Anything else leaves the row with its plain transcript Read: a wrong receipt is worse than none. The
+ * clock is only an extra guard — the agent cannot have taken a send before the ledger accepted it (within skew).
+ */
+const withSends = (
+  entries: readonly TranscriptEntry[],
+  ledger: readonly LedgerSendRecord[],
+): readonly TranscriptEntry[] => {
+  const rowsWith = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.kind === 'user') rowsWith.set(entry.text.trim(), (rowsWith.get(entry.text.trim()) ?? 0) + 1);
+  }
+  const deliveredWith = new Map<string, LedgerSendRecord[]>();
+  for (const send of ledger) {
+    if (send.fate !== 'delivered' || send.message === undefined) continue;
+    deliveredWith.set(send.message.trim(), [...(deliveredWith.get(send.message.trim()) ?? []), send]);
+  }
+  return entries.map(entry => {
+    if (entry.kind !== 'user' || entry.at === undefined) return entry;
+    const words = entry.text.trim();
+    const [send, ...others] = deliveredWith.get(words) ?? [];
+    if (send === undefined || others.length > 0 || rowsWith.get(words) !== 1) return entry;
+    const accepted = send.acceptedAt === undefined ? Number.NaN : Date.parse(send.acceptedAt);
+    return accepted <= entry.at + RECEIPT_SKEW_MS ? { ...entry, send } : entry;
+  });
+};

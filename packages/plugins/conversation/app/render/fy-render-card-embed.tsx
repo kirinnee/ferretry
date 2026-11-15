@@ -11,10 +11,10 @@
  *  - ONE RENDERER. A host that has no board to read (`cardEmbed` absent) never reaches this file: the fence stays an
  *    ordinary code fence, as any block this build cannot draw does.
  *
- * GAP(board): today's block drew the Board page's own card and lane header (`BoardCard`, `BoardLane`) as a mini board, and
- * the `parent: &F12` form drew the children grouped by lane. Those are Board views; until Board declares a renderer for
- * them the `card` and `board` list forms draw one reference row per card and the `parent:` form says whose cards it
- * names, with the parent's reference as the way in.
+ * THE MINI BOARD IS THE BOARD'S. The whole block (one card, a list, or a `parent:` form's children grouped by lane) is mounted through the
+ * `reference:&board` renderer the Board declares, handed what the block names and nothing the author typed. Only where
+ * no Board answers for it (a harness, a build without it) does a block fall back to one `reference:&` row per card, and
+ * the `parent:` form to a note saying whose cards it names, with the parent's reference as the way in.
  */
 
 import { RendererView } from '@ferretry/app';
@@ -54,11 +54,16 @@ function CardRow({ id, host }: { readonly id: string; readonly host: FyRenderCar
   );
 }
 
-export function FyRenderCardEmbed({ block, host }: FyRenderCardEmbedProps) {
-  const { embed } = block;
+/** What a block draws where no Board answers for the mini board: one reference row per card, a note for `parent:`. */
+function FallbackRows({
+  embed,
+  host,
+}: {
+  readonly embed: FyRenderEmbedBlock['embed'];
+  readonly host: FyRenderCardEmbedHost;
+}) {
   return (
-    // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of cards.
-    <div className="fy-card-embed" data-fy-card-embed={block.type} role="group" aria-label={block.alt}>
+    <>
       {embed.kind === 'card' ? <CardRow id={embed.id} host={host} /> : null}
       {/* The grammar already bounds a list at `embedCards`, so no row is dropped here. */}
       {embed.kind === 'cards' ? embed.ids.map(id => <CardRow key={id} id={id} host={host} />) : null}
@@ -68,6 +73,21 @@ export function FyRenderCardEmbed({ block, host }: FyRenderCardEmbedProps) {
           <CardRow id={embed.parent} host={host} />
         </>
       ) : null}
+    </>
+  );
+}
+
+export function FyRenderCardEmbed({ block, host }: FyRenderCardEmbedProps) {
+  const { embed } = block;
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset draws a border and legend; this is a plain labelled group of cards.
+    <div className="fy-card-embed" data-fy-card-embed={block.type} role="group" aria-label={block.alt}>
+      <RendererView
+        daemon={host.daemon}
+        rendererKey="reference:&board"
+        value={embed}
+        fallback={<FallbackRows embed={embed} host={host} />}
+      />
     </div>
   );
 }
