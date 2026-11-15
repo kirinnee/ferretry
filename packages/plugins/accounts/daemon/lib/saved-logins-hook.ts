@@ -18,6 +18,7 @@ import {
 } from '../../contract/routes/index.ts';
 import type { AccountVault } from './accounts.ts';
 import type { LoginDirectory } from './logins.ts';
+import type { SignInGrantSource } from './sign-in-grants/plans.ts';
 import type { SignInChoicePort } from './sign-in-context.ts';
 
 /** What the Vault reports after a submit (`LoginObservation`): facts about a target, never a value. */
@@ -41,6 +42,8 @@ export interface SavedLoginsDeps {
   /** Absent: no value can be made, so `fill` refuses. */
   readonly vault?: Pick<AccountVault, 'fill'>;
   readonly choice: SignInChoicePort;
+  /** What the owner approved in advance (plan lines and standing rules). Absent: no card is filled in advance. */
+  readonly grants?: SignInGrantSource;
 }
 
 export class AccountsSavedLogins implements SavedLoginsProvider {
@@ -87,6 +90,11 @@ export class AccountsSavedLogins implements SavedLoginsProvider {
       mode === undefined ? undefined : ModeSchema.parse(mode),
       pageUsername,
     );
+  }
+
+  /** THE SIGN-INS THE OWNER APPROVED IN ADVANCE, for the Vault's fill path: the grants, never a value (`fill` stays the one). */
+  grants(): SignInGrantSource | undefined {
+    return this.deps.grants;
   }
 
   async choice(sessionId: string): Promise<unknown> {

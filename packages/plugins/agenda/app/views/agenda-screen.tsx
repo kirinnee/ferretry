@@ -17,6 +17,7 @@ import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { inboxConversationReader } from '../lib/inbox-conversation.ts';
 import { useLayoutMode, useRouter } from '../shell.ts';
 
 export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) {
@@ -59,6 +60,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               from={inboxSourceFromSearch(window.location.search)}
               onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
               onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
+              readConversation={inboxConversationReader({ daemon, client: runtime.client }, fleet)}
               renderComposer={(card, answerForm) => (
                 <AgendaCardConversation answerForm={answerForm} card={card} daemon={daemon} inbox={inbox} />
               )}

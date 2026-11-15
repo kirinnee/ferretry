@@ -1558,3 +1558,15 @@ export const ModelsStateSchema = z.strictObject({
   local: LocalModelsSchema.optional(),
 });
 export type ModelsState = z.infer<typeof ModelsStateSchema>;
+
+// ── State (state/logins/passive-assignments.json) ────────────────────────────────────────────────────────────────
+
+/**
+ * Which login Logins last saw each Codex ferret on, and since when: the instant a reading of that ferret's rollout
+ * starts to be that login's. Ids only; never a credential.
+ */
+export const PassiveAssignmentsStateSchema = z.strictObject({
+  format: z.literal(1),
+  ferrets: z.record(NonEmpty, z.strictObject({ login: NonEmpty, since: z.number().int().nonnegative() })),
+});
+export type PassiveAssignmentsState = z.infer<typeof PassiveAssignmentsStateSchema>;
