@@ -85,12 +85,8 @@
       "ignore": [
         "app/components/agenda-message.tsx",
         "app/hooks/use-agenda-replies.ts",
-        "app/hooks/use-answered-suggestion-sweep.ts",
         "app/lib/answer-chip.ts",
-        "app/lib/permission-request.ts",
-        "app/features/permission-request/approval-card.tsx",
         "app/features/agenda/agenda-inbox-composer.tsx",
-        "app/features/agenda/agenda-nav.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
         "app/lib/agenda-source-refs.ts"
       ]
