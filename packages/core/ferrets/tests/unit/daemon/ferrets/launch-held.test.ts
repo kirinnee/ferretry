@@ -15,12 +15,18 @@ import { additivesFixture } from './additives-fixture.ts';
 function holding(options: Parameters<typeof additivesFixture>[0] = {}, cutOffMark?: SessionCutOffMark) {
   const shared = new KeyedSerialExecutor();
   const base = additivesFixture(options);
+  const decided: string[] = [];
+  const decide = base.ports.decide;
+  base.ports.decide = async input => {
+    decided.push(input.ferret);
+    return await decide(input);
+  };
   const service = new FerretsService(base.registry, base.tokens, {
     ...base.ports,
     serial: shared,
     ...(cutOffMark === undefined ? {} : { cutOffMark }),
   });
-  return { ...base, service, shared };
+  return { ...base, service, shared, decided };
 }
 
 describe('launchHeld', () => {
@@ -70,7 +76,9 @@ describe('launchHeld', () => {
     // Act
     const answer = await f.service.launchHeld(f.id);
 
-    // Assert — nothing launched, and the cut-off still stands
+    // Assert — nothing launched, the start gate never asked, the record untouched, and the cut-off still stands
+    expect(f.decided).toEqual([]);
+    expect(f.registry.get(f.id)?.state).toBe('stopped');
     expect(answer).toEqual({
       ok: false,
       error: { code: 'refused', reason: 'the owner cut off this ferret; a confirmed owner resume is required' },
