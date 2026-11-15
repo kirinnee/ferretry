@@ -360,6 +360,7 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
             {...(question === undefined ? {} : { question })}
             {...(readingPosition === undefined ? {} : { readingPosition })}
             refreshError={issue}
+            sends={sends}
             session={drawn}
             transcriptUnbound={transcriptUnbound}
           />
