@@ -49,6 +49,16 @@ ferret is bound to — as if only the process had restarted:
   `409 conversation_unresumable` and changes nothing. It never quietly starts a new conversation.
   **Start fresh** (`conversation: "fresh"`, `fy migrate … --conversation fresh`) is the person's explicit way
   past.
+- A relaunch on the **same login** (resume, Restart CLI, a queued restart) whose conversation the harness
+  **proves is not in the ferret's home** (`Harness.hasConversation` answers `false`: Claude finds `<id>.jsonl` in NO
+  `projects/*` folder of the home, after listing them all, because its own folder spelling can differ from Ferretry's
+  for a folder reached through a link or one spelled over 200 characters; Codex walks every rollout under `sessions/`
+  and none names it) starts a NEW
+  conversation instead of a `--resume` the CLI would fail ("No conversation found…"), and says so out loud: the
+  ferret's history gets `session.conversation_not_found` naming the old id, and an autonomous ferret's revive turn
+  is typed after a fixed sentence telling it so and pointing at its assigned task (`turn-001.md`). The old id and
+  transcript pointer are dropped from the record. Any doubt (a link, an unreadable file, a capped walk) resumes as
+  asked. The case this exists for is a ferret converted from Ferretry 4, whose chats were left behind.
 - **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
   Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
   harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and

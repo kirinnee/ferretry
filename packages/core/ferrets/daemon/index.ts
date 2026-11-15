@@ -1071,7 +1071,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       ferrets: () => registry.list(),
       waitingOf: ferret => registry.waitingOf(ferret),
       outdated: outdatedFor,
-      stop: async (ferret, reason) => await service.stop(ferret, 'polite', reason),
+      // NOW, not polite: a polite stop is one Ctrl-C, which Claude Code answers with "Press Ctrl-C again to exit" at an
+      // idle prompt, so the old process stayed in `fy-<id>` and the resume's start refused the occupied session. The drain
+      // only restarts a ferret that is idle (a your-turn or a declared wait), as a move's `releaseLive` stops with `now`.
+      stop: async (ferret, reason) => await service.stop(ferret, 'now', reason),
       // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words.
       resume: async (ferret, origin) => await service.resume(ferret, undefined, { actor: 'daemon', origin }),
       history: appendHistory,

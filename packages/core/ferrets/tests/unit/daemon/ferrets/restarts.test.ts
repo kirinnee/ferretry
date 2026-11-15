@@ -22,7 +22,15 @@ const ask = async (h: TestHost, body: unknown, who?: string) =>
 
 async function running() {
   const runner = new FakeRunner();
-  const h = await host([], { harness: new FakeHarness(), runner });
+  const harness = new FakeHarness();
+  // How each stop was asked for: a restart must END the harness, never leave it alive in its pane.
+  const stops: string[] = [];
+  const stop = harness.stop.bind(harness);
+  harness.stop = async (ferret, handle, using, how) => {
+    stops.push(how);
+    await stop(ferret, handle, using, how);
+  };
+  const h = await host([], { harness, runner });
   const start = async (name: string): Promise<string> => {
     const answer = await h.request('POST', '/v1/ferrets', {
       body: { name, folder: `/work/${name}` },
@@ -31,7 +39,7 @@ async function running() {
     expect(answer.status).toBe(201);
     return answer.json<{ id: string }>().id;
   };
-  return { h, runner, start };
+  return { h, runner, start, stops };
 }
 const history = (h: TestHost, id: string): string[] =>
   (h.state('ferrets').raw(FerretHistoryFiles, id) as string)
@@ -41,7 +49,7 @@ const history = (h: TestHost, id: string): string[] =>
 
 describe('restarting ferrets', () => {
   test('R-0323 a ferret on a declared wait is restarted now: stopped and resumed on the same harness', async () => {
-    const { h, runner, start } = await running();
+    const { h, runner, start, stops } = await running();
     const id = await start('aniya');
     await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting', condition: 'CI' } });
     expect(runner.starts).toBe(1);
@@ -53,6 +61,8 @@ describe('restarting ferrets', () => {
     // It is a fresh process on the same conversation: working, and no longer on the wait it had.
     expect(view.state).toBe('working');
     expect(view.waiting).toBeUndefined();
+    // Stopped NOW: Claude Code answers one polite Ctrl-C at an idle prompt with "Press Ctrl-C again to exit".
+    expect(stops).toEqual(['now']);
     expect(history(h, id)).toEqual(['session.waiting', 'session.stopped', 'session.resumed', 'session.restarted']);
     await h.stop();
   });
