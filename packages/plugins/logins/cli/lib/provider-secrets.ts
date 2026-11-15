@@ -55,26 +55,57 @@ export function shellVariables(deps: LoginsCommandDeps): Readonly<Record<string,
   );
 }
 
+/** The host of an address, lower-cased; `undefined` when it is not one. Userinfo is never part of it. */
+function hostOf(address: string): string | undefined {
+  try {
+    return new URL(address).hostname.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+/** What `--from-env` took from the shell, and the address variables it left on the preset's own host (by NAME). */
+export interface ShellPlain {
+  readonly values: Readonly<Record<string, string>>;
+  readonly keptPreset: readonly string[];
+}
+
 /**
- * The plain variables `--from-env` fills from the shell: ONLY a variable the preset requires and leaves empty (a gateway's
- * `ANTHROPIC_BASE_URL`), never one it deliberately leaves empty (`allowEmpty`: `ANTHROPIC_API_KEY` under openrouter, so the
- * gateway key is the one sent), never one whose NAME reads as a credential, and only a value the stored rule takes
- * (`plainPaste(…, 'stored')`). A key in the shell therefore never reaches the login file, nor a route that is not the Vault.
+ * The plain variables `--from-env` fills from the shell: a variable the preset requires and leaves empty (a gateway's
+ * `ANTHROPIC_BASE_URL`), or one it fills with a default the shell declares a different value for (`AWS_REGION`,
+ * `CLOUD_ML_REGION`, a Foundry deployment name) — the shell's own setting wins over the preset's default. Never one the preset
+ * deliberately leaves empty (`allowEmpty`: `ANTHROPIC_API_KEY` under openrouter, so the gateway key is the one sent), never
+ * one whose NAME reads as a credential, and only a value the stored rule takes (`plainPaste(…, 'stored')`). A key in the shell
+ * therefore never reaches the login file, nor a route that is not the Vault.
+ *
+ * One exception: a `*_BASE_URL` the preset sets keeps the preset's address when the shell's host differs, so a provider's key
+ * never follows a shell address to another host; the variable is returned in `keptPreset` so it is said by name.
  */
 export function shellPlainValues(
   preset: ProviderPresetView | undefined,
   shell: Readonly<Record<string, string>>,
-): Readonly<Record<string, string>> {
-  return Object.fromEntries(
-    (preset?.variables ?? []).flatMap(variable => {
-      const value = shell[variable.name];
-      const open =
-        variable.kind === 'plain' && variable.required && !variable.allowEmpty && (variable.value ?? '') === '';
-      if (value === undefined || !open || namesACredential(variable.name)) return [];
-      const verdict = plainPaste(variable.name, value, variable.allowEmpty, 'stored');
-      return verdict.kind === 'take' ? [[variable.name, verdict.value]] : [];
-    }),
-  );
+): ShellPlain {
+  const values: Record<string, string> = {};
+  const keptPreset: string[] = [];
+  for (const variable of preset?.variables ?? []) {
+    const value = shell[variable.name];
+    if (value === undefined || variable.kind !== 'plain' || variable.allowEmpty || namesACredential(variable.name))
+      continue;
+    const presetValue = variable.value ?? '';
+    // An empty preset value is taken only when the preset requires one; a filled one is the preset's default to replace.
+    if (presetValue === '' && !variable.required) continue;
+    const verdict = plainPaste(variable.name, value, variable.allowEmpty, 'stored');
+    if (verdict.kind !== 'take') continue;
+    if (presetValue !== '' && variable.name.endsWith('_BASE_URL')) {
+      const theirs = hostOf(verdict.value);
+      if (theirs === undefined || theirs !== hostOf(presetValue)) {
+        keptPreset.push(variable.name);
+        continue;
+      }
+    }
+    values[variable.name] = verdict.value;
+  }
+  return { values, keptPreset };
 }
 
 /** The preset the shell's variables point at, said by variable NAMES; a custom gateway or nothing is refused. */

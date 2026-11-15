@@ -179,8 +179,13 @@ async function environmentLogin(
       variable.kind === 'secret' ? `\${secret:${variable.secret ?? variable.name}}` : (variable.value ?? ''),
     ]),
   );
-  // The shell fills only a required, still-empty plain variable ({@link shellPlainValues}); a secret is stored, never read here.
-  const fromShell = shellPlainValues(preset, shell);
+  // The shell fills a required empty plain variable, or replaces a preset's default ({@link shellPlainValues}); a secret is stored, never read here.
+  const { values: fromShell, keptPreset } = shellPlainValues(preset, shell);
+  for (const name of keptPreset) {
+    if (given[name] === undefined) {
+      deps.out.warn(`${name} in this shell points elsewhere; kept the preset's. Pass --env to change it.`);
+    }
+  }
   const cloudCredential = cloudOption ?? preset?.cloudCredential?.suggested;
   return {
     login: {

@@ -228,9 +228,144 @@ describe('login add --from-env', () => {
 
     should(made.out.text('warn')).equal('Detected Z.ai GLM from ANTHROPIC_BASE_URL, ZAI_API_KEY.');
     should(made.gateway.called('putSecret').map(call => call.args)).eql([['ZAI_API_KEY', SENTINEL]]);
-    // The preset's own address stays: the shell fills only what the preset requires and leaves empty.
-    should(stagedEnv(made)).eql({ ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' });
+    // The shell's address is on the preset's own host (api.z.ai), so it is taken: the shell's setting wins over the default.
+    should(stagedEnv(made)).eql({
+      ANTHROPIC_BASE_URL: 'https://api.z.ai/api/other',
+      ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
+    });
     should(everythingSeen(made)).not.containEql(SENTINEL);
+  });
+
+  describe('a setting the shell declares for a variable the preset already fills', () => {
+    const keyless = (id: string, variables: Record<string, unknown>[]) => ({
+      ...zai,
+      id,
+      label: id,
+      variables,
+      detect: undefined,
+    });
+    const plain = (name: string, value: string) => ({
+      name,
+      kind: 'plain',
+      value,
+      required: false,
+      allowEmpty: false,
+    });
+    const KEY = 'SENTINEL-sk-ant-shell-credential';
+    const staging = async (
+      presets: Record<string, unknown>[],
+      named: string,
+      shellValues: Record<string, string>,
+      held: string[] = [],
+    ) => {
+      const made = world({ shell: shellValues, held }, { presets: () => ({ presets }) as never });
+      await loginAdd(made.deps, inv([named], { 'from-env': true, yes: true }));
+      return made;
+    };
+
+    it('should stage the shell’s AWS_REGION, not the preset’s default, for a bedrock-shaped preset', async () => {
+      const bedrock = keyless('bedrock', [plain('CLAUDE_CODE_USE_BEDROCK', '1'), plain('AWS_REGION', 'us-east-1')]);
+
+      const made = await staging([bedrock], 'bedrock', { CLAUDE_CODE_USE_BEDROCK: '1', AWS_REGION: 'eu-west-1' });
+
+      should(stagedEnv(made)).eql({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_REGION: 'eu-west-1' });
+    });
+
+    it('should keep the preset’s default when the shell does not declare the variable', async () => {
+      const bedrock = keyless('bedrock', [plain('CLAUDE_CODE_USE_BEDROCK', '1'), plain('AWS_REGION', 'us-east-1')]);
+
+      const made = await staging([bedrock], 'bedrock', { CLAUDE_CODE_USE_BEDROCK: '1' });
+
+      should(stagedEnv(made)).eql({ CLAUDE_CODE_USE_BEDROCK: '1', AWS_REGION: 'us-east-1' });
+    });
+
+    it('should stage the shell’s CLOUD_ML_REGION for a vertex-shaped preset', async () => {
+      const vertex = keyless('vertex', [plain('CLAUDE_CODE_USE_VERTEX', '1'), plain('CLOUD_ML_REGION', 'us-east5')]);
+
+      const made = await staging([vertex], 'vertex', { CLOUD_ML_REGION: 'europe-west1' });
+
+      should(stagedEnv(made)).eql({ CLAUDE_CODE_USE_VERTEX: '1', CLOUD_ML_REGION: 'europe-west1' });
+    });
+
+    it('should stage the shell’s Foundry deployment names, each in its own variable', async () => {
+      const foundry = keyless(
+        'foundry',
+        ['OPUS', 'SONNET', 'HAIKU'].map(tier =>
+          plain(`ANTHROPIC_DEFAULT_${tier}_MODEL`, `claude-${tier.toLowerCase()}`),
+        ),
+      );
+
+      const made = await staging([foundry], 'foundry', {
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'my-opus',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'my-haiku',
+      });
+
+      should(stagedEnv(made)).eql({
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'my-opus',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'my-haiku',
+      });
+    });
+
+    it('should keep the preset’s address when the shell’s base URL is on another host, and say so by name', async () => {
+      const made = await staging([zai], 'zai-glm', { ANTHROPIC_BASE_URL: 'https://other-host.example.test/v1' }, [
+        'ZAI_API_KEY',
+      ]);
+
+      should(stagedEnv(made)).eql({ ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' });
+      should(made.out.text('warn')).equal(
+        "ANTHROPIC_BASE_URL in this shell points elsewhere; kept the preset's. Pass --env to change it.",
+      );
+      should(JSON.stringify([made.out.lines, made.gateway.calls])).not.containEql('other-host');
+    });
+
+    it('should say nothing, and never print the address, for a shell base URL the stored rule refuses', async () => {
+      const made = await staging(
+        [zai],
+        'zai-glm',
+        { ANTHROPIC_BASE_URL: 'https://user:hunter2@other-host.example.test/v1' },
+        ['ZAI_API_KEY'],
+      );
+
+      should(stagedEnv(made)).match({ ANTHROPIC_BASE_URL: BASE_URL });
+      should(JSON.stringify([made.out.lines, made.gateway.calls])).not.containEql('hunter2');
+      should(JSON.stringify([made.out.lines, made.gateway.calls])).not.containEql('other-host');
+    });
+
+    it('should take a base URL on the preset’s own host', async () => {
+      const litellm = keyless('litellm', [
+        { ...plain('ANTHROPIC_BASE_URL', 'http://localhost:4000'), required: true },
+        plain('ANTHROPIC_MODEL', 'qwen'),
+      ]);
+
+      const made = await staging([litellm], 'litellm', {
+        ANTHROPIC_BASE_URL: 'http://localhost:8080',
+        ANTHROPIC_MODEL: 'my-model',
+      });
+
+      should(stagedEnv(made)).eql({ ANTHROPIC_BASE_URL: 'http://localhost:8080', ANTHROPIC_MODEL: 'my-model' });
+      should(made.out.text('warn')).equal('');
+    });
+
+    it('should never replace a variable the preset deliberately leaves empty or one named like a credential', async () => {
+      const openrouter = keyless('openrouter', [
+        plain('ANTHROPIC_BASE_URL', 'https://openrouter.ai/api'),
+        { name: 'ANTHROPIC_API_KEY', kind: 'plain', value: '', required: false, allowEmpty: true },
+        plain('ANTHROPIC_AUTH_TOKEN', 'x'),
+      ]);
+
+      const made = await staging([openrouter], 'openrouter', {
+        ANTHROPIC_API_KEY: KEY,
+        ANTHROPIC_AUTH_TOKEN: KEY,
+      });
+
+      should(stagedEnv(made)).eql({
+        ANTHROPIC_BASE_URL: 'https://openrouter.ai/api',
+        ANTHROPIC_API_KEY: '',
+        ANTHROPIC_AUTH_TOKEN: 'x',
+      });
+      should(JSON.stringify(made.gateway.calls)).not.containEql(KEY);
+    });
   });
 
   const gateway = {
