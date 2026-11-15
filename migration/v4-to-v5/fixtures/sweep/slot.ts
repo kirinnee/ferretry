@@ -1044,7 +1044,12 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
   // Roll back. The .prev set is the only copy of the old programs, so it is COPIED back, never renamed or removed: it stays
   // intact through every unsuccessful recovery and is dropped only once the old daemon is proved healthy.
   console.error(`slot ${n}: ${failure}. Rolling back to ${oldLabel}.`);
-  const manual = `for f in ${files.join(' ')}; do [ -e '${bin}/'"$f".prev ] && cp -p '${bin}/'"$f".prev '${bin}/'"$f"; done`;
+  const start = `fy5s${n} daemon start (the wrapper in ${slot.bin})`;
+  // Only what THIS run moved aside is restored: a .prev left by an older upgrade is not this run's backup.
+  const recovery =
+    moved.length === 0
+      ? `No program was moved aside, so the programs are untouched and nothing needs restoring. Start it: ${start}`
+      : `The old programs are intact as ${bin}/<name>.prev (${moved.join(', ')}); the home was not touched. To put them back by hand: for f in ${moved.join(' ')}; do cp -p '${bin}/'"$f".prev '${bin}/'"$f"; done   then start it: ${start}`;
   let again: string | undefined;
   try {
     await stopByLock(slot.v5.lock, 'new 5.0 daemon');
@@ -1061,7 +1066,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
   if (again !== undefined) {
     await stopByLock(slot.v5.lock, 'old 5.0 daemon (failed start)').catch(() => undefined);
     die(
-      `slot ${n}: the upgrade failed (${failure}) AND the old programs did not start either (${again}). The slot has NO running 5.0 daemon. The old programs are intact as ${bin}/<name>.prev (${moved.join(', ') || 'none moved'}); the home was not touched. To put them back by hand: ${manual}   then start it: fy5s${n} daemon start (the wrapper in ${slot.bin})`,
+      `slot ${n}: the upgrade failed (${failure}) AND the old programs did not start either (${again}). The slot has NO running 5.0 daemon. ${recovery}`,
       2,
     );
   }
