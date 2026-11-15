@@ -107,8 +107,9 @@ export class SessionMonitorService {
 
   /**
    * One tick. A STOPPED TICK DOES NOTHING MORE: `signal` (the job's own) or a `disarm` since the tick began is checked at
-   * every effect boundary — before expiring a wait, before each send, hold or heartbeat, and before the ledger is
+   * every effect boundary — before expiring a wait, before each hold or heartbeat, and before the ledger is
    * stamped — and a stopped tick rejects with `MonitorTickStopped` without touching the failure counters.
+   * An expire and its nudge are one unit: once a park's expire has committed its nudge is sent, stop or not.
    */
   async tick(signal?: AbortSignal): Promise<MonitorTickReport> {
     const epoch = this.epoch;
@@ -217,7 +218,9 @@ export class SessionMonitorService {
       // `undefined` means the park was already gone or had been replaced by a longer one under the
       // lock. Nothing was woken, so nothing is told it was woken.
       if (cleared === undefined) return;
-      guard();
+      // NO STOP CHECK HERE: the park is already cleared, so nothing later could wake this ferret. A committed wake
+      // is sent even if a stop landed after the expire (a nudge during shutdown is harmless: the pane outlives the
+      // daemon). The check sits before the expire, so no NEW wake is ever begun after a stop.
       this.beats.delete(session.id);
       expired.push(session.id);
       await this.ports.nudge.deliver(session.id, wakeSendId(session.id, cleared), plan.expiry.nudge);

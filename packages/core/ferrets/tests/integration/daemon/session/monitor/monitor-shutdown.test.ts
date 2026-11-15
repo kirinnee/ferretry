@@ -111,4 +111,48 @@ describe('a monitor tick in flight when the daemon stops', () => {
     // The aborted run publishes nothing at all: the record still says whatever the last real write said.
     should(records).eql([]);
   });
+
+  it('sends the wake of a park whose expire already committed, and expires no second park', async () => {
+    const OTHER = parseSessionId('20260806-other');
+    const expired: SessionId[] = [];
+    const sent: string[] = [];
+    const records: Record<string, unknown>[] = [];
+    let stop: () => Promise<void> = async () => undefined;
+    const waits: MonitorWaits = {
+      parked: async () => [
+        { id: REVIEW, status: 'waiting', waiting: { since: SINCE } },
+        { id: OTHER, status: 'waiting', waiting: { since: SINCE } },
+      ],
+      // The stop lands after this park's expire has committed, before its nudge goes out.
+      expire: async id => {
+        expired.push(id);
+        await stop();
+        return { since: SINCE };
+      },
+      hold: async () => false,
+    };
+    const monitor = buildMonitor({
+      waits,
+      files: {
+        ensureDirectory: async () => undefined,
+        writeTextAtomic: async (path, text) => {
+          if (path.endsWith('monitor-tick.json')) records.push(JSON.parse(text));
+        },
+      },
+      sends: {
+        send: async input => {
+          sent.push(String(input.id));
+          return undefined as never;
+        },
+      },
+      clock,
+    });
+    stop = () => monitor.close();
+    monitor.arm();
+    await monitor.run();
+    // Its park is already cleared, so no later tick or restart could wake it: the committed wake is sent.
+    should(sent).eql([String(REVIEW)]);
+    should(expired).eql([REVIEW]);
+    should(records.at(-1)?.armed).equal(false);
+  });
 });
