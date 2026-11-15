@@ -11,6 +11,7 @@ import {
   CONVERSATION_ABOVE_COMPOSER_SLOT,
   CONVERSATION_SLOTS,
 } from '../../../../plugins/conversation/contract/slots.ts';
+import { ACCESS_DEVICE_NOTE_SLOT, ACCOUNTS_CONTRIBUTED_SLOTS } from '../../../../plugins/accounts/contract/slots.ts';
 import { LOGINS_CONTRIBUTED_SLOTS } from '../../../../plugins/logins/contract/slots.ts';
 import { ADD_RUNTIME_LOGIN_SLOT, RUNTIMES_SLOTS } from '../../../../plugins/runtimes/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
@@ -162,5 +163,31 @@ describe('the slot Conversation offers above its composer and Claude Code fills'
   test('Claude Code imports nothing of Conversation: the two agree by name, and this test is the pairing', () => {
     expect(entryOf('claude-code')?.consumes).not.toContain('conversation');
     expect(Object.keys(entryOf('claude-code')?.manifest.needs ?? {})).toEqual(['ferrets']);
+  });
+});
+
+describe('the slot Access’s Add device page offers under each device’s Revoke and Accounts fills', () => {
+  test('Accounts writes the name Access owns, and puts its one panel there', () => {
+    expect([...ACCOUNTS_CONTRIBUTED_SLOTS]).toEqual([ACCESS_DEVICE_NOTE_SLOT]);
+    // The name Access's app half offers (its own test pins `DEVICE_NOTE_SLOT` to the same literal): a shell test may not
+    // import a half, so the agreed name is written here too.
+    expect(ACCESS_DEVICE_NOTE_SLOT).toBe('access.device-note');
+    expect(isSlotName(ACCESS_DEVICE_NOTE_SLOT)).toBe(true);
+    const contributors = (viewsOf(entries).panels.get(ACCESS_DEVICE_NOTE_SLOT) ?? []).map(
+      panel => `${panel.plugin}.${panel.id}`,
+    );
+    expect(contributors).toEqual(['accounts.device-rule-note']);
+  });
+
+  test('Accounts places no panel in any other access.* slot', () => {
+    const contributed = entries.flatMap(entry =>
+      (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('access.')),
+    );
+    expect(contributed).toEqual(['access.device-note']);
+  });
+
+  test('Access imports nothing of Accounts: the two agree by name, and this test is the pairing', () => {
+    expect(Object.keys(entryOf('access')?.manifest.needs ?? {})).not.toContain('accounts');
+    expect(Object.keys(entryOf('access')?.manifest.uses ?? {})).not.toContain('accounts');
   });
 });
