@@ -94,6 +94,8 @@ describe('R-0198 an open of the file that fails below a held folder is a content
     ['EACCES', 'changed'],
     ['ENOENT', 'changed'],
     ['EIO', 'changed'],
+    // c58-01: a folder that reaches nothing by descriptor fails closed; the file is never opened by a path instead.
+    ['ENOSYS', 'no_descriptor_reach'],
   ];
   for (const [errno, refusal] of table) {
     test(`R-0198 ${errno} at the file is ${refusal}: no path and no errno text in the answer, nothing left open`, async () => {
@@ -106,13 +108,6 @@ describe('R-0198 an open of the file that fails below a held folder is a content
       expect(w.handed.some(isOpen)).toBe(false);
     });
   }
-
-  test('R-0198 ENOSYS at the file (a host whose calls cannot open it) reads it by path, as that host always did', async () => {
-    const w = await world();
-    w.at.fail = 'ENOSYS';
-    expect(await w.root.readText(w.file, 1000)).toBe(TEXT);
-    expect(w.handed.some(isOpen)).toBe(false);
-  });
 });
 
 describe('R-0198 every descriptor the held read opened is closed, on every path', () => {
