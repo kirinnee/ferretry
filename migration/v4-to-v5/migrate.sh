@@ -279,9 +279,13 @@ case "${phase}" in
 # ================================================================ preflight
 preflight)
   say "📝 preflight: tools, v4 version, released v5, disk, home"
-  for tool in bash jq tmux bun git; do
-    command -v "${tool}" >/dev/null || fail "${tool} is not on PATH; install it and run preflight again"
+  # EVERY external tool a later phase calls, so a missing one stops here and not at verify, after the backup. (nix, brew, curl and
+  # xattr are optional and each checked where it is used.)
+  missing_tools=""
+  for tool in bash jq tmux bun git awk basename cat chmod cmp comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort tail tr uname wc; do
+    command -v "${tool}" >/dev/null || missing_tools="${missing_tools:+${missing_tools}, }${tool}"
   done
+  [ -z "${missing_tools}" ] || fail "not on PATH: ${missing_tools}; install them and run preflight again"
   H="${FY_HOME:-$HOME/.ferretry}"
   # A rehearsal never touches the default home: refused here, before anything is read, stopped, moved or converted.
   if [ "${MIGRATE_REHEARSAL:-}" = 1 ]; then rehearsal_refuse "${H}"; fi
@@ -809,6 +813,8 @@ start)
         say "⚠️ fy config check names a literal credential in a login file (expected, repaired by the OWNER; path, line and message below)"
         jq -r '.issues[] | select(.severity == "error") | "\(.path):\(.line // 1) \(.message)"' "${NOTES}.config-check.out"
         mark credential-repair-pending
+      else
+        say "✅ fy config check ran against the v5 daemon and passed (no errors, nothing waiting for confirmation)"
       fi
       mark started-v5
       say "✅ v5 daemon started and answering"
