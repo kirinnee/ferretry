@@ -185,6 +185,14 @@ export const browserInputModalitySource = (): InputModalitySource | null => {
 const inputModalityStore = createInputModalityStore(browserInputModalitySource);
 inputModalityStore.read();
 
+/**
+ * Forgets what the shared store learned and lets the next read or subscription ask the browser again. The store
+ * keeps the `matchMedia` lists it first obtained for the life of the page, which is right in a browser and wrong in
+ * a unit run, where every file shares one process: a file that stubbed `matchMedia` while a component read this
+ * store left a touch device behind for every later file. The unit tier's leak guard calls this after each test.
+ */
+export const resetInputModalityStore = (): void => inputModalityStore.dispose();
+
 /** Synchronous read for safety-sensitive event handlers. */
 export const readInputModality = (): InputModalityState => inputModalityStore.read();
 
