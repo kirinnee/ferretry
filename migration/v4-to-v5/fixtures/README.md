@@ -45,7 +45,7 @@ profile; a second device. What v4 cannot create is recorded as `skipped` in `mad
 alive and `--port <n>` pins the daemon's port. The directives that make the fake claude play a script
 (`FIXTURE-REC`, `FIXTURE-RUN`, in `support/fake-claude-rich.ts` and `fake-claude-tui.sh`) answer only when `FY_FIXTURE_RICH` is set.
 
-`sweep/` builds on it: `sweep-up.sh <1..8>` brings up a v4 daemon and a 5.0 daemon (a converted copy) side by side under
+`sweep/` builds on it: `sweep-up.sh <1..9>` brings up a v4 daemon and a 5.0 daemon (a converted copy) side by side under
 `/tmp/claude-1000/sweep/slot<N>/`, `sweep-down.sh <N>` stops them. It is a developer tool (it starts daemons); CI does not run it.
 
 ## Boot v5 on the converted home

@@ -3,11 +3,13 @@
  * One sweep slot: a RICH v4 home and the 5.0 conversion of it, each with its own daemon, side by side, so an agent can
  * walk every v4 screen and every v4 command against 5.0 ON THE SAME DATA.
  *
- *   bun slot.ts up   <1..8>     build (or rebuild) the pair and start both daemons
- *   bun slot.ts down <1..8> [--keep-files]
- *   bun slot.ts status <1..8>
- *   bun slot.ts cli  <1..8> <v4|v5> [args…]       the fy4s<N> / fy5s<N> wrappers call this
- *   bun slot.ts pair <1..8> <v4|v5>               opens ONE agent-browser tab already pairing (the link never appears here)
+ *   bun slot.ts up   <1..9>     build (or rebuild) the pair and start both daemons
+ *   bun slot.ts down <1..9> [--keep-files]
+ *   bun slot.ts status <1..9>
+ *   bun slot.ts cli  <1..9> <v4|v5> [args…]       the fy4s<N> / fy5s<N> wrappers call this
+ *   bun slot.ts pair <1..9> <v4|v5>               opens ONE agent-browser tab already pairing (the link never appears here)
+ *   bun slot.ts upgrade-v5 <1..9> <libexec-dir>   move ONLY the 5.0 daemon to a newer build, keeping its home, data and pairing
+ *   bun slot.ts stamp-v5 <libexec-dir> <commit>   record which commit a 5.0 build came from (BUILD.json), for upgrade-v5
  *
  * Everything lives under SWEEP_ROOT/slot<N>/ (refused anywhere else, links resolved first). Ports: v4 is 7600+2N, 5.0 is
  * 7601+2N. Nothing here touches ~/.ferretry (v4, 7457), ~/.ferretry-v5 (the owner's preview, 7458) or v4's default 7431:
@@ -17,7 +19,7 @@
  * Both daemons run with a private XDG_RUNTIME_DIR (no user systemd manager, no session bus), an EMPTY HOME, an allow-list
  * environment, their own tmux socket, and the fake claude/codex first on PATH. No real model is ever called.
  */
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import {
   chmod,
@@ -28,6 +30,7 @@ import {
   readFile,
   readdir,
   readlink,
+  rename,
   realpath,
   rm,
   symlink,
@@ -36,14 +39,17 @@ import {
 import { closeSync, openSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
-import { dirname, join, relative, isAbsolute } from 'node:path';
+import { basename, dirname, join, relative, isAbsolute, resolve } from 'node:path';
 
 const SWEEP_ROOT = '/tmp/claude-1000/sweep';
 const FIXTURES = join(import.meta.dir, '..');
-const CONVERTER = join(FIXTURES, '..', 'src', 'main.ts');
+const CONVERTER = process.env.SWEEP_CONVERTER ?? join(FIXTURES, '..', 'src', 'main.ts');
 /** The ports nobody here may ever reach: v4's default bind (a real daemon may run there), v4's own home, the owner's preview. */
+const V5_PROGRAMS = ['fy', 'fyd', 'fyd-browser-worker'] as const;
+/** Written beside the three programs when they are built (sweep-build-v5.sh / `stamp-v5`): which commit, and their sha256. */
+const STAMP = 'BUILD.json';
 const FORBIDDEN_PORTS = new Set([7431, 7457, 7458]);
-const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8] as const;
+const SLOTS = [1, 2, 3, 4, 5, 6, 7, 8, 9] as const;
 
 /**
  * The hosted relay is a real service the owner pays for (lead ruling 2026-11-13): it is OFF in a fake home unless the
@@ -71,6 +77,7 @@ interface Slot {
     user: string;
     harness: string;
     runtime: string;
+    bin: string;
     lock: string;
     tmux: string;
   };
@@ -98,6 +105,7 @@ function slotOf(n: number): Slot {
       user: join(v5dir, 'user'),
       harness: join(v5dir, 'harness-bin'),
       runtime: join(v5dir, 'xdg-run'),
+      bin: join(v5dir, 'bin'),
       lock: join(v5dir, 'home', 'run', 'daemon.lock'),
       tmux: join(v5dir, 'home', 'state', 'terminals', 'tmux.sock'),
     },
@@ -275,25 +283,38 @@ async function v4Programs(): Promise<{ dir: string; version: string }> {
   return { dir, version };
 }
 
-/** The 5.0 binaries, COPIED from the owner's preview libexec (read-only use: never run from there) into the sweep root. */
-async function v5Programs(): Promise<string> {
-  const dir = join(SWEEP_ROOT, 'bin5');
-  const have = await Promise.all(
-    ['fy', 'fyd'].map(async name => (await lstat(join(dir, name)).catch(() => undefined)) !== undefined),
-  );
-  if (have.every(Boolean)) return dir;
+/**
+ * The 5.0 binaries, COPIED from a libexec folder (default: the owner's preview libexec; read-only use, never run from there)
+ * into THIS SLOT'S OWN folder, so that upgrading one slot (upgrade-v5) can never change another slot's programs. The build
+ * stamp (BUILD.json) comes along when the source has one.
+ */
+async function v5Programs(slot: Slot): Promise<string> {
+  const dir = slot.v5.bin;
   const source = process.env.FY_V5_LIBEXEC ?? join(process.env.HOME ?? '', '.ferretry-v5', 'libexec');
   await mkdir(dir, { recursive: true });
-  for (const name of ['fy', 'fyd', 'fyd-browser-worker']) {
+  for (const name of [...V5_PROGRAMS, STAMP]) {
     const from = join(source, name);
     if ((await lstat(from).catch(() => undefined)) === undefined) {
-      if (name === 'fyd-browser-worker') continue;
+      if (name === 'fyd-browser-worker' || name === STAMP) continue;
       die(`${from} is missing; build 5.0 first or set FY_V5_LIBEXEC to a folder holding its fy and fyd`, 69);
     }
     await copyFile(from, join(dir, name));
-    await chmod(join(dir, name), 0o755);
+    await chmod(join(dir, name), name === STAMP ? 0o644 : 0o755);
   }
   return dir;
+}
+
+/**
+ * The folder whose `fy` a wrapper runs for this slot: the slot's own folder; for a slot built by an older kit (shared or
+ * hand-patched bin folder) the folder its RUNNING daemon was started from, which is what its wrapper was patched to use too;
+ * last, the old shared one.
+ */
+async function v5Fy(slot: Slot): Promise<string> {
+  const own = join(slot.v5.bin, 'fy');
+  if ((await lstat(own).catch(() => undefined)) !== undefined) return own;
+  const running = await daemonExecutable(slot);
+  if (running !== undefined) return join(dirname(running), 'fy');
+  return join(SWEEP_ROOT, 'bin5', 'fy');
 }
 
 // ─── running things ──────────────────────────────────────────────────────────────────────────────────────────────
@@ -350,7 +371,13 @@ async function waitUntil(label: string, ms: number, check: () => Promise<boolean
   }
 }
 
-function startDaemon(program: string, port: number, env: Record<string, string>, logFile: string, cwd: string): void {
+function startDaemon(
+  program: string,
+  port: number,
+  env: Record<string, string>,
+  logFile: string,
+  cwd: string,
+): ChildProcess {
   const fd = openSync(logFile, 'a', 0o600);
   const child = spawn(program, ['--host', '127.0.0.1', '--port', String(port)], {
     env,
@@ -360,6 +387,7 @@ function startDaemon(program: string, port: number, env: Record<string, string>,
   });
   closeSync(fd);
   child.unref();
+  return child;
 }
 
 async function stopByLock(lock: string, label: string): Promise<void> {
@@ -412,7 +440,7 @@ async function upInner(slot: Slot, reuse: boolean): Promise<void> {
   await assertSlotPath(slot);
   const started = Date.now();
   const { dir: v4Dir, version } = await v4Programs();
-  const v5Bin = await v5Programs();
+  const v5Bin = await v5Programs(slot);
   console.log(`slot ${String(slot.n)}: building a RICH v4 ${version} home (this takes several minutes) …`);
 
   // 1. The rich v4 home, through v4's own CLI, with the panes left running.
@@ -696,7 +724,7 @@ async function cli(
   inherit = false,
 ): Promise<{ code: number; out: string; err: string }> {
   const port = await guard(slot, which);
-  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : join(SWEEP_ROOT, 'bin5', 'fy');
+  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : await v5Fy(slot);
   const env = { ...baseEnvironment(), ...slotCliEnvironment(slot, which, port) };
   if (which === 'v4') {
     const token = (await readFile(join(slot.v4.home, 'api-token'), 'utf8').catch(() => '')).trim();
@@ -767,6 +795,259 @@ async function down(slot: Slot, options: { keepFiles: boolean; quiet?: boolean }
     console.log(`slot ${String(slot.n)}: down${options.keepFiles ? ' (files kept)' : ' and removed'}`);
 }
 
+// ─── upgrade-v5: move ONLY the 5.0 daemon to a newer build ───────────────────────────────────────────────────────
+
+/** The program the slot's running 5.0 daemon was started from (its own /proc exe link), or undefined when it is down. */
+async function daemonExecutable(slot: Slot): Promise<string | undefined> {
+  for (const pid of await pidsHolding(slot.v5.lock)) {
+    const exe = (await readlink(`/proc/${String(pid)}/exe`).catch(() => '')).replace(/ \(deleted\)$/u, '');
+    if (exe !== '' && basename(exe) === 'fyd') return exe;
+  }
+  return undefined;
+}
+
+const sha256File = async (path: string): Promise<string> =>
+  createHash('sha256')
+    .update(await readFile(path))
+    .digest('hex');
+
+interface Stamp {
+  readonly commit: string;
+  readonly sha256: Readonly<Record<string, string>>;
+}
+
+/** The build stamp beside a set of 5.0 programs, or undefined when there is none or it is not a stamp. */
+async function readStamp(dir: string): Promise<Stamp | undefined> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(join(dir, STAMP), 'utf8'));
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(parsed) || typeof parsed.commit !== 'string' || !/^[0-9a-f]{40}$/u.test(parsed.commit))
+    return undefined;
+  if (!isRecord(parsed.sha256)) return undefined;
+  const sha256: Record<string, string> = {};
+  for (const [name, value] of Object.entries(parsed.sha256)) if (typeof value === 'string') sha256[name] = value;
+  return { commit: parsed.commit, sha256 };
+}
+
+/**
+ * `stamp-v5 <libexec-dir> <commit>`: records WHICH COMMIT the three programs in a folder were built from, and their sha256, in
+ * BUILD.json beside them. sweep-build-v5.sh calls it right after compiling (the commit is the one it checked out). upgrade-v5
+ * trusts the stamp only while the programs still hash to what it says, so a stamp cannot ride along with other binaries.
+ */
+async function stampV5(dirArg: string | undefined, commitArg: string | undefined): Promise<void> {
+  if (dirArg === undefined || commitArg === undefined) die('usage: slot.ts stamp-v5 <libexec-dir> <commit>', 64);
+  const dir = resolve(dirArg);
+  const resolved = await run(
+    'git',
+    ['rev-parse', '--verify', `${commitArg}^{commit}`],
+    process.env as Record<string, string>,
+    FIXTURES,
+  );
+  const commit = resolved.out.trim();
+  if (resolved.code !== 0 || !/^[0-9a-f]{40}$/u.test(commit))
+    die(`"${commitArg}" is not a commit in this repository`, 64);
+  const sha256: Record<string, string> = {};
+  for (const name of V5_PROGRAMS) {
+    const path = join(dir, name);
+    if ((await lstat(path).catch(() => undefined))?.isFile() !== true)
+      die(`${path} is missing or not a regular file`, 69);
+    sha256[name] = await sha256File(path);
+  }
+  await writeFile(
+    join(dir, STAMP),
+    `${JSON.stringify({ commit, builtAt: new Date().toISOString(), sha256 }, null, 2)}\n`,
+  );
+  console.log(`stamped ${dir}: commit ${commit}`);
+}
+
+/**
+ * The new build, checked before anything is stopped: three regular files; `fy` and `fyd` report a 5.x version (the browser
+ * worker takes no `--version`: it is only required to exist and to be the one the stamp hashed); and a BUILD.json whose commit
+ * the programs still hash to.
+ */
+async function checkNewBuild(slot: Slot, libexec: string): Promise<Stamp> {
+  for (const name of V5_PROGRAMS) {
+    const path = join(libexec, name);
+    const info = await lstat(path).catch(() => undefined);
+    if (info === undefined || !info.isFile()) die(`refusing: ${path} is missing or not a regular file (no links)`);
+  }
+  const probe = join(slot.dir, 'upgrade-probe');
+  await mkdir(probe, { recursive: true, mode: 0o700 });
+  try {
+    for (const name of ['fy', 'fyd']) {
+      const ran = await run(
+        join(libexec, name),
+        ['--version'],
+        { ...baseEnvironment(), HOME: probe, FY_HOME: join(probe, 'home') },
+        probe,
+      );
+      const version = /\b(\d+\.\d+\.\d+)\b/u.exec(ran.out)?.[1];
+      if (version === undefined || !version.startsWith('5.'))
+        die(
+          `refusing: ${join(libexec, name)} does not report a 5.x version (it said "${ran.out.trim().slice(0, 80)}")`,
+        );
+    }
+  } finally {
+    await rm(probe, { recursive: true, force: true });
+  }
+  const stamp = await readStamp(libexec);
+  if (stamp === undefined)
+    die(
+      `refusing: ${join(libexec, STAMP)} is missing, so nobody can say which commit this build is. Build it with sweep-build-v5.sh, or record it with: bun ${join(import.meta.dir, 'slot.ts')} stamp-v5 ${libexec} <commit>`,
+    );
+  for (const name of V5_PROGRAMS)
+    if (stamp.sha256[name] !== (await sha256File(join(libexec, name))))
+      die(
+        `refusing: ${name} in ${libexec} is not the program ${STAMP} was written for (its sha256 differs); stamp it again if you rebuilt it`,
+      );
+  return stamp;
+}
+
+/** The hosted 5.0 app must already be live for the commit, or the app would say "Reload to get the new app". Read-only `gh`. */
+async function assertPagesDeployLive(commit: string): Promise<void> {
+  const ran = await run(
+    'gh',
+    [
+      'run',
+      'list',
+      '--workflow',
+      'Deploy 5.0 preview PWA to Pages',
+      '--limit',
+      '300',
+      '--json',
+      'headSha,conclusion,headBranch',
+    ],
+    process.env as Record<string, string>,
+    FIXTURES,
+  );
+  if (ran.code !== 0)
+    die(
+      `refusing: could not read the Pages deploy runs with gh (exit ${String(ran.code)}: ${ran.err.trim().slice(0, 200)}), so I cannot say commit ${commit.slice(0, 10)} is live`,
+    );
+  let runs: unknown;
+  try {
+    runs = JSON.parse(ran.out);
+  } catch {
+    die('refusing: gh did not return the deploy runs as JSON');
+  }
+  const live =
+    Array.isArray(runs) &&
+    runs.some(
+      entry =>
+        isRecord(entry) &&
+        entry.headSha === commit &&
+        entry.conclusion === 'success' &&
+        entry.headBranch === 'rebuild/5.0',
+    );
+  if (!live)
+    die(
+      `refusing: commit ${commit.slice(0, 10)} has no successful "Deploy 5.0 preview PWA to Pages" run, so the hosted app does not match it; nothing was stopped`,
+    );
+}
+
+async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<void> {
+  if (libexecArg === undefined) die('usage: slot.ts upgrade-v5 <1..9> <libexec-dir>', 64);
+  const n = String(slot.n);
+  await assertSlotPath(slot);
+  await guard(slot, 'v5');
+  const running = await daemonExecutable(slot);
+  if (running === undefined)
+    die(`refusing: slot ${n}'s 5.0 side is not up (no fyd holds ${slot.v5.lock}); start it with sweep-up.sh first`);
+  const bin = dirname(running);
+  if (relative(SWEEP_ROOT, bin).startsWith('..') || isAbsolute(relative(SWEEP_ROOT, bin)))
+    die(
+      `refusing: slot ${n}'s daemon runs from ${bin}, outside ${SWEEP_ROOT}; this command only rewrites programs inside the sweep root`,
+      99,
+    );
+  const libexec = resolve(libexecArg);
+  if (libexec === bin) die('refusing: the new build folder is the folder the daemon already runs from');
+  for (const other of SLOTS) {
+    if (other === slot.n) continue;
+    const exe = await daemonExecutable(slotOf(other));
+    if (exe !== undefined && dirname(exe) === bin)
+      die(
+        `refusing: slot ${String(other)}'s 5.0 daemon also runs from ${bin}; replacing its programs would move that slot too`,
+      );
+  }
+  const next = await checkNewBuild(slot, libexec);
+  await assertPagesDeployLive(next.commit);
+  const before = await readStamp(bin);
+  const oldLabel = before === undefined ? 'unknown (no BUILD.json beside the running programs)' : before.commit;
+  if (before?.commit === next.commit && V5_PROGRAMS.every(name => before.sha256[name] === next.sha256[name])) {
+    console.log(`slot ${n}: already on ${next.commit}; nothing to do`);
+    return;
+  }
+  console.log(`slot ${n}: 5.0 daemon ${oldLabel} -> ${next.commit} (programs in ${bin})`);
+
+  const prev = (name: string): string => join(bin, `${name}.prev`);
+  const files = [...V5_PROGRAMS, STAMP] as const;
+  const startAndWait = async (): Promise<string | undefined> => {
+    const child = startDaemon(
+      join(bin, 'fyd'),
+      slot.v5Port,
+      daemonEnvironment(slot, 'v5'),
+      join(slot.v5.dir, 'fyd.log'),
+      slot.v5.user,
+    );
+    const deadline = Date.now() + 180_000;
+    for (;;) {
+      if (child.exitCode !== null || child.signalCode !== null)
+        return `the new daemon exited (${child.exitCode === null ? String(child.signalCode) : 'code ' + String(child.exitCode)}) before it served; see ${join(slot.v5.dir, 'fyd.log')}`;
+      const ok = await fetch(`http://127.0.0.1:${String(slot.v5Port)}/healthz`, {
+        signal: AbortSignal.timeout(2000),
+      }).then(
+        response => response.ok,
+        () => false,
+      );
+      if (ok) return undefined;
+      if (Date.now() > deadline)
+        return `the new daemon did not serve /healthz within 180 s; see ${join(slot.v5.dir, 'fyd.log')}`;
+      await Bun.sleep(400);
+    }
+  };
+
+  // Stop ONLY this slot's 5.0 daemon, by its own lock. v4, every tmux server, the home and the identity are not touched.
+  await stopByLock(slot.v5.lock, '5.0 daemon');
+  for (const name of files) {
+    await rm(prev(name), { force: true });
+    if ((await lstat(join(bin, name)).catch(() => undefined)) !== undefined) await rename(join(bin, name), prev(name));
+  }
+  for (const name of files) {
+    await copyFile(join(libexec, name), join(bin, name));
+    await chmod(join(bin, name), name === STAMP ? 0o644 : 0o755);
+  }
+  const failure = await startAndWait();
+  if (failure === undefined) {
+    console.log(
+      `slot ${n}: 5.0 daemon is serving on http://127.0.0.1:${String(slot.v5Port)}  ${oldLabel} -> ${next.commit}`,
+    );
+    console.log(
+      `  the old programs are kept as ${bin}/<name>.prev; the home, identity and paired devices were not touched`,
+    );
+    return;
+  }
+  // Roll back: stop whatever the new build left, put the old programs back, start them.
+  console.error(`slot ${n}: ${failure}. Rolling back to ${oldLabel}.`);
+  await stopByLock(slot.v5.lock, 'new 5.0 daemon');
+  for (const name of files) {
+    await rm(join(bin, name), { force: true });
+    if ((await lstat(prev(name)).catch(() => undefined)) !== undefined) await rename(prev(name), join(bin, name));
+  }
+  const again = await startAndWait();
+  if (again !== undefined)
+    die(
+      `slot ${n}: the upgrade failed AND the old programs did not start either (${again}). They are back in ${bin}; the home was not touched.`,
+      2,
+    );
+  die(
+    `slot ${n}: the upgrade to ${next.commit} failed (${failure}); rolled back, the old programs (${oldLabel}) are serving again`,
+    2,
+  );
+}
+
 // ─── pairing an agent browser, code-free ─────────────────────────────────────────────────────────────────────────
 
 /**
@@ -789,7 +1070,7 @@ async function pair(slot: Slot, which: Which): Promise<void> {
   );
   const base = await guardedEnv(slot, which);
   const port = await guard(slot, which);
-  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : join(SWEEP_ROOT, 'bin5', 'fy');
+  const program = which === 'v4' ? join(SWEEP_ROOT, 'v4bin', 'fy') : await v5Fy(slot);
   const env: Record<string, string> = {
     ...base,
     PATH: `${shimDir}:${base.PATH ?? ''}`,
@@ -877,18 +1158,24 @@ try {
     case 'cli': {
       const slot = parseSlot(slotArg);
       const which = rest[0];
-      if (which !== 'v4' && which !== 'v5') die('usage: slot.ts cli <1..8> <v4|v5> [args…]', 64);
+      if (which !== 'v4' && which !== 'v5') die('usage: slot.ts cli <1..9> <v4|v5> [args…]', 64);
       process.exit((await cli(slot, which, rest.slice(1), true)).code);
       break;
     }
     case 'pair': {
       const which = rest[0];
-      if (which !== 'v4' && which !== 'v5') die('usage: slot.ts pair <1..8> <v4|v5>', 64);
+      if (which !== 'v4' && which !== 'v5') die('usage: slot.ts pair <1..9> <v4|v5>', 64);
       await pair(parseSlot(slotArg), which);
       break;
     }
+    case 'upgrade-v5':
+      await upgradeV5(parseSlot(slotArg), rest[0]);
+      break;
+    case 'stamp-v5':
+      await stampV5(slotArg, rest[0]);
+      break;
     default:
-      die('usage: slot.ts <up|down|status|cli|pair> <slot 1..8> …', 64);
+      die('usage: slot.ts <up|down|status|cli|pair|upgrade-v5|stamp-v5> <slot 1..9> …', 64);
   }
 } catch (error) {
   if (error instanceof Failure) {
