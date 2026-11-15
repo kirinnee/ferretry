@@ -156,8 +156,9 @@ export default implementDaemon(manifest, {
           () => kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
           listener => kernel.config.watch(CLAUDE_CODE_HOOKS, listener),
         ),
-        // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal).
-        'start.decide': fastStartDecision,
+        // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal);
+        // a start that names no model is judged on the model its runtime would launch with, read through Runtimes.
+        'start.decide': input => fastStartDecision(input, () => uses.runtimes.current()),
       },
     };
   },
