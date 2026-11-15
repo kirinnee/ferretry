@@ -6,6 +6,7 @@ import { ferretNamer } from '../../../app/lib/board-present.ts';
 import { DaemonBoardStore } from '../../../app/lib/board-store.ts';
 import type { EmbedSpec } from '../../../app/lib/embed-lanes.ts';
 import { THIS_MACHINE } from '../../../app/lib/machine.ts';
+import { boardCardPath } from '../../../app/lib/paths.ts';
 import { CardEmbed } from '../../../app/views/embed.tsx';
 import { boardAnswer, card, deferred, fakeEnvironment, fakePort, flush, laneSetFor, PROJECT } from './board-support.ts';
 
@@ -55,6 +56,15 @@ const poke = async (store: DaemonBoardStore, ...ids: string[]) =>
     store.noteEvent(THIS_MACHINE.daemonId, changed(...ids));
     await flush();
   });
+
+/** A parent with two children and a stranger. */
+const family = () =>
+  new Map<string, CardView>([
+    ['F10', card('F10', { title: 'Parent' })],
+    ['F11', card('F11', { title: 'Child one', parent: { id: 'F10' } })],
+    ['F12', card('F12', { title: 'Child two', parent: { id: 'F10' }, laneId: 'review' })],
+    ['F13', card('F13', { title: 'Stranger' })],
+  ]);
 
 describe('CardEmbed: a card', () => {
   it('draws the real board card with its title, its lane and a link to its page', async () => {
@@ -191,14 +201,6 @@ describe('CardEmbed: a list of cards', () => {
 });
 
 describe('CardEmbed: the children of a card', () => {
-  const family = () =>
-    new Map<string, CardView>([
-      ['F10', card('F10', { title: 'Parent' })],
-      ['F11', card('F11', { title: 'Child one', parent: { id: 'F10' } })],
-      ['F12', card('F12', { title: 'Child two', parent: { id: 'F10' }, laneId: 'review' })],
-      ['F13', card('F13', { title: 'Stranger' })],
-    ]);
-
   it('groups the children by lane and follows a lane move on board.changed', async () => {
     const cards = family();
     const { store, environment } = serving(cards);
@@ -274,5 +276,72 @@ describe('CardEmbed: the children of a card', () => {
     const { store } = serving(family(), new Set(), { nextCursor: 'more' });
     const root = await show(store, { kind: 'children', parent: 'F10' });
     expect(root.querySelector('[data-embed-truncated="F10"]')?.textContent).toContain('may be incomplete');
+  });
+});
+
+describe('CardEmbed: opening a card', () => {
+  const click = (target: Element, init: MouseEventInit = {}): MouseEvent => {
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const pushes = (): string[] => {
+    const seen: string[] = [];
+    const original = globalThis.history.pushState.bind(globalThis.history);
+    globalThis.history.pushState = ((state: unknown, title: string, url?: string | URL | null) => {
+      seen.push(String(url));
+      original(state, title, url);
+    }) as typeof globalThis.history.pushState;
+    restore = () => {
+      globalThis.history.pushState = original;
+    };
+    return seen;
+  };
+  let restore = () => {};
+  afterEach(() => restore());
+
+  it('opens the card on a plain click, the way the Board page opens one', async () => {
+    const seen = pushes();
+    const { store } = serving(new Map([['F1', card('F1', { title: 'Ship the thing' })]]));
+    const root = await show(store, { kind: 'card', id: 'F1' });
+    const link = root.querySelector('[data-embed-card="F1"] a') as HTMLAnchorElement;
+    const event = click(link);
+    expect(event.defaultPrevented).toBe(true);
+    expect(seen).toEqual([boardCardPath(undefined, 'F1')]);
+  });
+
+  it('opens a card of a mini board too', async () => {
+    const seen = pushes();
+    const { store } = serving(
+      new Map([
+        ['F1', card('F1')],
+        ['F2', card('F2', { laneId: 'review' })],
+      ]),
+    );
+    const root = await show(store, { kind: 'cards', ids: ['F1', 'F2'] });
+    click(root.querySelector('[data-task="F2"] a') as Element);
+    expect(seen).toEqual([boardCardPath(undefined, 'F2')]);
+  });
+
+  it('leaves a modified click to the browser as a link', async () => {
+    const seen = pushes();
+    const { store } = serving(new Map([['F1', card('F1')]]));
+    const root = await show(store, { kind: 'card', id: 'F1' });
+    const link = root.querySelector('[data-embed-card="F1"] a') as HTMLAnchorElement;
+    for (const init of [{ ctrlKey: true }, { metaKey: true }]) {
+      expect(click(link, init).defaultPrevented).toBe(false);
+    }
+    expect(seen).toEqual([]);
+  });
+
+  it('opens the parent from the truncated-list note with a plain link', async () => {
+    const seen = pushes();
+    const { store } = serving(family(), new Set(), { nextCursor: 'more' });
+    const root = await show(store, { kind: 'children', parent: 'F10' });
+    const link = root.querySelector('[data-embed-truncated="F10"] a') as HTMLAnchorElement;
+    expect(link.textContent).toBe('Open &F10');
+    expect(link.getAttribute('href')).toBe(boardCardPath(undefined, 'F10'));
+    click(link);
+    expect(seen).toEqual([boardCardPath(undefined, 'F10')]);
   });
 });

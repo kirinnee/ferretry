@@ -13,7 +13,7 @@
  */
 
 import { FY_RENDER_LIMITS } from '@ferretry/plugin-conversation/contract';
-import { useNow } from '@ferretry/app/ui';
+import { RouteLink, useNow } from '@ferretry/app/ui';
 import { type ReactElement, type ReactNode, useMemo } from 'react';
 import { useBoard, useBoardCard, useBoardCards } from '../hooks/use-board.ts';
 import { NO_BOARD_FILTERS } from '../lib/board-model.ts';
@@ -29,6 +29,7 @@ import {
   groupEmbedLanes,
 } from '../lib/embed-lanes.ts';
 import { THIS_MACHINE } from '../lib/machine.ts';
+import { navigateTo } from '../lib/navigate.ts';
 import { boardCardPath } from '../lib/paths.ts';
 import { BoardCard } from './board-card.tsx';
 import { BoardLane } from './board-lane.tsx';
@@ -73,6 +74,7 @@ function Card({
       href={boardCardPath(undefined, card.task.id)}
       names={names}
       now={now}
+      onNavigate={navigateTo}
       showMachine={false}
       {...(lane === undefined ? {} : { lane })}
     />
@@ -202,7 +204,10 @@ function ChildCards({
       : [note(parent, status === 'error' ? 'Its cards could not be read.' : 'No cards under this one.')];
   const incomplete = machines.some(read => read.truncated) ? (
     <p className="fy-card-embed-more" data-embed-truncated={parent}>
-      The board is too big to read in full, so this list may be incomplete.
+      The board is too big to read in full, so this list may be incomplete.{' '}
+      <RouteLink data-embed-parent-link={parent} onNavigate={navigateTo} to={boardCardPath(undefined, parent)}>
+        Open &{parent}
+      </RouteLink>
     </p>
   ) : null;
   return <MiniBoard anchor={parent} footer={incomplete} lanes={lanes} names={names} notes={notes} />;
