@@ -1163,6 +1163,7 @@ rollback)
       [ ! -e "${failed}" ] || failed="${failed}-$$"
       mv "${H}" "${failed}" || fail "cannot move ${H} aside"
       chmod 700 "${failed}" || fail "chmod 700 ${failed} failed"
+      note_set V5_FAILED_HOME "${failed}"
       say "📝 the v5 home was moved to ${failed} (nothing deleted; it holds copies of sealed files: the owner decides when to delete it)"
     fi
     mv "${B}" "${H}" || fail "cannot restore ${B} to ${H}"
@@ -1173,6 +1174,33 @@ rollback)
   fi
   [ -f "${H}/layout-version" ] || fail "${H}/layout-version is missing: the home is not v4"
   say "✅ home restored at ${H}"
+
+  # 2b. Which ferrets did v5 relaunch? Only v5's own history can say. The converter copies each ferret's v4 journal
+  # (state/sessions/<id>/events.jsonl) as the FIRST lines of its v5 history, so a session.restarted or session.resumed
+  # AFTER those lines was written by v5. Worked out now, before a v4 daemon can append to the restored journal, and kept
+  # (a rerun reuses it). A ferret whose history or journal cannot be read is not proven, so it is never touched.
+  relaunch_file="${base}/v5-relaunched-ids.txt"
+  if [ ! -f "${relaunch_file}" ]; then
+    v5_dir="$(note_get V5_FAILED_HOME)"
+    : >"${relaunch_file}.tmp"
+    if [ -n "${v5_dir}" ] && [ -d "${v5_dir}" ] && [ -s "${base}/restart-ids.txt" ]; then
+      while read -r rid; do
+        [[ ${rid} =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || continue
+        hist="${v5_dir}/state/ferrets/${rid}/history.jsonl"
+        { [ -f "${hist}" ] && [ ! -L "${hist}" ] && [ -r "${hist}" ]; } || continue
+        v4ev="${H}/state/sessions/${rid}/events.jsonl"
+        v4lines=0
+        if [ -e "${v4ev}" ] || [ -L "${v4ev}" ]; then
+          { [ -f "${v4ev}" ] && [ ! -L "${v4ev}" ] && [ -r "${v4ev}" ]; } || continue
+          v4lines="$(grep -c '' "${v4ev}" || true)"
+          [[ ${v4lines} =~ ^[0-9]+$ ]] || continue
+        fi
+        types="$(tail -n +$((v4lines + 1)) "${hist}" | jq -r 'select(.type == "session.restarted" or .type == "session.resumed") | .type')" || continue
+        if [ -n "${types}" ]; then echo "${rid}" >>"${relaunch_file}.tmp"; fi
+      done <"${base}/restart-ids.txt"
+    fi
+    mv "${relaunch_file}.tmp" "${relaunch_file}"
+  fi
 
   # 3. Programs, by recorded state. Skipped when v5 was never installed (v4 is still installed).
   if has_mark installing-v5; then
@@ -1228,38 +1256,50 @@ rollback)
 
   ids=""
   if [ -f "${base}/restart-ids.txt" ] && [ -s "${base}/restart-ids.txt" ]; then ids="$(tr '\n' ' ' <"${base}/restart-ids.txt")"; fi
+  proven=""
+  if [ -s "${relaunch_file}" ]; then proven="$(tr '\n' ' ' <"${relaunch_file}")"; fi
+  relaunch_failed=""
   if [ -z "${ids}" ]; then
-    say "📝 no ferret was live at the baseline: nothing to restart"
-  elif has_mark starting-v5 || has_mark started-v5; then
-    if [ "${restart_ferrets}" = 1 ]; then
-      # shellcheck disable=SC2086 # the ids are separate words, one per ferret
-      restart_out="$(fy4 restart ${ids})" || fail "'fy restart ${ids}' failed"
-      printf '%s\n' "${restart_out}"
-      # Name only the ferrets that really restarted: the output also lists the ones queued for later, left alone or failed,
-      # and "restarted: <every id>" over a refusal would tell the owner a ferret is back when it is not.
-      if grep -q '^Restarted now: ' <<<"${restart_out}"; then
-        restarted_ids="$(awk '
-          /^[^ ]/ { in_now = ($0 ~ /^Restarted now: /); next }
-          in_now && /^  / { line = $0; sub(/^  /, "", line); if (match(line, /\([^()]*\)$/)) line = substr(line, RSTART + 1, RLENGTH - 2); print line }
-        ' <<<"${restart_out}" | tr '\n' ' ')"
-        n_now="$({ grep -m1 '^Restarted now: ' <<<"${restart_out}" || true; } | sed 's/^Restarted now: //')"
-        n_queued="$({ grep -m1 '^Queued for their next idle moment: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
-        n_left="$({ grep -m1 '^Left alone: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
-        n_failed="$({ grep -m1 '^Failed: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
-        say "📝 restart: ${n_now:-0} restarted now, ${n_queued:-0} queued for their next idle moment, ${n_left:-0} left alone, ${n_failed:-0} failed (of $(wc -w <<<"${ids}" | tr -d ' ') asked)"
-        if [ "${n_now:-0}" -gt 0 ]; then
-          say "✅ restarted: ${restarted_ids% }. Ask the owner to send one of them a message and see it answer"
-        else
-          say "⚠️ no ferret was restarted now (see the lines above for each one). Rerun 'fy restart <id>' for the queued or refused ones once they are idle"
-        fi
-      else
-        say "⚠️ 'fy restart' printed no counts to read, so no ferret is claimed restarted. Read its output above, then ask the owner to message one of: ${ids}"
+    say "📝 no ferret was live at the baseline: nothing to hand back to v4"
+  elif ! { has_mark starting-v5 || has_mark started-v5; }; then
+    say "📝 v5 never started: the recorded ferrets kept their v4 harnesses, nothing to hand back"
+  elif [ -z "${proven}" ]; then
+    say "📝 v5's history shows it relaunched none of the $(wc -w <<<"${ids}" | tr -d ' ') recorded ferret(s): they keep their v4 harnesses and none is touched"
+  elif [ "${restart_ferrets}" != 1 ]; then
+    say "⚠️ v5 relaunched these ferrets (its history says session.restarted or session.resumed): ${proven}. They still run v5-launched harnesses under v4. With the owner's yes (it stops each one, which interrupts what it is doing and closes its own web-terminal panes, then resumes it with its conversation kept) rerun rollback with --restart: it runs 'fy stop orphan <id> --yes' then 'fy resume <id>' for each. No other ferret is touched."
+  else
+    # v4's 'fy restart' has no --force and refuses a harness it cannot see ("can't see what it is running"), which is exactly
+    # what a v5 launch looks like, so it cannot undo v5's relaunch. What works on a real rollback (run 7, all 15 ferrets):
+    # v4's 'fy stop orphan <id> --yes', then v4's 'fy resume <id>': the ferret comes back as a v4 launch with its own
+    # conversation. The stop also closes that ferret's own web-terminal panes. A ferret stopped here is recorded before the
+    # resume, so a rerun resumes it instead of stopping it twice.
+    relaunched=""
+    stopped_file="${base}/v4-stopped-ids.txt"
+    for rid in ${proven}; do
+      if [ -f "${base}/v4-relaunched-ids.txt" ] && grep -qxF "${rid}" "${base}/v4-relaunched-ids.txt"; then
+        relaunched="${relaunched} ${rid}"
+        continue
       fi
-    else
-      say "⚠️ v5 may have restarted these ferrets with its own hooks. With the owner's yes, run: fy restart ${ids}  (or rerun rollback with --restart). Bare 'fy restart' only reports status."
-    fi
+      if ! { [ -f "${stopped_file}" ] && grep -qxF "${rid}" "${stopped_file}"; }; then
+        if move_out="$(fy4 stop orphan "${rid}" --yes --reason "rollback: hand the ferret v5 relaunched back to a v4 launch" 2>&1)"; then
+          echo "${rid}" >>"${stopped_file}"
+        else
+          relaunch_failed="${relaunch_failed}${relaunch_failed:+; }${rid} (stop refused: $(head -n 1 <<<"${move_out}" | cut -c1-160))"
+          continue
+        fi
+      fi
+      if move_out="$(fy4 resume "${rid}" 2>&1)"; then
+        echo "${rid}" >>"${base}/v4-relaunched-ids.txt"
+        relaunched="${relaunched} ${rid}"
+      else
+        relaunch_failed="${relaunch_failed}${relaunch_failed:+; }${rid} (stopped, not resumed: $(head -n 1 <<<"${move_out}" | cut -c1-160))"
+      fi
+    done
+    say "📝 handed back to v4: $(wc -w <<<"${relaunched}" | tr -d ' ') of $(wc -w <<<"${proven}" | tr -d ' ') ferret(s) v5 relaunched${relaunched:+ (}${relaunched# }${relaunched:+)}"
+    if [ -z "${relaunch_failed}" ]; then say "✅ every ferret v5 relaunched now runs a v4 launch again. Ask the owner to send one of them a message and see it answer"; fi
   fi
   mark rolled-back
   say "✅ rolled back to v4 (${got}). The backup folder is now the live home; the v5 home, if any, is kept beside it"
+  [ -z "${relaunch_failed}" ] || fail "v4 is back, but these ferrets v5 relaunched could NOT be handed back to a v4 launch: ${relaunch_failed}. They still run v5-launched harnesses. Tell the owner; run rollback --restart again (it retries only these; a ferret already stopped is only resumed)"
   ;;
 esac

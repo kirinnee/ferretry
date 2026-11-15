@@ -3,7 +3,7 @@ import { mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { advance, DAEMON_DOWN_SH, DAEMON_UP_SH, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
-// Proof run 7 findings: rollback left v5's panes running; `--restart` named every id whatever `fy restart` said; quiet
+// Proof run 7 findings: rollback left v5 panes running; it never handed the ferrets v5 relaunched back to a v4 launch; quiet
 // listed empty agenda-change queues as "carried" while convert skips them.
 
 setDefaultTimeout(60_000);
@@ -76,65 +76,141 @@ describe('rollback closes the panes v5 started and v4 does not own', () => {
   });
 });
 
-describe('rollback --restart names only the ferrets that restarted', () => {
-  const restartWith = async (sb: Sandbox, text: string): Promise<void> => {
-    await sb.state('restart.out', text);
+describe('rollback hands back to v4 the ferrets v5 relaunched, and only those', () => {
+  const line = (sequence: number, id: string, type: string): string =>
+    JSON.stringify({ format: 1, sequence, sessionId: id, type, data: {} });
+
+  /**
+   * Two live ferrets at the baseline. `v5Events` is what v5 appended to each one's history AFTER the v4 journal lines it
+   * carried (the v4 journal holds a v4-era session.resumed, which must never count as v5's).
+   */
+  const relaunchBox = async (v5Events: Readonly<Record<string, readonly string[]>>): Promise<Sandbox> => {
+    const sb = await box();
+    await mkdir(join(sb.v4home, 'state', 'sessions', 'f2'), { recursive: true });
+    await writeFile(
+      join(sb.v4home, 'state', 'sessions', 'f2', 'terminal-pane.json'),
+      JSON.stringify({ sessionId: 'f2', tmuxSession: 'fy-f2', paneId: '%2' }),
+    );
+    await advance(sb, 'start');
+    const backup =
+      (await sb.notesText())
+        .split('\n')
+        .find(each => each.startsWith('B='))
+        ?.slice(2) ?? '';
+    for (const id of ['f1', 'f2']) {
+      const v4Lines = [line(1, id, 'session.created'), line(2, id, 'session.resumed')];
+      await mkdir(join(backup, 'state', 'sessions', id), { recursive: true });
+      await writeFile(join(backup, 'state', 'sessions', id, 'events.jsonl'), v4Lines.join('\n') + '\n');
+      const mine = v5Events[id];
+      if (mine === undefined) continue;
+      await mkdir(join(sb.v4home, 'state', 'ferrets', id), { recursive: true });
+      await writeFile(
+        join(sb.v4home, 'state', 'ferrets', id, 'history.jsonl'),
+        [...v4Lines, ...mine.map((type, index) => line(3 + index, id, type))].join('\n') + '\n',
+      );
+    }
+    return sb;
+  };
+  const withFy = async (
+    sb: Sandbox,
+    rules: readonly { match: string; err?: string; code?: number }[] = [],
+  ): Promise<void> => {
     await sb.fake('fy', [
       { match: '--version', run: 'cat "$D/fy.version"' },
       { match: 'daemon start', run: DAEMON_UP_SH },
       { match: 'daemon stop', run: DAEMON_DOWN_SH },
-      { match: 'restart *', run: 'cat "$D/restart.out"' },
+      ...rules,
+      { match: 'stop orphan *' },
+      { match: 'resume *' },
     ]);
   };
+  /** The v4 hand-back calls, in order, with the free-text reason trimmed off. */
+  const handBack = async (sb: Sandbox): Promise<string[]> =>
+    (await sb.calls())
+      .filter(each => each.startsWith('fy stop orphan') || each.startsWith('fy resume'))
+      .map(each => each.replace(/ --reason .*$/, ''));
 
-  test('refused and left-alone ferrets are not in the "restarted:" line; the counts are printed', async () => {
-    const sb = await box();
-    await advance(sb, 'start');
-    await restartWith(
-      sb,
-      [
-        'Restarted now: 2',
-        '  Chasity (f1)',
-        '  g2',
-        'Queued for their next idle moment: 1',
-        '  Dana (f3): it is working; it restarts at its next idle moment',
-        'Left alone: 1',
-        '  Eve (f4): not running',
-        '',
-      ].join('\n'),
-    );
+  test('a ferret v5 relaunched is stopped and resumed by v4; one v5 never touched is left alone; v4 restart and migrate are never used', async () => {
+    const sb = await relaunchBox({ f1: ['session.restarted'] });
+    await withFy(sb);
     const result = await sb.run('rollback', ['--owner-yes', '--restart']);
     expect(result.code).toBe(0);
-    const line = result.out.split('\n').find(each => each.includes('✅ restarted:')) ?? '';
-    expect(line).toContain('restarted: f1 g2.');
-    expect(line).not.toContain('f3');
-    expect(line).not.toContain('f4');
-    expect(result.out).toContain(
-      'restart: 2 restarted now, 1 queued for their next idle moment, 1 left alone, 0 failed',
+    expect(await handBack(sb)).toEqual(['fy stop orphan f1 --yes', 'fy resume f1']);
+    expect((await sb.calls()).filter(each => each.startsWith('fy restart') || each.startsWith('fy migrate'))).toEqual(
+      [],
     );
+    expect(result.out).toContain('handed back to v4: 1 of 1 ferret(s) v5 relaunched (f1)');
   });
 
-  test('nothing restarted now: no "✅ restarted" claim at all', async () => {
-    const sb = await box();
-    await advance(sb, 'start');
-    await restartWith(
-      sb,
-      'Restarted now: 0\nQueued for their next idle moment: 0\nLeft alone: 1\n  Eve (f1): not running\n',
-    );
+  test('a session.resumed that is only in the carried v4 journal is not v5 relaunching it: nothing is touched', async () => {
+    const sb = await relaunchBox({ f1: [], f2: [] });
+    await withFy(sb);
     const result = await sb.run('rollback', ['--owner-yes', '--restart']);
     expect(result.code).toBe(0);
-    expect(result.out).not.toContain('✅ restarted:');
-    expect(result.out).toContain('no ferret was restarted now');
+    expect(await handBack(sb)).toEqual([]);
+    expect(result.out).toContain("v5's history shows it relaunched none of the 2 recorded ferret(s)");
   });
 
-  test('output with no counts to read claims nobody restarted', async () => {
-    const sb = await box();
-    await advance(sb, 'start');
-    await restartWith(sb, 'something unexpected\n');
+  test('a session.resumed written by v5 counts as a relaunch too', async () => {
+    const sb = await relaunchBox({ f2: ['session.resumed'] });
+    await withFy(sb);
     const result = await sb.run('rollback', ['--owner-yes', '--restart']);
     expect(result.code).toBe(0);
-    expect(result.out).not.toContain('✅ restarted:');
-    expect(result.out).toContain('printed no counts to read');
+    expect(await handBack(sb)).toEqual(['fy stop orphan f2 --yes', 'fy resume f2']);
+  });
+
+  test('without --restart it names the ferrets and says what --restart does; nothing is stopped', async () => {
+    const sb = await relaunchBox({ f1: ['session.restarted'], f2: ['session.restarted'] });
+    await withFy(sb);
+    const result = await sb.run('rollback', ['--owner-yes']);
+    expect(result.code).toBe(0);
+    expect(await handBack(sb)).toEqual([]);
+    expect(result.out).toContain('v5 relaunched these ferrets');
+    expect(result.out).toContain('f1 f2');
+    expect(result.out).toContain('fy stop orphan <id> --yes');
+  });
+
+  test('a stop v4 refuses is named and the others still go; the exit is non-zero; a rerun retries only the failure', async () => {
+    const sb = await relaunchBox({ f1: ['session.restarted'], f2: ['session.restarted'] });
+    await withFy(sb, [{ match: 'stop orphan f2 *', err: 'refused: nothing eligible', code: 1 }]);
+    const first = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(first.code).toBe(1);
+    expect(first.out).toContain('handed back to v4: 1 of 2 ferret(s) v5 relaunched (f1)');
+    expect(first.err).toContain('f2 (stop refused: refused: nothing eligible)');
+    await withFy(sb);
+    const second = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(second.code).toBe(0);
+    expect(await handBack(sb)).toEqual([
+      'fy stop orphan f1 --yes',
+      'fy resume f1',
+      'fy stop orphan f2 --yes',
+      'fy stop orphan f2 --yes',
+      'fy resume f2',
+    ]);
+    expect(second.out).toContain('handed back to v4: 2 of 2');
+  });
+
+  test('a ferret stopped but not resumed is named as such, and a rerun only resumes it (never stops it twice)', async () => {
+    const sb = await relaunchBox({ f1: ['session.restarted'] });
+    await withFy(sb, [{ match: 'resume f1', err: 'cannot resume now', code: 1 }]);
+    const first = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(first.code).toBe(1);
+    expect(first.err).toContain('f1 (stopped, not resumed: cannot resume now)');
+    await withFy(sb);
+    const second = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(second.code).toBe(0);
+    expect(await handBack(sb)).toEqual(['fy stop orphan f1 --yes', 'fy resume f1', 'fy resume f1']);
+  });
+
+  test('a history that cannot be read is not proof: that ferret is never touched', async () => {
+    const sb = await relaunchBox({ f1: ['session.restarted'] });
+    const history = join(sb.v4home, 'state', 'ferrets', 'f1', 'history.jsonl');
+    await rm(history);
+    await mkdir(history);
+    await withFy(sb);
+    const result = await sb.run('rollback', ['--owner-yes', '--restart']);
+    expect(result.code).toBe(0);
+    expect(await handBack(sb)).toEqual([]);
   });
 });
 
