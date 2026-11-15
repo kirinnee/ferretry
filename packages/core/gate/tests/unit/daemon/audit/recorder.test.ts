@@ -11,7 +11,7 @@ import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { AUDIT_KINDS, type AuditDraft, AuditLogFile, auditKind } from '../../../../contract/index.ts';
 import { StateAuditJournal } from '../../../../daemon/adapters/audit/state-audit-journal.ts';
 import { isOwnersOwnRecord } from '../../../../daemon/lib/audit/policy.ts';
-import { recordedCallDraft } from '../../../../daemon/lib/audit/recorder.ts';
+import { recordedCallDraft, secretSentDraft } from '../../../../daemon/lib/audit/recorder.ts';
 import { AUDITED_ROUTES, type AuditedRouteRule } from '../../../../daemon/lib/audit/routes.ts';
 import { AuditKeptFile, AuditKeptRotatedFile, AuditRotatedFile } from '../../../../manifest.ts';
 
@@ -369,5 +369,32 @@ describe('the audit on disk, read through the kernel’s per-line reader', () =>
       '2026-11-07T12:00:01.000Z',
     ]);
     expect(reading.unreadable).toBe(2);
+  });
+});
+
+describe('c58-22 a kernel secret send is a secrets.used record, by names only', () => {
+  const note = { plugin: 'warden', secret: 'JEV_API_KEY', host: 'api.typesafe.ai', outcome: 'completion' };
+
+  test('the record names the secret, the plugin, the host and the outcome kind, as the machine acting on its own', () => {
+    expect(secretSentDraft(note)).toEqual({
+      event: auditKind('secrets.used'),
+      actor: { kind: 'host' },
+      subject: 'JEV_API_KEY',
+      outcome: 'succeeded',
+      detail: { plugin: 'warden', host: 'api.typesafe.ai', outcome: 'completion' },
+      cause: 'daemon',
+    });
+  });
+
+  test('a reply of any status is a send that succeeded; a send that never got one failed', () => {
+    expect(secretSentDraft({ ...note, outcome: 'status' }).outcome).toBe('succeeded');
+    for (const outcome of ['timeout', 'network', 'too_large', 'unreadable', 'vault_damaged'])
+      expect(secretSentDraft({ ...note, outcome }).outcome).toBe('failed');
+  });
+
+  test('the record has no field that could hold a value: only the four names go in', () => {
+    const draft = secretSentDraft({ ...note, outcome: 'network' });
+    expect(Object.keys(draft.detail ?? {}).sort()).toEqual(['host', 'outcome', 'plugin']);
+    expect(JSON.stringify(draft)).not.toMatch(/sk-|bearer|authorization/iu);
   });
 });

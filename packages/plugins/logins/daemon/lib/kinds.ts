@@ -203,12 +203,27 @@ export function loginKinds(deps: LoginKindDeps): Readonly<Record<KindKey, LoginK
             const unavailable = (sentence: string): LoginCredentialAnswer => ({ kind: 'unavailable', sentence });
             known(login, key);
             if (harness !== harnessKey('codex')) return unavailable(`the login ${login} is spent by Codex only`);
-            // The store and the file's state come first; the status word is the cached reading, never a renewal.
+            // The store and the file's state come first; the status word is the cached reading, renewed below only when due.
             const problem = await deps.credentialProblem(login);
             if (problem !== undefined) return unavailable(problem);
-            const view = await viewOf(login, key);
+            let view = await viewOf(login, key);
             if (view.status.word === 'needs_sign_in')
               return unavailable(`the login ${login} needs signing in: ${view.status.explanation}`);
+            // A launch is attended (a person started it), so a due token renews NOW, under the per-credential lock a
+            // Check now shares, instead of costing the first turn the OAuth round trip. A renewal that cannot run is
+            // never a reason to refuse: the harness renews its own file on first use, exactly as it would have.
+            if (view.status.word === 'refresh_due') {
+              try {
+                view = await deps.check(login);
+              } catch {
+                /* the last reading stands; nothing of the failure is quoted */
+              }
+              // The provider refused the renewal: an agent started now would sit at a browser approval mid-session.
+              if (view.status.word === 'needs_sign_in')
+                return unavailable(
+                  `the login ${login} needs approval in a browser before a ferret can start on it: ${view.status.explanation}`,
+                );
+            }
             const credential = await deps.shareCredential(login);
             if (credential === 'not_own') return unavailable(notPlainFileSentence(login));
             if (credential === undefined)

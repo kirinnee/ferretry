@@ -661,5 +661,10 @@ export const WardenConfigViewSchema = z.strictObject({
   login: WardenLoginViewSchema.optional(),
   /** On a settings change only: the sentences of the edit the daemon held for the owner (a loosening waits for them). */
   held: z.array(z.string()).optional(),
+  /**
+   * Whether `warden.yaml` names the Jev key (`jev.key`) — the one thing the kernel needs before it will spend it. A
+   * fact about a reference, never the key. Absent from a daemon that predates it: the card then says what it did.
+   */
+  jevKey: z.enum(['named', 'not_named']).optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;

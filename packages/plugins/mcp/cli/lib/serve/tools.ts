@@ -900,14 +900,7 @@ const CARD_TOOLS: readonly McpToolDefinition[] = [
   },
 ];
 
-/**
- * Agent tools whose owner (Accounts) has not built them. An agent is not told to use a tool that cannot work (M2 ruling), so
- * the owner's manifest no longer declares them and this list keeps their definitions out of what the server lists, whatever
- * a manifest declares later; the parity test pins both.
- */
-const UNBUILT_TOOLS: ReadonlySet<string> = new Set(['account_propose', 'task_plan']);
-
-/** Every tool this server lists, in the order a model reads them: the built ones only. */
+/** Every tool this server lists, in the order a model reads them. */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...TERMINAL_AND_BROWSER_TOOLS,
   ...CONFIG_TOOLS,
@@ -915,4 +908,4 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
   ...SEARCH_TOOLS,
   ...CARD_TOOLS,
   INSTRUCTIONS_TOOL,
-].filter(tool => !UNBUILT_TOOLS.has(tool.name));
+];

@@ -108,6 +108,8 @@ export interface WardenSubsystem {
   run(spawn: boolean): Promise<WardenRunView>;
   config(): ReturnType<WardenSweepService['view']>;
   updateConfig(patch: unknown): ReturnType<WardenSweepService['updateConfig']>;
+  /** The owner's act of naming the Jev key in `warden.yaml`; held for the owner unless the kernel finds the caller is. */
+  nameJevKey(): ReturnType<WardenSweepService['view']>;
   agenda(scope?: WardenReadScope): Promise<WardenAgendaView>;
   investigate(ferret: string, note?: string): Promise<WardenInvestigateView>;
   leave(ferret: string, duration: '1h' | '4h' | 'until_change'): ReturnType<WardenSweepService['leaveAlone']>;
@@ -142,6 +144,11 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
     return await kernel.redaction.read(async scope => scope.text(summary));
   });
   const configStore = new ConfigWardenConfigStore(kernel.config);
+  /** Every settings answer says whether `warden.yaml` names the Jev key: a fact about a reference, never the key. */
+  const naming = <View extends object>(view: View): View & { readonly jevKey: 'named' | 'not_named' } => ({
+    ...view,
+    jevKey: configStore.jevKeyNamed() ? 'named' : 'not_named',
+  });
   // A settings screen hears warden.yaml move the moment the kernel reloads it, from any editor (not only on mount).
   kernel.config.watch(WARDEN_CONFIG, () => kernel.events.publish(WardenConfigChanged, {}));
 
@@ -447,8 +454,13 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
     verdicts: async scope => await reader.readVerdicts(undefined, scope),
     report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
     run: async spawn => await loop.run(spawn),
-    config: async () => await service.view(),
-    updateConfig: async patch => await service.updateConfig(parseWardenConfigPatch(patch)),
+    config: async () => naming(await service.view()),
+    updateConfig: async patch => naming(await service.updateConfig(parseWardenConfigPatch(patch))),
+    nameJevKey: async () => {
+      const held = await configStore.nameJevKey();
+      const view = naming(await service.view());
+      return held.length === 0 ? view : { ...view, held: [...held] };
+    },
     agenda: async scope => await service.agenda(scope),
     // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation starts now.
     investigate: async (ferret, note) => {
