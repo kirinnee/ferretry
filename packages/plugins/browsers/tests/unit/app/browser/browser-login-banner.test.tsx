@@ -100,6 +100,100 @@ describe('BrowserLoginBanner', () => {
     await view.unmount();
   });
 
+  it('wears the danger tone for an error or unknown status, distinct from opening and closing', async () => {
+    const tone = async (
+      status: BrowserLoginSnapshot,
+    ): Promise<{ readonly data: string | null; readonly cls: string }> => {
+      const view = await mount(<BrowserLoginBanner status={status} onClose={async () => closed} />);
+      const aside = must(view.container.querySelector('aside'), 'the status strip');
+      const result = { data: aside.getAttribute('data-tone'), cls: aside.className };
+      await view.unmount();
+      return result;
+    };
+    const failure = await tone({ state: 'error', profilePrimed: false, error: 'no display' });
+    expect(failure.data).toBe('err');
+    expect(failure.cls).toContain('bg-err-bg');
+    expect(failure.cls).toContain('text-err');
+    const unknown = await tone({ state: 'unknown', error: 'network unavailable' });
+    expect(unknown.data).toBe('err');
+    expect(unknown.cls).toContain('border-err-border');
+    const opening = await tone({ state: 'opening', profilePrimed: false });
+    expect(opening.data).toBe('warn');
+    expect(opening.cls).toContain('bg-warn-bg');
+    expect(opening.cls).not.toContain('err');
+    // The window itself is a warm, in-progress strip, never a failure.
+    expect((await tone(open)).cls).not.toContain('err');
+  });
+
+  it('lets the reason wrap in full instead of truncating it', async () => {
+    const reason = 'the human browser could not be reached over the tunnel';
+    const view = await mount(
+      <BrowserLoginBanner
+        status={{ state: 'error', profilePrimed: false, error: reason }}
+        onClose={async () => closed}
+      />,
+    );
+    const text = must(view.container.querySelector('[role="status"] span span'), 'the reason');
+    expect(text.textContent).toContain(reason);
+    expect(text.className).not.toContain('truncate');
+    await view.unmount();
+  });
+
+  it('keeps the countdown on its own unbreakable unit and the connection rows wrapping, with Copy always shown', async () => {
+    const view = await mount(<BrowserLoginBanner status={open} onClose={async () => closed} now={NOW} />);
+    const countdown = must(
+      [...view.container.querySelectorAll('span')].find(span => span.textContent === 'closes in 1:01'),
+      'the countdown unit',
+    );
+    expect(countdown.className).toContain('whitespace-nowrap');
+    expect(countdown.parentElement?.className).not.toContain('truncate');
+    const ssh = must(
+      [...view.container.querySelectorAll('code')].find(code => code.textContent?.startsWith('ssh -N')),
+      'the SSH command',
+    );
+    expect(ssh.className).toContain('overflow-wrap:anywhere');
+    const box = must(ssh.parentElement?.parentElement, 'the details box');
+    expect(box.className).not.toContain('overflow-auto');
+    expect(box.className).not.toContain('max-h');
+    expect(ssh.parentElement?.querySelector('button')?.className).toContain('shrink-0');
+    await view.unmount();
+  });
+
+  it('runs its one-second timer only while the window is open', async () => {
+    const realSet = globalThis.setInterval;
+    const realClear = globalThis.clearInterval;
+    const live = new Set<unknown>();
+    globalThis.setInterval = ((handler: () => void, delay?: number) => {
+      const id = realSet(handler, delay);
+      if (delay === 1_000) live.add(id);
+      return id;
+    }) as typeof setInterval;
+    globalThis.clearInterval = ((id?: Parameters<typeof clearInterval>[0]) => {
+      live.delete(id);
+      realClear(id);
+    }) as typeof clearInterval;
+    try {
+      const shut = await mount(<BrowserLoginBanner status={closed} onClose={async () => closed} />);
+      expect(live.size).toBe(0);
+      await shut.unmount();
+      const failed = await mount(
+        <BrowserLoginBanner
+          status={{ state: 'error', profilePrimed: false, error: 'x' }}
+          onClose={async () => closed}
+        />,
+      );
+      expect(live.size).toBe(0);
+      await failed.unmount();
+      const running = await mount(<BrowserLoginBanner status={open} onClose={async () => closed} />);
+      expect(live.size).toBe(1);
+      await running.unmount();
+      expect(live.size).toBe(0);
+    } finally {
+      globalThis.setInterval = realSet;
+      globalThis.clearInterval = realClear;
+    }
+  });
+
   it('reports whether the reader signed in, then folds its menu away', async () => {
     const calls: boolean[] = [];
     const view = await mount(

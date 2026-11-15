@@ -11,9 +11,15 @@
  */
 
 import { Button } from '@ferretry/app/ui';
-import { ChevronDown, Copy, KeyRound, ShieldAlert } from 'lucide-react';
+import { ChevronDown, Copy, KeyRound, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
+
+/** The app's own tone tokens (`warn-*` for in-progress, `err-*` for a failure); no colour is invented here. */
+const LOGIN_TONE = {
+  warn: 'border-warn-border bg-warn-bg text-warn',
+  err: 'border-err-border bg-err-bg text-err',
+} as const;
 
 /** `m:ss` until the window closes itself, or a plain "expiry unknown" when the time cannot be read. */
 export function browserLoginRemaining(expiresAt: string | undefined, now = Date.now()): string {
@@ -36,11 +42,21 @@ function CopyLine({ label, value }: { readonly label: string; readonly value: st
     }
   };
 
+  // The value column is `minmax(0,1fr)` and the value itself breaks anywhere, so a long command wraps inside the box on
+  // a phone instead of pushing the Copy button out of view. Copy never shrinks and never leaves the row.
   return (
-    <div className="grid min-w-max grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-xs py-1">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-xs py-1">
       <span className="font-medium text-muted">{label}</span>
-      <code className="select-all font-mono text-meta text-fg">{value}</code>
-      <Button type="button" variant="ghost" size="sm" onClick={() => void copy()} className="min-h-[32px] px-2">
+      <code className="min-w-0 select-all break-words font-mono text-meta text-fg [overflow-wrap:anywhere]">
+        {value}
+      </code>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        onClick={() => void copy()}
+        className="min-h-[32px] shrink-0 px-2"
+      >
         <Copy size={13} aria-hidden="true" />
         <span>{copied ? 'Copied' : 'Copy'}</span>
       </Button>
@@ -62,11 +78,14 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
   const [busy, setBusy] = useState(false);
   const [liveNow, setLiveNow] = useState(() => Date.now());
 
+  // Only an OPEN window has a countdown to draw, so only then does a one-second timer run.
+  const counting = status?.state === 'open';
   useEffect(() => {
-    if (fixedNow !== undefined) return undefined;
+    if (fixedNow !== undefined || !counting) return undefined;
+    setLiveNow(Date.now());
     const interval = setInterval(() => setLiveNow(Date.now()), 1_000);
     return () => clearInterval(interval);
-  }, [fixedNow]);
+  }, [fixedNow, counting]);
 
   // A closed window draws nothing. A FAILED read is not closed: it says so below, rather than looking like no banner.
   if (status === null || status.state === 'closed') return null;
@@ -89,15 +108,20 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
         : detail === undefined
           ? `Browser login ${status.state}`
           : `Browser login ${status.state} · ${detail}`;
+    // A failed or unreadable status is a FAILURE, not progress: it wears the danger tone and its own icon, and its
+    // reason wraps in full (it is shown nowhere else).
+    const failed = status.state === 'error' || status.state === 'unknown';
+    const Icon = failed ? TriangleAlert : ShieldAlert;
     return (
       <aside
         role="status"
         aria-live="polite"
-        className="shrink-0 border-b border-warn/30 bg-warn-soft px-panel py-1.5 text-ui text-warn"
+        data-tone={failed ? 'err' : 'warn'}
+        className={`shrink-0 border-b px-panel py-1.5 text-ui ${failed ? LOGIN_TONE.err : LOGIN_TONE.warn}`}
       >
-        <span className="flex min-w-0 items-center gap-xs">
-          <ShieldAlert size={15} aria-hidden="true" className="shrink-0" />
-          <span className="truncate">{words}</span>
+        <span className="flex min-w-0 items-start gap-xs">
+          <Icon size={15} aria-hidden="true" className="mt-0.5 shrink-0" />
+          <span className="min-w-0 break-words [overflow-wrap:anywhere]">{words}</span>
         </span>
       </aside>
     );
@@ -106,13 +130,19 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
   const { connection } = status;
   return (
     <aside
-      className="shrink-0 border-b border-warn/30 bg-warn-soft px-panel py-1.5 text-ui text-warn"
+      className={`shrink-0 border-b px-panel py-1.5 text-ui ${LOGIN_TONE.warn}`}
+      data-tone="warn"
       aria-label="Browser login window"
     >
-      <div className="flex min-w-0 items-center gap-xs">
-        <KeyRound size={15} aria-hidden="true" className="shrink-0" />
-        <span className="min-w-0 flex-1 truncate font-medium">
-          Browser login window open · closes in {browserLoginRemaining(status.expiresAt, fixedNow ?? liveNow)}
+      <div className="flex min-w-0 items-start gap-xs">
+        <KeyRound size={15} aria-hidden="true" className="mt-1 shrink-0" />
+        {/* The title wraps, and the countdown is one unbreakable unit, so on a phone it drops to its own line
+            rather than being ellipsised away. */}
+        <span className="min-w-0 flex-1 py-1 font-medium">
+          Browser login window open ·{' '}
+          <span className="whitespace-nowrap">
+            closes in {browserLoginRemaining(status.expiresAt, fixedNow ?? liveNow)}
+          </span>
         </span>
         <Button
           type="button"
@@ -121,13 +151,13 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
           disabled={busy}
           onClick={() => setMenuOpen(value => !value)}
           aria-expanded={menuOpen}
-          className="min-h-[32px] shrink-0 border-warn/40 bg-surface px-2 text-warn hover:text-fg"
+          className="min-h-[32px] shrink-0 border-warn-border bg-surface px-2 text-warn hover:text-fg"
         >
           Close <ChevronDown size={13} aria-hidden="true" />
         </Button>
       </div>
       {menuOpen && (
-        <fieldset className="mt-1 grid gap-xs border-t border-warn/30 pt-1" aria-label="Close browser login window">
+        <fieldset className="mt-1 grid gap-xs border-t border-warn-border pt-1" aria-label="Close browser login window">
           <Button
             type="button"
             variant="primary"
@@ -148,9 +178,10 @@ export function BrowserLoginBanner({ status, onClose, now: fixedNow }: BrowserLo
           </Button>
         </fieldset>
       )}
-      <details className="mt-1 border-t border-warn/30 pt-1 text-fg">
+      <details className="mt-1 border-t border-warn-border pt-1 text-fg">
         <summary className="cursor-pointer select-none text-meta font-medium text-warn">Connection details</summary>
-        <div className="mt-1 max-h-36 overflow-auto rounded-control border border-warn/30 bg-surface px-2 py-1">
+        {/* No height cap and no scroll: the rows wrap, so nothing is clipped and every Copy button stays in view. */}
+        <div className="mt-1 min-w-0 rounded-control border border-warn-border bg-surface px-2 py-1">
           <CopyLine label="VNC" value={`${connection.host}:${connection.port}`} />
           <CopyLine label="Password" value={connection.password} />
           <CopyLine label="SSH" value={connection.sshTunnel} />
