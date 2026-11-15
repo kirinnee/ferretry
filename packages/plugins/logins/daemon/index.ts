@@ -37,6 +37,7 @@ import { suggestedOllamaModel } from './lib/local-models/ollama.ts';
 import { LocalModelsService } from './lib/local-models/service.ts';
 import { CREDENTIAL_LIST_FRESH_MS, FleetCredentialsService } from './lib/credentials/credentials-service.ts';
 import { CredentialStatusService } from './lib/credentials/credential-status.ts';
+import { CodexPassiveReading } from './lib/credentials/passive-codex.ts';
 import { HarnessLoginService } from './lib/harness-login/service.ts';
 import { loginKinds } from './lib/kinds.ts';
 import { environmentTemplates } from './lib/profile-templates.ts';
@@ -58,6 +59,11 @@ import { HOSTED_APP_ORIGIN, HOSTED_APP_RELEASE_KEY } from './lib/shared/hosted.t
 import { endpointFiles, loginFiles, modelFiles } from './lib/config.ts';
 import { sanitizeHarnessEnv } from './lib/shared/harness-env.ts';
 import type { HarnessKind } from './lib/shared/harness.ts';
+
+/** How often the Codex passive reading looks for a rollout that moved: an unchanged one costs a stat. */
+const CODEX_PASSIVE_USAGE_INTERVAL_MS = 30_000;
+/** The kernel job that runs it. */
+export const CODEX_PASSIVE_USAGE_JOB = 'logins.codex-passive-usage';
 
 /** A harness's wrapper is a program the manifest declared in `permissions.spawn`; the kernel resolves the name. */
 const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', codex: 'codex' };
@@ -183,6 +189,42 @@ export function buildLoginsDaemon() {
             const budgets = hooks.provider(LoginsBudget, 'usage');
             return budgets === 'unavailable' ? undefined : budgets.view(id);
           },
+        },
+      });
+
+      // The Codex logins' usage stays fresh from the rollouts of the ferrets launched on them (§8.2.3): one pass on an
+      // interval, over the transcripts Ferrets' harness proved to be those ferrets' own. Ferrets off reads as no ferrets.
+      const codexPassive = new CodexPassiveReading({
+        logins: async () =>
+          (await catalog.entries()).entries.flatMap(entry =>
+            entry.credential.harness === 'codex'
+              ? [{ subject: { id: entry.id, resolution: entry.resolution }, usedBy: entry.usedBy }]
+              : [],
+          ),
+        sessions: async () => {
+          const ferrets = uses.ferrets.current();
+          if (ferrets === undefined) return [];
+          return (await ferrets.list()).flatMap(ferret =>
+            ferret.harness === 'codex' && ferret.state !== 'stopped'
+              ? [
+                  {
+                    id: ferret.id,
+                    ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
+                    ...(ferret.login === undefined ? {} : { login: ferret.login }),
+                    open: async () => await (await ferrets.harness?.(ferret.id))?.transcriptBytes?.(),
+                  },
+                ]
+              : [],
+          );
+        },
+        write: (subject, record) => store.recordPassiveUsage(subject, record),
+      });
+      jobs.add({
+        id: CODEX_PASSIVE_USAGE_JOB,
+        schedule: { every: milliseconds(CODEX_PASSIVE_USAGE_INTERVAL_MS) },
+        lane: 'worker',
+        run: async () => {
+          await codexPassive.pass();
         },
       });
 

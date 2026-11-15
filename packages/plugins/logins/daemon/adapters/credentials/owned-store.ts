@@ -18,11 +18,12 @@ import {
   InMemoryCredentialStatusStore,
   localCredentialFacts,
   type CredentialStatusPorts,
+  type CredentialSubject,
   type LocalCredentialFacts,
 } from '../../lib/credentials/credential-status.ts';
 import { resolveCredentialStore, type StoredCredentialResolution } from '../../lib/credentials/credentials.ts';
 import type { FleetTokenRefreshPort } from '../../lib/credentials/token-refresh.ts';
-import { PassiveUsageRecordSchema } from '../../lib/credentials/usage.ts';
+import { PassiveUsageRecordSchema, type PassiveUsageRecord } from '../../lib/credentials/usage.ts';
 import { classifyCredential, type CredentialMaterial } from '../../lib/shared/identity.ts';
 import type { CredentialStoreCheck, CredentialStoreInspection } from '../../lib/shared/store-inspection.ts';
 import { credentialFingerprint } from './credential-classifier.ts';
@@ -38,7 +39,10 @@ const HOST_CLAUDE_TERMINAL =
   'this login uses the sign-in in your terminal (store: host); Ferretry does not read or change it, so sign in or out with claude in your terminal';
 
 /** The calls this store makes on the kernel's `credentials` root. No host-home or keychain authority exists here. */
-export type OwnedLoginRoot = Pick<RootHandle, 'resolve' | 'readText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'>;
+export type OwnedLoginRoot = Pick<
+  RootHandle,
+  'resolve' | 'readText' | 'writeText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'
+>;
 
 const describe = (info: Pick<RootLstat, 'kind' | 'size' | 'modified' | 'mode' | 'links'>): string =>
   `${info.kind}:${info.size}:${String(info.modified)}:${info.mode}:${info.links}`;
@@ -213,6 +217,18 @@ export class OwnedLoginStore {
     }
     if (stamp !== undefined) this.#emails.set(path, { stamp, email });
     return email;
+  }
+
+  /**
+   * Records a login's passive reading where `passiveUsage` reads it: `<its owned directory>/usage.json`, exactly the
+   * file `fy statusline` writes for a Claude login (one JSON line, replaced whole, `0600`). A login this daemon does
+   * not own has no such file, so nothing is written for it.
+   */
+  async recordPassiveUsage(subject: CredentialSubject, record: PassiveUsageRecord): Promise<void> {
+    const resolution = subject.resolution;
+    if (resolution.store !== 'ferretry' || 'unavailable' in resolution || resolution.ownedDirectory === undefined)
+      return;
+    await this.root.writeText(this.#path(`${resolution.ownedDirectory}/usage.json`), `${JSON.stringify(record)}\n`);
   }
 
   statusPorts(options: {
