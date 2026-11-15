@@ -80,13 +80,22 @@ function connectWith(
   preferences?: Parameters<typeof buildConnect>[1],
 ) {
   const listeners: Array<(signal: ConnectionSignal) => void> = [];
+  const caches: Array<{ clearDaemon(daemonId: string): void }> = [];
+  const timers: Array<{ readonly delayMs: number; readonly run: () => void }> = [];
   const ports = {
     openSocket: () => {
       throw new Error('nothing dials here');
     },
-    after: () => undefined,
+    after: (delayMs: number, run: () => void) => void timers.push({ delayMs, run }),
     now: () => 0,
-    daemons: { registerCache: () => () => undefined, get: list.get, setCarriers: list.setCarriers },
+    daemons: {
+      registerCache: (cache: { clearDaemon(daemonId: string): void }) => {
+        caches.push(cache);
+        return () => undefined;
+      },
+      get: list.get,
+      setCarriers: list.setCarriers,
+    },
   } as unknown as ConnectPorts;
   const connect = buildConnect(
     ports,
@@ -101,11 +110,15 @@ function connectWith(
   );
   return {
     connect,
+    timers,
+    caches,
     signal: (signal: ConnectionSignal) => {
       for (const listener of listeners) listener(signal);
     },
   };
 }
+
+const OUTAGE = { failures: [], daemonAbsent: true, relaysNeverOpened: false } as const;
 
 const settle = () => runAsync(async () => void (await new Promise(resolve => setTimeout(resolve, 5))));
 
@@ -372,5 +385,122 @@ describe('the new network and the Connection panel', () => {
     await settle();
     expect(JSON.stringify(full.toJSON())).not.toContain('WebRTC isn’t available in this build yet');
     run(() => full.unmount());
+  });
+});
+
+describe('a reconnecting machine and its outage sheet', () => {
+  /** A mounted background view: the router's client for this machine, so the reconnect loop has something to read through. */
+  async function held(wired: ReturnType<typeof connectWith>, answers: Record<string, unknown>) {
+    const fake = fakeClient({ 'GET /v1/carriers': { carriers: [DIRECT] }, ...answers });
+    const View = carrierWriteBackView(
+      () => wired.connect.carrierSets,
+      () => wired.connect,
+    );
+    const mounted = render(createElement(View, { daemon: DAEMON, client: fake.client }));
+    await settle();
+    return { fake, unmount: () => run(() => mounted.unmount()) };
+  }
+  const carrierReads = (calls: readonly string[]): number => calls.filter(call => call === 'GET /v1/carriers').length;
+
+  test('R88 back online or back in the foreground, a reconnecting machine is retried at once, not at its backoff timer', async () => {
+    for (const signal of ['online', 'visible', 'network-change'] as const) {
+      const wired = connectWith(storedList([DIRECT]));
+      const { fake, unmount } = await held(wired, {});
+      wired.connect.health.outage(DAEMON, OUTAGE);
+      // The first retry waits out its backoff: nothing has asked the machine again, however long the test waits.
+      await settle();
+      const before = carrierReads(fake.calls);
+      expect(wired.timers.some(timer => timer.delayMs >= 150)).toBe(true);
+      expect(wired.connect.health.state(DAEMON)).toMatchObject({ kind: 'reconnecting', attempt: 0 });
+
+      wired.signal(signal);
+      await settle();
+
+      expect(wired.connect.health.state(DAEMON)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
+      expect(carrierReads(fake.calls)).toBe(before + 1);
+      unmount();
+    }
+  });
+
+  test('R88 a machine that is not reconnecting is not asked again by a signal', async () => {
+    const wired = connectWith(storedList([DIRECT]));
+    const { fake, unmount } = await held(wired, {});
+    const before = carrierReads(fake.calls);
+
+    wired.signal('online');
+    await settle();
+
+    expect(carrierReads(fake.calls)).toBe(before);
+    expect(wired.connect.health.state(DAEMON)).toEqual({ kind: 'unknown' });
+    unmount();
+  });
+
+  test('R88 the loop schedules its attempts on the shell’s timer, and a retry done at once leaves the old timer inert', async () => {
+    const wired = connectWith(storedList([DIRECT]));
+    const { fake, unmount } = await held(wired, {});
+    wired.connect.health.outage(DAEMON, OUTAGE);
+    const backoff = wired.timers.at(-1);
+    wired.signal('online');
+    await settle();
+    const after = carrierReads(fake.calls);
+
+    // The backoff the retry-now cancelled fires anyway (the shell's timer cannot be recalled): it does nothing.
+    backoff?.run();
+    await settle();
+
+    expect(carrierReads(fake.calls)).toBe(after);
+    unmount();
+  });
+
+  test('R88 a walk that finds nothing to carry is an outage (the router feeds the health model)', async () => {
+    // Auto walks the published direct address first; nothing answers it here.
+    const preferences = new CarrierPreferenceStore();
+    preferences.set(DAEMON, 'auto');
+    const wired = connectWith(storedList([DIRECT]), undefined, preferences);
+    const daemon = storedList([DIRECT]).get(DAEMON) as PairedDaemon;
+    const closed: number[] = [];
+    run(() => {
+      wired.connect.router.dial(daemon)({
+        onBinary: () => undefined,
+        onText: () => undefined,
+        onClose: code => closed.push(code),
+      });
+    });
+    await settle();
+
+    expect(closed).toHaveLength(1);
+    expect(wired.connect.health.state(DAEMON).kind).toBe('reconnecting');
+  });
+
+  test('an unpaired machine is no longer reconnecting', async () => {
+    const wired = connectWith(storedList([DIRECT]));
+    wired.connect.health.outage(DAEMON, OUTAGE);
+    expect(wired.connect.health.reconnecting()).toEqual([DAEMON]);
+
+    for (const cache of wired.caches) cache.clearDaemon(DAEMON);
+
+    expect(wired.connect.health.reconnecting()).toEqual([]);
+  });
+
+  test('S-0145 the Connection panel shows one machine’s outage while it is reconnecting, and not before', async () => {
+    const wired = connectWith(storedList([DIRECT]));
+    const fake = fakeClient({ 'GET /v1/carriers': { carriers: [DIRECT] } });
+    const Panel = buildConnectionsApp({ manifest, client: fake.client }, undefined, undefined, {
+      webrtc: undefined,
+      tunnelSwitch: wired.connect.tunnelSwitch,
+      health: wired.connect.health,
+    }).panels.carrier;
+
+    const drawn = render(createElement(Panel));
+    await settle();
+    expect(JSON.stringify(drawn.toJSON())).not.toContain('data-connection-outage');
+
+    run(() => wired.connect.health.outage(DAEMON, OUTAGE));
+    expect(JSON.stringify(drawn.toJSON())).toContain('data-connection-outage');
+    expect(JSON.stringify(drawn.toJSON())).toContain('"data-connection-status":"reconnecting"');
+
+    run(() => wired.connect.health.answered(DAEMON));
+    expect(JSON.stringify(drawn.toJSON())).not.toContain('data-connection-outage');
+    run(() => drawn.unmount());
   });
 });

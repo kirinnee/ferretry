@@ -67,6 +67,15 @@ export class IntroducerRegistry {
     };
   }
 
+  /**
+   * ONE REAL READ OF THIS MACHINE, THROUGH THE ROUTER'S OWN WALK: the reconnect loop's attempt. It is an ordinary `GET
+   * /v1/carriers` through the held client, so it dials like any request and its outcome reaches the health model
+   * through the router like any other; nothing here reads it back. With no client held there is nothing to ask.
+   */
+  async read(daemonId: string): Promise<void> {
+    await this.#clients.get(daemonId)?.call('GET /v1/carriers');
+  }
+
   /** The request for this daemon, or `undefined` while no half of Connections holds a client for it. */
   request(daemonId: string): IntroducerRequest | undefined {
     const client = this.#clients.get(daemonId);

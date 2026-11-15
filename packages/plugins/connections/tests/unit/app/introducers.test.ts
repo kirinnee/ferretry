@@ -62,6 +62,18 @@ describe('the clients the router asks through', () => {
     expect(fake.calls[1]?.init?.body).toEqual({ sdp: 'offer' });
   });
 
+  test('R88 the reconnect loop reads the machine through its held client, and has nothing to ask with none', async () => {
+    const registry = new IntroducerRegistry();
+    const fake = clientAnswering({ carriers: [] });
+
+    await registry.read('daemon-a');
+    expect(fake.calls).toEqual([]);
+    registry.attach('daemon-a', fake.client);
+    await registry.read('daemon-a');
+
+    expect(fake.calls.map(call => call.route)).toEqual(['GET /v1/carriers']);
+  });
+
   test('R636 a refusal is the daemon’s answer with its status and sentence; a call that got no answer rejects', async () => {
     const registry = new IntroducerRegistry();
     registry.attach('refusing', clientAnswering(new DaemonCallError(409, 'webrtc_busy', 'WebRTC is busy')).client);

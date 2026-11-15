@@ -51,6 +51,30 @@ test('R121 the direct carrier discloses only the parties actually on its path', 
   for (const observer of describeConnectionMethod(direct).observers) expect(html).toContain(observer);
   expect(html).not.toContain('fy_daemon_');
 });
+test('S-0145 one machine’s outage shows its lost-for cause and the carriers tried, only while it is reconnecting', () => {
+  const outage = {
+    kind: 'reconnecting',
+    since: 0,
+    attempt: 2,
+    nextAttemptAt: null,
+    failures: [{ label: 'Direct', detail: 'refused' }],
+    cause: 'daemon-unreachable',
+    stalled: false,
+  } as const;
+  const choice = chooseConnection([{ method: direct, reachable: true }]);
+  const drawn = (health: Parameters<typeof ActiveCarrierCard>[0]['health']) =>
+    renderToStaticMarkup(
+      createElement(ActiveCarrierCard, { choice, relayAdvertised: true, health, machine: 'studio' }),
+    );
+
+  const down = drawn(outage);
+  expect(down).toContain('data-connection-outage');
+  expect(down).toContain('data-connection-status="reconnecting"');
+  expect(down).toContain('Direct: refused');
+  expect(down).toContain('Last connected over');
+  expect(drawn({ kind: 'connected' })).not.toContain('data-connection-outage');
+  expect(drawn(undefined)).not.toContain('data-connection-outage');
+});
 test('R15 the card links the self-hosting runbook and offers no relay setting of its own', () => {
   const html = renderToStaticMarkup(createElement(ActiveCarrierCard, { choice: undefined, relayAdvertised: true }));
   expect(html).toContain('Running your own relay is an expert option set on the daemon, not in this app.');

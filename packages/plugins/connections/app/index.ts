@@ -14,6 +14,11 @@ import { CarrierPreferenceStore, settingOf } from './lib/carrier-preference.ts';
 import { watchCarriers } from './lib/carrier-watch.ts';
 import { type CarrierWriteBack, carrierWriteBack } from './lib/carrier-write-back.ts';
 import {
+  browserConnectionHealthEnvironment,
+  type ConnectionHealthState,
+  DaemonConnectionHealth,
+} from './lib/connection-health.ts';
+import {
   browserConnectionSignals,
   type ConnectionSignalEnvironment,
   watchConnectionSignals,
@@ -39,6 +44,9 @@ export interface ConnectionMeasurements {
   relayFallback?(daemonId: string): string | undefined;
   subscribe(listener: () => void): () => void;
 }
+
+/** The health snapshot of a half built with no health model: one stable value, since a store snapshot must be. */
+const UNMEASURED_HEALTH: ConnectionHealthState = Object.freeze({ kind: 'unknown' });
 
 const unmeasured: ConnectionMeasurements = { choice: () => undefined, subscribe: () => () => undefined };
 
@@ -86,7 +94,25 @@ export function buildConnect(
       if (tunnel !== undefined) carrierSets.replaceTunnel(daemon.daemonId, tunnel ?? undefined);
     },
   });
+  // The one fact of how well this browser reaches each machine, fed by the router's dial results; its reconnect loop's
+  // attempt is a real read through the router (R88). Document-lifetime, like the router.
+  const health = new DaemonConnectionHealth(
+    browserConnectionHealthEnvironment({
+      now: ports.now,
+      schedule: (run, delayMs) => {
+        let live = true;
+        ports.after(delayMs, () => {
+          if (live) run();
+        });
+        return () => {
+          live = false;
+        };
+      },
+    }),
+    daemonId => introducers.read(daemonId),
+  );
   const router = new CarrierRouter({
+    health,
     openSocket: ports.openSocket,
     after: ports.after,
     now: ports.now,
@@ -114,17 +140,20 @@ export function buildConnect(
   preferences.subscribe(daemonId => router.rewalk(daemonId));
   // Back online, back in the foreground, a new network: prove every held session is still alive (4 s) rather than
   // waiting for its next ping. Document-lifetime, like the router (`registeredConnect` builds this once per document).
-  // GAP(parity): R88's "retry every outage now" is NOT wired — no reconnect loop is built in this half yet, so a daemon
-  // that is reconnecting waits for its backoff timer. Said out loud here (and in ports-pending.json) rather than hidden
-  // by an optional field. A new network DOES drop every WebRTC path (R685: no ICE restart; the next dial negotiates
-  // afresh over the network the device is on now).
+  // A reconnecting machine is retried at once rather than waiting out its backoff (R88). A new network also drops every
+  // WebRTC path (R685: no ICE restart; the next dial negotiates afresh over the network the device is on now).
   watchConnectionSignals(signals, {
-    reconnecting: () => [],
-    retryNow: () => {},
+    reconnecting: () => health.reconnecting(),
+    retryNow: daemonId => health.retryNow(daemonId),
     networkChanged: () => webrtc?.networkChanged(),
     checkLiveness: () => router.checkLiveness(),
   });
-  ports.daemons.registerCache({ clearDaemon: daemonId => router.clearDaemon(daemonId) });
+  ports.daemons.registerCache({
+    clearDaemon: daemonId => {
+      router.clearDaemon(daemonId);
+      health.clearDaemon(daemonId);
+    },
+  });
   const pairing = pairingWalk({ openSocket: ports.openSocket, after: ports.after, hostedRelay: discovery.hostedRelay });
   return {
     router,
@@ -135,6 +164,7 @@ export function buildConnect(
     introducers,
     tunnelSwitch,
     webrtc,
+    health,
     daemons: ports.daemons,
   };
 }
@@ -144,11 +174,12 @@ export function buildConnectionsApp(
   measurements: ConnectionMeasurements = connect?.router ?? unmeasured,
   preferences: CarrierPreferenceStore = connect?.preferences ?? new CarrierPreferenceStore(),
   /** The machine's tunnel switch and the WebRTC dialer: what the preference screen and the panel read (R635, R677). */
-  live: Pick<Connect, 'tunnelSwitch' | 'webrtc'> | undefined = connect,
+  live: (Pick<Connect, 'tunnelSwitch' | 'webrtc'> & Partial<Pick<Connect, 'health'>>) | undefined = connect,
 ) {
   const daemonId = daemonOfClient(ctx.client);
   const tunnelSwitch = live?.tunnelSwitch;
   const webrtc = live?.webrtc;
+  const health = live?.health;
   /**
    * The published set as the daemon last answered it, for the screens of this half. It watches the daemon only while a
    * screen is subscribed to it, and stops with the last one, so a half rebuilt on every reconnect leaves no listener
@@ -227,8 +258,15 @@ export function buildConnectionsApp(
     );
     const choice = useCarrierRtt(measured, webrtc === undefined ? undefined : measureRtt);
     const relayFallback = daemonId === undefined ? undefined : measurements.relayFallback?.(daemonId);
+    // One machine's outage: its lost-for time, the automatic attempt count and the cause (S-0145).
+    const outage = useSyncExternalStore(
+      listener =>
+        health === undefined || daemonId === undefined ? () => undefined : health.subscribe(daemonId, listener),
+      () => (health === undefined || daemonId === undefined ? UNMEASURED_HEALTH : health.state(daemonId)),
+    );
     return createElement(ActiveCarrierCard, {
       choice,
+      health: outage,
       relayAdvertised: carriers.some(c => c.kind === 'relay'),
       ...(daemonId === undefined ? {} : { daemon: daemonId }),
       ...(relayFallback === undefined ? {} : { relayFallback }),
