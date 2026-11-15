@@ -1,5 +1,6 @@
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { milliseconds } from '@ferretry/std';
 import {
   AGENDA_CONFIG,
   AgendaBuzzed,
@@ -11,7 +12,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { StateBuzzLedger } from './adapters/state-buzz-ledger.ts';
-import { StateModeStore, StateSeenStore } from './adapters/state-stores.ts';
+import { StateModeStore, StateNudgeStore, StateSeenStore } from './adapters/state-stores.ts';
 import { AgendaModeService, adoptAgendaDefault } from './lib/agenda-mode.ts';
 import { agendaArchiveKeeps } from './lib/archive-keeps.ts';
 import { agendaLaunchPart } from './lib/launch-parts.ts';
@@ -28,7 +29,7 @@ import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
 import { AgendaReferenceMenu } from './lib/reference-menu.ts';
-import { AgendaTurnNudge } from './lib/turn-nudge.ts';
+import { AGENDA_NUDGE_ID_PREFIX, AgendaTurnNudge } from './lib/turn-nudge.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
 import { buzzBody, buzzTitle } from './lib/words.ts';
@@ -68,6 +69,7 @@ export default implementDaemon(manifest, {
     const ledger = new StateBuzzLedger(state);
     const seen = new StateSeenStore(state);
     const modeStore = new StateModeStore(state);
+    const nudgeStore = new StateNudgeStore(state);
     const warn = (message: string): void => log.warn(message);
 
     const buzzes = new BuzzService({
@@ -134,10 +136,30 @@ export default implementDaemon(manifest, {
     /**
      * THE TURN-END CHECK: a ferret that ends a turn asking the owner for something it did not raise gets one nudge, typed
      * through Conversation as Agenda's own words (`{ kind: 'agenda' }`, fixed text; only the ferret's own asks are quoted back
-     * to it). A ferret that is stopped or gone is never nudged: the nudge must not revive it.
+     * to it). A ferret that is stopped or gone is never nudged: Conversation refuses an Agenda send to one, so a nudge
+     * can never revive it. One nudge per ferret until a message that is not Agenda's reaches it (state/agenda/nudges.json).
      */
     const turnNudge = new AgendaTurnNudge(
       {
+        mark: async ferret => await nudgeStore.mark(ferret),
+        reserve: async (ferret, taken, replacing) => await nudgeStore.reserve(ferret, taken, replacing),
+        release: async (ferret, sendId) => await nudgeStore.release(ferret, sendId),
+        pause: async ms =>
+          await new Promise<void>(resolve => {
+            kernel.clock.after(milliseconds(ms), resolve);
+          }),
+        now: () => String(clock.now()),
+        sends: async ferret => {
+          const read = await uses.conversation.current()?.sends(ferret as FerretId);
+          return (read?.sends ?? [])
+            .filter(send => send.withdrawn !== true)
+            .map(send => ({
+              sendId: send.sendId,
+              acceptedAt: send.acceptedAt,
+              message: send.message,
+              agenda: send.by?.feature === 'Agenda' || send.sendId.startsWith(AGENDA_NUDGE_ID_PREFIX),
+            }));
+        },
         enabled: () => config().agendaNudge,
         subject: async ferret => {
           const summary = await ferrets.get(ferret as FerretId);
@@ -230,10 +252,10 @@ export default implementDaemon(manifest, {
           },
         ],
         // A ferret's round ended: only one that finished its work is checked (an interrupted or failed round said nothing).
-        'turn.ended': ({ ferret, turn, outcome }) => {
+        'turn.ended': ({ ferret, outcome }) => {
           if (outcome !== 'completed') return;
           void turnNudge
-            .check(ferret, turn)
+            .check(ferret)
             .catch(error => warn(`agenda could not check the end of a turn of ${ferret}: ${String(error)}`));
         },
         'ferret.changed': ({ ferret, state: now, previous, change }) => {

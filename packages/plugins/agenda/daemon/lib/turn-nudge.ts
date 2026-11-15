@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { ownerAsks } from '@ferretry/core-asks/contract';
 import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 
@@ -10,8 +11,10 @@ import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
  * owner to act (`ownerAsks`, a structural detector) and the turn raised fewer items than it asked for, the ferret gets
  * ONE short message saying which asks to raise, or to say why not.
  *
- * - **Once per turn, never a loop.** The send id is the turn's own, so a turn end observed twice is one send. A turn the
- *   nudge itself started is never checked: its opener carries {@link AGENDA_NUDGE_MARK}.
+ * - **Never a loop.** A ferret is nudged at most ONCE until a message that is not Agenda's reaches it ({@link nudgeSpent},
+ *   kept in Agenda's own state so a restart does not reset it). The send id is keyed on the reply, so a turn end observed
+ *   twice is one send. A turn the nudge itself started is also never checked: its opener carries
+ *   {@link AGENDA_NUDGE_MARK} or says the words of Agenda's newest send ({@link startedByNudge}).
  * - **Only replies the owner reads.** A helper's reply goes to the ferret that started it, which raises what the owner
  *   must do, so a helper is never checked (Pack mode).
  * - **Evidence over inference.** The turn's own tool calls are what count as "raised": a command running `agenda add|edit`
@@ -23,6 +26,9 @@ import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 
 /** The first words of every nudge: how a later turn knows the nudge started it. */
 export const AGENDA_NUDGE_MARK = '[attention check]';
+
+/** How every nudge's send id begins; with the send's author, how a send is known as Agenda's. */
+export const AGENDA_NUDGE_ID_PREFIX = 'attention-nudge-';
 
 /** How many transcript events back the final turn is looked for. A turn longer than this is read in part. */
 export const AGENDA_NUDGE_TAIL = 400;
@@ -111,25 +117,93 @@ export function attentionNudge(
   turn: FinishedTurn,
   subject: NudgeSubject,
   binary: string,
+  lastNudge?: string,
 ): { readonly asks: readonly string[]; readonly message: string } | undefined {
   if (subject.parent) return undefined;
   if (turn.opener.trimStart().startsWith(AGENDA_NUDGE_MARK)) return undefined;
+  if (startedByNudge(turn.opener, lastNudge)) return undefined;
   const asks = ownerAsks(turn.reply);
   if (asks.length === 0 || turn.raised >= asks.length) return undefined;
   return { asks, message: agendaNudgeMessage(asks, turn.raised, subject, binary) };
 }
 
-/** The send id of the one nudge a turn may get. */
-export const agendaNudgeSendId = (ferret: string, turn: string): string => `attention-nudge-${ferret}-${turn}`;
+/** How long after a turn ends the transcript is read: the pane shows the end before the last words reach the file (as v4). */
+export const AGENDA_NUDGE_SETTLE_MS = 2000;
+
+/** Whitespace folded away, so a message compares equal however a harness wraps or re-flows it. */
+const squeezed = (text: string): string => text.replace(/\s+/gu, ' ').trim();
+
+/**
+ * Whether a turn's opener is a nudge's own delivery: the opener says what the newest Agenda send said, bare or wrapped
+ * (a Claude paste is recorded inside `<pasted_content …>`). A nudge delivered by pointer (a turn file, a queued-message
+ * pointer) carries none of its words; the one-nudge cap ({@link nudgeSpent}) is what holds for those.
+ */
+export function startedByNudge(opener: string, lastNudge: string | undefined): boolean {
+  const said = squeezed(lastNudge ?? '');
+  return said !== '' && squeezed(opener).includes(said);
+}
+
+/** The one nudge a ferret holds: its send and when it was made, as Agenda's own state keeps them. */
+export interface NudgeMark {
+  readonly sendId: string;
+  readonly at: string;
+}
+
+/** One send to the ferret, as the check reads the ledger. A withdrawn send (nothing was typed) is not listed. */
+export interface NudgeSend {
+  readonly sendId: string;
+  readonly acceptedAt: string;
+  readonly message: string;
+  /** Agenda's own words: the send's author is Ferretry's Agenda, or its id is a nudge's. */
+  readonly agenda: boolean;
+}
+
+/** Where the cap is kept: Agenda's own small state, so a restart does not reset it. */
+export interface NudgeStore {
+  mark(ferret: string): Promise<NudgeMark | undefined>;
+  /** Records the nudge when the ferret still holds `replacing` (or none); whether this call took it. */
+  reserve(ferret: string, taken: NudgeMark, replacing: string | undefined): Promise<boolean>;
+  /** Takes back a nudge whose send failed, so nothing was nudged. */
+  release(ferret: string, sendId: string): Promise<void>;
+}
+
+/**
+ * THE CAP: at most one nudge per ferret until a message that is not Agenda's (the owner, a peer, a notice) reaches it.
+ * A turn a nudge started often ends on a "Next steps: You: …" line again; without the cap that is a nudge every turn.
+ */
+export function nudgeSpent(mark: NudgeMark | undefined, sends: readonly NudgeSend[]): boolean {
+  if (mark === undefined) return false;
+  const since = Date.parse(mark.at);
+  return !sends.some(send => !send.agenda && Date.parse(send.acceptedAt) > since);
+}
+
+/** The words of the newest Agenda send, and how many Agenda sends the ferret has had. */
+export function agendaSends(sends: readonly NudgeSend[]): {
+  readonly newest: string | undefined;
+  readonly count: number;
+} {
+  const own = sends.filter(send => send.agenda).sort((a, b) => Date.parse(a.acceptedAt) - Date.parse(b.acceptedAt));
+  return { newest: own.at(-1)?.message, count: own.length };
+}
+
+/** The send id of the one nudge a reply may get: keyed on the reply (its digest), so a state flicker never nudges it twice. */
+export const agendaNudgeSendId = (ferret: string, reply: string, count: number): string =>
+  `${AGENDA_NUDGE_ID_PREFIX}${ferret}-${createHash('sha256').update(reply).digest('hex').slice(0, 16)}-${count}`;
 
 /** What the check reads and how it sends. */
-export interface AgendaNudgePorts {
+export interface AgendaNudgePorts extends NudgeStore {
   /** The machine's switch (`agenda.yaml` `agendaNudge`), read per turn so turning it off is immediate. */
   readonly enabled: () => boolean;
   /** The ferret, or `undefined` when it cannot be read. */
   readonly subject: (ferret: string) => Promise<NudgeSubject | undefined>;
   /** The newest transcript events, oldest first; empty when none can be proved to be the ferret's. */
   readonly tail: (ferret: string, limit: number) => Promise<readonly TranscriptEvent[]>;
+  /** What has been sent to the ferret, from the send ledger. */
+  readonly sends: (ferret: string) => Promise<readonly NudgeSend[]>;
+  /** Lets this long pass. */
+  readonly pause: (ms: number) => Promise<void>;
+  /** Now, as an instant. */
+  readonly now: () => string;
   /** The send; the same id twice is one message. */
   readonly send: (ferret: string, sendId: string, message: string) => Promise<void>;
 }
@@ -142,15 +216,27 @@ export class AgendaTurnNudge {
   ) {}
 
   /** Checks the ferret's turn that just ended; whether a nudge was sent. */
-  async check(ferret: string, turn: string): Promise<boolean> {
+  async check(ferret: string): Promise<boolean> {
     if (!this.ports.enabled()) return false;
     const subject = await this.ports.subject(ferret);
     if (subject === undefined || subject.parent) return false;
+    await this.ports.pause(AGENDA_NUDGE_SETTLE_MS);
+    const mark = await this.ports.mark(ferret);
+    const sends = await this.ports.sends(ferret);
+    if (nudgeSpent(mark, sends)) return false;
     const finished = finishedTurn(await this.ports.tail(ferret, AGENDA_NUDGE_TAIL));
     if (finished === undefined) return false;
-    const nudge = attentionNudge(finished, subject, this.binary);
+    const own = agendaSends(sends);
+    const nudge = attentionNudge(finished, subject, this.binary, own.newest);
     if (nudge === undefined) return false;
-    await this.ports.send(ferret, agendaNudgeSendId(ferret, turn), nudge.message);
+    const sendId = agendaNudgeSendId(ferret, finished.reply, own.count);
+    if (!(await this.ports.reserve(ferret, { sendId, at: this.ports.now() }, mark?.sendId))) return false;
+    try {
+      await this.ports.send(ferret, sendId, nudge.message);
+    } catch (error) {
+      await this.ports.release(ferret, sendId).catch(() => undefined);
+      throw error;
+    }
     return true;
   }
 }

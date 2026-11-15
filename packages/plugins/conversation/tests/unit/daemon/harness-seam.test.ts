@@ -939,6 +939,31 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     await host.stop();
   });
 
+  test.each([
+    ['stopped', { state: 'stopped', cause: { kind: 'stopped' } }],
+    ['finished', { state: 'stopped', cause: { kind: 'completed' } }],
+    ['crashed', { state: 'stopped', cause: { kind: 'agent_crashed', exitCode: 1 } }],
+  ] as const)(
+    'an Agenda send to a ferret that is %s is refused: nothing is revived, typed or recorded, never under the owner’s name',
+    async (_name, over) => {
+      const ferrets = new HarnessFerrets();
+      const { host, api, apiFor } = await conversation(ferrets, OPEN, over, { consumers: ['agenda'] });
+
+      const sent = await apiFor('agenda').send(
+        F1,
+        { kind: 'agenda' },
+        { message: '[attention check] x', sendId: 's-a' },
+      );
+
+      expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+      expect(JSON.stringify(sent)).toContain('never revives it');
+      expect(ferrets.resumes).toEqual([]);
+      expect(ferrets.delivered).toEqual([]);
+      expect((await api().sends(F1)).sends).toEqual([]);
+      await host.stop();
+    },
+  );
+
   test('D2 #19 a Warden send to a stopped ferret revives it rather than typing at a pane; a relaunch that carries nothing types nothing and its record is taken back', async () => {
     const ferrets = new HarnessFerrets();
     const { host, api } = await conversation(ferrets, OPEN, { state: 'stopped' });

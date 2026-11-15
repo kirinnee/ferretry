@@ -2,13 +2,19 @@ import { describe, expect, test } from 'bun:test';
 import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 import {
   AGENDA_NUDGE_MARK,
+  AGENDA_NUDGE_SETTLE_MS,
   AGENDA_NUDGE_TAIL,
   AgendaTurnNudge,
   agendaNudgeMessage,
   agendaNudgeSendId,
+  agendaSends,
   attentionNudge,
   finishedTurn,
+  nudgeSpent,
   raisesAgendaItem,
+  startedByNudge,
+  type NudgeMark,
+  type NudgeSend,
   type NudgeSubject,
 } from '../../../daemon/lib/turn-nudge.ts';
 
@@ -22,6 +28,13 @@ const result = (): TranscriptEvent =>
     role: 'tool',
     result: { callId: 'c1', content: null, isError: false },
   }) as TranscriptEvent;
+
+const send = (sendId: string, acceptedAt: string, agenda: boolean): NudgeSend => ({
+  sendId,
+  acceptedAt,
+  message: 'words',
+  agenda,
+});
 
 const ASKING = 'Done.\n\n## Waiting on you\n- Approve the deploy\n- Pick a region\n';
 const subject: NudgeSubject = { parent: false, mode: 'interactive', agenda: true };
@@ -124,17 +137,80 @@ describe('whether a finished turn gets a nudge', () => {
     expect(attentionNudge(turn({ opener: `  ${AGENDA_NUDGE_MARK} Your last reply…` }), subject, 'fy')).toBeUndefined();
   });
 
-  test('the send id is the ferret’s and the turn’s own', () => {
-    expect(agendaNudgeSendId('f1', 'turn-3')).toBe('attention-nudge-f1-turn-3');
+  test('a turn whose opener says the words of Agenda’s newest send is not checked, bare or pasted', () => {
+    const said = 'Your last reply asked the owner to:\n- Approve';
+    expect(attentionNudge(turn({ opener: said }), subject, 'fy', said)).toBeUndefined();
+    expect(
+      attentionNudge(turn({ opener: `<pasted_content id=x>\n${said}\n</pasted_content>` }), subject, 'fy', said),
+    ).toBeUndefined();
+    expect(attentionNudge(turn({ opener: 'something else' }), subject, 'fy', said)).toBeDefined();
+  });
+
+  test('the send id is the ferret’s, the reply’s own digest and how many Agenda sends came before', () => {
+    const first = agendaNudgeSendId('f1', 'a reply', 0);
+    expect(first).toMatch(/^attention-nudge-f1-[0-9a-f]{16}-0$/u);
+    expect(agendaNudgeSendId('f1', 'a reply', 0)).toBe(first);
+    expect(agendaNudgeSendId('f1', 'another reply', 0)).not.toBe(first);
+    expect(agendaNudgeSendId('f1', 'a reply', 1)).not.toBe(first);
+  });
+});
+
+describe('the one-nudge cap and the evidence a turn was a nudge’s', () => {
+  const send = (over: Partial<NudgeSend> & { sendId: string; acceptedAt: string }): NudgeSend => ({
+    message: 'words',
+    agenda: false,
+    ...over,
+  });
+  const mark: NudgeMark = { sendId: 'attention-nudge-f1-x-0', at: '2026-11-15T10:00:00.000Z' };
+
+  test('a ferret never nudged is not capped', () => {
+    expect(nudgeSpent(undefined, [])).toBe(false);
+  });
+
+  test('a nudged ferret stays capped until a send that is not Agenda’s reaches it afterwards', () => {
+    const own = send({ sendId: mark.sendId, acceptedAt: '2026-11-15T10:00:00.000Z', agenda: true });
+    expect(nudgeSpent(mark, [own])).toBe(true);
+    expect(nudgeSpent(mark, [own, send({ sendId: 'old', acceptedAt: '2026-11-15T09:00:00.000Z' })])).toBe(true);
+    expect(nudgeSpent(mark, [own, send({ sendId: 'owner', acceptedAt: '2026-11-15T10:00:05.000Z' })])).toBe(false);
+  });
+
+  test('the newest Agenda send and how many there are', () => {
+    expect(agendaSends([])).toEqual({ newest: undefined, count: 0 });
+    expect(
+      agendaSends([
+        send({ sendId: 'b', acceptedAt: '2026-11-15T10:00:09.000Z', agenda: true, message: 'second' }),
+        send({ sendId: 'o', acceptedAt: '2026-11-15T10:00:10.000Z', message: 'owner' }),
+        send({ sendId: 'a', acceptedAt: '2026-11-15T10:00:01.000Z', agenda: true, message: 'first' }),
+      ]),
+    ).toEqual({ newest: 'second', count: 2 });
+  });
+
+  test('an opener is a nudge’s when it holds the newest Agenda send’s words, however the whitespace falls', () => {
+    expect(startedByNudge('a\n  b', 'a b')).toBe(true);
+    expect(startedByNudge('<pasted_content>a b</pasted_content>', 'a   b')).toBe(true);
+    expect(startedByNudge('a b', undefined)).toBe(false);
+    expect(startedByNudge('a b', '')).toBe(false);
+    expect(startedByNudge('', 'a b')).toBe(false);
   });
 });
 
 describe('the check at a turn end', () => {
+  const OWNER_AT = '2026-11-15T10:05:00.000Z';
   const rig = (
-    over: Partial<{ enabled: boolean; subject: NudgeSubject | undefined; events: TranscriptEvent[] }> = {},
+    over: Partial<{
+      enabled: boolean;
+      subject: NudgeSubject | undefined;
+      events: TranscriptEvent[];
+      sends: NudgeSend[];
+      mark: NudgeMark;
+      failSend: boolean;
+    }> = {},
   ) => {
     const sent: string[][] = [];
     const reads: number[] = [];
+    const waits: number[] = [];
+    const store = { mark: over.mark as NudgeMark | undefined };
+    const released: string[] = [];
     const check = new AgendaTurnNudge(
       {
         enabled: () => over.enabled ?? true,
@@ -143,37 +219,173 @@ describe('the check at a turn end', () => {
           reads.push(limit);
           return over.events ?? [said('user', 'go'), said('assistant', ASKING)];
         },
-        send: async (ferret, sendId, message) => void sent.push([ferret, sendId, message]),
+        sends: async () => over.sends ?? [],
+        pause: async ms => void waits.push(ms),
+        now: () => '2026-11-15T10:00:00.000Z',
+        mark: async () => store.mark,
+        reserve: async (_ferret, taken, replacing) => {
+          if (store.mark?.sendId !== replacing) return false;
+          store.mark = taken;
+          return true;
+        },
+        release: async (_ferret, sendId) => {
+          if (store.mark?.sendId === sendId) store.mark = undefined;
+          released.push(sendId);
+        },
+        send: async (ferret, sendId, message) => {
+          if (over.failSend === true) throw new Error('refused');
+          sent.push([ferret, sendId, message]);
+        },
       },
       'fy',
     );
-    return { check, sent, reads };
+    return { check, sent, reads, waits, store, released };
   };
 
-  test('sends one nudge under the turn’s own send id', async () => {
-    const { check, sent, reads } = rig();
-    expect(await check.check('f1', 'turn-3')).toBe(true);
+  test('waits for the transcript to settle, then sends one nudge keyed on the reply', async () => {
+    const { check, sent, reads, waits, store } = rig();
+    expect(await check.check('f1')).toBe(true);
+    expect(waits).toEqual([AGENDA_NUDGE_SETTLE_MS]);
+    expect(AGENDA_NUDGE_SETTLE_MS).toBe(2000);
     expect(sent).toHaveLength(1);
     expect(sent[0]?.[0]).toBe('f1');
-    expect(sent[0]?.[1]).toBe('attention-nudge-f1-turn-3');
+    expect(sent[0]?.[1]).toBe(agendaNudgeSendId('f1', ASKING.trim(), 0));
     expect(sent[0]?.[2]).toContain('- Approve the deploy');
     expect(reads).toEqual([AGENDA_NUDGE_TAIL]);
+    expect(store.mark).toEqual({ sendId: String(sent[0]?.[1]), at: '2026-11-15T10:00:00.000Z' });
+  });
+
+  test('the same reply seen twice is one nudge: the second finds the ferret capped', async () => {
+    const { check, sent } = rig();
+    expect(await check.check('f1')).toBe(true);
+    expect(await check.check('f1')).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('a ferret nudged once is not nudged again whatever its next turn’s opener looks like', async () => {
+    // A pointer opener (Codex turn file), a paste wrapper and a queued-message pointer carry none of the nudge’s words.
+    for (const opener of [
+      'Read the instructions in /state/turns/turn-007.md and follow them.',
+      '<pasted_content id="p1">Read the file</pasted_content>',
+      'Queued message pointer: see queue/q-12.md',
+    ]) {
+      const { check, sent, store } = rig();
+      expect(await check.check('f1')).toBe(true);
+      store.mark = { ...(store.mark as NudgeMark), at: '2026-11-15T10:00:00.000Z' };
+      const again = new AgendaTurnNudge(
+        {
+          enabled: () => true,
+          subject: async () => subject,
+          tail: async () => [said('user', opener), said('assistant', ASKING)],
+          sends: async () => [send('attention-nudge-f1', '2026-11-15T10:00:01.000Z', true)],
+          pause: async () => undefined,
+          now: () => '2026-11-15T10:00:02.000Z',
+          mark: async () => store.mark,
+          reserve: async () => true,
+          release: async () => undefined,
+          send: async (...args) => void sent.push([...args]),
+        },
+        'fy',
+      );
+      expect(await again.check('f1')).toBe(false);
+      expect(sent).toHaveLength(1);
+    }
+  });
+
+  test('after the owner (or a peer) sends, the next completed turn may be nudged again', async () => {
+    const first = rig();
+    expect(await first.check.check('f1')).toBe(true);
+    const mark = first.store.mark as NudgeMark;
+    const { check, sent, store } = rig({
+      mark,
+      sends: [
+        send(mark.sendId, '2026-11-15T10:00:01.000Z', true),
+        { sendId: 'owner-1', acceptedAt: OWNER_AT, message: 'ok do it', agenda: false },
+      ],
+    });
+    expect(await check.check('f1')).toBe(true);
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.[1]).toBe(agendaNudgeSendId('f1', ASKING.trim(), 1));
+    expect(store.mark?.sendId).toBe(sent[0]?.[1]);
+  });
+
+  test('a turn whose opener says the words of Agenda’s newest send is skipped even when the cap is open', async () => {
+    const words = 'Your last reply asked the owner to: do things';
+    const { check, sent } = rig({
+      events: [said('user', `<pasted_content>${words}</pasted_content>`), said('assistant', ASKING)],
+      sends: [{ sendId: 'x', acceptedAt: OWNER_AT, message: words, agenda: true }],
+    });
+    expect(await check.check('f1')).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  test('a send that fails takes the reservation back, so nothing was nudged and the next turn may try', async () => {
+    const { check, store, released } = rig({ failSend: true });
+    await expect(check.check('f1')).rejects.toThrow('refused');
+    expect(store.mark).toBeUndefined();
+    expect(released).toHaveLength(1);
+  });
+
+  test('a failure to take the reservation back does not hide the send’s own failure', async () => {
+    const failing = new AgendaTurnNudge(
+      {
+        enabled: () => true,
+        subject: async () => subject,
+        tail: async () => [said('user', 'go'), said('assistant', ASKING)],
+        sends: async () => [],
+        pause: async () => undefined,
+        now: () => 'x',
+        mark: async () => undefined,
+        reserve: async () => true,
+        release: async () => {
+          throw new Error('disk');
+        },
+        send: async () => {
+          throw new Error('refused');
+        },
+      },
+      'fy',
+    );
+    await expect(failing.check('f1')).rejects.toThrow('refused');
+  });
+
+  test('a check that loses the reservation sends nothing', async () => {
+    const lost = new AgendaTurnNudge(
+      {
+        enabled: () => true,
+        subject: async () => subject,
+        tail: async () => [said('user', 'go'), said('assistant', ASKING)],
+        sends: async () => [],
+        pause: async () => undefined,
+        now: () => 'x',
+        mark: async () => undefined,
+        reserve: async () => false,
+        release: async () => undefined,
+        send: async () => {
+          throw new Error('must not send');
+        },
+      },
+      'fy',
+    );
+    expect(await lost.check('f1')).toBe(false);
   });
 
   test('says nothing when the switch is off, the ferret cannot be read, or it is a helper — and reads nothing', async () => {
     for (const over of [{ enabled: false }, { subject: undefined }, { subject: { ...subject, parent: true } }]) {
-      const { check, sent, reads } = rig(over);
-      expect(await check.check('f1', 't')).toBe(false);
+      const { check, sent, reads, waits } = rig(over);
+      expect(await check.check('f1')).toBe(false);
       expect(sent).toEqual([]);
       expect(reads).toEqual([]);
+      expect(waits).toEqual([]);
     }
   });
 
   test('says nothing when there is no turn to read or the reply asks nothing', async () => {
     for (const events of [[], [said('user', 'go'), said('assistant', 'fine')]]) {
-      const { check, sent } = rig({ events });
-      expect(await check.check('f1', 't')).toBe(false);
+      const { check, sent, store } = rig({ events });
+      expect(await check.check('f1')).toBe(false);
       expect(sent).toEqual([]);
+      expect(store.mark).toBeUndefined();
     }
   });
 });

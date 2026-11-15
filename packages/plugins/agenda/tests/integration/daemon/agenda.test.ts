@@ -63,6 +63,9 @@ async function world(
   const turnEnded = async (payload: unknown): Promise<void> => {
     built.half?.hooks?.['turn.ended']?.(payload as never);
     for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    // The check waits for the transcript to settle (2 s on the driven clock) before it reads.
+    await host.clock.advance(2000);
+    for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
   };
   return { host, asks, ferrets, acc, turnEnded };
 }
@@ -327,9 +330,25 @@ describe('the turn-end check', () => {
     await turnEnded(ended('f1'));
     await turnEnded(ended('f1'));
     const sends = await sentTo(conversation, 'f1');
-    expect(sends.map(send => [send.sendId, send.senderKind])).toEqual([['attention-nudge-f1-t1', 'daemon']]);
+    expect(sends.map(send => [send.sendId.replace(/-[0-9a-f]{16}-/u, '-DIGEST-'), send.senderKind])).toEqual([
+      ['attention-nudge-f1-DIGEST-0', 'daemon'],
+    ]);
     expect(sends[0]?.message).toContain('[attention check]');
     expect(sends[0]?.message).toContain('- Approve the release');
+  });
+
+  test('a ferret is nudged once until another sender reaches it, then it may be nudged again', async () => {
+    let at = '2026-11-06T09:00:00.000Z';
+    const conversation = fakeConversation({ now: () => at as never });
+    conversation.setEvents(ferretId('f1'), ASKING);
+    const { turnEnded } = await world({ conversation });
+    await turnEnded(ended('f1'));
+    await turnEnded({ ...ended('f1'), turn: 't2' });
+    expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    at = '2026-11-06T10:00:00.000Z';
+    await conversation.send(ferretId('f1'), { kind: 'owner' }, { message: 'go ahead', sendId: 'owner-1' });
+    await turnEnded({ ...ended('f1'), turn: 't3' });
+    expect((await sentTo(conversation, 'f1')).map(send => send.senderKind)).toEqual(['daemon', 'human', 'daemon']);
   });
 
   test('an interrupted or failed round, a helper and a stopped ferret are not nudged', async () => {

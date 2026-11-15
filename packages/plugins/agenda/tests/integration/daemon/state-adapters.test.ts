@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
-import { BUZZES, MODES, SEEN, type BuzzRecord } from '../../../contract/index.ts';
+import { BUZZES, MODES, NUDGES, SEEN, type BuzzRecord } from '../../../contract/index.ts';
 import { StateBuzzLedger } from '../../../daemon/adapters/state-buzz-ledger.ts';
-import { StateModeStore, StateSeenStore } from '../../../daemon/adapters/state-stores.ts';
+import { StateModeStore, StateNudgeStore, StateSeenStore } from '../../../daemon/adapters/state-stores.ts';
 
 const AT = '2026-11-01T08:00:00.000Z' as BuzzRecord['at'];
 
@@ -18,7 +18,7 @@ const buzz = (key: string, ferret: string): BuzzRecord => ({
 });
 
 function fixture(folder = new MemoryStateFolder()) {
-  const state = folder.port([SEEN, BUZZES, MODES]);
+  const state = folder.port([SEEN, BUZZES, MODES, NUDGES]);
   return { folder, state };
 }
 
@@ -101,5 +101,62 @@ describe('StateModeStore over the agenda state folder', () => {
 
     await expect(store.recorded('f1')).rejects.toThrow('modes.json');
     await expect(store.write('f1', true, AT)).rejects.toThrow('modes.json');
+  });
+});
+
+describe('StateNudgeStore over the agenda state folder', () => {
+  const mark = (sendId: string) => ({ sendId, at: AT });
+
+  test('a ferret never nudged has no mark; the first reservation takes one and a restart reads it back', async () => {
+    const { folder, state } = fixture();
+    const store = new StateNudgeStore(state);
+    expect(await store.mark('f1')).toBeUndefined();
+
+    expect(await store.reserve('f1', mark('n1'), undefined)).toBe(true);
+
+    expect(await new StateNudgeStore(fixture(folder).state).mark('f1')).toEqual(mark('n1'));
+    expect(await store.mark('f2')).toBeUndefined();
+  });
+
+  test('a second reservation loses unless it names the mark it replaces, and a loser changes nothing', async () => {
+    const store = new StateNudgeStore(fixture().state);
+    await store.reserve('f1', mark('n1'), undefined);
+
+    expect(await store.reserve('f1', mark('n2'), undefined)).toBe(false);
+    expect(await store.reserve('f1', mark('n2'), 'other')).toBe(false);
+    expect(await store.mark('f1')).toEqual(mark('n1'));
+    expect(await store.reserve('f1', mark('n2'), 'n1')).toBe(true);
+    expect(await store.mark('f1')).toEqual(mark('n2'));
+  });
+
+  test('a loser keeps what another ferret holds', async () => {
+    const store = new StateNudgeStore(fixture().state);
+    await store.reserve('f1', mark('n1'), undefined);
+
+    expect(await store.reserve('f2', mark('x'), 'n1')).toBe(false);
+    expect(await store.mark('f1')).toEqual(mark('n1'));
+  });
+
+  test('releasing the nudge that was reserved clears it; releasing any other send leaves it', async () => {
+    const store = new StateNudgeStore(fixture().state);
+    await store.reserve('f1', mark('n1'), undefined);
+    await store.reserve('f2', mark('n9'), undefined);
+
+    await store.release('f1', 'not-it');
+    expect(await store.mark('f1')).toEqual(mark('n1'));
+    await store.release('f1', 'n1');
+    expect(await store.mark('f1')).toBeUndefined();
+    expect(await store.mark('f2')).toEqual(mark('n9'));
+    await store.release('f3', 'nothing');
+  });
+
+  test('a damaged nudges file refuses the read, the reservation and the release', async () => {
+    const { folder, state } = fixture();
+    folder.plant(NUDGES, 'garbage');
+    const store = new StateNudgeStore(state);
+
+    await expect(store.mark('f1')).rejects.toThrow('nudges.json');
+    await expect(store.reserve('f1', mark('n1'), undefined)).rejects.toThrow('nudges.json');
+    await expect(store.release('f1', 'n1')).rejects.toThrow('nudges.json');
   });
 });

@@ -9,6 +9,7 @@ import {
   MACHINE_AGENDA_ACTED_AUDIT,
   BUZZES,
   MODES,
+  NUDGES,
   SEEN,
   cap,
 } from './contract/index.ts';
@@ -427,7 +428,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SEEN, BUZZES, MODES],
+    state: [SEEN, BUZZES, MODES, NUDGES],
     config: [AGENDA_CONFIG],
     readModels: ['open', 'daemon-agenda', 'mode'],
     publishes: [AgendaModeChanged, AgendaBuzzed],

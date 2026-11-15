@@ -1045,7 +1045,16 @@ export function buildConversationA(deps: {
   };
   const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
-    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) return await reviveLocked(ferret, request);
+    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) {
+      // Agenda's own words never revive: a nudge is no reason to start a ferret the owner (or its own end) stopped. Refused
+      // before any record, so nothing is typed, nothing is kept, and nothing is recorded under the owner's name.
+      if (request.agenda === true)
+        throw new SessionSendError(
+          'refused',
+          'the ferret is stopped and an Agenda message never revives it, so nothing was typed',
+        );
+      return await reviveLocked(ferret, request);
+    }
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
