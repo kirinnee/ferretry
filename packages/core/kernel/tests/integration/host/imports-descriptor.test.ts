@@ -457,9 +457,34 @@ describe('R-0198 a host that reaches no folder by descriptor path', () => {
       expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
   });
 
-  test('R-0198 a host with neither (the C library unloadable) still reads, stats and lists every verb', async () => {
+  test('R-0198 a host with neither (the C library unloadable) fails closed: every verb is refused no_descriptor_reach, never read by path', async () => {
     const w = await world(disks.noReach());
     for (const verb of VERBS)
-      expect(await observe(w.rootFor(), w.scoped, verb)).toMatchObject({ kind: 'answer', leak: false, inside: true });
+      expect(await observe(w.rootFor(), w.scoped, verb)).toEqual({ kind: 'refused', refusal: 'no_descriptor_reach' });
   });
+});
+
+/**
+ * The swap INSIDE one call, on the host that has no descriptor reach at all. The old code read such a host by path
+ * after the lstat walk, so a folder swapped for a link between the walk and the look answered the OUTSIDE tree's names
+ * and metadata. Now every step of the call refuses, so whatever step the swap lands after, the only answers are a
+ * content-free refusal or an EMPTY answer (never the inside tree, which the refusal also withholds, and never the outside).
+ */
+describe('R-0198 a host with neither reach refuses a folder swapped for a link inside ONE call', () => {
+  const REFUSALS = ['no_descriptor_reach', 'link_escape', 'changed'];
+  for (const which of ['c', 'b', 'a'] as const) {
+    for (const verb of VERBS) {
+      test(`R-0198 noReach: ${verb} with the ${which === 'c' ? 'scoped folder' : which === 'b' ? "scoped folder's parent" : 'first folder below the anchor'} swapped at any step answers nothing outside, and nothing inside`, async () => {
+        const { dry, seen } = await sweep('noReach', verb, which);
+        // Every swap point first (before the call, and after each step of it): nothing is ever answered from a folder.
+        for (const one of seen) {
+          if (one.kind === 'answer') expect(one).toEqual({ kind: 'answer', leak: false, inside: false });
+          else expect(REFUSALS).toContain(one.refusal);
+        }
+        // A swap landing mid-call, after the walk, is the descriptor refusal itself (not a swallowed lexical read).
+        expect(seen.some(one => one.kind === 'refused' && one.refusal === 'no_descriptor_reach')).toBe(true);
+        expect(dry).toEqual({ kind: 'refused', refusal: 'no_descriptor_reach' });
+      }, 120_000);
+    }
+  }
 });
