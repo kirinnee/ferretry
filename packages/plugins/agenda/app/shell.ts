@@ -31,7 +31,6 @@ export {
   placePopover,
   RouteLink,
   Spinner,
-  Textarea,
   useDialogFocus,
   useLayoutMode,
   usePrefersReducedMotion,
