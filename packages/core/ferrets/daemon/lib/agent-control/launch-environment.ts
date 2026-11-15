@@ -42,7 +42,17 @@ export class LaunchEnvironmentStore implements LaunchEnvironmentRecord {
  * `FY_PACK`, so the record is known, and a switch it does not hold was not handed to the pane.
  */
 export function switchesOfRecord(record: FerretRecord | undefined): Readonly<Record<string, string>> {
-  return record?.mode === undefined ? {} : { FY_SESSION_MODE: record.mode };
+  return sessionModeSwitch(record?.mode);
+}
+
+/**
+ * The mode a pane is handed (`FY_SESSION_MODE`, v4 parity): the wrappers and `instructions` read it. The ONE spelling
+ * of it, shared by what a launch puts in the pane's environment and what the record implies, so the stored switch and
+ * the derived one always agree and a launch never makes a ferret read as changed. No mode hands the pane nothing
+ * (unattended, as the wrappers read an unset variable).
+ */
+export function sessionModeSwitch(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
+  return mode === undefined ? {} : { FY_SESSION_MODE: mode };
 }
 
 /** The launch variables a launch records: the section switches and the mode, as the launch put them in its environment. */

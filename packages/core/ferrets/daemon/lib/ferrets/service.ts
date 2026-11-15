@@ -106,7 +106,11 @@ import {
 } from '../../../contract/index.ts';
 import { type FerretTokenDirectory, issueToken, type TokenEntry } from '../tokens/tokens.ts';
 import type { SessionSpawnRequest } from '../session/provenance/types.ts';
-import { type LaunchEnvironmentRecord, recordedSwitches } from '../agent-control/launch-environment.ts';
+import {
+  type LaunchEnvironmentRecord,
+  recordedSwitches,
+  sessionModeSwitch,
+} from '../agent-control/launch-environment.ts';
 import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
 /**
@@ -2145,6 +2149,7 @@ export class FerretsService implements FerretsApi {
       // Set from the login only, never by a launch part: the spec field has no other writer.
       ...(credential.value === undefined ? {} : { credential: credential.value }),
       ...launchOptions(this.registry.detailsOf(record.id)?.options),
+      ...(record.mode === undefined ? {} : { mode: record.mode }),
       ...(ownCompactAt === undefined ? {} : { compactAt: ownCompactAt }),
       folder: record.folder as FencedPath,
       home: home.value,
@@ -2170,7 +2175,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, record.mode, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2618,6 +2623,7 @@ export class FerretsService implements FerretsApi {
 
   private async environment(
     ferret: FerretId,
+    mode: FerretRecord['mode'],
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
@@ -2626,6 +2632,10 @@ export class FerretsService implements FerretsApi {
     // The login's environment goes in first, so every part (MCP, shells) and the FY_* switches below keep precedence.
     const env: Record<string, string> = { ...login };
     for (const part of parts) if (part.kind === 'env' || part.kind === 'shell') Object.assign(env, part.env);
+    // The ferret's mode (v4 parity: the pane is handed FY_SESSION_MODE, which the wrappers and `instructions` read) goes
+    // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
+    // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
+    Object.assign(env, sessionModeSwitch(mode));
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
     Object.assign(env, signedIn);
