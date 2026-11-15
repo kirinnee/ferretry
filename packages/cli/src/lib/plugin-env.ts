@@ -25,6 +25,24 @@ const PLUGIN_ENV_NAMES = [
   'PWD',
 ] as const;
 
+/**
+ * What `CliContext.readEnvironment(names)` answers: the names asked for that the plugin's manifest DECLARED
+ * (`permissions.cliEnvReads`, exact names) and the shell has set. A name outside the declaration reads nothing, so a
+ * half cannot widen what it sees by asking; nothing declared means nothing read.
+ */
+export function declaredEnvironment(
+  environment: Environment,
+  declared: readonly string[] | undefined,
+  names: readonly string[],
+): CliEnvironment {
+  const allowed: Record<string, string> = {};
+  for (const name of names) {
+    const value = environment[name];
+    if (declared?.includes(name) === true && value !== undefined) allowed[name] = value;
+  }
+  return Object.freeze(allowed);
+}
+
 /** The allowed names that are set, with their values as they are, except `PWD`, which is `cwd` (the real working directory). */
 export function pluginEnvironment(environment: Environment, cwd: string): CliEnvironment {
   const allowed: Record<string, string> = {};

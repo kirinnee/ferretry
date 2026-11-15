@@ -1,5 +1,6 @@
 import type { VerbInvocation } from '@ferretry/kernel/manifest';
 import type { HarnessKey } from '@ferretry/core-ferrets/contract';
+import type { ProviderPresetView } from '../../contract/index.ts';
 import { requireMayApply } from './authority.ts';
 import { type ChangeFlags, parseReason, parseUntil, runChange } from './change.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
@@ -10,6 +11,7 @@ import {
   renderModelRefresh,
   renderPresetList,
 } from './render.ts';
+import { detectedPreset, secretNeeds, shellVariables, storeSecrets } from './provider-secrets.ts';
 import { runSignIn } from './sign-in.ts';
 
 /** One verb: it prints through `deps.out`, sets the exit code there and refuses by throwing a `LoginsCommandError`. */
@@ -146,18 +148,22 @@ function envOptions(invocation: VerbInvocation): Record<string, string> {
 
 /**
  * The environment half of `login add` (docs/provider-presets.md): nothing when none of its options is given, else an
- * environment login — from a preset's variables when one is named, each overridden by an `--env`, a secret as
- * `${secret:NAME}` and never a value.
+ * environment login — from a preset's variables when one is named, a plain one taken from the shell under `--from-env`,
+ * each overridden by an `--env`, a secret as `${secret:NAME}` and never a value.
  */
 async function environmentLogin(
   deps: LoginsCommandDeps,
   harness: HarnessKey,
   invocation: VerbInvocation,
   presetId: string | undefined,
-): Promise<{ store?: 'environment'; preset?: string; env?: Record<string, string>; cloudCredential?: string }> {
+  shell: Readonly<Record<string, string>>,
+): Promise<{
+  login: { store?: 'environment'; preset?: string; env?: Record<string, string>; cloudCredential?: string };
+  preset?: ProviderPresetView;
+}> {
   const given = envOptions(invocation);
   const cloudOption = textOption(invocation, 'cloud-credential');
-  if (presetId === undefined && Object.keys(given).length === 0 && cloudOption === undefined) return {};
+  if (presetId === undefined && Object.keys(given).length === 0 && cloudOption === undefined) return { login: {} };
   const preset =
     presetId === undefined ? undefined : (await deps.gateway.presets()).presets.find(entry => entry.id === presetId);
   if (presetId !== undefined && preset === undefined) {
@@ -173,12 +179,22 @@ async function environmentLogin(
       variable.kind === 'secret' ? `\${secret:${variable.secret ?? variable.name}}` : (variable.value ?? ''),
     ]),
   );
+  // A plain variable the shell carries wins over the preset's value; a secret one is never read this way, it is stored.
+  const fromShell = Object.fromEntries(
+    (preset?.variables ?? []).flatMap(variable => {
+      const value = shell[variable.name];
+      return variable.kind === 'plain' && value !== undefined ? [[variable.name, value]] : [];
+    }),
+  );
   const cloudCredential = cloudOption ?? preset?.cloudCredential?.suggested;
   return {
-    store: 'environment',
-    ...(preset === undefined ? {} : { preset: preset.id }),
-    env: { ...defaults, ...given },
-    ...(cloudCredential === undefined ? {} : { cloudCredential }),
+    login: {
+      store: 'environment',
+      ...(preset === undefined ? {} : { preset: preset.id }),
+      env: { ...defaults, ...fromShell, ...given },
+      ...(cloudCredential === undefined ? {} : { cloudCredential }),
+    },
+    ...(preset === undefined ? {} : { preset }),
   };
 }
 
@@ -188,28 +204,37 @@ const HARNESS_WORDS: Readonly<Record<HarnessKey, string>> = { 'claude-code': 'Cl
  * `login add claude|codex [--label X] [--id X] [--no-sign-in] [--preset X] [--env NAME=VALUE] [--cloud-credential X]`,
  * or `login add <provider>` for a provider on `login presets`: a sign-in, or an environment login from a preset.
  *
- * GAP(vault): a provider's secrets are not prompted for here (the Vault's routes are another plugin's); store each
- * with `fy secret set NAME` and name it as `--env NAME='${secret:NAME}'`.
+ * A provider's secrets are asked for here (`provider-secrets.ts`): hidden at a terminal, or — with `--from-env`, which
+ * also tells the provider from the shell's variables when none is named — taken from the shell, and stored in the
+ * Vault. The login file gets the `${secret:NAME}` reference only.
  */
 export const loginAdd: VerbBody = async (deps, invocation) => {
   await requireMayApply(deps);
-  const word = invocation.args[0]?.trim();
-  if (word === undefined || word === '') {
+  const fromEnv = flagOn(invocation, 'from-env');
+  const word = invocation.args[0]?.trim() ?? '';
+  if (word === '' && !fromEnv) {
     throw new LoginsCommandError(`Name a tool or provider: ${deps.binaryName} login add claude|codex|<provider>`);
   }
+  const shell = fromEnv ? shellVariables(deps) : {};
   const tool = toolOf(word);
-  const presetId = textOption(invocation, 'preset') ?? (tool === undefined ? word : undefined);
+  const named = textOption(invocation, 'preset') ?? (tool === undefined && word !== '' ? word : undefined);
+  const presetId = named ?? (fromEnv ? detectedPreset(deps, await deps.gateway.presets(), shell).id : undefined);
   const provider =
     tool === undefined ? (await deps.gateway.presets()).presets.find(entry => entry.id === presetId) : undefined;
   if (tool === undefined && provider === undefined) {
-    throw new LoginsCommandError(`There is no provider "${word}": see \`${deps.binaryName} login presets\``);
+    throw new LoginsCommandError(`There is no provider "${presetId}": see \`${deps.binaryName} login presets\``);
   }
   const harness = (tool ?? provider?.harness) as HarnessKey;
   const label = textOption(invocation, 'label');
   const taken = new Set((await deps.gateway.logins()).logins.map(entry => entry.id));
   const id = textOption(invocation, 'id') ?? suggestLoginId(harness, label ?? presetId, taken);
   const flags = changeFlags(invocation);
-  const environment = await environmentLogin(deps, harness, invocation, presetId);
+  const { login: environment, preset } = await environmentLogin(deps, harness, invocation, presetId, shell);
+  // A dry run changes nothing, the Vault included: no prompt, no store.
+  if (preset !== undefined && !flags.dryRun) {
+    const needs = secretNeeds(preset, environment.env ?? {});
+    await storeSecrets(deps, needs, shell, line => (flags.json ? undefined : deps.out.report(line)));
+  }
   const outcome = await runChange(deps, {
     change: { kind: 'login.add', id, harness, ...(label === undefined ? {} : { label }), ...environment },
     destructive: false,
@@ -217,9 +242,7 @@ export const loginAdd: VerbBody = async (deps, invocation) => {
   });
   if (outcome === undefined || flags.json) return;
   if (environment.store === 'environment') {
-    deps.out.report(
-      `Store each secret it names with \`${deps.binaryName} secret set NAME\`, then: ${deps.binaryName} login test ${id}`,
-    );
+    deps.out.report(`Test it: ${deps.binaryName} login test ${id}`);
     return;
   }
   if (flagOn(invocation, 'no-sign-in') || invocation.options['sign-in'] === false) {

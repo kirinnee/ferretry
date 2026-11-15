@@ -5,36 +5,60 @@
  *
  * WHAT IS SHOWN IS NAMES. The result names the variables that gave the provider away and the host the
  * preset declares, never a value. The box is emptied the moment it is read; the values stay in memory
- * only, to fill in the provider's form — where a secret stays a `${secret:NAME}` reference, so a
- * pasted key is never stored from this screen: it is pasted into the secret store itself.
+ * only, to fill in the provider's form — where a secret stays a `${secret:NAME}` reference. A pasted
+ * key is filed in the Vault under the preset's secret name when Continue is pressed (`POST /v1/secrets`,
+ * `lib/secrets-api.ts`) and goes nowhere else: not into a field, a login file or a sentence.
  */
 
 import { ChevronLeft } from 'lucide-react';
 import { useId, useState } from 'react';
 import type { ProviderPresetView } from '../../contract/index.ts';
+import type { LoginsClient } from '../lib/client.ts';
+import { refusalSentence } from '../lib/client.ts';
 import {
   alsoMatchedSentence,
   detectionSentence,
   type PasteReading,
   type Prefill,
   pasteTarget,
+  pastedSecrets,
   prefillFrom,
   readPaste,
 } from '../lib/paste-model.ts';
+import { saveSecret } from '../lib/secrets-api.ts';
 import { Button } from '../ui.ts';
 
 export interface PasteVariablesProps {
+  readonly client: LoginsClient;
   /** The presets on offer, in the daemon's order. */
   readonly presets: readonly ProviderPresetView[];
   readonly onBack: () => void;
-  /** Continue to this preset's form, filled in from the paste. */
+  /** Continue to this preset's form, filled in from the paste; its pasted keys are already in the Vault. */
   readonly onContinue: (presetId: string, prefill: Prefill) => void;
 }
 
-export function PasteVariables({ presets, onBack, onContinue }: PasteVariablesProps) {
+export function PasteVariables({ client, presets, onBack, onContinue }: PasteVariablesProps) {
   const ids = useId();
   const [text, setText] = useState('');
   const [reading, setReading] = useState<PasteReading | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [refusal, setRefusal] = useState<string | null>(null);
+
+  /** Files each pasted key in the Vault, then continues. A refusal stays on this screen so the paste can be tried again. */
+  const save = async (preset: ProviderPresetView, pasted: PasteReading): Promise<void> => {
+    setSaving(true);
+    setRefusal(null);
+    try {
+      for (const [name, value] of Object.entries(pastedSecrets(preset, pasted.values))) {
+        await saveSecret(client, name, value);
+      }
+    } catch (error) {
+      setRefusal(refusalSentence(error));
+      setSaving(false);
+      return;
+    }
+    onContinue(preset.id, prefillFrom(preset, pasted.values));
+  };
 
   const read = (): void => {
     setReading(readPaste(presets, text));
@@ -77,8 +101,8 @@ export function PasteVariables({ presets, onBack, onContinue }: PasteVariablesPr
           onChange={event => setText(event.target.value)}
         />
         <span className="text-meta leading-base text-muted">
-          NAME=value lines, YAML, or a Codex [model_providers] table. Read here and cleared; a key is never stored from
-          here — paste it into the secret store.
+          NAME=value lines, YAML, or a Codex [model_providers] table. Read here and cleared; a key goes straight to the
+          secret store when you Continue, and the form keeps only its name.
         </span>
       </div>
       <div>
@@ -121,13 +145,18 @@ export function PasteVariables({ presets, onBack, onContinue }: PasteVariablesPr
             type="button"
             variant="primary"
             data-paste-continue=""
-            disabled={target === undefined}
+            disabled={target === undefined || saving}
             onClick={() => {
-              if (target !== undefined) onContinue(target.id, prefillFrom(target, reading.values));
+              if (target !== undefined) void save(target, reading);
             }}
           >
-            Continue
+            {saving ? 'Saving…' : 'Continue'}
           </Button>
+          {refusal === null ? null : (
+            <p role="alert" className="m-0 mt-2 text-cell leading-base text-warn" data-paste-refused="">
+              {refusal}
+            </p>
+          )}
         </div>
       )}
     </div>

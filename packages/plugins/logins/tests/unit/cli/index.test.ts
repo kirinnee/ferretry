@@ -113,6 +113,106 @@ describe('the logins cli half', () => {
     should(out.join('')).match(/Done\./);
   });
 
+  it('should add a provider login end to end: the key typed hidden goes to the Vault and only its reference to the login', async () => {
+    const SENTINEL = 'SENTINEL-sk-end-to-end';
+    const preset = {
+      id: 'zai-glm',
+      label: 'Z.ai GLM',
+      harness: 'claude-code',
+      summary: 'x',
+      docs: 'https://docs.example.test',
+      origin: 'built-in',
+      variables: [
+        {
+          name: 'ANTHROPIC_AUTH_TOKEN',
+          kind: 'secret',
+          secret: 'ZAI_API_KEY',
+          required: true,
+          allowEmpty: false,
+          harnesses: ['claude-code'],
+        },
+      ],
+      models: [],
+      test: { available: true, spends: 'nothing', note: 'Free.' },
+      quota: { source: 'none', note: 'n/a' },
+      unverified: [],
+      verified: '2026-10-16',
+      offered: { available: true },
+      halves: [{ harness: 'claude-code', offered: { available: true }, models: [] }],
+    };
+    const staged = {
+      id: 'chg1',
+      change: { kind: 'login.enable', id: 'work' },
+      summary: 'Add',
+      consequences: [],
+      expiresAt: LATER,
+      state: 'pending',
+    };
+    const asked: string[] = [];
+    const { ctx, out, err, calls } = context(
+      {
+        [GRANTS_ROUTE]: OPEN,
+        [ROUTES.presets]: { presets: [preset] },
+        [ROUTES.logins]: loginList(),
+        'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+        'POST /v1/secrets': { name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT },
+        [ROUTES.stage]: staged,
+        [ROUTES.apply]: { outcome: 'applied' },
+      },
+      {
+        promptHidden: async question => {
+          asked.push(question);
+          return SENTINEL;
+        },
+      },
+    );
+
+    const code = await cli.build?.(ctx).verbs['login add']({ args: ['zai-glm'], options: { yes: true } });
+
+    should(code).equal(0);
+    should(asked).eql(['ZAI_API_KEY (hidden; press Enter when done): ']);
+    const vault = calls.find(call => call.route === 'POST /v1/secrets');
+    should(vault?.init).eql({ body: { name: 'ZAI_API_KEY', value: SENTINEL } });
+    should(calls.find(call => call.route === ROUTES.stage)?.init).match({
+      body: { env: { ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' } },
+    });
+    // The value reached the Vault call and nothing else a person, a pipe or a file could see.
+    const elsewhere = JSON.stringify([out, err, asked, calls.filter(call => call !== vault)]);
+    should(elsewhere).not.containEql(SENTINEL);
+  });
+
+  it('should read the shell only through what the manifest declares, and say so when the shell offers no way', async () => {
+    const asked: (readonly string[])[] = [];
+    const { ctx, err } = context(
+      { [GRANTS_ROUTE]: OPEN },
+      {
+        readEnvironment: names => {
+          asked.push(names);
+          return { ZAI_API_KEY: 'SENTINEL-shell' };
+        },
+      },
+    );
+    const bare = context({ [GRANTS_ROUTE]: OPEN });
+
+    // No preset in the answers: detection runs, finds nothing it can use, and refuses — after reading only declared names.
+    const code = await cli
+      .build?.({
+        ...ctx,
+        client: {
+          ...ctx.client,
+          call: async <A>(route: string) => (route === ROUTES.presets ? ({ presets: [] } as A) : (OPEN as A)),
+        },
+      })
+      .verbs['login add']({ args: [], options: { 'from-env': true } });
+    const refused = await cli.build?.(bare.ctx).verbs['login add']({ args: [], options: { 'from-env': true } });
+
+    should(code).equal(1);
+    should(asked).eql([manifest.permissions.cliEnvReads]);
+    should(err.join('')).not.containEql('SENTINEL');
+    should(refused).equal(1);
+    should(bare.err.join('')).match(/cannot read your shell's variables/u);
+  });
+
   it('should print what a change saves and which runtimes it lands on, as v4 did', async () => {
     const staged = {
       id: 'chg1',

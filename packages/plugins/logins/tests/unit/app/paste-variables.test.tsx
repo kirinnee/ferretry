@@ -3,6 +3,7 @@ import type { ProviderPresetView } from '../../../contract/index.ts';
 import { PasteVariables } from '../../../app/features/paste-variables.tsx';
 import type { Prefill } from '../../../app/lib/paste-model.ts';
 import { interact, mount, must } from '../support/dom.ts';
+import { type Call, scripted } from './support/client.ts';
 
 // The paste screen (docs/provider-presets.md § Detect): what it shows is NAMES, the box empties the
 // moment it is read, and a key's value never reaches the tree.
@@ -71,7 +72,12 @@ const paste = async (view: { container: HTMLElement }, text: string): Promise<vo
 describe('the paste screen', () => {
   it('recognises the provider in this browser, empties the box when it is read, and shows names only', async () => {
     const view = await mount(
-      <PasteVariables presets={[ZAI, GATEWAY]} onBack={() => undefined} onContinue={() => undefined} />,
+      <PasteVariables
+        client={scripted({})}
+        presets={[ZAI, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
     );
     await paste(view, 'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret');
     const c = view.container;
@@ -98,7 +104,12 @@ describe('the paste screen', () => {
       detect: { hosts: [], variables: ['SHARED_KEY'], keyPrefixes: [] },
     });
     const view = await mount(
-      <PasteVariables presets={[FIRST, SECOND]} onBack={() => undefined} onContinue={() => undefined} />,
+      <PasteVariables
+        client={scripted({})}
+        presets={[FIRST, SECOND]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
     );
     await paste(view, 'export SHARED_KEY=sk-tie-secret');
     const c = view.container;
@@ -112,7 +123,12 @@ describe('the paste screen', () => {
 
   it('says so when a paste holds no variables, and offers no Continue', async () => {
     const view = await mount(
-      <PasteVariables presets={[ZAI, GATEWAY]} onBack={() => undefined} onContinue={() => undefined} />,
+      <PasteVariables
+        client={scripted({})}
+        presets={[ZAI, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
     );
     await paste(view, 'just a sentence, nothing to read');
     expect(view.container.querySelector('[data-paste-result="empty"]')?.textContent).toBe(
@@ -125,7 +141,12 @@ describe('the paste screen', () => {
   it('continues as the custom gateway, saying so, when the recognised provider is not offered here', async () => {
     const refused = preset({ ...ZAI, offered: { available: false, reason: 'not here' } });
     const view = await mount(
-      <PasteVariables presets={[refused, GATEWAY]} onBack={() => undefined} onContinue={() => undefined} />,
+      <PasteVariables
+        client={scripted({})}
+        presets={[refused, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => undefined}
+      />,
     );
     await paste(view, 'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4');
     expect(view.container.querySelector('[data-paste-not-offered]')?.textContent).toBe(
@@ -135,7 +156,9 @@ describe('the paste screen', () => {
   });
 
   it('offers no Continue when nothing on offer can take the variables', async () => {
-    const view = await mount(<PasteVariables presets={[]} onBack={() => undefined} onContinue={() => undefined} />);
+    const view = await mount(
+      <PasteVariables client={scripted({})} presets={[]} onBack={() => undefined} onContinue={() => undefined} />,
+    );
     await paste(view, 'GATEWAY_TOKEN=abc');
     expect(view.container.querySelector('[data-paste-not-offered]')?.textContent).toBe(
       'Nothing offered here can take these variables. Pick a provider instead.',
@@ -144,10 +167,14 @@ describe('the paste screen', () => {
     await view.unmount();
   });
 
-  it('continues to the preset it picked with the paste as its prefill', async () => {
+  it('files the pasted key in the Vault under the preset’s secret name, then continues with names only', async () => {
+    const KEY = 'SENTINEL-sk-zai-very-secret';
+    const calls: Call[] = [];
+    const client = scripted({ 'POST /v1/secrets': { name: 'ZAI_API_KEY' } }, calls);
     const given: { value: readonly [string, Prefill] | null } = { value: null };
     const view = await mount(
       <PasteVariables
+        client={client}
         presets={[ZAI, GATEWAY]}
         onBack={() => undefined}
         onContinue={(presetId, prefill) => {
@@ -155,14 +182,85 @@ describe('the paste screen', () => {
         }}
       />,
     );
-    await paste(view, 'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=sk-zai-very-secret');
+    await paste(view, `export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4\nexport ZAI_API_KEY=${KEY}`);
     const button = must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue');
     await interact(() => button.click());
+
+    // The value went to the secrets route, under the preset's own secret name, and nowhere else.
+    expect(calls.map(call => [call.route, call.body])).toEqual([
+      ['POST /v1/secrets', { name: 'ZAI_API_KEY', value: KEY }],
+    ]);
     expect(given.value?.[0]).toBe('zai-glm');
     expect(given.value?.[1].values).toEqual({ ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4' });
     expect(given.value?.[1].secrets).toEqual(['ZAI_API_KEY']);
-    // The key's value is dropped where it is read: nothing the panel is handed holds it.
-    expect(JSON.stringify(given.value?.[1])).not.toContain('sk-zai-very-secret');
+    // Nothing the panel is handed, and nothing on screen, holds the key.
+    expect(JSON.stringify(given.value?.[1])).not.toContain(KEY);
+    expect(view.container.innerHTML).not.toContain(KEY);
+    await view.unmount();
+  });
+
+  it('files nothing when the paste carried no key', async () => {
+    const calls: Call[] = [];
+    const client = scripted({ 'POST /v1/secrets': { name: 'x' } }, calls);
+    const view = await mount(
+      <PasteVariables client={client} presets={[ZAI, GATEWAY]} onBack={() => undefined} onContinue={() => undefined} />,
+    );
+    await paste(view, 'export ANTHROPIC_BASE_URL=https://api.z.ai/api/paas/v4');
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+    expect(calls).toEqual([]);
+    await view.unmount();
+  });
+
+  it('stays on the paste screen, saying why, when the Vault refuses the key — and says nothing of its value', async () => {
+    const KEY = 'SENTINEL-sk-refused';
+    let continued = false;
+    const refusal = Object.assign(new Error('a ferret cannot set or replace a secret; the owner does.'), {
+      status: 403,
+      code: 'forbidden',
+    });
+    const view = await mount(
+      <PasteVariables
+        client={scripted({ 'POST /v1/secrets': refusal })}
+        presets={[ZAI, GATEWAY]}
+        onBack={() => undefined}
+        onContinue={() => {
+          continued = true;
+        }}
+      />,
+    );
+    await paste(view, `export ZAI_API_KEY=${KEY}`);
+    await interact(() =>
+      must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
+    );
+
+    expect(continued).toBe(false);
+    expect(view.container.querySelector('[data-paste-refused]')?.textContent).toBe(
+      'a ferret cannot set or replace a secret; the owner does.',
+    );
+    expect(view.container.innerHTML).not.toContain(KEY);
+    // The button is usable again: the person can try once more.
+    expect((view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null)?.disabled).toBe(false);
+    await view.unmount();
+  });
+
+  it('shows Saving… and takes no second press while the key is on its way to the Vault', async () => {
+    let release: (() => void) | undefined;
+    const calls: Call[] = [];
+    const client = scripted({ 'POST /v1/secrets': () => new Promise<void>(resolve => (release = resolve)) }, calls);
+    const view = await mount(
+      <PasteVariables client={client} presets={[ZAI, GATEWAY]} onBack={() => undefined} onContinue={() => undefined} />,
+    );
+    await paste(view, 'export ZAI_API_KEY=SENTINEL-slow');
+    const button = must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue');
+    await interact(() => button.click());
+
+    expect(button.textContent).toBe('Saving…');
+    expect(button.disabled).toBe(true);
+    await interact(() => button.click());
+    expect(calls).toHaveLength(1);
+    await interact(() => release?.());
     await view.unmount();
   });
 
@@ -171,6 +269,7 @@ describe('the paste screen', () => {
     let continued = false;
     const view = await mount(
       <PasteVariables
+        client={scripted({})}
         presets={[ZAI, GATEWAY]}
         onBack={() => {
           back = true;
