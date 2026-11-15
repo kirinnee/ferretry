@@ -22,6 +22,8 @@ export interface FakePanes {
   readonly samples?: Readonly<Record<string, LivenessSample>>;
   readonly browsers?: Readonly<Record<string, PaneBrowsers>>;
   readonly still?: (ferret: FerretId, browser: PaneBrowser) => PaneBrowserStill | Promise<PaneBrowserStill>;
+  /** What each ferret's pane last showed (absent: `''`). */
+  readonly screens?: Readonly<Record<string, string>>;
 }
 
 /** An in-memory `TerminalsApi` over a fixed set of terminals, and the panes `panes` describes (none: blind, empty). */
@@ -45,6 +47,7 @@ export function fakeTerminals(terminals: readonly TerminalView[] = [], panes: Fa
       });
     },
     liveness: async (ferret: FerretId) => ({ ...(panes.samples?.[ferret] ?? {}) }),
+    deadPaneText: async (ferret: FerretId) => panes.screens?.[ferret] ?? '',
     paneBrowsers: async (ferret: FerretId) =>
       panes.browsers?.[ferret] ?? { kind: 'observed', toolCommandRunning: false, browsers: [] },
     paneBrowserStill: async (ferret: FerretId, browser: PaneBrowser) => {
@@ -71,6 +74,9 @@ export function terminalsConformance(name: string, make: () => TerminalsApi, fer
       const holders = await make().holders();
       expect(holders.holders.reduce((sum, holder) => sum + holder.count, 0)).toBe(holders.open);
       expect(holders.open).toBeLessThanOrEqual(holders.limit);
+    });
+    test('a dead pane’s text is always a string: empty when there is nothing to say, never a throw', async () => {
+      expect(typeof (await make().deadPaneText(ferret))).toBe('string');
     });
     test('a liveness sample carries only the sample fields, never a transcript of its own', async () => {
       const sample = await make().liveness(ferret);

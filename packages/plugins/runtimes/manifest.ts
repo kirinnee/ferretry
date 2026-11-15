@@ -1,5 +1,6 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { LoginChanged, LoginChangesPort, LoginsPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
+import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import { LoginPaused, LoginResumed, UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   AutoResumeDecide,
@@ -54,7 +55,8 @@ export default definePlugin({
   // Logins is one plugin: reading it (`logins`) and changing it (`loginChanges`) are two ports, and only Runtimes holds the second.
   needs: { ferrets: FerretsPort, logins: LoginsPort, loginChanges: LoginChangesPort },
   // Optional (§2.4): the account picker shows each runtime's quota from Usage's feed. Usage off = the picker without quota.
-  uses: { usage: UsagePort },
+  // Also optional: Terminals reads a dead pane, so a Codex ferret whose start failed is told why. Terminals off = no sentence.
+  uses: { usage: UsagePort, terminals: TerminalsPort },
   provides: { runtimes: RuntimesPort },
 
   actions: {

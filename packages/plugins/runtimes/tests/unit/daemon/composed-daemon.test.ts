@@ -16,11 +16,12 @@ import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/te
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { fakeTerminals } from '@ferretry/plugin-terminals/contract/testing';
 import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
+import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesLaunchFailed, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -839,6 +840,49 @@ describe('the default composition stands in for the services and keeps a broken 
     const lines = host.logs.map(line => line.message);
     expect(lines.filter(line => line.includes('could not open the fleet folder'))).toHaveLength(1);
     expect(lines.some(line => line.includes('follow-up could not run'))).toBe(true);
+  });
+
+  it('a Codex ferret whose start failed is told why from its dead pane, and only while Terminals is on', async () => {
+    const run = async (terminals: boolean) => {
+      const ferrets = new FakeFerrets();
+      ferrets.add({
+        id: 'c1' as never,
+        harness: 'codex',
+        runtime: 'codex-default',
+        state: 'stopped',
+        cause: { kind: 'start_failed' },
+      } as never);
+      const world = await fleetWorld();
+      const host = await testHost({
+        plugins: [
+          runtimesDaemon(ctx =>
+            hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
+          ) as DaemonImplementation<any>,
+        ],
+        fakes: {
+          ferrets,
+          logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
+          loginChanges: fakeLoginChanges(),
+        },
+        ...(terminals
+          ? {
+              uses: {
+                terminals: fakeTerminals([], { screens: { c1: 'Error: workspace routing discovery failed' } }),
+              },
+            }
+          : {}),
+        gate: new StandInAdmission(() => ownerStanding()),
+        config: CONFIG,
+        ownerHome: world.person,
+      });
+      const before = host.published.length;
+      host.emit(FerretsChanged, { ferret: 'c1', generation: 1, state: 'stopped' });
+      await host.settle();
+      return host.published.slice(before).map(event => event.event);
+    };
+
+    expect(await run(true)).toEqual([RuntimesLaunchFailed.name]);
+    expect(await run(false)).toEqual([]);
   });
 
   it('the unavailable assembly is reported by the doctor row as a warning, not as a healthy half', async () => {
