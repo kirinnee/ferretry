@@ -32,6 +32,7 @@ import {
   RuntimeStart,
   type AutoResumeDecideInput,
   AutoResumeSummaryFile,
+  MonitorTickFile,
   FerretChanged,
   type FerretChangedPayload,
   FerretHistoryFiles,
@@ -53,6 +54,7 @@ import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
 import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { fleetEventsAccept, HistoryEventSource } from '../../../daemon/modules/fleet-events.ts';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
+import { MONITOR_TICK_JOB } from '../../../daemon/modules/monitor.ts';
 import { type SessionHandoverNeeds, sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
 import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/directory/subsystem.ts';
 import { createSessionEvent, encodeSessionEvent } from '../../../daemon/lib/storage/journal.ts';
@@ -905,5 +907,56 @@ describe('the session index is rebuilt at boot (BG-049, J-0159)', () => {
     expect(lost.storage.listSessions()).toHaveLength(60);
     expect(lost.storage.listSessions().find(session => session.id === sessionIdAt(59))?.lastSequence).toBe(3);
     await lost.storage.close();
+  });
+});
+
+describe('the declared-wait monitor (J-0003 J-0006 J-0070 J-0071 J-0072 J-0120)', () => {
+  const MINUTE_MS = 60_000;
+  const wake = (runner: FakeRunner) =>
+    runner.deliveries.filter(sent => sent.delivery.text.startsWith('The wait you declared has elapsed'));
+  const park = async (h: TestHost, id: FerretId, until: string) => {
+    const waiting = await h.request('POST', `/v1/ferrets/${id}/signal`, {
+      body: { kind: 'waiting', until, condition: 'the CI run' },
+    });
+    expect(waiting.status).toBe(200);
+  };
+
+  test('J-0003 the monitor is a kernel job at the loop’s own cadence: a ferret whose wait has elapsed is woken once, its park cleared and the pane told', async () => {
+    const { h, runner } = await host();
+    expect(h.jobIds()).toContain(MONITOR_TICK_JOB);
+    const id = await start(h, 'wren');
+    await park(h, id, '1m');
+
+    // Inside the wait the tick wakes nobody, and the wait still stands on the ferret.
+    await h.runJob(MONITOR_TICK_JOB);
+    expect(wake(runner)).toHaveLength(0);
+    expect((await h.provided(FerretsPort).get(id))?.waiting).toMatchObject({ condition: 'the CI run' });
+
+    // Past its deadline the next tick ends the park and tells the ferret what it was waiting for, once.
+    await advance(h, 2 * MINUTE_MS);
+    await h.runJob(MONITOR_TICK_JOB);
+    expect(wake(runner)).toHaveLength(1);
+    expect(wake(runner)[0]?.delivery.text).toContain('the CI run');
+    expect((await h.provided(FerretsPort).get(id))?.waiting).toBeUndefined();
+    await h.runJob(MONITOR_TICK_JOB);
+    expect(wake(runner)).toHaveLength(1);
+    await h.stop();
+  });
+
+  test('J-0070 J-0071 the loop publishes its own record after every tick, armed and with what it parked, and says it stopped when the daemon does', async () => {
+    const { h } = await host();
+    const id = await start(h, 'wren');
+    await park(h, id, '30m');
+    expect(h.state('ferrets').raw(MonitorTickFile)).toBeUndefined();
+
+    await h.runJob(MONITOR_TICK_JOB);
+    expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({
+      armed: true,
+      overdue: false,
+      parked: 1,
+      lastTick: { parked: 1, heartbeats: [id], expired: [] },
+    });
+    await h.stop();
+    expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({ armed: false, overdue: true });
   });
 });

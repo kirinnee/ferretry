@@ -31,7 +31,7 @@ export interface ParkedSession {
 }
 
 /** Why a park ended, which is not the same question as when. */
-export type WaitExpiryBasis =
+type WaitExpiryBasis =
   /** The deadline the teammate declared, as clamped when the park was accepted. */
   | 'declared'
   /** No deadline was declared, so the daemon's own backstop ended it. */
