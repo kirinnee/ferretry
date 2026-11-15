@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import { createLiveActivityHub, deviceControls, PanelSlot } from '@ferretry/app';
-import { ensureDom, render, run } from '@ferretry/app/testing';
+import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -16,7 +16,29 @@ import { QuestionForm } from '../../../../app/questions/question-form.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
 import { ferretView } from '../../../support/app/ferret-view.ts';
 
+import * as realSharedDraft from '../../../../app/composer/use-shared-draft.ts';
+
 ensureDom();
+
+/**
+ * The shared draft's clear can take up to a second to come back while this device's last keystroke is answered. A case
+ * holds it open here (a gate it releases itself); every other case goes straight to the real hook.
+ */
+// Taken before the mock replaces the module's binding, or the mock would call itself.
+const { useSharedDraft: realUseSharedDraft, ...otherSharedDraftExports } = realSharedDraft;
+const clearGate: { current: Promise<undefined> | undefined } = { current: undefined };
+mock.module('../../../../app/composer/use-shared-draft.ts', () => ({
+  ...otherSharedDraftExports,
+  useSharedDraft: (...args: Parameters<typeof realUseSharedDraft>) => {
+    const real = realUseSharedDraft(...args);
+    return {
+      ...real,
+      sendClear: (...rest: Parameters<typeof real.sendClear>) => {
+        return clearGate.current ?? real.sendClear(...rest);
+      },
+    };
+  },
+}));
 
 /**
  * THE CHAT: one ferret's conversation and the slots the rest of its screen is drawn in. Today's suite drove the whole
@@ -299,7 +321,7 @@ describe('the question the ferret is asking', () => {
     expect(page.root.findAllByType(Composer)).toHaveLength(1);
   });
 
-  test('a form card’s Send answers the form, not the chat, even while the ferret waits on its question', async () => {
+  test('a form card’s Send, pressed for real, answers the form and sends no chat message, even while the ferret waits on its question', async () => {
     const sent: unknown[] = [];
     const replied: unknown[] = [];
     let answered = 0;
@@ -318,17 +340,52 @@ describe('the question the ferret is asking', () => {
       },
       client,
     );
-    const composer = page.root.findByType(Composer);
 
-    expect(composer.props.allowEmptySend).toBe(true);
-    expect(composer.props.clearErrorOn).toBe(3);
-    await composer.props.api.send('shared', { message: '' });
-    run(() => composer.props.onSent({ words: '' }));
+    expect(page.root.findByType(Composer).props.allowEmptySend).toBe(true);
+    expect(page.root.findByType(Composer).props.clearErrorOn).toBe(3);
+    await runAsync(async () => page.root.findByType('form').props.onSubmit({ preventDefault() {} }));
 
     expect(answered).toBe(1);
     expect(sent).toEqual([]);
     // A form's Send is an answer, not a reply: the Inbox is told nothing.
     expect(replied).toEqual([]);
+  });
+
+  test('a Send pressed on form A6 answers A6 only, even when the page moves to form A7 of the same ferret before it ends', async () => {
+    const answeredOn: string[] = [];
+    const base: Partial<PageProps> = {
+      embedded: true,
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    };
+    const props = (id: string): PageProps => ({
+      client: fakeClient({}),
+      daemonId: 'alpha',
+      entries: [],
+      ...base,
+      ask: { id, answerForm: () => void answeredOn.push(id) },
+      session: base.session as PageProps['session'],
+    });
+    let release: () => void = () => undefined;
+    clearGate.current = new Promise<undefined>(resolve => {
+      release = () => resolve(undefined);
+    });
+    try {
+      const page = draw(props('A6'));
+      // The press happens while the shared draft's clear is still out; then the owner opens the next item of the same ferret.
+      // (The press is its own act, not part of an async one: an update inside an open async act waits for it to end.)
+      let pressed: Promise<void> = Promise.resolve();
+      run(() => {
+        pressed = page.root.findByType('form').props.onSubmit({ preventDefault() {} });
+      });
+      run(() => page.update(<SessionChatPage {...props('A7')} />));
+      release();
+      await runAsync(async () => await pressed);
+    } finally {
+      clearGate.current = undefined;
+    }
+
+    expect(answeredOn).toEqual(['A6']);
   });
 
   test('without a form the item’s reply box is still a reply to the item', () => {

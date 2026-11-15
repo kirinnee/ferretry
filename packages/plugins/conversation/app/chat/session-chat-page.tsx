@@ -238,25 +238,10 @@ export function SessionChatPage({
     [onRefresh, askReplied, forForm],
   );
   // The ask's reply carries its reference; the ferret's own chat box has none, and keeps the composer's default calls.
-  // A FORM card's Send answers the form instead: the message the composer would have sent is dropped and `answerForm`
-  // runs (it may throw the composer's one error line), whatever the ferret's chat is doing.
-  const answerRef = useRef(answerForm);
-  answerRef.current = answerForm;
-  const askApi = useMemo(() => {
-    if (askId === undefined) return undefined;
-    const reply = withReferencePrefix(composerApi(client), () => [askId]);
-    if (!forForm) return reply;
-    return new Proxy(reply, {
-      get(target, key, receiver) {
-        const value = Reflect.get(target, key, receiver);
-        if (key !== 'send') return typeof value === 'function' ? value.bind(target) : value;
-        return () => {
-          answerRef.current?.();
-          return Promise.resolve({});
-        };
-      },
-    });
-  }, [client, askId, forForm]);
+  const askApi = useMemo(
+    () => (askId === undefined ? undefined : withReferencePrefix(composerApi(client), () => [askId])),
+    [client, askId],
+  );
   // LIVE is not WORKING. `running` means the agent's terminal is up; whose turn it is comes from the daemon's turn
   // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
   // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
@@ -413,6 +398,8 @@ export function SessionChatPage({
                 {...(forForm
                   ? {
                       allowEmptySend: true,
+                      // A form card's Send answers THE FORM, from the press itself: never a chat message, never the outbox.
+                      onFormSend: answerForm,
                       ...(ask?.formChanges === undefined ? {} : { clearErrorOn: ask.formChanges }),
                     }
                   : {})}
