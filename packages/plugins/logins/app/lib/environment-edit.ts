@@ -11,7 +11,7 @@
 import {
   type LoginChange,
   type LoginEnvironment,
-  hasTokenShape,
+  nameLooksLikeKey,
   RESERVED_LOGIN_ENV_NAMES,
   storedEnvironmentIssue,
 } from '../../contract/index.ts';
@@ -75,7 +75,7 @@ export function envChange(loginId: string, rows: readonly EditRow[]): EnvEdit {
       return refused(
         "The new variable's name is not a variable name: letters, digits and underscores, not starting with a digit.",
       );
-    if (hasTokenShape(name))
+    if (nameLooksLikeKey(name))
       return refused(
         `The new variable's name looks like a key. A name is a label: put the key in Settings › Secrets and write its NAME as \${secret:NAME} in the value.`,
       );

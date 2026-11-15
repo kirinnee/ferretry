@@ -162,6 +162,21 @@ describe('envChange', () => {
     });
   });
 
+  it('accepts ordinary names a value-prefix test would read as keys', () => {
+    for (const name of ['npm_config_registry', 'npm_config_strict_ssl', 'ASIA_REGION', 'hf_home', 'my_npm_cache_dir']) {
+      const edit = envChange('zai', [newRow(name, 'https://registry.test')]);
+      expect(edit.kind).toBe('change');
+    }
+  });
+
+  it('also refuses an npm_ or hf_ key with a long body as a name, without repeating it', () => {
+    for (const name of [['npm', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_'), ['hf', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_')]) {
+      const edit = envChange('zai', [newRow(name, 'x')]);
+      expect(edit).toMatchObject({ kind: 'refused', sentence: expect.stringContaining('looks like a key') });
+      expect(JSON.stringify(edit)).not.toContain('a1b2c3d4e5f6');
+    }
+  });
+
   it('accepts variables called __proto__ or constructor, and still refuses one listed twice', () => {
     const edit = envChange('zai', [newRow('__proto__', 'x'), newRow('constructor', 'y')]);
     expect(edit.kind).toBe('change');

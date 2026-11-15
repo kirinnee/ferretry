@@ -128,6 +128,34 @@ describe('a login environment', () => {
     }
   });
 
+  it('should still load the ordinary names a value-prefix test would have read as keys, in a file and a harness half', () => {
+    // These loaded before the name check; a working login must not become unusable on upgrade.
+    const names = ['npm_config_registry', 'npm_config_strict_ssl', 'ASIA_REGION', 'hf_home', 'my_npm_cache_dir'];
+    const env = Object.fromEntries(names.map(name => [name, 'https://registry.example']));
+    should(LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env }).success).be.true();
+    should(LoginHalfSchema.safeParse({ env }).success).be.true();
+    should(
+      LoginChangeSchema.safeParse({ kind: 'login.add', id: 'work', harness: 'claude-code', store: 'environment', env })
+        .success,
+    ).be.true();
+    should(LoginChangeSchema.safeParse({ kind: 'login.env', id: 'work', env }).success).be.true();
+  });
+
+  it('should refuse a long-bodied npm_ or hf_ key as a name without repeating it', () => {
+    const body = 'a1b2c3d4e5f6a1b2c3d4e5f6';
+    for (const bad of [['npm', body].join('_'), ['hf', body].join('_')]) {
+      const env = { [bad]: 'https://gw.example' };
+      for (const result of [
+        LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env }),
+        LoginHalfSchema.safeParse({ env }),
+      ]) {
+        const issues = refusal(result);
+        should(issues.some(issue => issue.message.startsWith('A variable name looks like a key'))).be.true();
+        should(JSON.stringify(issues)).not.containEql(body);
+      }
+    }
+  });
+
   it('should still accept every name a preset sets', () => {
     for (const name of PRESET_ENV_NAMES) {
       should(LoginHalfSchema.safeParse({ env: { [name]: 'x' } }).success).be.true();
@@ -183,6 +211,24 @@ describe('m4: a login FILE is judged by the stored rule too (config editor, conf
     should(
       LoginFileSchema.safeParse(file({ OPENAI_API_KEY: 'ollama', GATEWAY_TOKEN: 'Bearer ${secret:K}' })).success,
     ).be.true();
+  });
+});
+
+describe('a stored-secret refusal never repeats a variable name that looks like a key', () => {
+  const body = 'a1b2c3d4e5f6a1b2c3d4e5f6';
+  const keyName = ['ghp', body].join('_');
+  const file = (env: Record<string, unknown>) => ({ harness: 'claude-code', store: 'environment', env });
+
+  it('should use a name-less message and an empty path for a key-named variable holding a secret or a long value', () => {
+    for (const value of ['hunter22x', 'a'.repeat(4097)]) {
+      const issues = refusal(LoginFileSchema.safeParse(file({ [keyName]: value })));
+      should(JSON.stringify(issues)).not.containEql(body);
+      should(issues.every(issue => !issue.path.includes(keyName))).be.true();
+    }
+    const raw = refusal(
+      LoginHalfSchema.safeParse({ env: { [keyName]: `https://gw.example/v1?key=${'q7Zk'.repeat(10)}` } }),
+    );
+    should(JSON.stringify(raw)).not.containEql(body);
   });
 });
 
