@@ -27,6 +27,12 @@ export interface AgendaRuntime {
   readonly agenda: DaemonAgendaClient;
   readonly ferrets: AgendaFerretStore;
   readonly clearPort: ClearPort;
+  /**
+   * Lets go of the transport events this runtime listens to and stops the ferret store's queued reads. For the owner
+   * of a runtime made for one purpose (the nav badge); the device's shared runtime (`AgendaFleet`) lives with the
+   * connection. A disposed runtime does not read again — make a new one.
+   */
+  readonly dispose: () => void;
 }
 
 export type RuntimeClient = AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>;
@@ -42,12 +48,18 @@ export const createAgendaRuntime = (
   const id = daemonOfClient(client);
   const connection = id === undefined ? THIS_MACHINE : daemonConnection({ daemonId: id });
   const ferrets = new AgendaFerretStore(client, connection, agenda.rollup);
-  client.subscribe?.(AsksChanged, payload => {
-    agenda.noteEvent(connection, payload);
-    ferrets.askChanged();
-  });
-  client.subscribe?.(FerretsChanged, () => ferrets.ferretChanged());
+  const transport = [
+    client.subscribe?.(AsksChanged, payload => {
+      agenda.noteEvent(connection, payload);
+      ferrets.askChanged();
+    }),
+    client.subscribe?.(FerretsChanged, () => ferrets.ferretChanged()),
+  ];
   return {
+    dispose: () => {
+      for (const off of transport.splice(0)) off?.();
+      ferrets.stop();
+    },
     client,
     connection,
     name: THIS_MACHINE_NAME,

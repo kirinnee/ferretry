@@ -43,6 +43,29 @@ describe('createAgendaRuntime', () => {
     runtime.ferrets.stop();
   });
 
+  it('disposes: its transport events are released and its ferret reads stop; a client with no events has nothing to release', async () => {
+    const released: unknown[] = [];
+    const { client: base } = build();
+    const client = {
+      ...base,
+      subscribe: ((event: unknown) => {
+        released.push(event);
+        return () => {
+          released.splice(released.indexOf(event), 1);
+        };
+      }) as never,
+    };
+    const runtime = createAgendaRuntime(client);
+    expect(released).toEqual([AsksChanged, FerretsChanged]);
+    runtime.dispose();
+    expect(released).toEqual([]);
+    runtime.dispose();
+    await expect(runtime.ferrets.refresh()).rejects.toThrow('List refresh was cleared');
+
+    const quiet = createAgendaRuntime({ call: build().client.call });
+    quiet.dispose();
+  });
+
   it('posts no seen mark of its own: opening an ask is told to the `agenda.item-opened` hook (use-item-opened)', async () => {
     const { client, calls } = build();
     const runtime = createAgendaRuntime(client);
