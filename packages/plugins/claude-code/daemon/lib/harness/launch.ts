@@ -100,6 +100,8 @@ export interface CommandInputs {
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly model?: string | undefined;
   readonly hasMcp: boolean;
+  /** The ferret's mode (`LaunchSpec.mode`): only an interactive one keeps the question tool. */
+  readonly mode?: 'interactive' | 'auto' | undefined;
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
   /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
@@ -138,10 +140,22 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
+    ...questionArguments(inputs.mode),
     ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
     ...readAllowArguments(inputs.readable ?? []),
     ...(inputs.model === undefined ? [] : startupModelArguments(inputs.model)),
   ];
+}
+
+/**
+ * The question tool, per ferret (O3, v4 parity with the Runtimes wrapper's `CLAUDE_NO_QUESTIONS_FLAG`): an interactive
+ * ferret has an owner and keeps `AskUserQuestion`; an unattended one (`auto`, or no mode) has nobody to answer, so the
+ * tool is withheld. Not part of the fixed layer's fingerprint: a ferret's mode is fixed for its life.
+ */
+export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
+
+export function questionArguments(mode: 'interactive' | 'auto' | undefined): readonly string[] {
+  return mode === 'interactive' ? [] : [CLAUDE_NO_QUESTIONS_FLAG];
 }
