@@ -132,6 +132,15 @@ export interface BrowsersApi {
   /** The pages one ferret holds, by id and name only. */
   pagesOf(ferret: FerretId): Promise<readonly BrowserPageRef[]>;
   /**
+   * The ADDRESS of the page `name` that `ferret` holds, as `scheme://host[:port]` only (never a path, query or fragment:
+   * what a page's address carries is the page's to say). THE AGENT-CONTROL GATE IS ASKED HERE, live on every call:
+   * with "What agents may control › Browsers" off (or undetermined) it refuses with `ApiError(403,
+   * agentControlRefusal('browser'), 'forbidden')`, and no address leaves. Only a page the ferret itself holds is
+   * answered, found in ITS own listing and nowhere else; no such page, a page that is a person's or is held by one, or a
+   * page with no http(s) address yet answers `undefined`. Present for Accounts only; optional, an absent method offers no address.
+   */
+  pageAddressOf?(ferret: FerretId, name: string): Promise<string | undefined>;
+  /**
    * Whether this host shares its loopback ports with other local users: the machine's `browserPorts` is anything but
    * `random` (today's `FleetLoginService` reading). Logins takes it as an optional use (lead decision 19, L2); an
    * absent method means the host is treated as shared, which fails closed.
