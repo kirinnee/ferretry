@@ -63,6 +63,17 @@ export interface InboxDerived {
   readonly total: number;
 }
 
+/**
+ * The reply overlay is the whole device's (`inboxLocal`), but a derivation counts only the machines it is given: a
+ * card Undo brought back belongs to ITS machine, so another machine's badge, or a locked or unpaired machine, must
+ * not add it. One machine's cards are the ones whose `daemonId` is among `machines`.
+ */
+const repliedWithin = (machines: readonly InboxMachine[], replied: RepliedState): RepliedState => {
+  const mine = new Set<DaemonId>(machines.map(machine => machine.connection.daemonId));
+  const entries = replied.entries.filter(entry => mine.has(entry.card.daemonId));
+  return entries.length === replied.entries.length ? replied : { ...replied, entries };
+};
+
 export const deriveInbox = (
   machines: readonly InboxMachine[],
   boardFor: BoardFor,
@@ -76,7 +87,7 @@ export const deriveInbox = (
     })),
   );
   const boardCards = boardDeck(unread, boardFor, local);
-  const cards = withRepliedCards(boardCards, local.replied);
+  const cards = withRepliedCards(boardCards, repliedWithin(machines, local.replied));
   const held = (entry: UnreadSession): boolean => boardFor(entry.daemonId, entry.view.config.id) !== undefined;
   return { unread, boardCards, cards, total: inboxCount(unread, held, cards) };
 };

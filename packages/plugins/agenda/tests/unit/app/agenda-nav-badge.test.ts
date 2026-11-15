@@ -12,7 +12,10 @@ import { inboxBadgeOf, needsYouOf } from '../../../app/lib/agenda-nav-badge.ts';
 import { inboxCardKey } from '../../../app/lib/agenda-inbox.ts';
 import { InboxLocal } from '../../../app/lib/inbox-local.ts';
 import manifest from '../../../manifest.ts';
-import { agendaItem } from '../../support/app/agenda-inbox.tsx';
+import { RepliedAgenda } from '../../../app/lib/agenda-replied.ts';
+import { deriveInbox } from '../../../app/lib/inbox-count.ts';
+import { agendaItem, inboxCard } from '../../support/app/agenda-inbox.tsx';
+import { sessionView } from '../../support/app/sessions.ts';
 
 const DAEMON = `fy_daemon_${'c'.repeat(43)}`;
 
@@ -27,8 +30,14 @@ const snapshot = (sessionId: string, items: ReturnType<typeof agendaItem>[]) => 
 });
 
 /** A machine with one ferret and a machine ledger, counting what it is asked. */
-const machine = (ferret: ReturnType<typeof agendaItem>[], ledger: ReturnType<typeof agendaItem>[]) => {
+const machine = (
+  ferret: ReturnType<typeof agendaItem>[],
+  ledger: ReturnType<typeof agendaItem>[],
+  daemon: string = DAEMON,
+) => {
   const routes: string[] = [];
+  /** The transport events the machine's runtime listens to, by the event it asked for. */
+  const listeners = new Set<(payload: unknown) => void>();
   const client = {
     call: async (route: string) => {
       routes.push(route);
@@ -39,10 +48,23 @@ const machine = (ferret: ReturnType<typeof agendaItem>[], ledger: ReturnType<typ
       if (route.includes('/agenda')) return snapshot('zoe', ferret);
       throw new Error(`no route ${route}`);
     },
-    subscribe: () => () => undefined,
+    subscribe: (_event: unknown, listener: (payload: unknown) => void) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
   };
-  noteClientDaemon(client as never, DAEMON);
-  return { client: client as never, routes };
+  noteClientDaemon(client as never, daemon as never);
+  return {
+    client: client as never,
+    routes,
+    listening: () => listeners.size,
+    /** Fires every event a live subscriber would hear. */
+    emit: () => {
+      for (const listener of [...listeners]) listener({ ferret: 'zoe' });
+    },
+  };
 };
 
 const until = async (ready: () => boolean): Promise<void> => {
@@ -122,6 +144,84 @@ describe('the Inbox count on the nav entry', () => {
     const quiet = routes.length;
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(routes.length).toBe(quiet);
+  });
+
+  it('lets go of the machine’s events and queued reads on the last unsubscribe, and watches again on the next', async () => {
+    const { client, routes, listening, emit } = machine([ASK], []);
+    const badge = inboxBadgeOf(client, { local: new InboxLocal() });
+    const stop = badge.subscribe(() => undefined);
+    await until(() => badge.count() === 1);
+    expect(listening()).toBe(2);
+    // An event inside the refresh cooldown leaves a read queued; the last unsubscribe must cancel it too.
+    emit();
+    stop();
+    expect(listening()).toBe(0);
+    expect(badge.count()).toBe(0);
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    const quiet = routes.length;
+    emit();
+    await new Promise(resolve => setTimeout(resolve, 30));
+    expect(routes.length).toBe(quiet);
+
+    const again = badge.subscribe(() => undefined);
+    expect(listening()).toBe(2);
+    await until(() => badge.count() === 1);
+    expect(badge.count()).toBe(1);
+    expect(routes.length).toBeGreaterThan(quiet);
+    const resumed = routes.length;
+    emit();
+    await until(() => routes.length > resumed);
+    expect(routes.length).toBeGreaterThan(resumed);
+    again();
+    expect(listening()).toBe(0);
+  });
+});
+
+describe('the Inbox count across machines: a reply Undo belongs to its own machine', () => {
+  const A = `fy_daemon_${'d'.repeat(43)}`;
+  const B = `fy_daemon_${'e'.repeat(43)}`;
+  const view = sessionView('zoe', { config: { teammate: 'zoe', name: 'Release train' } });
+  const aCard = inboxCard(ASK, view, 'A', A as never);
+
+  /** A reply sent from A's card and taken back with Undo, as the Inbox page does it, published to the device's local state. */
+  const undone = async (local: InboxLocal) => {
+    const replied = new RepliedAgenda({ withdraw: async () => 'withdrawn', unsnooze: async () => undefined });
+    expect(replied.mark(aCard, { words: 'yes', sendId: 'send-1' })).toBe(true);
+    await replied.undo(aCard.key);
+    expect(replied.getSnapshot().entries.map(entry => entry.phase)).toEqual(['back']);
+    local.publish({}, { hidden: new Set(), replied: replied.getSnapshot() });
+  };
+
+  it('counts A’s card once across two unlocked machines: the nav is the Inbox', async () => {
+    const local = new InboxLocal();
+    const a = machine([ASK], [], A);
+    const b = machine([], [], B);
+    const badgeA = inboxBadgeOf(a.client, { local });
+    const badgeB = inboxBadgeOf(b.client, { local });
+    const stops = [badgeA.subscribe(() => undefined), badgeB.subscribe(() => undefined)];
+    await until(() => badgeA.count() === 1);
+    await undone(local);
+    expect(badgeA.count()).toBe(1);
+    expect(badgeB.count()).toBe(0);
+    expect(badgeA.count() + badgeB.count()).toBe(1);
+    for (const stop of stops) stop();
+  });
+
+  it('does not count a card of a machine that is locked or unpaired', async () => {
+    const local = new InboxLocal();
+    await undone(local);
+    const machineOf = (daemon: string, name: string) => ({
+      connection: { daemonId: daemon as never },
+      name,
+      sessions: [],
+    });
+    const a = machineOf(A, 'A');
+    const b = machineOf(B, 'B');
+    const total = (machines: (typeof a)[]) =>
+      deriveInbox(machines, () => undefined, { ...local.getSnapshot(), answered: new Set() }).total;
+    // Unlocked, A's replied card is its own to count; with A gone, B counts nothing of it.
+    expect(total([a, b])).toBe(total([a]));
+    expect(total([b])).toBe(0);
   });
 });
 

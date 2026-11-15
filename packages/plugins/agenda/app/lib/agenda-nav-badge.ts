@@ -6,7 +6,8 @@
  * them, the machine's own ledger, notifications, items in discussion, the rule suggestions the owner answered and the
  * answers still in their undo window are all derived by `deriveInbox` (`inbox-count.ts`), the function the page
  * counts with. What the page reads to count, the badge reads too — a conversation's board when its summary moves, the
- * machine's ledger — and only once the shell subscribes; the last unsubscribe stops watching.
+ * machine's ledger — and only once the shell subscribes; the last unsubscribe stops watching: the badge's own runtime
+ * lets go of its transport events and queued reads, so nothing reads for a badge nobody is listening to.
  */
 
 import type { FerretsNeedsYou } from '@ferretry/core-ferrets/contract';
@@ -32,7 +33,6 @@ export interface InboxBadge {
 export interface InboxBadgeSeams {
   readonly timers?: DeferredTimers;
   readonly local?: InboxLocal;
-  readonly runtimeOf?: (client: RuntimeClient) => AgendaRuntime;
 }
 
 export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {}): InboxBadge => {
@@ -62,8 +62,10 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
   };
 
   const start = (): (() => void) => {
-    runtime ??= (seams.runtimeOf ?? (made => createAgendaRuntime(made)))(client);
-    const machine = runtime;
+    // The badge OWNS this runtime for as long as someone listens: its transport events and queued reads end with the
+    // last unsubscribe, and a new subscription builds a fresh one.
+    const machine = createAgendaRuntime(client);
+    runtime = machine;
     const reads = new InboxBoardReads(seams.timers ?? browserDeferredTimers);
     const connection = machine.connection;
     const connectionFor = () => connection;
@@ -94,6 +96,8 @@ export const inboxBadgeOf = (client: RuntimeClient, seams: InboxBadgeSeams = {})
       for (const off of stops) off();
       cancelSweep?.();
       reads.dispose();
+      machine.dispose();
+      runtime = undefined;
     };
   };
 
