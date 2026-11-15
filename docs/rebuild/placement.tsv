@@ -1191,7 +1191,6 @@ daemon/src/adapters/session/resume/storage-consistency-pass.ts	ferrets	19	identi
 daemon/src/adapters/session/resume/storage-health-inventory.ts	ferrets	19	identity/state machine/launch/lineage
 daemon/src/adapters/session/resume/storage-resume-repository.ts	ferrets	19	identity/state machine/launch/lineage
 daemon/src/adapters/session/resume/system-monotonic-clock.ts	ferrets	19	identity/state machine/launch/lineage
-daemon/src/adapters/session/resume/tmux-resume-launcher.ts	ferrets	19	identity/state machine/launch/lineage
 daemon/src/adapters/session/resume/unmounted-repair.ts	ferrets	19	identity/state machine/launch/lineage
 daemon/src/adapters/session/send/file-outbox-tail.ts	conversation	28	send/queue/turn/questions/transcript
 daemon/src/adapters/session/send/file-send-channel.ts	conversation	28	send/queue/turn/questions/transcript

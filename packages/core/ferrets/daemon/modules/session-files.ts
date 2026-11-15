@@ -31,10 +31,12 @@ import type { SessionEffectKey } from '../lib/session/effects/types.ts';
 import { defaultSessionResumeSettings } from '../lib/session/resume/settings.ts';
 import { resumeTurnDocument, resumeTurnInstruction } from '../lib/session/resume/policy.ts';
 import type { ClockPort } from '../lib/ports.ts';
+import { CoupledCapabilityHashStore, type SessionCutOffMark, type TokenCutOff } from '../lib/tokens/cut-off-mark.ts';
 import type { SessionProtocolEnvelope } from '../adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { type SessionId, parseSessionId, tryParseSessionId } from '../lib/session-id.ts';
 import {
   defaultSessionLifecycleSettings,
+  type SessionCapabilityHashStore,
   SessionCredentialRotation,
   type SessionEnvironmentStore,
   type SessionLifecycleLauncher,
@@ -102,6 +104,12 @@ export interface SessionFilesDeps {
    */
   readonly seed?: (ferret: SessionId) => Omit<SessionDocumentSeed, 'turn'> | undefined;
   readonly log: Pick<Log, 'warn'>;
+  /**
+   * The token directory's half of the owner's cut-off (`tokens.json`). With it the lifecycle's hash store and the
+   * service's {@link SessionFiles.cutOffMark} are ONE fact: a cut-off is written to the document AND the directory and
+   * read from either. Unbound only in a unit fixture, where the document's mark alone is the fact.
+   */
+  readonly tokenCutOff?: TokenCutOff;
 }
 
 /** The folder of a ferret's own session folder its opening attachments are written to (one of `FERRET_READABLE_FOLDERS`). */
@@ -123,14 +131,15 @@ export class SessionFiles {
   /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
   readonly launchGate: InMemoryLaunchGate;
   /**
-   * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so must every other
-   * writer of a session's launch state. GAP(ports-pending: Session adapters): FerretsService's start/stop runs on its
-   * own executor, so before a lifecycle may launch a ferret that already exists, that start/stop must run on THIS
-   * queue (as must the interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers).
+   * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so does FerretsService's
+   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): the
+   * interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers are not on it yet.
    */
   readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
-  private readonly hashes: StorageSessionCapabilityHashStore;
+  private readonly hashes: SessionCapabilityHashStore;
+  /** The document's half of the owner's cut-off, for the service: it ORs it with the token directory's (`isCutOff`). */
+  readonly cutOffMark: SessionCutOffMark;
   private readonly provenance: StorageSessionProvenanceStore;
   private readonly stamper: SessionProvenanceStamper;
   private readonly recorder: SessionProvenanceRecorder;
@@ -144,7 +153,24 @@ export class SessionFiles {
 
   constructor(private readonly deps: SessionFilesDeps) {
     this.launchGate = new InMemoryLaunchGate(async ms => await deps.sleep(milliseconds(ms)));
-    this.hashes = new StorageSessionCapabilityHashStore(deps.storage);
+    const documentHashes = new StorageSessionCapabilityHashStore(deps.storage);
+    this.hashes =
+      deps.tokenCutOff === undefined
+        ? documentHashes
+        : new CoupledCapabilityHashStore(documentHashes, deps.tokenCutOff);
+    // The service's view of the document's half only (it writes the directory's half itself): a ferret with no document
+    // yet has nothing to mark, so it is skipped, and the directory's own mark holds for it.
+    this.cutOffMark = {
+      isCutOff: async ferret => await documentHashes.isCutOff(parseSessionId(ferret)),
+      cutOff: async ferret => {
+        const id = parseSessionId(ferret);
+        if ((await deps.storage.readConfig(id)) !== undefined) await documentHashes.cutOff(id);
+      },
+      restore: async ferret => {
+        const id = parseSessionId(ferret);
+        if ((await deps.storage.readConfig(id)) !== undefined) await documentHashes.restore(id);
+      },
+    };
     this.provenance = new StorageSessionProvenanceStore(deps.storage);
     this.stamper = new SessionProvenanceStamper(deps.clock);
     // STRICT, unlike `provenance.read` (which answers "no stamp" for the session's OWN damaged document, as today's

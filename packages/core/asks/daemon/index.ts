@@ -52,8 +52,8 @@ import { AgendaLedgerFiles } from './lib/state.ts';
 /** How often the outboxes that hold a change event are drained. */
 const CHANGES_SWEEP_MS = 5_000;
 
-/** The one plugin whose Asks view can tell a ferret something. */
-const TELLING_PLUGIN = 'vault';
+/** The two plugins whose Asks view can tell a ferret something: the Vault (a request ended) and Accounts ("Not me"). */
+const TELLING_PLUGINS: ReadonlySet<string> = new Set(['vault', 'accounts']);
 
 export default implementDaemon(manifest, {
   build({ kernel, hooks }) {
@@ -187,9 +187,10 @@ export default implementDaemon(manifest, {
         ),
       },
       provides: {
-        // Typing into a ferret is not for every plugin that holds Asks: `tell` is on the view of the one plugin that
-        // owes a ferret something (Vault, when its request ends); every other needer's view has no `tell`.
-        asks: perNeeder(needer => (needer.id === TELLING_PLUGIN ? withTell : withoutTell)),
+        // Typing into a ferret is not for every plugin that holds Asks: `tell` is on the view of the plugins that owe a
+        // ferret something (Vault, when its request ends; Accounts, when the owner says "Not me" to a phone approval);
+        // every other needer's view has no `tell`.
+        asks: perNeeder(needer => (TELLING_PLUGINS.has(needer.id) ? withTell : withoutTell)),
       },
     };
   },
