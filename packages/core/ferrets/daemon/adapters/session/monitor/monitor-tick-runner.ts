@@ -1,5 +1,5 @@
 import type { FileSystemPort } from '../../../lib/ports.ts';
-import type { SessionMonitorService } from '../../../lib/session/monitor/service.ts';
+import { MonitorTickStopped, type SessionMonitorService } from '../../../lib/session/monitor/service.ts';
 import type { SessionMonitorSettings } from '../../../lib/session/monitor/settings.ts';
 import type { MonitorLoop, MonitorTickReport } from '../../../lib/session/monitor/types.ts';
 import { writeJsonAtomic } from './atomic-json.ts';
@@ -39,8 +39,17 @@ export class MonitorTickRunner implements MonitorLoop {
   }
 
   /** Runs a tick and publishes the record. Returns what the tick did, or `undefined` if it failed. */
-  async run(): Promise<MonitorTickReport | undefined> {
-    const report = await this.monitor.tick().catch(() => undefined);
+  /**
+   * `signal` is the job's own: aborting it (or `close()`) stops a tick already in flight at its next effect, and a
+   * stopped run publishes nothing, so it can never put `armed: true` back over the record `close()` wrote.
+   */
+  async run(signal?: AbortSignal): Promise<MonitorTickReport | undefined> {
+    let stopped = false;
+    const report = await this.monitor.tick(signal).catch(error => {
+      stopped = error instanceof MonitorTickStopped;
+      return undefined;
+    });
+    if (stopped || signal?.aborted === true) return report;
     await this.publish(report).catch(() => undefined);
     return report;
   }

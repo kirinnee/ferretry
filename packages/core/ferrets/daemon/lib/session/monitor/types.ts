@@ -187,7 +187,7 @@ export interface MonitorLoop {
   arm(): void;
   /** One tick, with its outcome published. Never rejects — a background timer must not take the
    *  daemon down, and the failure is carried by the record instead. */
-  run(): Promise<MonitorTickReport | undefined>;
+  run(signal?: AbortSignal): Promise<MonitorTickReport | undefined>;
   /**
    * Disarms the loop and republishes the record saying so, WITHOUT ticking.
    *

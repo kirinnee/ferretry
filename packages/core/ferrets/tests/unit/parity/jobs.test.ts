@@ -959,4 +959,34 @@ describe('the declared-wait monitor (J-0003 J-0006 J-0070 J-0071 J-0072 J-0120)'
     await h.stop();
     expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({ armed: false, overdue: true });
   });
+
+  test('J-0070 a tick in flight when the daemon stops tells nobody else and leaves the record saying armed: false', async () => {
+    const { h, runner } = await host();
+    const first = await start(h, 'wren');
+    const second = await start(h, 'robin');
+    await park(h, first, '1m');
+    await park(h, second, '1m');
+    await advance(h, 2 * MINUTE_MS);
+
+    // The first wake's delivery is held open: the tick is suspended mid-send when the daemon stops.
+    const deliver = runner.deliver.bind(runner);
+    let entered: () => void = () => undefined;
+    const inFlight = new Promise<void>(resolve => (entered = resolve));
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    runner.deliver = async (handle, delivery) => {
+      entered();
+      await gate;
+      return await deliver(handle, delivery);
+    };
+    const running = h.runJob(MONITOR_TICK_JOB);
+    await inFlight;
+    await h.stop();
+    release();
+    await running;
+
+    // The send the tick was inside lands; no other ferret is told, and the record is not re-stamped armed.
+    expect(wake(runner)).toHaveLength(1);
+    expect(JSON.parse(h.state('ferrets').raw(MonitorTickFile) ?? '{}')).toMatchObject({ armed: false, overdue: true });
+  });
 });

@@ -1072,15 +1072,17 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   kernel.jobs.add({
     id: MONITOR_TICK_JOB,
     schedule: { every: milliseconds(monitor.intervalMs) },
-    run: async () => {
+    run: async signal => {
       await ready();
       await storeLoaded.catch(() => undefined);
+      // A stop that landed while this waited arms nothing: `close()` has already said the loop is not running.
+      if (signal.aborted) return;
       if (!monitorArmed) {
         monitorArmed = true;
         monitor.arm();
         kernel.lifecycle.onStop(async () => await monitor.close());
       }
-      await monitor.run();
+      await monitor.run(signal);
     },
   });
   // A ferret signals for itself and its helpers; a person for any ferret (the same rule as stop, resume and rename).

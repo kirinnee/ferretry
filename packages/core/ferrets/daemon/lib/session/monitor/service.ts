@@ -25,6 +25,14 @@ export interface SessionMonitorPorts {
   readonly monotonic: MonitorMonotonicClock;
 }
 
+/** A tick that was stopped (the job's signal aborted, or the loop was disarmed) and did no further effect. */
+export class MonitorTickStopped extends Error {
+  constructor() {
+    super('the monitor tick was stopped');
+    this.name = 'MonitorTickStopped';
+  }
+}
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -72,6 +80,8 @@ export class SessionMonitorService {
   private parked = 0;
   private consecutiveFailures = 0;
   private lastFailure: string | undefined;
+  /** Bumped by `disarm`; a tick that began under an earlier one has been stopped and does no further effect. */
+  private epoch = 0;
 
   constructor(
     private readonly ports: SessionMonitorPorts,
@@ -85,6 +95,8 @@ export class SessionMonitorService {
   }
 
   disarm(): void {
+    // A tick already suspended in a port call must not outlive this: it would send a wake and re-arm the loop.
+    this.epoch += 1;
     this.lastTickElapsedMs = undefined;
     this.beats.clear();
   }
@@ -93,15 +105,24 @@ export class SessionMonitorService {
     return this.lastTickElapsedMs !== undefined;
   }
 
-  async tick(): Promise<MonitorTickReport> {
+  /**
+   * One tick. A STOPPED TICK DOES NOTHING MORE: `signal` (the job's own) or a `disarm` since the tick began is checked at
+   * every effect boundary — before expiring a wait, before each send, hold or heartbeat, and before the ledger is
+   * stamped — and a stopped tick rejects with `MonitorTickStopped` without touching the failure counters.
+   */
+  async tick(signal?: AbortSignal): Promise<MonitorTickReport> {
+    const epoch = this.epoch;
+    const stopped = (): boolean => signal?.aborted === true || this.epoch !== epoch;
     let roster: readonly ParkedSession[];
     try {
       roster = await this.ports.waits.parked();
     } catch (error) {
+      if (stopped()) throw new MonitorTickStopped();
       this.consecutiveFailures += 1;
       this.lastFailure = message(error);
       throw error;
     }
+    if (stopped()) throw new MonitorTickStopped();
     const nowMs = this.ports.wallClock.nowMs();
     const expired: string[] = [];
     const heartbeats: string[] = [];
@@ -109,11 +130,13 @@ export class SessionMonitorService {
     const failures = new Map<string, string>();
     for (const session of roster) {
       try {
-        await this.service(session, nowMs, expired, heartbeats, held);
+        await this.service(session, nowMs, expired, heartbeats, held, stopped);
       } catch (error) {
+        if (error instanceof MonitorTickStopped || stopped()) throw new MonitorTickStopped();
         failures.set(session.id, message(error));
       }
     }
+    if (stopped()) throw new MonitorTickStopped();
     // Question evidence is a second planner on this tick, not a second execution path. Its adapter
     // holds the answer domain's queue while reconciling transcript and ledger state, and has no
     // terminal-drive capability at all.
@@ -121,12 +144,14 @@ export class SessionMonitorService {
     try {
       questionFailures = await this.ports.questions.reconcile();
     } catch (error) {
+      if (stopped()) throw new MonitorTickStopped();
       // A planner-wide failure is a failed tick, not a fabricated session id in the per-session
       // failure map. Do not stamp it as completed: health must expose that reconciliation stopped.
       this.consecutiveFailures += 1;
       this.lastFailure = message(error);
       throw error;
     }
+    if (stopped()) throw new MonitorTickStopped();
     for (const [id, failure] of questionFailures) if (!failures.has(id)) failures.set(id, failure);
     this.prune(roster);
     const elapsedMs = this.ports.monotonic.elapsedMs();
@@ -180,20 +205,30 @@ export class SessionMonitorService {
     expired: string[],
     heartbeats: string[],
     held: string[],
+    stopped: () => boolean,
   ): Promise<void> {
+    const guard = (): void => {
+      if (stopped()) throw new MonitorTickStopped();
+    };
     const plan = planWaitTick(session, this.beats.get(session.id), nowMs, this.settings);
     if (plan.expiry !== undefined) {
+      guard();
       const cleared = await this.ports.waits.expire(session.id, nowMs, plan.expiry);
       // `undefined` means the park was already gone or had been replaced by a longer one under the
       // lock. Nothing was woken, so nothing is told it was woken.
       if (cleared === undefined) return;
+      guard();
       this.beats.delete(session.id);
       expired.push(session.id);
       await this.ports.nudge.deliver(session.id, wakeSendId(session.id, cleared), plan.expiry.nudge);
       return;
     }
-    if (plan.hold && (await this.ports.waits.hold(session.id))) held.push(session.id);
+    if (plan.hold) {
+      guard();
+      if (await this.ports.waits.hold(session.id)) held.push(session.id);
+    }
     if (plan.heartbeat === undefined) return;
+    guard();
     await this.ports.heartbeats.publish(session.id, plan.heartbeat);
     this.beats.set(session.id, nowMs);
     heartbeats.push(session.id);
