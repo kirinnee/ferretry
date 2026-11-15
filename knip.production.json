@@ -152,7 +152,7 @@
     "packages/plugins/updates": {
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/lib/changelog.ts", "app/lib/install-prompt.ts"]
+      "ignore": ["app/lib/changelog.ts"]
     },
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],

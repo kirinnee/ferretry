@@ -72,7 +72,11 @@ export default definePlugin({
 
   ui: {
     settings: [settingsTab('updates', { group: 'about', label: 'Updates', order: 60 })],
-    panels: [panel('daemon.status', { id: 'behind', order: 30 })],
+    panels: [
+      panel('daemon.status', { id: 'behind', order: 30 }),
+      // Settings › This device › Install app (S4): after Connection, so "App" closes the device page.
+      panel('device.settings', { id: 'install-app', order: 50 }),
+    ],
   },
 
   data: {

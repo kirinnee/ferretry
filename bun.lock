@@ -670,10 +670,12 @@
       "name": "@ferretry/plugin-updates",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/app": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
+        "lucide-react": "^0.468.0",
         "react": "^19.0.0",
         "zod": "4.4.3",
       },
