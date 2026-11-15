@@ -244,7 +244,13 @@ export interface TmuxRunnerOptions {
    * The turn watch's read (`Runner.look`, U4): every look is an act on the pane (`kernel.act(terminal %n, 'read')`, so a
    * hold refuses it), its screen masked inside one `Redaction.read` before it is parsed. Absent: `look` answers nothing.
    */
-  readonly look?: { readonly act: ActRunner; readonly redaction: Redaction; readonly digest: FrameDigest };
+  readonly look?: {
+    readonly act: ActRunner;
+    readonly redaction: Redaction;
+    readonly digest: FrameDigest;
+    /** Gives the event loop back between a big screen's readings (the kernel clock's zero sleep); absent: no yield. */
+    readonly yieldToLoop?: () => Promise<void>;
+  };
 }
 
 /** Which of the harness's blocking surfaces a frame is: a tool-permission prompt, a dialog, or neither (a question form is neither). */
@@ -531,9 +537,13 @@ export class TmuxRunner implements Runner {
         ]);
         if (visible.code !== 0) return { kind: 'content' as const };
         const earlier = history.code === 0 ? tailAtLine(history.stdout, FORM_HISTORY_CHARS) : '';
-        return await watch.redaction.read(scope => {
-          const shown = maskedScreen(scope, visible.stdout);
-          const state = paneStateFrom({ dead: false }, shown, earlier === '' ? '' : maskedScreen(scope, earlier));
+        return await watch.redaction.read(async scope => {
+          const shown = await maskedScreen(scope, visible.stdout, watch.yieldToLoop);
+          const state = paneStateFrom(
+            { dead: false },
+            shown,
+            earlier === '' ? '' : await maskedScreen(scope, earlier, watch.yieldToLoop),
+          );
           return {
             kind: 'content' as const,
             data: {
@@ -616,9 +626,12 @@ export class TmuxRunner implements Runner {
           if (this.#stopEpoch === epoch) this.#frames.set(handle, frame);
         }
         const visible = frame.visible;
-        return await watch.redaction.read(scope => ({
+        return await watch.redaction.read(async scope => ({
           kind: 'content' as const,
-          data: turnLookOf(paneStateFrom(activity, maskedScreen(scope, visible)), watch.digest) as never,
+          data: turnLookOf(
+            paneStateFrom(activity, await maskedScreen(scope, visible, watch.yieldToLoop)),
+            watch.digest,
+          ) as never,
         }));
       })
       .catch(() => undefined);
