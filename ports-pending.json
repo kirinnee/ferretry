@@ -14,7 +14,6 @@
     "catalogs",
     "mcp",
     "skills",
-    "layouts",
     "runtimes",
     "onboarding",
     "terminals",
@@ -226,9 +225,6 @@
       "[own] GAP(onboarding-steps): each step's panel shows its plugin's own Settings view (Claude Code, Codex, Logins, Runtimes, Shells); v4's single New machine setup rail is not rebuilt. Onboarding's device view (app/views/steps-opener.tsx) opens the steps page by itself for a machine paired while the tab is open that has steps not looked at yet; it opens nothing while the person is on the first run (whose last stage, Open your fleet, opens the same page whether or not the machine is set up), for a machine already paired when the page loaded, for a locked machine or when the steps cannot be read. Those machines reach the page from Settings › Setup, which counts the steps not looked at yet. It navigates by replacing the entry Access went to, as v4's single hop did. As v4 did, it skips a machine that is already set up (the steps answer says setUp: the machine has a runtime, read from Runtimes' list) and has no recorded step answers. The device-kind sentence is drawn on the first run, not as a step of a machine: app/views/steps-screen.tsx",
       "[tests] GAP(onboarding-harness): app/landing-geometry.ts is the browser harness's measure of the static pages (it needs playwright's types and the DOM lib) and nothing in the app imports it; the harness is not ported",
       "[cli] GAP(onboarding): `fy daemon setup` and `fy daemon import <tool>` (parity rows V-0241, V-0232) are not shell verbs yet: Onboarding and Runtimes serve the setup and import steps in the app, but no terminal verb drives them: packages/cli/src/lib/verbs.ts"
-    ],
-    "layouts": [
-      "[own] the Layout tab edits the wide layout only: the `phone.*` keys (`fy layout set phone.nav.side bottom`) have no row in either scope"
     ],
     "terminals": [
       "[cross: vault] GAP(terminals): row I73 (every stream frame kind, a predicate match and the last frame are withheld when a quarantine began after the read was stamped) is proven in Vault's tests only at the kernel Dispatcher's publication gate; the same check at Terminals' own publication points (stream frames, the recorded last frame, a screen read before quarantine) has no test named `I73` in Terminals yet",
