@@ -592,6 +592,31 @@ export interface FerretPaneLimit {
 }
 
 /**
+ * One name in a ferret's folder as {@link FerretsApi.listFolder} lists it. A name flagged `denied`, `ignored` or `escapes`
+ * is LISTED but never served (the file browser's own badges): a reader that offers it says so and offers nothing more.
+ * Never a size, a time, a link target or a path outside the ferret's folder.
+ */
+export interface FerretFolderEntry {
+  readonly name: string;
+  readonly type: 'file' | 'dir' | 'symlink';
+  /** On the unconditional denylist (secrets, `.git/`, `node_modules/`), or fenced from this reader. */
+  readonly denied?: boolean;
+  /** Gitignored. */
+  readonly ignored?: boolean;
+  /** A symlink resolving outside the ferret's folder, or broken. */
+  readonly escapes?: boolean;
+}
+
+/** One level of a ferret's folder: directories first, then files. */
+export interface FerretFolderListing {
+  /** The listed folder relative to the ferret's root; `''` is the root itself. */
+  readonly path: string;
+  readonly entries: readonly FerretFolderEntry[];
+  /** The folder held more names than one listing reports. */
+  readonly truncated?: boolean;
+}
+
+/**
  * The Ferrets port (§2.2): who each ferret is, its lineage, its state; start, stop and resume through the harness
  * and runner plugins. "A ferret touches only its own; a lead also its helpers'" is `mayTouch`, decided here and
  * nowhere else.
@@ -659,6 +684,18 @@ export interface FerretsApi {
    * Accounts gets it from the Board.
    */
   workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined>;
+  /**
+   * One folder of a ferret's work tree, listed the way the file browser lists it (`GET /v1/ferrets/:ferretId/fs`), so
+   * the composer's `@` menu offers exactly what the browser would. Additive, read only, names only.
+   *
+   * ALWAYS FENCED as an agent's read is: nothing inside the daemon's state home, no hard link, and `path` is resolved
+   * UNDER the ferret's root (a `..` segment, an absolute path or a link out of it is refused `403 escapes_root`; a
+   * gitignored or denylisted folder is refused `403 ignored` / `403 denied`; a missing one `404 not_found`, a file
+   * `400 not_a_directory`). With `caller` (a ferret acting), only itself and its helpers are reachable, by the same
+   * `mayTouch` rule as `harness`: anyone else is refused `403 forbidden`, before the folder is touched. `undefined` for
+   * a ferret this daemon does not know. A grant (`filesystem.use`) is the CALLER'S to ask: this member does not.
+   */
+  listFolder?(ferret: FerretId, path: string | undefined, caller?: FerretId): Promise<FerretFolderListing | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
   /**
    * What a finished ferret handed back with `signal done`: its `summary.md` as it wrote it (today's session

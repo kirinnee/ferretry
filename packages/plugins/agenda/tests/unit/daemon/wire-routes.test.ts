@@ -26,7 +26,8 @@ test('Agenda’s app half is bound: no half of it is pending, and what is still 
   expect(open).not.toContain('GAP(agenda-channel-header)');
   // The composer is Conversation's panel now (lead decision Q9), so agenda-composer is closed; the nav GAP is still open.
   expect(open).not.toContain('GAP(agenda-composer)');
-  expect(open).toContain('GAP(agenda-nav)');
+  // The nav parts are provided now (navBadges.agenda, navPanels['needs-you']), so the nav GAP is closed.
+  expect(open).not.toContain('GAP(agenda-nav)');
 });
 
 const AT = '2026-11-07T12:00:00.000Z';
