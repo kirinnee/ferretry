@@ -26,3 +26,4 @@ export type { ConfigTreeEvents, ConfigWatchOptions, ConfigWatchTimers } from './
 export { watchConfigFiles } from './watcher.ts';
 export type { ConfigRouteSources } from './routes.ts';
 export { configRoutes } from './routes.ts';
+export { CONFIG_FILE_READ, configFrameShown } from './bus-frame.ts';

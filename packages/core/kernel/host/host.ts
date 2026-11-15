@@ -37,7 +37,7 @@ import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { ConfigStatus } from './config/service.ts';
 import { type ConfigFileMove, configChangedPayload } from './config/state-change.ts';
-import { configFrameShown } from './config/bus-frame.ts';
+import { CONFIG_FILE_READ, configFrameShown } from './config/bus-frame.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
 import { type BootPhases, createBootPhases } from './boot-phases.ts';
@@ -207,13 +207,6 @@ export interface HostConfig {
  * created or replaced is pinned within this long, which is also the longest one can be reached under a second name.
  */
 const PRIVATE_RECHECK_MS = DEFAULT_RECHECK_MS;
-
-/** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
-const CONFIG_FILE_READ = (() => {
-  const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
-  if (found === undefined) throw new Error('the kernel manifest declares no GET /v1/config/file');
-  return found;
-})();
 
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
 export type ConfigJudge = (input: {
@@ -1000,6 +993,8 @@ async function bootLocked(
           mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
           transport: outboundSecretTransport(fetchPort, clock),
           log: scopedLog(adapters.logSink, manifest.id),
+          // Gate writes it into the security log (`secrets.used`): the name and host, never the value.
+          sent: note => bound.admission?.secretSent?.({ plugin: manifest.id, ...note }),
         },
       ),
       signer: signerFor(manifest.id, sessionSigner),

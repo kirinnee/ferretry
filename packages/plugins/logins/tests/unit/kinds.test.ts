@@ -77,6 +77,11 @@ describe('the five login kinds', () => {
     expect(holders('ghost')).toEqual([]);
   });
 
+  test('a sign-in kind refreshes through the check, and a key kind has nothing to refresh', async () => {
+    expect(await kinds.openai.refresh?.('team')).toEqual({ state: 'signed-in' });
+    expect(kinds.endpoint.refresh).toBeUndefined();
+  });
+
   test('a sign-in login (OAuth) answers an empty environment: its credential is not env', async () => {
     expect(await kinds.anthropic.env('work', 'claude-code')).toEqual({});
     expect(await kinds.openai.env('team', 'codex')).toEqual({});
@@ -270,6 +275,98 @@ describe('the launch and credential answers when the store or the share cannot d
       sentence: 'the login team needs signing in: The access token has expired.',
     });
     expect(shared).toBe(0);
+  });
+
+  const due = (id: string) =>
+    sampleLogin(id, {
+      status: {
+        word: 'refresh_due',
+        label: 'Refresh due',
+        reason: 'access_expired_refreshable',
+        explanation: 'The access token has expired. It renews itself the next time it is used.',
+        lastCheckInconclusive: false,
+      },
+    });
+  const SHARED = { credential: 'auth.json' } as unknown as Awaited<
+    ReturnType<Parameters<typeof loginKinds>[0]['shareCredential']>
+  >;
+
+  test('a Codex login that is due renews BEFORE the file is shared, once, and the renewed login is then shared', async () => {
+    const order: string[] = [];
+    const renewing = kindsWith({
+      view: async id => due(id),
+      check: async id => {
+        order.push(`check ${id}`);
+        return sampleLogin(id);
+      },
+      shareCredential: async () => {
+        order.push('share');
+        return SHARED;
+      },
+    });
+
+    const answer = await renewing.openai.credential?.('team', 'codex');
+
+    expect(order).toEqual(['check team', 'share']);
+    expect(answer?.kind === 'file' ? answer.credential : undefined).toBe(SHARED as never);
+  });
+
+  test('a Codex login that is fresh is never renewed: a launch spends no single-use token it does not need', async () => {
+    let checks = 0;
+    const fresh = kindsWith({
+      check: async id => {
+        checks += 1;
+        return sampleLogin(id);
+      },
+      shareCredential: async () => SHARED,
+    });
+
+    expect((await fresh.openai.credential?.('team', 'codex'))?.kind).toBe('file');
+    expect(checks).toBe(0);
+  });
+
+  test('a renewal the provider refused says "needs approval" at the start and shares nothing', async () => {
+    let shared = 0;
+    const refused = kindsWith({
+      view: async id => due(id),
+      check: async id => needsSignIn(id),
+      shareCredential: async () => {
+        shared += 1;
+        return SHARED;
+      },
+    });
+
+    expect(await refused.openai.credential?.('team', 'codex')).toEqual({
+      kind: 'unavailable',
+      sentence:
+        'the login team needs approval in a browser before a ferret can start on it: The access token has expired.',
+    });
+    expect(shared).toBe(0);
+  });
+
+  test('a renewal that could not run never refuses the launch and quotes nothing of its failure', async () => {
+    const wedged = kindsWith({
+      view: async id => due(id),
+      check: async () => {
+        throw new Error(`cannot spawn codex at ${STORE}/team`);
+      },
+      shareCredential: async () => SHARED,
+    });
+
+    const answer = await wedged.openai.credential?.('team', 'codex');
+
+    expect(answer?.kind).toBe('file');
+    expect(JSON.stringify(answer)).not.toContain(STORE);
+  });
+
+  test('a renewal that leaves the login due still starts it: the harness renews its own file on first use', async () => {
+    const still = kindsWith({
+      view: async id => due(id),
+      check: async id => due(id),
+      shareCredential: async () => SHARED,
+    });
+
+    expect((await still.openai.credential?.('team', 'codex'))?.kind).toBe('file');
   });
 
   test('a Codex sign-in the kernel would not share is unavailable in a sentence naming the login', async () => {

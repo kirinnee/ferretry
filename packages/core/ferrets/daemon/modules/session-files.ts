@@ -183,6 +183,14 @@ export class SessionFiles {
         );
         return parsed.success ? parsed.data : undefined;
       },
+      // Records (or drops) the ferret's own choice: the one field changes, every other keeps its value, and the storage
+      // writes the document atomically. A missing or damaged config is refused by the storage, never rebuilt from nothing.
+      setCompactAt: async (ferret, value) => {
+        await this.deps.storage.updateConfig(parseSessionId(ferret), current => {
+          const { compactAt: _previous, ...kept } = current as Readonly<Record<string, unknown>>;
+          return value === undefined ? kept : { ...kept, compactAt: value };
+        });
+      },
       askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
       // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
       // inside the ferret's own folder on the sessions root, never in its work tree.

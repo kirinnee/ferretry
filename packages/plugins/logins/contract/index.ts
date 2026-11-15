@@ -46,6 +46,7 @@ import {
 } from './wire.ts';
 
 export * from './wire.ts';
+export * from './slots.ts';
 export { hasTokenShape, storedEnvironmentIssue } from './secret-shape.ts';
 
 /** The five login kinds this plugin takes under Ferrets' `logins` hook (§4.4). */

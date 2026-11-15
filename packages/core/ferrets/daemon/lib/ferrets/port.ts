@@ -185,6 +185,8 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     harness: (ferret, caller) => service.harness(ferret, caller),
     turns: (ferret, caller) => service.turns(ferret, caller),
     prompt: (ferret, caller) => service.prompt(ferret, caller),
+    compactAt: (ferret, caller) => service.compactAt(ferret, caller),
+    setCompactAt: (ferret, value, caller) => service.setCompactAt(ferret, value, caller),
     lastSnapshot: (ferret, caller) => service.lastSnapshot(ferret, caller),
     move: async (ferret, runtime, asked, caller): Promise<Result<FerretSummary, MoveFailure>> => {
       const options = { ...asked };

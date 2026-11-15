@@ -401,6 +401,7 @@ export class ClaudeHarness implements Harness {
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
+      mode: spec.mode,
       conversation,
       readable: spec.readable,
     });
