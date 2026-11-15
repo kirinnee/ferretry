@@ -79,6 +79,8 @@ function fileFailure(error: unknown): string {
 export class OwnedLoginStore {
   readonly #base: string;
   readonly #emails = new Map<string, { readonly stamp: string; readonly email: string | undefined }>();
+  /** The passive-reading write in flight for each login's file, so the next one waits for it. */
+  readonly #passiveWrites = new Map<string, Promise<void>>();
 
   /**
    * `root` is `kernel.roots.root('credentials')`, and nothing else: the kernel binds that name to Logins and its base to
@@ -228,7 +230,34 @@ export class OwnedLoginStore {
     const resolution = subject.resolution;
     if (resolution.store !== 'ferretry' || 'unavailable' in resolution || resolution.ownedDirectory === undefined)
       return;
-    await this.root.writeText(this.#path(`${resolution.ownedDirectory}/usage.json`), `${JSON.stringify(record)}\n`);
+    const path = this.#path(`${resolution.ownedDirectory}/usage.json`);
+    // Serialised per file, so two writers cannot both read the same older record and the slower one replace the newer.
+    const before = this.#passiveWrites.get(path) ?? Promise.resolve();
+    const turn = before.then(async () => {
+      // An older reading never replaces a newer persisted one (an exhausted login must not read as free after a restart).
+      const kept = await this.#readPassive(`${resolution.ownedDirectory}/usage.json`);
+      if (kept !== undefined && kept.at >= record.at) return;
+      await this.root.writeText(path, `${JSON.stringify(record)}\n`);
+    });
+    const settled = turn.catch(() => undefined);
+    this.#passiveWrites.set(path, settled);
+    try {
+      await turn;
+    } finally {
+      if (this.#passiveWrites.get(path) === settled) this.#passiveWrites.delete(path);
+    }
+  }
+
+  /** The reading persisted in `file` (inside the root), or `undefined` when there is none or it cannot be read. */
+  async #readPassive(file: string): Promise<PassiveUsageRecord | undefined> {
+    try {
+      const parsed = PassiveUsageRecordSchema.safeParse(
+        JSON.parse(await this.root.readText(this.#path(file))) as unknown,
+      );
+      return parsed.success ? parsed.data : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   statusPorts(options: {
@@ -242,15 +271,9 @@ export class OwnedLoginStore {
     return {
       local: resolution => this.local(resolution),
       passiveUsage: async subject => {
-        try {
-          const resolution = subject.resolution;
-          if (resolution.store !== 'ferretry' || 'unavailable' in resolution) return undefined;
-          const path = this.#path(`${resolution.ownedDirectory}/usage.json`);
-          const parsed = PassiveUsageRecordSchema.safeParse(JSON.parse(await this.root.readText(path)) as unknown);
-          return parsed.success ? parsed.data : undefined;
-        } catch {
-          return undefined;
-        }
+        const resolution = subject.resolution;
+        if (resolution.store !== 'ferretry' || 'unavailable' in resolution) return undefined;
+        return await this.#readPassive(`${resolution.ownedDirectory}/usage.json`);
       },
       // Today's MaterialCredentialReads.active: one read, facts for that exact material, a fixed failure on throw.
       activeUsage: async resolution => {

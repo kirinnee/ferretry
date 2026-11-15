@@ -211,6 +211,8 @@ export function buildLoginsDaemon() {
                     id: ferret.id,
                     ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
                     ...(ferret.login === undefined ? {} : { login: ferret.login }),
+                    // Its last launch: a reading from before it was written on whatever login the ferret had then.
+                    since: Date.parse(ferret.stateAt),
                     open: async () => await (await ferrets.harness?.(ferret.id))?.transcriptBytes?.(),
                   },
                 ]

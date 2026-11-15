@@ -169,6 +169,37 @@ describe('newestRolloutReading', () => {
     expect((await newestRolloutReading(file))?.fiveHour?.usedPercent).toBe(64);
   });
 
+  test('keeps nothing but the normalized rate_limits fields and timestamps of what it read (the G162 trusted-consumer reason)', async () => {
+    const secret = 'sk-secret-message-text';
+    const noisy = JSON.stringify({
+      timestamp: '2026-10-13T08:00:00.000Z',
+      type: 'event_msg',
+      session: { cwd: '/home/someone/private', text: secret },
+      payload: {
+        type: 'token_count',
+        message: secret,
+        info: { total_token_usage: { input_tokens: 12_345 }, text: secret },
+        rate_limits: {
+          plan_type: secret,
+          credits: { balance: secret },
+          primary: { used_percent: 44, window_minutes: 300, resets_at: 1_800_003_600, note: secret },
+          secondary: { used_percent: 7, window_minutes: 10_080, resets_at: 1_800_500_000, note: secret },
+        },
+      },
+    });
+    const prose = JSON.stringify({ type: 'response_item', payload: { text: secret } });
+
+    const found = await newestRolloutReading(rollout(`${prose}\n${noisy}\n${prose}\n`));
+
+    expect(found).toBeDefined();
+    expect(Object.keys(found ?? {}).sort()).toEqual(['at', 'fiveHour', 'source', 'version', 'weekly']);
+    expect(Object.keys(found?.fiveHour ?? {}).sort()).toEqual(['resetAt', 'usedPercent']);
+    expect(Object.keys(found?.weekly ?? {}).sort()).toEqual(['resetAt', 'usedPercent']);
+    expect(JSON.stringify(found)).not.toContain(secret);
+    expect(JSON.stringify(found)).not.toContain('/home/someone');
+    expect(found?.at).toBe(at('2026-10-13T08:00:00.000Z'));
+  });
+
   test('answers nothing for a rollout that never measured, and for an empty one', async () => {
     expect(await newestRolloutReading(rollout('{"type":"session_meta"}\n'))).toBeUndefined();
     expect(await newestRolloutReading(rollout(''))).toBeUndefined();

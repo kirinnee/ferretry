@@ -11,6 +11,9 @@
  * - **What replaces today's watches.** Today a file-event hub told the service a rollout changed. Here one kernel job
  *   runs the pass on an interval, and the pass itself is what makes an unchanged rollout cost one stat: a transcript is
  *   read again only when its stamp (token, size, modification time) moved since it was last read.
+ * - **Whose reading it is.** A rollout can outlive the login a ferret started on (a same-harness move keeps the
+ *   conversation, and a daemon restart rereads it), so a reading is accepted only when it was taken at or after the
+ *   instant the ferret started on its current login ({@link PassiveSession.since}); an older one is ignored.
  * - **Never wrong, only late.** A reading is recorded only when it is newer than the one this pass last recorded, and a
  *   read that fails leaves its stamp unrecorded so the next pass tries it again. A login that cannot be read does not
  *   stop the others.
@@ -34,6 +37,13 @@ export interface PassiveSession {
   readonly runtime?: string;
   /** The login it was started on, when its record names one. */
   readonly login?: string;
+  /**
+   * The instant (epoch ms) this ferret last started on its CURRENT login: its record's `stateAt`, which every launch
+   * (start, resume, restart, move, revive) sets and nothing earlier can precede. A reading older than it was written
+   * before the ferret was on this login, so it is never this login's (a move carries the conversation, and its
+   * rollout, to the new login).
+   */
+  readonly since: number;
   /** Its proved transcript, or `undefined` while none is proved. */
   open(): Promise<PassiveTranscript | undefined>;
 }
@@ -119,7 +129,7 @@ export class CodexPassiveReading {
       if (this.#read.get(session.id) === stamp) return undefined;
       const reading = await newestRolloutReading(transcript);
       seen.set(session.id, stamp);
-      return reading;
+      return reading !== undefined && reading.at >= session.since ? reading : undefined;
     } catch {
       return undefined;
     } finally {

@@ -59,9 +59,11 @@ const session = (
   id: string,
   rollout: Rollout | undefined,
   who: { readonly runtime?: string; readonly login?: string } = { runtime: 'codex-a' },
+  since = 0,
 ): PassiveSession => ({
   id,
   ...who,
+  since,
   open: async () => rollout?.transcript(),
 });
 
@@ -172,6 +174,7 @@ describe('CodexPassiveReading', () => {
     const flaky: PassiveSession = {
       id: 'flaky',
       runtime: 'codex-a',
+      since: 0,
       open: async () => {
         if (!proved) throw new Error('refused');
         return readable.transcript();
@@ -180,6 +183,7 @@ describe('CodexPassiveReading', () => {
     const broken: PassiveSession = {
       id: 'broken',
       runtime: 'codex-a',
+      since: 0,
       open: async () => ({
         file: 'x',
         size: 10,
@@ -250,5 +254,74 @@ describe('CodexPassiveReading', () => {
     await reading.pass();
 
     expect(asked).toBe(0);
+  });
+});
+
+describe('CodexPassiveReading — a carried rollout never puts the old login’s quota on the new login', () => {
+  const heavy = tokenCount('2026-10-13T08:00:00.000Z', 99);
+  const moved = at('2026-10-13T08:30:00.000Z');
+  const taskStarted = `${JSON.stringify({ timestamp: '2026-10-13T08:31:00.000Z', type: 'event_msg', payload: { type: 'task_started' } })}\n`;
+
+  test('a move from login A to login B: A keeps its reading, and B gets none from the carried rollout', async () => {
+    const rollout = new Rollout(heavy);
+    let ferret: PassiveSession = session('f', rollout, { login: 'a' });
+    const { reading, written } = rig([login('a', []), login('b', [])], () => [ferret]);
+    await reading.pass();
+    expect(written.map(entry => entry.id)).toEqual(['a']);
+
+    // The move: the same conversation, now started on B at 08:30; Codex appends a turn start and no token_count yet.
+    rollout.text += taskStarted;
+    ferret = session('f', rollout, { login: 'b' }, moved);
+    await reading.pass();
+    await reading.pass();
+
+    expect(written.map(entry => entry.id)).toEqual(['a']);
+  });
+
+  test('B records the first reading Codex takes on B, and one taken at the very instant it started', async () => {
+    const rollout = new Rollout(heavy + taskStarted);
+    const { reading, written } = rig([login('b', [])], () => [session('f', rollout, { login: 'b' }, moved)]);
+    await reading.pass();
+    expect(written).toEqual([]);
+
+    rollout.text += tokenCount('2026-10-13T08:30:00.000Z', 3);
+    await reading.pass();
+    expect(written.map(entry => entry.record.fiveHour?.usedPercent)).toEqual([3]);
+  });
+
+  test('a fork on login B does not take the source ferret’s readings carried in its copied rollout', async () => {
+    const copied = new Rollout(heavy);
+    const { reading, written } = rig([login('b', [])], () => [session('fork', copied, { login: 'b' }, moved)]);
+
+    await reading.pass();
+
+    expect(written).toEqual([]);
+  });
+
+  test('a daemon restart rereads the historical rollout and still refuses what predates the current login', async () => {
+    const rollout = new Rollout(heavy + taskStarted);
+    const live = () => [session('f', rollout, { login: 'b' }, moved)];
+    const first = rig([login('b', [])], live);
+    await first.reading.pass();
+    // A brand new pass instance holds no memory of what the first one saw.
+    const restarted = rig([login('b', [])], live);
+    await restarted.reading.pass();
+
+    expect(first.written).toEqual([]);
+    expect(restarted.written).toEqual([]);
+  });
+
+  test('a ferret naming no login (the runtime default) is held to the same instant', async () => {
+    const rollout = new Rollout(heavy + taskStarted);
+    const { reading, written } = rig([login('b', ['codex-b'])], () => [
+      session('f', rollout, { runtime: 'codex-b' }, moved),
+    ]);
+
+    await reading.pass();
+    expect(written).toEqual([]);
+
+    rollout.text += tokenCount('2026-10-13T09:00:00.000Z', 8);
+    await reading.pass();
+    expect(written.map(entry => entry.record.fiveHour?.usedPercent)).toEqual([8]);
   });
 });

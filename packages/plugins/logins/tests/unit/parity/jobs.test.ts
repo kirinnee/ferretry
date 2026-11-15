@@ -107,6 +107,18 @@ describe('the jobs and timers Logins keeps', () => {
     }
   });
 
+  test('J-0232 a reading taken before the ferret started on the login is not the login’s, end to end', async () => {
+    const rig = await codexRig(8, '2026-10-13T09:00:00.000Z');
+    try {
+      await rig.host.runJob(CODEX_PASSIVE_USAGE_JOB);
+
+      expect(rig.reads()).toBe(1);
+      expect((await rig.usage())?.usedPercent).toBeUndefined();
+    } finally {
+      await rig.host.stop();
+    }
+  });
+
   test('J-0232 a daemon with no Ferrets to ask has no ferret on any login, and a run records nothing and fails nothing', async () => {
     const host = await testHost({
       plugins: [daemon],
@@ -183,10 +195,18 @@ describe('the jobs and timers Logins keeps', () => {
 });
 
 /** A Codex login with one idle ferret launched on it, whose rollout holds one reading; a run of the job reads it. */
-async function codexRig(initial: number) {
+async function codexRig(initial: number, startedAt = '2026-10-13T08:00:00.000Z') {
   const ferrets = new FakeFerrets();
   const ferret = ferretId('f1');
-  ferrets.add({ id: ferret, harness: 'codex', state: 'idle', runtime: 'work', login: 'team' } as never);
+  // Started on `team` at `startedAt` (by default before every reading this rig appends: 08:00 plus the used percent in minutes).
+  ferrets.add({
+    id: ferret,
+    harness: 'codex',
+    state: 'idle',
+    runtime: 'work',
+    login: 'team',
+    stateAt: startedAt,
+  } as never);
   const event = (used: number) =>
     `${JSON.stringify({
       timestamp: new Date(Date.parse('2026-10-13T08:00:00.000Z') + used * 60_000).toISOString(),
