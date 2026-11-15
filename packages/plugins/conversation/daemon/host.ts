@@ -88,6 +88,7 @@ import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/sess
 import { agendaAnswers } from './questions/lib/agenda-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { PromptAsks } from './prompts/adapters/prompt-asks.ts';
+import { StatePromptRecords } from './prompts/adapters/state-prompt-records.ts';
 import type { PromptRead } from './prompts/lib/prompt-wait.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
@@ -357,8 +358,11 @@ export function buildConversationA(deps: {
   const promptAsks = new PromptAsks(
     asks,
     async ferret => (await ferrets.prompt?.(parseSessionId(ferret))) as PromptRead | undefined,
+    new StatePromptRecords(kernel.state),
     message => kernel.log.warn(message),
   );
+  /** Said once until the ferret list reads again, not on every 2 s look. */
+  let promptRosterFailing = false;
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
     (what: string) =>
@@ -1369,9 +1373,17 @@ export function buildConversationA(deps: {
           }, askFailure('reconcile'));
         } else await questionAsks.settle();
         // A pane parked on a permission prompt or a dialog moves no ferret state, so it is looked at on this tick.
-        await promptAsks
-          .sweep((await ferrets.list()).map(ferret => ({ id: ferret.id, live: ferret.state !== 'stopped' })))
-          .catch(error => kernel.log.warn(`conversation could not follow the prompts: ${String(error)}`));
+        await ferrets.list().then(
+          async roster => {
+            promptRosterFailing = false;
+            await promptAsks.sweep(roster.map(ferret => ({ id: ferret.id, state: ferret.state })));
+          },
+          error => {
+            if (!promptRosterFailing)
+              kernel.log.warn(`conversation could not list the ferrets for their prompts: ${String(error)}`);
+            promptRosterFailing = true;
+          },
+        );
         await questionWatch.sweep();
       })()
         .catch(() => undefined)

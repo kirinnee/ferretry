@@ -10,13 +10,22 @@ export interface PromptRead {
   readonly dialog?: unknown;
 }
 
-/** One wait of a ferret on the owner that is not a structured question: the card it is, and the prompt's own id. */
+/** One wait of a ferret on the owner that is not a structured question: the card it is, and the words behind it. */
 export interface PromptWait {
   readonly ref: PromptAskRef;
-  readonly subject: string;
+  /** The wait's own words, whole and on one line: the card's context, never its subject. */
+  readonly words: string;
 }
 
-const MAX_SUBJECT = 240;
+/**
+ * What one look at a pane means for the card: parked on a wait of this source, positively NOT waiting (the turn moved
+ * on, or the question is its own card), or no evidence either way (nothing recorded, nothing readable). Only `ended`
+ * closes a card: an empty or failed read says nothing about whether the wait is over.
+ */
+export type PromptReading =
+  | { readonly kind: 'waiting'; readonly wait: PromptWait }
+  | { readonly kind: 'ended' }
+  | { readonly kind: 'unknown' };
 
 /** Only the words the card needs; the pane's whole prompt (options, cursor) is Ferrets' and stays there. */
 const PermissionWords = z.looseObject({
@@ -27,11 +36,10 @@ const PermissionWords = z.looseObject({
 });
 const DialogWords = z.looseObject({ id: z.string().min(1), title: z.string().min(1) });
 
-/** One line, bounded: the prompt's words as the card's subject. */
-const oneLine = (words: string): string => {
-  const line = words.replace(/\s+/gu, ' ').trim();
-  return line.length <= MAX_SUBJECT ? line : `${line.slice(0, MAX_SUBJECT - 1)}…`;
-};
+/** One line: whitespace collapsed and trimmed. The identity of a prompt is hashed from THIS whole, never a clipped copy. */
+const oneLine = (words: string): string => words.replace(/\s+/gu, ' ').trim();
+
+const digestOf = (words: string): string => createHash('sha256').update(words).digest('hex').slice(0, 32);
 
 /**
  * What the ferret is waiting on besides a question, or `undefined` when it is not parked on a prompt. A permission
@@ -44,19 +52,40 @@ export function promptWait(read: PromptRead | undefined): PromptWait | undefined
   if (permission.success)
     return {
       ref: { kind: 'permission', prompt: permission.data.id },
-      subject: oneLine(
-        `Permission: ${permission.data.tool}${permission.data.what === undefined ? '' : ` ${permission.data.what}`}`,
+      words: oneLine(
+        `Permission: ${permission.data.tool}${permission.data.what === undefined ? '' : ` ${permission.data.what}`}. ${permission.data.question}`,
       ),
     };
   const dialog = DialogWords.safeParse(read.dialog);
   if (dialog.success)
-    return { ref: { kind: 'dialog', prompt: dialog.data.id }, subject: oneLine(`Dialog: ${dialog.data.title}`) };
+    return { ref: { kind: 'dialog', prompt: dialog.data.id }, words: oneLine(`Dialog: ${dialog.data.title}`) };
   const words = read.prompt === undefined ? '' : oneLine(read.prompt);
   if (words === '') return undefined;
-  const digest = createHash('sha256').update(words).digest('hex').slice(0, 16);
-  return { ref: { kind: 'prompt', prompt: digest }, subject: words };
+  return { ref: { kind: 'prompt', prompt: digestOf(words) }, words };
 }
 
-/** The card's entry id: the ferret and the prompt together, so the same prompt is the same card and another's is not. */
-export const promptEntry = (ferret: string, ref: PromptAskRef): string =>
-  `p:${createHash('sha256').update(ferret).update('\0').update(ref.kind).update('\0').update(ref.prompt).digest('hex').slice(0, 40)}`;
+/** Reads one look at a pane for the card: see {@link PromptReading}. Total. */
+export function readPrompt(read: PromptRead | undefined): PromptReading {
+  if (read?.turnState === undefined) return { kind: 'unknown' };
+  const wait = promptWait(read);
+  return wait === undefined ? { kind: 'ended' } : { kind: 'waiting', wait };
+}
+
+/** The wait's kind and the prompt's own id: what makes a different prompt a different wait. */
+export const promptKey = (ref: PromptAskRef): string => `${ref.kind}:${ref.prompt}`;
+
+const SUBJECT_KIND: Readonly<Record<PromptAskRef['kind'], string>> = {
+  permission: 'a permission answer',
+  dialog: 'an answer to a dialog',
+  prompt: 'an answer',
+};
+
+/** The card's subject, v4's words: who waits and on what kind of answer. The prompt's own words are the context. */
+export const promptSubject = (ferret: string, ref: PromptAskRef): string => `${ferret} needs ${SUBJECT_KIND[ref.kind]}`;
+
+/**
+ * The card's entry id: the ferret, the prompt and which OCCURRENCE of waiting it is. The same prompt of the same ferret
+ * is the same card for as long as the wait lasts, and the same prompt asked again after the wait ended is a new one.
+ */
+export const promptEntry = (ferret: string, ref: PromptAskRef, occurrence: number): string =>
+  `p:${createHash('sha256').update(ferret).update('\0').update(ref.kind).update('\0').update(ref.prompt).update('\0').update(String(occurrence)).digest('hex').slice(0, 40)}`;
