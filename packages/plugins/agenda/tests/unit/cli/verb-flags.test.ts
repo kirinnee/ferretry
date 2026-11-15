@@ -114,3 +114,18 @@ describe('nothing a verb was given is ignored', () => {
     });
   });
 });
+
+describe('a switch can be turned off with --no-<name>', () => {
+  test('`--no-json` after `--json` leaves the switch off, as `--json=false` does', () => {
+    const got = read('ls', '--json', '--no-json');
+    expect(got.ok).toBe(true);
+    if (got.ok) expect(got.flags).not.toHaveProperty('json');
+    expect(read('ls', '--json=true', '--json=false')).toMatchObject({ ok: true });
+  });
+
+  test('`--no-` before a value flag is not a switch, so it is an unknown option naming what the verb takes', () => {
+    const got = read('edit', 'A1', '--no-title');
+    expect(got.ok).toBe(false);
+    if (!got.ok) expect(got.message).toContain('unknown option --no-title; it takes --json');
+  });
+});

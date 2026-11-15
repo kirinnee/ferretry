@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { AskOwnerActionError } from '../../../contract/index.ts';
 import type { AskDraft, AskId, AskSourceSpec, AskRef, EntryId, SourceKey } from '../../../contract/index.ts';
 import { agendaLedgerDocument, applyAgendaCommandToSession } from '../../../daemon/lib/agenda/state-machine.ts';
 import { agendaFilePath } from '../../support/daemon/agenda-state.ts';
@@ -506,6 +507,19 @@ describe('the owner dismisses what a ferret raised, through the Asks port', () =
     // Assert
     await half.asks.ownerDismiss(ref);
     await half.asks.ownerDismiss({ ferret: 'f1', id: 'A99' as AskId });
+  });
+
+  it('should refuse the owner’s dismissal as a failure when the board is not one it may write, never as a no-op', async () => {
+    // Arrange
+    const half = await world();
+
+    // Act
+    const refused = await half.asks
+      .ownerDismiss({ ferret: '../escape', id: 'A1' as AskId })
+      .catch((error: unknown) => error);
+
+    // Assert
+    expect(refused).toBeInstanceOf(AskOwnerActionError);
   });
 });
 

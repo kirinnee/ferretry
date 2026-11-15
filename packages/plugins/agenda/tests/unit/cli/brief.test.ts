@@ -1059,3 +1059,77 @@ describe('agenda --link: target, label=target and label=target=meaning', () => {
     should(edited).containDeep({ links: [{ label: 'Plan', target: '&F12', meaning: 'The plan' }] });
   });
 });
+
+describe('agenda edit: the stage, the replaced ask and the flags that contradict', () => {
+  const edit = (flags: EditFlags) => composeEditRequest('A1', flags, undefined);
+
+  it('should read --stage in any letter case, and refuse a stage that is not one (done is its own verb)', () => {
+    // Act / Assert
+    should(edit({ stage: ' Plan ' })).have.property('stage', 'plan');
+    should(() => edit({ stage: 'done' })).throw(/--stage is one of .*\(done is `agenda done`\), not "done"/u);
+    should(() => edit({ stage: 'someday' })).throw(/--stage is one of .*not "someday"/u);
+  });
+
+  it('should replace the ask when --kind is given: yes/no brings its answers and sends no options', () => {
+    // Act
+    const request = edit({ kind: 'yesno' });
+
+    // Assert
+    should(request.kind).equal('yesno');
+    should(request.ask).deepEqual({ kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] });
+    should(request.answers?.length).be.greaterThan(0);
+    should(request).not.have.property('questions');
+    should(request).not.have.property('optionDetails');
+  });
+
+  it('should replace the ask with the options given: each --option is a choice, its detail kept as the option’s detail', () => {
+    // Act
+    const request = edit({
+      kind: 'choice',
+      option: ['Defaults: the standard setup', 'Custom'],
+      optionDetail: ['Custom=Bring your own config'],
+    });
+
+    // Assert
+    should(request.kind).equal('choice');
+    should(request.ask).deepEqual({ kind: 'multiple-choice', options: [{ label: 'Defaults' }, { label: 'Custom' }] });
+    should(request.optionDetails).deepEqual([
+      { label: 'Defaults', detail: 'the standard setup' },
+      { label: 'Custom', detail: 'Bring your own config' },
+    ]);
+  });
+
+  it('should replace the ask with a question and its recommendation, so the recommended option is among the answers', () => {
+    // Act
+    const request = edit({
+      kind: 'choice',
+      question: ['Which plan?'],
+      option: ['A', 'B'],
+      recommend: 'B',
+      recommendWhy: 'Cheaper.',
+    });
+
+    // Assert
+    should(request.questions).containDeep([{ question: 'Which plan?' }]);
+    should(request.answers?.map(each => each.label)).containEql('B');
+  });
+
+  it('should refuse an option with no detail when the ask is not replaced, naming the two ways out', () => {
+    // Act / Assert
+    should(() => edit({ option: ['Defaults'] })).throw(
+      /an edit keeps the options unless it replaces the ask: give --option "Label: detail" or --option-detail for Defaults, or --kind with the new options/u,
+    );
+  });
+
+  it('should refuse flags that say opposite things in one edit', () => {
+    // Act / Assert
+    should(() => edit({ blocking: true, notBlocking: true })).throw('--blocking and --not-blocking contradict');
+    should(() => edit({ willBlock: 'the release', clearWillBlock: true })).throw(
+      '--will-block and --clear-will-block contradict',
+    );
+    should(() => edit({ neededBy: '2026-11-05T10:00:00.000Z', clearBy: true })).throw('--by and --clear-by contradict');
+    should(() => edit({ questionAnswer: 'x', clearQuestionAnswer: true })).throw(
+      '--question-answer and --clear-question-answer contradict',
+    );
+  });
+});
