@@ -90,6 +90,21 @@ export interface Admission<Standing extends object = CallStanding, Member extend
    * Never changes the answer; a throw is swallowed.
    */
   recorded?(call: RecordedCall): void;
+  /**
+   * Told once for every `kernel.secrets.send` that placed a plugin's secret on a request (the Vault was opened and the
+   * request went out), after the outcome is known. Names and a host only — the note has no field for a value. Never
+   * changes the answer; a throw is swallowed.
+   */
+  secretSent?(note: SecretSendNote): void;
+}
+
+/** One secret placed on one request by the kernel: which plugin, which secret NAME, which host, what came back. */
+export interface SecretSendNote {
+  readonly plugin: string;
+  readonly secret: string;
+  readonly host: string;
+  /** The outcome's kind (`completion`, `status`, `timeout`, `network`, …), never the reply. */
+  readonly outcome: string;
 }
 
 /** What the caller does to one config file (`Admission.judgeConfigAccess`). */

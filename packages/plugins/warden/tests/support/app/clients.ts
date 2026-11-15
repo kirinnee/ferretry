@@ -16,5 +16,6 @@ export const fakeWardenClient = (overrides: Partial<WardenClient> = {}): WardenC
   }),
   config: async () => ({ config: wardenConfig(), accounts: [], warnings: [] }),
   updateConfig: async () => ({ config: wardenConfig(), accounts: [], warnings: [] }),
+  nameJevKey: async () => ({ config: wardenConfig(), accounts: [], warnings: [], jevKey: 'named' }),
   ...overrides,
 });
