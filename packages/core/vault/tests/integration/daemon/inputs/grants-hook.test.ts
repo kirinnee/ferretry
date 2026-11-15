@@ -8,7 +8,17 @@ import {
   SignInGrantLedger,
   type SignInGrantSource,
 } from '../../../../daemon/lib/inputs/borrowed-grants.ts';
-import { account, grant, KEY, page, SESSION, site } from '../../../unit/daemon/inputs/grant-fixtures.ts';
+import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts';
+import {
+  account,
+  grant,
+  KEY,
+  NOW,
+  page,
+  ruleGrant,
+  SESSION,
+  site,
+} from '../../../unit/daemon/inputs/grant-fixtures.ts';
 import { PAGE_LOGIN, PASSWORD, USERNAME, world } from '../../../unit/daemon/inputs/world.ts';
 
 /**
@@ -242,5 +252,125 @@ describe('the hook as the Vault’s grant source, member by member', () => {
     }
 
     should(plans.ledger).equal(planOnly.ledger);
+  });
+});
+
+/**
+ * A page script that ran while Accounts was not listening (off, or a plugin-graph restart) is still a script that ran:
+ * the Vault's own record of them (Browsers tells it) is what a standing rule is held to as well, and a fill is typed
+ * on the one source it started with.
+ */
+describe('a standing rule and the page scripts the Vault saw while Accounts was away', () => {
+  const rule = (over: Partial<SignInGrant> = {}) => ruleGrant(over);
+
+  it('should fill under the rule when no page script ran (the control for the cases below)', async () => {
+    const offered = offering({ grants: [rule()] });
+    const w = world({
+      facts: page(),
+      grantPort: new SignInGrantsThroughHook(over(offered)),
+      scripts: new MachineScripts(() => NOW),
+      accounts: github(),
+    });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('delivered');
+    should(offered.used).eql([`${rule().id}@${SESSION}`]);
+  });
+
+  it('should not fill when a script was reported with no source, and a source appeared after it', async () => {
+    // Accounts is off: Browsers' report reaches the hook (dropped, nobody listens) and the Vault's own record.
+    const scripts = new MachineScripts(() => NOW);
+    const offered = offering({ grants: [rule()] });
+    let live: SignInGrantSource | undefined;
+    const hook = new SignInGrantsThroughHook(() => (live === undefined ? undefined : provider(() => live)));
+    hook.scriptedOn('github.com');
+    scripts.scriptedOn('github.com');
+    // Accounts comes back as a new instance that knows nothing of the script.
+    live = source(offered);
+    should(live.scriptedOrigins().hosts.size).equal(0);
+    const w = world({ facts: page(), grantPort: hook, scripts, accounts: github() });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+    const request = await w.pending();
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+    should(offered.used).eql([]);
+    should(request.preapproval).match({ by: 'rule', outcome: 'did-not-apply', reason: 'scripted-origin' });
+  });
+
+  it('should not fill while a script runs across a source swap, and fill once it has ended', async () => {
+    const scripts = new MachineScripts(() => NOW);
+    const before = offering({ grants: [rule()] });
+    const after = offering({ grants: [rule()] });
+    let live = source(before);
+    const hook = new SignInGrantsThroughHook(() => provider(() => live));
+    // The script starts under the first instance; the graph restarts, so the second one has never heard of it.
+    const end = scripts.running();
+    live = source(after);
+    should(live.scriptedOrigins().running).equal(undefined);
+
+    const during = world({ facts: page(), grantPort: hook, scripts, accounts: github() });
+    const blocked = await during.service.raise(SESSION, PAGE_LOGIN);
+    should(blocked.state).equal('pending');
+    should(during.writes).eql([]);
+    should(after.used).eql([]);
+    end();
+    const later = world({ facts: page(), grantPort: hook, scripts, accounts: github() });
+    const filled = await later.service.raise(SESSION, PAGE_LOGIN);
+
+    should(filled.state).equal('delivered');
+    should(after.used).eql([`${rule().id}@${SESSION}`]);
+  });
+
+  it('should settle a fill on the source it reserved on, so a one-use rule cannot fill again after a swap', async () => {
+    const oneUse = rule({ remaining: 1 });
+    const first = offering({ grants: [oneUse] });
+    const second = offering({ grants: [oneUse] });
+    const firstLedger = new SignInGrantLedger();
+    // Once a use is recorded the rule is used up, as Accounts reports it.
+    const firstSource: SignInGrantSource = {
+      ...source(first, firstLedger),
+      of: () => (first.used.length > 0 ? [{ ...oneUse, state: 'used-up', remaining: 0 }] : first.grants),
+    };
+    let live = firstSource;
+    const hook = new SignInGrantsThroughHook(() => provider(() => live));
+    const w = world({ facts: page(), grantPort: hook, accounts: github() });
+    // The graph restarts while the value is being typed: the second instance has its own, empty ledger.
+    w.state.onType = () => {
+      live = source(second);
+    };
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+    w.state.onType = undefined;
+    live = firstSource;
+    const again = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('delivered');
+    should(first.used).eql([`${oneUse.id}@${SESSION}`]);
+    should(second.used).eql([]);
+    should(again.state).equal('pending');
+    should(w.writes.map(write => write.values)).eql([[USERNAME, PASSWORD]]);
+  });
+});
+
+describe('the hook held fixed for one fill', () => {
+  it('should answer from the source in effect when it was bound, whatever Accounts offers after', async () => {
+    const first = source(offering());
+    const second = source(offering({ enabled: false }));
+    let live: SignInGrantSource | undefined = first;
+    const hook = new SignInGrantsThroughHook(() => (live === undefined ? undefined : provider(() => live)));
+
+    const bound = hook.bound();
+    live = second;
+    const offAfter = new SignInGrantsThroughHook(() => undefined).bound();
+
+    should(bound.ledger).equal(first.ledger);
+    should(bound.enabled()).equal(true);
+    should(hook.enabled()).equal(false);
+    should(bound.bound?.().ledger).equal(first.ledger);
+    should(offAfter.enabled()).equal(false);
+    should(offAfter.ledger).be.instanceOf(SignInGrantLedger);
   });
 });

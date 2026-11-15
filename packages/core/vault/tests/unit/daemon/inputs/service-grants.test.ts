@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
-import { account, page, ruleGrant, SESSION, site } from './grant-fixtures.ts';
+import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts';
+import { account, NOW, page, ruleGrant, SESSION, site } from './grant-fixtures.ts';
 import { PAGE_LOGIN, PASSWORD, planLine, USERNAME, world } from './world.ts';
 
 /**
@@ -205,6 +206,47 @@ describe('a standing rule fills a sign-in at the raise', () => {
   it('should read the session’s project only for a rule scoped to one', async () => {
     const rule = ruleGrant({ scope: { kind: 'project', project: 'ferretry' } });
     const w = world({ facts: page(), grants: [rule], accounts: github() });
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('delivered');
+  });
+});
+
+describe('a page script that lands between the last look and the write stops a standing rule', () => {
+  const ruleFor = () => ruleGrant();
+
+  it('should type nothing when a script starts running before the write', async () => {
+    const scripts = new MachineScripts(() => NOW);
+    const w = world({ facts: page(), grants: [ruleFor()], accounts: github(), scripts });
+    w.state.onDelivering = () => void scripts.running();
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+  });
+
+  it('should type nothing when a script ran on the rule’s login domain before the write', async () => {
+    const scripts = new MachineScripts(() => NOW);
+    const w = world({ facts: page(), grants: [ruleFor()], accounts: github(), scripts });
+    w.state.onDelivering = () => scripts.scriptedOn('github.com');
+
+    const view = await w.service.raise(SESSION, PAGE_LOGIN);
+
+    should(view.state).equal('pending');
+    should(w.writes).eql([]);
+  });
+
+  it('should not hold a plan line to page scripts: a script is the rule’s taint, not the line’s', async () => {
+    const scripts = new MachineScripts(() => NOW);
+    scripts.running();
+    const w = world({
+      facts: page(),
+      grants: [planLine({ pins: { placeKeys: ['github.com'], recipeVersion: undefined, identities: undefined } })],
+      accounts: github(),
+      scripts,
+    });
 
     const view = await w.service.raise(SESSION, PAGE_LOGIN);
 

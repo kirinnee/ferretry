@@ -6,9 +6,14 @@ import type { ScriptedOriginsView } from './borrowed-grants.ts';
  * `steerOf`: a script on the card's site, on a host that could not be read, or one running anywhere now, makes the
  * card `scripted` (I98). Memory only: a restart ends every script.
  *
+ * It is also the record a standing rule is held to: Accounts' grant source is told of every script too, but only in its
+ * own RAM, which is empty while Accounts is off and after a plugin restart. The input service reads THIS record as well
+ * when it matches a rule and again right before the write (`sightingOf`, `scriptedUnderRule`), so a script that ran
+ * while Accounts was away still stops the rule.
+ *
  * GAP: today's `scriptedOn` also suspended every standing sign-in rule pinned to that host ON DISK, so planted storage
- * could not wait out a restart. Standing rules are Accounts' and no grant source is bound to Vault in 5.0, so there is
- * nothing to suspend yet; the RAM taint is kept.
+ * could not wait out a restart. The suspension on disk is Accounts' to write, from the report the Vault forwards
+ * (`SignInGrantsThroughHook.scriptedOn`), and is lost when no source is listening; the RAM taint here is not.
  */
 export class MachineScripts {
   /** Where a page script ran, by host, and when one ran where its origin couldn't be read: machine-wide, in RAM. */

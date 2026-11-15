@@ -9,6 +9,7 @@ import type {
 } from '../../../../daemon/lib/inputs/borrowed.ts';
 import {
   type GrantReservation,
+  type ScriptedOriginsView,
   type SignInGrant,
   SignInGrantLedger,
   type SignInGrantSource,
@@ -97,6 +98,8 @@ export interface WorldOptions {
   readonly grantsEnabled?: boolean;
   /** A grant source of the test's own (the production hook adapter over a provider); wins over `grants`. */
   readonly grantPort?: SignInGrantSource;
+  /** Where page scripts ran as Browsers told the Vault (`MachineScripts`), which a rule's fill is held to as well. */
+  readonly scripts?: { scriptedOrigins(): ScriptedOriginsView };
   /** Whether the ferret ran a page script / acted since (the login observer's `tainted`); never by default. */
   readonly tainted?: boolean;
   readonly history?: readonly InputEvent[];
@@ -328,6 +331,7 @@ export function world(options: WorldOptions = {}) {
     quarantine,
     redact: async text => values.scrubAll(text),
     hostName: 'kirin-box',
+    ...(options.scripts === undefined ? {} : { scripts: options.scripts }),
     ...((options.withLogins ?? true) ? { logins: options.loginPort ?? logins } : {}),
     ...(options.choicePort === undefined ? {} : { choice: options.choicePort }),
     ...(options.grantPort === undefined

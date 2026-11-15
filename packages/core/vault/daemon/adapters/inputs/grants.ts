@@ -43,7 +43,19 @@ export class SignInGrantsThroughHook implements SignInGrantSource {
   /** Settles a reservation that outlived its source (Accounts turned off mid-fill): nothing is ever reserved on it. */
   readonly #none = new SignInGrantLedger();
 
-  constructor(private readonly provider: GrantsProviderLookup) {}
+  /**
+   * `fixed`: a source resolved once (possibly none) that every member then answers from, never looked up again. Only
+   * {@link bound} makes one.
+   */
+  constructor(
+    private readonly provider: GrantsProviderLookup,
+    private readonly fixed?: { readonly source: SignInGrantSource | undefined },
+  ) {}
+
+  /** The source in effect now, held fixed for one fill: reserve, write and settle on one ledger, whatever Accounts does. */
+  bound(): SignInGrantSource {
+    return new SignInGrantsThroughHook(this.provider, { source: this.#source() });
+  }
 
   get ledger(): SignInGrantLedger {
     return this.#source()?.ledger ?? this.#none;
@@ -97,6 +109,7 @@ export class SignInGrantsThroughHook implements SignInGrantSource {
 
   /** The source in effect now, or nothing: a provider that throws or offers something else is no source. */
   #source(): SignInGrantSource | undefined {
+    if (this.fixed !== undefined) return this.fixed.source;
     try {
       const offered = this.provider()?.grants?.();
       return isGrantSource(offered) ? offered : undefined;
