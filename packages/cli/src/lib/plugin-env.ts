@@ -1,8 +1,10 @@
 /**
  * The environment a plugin's `cli` half may read (`CliContext.env`, lead decision 21): the names today's verbs read
  * and nothing else. A name outside this list reads `undefined`, so no credential (`FY_TOKEN`, `FY_SESSION_TOKEN`,
- * `FY_SESSION_BOARD_CAPABILITY`) and no other variable of the caller's shell ever reaches a half. Pure: an
- * environment in, the allowed part out.
+ * `FY_SESSION_BOARD_CAPABILITY`) and no other variable of the caller's shell ever reaches a half. The one other door,
+ * `readEnvironment` ({@link declaredEnvironment}), answers only the names a manifest declares and refuses every `FY_*`
+ * name and any name that is not a POSIX variable name, whatever the manifest says. Pure: an environment in, the allowed
+ * part out.
  */
 import type { CliEnvironment } from '@ferretry/kernel/manifest';
 import type { Environment } from './credential.ts';
@@ -25,10 +27,16 @@ const PLUGIN_ENV_NAMES = [
   'PWD',
 ] as const;
 
+/** A name the shell may be asked for: a POSIX variable name, and never one of Ferretry's own (`FY_TOKEN`, `FY_SESSION_TOKEN`…). */
+const READABLE_NAME = /^[A-Z_][A-Z0-9_]*$/u;
+const isReadable = (name: string): boolean => READABLE_NAME.test(name) && !name.startsWith('FY_');
+
 /**
  * What `CliContext.readEnvironment(names)` answers: the names asked for that the plugin's manifest DECLARED
  * (`permissions.cliEnvReads`, exact names) and the shell has set. A name outside the declaration reads nothing, so a
- * half cannot widen what it sees by asking; nothing declared means nothing read.
+ * half cannot widen what it sees by asking; nothing declared means nothing read. WHATEVER A MANIFEST DECLARES, a name
+ * that is not a POSIX variable name or that starts with `FY_` reads nothing: Ferretry's own credentials
+ * (`FY_TOKEN`, `FY_SESSION_TOKEN`, `FY_SESSION_BOARD_CAPABILITY`) never reach a half through this door.
  */
 export function declaredEnvironment(
   environment: Environment,
@@ -38,7 +46,7 @@ export function declaredEnvironment(
   const allowed: Record<string, string> = {};
   for (const name of names) {
     const value = environment[name];
-    if (declared?.includes(name) === true && value !== undefined) allowed[name] = value;
+    if (isReadable(name) && declared?.includes(name) === true && value !== undefined) allowed[name] = value;
   }
   return Object.freeze(allowed);
 }

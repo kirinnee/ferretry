@@ -11,7 +11,7 @@ import {
   renderModelRefresh,
   renderPresetList,
 } from './render.ts';
-import { detectedPreset, secretNeeds, shellVariables, storeSecrets } from './provider-secrets.ts';
+import { detectedPreset, secretNeeds, shellPlainValues, shellVariables, storeSecrets } from './provider-secrets.ts';
 import { runSignIn } from './sign-in.ts';
 
 /** One verb: it prints through `deps.out`, sets the exit code there and refuses by throwing a `LoginsCommandError`. */
@@ -148,8 +148,8 @@ function envOptions(invocation: VerbInvocation): Record<string, string> {
 
 /**
  * The environment half of `login add` (docs/provider-presets.md): nothing when none of its options is given, else an
- * environment login — from a preset's variables when one is named, a plain one taken from the shell under `--from-env`,
- * each overridden by an `--env`, a secret as `${secret:NAME}` and never a value.
+ * environment login — from a preset's variables when one is named, a required empty plain one taken from the shell under
+ * `--from-env`, each overridden by an `--env`, a secret as `${secret:NAME}` and never a value.
  */
 async function environmentLogin(
   deps: LoginsCommandDeps,
@@ -179,13 +179,8 @@ async function environmentLogin(
       variable.kind === 'secret' ? `\${secret:${variable.secret ?? variable.name}}` : (variable.value ?? ''),
     ]),
   );
-  // A plain variable the shell carries wins over the preset's value; a secret one is never read this way, it is stored.
-  const fromShell = Object.fromEntries(
-    (preset?.variables ?? []).flatMap(variable => {
-      const value = shell[variable.name];
-      return variable.kind === 'plain' && value !== undefined ? [[variable.name, value]] : [];
-    }),
-  );
+  // The shell fills only a required, still-empty plain variable ({@link shellPlainValues}); a secret is stored, never read here.
+  const fromShell = shellPlainValues(preset, shell);
   const cloudCredential = cloudOption ?? preset?.cloudCredential?.suggested;
   return {
     login: {

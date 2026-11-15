@@ -98,6 +98,58 @@ describe('login add asks for the provider’s secret, hidden', () => {
     }
   });
 
+  describe('when the Vault refuses', () => {
+    const SECOND_KEY = 'SENTINEL-second';
+    const two = {
+      ...zai,
+      variables: [...zai.variables, { name: 'ZAI_REGION', kind: 'secret', secret: 'ZAI_REGION_KEY' }],
+    };
+    const refusing = (accepting: number, failure: (value: string) => Error) => {
+      let puts = 0;
+      const made = world(
+        { hidden: [SENTINEL, SECOND_KEY] },
+        {
+          presets: () => ({ presets: [two] }) as never,
+          putSecret: () => {
+            puts += 1;
+            if (puts > accepting) throw failure(puts === 1 ? SENTINEL : SECOND_KEY);
+          },
+        },
+      );
+      return { made };
+    };
+    const daemon = (message: string) => Object.assign(new Error(message), { status: 403, code: 'ownerOnly' });
+
+    it('should name the secret and the daemon’s words, stage nothing and keep every value out of every channel', async () => {
+      const { made } = refusing(0, () => daemon('only the owner may set a secret.'));
+
+      await should(loginAdd(made.deps, inv(['zai-glm'], { yes: true }))).be.rejectedWith(
+        'ZAI_API_KEY was not stored: only the owner may set a secret. The login was not added.',
+      );
+
+      should(made.gateway.called('stage')).be.empty();
+      should(everythingSeen(made)).not.containEql('SENTINEL');
+    });
+
+    it('should name what stays in the Vault when a later secret is refused, and take an echoed value out of the words', async () => {
+      const { made } = refusing(1, value => daemon(`refused ${value}`));
+
+      await should(loginAdd(made.deps, inv(['zai-glm'], { yes: true }))).be.rejectedWith(
+        'ZAI_REGION_KEY was not stored: refused …. The login was not added. ZAI_API_KEY was stored before it and stays in the Vault.',
+      );
+
+      should(made.gateway.called('stage')).be.empty();
+    });
+
+    it('should say nothing of a failure that is not the daemon’s answer, which may hold anything', async () => {
+      const { made } = refusing(0, value => new Error(`unreadable ${value}`));
+
+      await should(loginAdd(made.deps, inv(['zai-glm'], { yes: true }))).be.rejectedWith(
+        'ZAI_API_KEY was not stored. The login was not added.',
+      );
+    });
+  });
+
   it('should store nothing when nothing was typed', async () => {
     const made = world({ hidden: [''] });
     await should(loginAdd(made.deps, inv(['zai-glm'], { yes: true }))).be.rejectedWith(
@@ -176,11 +228,92 @@ describe('login add --from-env', () => {
 
     should(made.out.text('warn')).equal('Detected Z.ai GLM from ANTHROPIC_BASE_URL, ZAI_API_KEY.');
     should(made.gateway.called('putSecret').map(call => call.args)).eql([['ZAI_API_KEY', SENTINEL]]);
-    should(stagedEnv(made)).eql({
-      ANTHROPIC_BASE_URL: 'https://api.z.ai/api/other',
-      ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
-    });
+    // The preset's own address stays: the shell fills only what the preset requires and leaves empty.
+    should(stagedEnv(made)).eql({ ANTHROPIC_BASE_URL: BASE_URL, ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' });
     should(everythingSeen(made)).not.containEql(SENTINEL);
+  });
+
+  const gateway = {
+    ...zai,
+    id: 'custom-gateway',
+    label: 'Custom gateway',
+    variables: [
+      { name: 'ANTHROPIC_BASE_URL', kind: 'plain', value: '', required: true, allowEmpty: false },
+      { name: 'ANTHROPIC_AUTH_TOKEN', kind: 'secret', secret: 'GATEWAY_API_KEY' },
+      { name: 'ANTHROPIC_API_KEY', kind: 'plain', value: '', required: false, allowEmpty: true },
+      { name: 'ANTHROPIC_MODEL', kind: 'plain', value: '', required: false, allowEmpty: false },
+    ],
+    detect: { hosts: [], variables: [], keyPrefixes: [] },
+  };
+  const ANTHROPIC = 'SENTINEL-sk-ant-real-anthropic-key';
+
+  it('should never copy a shell credential into a plain variable the preset deliberately leaves empty', async () => {
+    const made = world(
+      {
+        shell: {
+          ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+          ANTHROPIC_API_KEY: ANTHROPIC,
+          ANTHROPIC_MODEL: 'm',
+        },
+        hidden: [SENTINEL],
+      },
+      { presets: () => ({ presets: [gateway] }) as never },
+    );
+
+    await loginAdd(made.deps, inv(['custom-gateway'], { 'from-env': true, yes: true }));
+
+    // The required, empty address comes from the shell; the deliberately empty key stays empty; an optional one is not read.
+    should(stagedEnv(made)).eql({
+      ANTHROPIC_BASE_URL: 'https://gateway.example.test',
+      ANTHROPIC_AUTH_TOKEN: '${secret:GATEWAY_API_KEY}',
+      ANTHROPIC_API_KEY: '',
+      ANTHROPIC_MODEL: '',
+    });
+    should(made.gateway.called('putSecret').map(call => call.args)).eql([['GATEWAY_API_KEY', SENTINEL]]);
+    // The Anthropic key reached neither the stage body nor the Vault nor any line a person could see.
+    should(JSON.stringify([everythingSeen(made), made.gateway.called('putSecret')])).not.containEql(ANTHROPIC);
+  });
+
+  it('should not send the shell’s Anthropic key anywhere when --preset names the gateway under --from-env', async () => {
+    const made = world(
+      {
+        shell: { ANTHROPIC_BASE_URL: 'https://gateway.example.test', ANTHROPIC_API_KEY: ANTHROPIC },
+        hidden: [SENTINEL],
+      },
+      {
+        presets: () =>
+          ({ presets: [{ ...gateway, detect: { hosts: [], variables: [], keyPrefixes: [] } }, zai] }) as never,
+      },
+    );
+
+    await loginAdd(made.deps, inv([], { 'from-env': true, yes: true, preset: 'custom-gateway' }));
+
+    should(JSON.stringify(made.gateway.calls)).not.containEql(ANTHROPIC);
+  });
+
+  it('should refuse a shell address that carries a user or a key, filling nothing from it', async () => {
+    const made = world(
+      { shell: { ANTHROPIC_BASE_URL: 'https://user:hunter2@gateway.example.test' }, hidden: [SENTINEL] },
+      { presets: () => ({ presets: [gateway] }) as never },
+    );
+
+    await loginAdd(made.deps, inv(['custom-gateway'], { 'from-env': true, yes: true }));
+
+    should(stagedEnv(made)).match({ ANTHROPIC_BASE_URL: '' });
+    should(JSON.stringify(made.gateway.calls)).not.containEql('hunter2');
+  });
+
+  it('should never fill a credential-named variable from the shell, even a required empty plain one', async () => {
+    const odd = {
+      ...gateway,
+      variables: [{ name: 'ANTHROPIC_API_KEY', kind: 'plain', value: '', required: true, allowEmpty: false }],
+    };
+    const made = world({ shell: { ANTHROPIC_API_KEY: ANTHROPIC } }, { presets: () => ({ presets: [odd] }) as never });
+
+    await loginAdd(made.deps, inv(['custom-gateway'], { 'from-env': true, yes: true }));
+
+    should(stagedEnv(made)).eql({ ANTHROPIC_API_KEY: '' });
+    should(JSON.stringify(made.gateway.calls)).not.containEql(ANTHROPIC);
   });
 
   it('should read only the variables the presets declare, never the rest of the shell', async () => {
@@ -240,12 +373,19 @@ describe('login add --from-env', () => {
     should(made.gateway.called('stage')).be.empty();
   });
 
-  it('should refuse by name when no provider can be told from the shell, empty values counting for nothing', async () => {
-    const nothing: Record<string, string>[] = [{ API_TIMEOUT_MS: '1000' }, { ZAI_API_KEY: '' }, {}];
-    for (const none of nothing) {
+  it('should say nothing matched when the shell has variables but none points at a provider', async () => {
+    const made = world({ shell: { API_TIMEOUT_MS: '1000' } });
+    await should(loginAdd(made.deps, inv([], { 'from-env': true }))).be.rejectedWith(
+      "No provider could be told from this shell's variables. Name it: fz login add <provider> (see `fz login presets`)",
+    );
+    should(made.gateway.called('putSecret')).be.empty();
+  });
+
+  it('should say nothing was read, apart from nothing matched, when no variable is declared, set or readable', async () => {
+    for (const none of [{ ZAI_API_KEY: '' }, {} as Record<string, string>]) {
       const made = world({ shell: none });
       await should(loginAdd(made.deps, inv([], { 'from-env': true }))).be.rejectedWith(
-        "No provider could be told from this shell's variables. Name it: fz login add <provider> (see `fz login presets`)",
+        'Nothing was read: none of the variables the providers name is set, declared or readable in this shell. Name it: fz login add <provider> (see `fz login presets`)',
       );
       should(made.gateway.called('putSecret')).be.empty();
     }

@@ -7,11 +7,13 @@
  * preset declares, never a value. The box is emptied the moment it is read; the values stay in memory
  * only, to fill in the provider's form — where a secret stays a `${secret:NAME}` reference. A pasted
  * key is filed in the Vault under the preset's secret name when Continue is pressed (`POST /v1/secrets`,
- * `lib/secrets-api.ts`) and goes nowhere else: not into a field, a login file or a sentence.
+ * `lib/secrets-api.ts`) and goes nowhere else: not into a field, a login file or a sentence. A name the Vault ALREADY
+ * holds (`GET /v1/secrets`, asked when the paste is read) is kept as it is, said by name with a Replace choice that is
+ * off until the person turns it on: pressing Continue never overwrites a key a working login may be using.
  */
 
 import { ChevronLeft } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { ProviderPresetView } from '../../contract/index.ts';
 import type { LoginsClient } from '../lib/client.ts';
 import { refusalSentence } from '../lib/client.ts';
@@ -25,7 +27,7 @@ import {
   prefillFrom,
   readPaste,
 } from '../lib/paste-model.ts';
-import { saveSecret } from '../lib/secrets-api.ts';
+import { heldSecretNames, saveSecret } from '../lib/secrets-api.ts';
 import { Button } from '../ui.ts';
 
 export interface PasteVariablesProps {
@@ -43,13 +45,19 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
   const [reading, setReading] = useState<PasteReading | null>(null);
   const [saving, setSaving] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
+  /** The pasted keys' names the Vault already holds; `null` until the Vault has been asked (Continue waits for it). */
+  const [held, setHeld] = useState<readonly string[] | null>(null);
+  /** The held names the person chose to replace. Empty unless they said so: a held key is never replaced by default. */
+  const [replacing, setReplacing] = useState<readonly string[]>([]);
+  const latest = useRef(0);
 
-  /** Files each pasted key in the Vault, then continues. A refusal stays on this screen so the paste can be tried again. */
+  /** Files each pasted key the Vault does not hold (or the person chose to replace), then continues. A refusal stays here. */
   const save = async (preset: ProviderPresetView, pasted: PasteReading): Promise<void> => {
     setSaving(true);
     setRefusal(null);
     try {
       for (const [name, value] of Object.entries(pastedSecrets(preset, pasted.values))) {
+        if ((held ?? []).includes(name) && !replacing.includes(name)) continue;
         await saveSecret(client, name, value);
       }
     } catch (error) {
@@ -60,9 +68,31 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
     onContinue(preset.id, prefillFrom(preset, pasted.values));
   };
 
+  /** Reads the paste, empties the box, and asks the Vault which pasted keys it already holds (names only). */
   const read = (): void => {
-    setReading(readPaste(presets, text));
+    const next = readPaste(presets, text);
+    const to = pasteTarget(presets, next.detection);
+    const names = to === undefined ? [] : Object.keys(pastedSecrets(to, next.values));
+    latest.current += 1;
+    const turn = latest.current;
+    setReading(next);
     setText('');
+    setReplacing([]);
+    setRefusal(null);
+    if (names.length === 0) {
+      setHeld([]);
+      return;
+    }
+    setHeld(null);
+    void heldSecretNames(client).then(
+      inVault => {
+        if (latest.current === turn) setHeld(names.filter(name => inVault.has(name)));
+      },
+      error => {
+        // Unable to tell what the Vault holds: Continue stays off, so nothing is written without knowing.
+        if (latest.current === turn) setRefusal(refusalSentence(error));
+      },
+    );
   };
 
   const found = reading === null ? 0 : Object.keys(reading.values).length;
@@ -101,8 +131,9 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
           onChange={event => setText(event.target.value)}
         />
         <span className="text-meta leading-base text-muted">
-          NAME=value lines, YAML, or a Codex [model_providers] table. Read here and cleared; a key goes straight to the
-          secret store when you Continue, and the form keeps only its name.
+          NAME=value lines, YAML, or a Codex [model_providers] table. Read here and cleared; a new key goes straight to
+          the secret store when you Continue (one already there stays unless you choose to replace it), and the form
+          keeps only its name.
         </span>
       </div>
       <div>
@@ -137,6 +168,26 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
               That provider is not offered here, so this continues as {target.label}.
             </p>
           ) : null}
+          {(held ?? []).map(name => (
+            <div key={name} className="flex min-w-0 flex-col gap-1" data-paste-held={name}>
+              <p className="m-0 break-words text-cell leading-base text-muted">
+                <span className="mono">{name}</span> is already in the secret store, so it stays as it is.
+              </p>
+              <label className="flex min-h-control items-center gap-sm text-ui text-fg">
+                <input
+                  type="checkbox"
+                  className="size-4 shrink-0 accent-accent"
+                  checked={replacing.includes(name)}
+                  disabled={saving}
+                  data-paste-replace={name}
+                  onChange={event =>
+                    setReplacing(event.target.checked ? [...replacing, name] : replacing.filter(item => item !== name))
+                  }
+                />
+                Replace it with the pasted key
+              </label>
+            </div>
+          ))}
         </div>
       )}
       {reading === null || found === 0 ? null : (
@@ -145,7 +196,7 @@ export function PasteVariables({ client, presets, onBack, onContinue }: PasteVar
             type="button"
             variant="primary"
             data-paste-continue=""
-            disabled={target === undefined || saving}
+            disabled={target === undefined || saving || held === null}
             onClick={() => {
               if (target !== undefined) void save(target, reading);
             }}

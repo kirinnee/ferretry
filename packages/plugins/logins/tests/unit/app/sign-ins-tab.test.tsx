@@ -400,6 +400,7 @@ describe('the add-login panel', () => {
         [GRANTS]: OPEN,
         [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
         [APPLY]: { outcome: 'applied' },
+        'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
         'POST /v1/secrets': { name: 'ZAI_API_KEY' },
       },
       calls,
@@ -555,6 +556,7 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
       'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);
@@ -660,6 +662,7 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai, openrouter] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
       'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);

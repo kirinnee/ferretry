@@ -181,6 +181,123 @@ describe('the logins cli half', () => {
     should(elsewhere).not.containEql(SENTINEL);
   });
 
+  describe('when the Vault refuses the secret', () => {
+    const SENTINEL = 'SENTINEL-sk-vault-refuses';
+    const SECOND = 'SENTINEL-sk-second-key';
+    const secret = (variable: string, name: string) => ({
+      name: variable,
+      kind: 'secret',
+      secret: name,
+      required: true,
+      allowEmpty: false,
+      harnesses: ['claude-code'],
+    });
+    const preset = {
+      id: 'zai-glm',
+      label: 'Z.ai GLM',
+      harness: 'claude-code',
+      summary: 'x',
+      docs: 'https://docs.example.test',
+      origin: 'built-in',
+      variables: [secret('ANTHROPIC_AUTH_TOKEN', 'ZAI_API_KEY'), secret('ZAI_SECOND', 'ZAI_SECOND_KEY')],
+      models: [],
+      test: { available: true, spends: 'nothing', note: 'Free.' },
+      quota: { source: 'none', note: 'n/a' },
+      unverified: [],
+      verified: '2026-10-16',
+      offered: { available: true },
+      halves: [{ harness: 'claude-code', offered: { available: true }, models: [] }],
+    };
+    const staged = {
+      id: 'chg1',
+      change: { kind: 'login.enable', id: 'work' },
+      summary: 'Add',
+      consequences: [],
+      expiresAt: LATER,
+      state: 'pending',
+    };
+
+    /** Adds `zai-glm` with a Vault that takes the first `accepting` secrets and refuses the rest like `ownerOnly` does. */
+    const addWhileRefused = async (accepting: number, echo = false) => {
+      const answers = {
+        [GRANTS_ROUTE]: OPEN,
+        [ROUTES.presets]: { presets: [preset] },
+        [ROUTES.logins]: loginList(),
+        'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+        'POST /v1/secrets': { name: 'ZAI_API_KEY', createdAt: AT, updatedAt: AT },
+        [ROUTES.stage]: staged,
+        [ROUTES.apply]: { outcome: 'applied' },
+      };
+      const typed = [SENTINEL, SECOND];
+      const asked: string[] = [];
+      const base = context(answers, {
+        promptHidden: async question => {
+          asked.push(question);
+          return typed.shift();
+        },
+      });
+      let puts = 0;
+      const inner = base.ctx.client.call;
+      const client: PluginClient = {
+        ...base.ctx.client,
+        call: async <Answer>(route: string, init?: Parameters<PluginClient['call']>[1]): Promise<Answer> => {
+          if (route !== 'POST /v1/secrets') return inner<Answer>(route, init);
+          puts += 1;
+          if (puts <= accepting) return inner<Answer>(route, init);
+          base.calls.push({ route, init });
+          const body = init as { body: { value: string } };
+          throw Object.assign(
+            new Error(
+              echo
+                ? `only the owner may set a secret (${body.body.value})`
+                : 'a governed device may not set or replace a secret.',
+            ),
+            { status: 403, code: 'ownerOnly' },
+          );
+        },
+      };
+      const code = await cli
+        .build?.({ ...base.ctx, client })
+        .verbs['login add']({ args: ['zai-glm'], options: { yes: true } });
+      return { code, asked, ...base };
+    };
+    const NON_VAULT = (calls: { route: string }[]) => calls.filter(call => call.route !== 'POST /v1/secrets');
+
+    it('should exit 1, stage nothing and show the key nowhere when the first secret is refused', async () => {
+      const { code, out, err, asked, calls } = await addWhileRefused(0);
+
+      should(code).equal(1);
+      should(err.join('')).containEql('ZAI_API_KEY was not stored: a governed device may not set or replace a secret.');
+      should(err.join('')).containEql('The login was not added.');
+      should(calls.map(call => call.route)).not.containEql(ROUTES.stage);
+      should(calls.map(call => call.route)).not.containEql(ROUTES.apply);
+      // Only the one refused write was tried: the second secret was never asked for.
+      should(calls.filter(call => call.route === 'POST /v1/secrets')).have.length(1);
+      should(asked).eql(['ZAI_API_KEY (hidden; press Enter when done): ']);
+      should(JSON.stringify([out, err, asked, NON_VAULT(calls)])).not.containEql('SENTINEL');
+    });
+
+    it('should do the same when the SECOND secret is refused after the first was stored, naming what stays', async () => {
+      const { code, out, err, asked, calls } = await addWhileRefused(1);
+
+      should(code).equal(1);
+      should(err.join('')).containEql(
+        'ZAI_SECOND_KEY was not stored: a governed device may not set or replace a secret.',
+      );
+      should(err.join('')).containEql('ZAI_API_KEY was stored before it and stays in the Vault.');
+      should(calls.map(call => call.route)).not.containEql(ROUTES.stage);
+      should(calls.filter(call => call.route === 'POST /v1/secrets')).have.length(2);
+      should(JSON.stringify([out, err, asked, NON_VAULT(calls)])).not.containEql('SENTINEL');
+    });
+
+    it('should take a value out of a refusal that echoes it', async () => {
+      const { err } = await addWhileRefused(0, true);
+
+      should(err.join('')).containEql('ZAI_API_KEY was not stored: only the owner may set a secret (…)');
+      should(err.join('')).not.containEql('SENTINEL');
+    });
+  });
+
   it('should read the shell only through what the manifest declares, and say so when the shell offers no way', async () => {
     const asked: (readonly string[])[] = [];
     const { ctx, err } = context(

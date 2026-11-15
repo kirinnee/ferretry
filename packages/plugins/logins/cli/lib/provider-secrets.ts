@@ -1,6 +1,7 @@
 import { detectProvider } from '../../contract/detect.ts';
 import { PRESET_ENV_NAMES } from '../../contract/preset-env-names.ts';
 import type { ProviderPresetCatalog, ProviderPresetView } from '../../contract/index.ts';
+import { namesACredential, plainPaste } from '../../contract/secret-shape.ts';
 import { type LoginsCommandDeps, LoginsCommandError } from './ports.ts';
 
 /**
@@ -54,6 +55,28 @@ export function shellVariables(deps: LoginsCommandDeps): Readonly<Record<string,
   );
 }
 
+/**
+ * The plain variables `--from-env` fills from the shell: ONLY a variable the preset requires and leaves empty (a gateway's
+ * `ANTHROPIC_BASE_URL`), never one it deliberately leaves empty (`allowEmpty`: `ANTHROPIC_API_KEY` under openrouter, so the
+ * gateway key is the one sent), never one whose NAME reads as a credential, and only a value the stored rule takes
+ * (`plainPaste(…, 'stored')`). A key in the shell therefore never reaches the login file, nor a route that is not the Vault.
+ */
+export function shellPlainValues(
+  preset: ProviderPresetView | undefined,
+  shell: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> {
+  return Object.fromEntries(
+    (preset?.variables ?? []).flatMap(variable => {
+      const value = shell[variable.name];
+      const open =
+        variable.kind === 'plain' && variable.required && !variable.allowEmpty && (variable.value ?? '') === '';
+      if (value === undefined || !open || namesACredential(variable.name)) return [];
+      const verdict = plainPaste(variable.name, value, variable.allowEmpty, 'stored');
+      return verdict.kind === 'take' ? [[variable.name, verdict.value]] : [];
+    }),
+  );
+}
+
 /** The preset the shell's variables point at, said by variable NAMES; a custom gateway or nothing is refused. */
 export function detectedPreset(
   deps: LoginsCommandDeps,
@@ -66,8 +89,13 @@ export function detectedPreset(
   const detection = detectProvider(table, shell);
   const preset = catalog.presets.find(entry => entry.id === detection.preset);
   if (preset === undefined) {
+    // Nothing read is not the same as nothing matched: say which, so a missing declaration is not mistaken for a shell with no clue.
+    const said =
+      Object.keys(shell).length === 0
+        ? 'Nothing was read: none of the variables the providers name is set, declared or readable in this shell'
+        : "No provider could be told from this shell's variables";
     throw new LoginsCommandError(
-      `No provider could be told from this shell's variables. Name it: ${deps.binaryName} login add <provider> (see \`${deps.binaryName} login presets\`)`,
+      `${said}. Name it: ${deps.binaryName} login add <provider> (see \`${deps.binaryName} login presets\`)`,
     );
   }
   deps.out.warn(`Detected ${preset.label} from ${detection.clues.map(clue => clue.variable).join(', ')}.`);
@@ -87,6 +115,7 @@ export async function storeSecrets(
 ): Promise<void> {
   if (needs.length === 0) return;
   const held = await deps.gateway.secretNames();
+  const stored: string[] = [];
   for (const need of needs) {
     if (held.has(need.name)) {
       say(`${need.name}: already set ✓`);
@@ -101,7 +130,29 @@ export async function storeSecrets(
       );
     }
     if (typed === '') throw new LoginsCommandError(`${need.name} is needed: nothing was typed, so nothing was stored.`);
-    await deps.gateway.putSecret(need.name, typed);
+    try {
+      await deps.gateway.putSecret(need.name, typed);
+    } catch (error) {
+      throw new LoginsCommandError(refusedSentence(need.name, stored, error, typed));
+    }
+    stored.push(need.name);
     say(`${need.name}: stored in the Vault ✓`);
   }
+}
+
+/**
+ * The sentence for a Vault that would not take a secret (a governed caller's 403, a full store): the daemon's own words
+ * when it answered with a status, with the value taken out of them should they ever echo it, else none; the name, never
+ * the value; and what is left behind — the login is not added, a secret stored before this one stays in the Vault.
+ */
+function refusedSentence(name: string, stored: readonly string[], error: unknown, value: string): string {
+  const answered = error instanceof Error && typeof (error as { status?: unknown }).status === 'number';
+  const why = answered
+    ? `: ${error.message
+        .split(value)
+        .join('…')
+        .replace(/[.\s]+$/u, '')}`
+    : '';
+  const left = stored.length === 0 ? '' : ` ${stored.join(', ')} was stored before it and stays in the Vault.`;
+  return `${name} was not stored${why}. The login was not added.${left}`;
 }
