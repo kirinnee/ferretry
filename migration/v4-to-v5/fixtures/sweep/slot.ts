@@ -984,7 +984,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
 
   const prev = (name: string): string => join(bin, `${name}.prev`);
   const files = [...V5_PROGRAMS, STAMP] as const;
-  const startAndWait = async (): Promise<string | undefined> => {
+  const startAndWait = async (which: 'new' | 'old'): Promise<string | undefined> => {
     const child = startDaemon(
       join(bin, 'fyd'),
       slot.v5Port,
@@ -995,7 +995,7 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     const deadline = Date.now() + 180_000;
     for (;;) {
       if (child.exitCode !== null || child.signalCode !== null)
-        return `the new daemon exited (${child.exitCode === null ? String(child.signalCode) : 'code ' + String(child.exitCode)}) before it served; see ${join(slot.v5.dir, 'fyd.log')}`;
+        return `the ${which} daemon exited (${child.exitCode === null ? String(child.signalCode) : 'code ' + String(child.exitCode)}) before it served; see ${join(slot.v5.dir, 'fyd.log')}`;
       const ok = await fetch(`http://127.0.0.1:${String(slot.v5Port)}/healthz`, {
         signal: AbortSignal.timeout(2000),
       }).then(
@@ -1004,22 +1004,33 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
       );
       if (ok) return undefined;
       if (Date.now() > deadline)
-        return `the new daemon did not serve /healthz within 180 s; see ${join(slot.v5.dir, 'fyd.log')}`;
+        return `the ${which} daemon did not serve /healthz within 180 s; see ${join(slot.v5.dir, 'fyd.log')}`;
       await Bun.sleep(400);
     }
   };
 
   // Stop ONLY this slot's 5.0 daemon, by its own lock. v4, every tmux server, the home and the identity are not touched.
   await stopByLock(slot.v5.lock, '5.0 daemon');
-  for (const name of files) {
-    await rm(prev(name), { force: true });
-    if ((await lstat(join(bin, name)).catch(() => undefined)) !== undefined) await rename(join(bin, name), prev(name));
+  // From here on EVERY failure (a copy, a chmod, a spawn, a daemon that never serves) takes the rollback below. `moved` is what THIS
+  // run put aside as <name>.prev, so a leftover .prev from an older upgrade is never mistaken for this run's backup.
+  const moved: string[] = [];
+  let failure: string | undefined;
+  try {
+    for (const name of files) {
+      await rm(prev(name), { force: true });
+      if ((await lstat(join(bin, name)).catch(() => undefined)) !== undefined) {
+        await rename(join(bin, name), prev(name));
+        moved.push(name);
+      }
+    }
+    for (const name of files) {
+      await copyFile(join(libexec, name), join(bin, name));
+      await chmod(join(bin, name), name === STAMP ? 0o644 : 0o755);
+    }
+    failure = await startAndWait('new');
+  } catch (error) {
+    failure = `the new programs could not be put in place or started (${error instanceof Error ? error.message : String(error)})`;
   }
-  for (const name of files) {
-    await copyFile(join(libexec, name), join(bin, name));
-    await chmod(join(bin, name), name === STAMP ? 0o644 : 0o755);
-  }
-  const failure = await startAndWait();
   if (failure === undefined) {
     console.log(
       `slot ${n}: 5.0 daemon is serving on http://127.0.0.1:${String(slot.v5Port)}  ${oldLabel} -> ${next.commit}`,
@@ -1029,21 +1040,34 @@ async function upgradeV5(slot: Slot, libexecArg: string | undefined): Promise<vo
     );
     return;
   }
-  // Roll back: stop whatever the new build left, put the old programs back, start them.
+
+  // Roll back. The .prev set is the only copy of the old programs, so it is COPIED back, never renamed or removed: it stays
+  // intact through every unsuccessful recovery and is dropped only once the old daemon is proved healthy.
   console.error(`slot ${n}: ${failure}. Rolling back to ${oldLabel}.`);
-  await stopByLock(slot.v5.lock, 'new 5.0 daemon');
-  for (const name of files) {
-    await rm(join(bin, name), { force: true });
-    if ((await lstat(prev(name)).catch(() => undefined)) !== undefined) await rename(prev(name), join(bin, name));
+  const manual = `for f in ${files.join(' ')}; do [ -e '${bin}/'"$f".prev ] && cp -p '${bin}/'"$f".prev '${bin}/'"$f"; done`;
+  let again: string | undefined;
+  try {
+    await stopByLock(slot.v5.lock, 'new 5.0 daemon');
+    for (const name of moved) {
+      const temp = join(bin, `${name}.restore`);
+      await copyFile(prev(name), temp);
+      await chmod(temp, name === STAMP ? 0o644 : 0o755);
+      await rename(temp, join(bin, name));
+    }
+    again = await startAndWait('old');
+  } catch (error) {
+    again = `restoring the old programs failed (${error instanceof Error ? error.message : String(error)})`;
   }
-  const again = await startAndWait();
-  if (again !== undefined)
+  if (again !== undefined) {
+    await stopByLock(slot.v5.lock, 'old 5.0 daemon (failed start)').catch(() => undefined);
     die(
-      `slot ${n}: the upgrade failed AND the old programs did not start either (${again}). They are back in ${bin}; the home was not touched.`,
+      `slot ${n}: the upgrade failed (${failure}) AND the old programs did not start either (${again}). The slot has NO running 5.0 daemon. The old programs are intact as ${bin}/<name>.prev (${moved.join(', ') || 'none moved'}); the home was not touched. To put them back by hand: ${manual}   then start it: fy5s${n} daemon start (the wrapper in ${slot.bin})`,
       2,
     );
+  }
+  for (const name of moved) await rm(prev(name), { force: true });
   die(
-    `slot ${n}: the upgrade to ${next.commit} failed (${failure}); rolled back, the old programs (${oldLabel}) are serving again`,
+    `slot ${n}: the upgrade to ${next.commit} failed (${failure}); rolled back, the old programs (${oldLabel}) are serving again and the .prev set was dropped`,
     2,
   );
 }
