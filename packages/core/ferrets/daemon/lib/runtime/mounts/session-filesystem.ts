@@ -12,7 +12,6 @@ import {
 import { SESSION_FILE_INDEX_VERSION, type SessionFileIndexResponse } from '../../protocol/session-search.ts';
 import {
   FsError,
-  type FsErrorCode,
   MAX_FILE_BYTES,
   type FsDiffView,
   type FsFileView,
@@ -23,6 +22,7 @@ import {
   type SessionFilesystem,
   type SessionReadFence,
 } from '../../session/filesystem/index.ts';
+import { FS_ERROR_STATUS } from '../../ferrets/folder-listing.ts';
 
 type RouteContext = CallContext;
 
@@ -53,20 +53,8 @@ type RouteContext = CallContext;
  * declared "this must not leave the machine".
  */
 
-/** Every refusal, as the status a client can act on. */
-const FS_ERROR_STATUS: Readonly<Record<FsErrorCode, number>> = {
-  invalid_path: 400,
-  not_found: 404,
-  not_a_directory: 400,
-  not_a_file: 400,
-  escapes_root: 403,
-  denied: 403,
-  ignored: 403,
-  // 501 rather than 403: the surface is not implemented on this machine, which is a statement about the
-  // daemon rather than about the caller's authority or the path they asked for.
-  unsupported: 501,
-};
-
+// The status table is shared with the in-process listing (`FerretsApi.listFolder`), so the two cannot drift. 501 rather
+// than 403 for `unsupported`: it is a statement about the daemon, not about the caller's authority or the path.
 function refuse(error: unknown): never {
   if (error instanceof FsError) throw new ApiError(FS_ERROR_STATUS[error.code], error.message, error.code);
   throw error;
