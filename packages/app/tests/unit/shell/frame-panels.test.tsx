@@ -598,7 +598,7 @@ describe('the side column', () => {
     expect(panels('inbox.side-note')).toBe(1);
     expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
     await view.unmount();
-    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', storage });
+    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', arrived: true, storage });
     view = home.view;
     expect(panels('inbox.side-note')).toBe(0);
   });

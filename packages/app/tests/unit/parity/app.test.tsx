@@ -12,6 +12,7 @@ import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { arriveAtList } from '../../support/arrive-at-list.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -73,9 +74,13 @@ const settle = async (): Promise<void> => {
 const go = (path: string): void => window.history.replaceState({}, '', path);
 afterEach(() => go('/'));
 
-/** The shell at `path`, with one paired daemon `d1` on machine `laptop`. */
-async function drawn(path: string) {
-  go(path);
+/**
+ * The shell at `path`, with one paired daemon `d1` on machine `laptop`. `arrived` puts it there as a person reaches the
+ * list from inside the app (the app's home opens the selected machine only when the app is OPENED there).
+ */
+async function drawn(path: string, options: { readonly arrived?: boolean } = {}) {
+  if (options.arrived === true) arriveAtList(path);
+  else go(path);
   const transport = new FakeTransport((request: TransportRequest) => {
     if (request.path === '/v1/plugins') return json(inventoryOf(surfaces, {}));
     if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
@@ -105,7 +110,7 @@ describe('the shell home: the daemon list at `/`', () => {
   });
 
   test('S-0392 the home draws the paired daemons grouped by machine, each with its home and settings links', async () => {
-    const view = await drawn('/app/');
+    const view = await drawn('/app/', { arrived: true });
     expect(view.container.querySelector('h1')?.textContent).toBe('Daemons');
     expect(view.container.querySelector('h2')?.textContent).toBe('laptop');
     const hrefs = [...view.container.querySelectorAll('li a')].map(link => link.getAttribute('href'));

@@ -78,6 +78,14 @@ const fillCommand = async (root: HTMLElement, name = 'sentry'): Promise<void> =>
 const submit = async (root: HTMLElement): Promise<void> => click(root, '[data-action-submit]');
 
 describe('mcp#0 Add MCP server — project scope', () => {
+  it('names the registered project the daemon says owns the file (the folder is the fallback, asserted below)', async () => {
+    const { root } = await open({
+      [LISTING]: { project: { path: '/w/.mcp.json', name: 'Ferretry app', etag: null, servers: [] } },
+    });
+    expect(root.textContent).toContain('Writes .mcp.json in Ferretry app;');
+    expect(root.textContent).not.toContain('in w;');
+  });
+
   it('previews the repo change as a diff, adds with the previewed etag, then reloads this ferret', async () => {
     const { root, calls, closed } = await open({
       [PREVIEW_PROJECT]: projectPreview({ etag: null }),

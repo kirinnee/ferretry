@@ -257,6 +257,7 @@ function ShellCommandBar(props: {
             screenHref: (...address) => screenHrefRef.current(...address),
             changed,
             ferret,
+            appHook: name => runtime.appHook(daemon, name),
           }),
     [daemon, props.open, runtime, router, changed, ferret, allowed],
   );

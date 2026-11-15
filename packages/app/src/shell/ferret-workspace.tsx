@@ -32,27 +32,34 @@ export interface FerretWorkspaceProps {
   readonly subject: string;
   /** The conversation. */
   readonly chat: ReactNode;
+  /** Whether this connection may control the ferret; the panels read it (`useFerretWorkspace`). Defaults to true. */
+  readonly canControl?: boolean;
 }
 
 /** Beside the chat every panel is already on screen: asking for one changes nothing. */
 const ALREADY_SHOWN = (): void => undefined;
 
-export function FerretWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
+export function FerretWorkspace({ daemon, subject, chat, canControl = true }: FerretWorkspaceProps) {
   const panels = useSlotPanels(SIDE);
   const phone = useLayoutMode() === 'drawer';
   if (!phone || panels.length === 0)
     return (
-      <FerretWorkspaceActionsProvider daemon={daemon} ferret={subject} showPanel={ALREADY_SHOWN}>
+      <FerretWorkspaceActionsProvider
+        canControl={canControl}
+        daemon={daemon}
+        ferret={subject}
+        showPanel={ALREADY_SHOWN}
+      >
         <div className="flex min-h-0 min-w-0 flex-1">
           {chat}
           <PanelSlot daemon={daemon} slot={SIDE} subject={subject} />
         </div>
       </FerretWorkspaceActionsProvider>
     );
-  return <PhoneWorkspace chat={chat} daemon={daemon} subject={subject} />;
+  return <PhoneWorkspace canControl={canControl} chat={chat} daemon={daemon} subject={subject} />;
 }
 
-function PhoneWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
+function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWorkspaceProps) {
   const panels = useSlotPanels(SIDE);
   const rowId = useId();
   const tabs = phoneTabs(panels);
@@ -78,7 +85,7 @@ function PhoneWorkspace({ daemon, subject, chat }: FerretWorkspaceProps) {
   );
 
   return (
-    <FerretWorkspaceActionsProvider daemon={daemon} ferret={subject} showPanel={showPanel}>
+    <FerretWorkspaceActionsProvider canControl={canControl} daemon={daemon} ferret={subject} showPanel={showPanel}>
       <PhoneTabRow
         active={active}
         choices={newTabChoices(panels)}
