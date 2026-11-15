@@ -1,7 +1,7 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { Logins } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
 import { PRESET_ENV_NAMES } from './contract/preset-env-names.ts';
@@ -14,6 +14,7 @@ import {
   LOGINS_CONFIG,
   LOGINS_CREDENTIALS,
   LOGINS_MODELS,
+  LOGINS_PASSIVE_ASSIGNMENTS,
   LOGINS_READ_MODELS,
   LOGINS_WORDS,
   LoginChanged,
@@ -46,7 +47,7 @@ export default definePlugin({
   words: LOGINS_WORDS,
 
   needs: { vault: VaultPort },
-  uses: { browsers: BrowsersPort },
+  uses: { browsers: BrowsersPort, ferrets: FerretsPort },
   provides: { logins: LoginsPort, loginChanges: LoginChangesPort },
 
   actions: {
@@ -329,7 +330,7 @@ export default definePlugin({
     private: ['credentials'],
   },
   data: {
-    state: [LOGINS_CREDENTIALS, LOGINS_MODELS],
+    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_PASSIVE_ASSIGNMENTS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
     readModels: LOGINS_READ_MODELS,
     publishes: [LoginSignedIn, LoginChanged, ModelsChanged],

@@ -85,12 +85,9 @@
       "ignore": [
         "app/components/agenda-message.tsx",
         "app/hooks/use-agenda-replies.ts",
-        "app/hooks/use-agenda.ts",
         "app/lib/answer-chip.ts",
-        "app/lib/item-conversation.ts",
         "app/features/agenda/agenda-inbox-composer.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
-        "app/features/agenda/agenda.tsx",
         "app/lib/agenda-source-refs.ts"
       ]
     },
@@ -166,8 +163,7 @@
     },
     "packages/plugins/accounts": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/sign-in-grants/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/shells": {
       "entry": ["app/views/*.tsx"],

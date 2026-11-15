@@ -3,7 +3,6 @@ import should from 'should';
 import type { LoginFile, ProviderPresetCatalog, ProviderQuotaReading } from '../../../contract/index.ts';
 import type { CredentialStatusView } from '../../../daemon/lib/credentials/credential-status.ts';
 import {
-  attributedTranscripts,
   type CredentialEntry,
   FleetCredentialCatalog,
   type FleetCredentialCatalogDeps,
@@ -578,21 +577,6 @@ describe('FleetCredentialsService — Test and the presets', () => {
     should(await serviceOf().service.presets()).eql({ presets: [] });
     const catalog = { presets: [] } as ProviderPresetCatalog;
     should(await serviceOf({ environment: environment(catalog) }).service.presets()).equal(catalog);
-  });
-});
-
-describe('attributedTranscripts — only a session this daemon launched on the login', () => {
-  it('should name the transcripts of sessions on the login’s runtimes, once each and in order', () => {
-    const sessions = [
-      { agent: 'b', transcript: { home: '/h', file: '/h/b.jsonl' } },
-      { agent: 'a', transcript: { home: '/h', file: '/h/a.jsonl' } },
-      { agent: 'a', transcript: { home: '/h', file: '/h/a.jsonl' } },
-      { agent: 'other', transcript: { home: '/h', file: '/h/other.jsonl' } },
-      { agent: 'a', transcript: { home: '/h' } },
-      { agent: 'a' },
-    ];
-    should(attributedTranscripts({ usedBy: ['a', 'b'] }, sessions)).eql(['/h/a.jsonl', '/h/b.jsonl']);
-    should(attributedTranscripts({ usedBy: [] }, sessions)).eql([]);
   });
 });
 

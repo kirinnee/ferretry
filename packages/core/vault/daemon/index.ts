@@ -256,10 +256,18 @@ export default implementDaemon(manifest, {
       // What a ferret did to a page and where page scripts ran, told by Browsers (lead DECISIONS-2 #5, I98–I100):
       // the login observer's act notes and the machine-wide script taint a page card's lock reads.
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
-      scriptRunning: () => inputs.scripts.running(),
+      scriptRunning: () => {
+        const ended = [inputs.scripts.running(), inputs.grants.running?.() ?? (() => undefined)];
+        return () => {
+          for (const end of ended) end();
+        };
+      },
       // A person took a page over (Browsers): a paste still waiting for the owner into it is refused now (secure-clip-1 fix1, P2-5).
       pageTakenOver: async (ferret, keys) => await inputs.service.pageTakenOver(ferret, keys),
-      scriptedOn: host => inputs.scripts.scriptedOn(host),
+      scriptedOn: host => {
+        inputs.scripts.scriptedOn(host);
+        inputs.grants.scriptedOn?.(host);
+      },
       // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
       cardTarget: requestId => inputs.service.cardTarget(requestId),
       inputOpen: ferret => inputs.service.hasOpen(ferret),
