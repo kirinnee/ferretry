@@ -35,6 +35,8 @@ export interface LastSnapshotCaptureDeps {
   /** The kernel clock's sleep: the capture's bound is kernel time, so a driven clock drives it in a test. */
   readonly sleep: (delay: Duration, signal?: AbortSignal) => Promise<void>;
   readonly log: Pick<Log, 'warn'>;
+  /** Gives the event loop back between a big screen's masking readings (see {@link maskedScreen}); absent: no yield. */
+  readonly yieldToLoop?: () => Promise<void>;
   /** Default {@link LAST_SNAPSHOT_CAPTURE_BOUND}. */
   readonly bound?: Duration;
 }
@@ -92,7 +94,7 @@ export class LastSnapshotCapture {
     const screen = look?.status;
     // Today's rule: only a frame actually observed on a live pane is kept; a blank one is not evidence of anything.
     if (screen === undefined || screen.trim() === '') return 'nothing';
-    const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen));
+    const masked = await this.deps.redaction.read(scope => maskedScreen(scope, screen, this.deps.yieldToLoop));
     if (typeof masked !== 'string' || masked.trim() === '') return 'nothing';
     // The bound is checked here, before the write starts; a write already begun is not called back (see the class).
     if (abandoned.aborted) return 'nothing';

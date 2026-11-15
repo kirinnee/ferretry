@@ -5,6 +5,7 @@ import { testActRunner, TestMintedIds } from '@ferretry/kernel/testing';
 import type {
   DeliveryOutcome,
   FerretBirth,
+  FerretId,
   FerretRecord,
   FerretsApi,
   LimitsFile,
@@ -89,6 +90,8 @@ export interface AdditivesOptions {
   readonly session?: FerretSessionPort;
   /** `limits.yaml` as the kernel config port answers it, read on every call (unbound by default). */
   readonly limits?: () => LimitsFile | undefined;
+  /** The stored last screen as the daemon's reader answers it, masked again (unbound by default). */
+  readonly storedLastSnapshot?: (ferret: FerretId) => Promise<string | undefined>;
 }
 
 /** A Ferrets service over fakes; with `queueing`, a runner that acts per write on the kernel's real act rules. */
@@ -136,6 +139,7 @@ export function additivesFixture(options: AdditivesOptions = {}) {
     asks: { open: async () => [] },
     ...(options.session === undefined ? {} : { session: options.session }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
+    ...(options.storedLastSnapshot === undefined ? {} : { storedLastSnapshot: options.storedLastSnapshot }),
   };
   const service = new FerretsService(registry, tokens, ports);
   return {

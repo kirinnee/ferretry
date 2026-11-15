@@ -263,6 +263,11 @@ export interface FerretsPorts {
    */
   promptState?(ferret: FerretId): Promise<FerretPrompt>;
   /**
+   * The ferret's stored last screen (`last-snapshot.txt`), MASKED AGAIN with the Vault's values now; `undefined` when
+   * there is none, it cannot be read or it cannot be masked. Unbound: no stored screen is answered.
+   */
+  storedLastSnapshot?(ferret: FerretId): Promise<string | undefined>;
+  /**
    * The environment the named login defines for `harness` (`LoginKind.env` of the kind that holds it): literal settings
    * and `${secret:NAME}` references, never a value read from the Vault. An error is a sentence for the owner (no such
    * login, or none can be read) and refuses the start as `login_unavailable`; it never quotes a port error, which can
@@ -1893,6 +1898,18 @@ export class FerretsService implements FerretsApi {
     if (this.registry.get(ferret) === undefined) return undefined;
     this.requireMayTouch(caller, ferret);
     return (await this.ports.promptState?.(ferret).catch(() => undefined)) ?? {};
+  }
+
+  /**
+   * The ferret's stored last screen (`FerretsApi.lastSnapshot`), masked again on this read. The same `mayTouch` rule as
+   * `harness`, checked BEFORE the file is touched. `undefined` for a ferret this daemon does not know, with no stored
+   * screen, or when it cannot be read or masked (fail closed: never the raw text).
+   */
+  async lastSnapshot(ferret: FerretId, caller?: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    return await this.ports.storedLastSnapshot?.(ferret).catch(() => undefined);
   }
 
   /**
