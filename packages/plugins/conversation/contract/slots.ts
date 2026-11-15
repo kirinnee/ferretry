@@ -6,6 +6,9 @@
  *   - `conversation.row` ........ beside a row of the transcript; the panel sees only {id, kind, text, at?, label?, tools?}; `tools`
  *                                 are a tool row's shell calls whose WHOLE script is one plain command of a program named `fy`
  *                                 (no pipe, list, redirect, subshell or expansion), and their text answers; never another script or tool.
+ *   - `conversation.row-body` ... INSTEAD of the words of the person's own message (a `user` row, or a send still on its
+ *                                 way): Agenda draws an agenda message as its card. The panel gets {entry, onItsWay?, fallback}
+ *                                 and returns `fallback` (the plain words) when it does not recognise the message.
  *   - `conversation.row-actions`  in an assistant message's footer: Voice offers "Read aloud" on the message.
  *   - `conversation.above-composer` directly above the composer: Claude Code's permission and harness-dialog cards, and
  *                                 Voice's auto-read chip (it sees the rows, the turn, what the ferret waits on and the send ledger).
@@ -13,6 +16,13 @@
 
 export const CONVERSATION_ROW_SLOT = 'conversation.row' as const;
 export const CONVERSATION_ROW_ACTIONS_SLOT = 'conversation.row-actions' as const;
+/**
+ * Where a message's words are drawn INSTEAD of the chat's plain prose: the panels contributed here are nested in layout
+ * order and each gets {@link ConversationRowBodyProps}; no panel, or one that cannot be drawn or throws, leaves the
+ * plain words. Not a place BESIDE a row (that is `conversation.row`): a card here stands in for the words, so it does
+ * not repeat them.
+ */
+export const CONVERSATION_ROW_BODY_SLOT = 'conversation.row-body' as const;
 /**
  * Directly above the composer, in the chat: the cards of what the ferret is stopped on (Claude Code's permission prompt
  * and harness dialog), and what a chat-level reader needs (Voice's auto-read). The chat mounts every panel contributed
@@ -24,6 +34,7 @@ export const CONVERSATION_ABOVE_COMPOSER_SLOT = 'conversation.above-composer' as
 /** Every slot the chat offers, in one list a test can pair against the panels other plugins contribute. */
 export const CONVERSATION_SLOTS = [
   CONVERSATION_ROW_SLOT,
+  CONVERSATION_ROW_BODY_SLOT,
   CONVERSATION_ROW_ACTIONS_SLOT,
   CONVERSATION_ABOVE_COMPOSER_SLOT,
 ] as const;
@@ -33,7 +44,8 @@ export type ConversationSlot = (typeof CONVERSATION_SLOTS)[number];
  * The transcript row a panel is drawn for, as far as a contributor may rely on it. The chat hands ONLY these fields (the
  * rest of its row stays inside Conversation), built from the daemon's reading of this ferret's transcript: the words are
  * the daemon's redacted text, so a value Vault masks is masked here too. A row that exists only on this device (a send
- * that has not landed, or was refused) has not been through the daemon, so it is never offered to a slot.
+ * that has not landed, or was refused) has not been through the daemon, so it is never offered to a slot — except the
+ * person's own words, to `conversation.row-body` alone (`ConversationRowBodyProps`).
  */
 export interface ConversationRowEntry {
   readonly id: string;
@@ -81,9 +93,27 @@ export interface ConversationRowToolCall {
 /** The most characters of a command's answer a slot is handed; a longer answer is cut. */
 export const ROW_TOOL_TEXT_LIMIT = 100_000;
 
-/** The props every panel in a Conversation slot receives, beside its `subject` (the ferret). */
+/** The props every panel in a Conversation row slot receives, beside its `subject` (the ferret). */
 export interface ConversationRowProps {
   readonly entry: ConversationRowEntry;
+}
+
+/**
+ * The props of a `conversation.row-body` panel, beside its `subject` (the ferret).
+ *
+ * THE ONE EXCEPTION to the rule that a row on this device only is never offered (`ConversationRowEntry`): a send still
+ * on its way (`onItsWay`) is offered to THIS slot alone, with the words the person typed (not yet read by the daemon,
+ * so not redacted), because the card that will draw it must show at once, in the same chat it is going to. A panel
+ * draws it and nothing else: it does not store, send or log it.
+ */
+export interface ConversationRowBodyProps extends ConversationRowProps {
+  /** True while the message is the person's own send that has not landed yet. */
+  readonly onItsWay?: boolean;
+  /**
+   * The plain words, already drawn by the chat (a React node, opaque here: a contract imports no React): a panel returns
+   * it as it is for a message it does not recognise.
+   */
+  readonly fallback: unknown;
 }
 
 /** What a ferret is stopped on, as one choice offered it: only its words. */

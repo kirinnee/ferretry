@@ -1,10 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import type { ReactNode } from 'react';
 import { implementApp, type Manifest, skeletonApp } from '@ferretry/kernel/manifest';
 import type { TransportRequest } from '../../../src/client/transport.ts';
 import { DaemonList } from '../../../src/daemons/daemon-list.ts';
 import { DeviceLayoutStore } from '../../../src/layout/device-layout.ts';
 import { App } from '../../../src/shell/app.tsx';
-import { PanelSlot } from '../../../src/shell/views.tsx';
+import { PanelReplace, PanelSlot } from '../../../src/shell/views.tsx';
 import type { ShellWindow } from '../../../src/shell/context.tsx';
 import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
@@ -139,6 +140,79 @@ const fillerApp = implementApp(fillerManifest, {
   }),
 });
 
+// A plugin screen whose body other plugins' panels may REPLACE (`PanelReplace`): four slots, each with its own story.
+const bodyManifest = {
+  id: 'body',
+  title: 'Body',
+  version: '5.0.0',
+  api: 5,
+  core: false,
+  kinds: ['view'],
+  ui: { screens: [{ id: 'body', path: 'body' }] },
+} as unknown as Manifest;
+const bodyApp = implementApp(bodyManifest, {
+  build: () => ({
+    screens: {
+      body: () => (
+        <>
+          {['host.empty', 'host.nested', 'host.throws', 'host.skeleton', 'host.blocked', 'host.broken'].map(slot => (
+            <section data-testid={slot} key={slot}>
+              <PanelReplace
+                daemon="d1"
+                fallback={<p data-testid="plain">plain words</p>}
+                props={{ entry: slot }}
+                slot={slot}
+                subject="ferret-1"
+              />
+            </section>
+          ))}
+        </>
+      ),
+    },
+  }),
+});
+const panelsOf = (id: string, ...panels: Array<[string, string, number]>): Manifest =>
+  ({
+    id,
+    title: id,
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: ['view'],
+    ui: { panels: panels.map(([panel, slot, order]) => ({ id: panel, slot, order })) },
+  }) as unknown as Manifest;
+type Replacer = { readonly subject?: string; readonly entry?: string; readonly fallback?: ReactNode };
+const nestManifest = panelsOf('nest', ['outer', 'host.nested', 1], ['inner', 'host.nested', 2]);
+const nestApp = implementApp(nestManifest, {
+  build: () => ({
+    panels: {
+      outer: ({ subject, entry, fallback }: Replacer) => <i data-outer={`${subject}/${entry}`}>{fallback}</i>,
+      inner: ({ fallback }: Replacer) => <u data-inner="">{fallback}</u>,
+    },
+  }),
+});
+const throwsManifest = panelsOf('throws', ['bad', 'host.throws', 1]);
+const throwsApp = implementApp(throwsManifest, {
+  build: () => ({
+    panels: {
+      bad: () => {
+        throw new Error('this panel cannot draw');
+      },
+    },
+  }),
+});
+const skeletonManifest = panelsOf('skel', ['quiet', 'host.skeleton', 1]);
+const blockedManifest = panelsOf('blocked', ['gone', 'host.blocked', 1]);
+const blockedApp = implementApp(blockedManifest, {
+  build: () => ({ panels: { gone: () => <p data-testid="never">never drawn</p> } }),
+});
+const brokenManifest = panelsOf('broken', ['wrecked', 'host.broken', 1]);
+const brokenApp = implementApp(brokenManifest, {
+  build: () => {
+    throw new Error('could not start');
+  },
+});
+
 const entry = (manifest: Manifest, app: SurfaceEntry['app'], contract: string): SurfaceEntry => ({
   id: manifest.id,
   title: manifest.title,
@@ -157,6 +231,12 @@ const surfaces: SurfaceEntry[] = [
   entry(multiManifest, multiApp, 'h-multi'),
   entry(formManifest, formApp, 'h-form'),
   entry(fillerManifest, fillerApp, 'h-filler'),
+  entry(bodyManifest, bodyApp, 'h-body'),
+  entry(nestManifest, nestApp, 'h-nest'),
+  entry(throwsManifest, throwsApp, 'h-throws'),
+  entry(skeletonManifest, skeletonApp(skeletonManifest), 'h-skel'),
+  entry(blockedManifest, blockedApp, 'h-blocked'),
+  entry(brokenManifest, brokenApp, 'h-broken'),
 ];
 
 const browser: ShellWindow = {
@@ -360,6 +440,36 @@ describe('the app shell', () => {
     expect(button?.textContent).toBe('draft');
     await interact(() => button?.click());
     expect(picked).toEqual(['draft!']);
+    await view.unmount();
+  });
+
+  test('a body the panels of a slot replace: nested in order with no wrapper, and the plain body wherever a panel cannot draw', async () => {
+    go('/d/d1/body');
+    // The blocked plugin's contract is not the daemon's: its panel is held back by the shell's one line.
+    const { runtime, storage } = setup({ blocked: 'h-other' });
+    const view = await mount(
+      <App
+        runtime={runtime}
+        themes={new ThemePreferenceStore(storage)}
+        layouts={new DeviceLayoutStore(storage)}
+        browser={browser}
+        scroll={new ScrollMemory(null)}
+      />,
+    );
+    await settle();
+    const section = (slot: string): Element | null => view.container.querySelector(`[data-testid="${slot}"]`);
+    // No panel contributed: the host's own body, as it is.
+    expect(section('host.empty')?.innerHTML).toBe('<p data-testid="plain">plain words</p>');
+    // Two panels: the first outside, handed the second as its fallback, the host's body innermost; no slot or panel box.
+    expect(section('host.nested')?.innerHTML).toBe(
+      '<i data-outer="ferret-1/host.nested"><u data-inner=""><p data-testid="plain">plain words</p></u></i>',
+    );
+    // A panel that throws, one that is only a skeleton, a blocked one and one that never started: the plain body each time.
+    for (const slot of ['host.throws', 'host.skeleton', 'host.blocked', 'host.broken']) {
+      expect(section(slot)?.innerHTML).toBe('<p data-testid="plain">plain words</p>');
+    }
+    expect(view.container.querySelector('.fy-shell-line')).toBeNull();
+    expect(view.container.querySelector('[data-testid="never"]')).toBeNull();
     await view.unmount();
   });
 

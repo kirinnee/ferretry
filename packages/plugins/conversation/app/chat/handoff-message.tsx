@@ -21,7 +21,7 @@ import { FileText, Info } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { StoredTranscriptAttachment } from '../composer/attachments.ts';
 import type { DaemonConnection } from '../composer/seam.ts';
-import { AgendaMessageOr } from './seam.ts';
+import { RowBodySlot } from './row-slots.tsx';
 import { TranscriptAttachmentGallery } from '../composer/attachment-gallery.tsx';
 import { Markdown } from '@ferretry/app';
 
@@ -234,7 +234,7 @@ export function HandoffBody({
 function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
   return (
     <>
-      {draft.message.trim() === '' ? null : <HandoffText text={draft.message} />}
+      {draft.message.trim() === '' ? null : <HandoffText onItsWay text={draft.message} />}
       {draft.files.length === 0 ? null : (
         <ul className="fy-handoff-chips">
           {draft.files.map(file => {
@@ -253,11 +253,19 @@ function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
 }
 
 /**
- * A handed-over message's words: Markdown, or the agenda cards a burst of answers reads as (`agenda-message.tsx`) —
- * a batch is several paragraphs, so it travels as a file.
+ * A handed-over message's words: Markdown, or what the panels of `conversation.row-body` draw for them (the agenda
+ * cards a burst of answers reads as) — a batch is several paragraphs, so it travels as a file. A hand-over belongs to
+ * no row of its own, so it names none (`handoff`).
  */
-function HandoffText({ text }: { readonly text: string }) {
-  return <AgendaMessageOr fallback={<Markdown className="fy-handoff-text" text={text} />} text={text} />;
+function HandoffText({ text, onItsWay = false }: { readonly text: string; readonly onItsWay?: boolean }) {
+  return (
+    <RowBodySlot
+      fallback={<Markdown className="fy-handoff-text" text={text} />}
+      id="handoff"
+      onItsWay={onItsWay}
+      text={text}
+    />
+  );
 }
 
 /** When the file is gone the line is simply shown, because then it is the only thing explaining the faded pointer above it. */
