@@ -79,14 +79,16 @@ export const unreadChatSession = (ferretId: string): ChatSession => ({
  * Ferrets' four states, in the chat's words. `working` and `idle` are a LIVE ferret whose turn the daemon's turn watch
  * decided, so they carry `turnState`; a stopped ferret that said `signal done` (`finishedAt`) finished its work.
  */
-const stateOf = (summary: FerretSummary): Pick<ChatSessionState, 'status' | 'turnState'> => {
+const stateOf = (summary: FerretSummary): Pick<ChatSessionState, 'status' | 'turnState' | 'turnStateAt'> => {
   switch (summary.state) {
     case 'starting':
       return { status: 'starting' };
+    // The summary's `stateAt` is the instant the daemon last changed the ferret's state, so for a live ferret it is when
+    // the current turn state (`working` or `your-turn`) began: the daemon's own dating of the turn, never a browser clock.
     case 'working':
-      return { status: 'running', turnState: 'working' };
+      return { status: 'running', turnState: 'working', turnStateAt: summary.stateAt };
     case 'idle':
-      return { status: 'running', turnState: 'your-turn' };
+      return { status: 'running', turnState: 'your-turn', turnStateAt: summary.stateAt };
     case 'stopped':
       return { status: summary.finishedAt === undefined ? 'stopped' : 'completed' };
   }

@@ -5,7 +5,8 @@
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ReactNode, useEffect, useState } from 'react';
-import type { ConversationRowProps } from '@ferretry/plugin-conversation/contract';
+import type { ConversationAboveComposerProps, ConversationRowProps } from '@ferretry/plugin-conversation/contract';
+import { AutoReadChip } from './components/auto-read-chip.tsx';
 import { DictationControl } from './components/dictation-control.tsx';
 import { ReadAloudControl } from './components/read-aloud.tsx';
 import { DictationDebugSettings } from './features/settings/dictation-debug-settings.tsx';
@@ -13,7 +14,9 @@ import { DictationSettings } from './features/settings/dictation-settings.tsx';
 import { SpeedupKeysSettings } from './features/settings/speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './features/settings/transcription-log-settings.tsx';
 import { SpeedupsSurface } from './features/speedups/speedups-surface.tsx';
+import { useAutoRead } from './hooks/use-auto-read.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
+import { needsInputOf } from './lib/voice-chat/reply-picker.ts';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createVoiceStore, StoreProvider, useSttSettingsStore, type VoiceStore } from './lib/voice-store.tsx';
 import { useComposerDraft } from '@ferretry/app';
@@ -165,5 +168,46 @@ export function voiceSurfaces(client: PluginClient, options: VoiceSurfaceOptions
       </Boundary>
     );
 
-  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel };
+  /**
+   * "Read replies aloud" (`conversation.above-composer`): the chat hands the rows, whose turn it is, what the ferret waits
+   * on and the send ledger's ids, and the auto-read hook reads a finished reply (or the question a ferret asks) aloud while
+   * the device setting is on. It draws the "Reading the reply" chip only while a reading it started is going on.
+   */
+  function AutoReadPanelBody({
+    subject,
+    rows,
+    turn,
+    needsInput,
+    sends,
+  }: { readonly subject: string } & ConversationAboveComposerProps) {
+    const handle = useAutoRead({
+      scope: subject,
+      entries: rows,
+      authoritative: turn.live,
+      turn: turn.state,
+      turnStateAt: turn.at,
+      question: needsInputOf(needsInput),
+      sends,
+    });
+    return <AutoReadChip onStop={handle.stop} reading={handle.reading} />;
+  }
+
+  const AutoReadPanel = ({
+    subject,
+    rows,
+    turn,
+    needsInput,
+    sends,
+  }: { readonly subject?: string } & Partial<ConversationAboveComposerProps>) =>
+    subject === undefined ||
+    rows === undefined ||
+    turn === undefined ||
+    needsInput === undefined ||
+    sends === undefined ? null : (
+      <Boundary>
+        <AutoReadPanelBody needsInput={needsInput} rows={rows} sends={sends} subject={subject} turn={turn} />
+      </Boundary>
+    );
+
+  return { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel };
 }

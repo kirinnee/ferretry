@@ -6,12 +6,12 @@ import { voiceSurfaces } from './surfaces.tsx';
 
 /**
  * Voice's app half (§2.3): the Voice and Speed-ups settings tabs, the composer's dictation control, "Read aloud" in an
- * assistant message's footer, and the first run's Speed-ups and Voice steps (the same views as the two tabs, each drawn
+ * assistant message's footer, "Read replies aloud" above the composer, and the first run's Speed-ups and Voice steps (the same views as the two tabs, each drawn
  * only for its own step).
  */
 export default implementApp(manifest, {
   build: ({ client }) => {
-    const { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel } = voiceSurfaces(client, {
+    const { VoiceTab, SpeedupsTab, DictationPanel, ReadAloudPanel, AutoReadPanel } = voiceSurfaces(client, {
       loadSpeechAssets: async () => (await import('./speech-assets.ts')).speechAssets,
     });
     return {
@@ -19,6 +19,7 @@ export default implementApp(manifest, {
       panels: {
         dictation: DictationPanel,
         'read-aloud': ReadAloudPanel,
+        'auto-read': AutoReadPanel,
         'onboarding-speedups': forSubject('voice.speedups', SpeedupsTab as AppComponent<PanelProps>),
         'onboarding-voice': forSubject('voice.voice', VoiceTab as AppComponent<PanelProps>),
       },

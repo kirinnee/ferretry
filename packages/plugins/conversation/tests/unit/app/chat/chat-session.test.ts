@@ -42,6 +42,14 @@ describe('Ferrets’ summary, as the chat draws it', () => {
     const session = chatSessionOf(ferretSummary('f1', { state: 'starting' }));
     expect(session.state.status).toBe('starting');
     expect(session.state.turnState).toBeUndefined();
+    expect(session.state.turnStateAt).toBeUndefined();
+  });
+
+  test('a live ferret’s turn is dated by the daemon’s own stateAt; a stopped one has no turn to date', () => {
+    const at = '2026-11-05T03:00:09.000Z';
+    expect(chatSessionOf(ferretSummary('f1', { state: 'working', stateAt: at })).state.turnStateAt).toBe(at);
+    expect(chatSessionOf(ferretSummary('f1', { state: 'idle', stateAt: at })).state.turnStateAt).toBe(at);
+    expect(chatSessionOf(ferretSummary('f1', { state: 'stopped', stateAt: at })).state.turnStateAt).toBeUndefined();
   });
 
   test('a stopped ferret is finished: completed when it said `signal done`, stopped otherwise', () => {
@@ -72,7 +80,7 @@ describe('Ferrets’ summary, as the chat draws it', () => {
 
   test('what the summary does not carry is absent, never invented', () => {
     const session = chatSessionOf(ferretSummary('f1'));
-    for (const field of ['turnStateAt', 'activity', 'pendingQuestion', 'permissionRequest', 'harnessDialog'] as const)
+    for (const field of ['activity', 'pendingQuestion', 'permissionRequest', 'harnessDialog'] as const)
       expect(session.state[field]).toBeUndefined();
     expect(session.context).toBeUndefined();
   });
