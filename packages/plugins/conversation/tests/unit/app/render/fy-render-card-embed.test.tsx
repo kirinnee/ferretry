@@ -6,7 +6,8 @@ import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '.
 /**
  * A `card` / `board` block draws each card through the Board's own `reference:&` renderer (`RendererView`), so with no
  * shell mounted — a harness, this test — the way in is the written reference as plain text, never a link. The mini
- * board of today's block (the Board page's card and lane header) is the Board's to draw: GAP(board).
+ * board of today's block (the Board page's card and lane header) is the Board's to draw: `fy-render-card-embed-board.test.tsx` proves the
+ * hand-off to it, and this file the fallback where no Board answers.
  */
 
 const host = { daemon: 'daemon-a' };
