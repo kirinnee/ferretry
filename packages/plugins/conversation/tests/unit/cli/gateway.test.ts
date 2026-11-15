@@ -72,7 +72,37 @@ describe('ClientConversationGateway', () => {
     await expect(broken.gateway.sendStatus('f1', 's1')).rejects.toThrow('boom');
   });
 
-  it('cannot upload: the shell gives a plugin no file access', async () => {
+  it('uploads a staged file through the attachments route and answers its id', async () => {
+    const view = {
+      id: 'a1',
+      filename: 'shot.png',
+      mime: 'image/png',
+      size: 4,
+      sha256: 'a'.repeat(64),
+      createdAt: '2026-11-07T12:00:00.000Z',
+    };
+    const staged = { filename: 'shot.png', mime: 'image/png', base64: 'iVBORw==' };
+    const calls: Array<{ route: string; init: Init | undefined }> = [];
+    const client = {
+      call: (async (route: string, init?: Init) => {
+        calls.push({ route, init });
+        return view;
+      }) as unknown as PluginClient['call'],
+    };
+    const gateway = new ClientConversationGateway(client, () => 'minted-1', {
+      readAttachment: async path => {
+        expect(path).toBe('/tmp/shot.png');
+        return staged;
+      },
+    });
+
+    expect((await gateway.upload('f1', '/tmp/shot.png')).id).toBe('a1');
+    expect(calls).toEqual([
+      { route: 'POST /v1/ferrets/:ferretId/attachments', init: { params: { ferretId: 'f1' }, body: staged } },
+    ]);
+  });
+
+  it('cannot upload when the host gave it no file source', async () => {
     const { gateway } = build({});
     await expect(gateway.upload('f1', 'a.png')).rejects.toBeInstanceOf(CommandError);
     await expect(gateway.upload('f1', 'a.png')).rejects.toThrow(NO_FILE_ACCESS);
