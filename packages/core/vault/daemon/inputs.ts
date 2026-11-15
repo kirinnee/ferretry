@@ -6,18 +6,22 @@ import { milliseconds } from '@ferretry/std';
 import {
   InputAskRefSchema,
   InputPhoneApprovals,
+  InputSavedLogins,
   InputSecureCopies,
   type InputTargetAdapter,
   InputRequestFiles,
   InputTargets,
   PHONE_APPROVAL_KEY,
   type PhoneApprovalProvider,
+  SAVED_LOGINS_KEY,
+  type SavedLoginsProvider,
   SECURE_COPY_KEY,
   type SecureCopyProvider,
 } from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
+import { SavedLoginsThroughHook } from './adapters/inputs/saved-logins.ts';
 import { SecureCopiesThroughHook } from './adapters/inputs/secure-copy.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
@@ -57,8 +61,8 @@ export interface InputsDeps {
   /** Where a paste "as the secret NAME" is kept; absent: such a paste is unsupported. */
   readonly secretStore?: SecretStoreDirectory;
   /**
-   * Saved logins, sign-ins, secure copies, paste rules and approved sign-ins: Accounts' (the proposed `input.saved`
-   * hook). Each is optional exactly as today; absent, the card offers nothing saved and every value is typed.
+   * A test seam over the saved logins, the card order, sign-in facts, paste rules and approved sign-ins, which are
+   * Accounts' (`input.saved`, `input.secure-copy`); what is passed here wins over the hook. Absent, the hook answers.
    */
   readonly accounts?: {
     readonly logins?: InputLoginPort;
@@ -137,7 +141,21 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     return found === 'unavailable' ? undefined : found;
   };
   const copies = new SecureCopiesThroughHook(secureCopy);
-  const accounts = { sealed: copies, rules: copies, ...(deps.accounts ?? {}) };
+  // Saved logins, the card's order and what the daemon saw after a submit are Accounts' too, provided as `input.saved`
+  // and looked up on every call: an Accounts that is off offers nothing saved and every value is typed (fail closed).
+  const savedLogins = (): SavedLoginsProvider | undefined => {
+    const found = ctx.hooks.provider(InputSavedLogins, SAVED_LOGINS_KEY);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const saved = new SavedLoginsThroughHook(savedLogins);
+  const accounts = {
+    sealed: copies,
+    rules: copies,
+    logins: saved,
+    choice: saved,
+    loginFacts: saved,
+    ...(deps.accounts ?? {}),
+  };
   // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
   // Its own looks after a submit go through the targets' own reads (`where`, `text`, `promptLine`); a target that
   // offers none answers "cannot tell", so no sign-in fact is kept for it.

@@ -129,12 +129,7 @@
     "packages/plugins/projects": {
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/hooks/use-project-scope.ts",
-        "app/lib/project-scope.ts",
-        "app/hooks/use-work-project-names.ts",
-        "app/lib/work-project-names.ts"
-      ]
+      "ignore": ["app/hooks/use-project-scope.ts", "app/lib/project-scope.ts"]
     },
     "packages/plugins/runtimes": {
       "entry": ["app/views/*.tsx"],
@@ -151,8 +146,7 @@
     },
     "packages/plugins/updates": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/lib/changelog.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],

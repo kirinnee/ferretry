@@ -11,6 +11,23 @@ import type { CarrierFailure, LikelyCause } from '../../lib/connection-health.ts
 /** The pill's one word while the reconnect loop is working. */
 export const RECONNECTING_LABEL = 'Reconnecting…';
 
+/** "12 seconds", "3 minutes", "2 hours" — how long the outage has lasted, for the outage view. */
+export const outageDuration = (since: number, now: number): string => {
+  const seconds = Math.max(0, Math.floor((now - since) / 1000));
+  const unit = (count: number, name: string): string => `${count} ${name}${count === 1 ? '' : 's'}`;
+  if (seconds < 60) return unit(seconds, 'second');
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return unit(minutes, 'minute');
+  return unit(Math.floor(minutes / 60), 'hour');
+};
+
+/** The outage view's own lines: how long, how many automatic attempts, and the one action. */
+export const OUTAGE_COPY = {
+  lostFor: (duration: string): string => `Lost ${duration} ago`,
+  attempts: (attempt: number): string => (attempt === 1 ? '1 automatic attempt' : `${attempt} automatic attempts`),
+  retryNow: 'Retry now',
+} as const;
+
 /** A stalled machine's heading and one sentence per likely cause. */
 export interface StallCopy {
   readonly heading: string;

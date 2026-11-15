@@ -5,6 +5,7 @@
  */
 import type { AppComponent, PanelProps, PluginClient, SettingsProps } from '@ferretry/kernel/manifest';
 import type { ReactNode } from 'react';
+import { useFerretWorkspace } from '@ferretry/app';
 import { ContextNote } from '@ferretry/app/ui';
 import { createAddMcpRowPanel } from './add-mcp-row.tsx';
 import { McpServersPanel } from './servers-panel.tsx';
@@ -12,8 +13,10 @@ import { McpSettings } from './servers-settings.tsx';
 
 const mcpServersPanel = (client: PluginClient): AppComponent<PanelProps> =>
   function McpServers({ subject }: PanelProps): ReactNode {
+    // The workspace says whether this connection may control the ferret; outside one (a suite) the daemon still decides.
+    const workspace = useFerretWorkspace();
     if (subject === undefined) return <ContextNote>Pick a ferret to see its MCP servers.</ContextNote>;
-    return <McpServersPanel client={client} ferretId={subject} />;
+    return <McpServersPanel canControl={workspace?.canControl ?? true} client={client} ferretId={subject} />;
   };
 
 const mcpSettings = (client: PluginClient): AppComponent<SettingsProps> =>
