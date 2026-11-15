@@ -41,6 +41,7 @@ import {
   type ModelCatalogsView,
   type ModelPriceCatalog,
   ModelsStateSchema,
+  PassiveAssignmentsStateSchema,
   type ProviderPresetCatalog,
   LOGIN_NAME,
 } from './wire.ts';
@@ -260,6 +261,15 @@ export const LOGINS_MODELS = defineState({
   store: 'json',
   format: 1,
   schema: ModelsStateSchema,
+});
+
+/** Which login each Codex ferret was last seen on, and since when (the passive usage reading's attribution). */
+export const LOGINS_PASSIVE_ASSIGNMENTS = defineState({
+  name: 'passive-assignments',
+  path: 'passive-assignments.json',
+  store: 'json',
+  format: 1,
+  schema: PassiveAssignmentsStateSchema,
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────

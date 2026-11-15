@@ -56,7 +56,7 @@ describe('newestRateLimitsInText', () => {
       '',
     ].join('\n');
 
-    expect(newestRateLimitsInText(text, 0)).toEqual({
+    expect(newestRateLimitsInText(text)).toEqual({
       version: 1,
       source: 'codex-rollout',
       at: at('2026-10-13T07:05:00.000Z'),
@@ -65,13 +65,14 @@ describe('newestRateLimitsInText', () => {
     });
   });
 
-  test('reads an older rollout reset given relative to the event, and falls back to the file time', () => {
+  test('reads an older rollout reset given relative to the event, from the event’s own timestamp', () => {
     const relative = JSON.stringify({
+      timestamp: '2023-11-14T22:13:20.000Z',
       type: 'event_msg',
       payload: { type: 'token_count', rate_limits: { primary: { used_percent: 55, resets_in_seconds: 60 } } },
     });
 
-    expect(newestRateLimitsInText(relative, 1_700_000_000_000)).toEqual({
+    expect(newestRateLimitsInText(relative)).toEqual({
       version: 1,
       source: 'codex-rollout',
       at: 1_700_000_000_000,
@@ -88,22 +89,27 @@ describe('newestRateLimitsInText', () => {
       '',
     ].join('\n');
 
-    expect(newestRateLimitsInText(text, 0)?.fiveHour?.usedPercent).toBe(20);
+    expect(newestRateLimitsInText(text)?.fiveHour?.usedPercent).toBe(20);
   });
 
-  test('dates an event with a timestamp that is no instant by the file time', () => {
-    const odd = JSON.stringify({
-      timestamp: 'yesterday',
-      type: 'event_msg',
-      payload: { type: 'token_count', rate_limits: limits(9, 1) },
-    });
+  test('passes over an event with no timestamp or one that is no instant, and takes the older stamped one', () => {
+    const event = (stamp: Record<string, unknown>, used: number) =>
+      JSON.stringify({ ...stamp, type: 'event_msg', payload: { type: 'token_count', rate_limits: limits(used, 1) } });
+    const text = [
+      event({ timestamp: '2026-10-13T07:00:00.000Z' }, 10),
+      event({ timestamp: 'yesterday' }, 20),
+      event({ timestamp: -5 }, 30),
+      event({ timestamp: '1969-12-31T23:59:59.000Z' }, 35),
+      event({}, 40),
+    ].join('\n');
 
-    expect(newestRateLimitsInText(odd, 42)?.at).toBe(42);
+    expect(newestRateLimitsInText(text)?.fiveHour?.usedPercent).toBe(10);
+    expect(newestRateLimitsInText([event({}, 40), event({ timestamp: 'yesterday' }, 50)].join('\n'))).toBeUndefined();
   });
 
   test('finds nothing in a rollout with no usable reading', () => {
-    expect(newestRateLimitsInText(tokenCount('2026-10-13T07:00:00.000Z', { primary: {} }), 0)).toBeUndefined();
-    expect(newestRateLimitsInText('', 0)).toBeUndefined();
+    expect(newestRateLimitsInText(tokenCount('2026-10-13T07:00:00.000Z', { primary: {} }))).toBeUndefined();
+    expect(newestRateLimitsInText('')).toBeUndefined();
   });
 
   test('records only the window the event measured', () => {
@@ -111,7 +117,7 @@ describe('newestRateLimitsInText', () => {
       secondary: { used_percent: 8, resets_at: 1_800_500_000 },
     });
 
-    const reading = newestRateLimitsInText(weeklyOnly, 0);
+    const reading = newestRateLimitsInText(weeklyOnly);
 
     expect(reading?.fiveHour).toBeUndefined();
     expect(reading?.weekly?.usedPercent).toBe(8);

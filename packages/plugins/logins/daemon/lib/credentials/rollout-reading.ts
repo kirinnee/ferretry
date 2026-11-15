@@ -20,13 +20,17 @@ const asRecord = (value: unknown): Readonly<Record<string, unknown>> =>
 /** The part of a proved transcript the reader needs: its size, and a bounded window of its bytes. */
 export interface RolloutBytes {
   readonly size: number;
-  /** The file's modification time, epoch milliseconds: the instant a reading without a timestamp is dated. */
+  /** The file's modification time, epoch milliseconds. It is only part of the file's identity: it never dates a reading. */
   readonly mtimeMs: number;
   read(offset: number, length: number): Promise<Uint8Array>;
 }
 
-/** The newest `token_count` reading in one block of a rollout's text, scanning from the end. */
-export function newestRateLimitsInText(text: string, fallbackAt: number): PassiveUsageRecord | undefined {
+/**
+ * The newest `token_count` reading in one block of a rollout's text, scanning from the end. Only an event carrying its
+ * OWN valid timestamp is a reading: a file's modification time moves on any append, so it is no proof of when a quota
+ * was measured, and an event without one is passed over rather than dated by it.
+ */
+export function newestRateLimitsInText(text: string): PassiveUsageRecord | undefined {
   const lines = text.split('\n');
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index]?.trim() ?? '';
@@ -40,7 +44,8 @@ export function newestRateLimitsInText(text: string, fallbackAt: number): Passiv
     const payload = asRecord(event.payload);
     if (payload.type !== 'token_count') continue;
     const stamped = typeof event.timestamp === 'string' ? Date.parse(event.timestamp) : Number.NaN;
-    const at = Number.isFinite(stamped) && stamped >= 0 ? Math.trunc(stamped) : fallbackAt;
+    if (!Number.isFinite(stamped) || stamped < 0) continue;
+    const at = Math.trunc(stamped);
     const reading = parseCodexRateLimits(payload.rate_limits, at);
     if (!reading.hasQuotaSignal) continue;
     return {
@@ -100,7 +105,7 @@ export async function newestRolloutReading(rollout: RolloutBytes): Promise<Passi
     } else {
       carry = new Uint8Array(0);
     }
-    const reading = newestRateLimitsInText(decoder.decode(chunk), Math.trunc(rollout.mtimeMs));
+    const reading = newestRateLimitsInText(decoder.decode(chunk));
     if (reading !== undefined) return reading;
   }
   return undefined;

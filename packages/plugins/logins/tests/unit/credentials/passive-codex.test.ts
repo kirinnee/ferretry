@@ -7,6 +7,7 @@ import type { CredentialSubject } from '../../../daemon/lib/credentials/credenti
 import {
   attributedSessions,
   CodexPassiveReading,
+  type PassiveAssignment,
   type PassiveLogin,
   type PassiveSession,
   type PassiveTranscript,
@@ -59,13 +60,28 @@ const session = (
   id: string,
   rollout: Rollout | undefined,
   who: { readonly runtime?: string; readonly login?: string } = { runtime: 'codex-a' },
-  since = 0,
+  stateAt = 0,
+  current: PassiveSession['current'] = async () => who,
 ): PassiveSession => ({
   id,
   ...who,
-  since,
+  stateAt,
+  current,
   open: async () => rollout?.transcript(),
 });
+
+/** Logins' own durable assignment record, in memory: it outlives a pass instance, as the file outlives a restart. */
+class Assignments {
+  held: Readonly<Record<string, PassiveAssignment>> = {};
+  writes = 0;
+  failWrites = false;
+  read = async () => this.held;
+  write = async (next: Readonly<Record<string, PassiveAssignment>>) => {
+    if (this.failWrites) throw new Error('disk full');
+    this.writes += 1;
+    this.held = next;
+  };
+}
 
 const subject = (id: string): CredentialSubject => ({
   id,
@@ -73,12 +89,18 @@ const subject = (id: string): CredentialSubject => ({
 });
 const login = (id: string, usedBy: readonly string[]): PassiveLogin => ({ subject: subject(id), usedBy });
 
-function rig(logins: readonly PassiveLogin[], sessions: () => readonly PassiveSession[]) {
+function rig(
+  logins: readonly PassiveLogin[],
+  sessions: () => readonly PassiveSession[],
+  assignments = new Assignments(),
+) {
   const written: { readonly id: string; readonly record: PassiveUsageRecord }[] = [];
   let failWrite = false;
   const reading = new CodexPassiveReading({
     logins: async () => logins,
     sessions: async () => sessions(),
+    assignments,
+    now: () => 1_000,
     write: async (target, record) => {
       if (failWrite) throw new Error('disk full');
       written.push({ id: target.id, record });
@@ -87,6 +109,7 @@ function rig(logins: readonly PassiveLogin[], sessions: () => readonly PassiveSe
   return {
     reading,
     written,
+    assignments,
     failWrites: (fail: boolean) => {
       failWrite = fail;
     },
@@ -174,7 +197,8 @@ describe('CodexPassiveReading', () => {
     const flaky: PassiveSession = {
       id: 'flaky',
       runtime: 'codex-a',
-      since: 0,
+      stateAt: 0,
+      current: async () => ({ runtime: 'codex-a' }),
       open: async () => {
         if (!proved) throw new Error('refused');
         return readable.transcript();
@@ -183,7 +207,8 @@ describe('CodexPassiveReading', () => {
     const broken: PassiveSession = {
       id: 'broken',
       runtime: 'codex-a',
-      since: 0,
+      stateAt: 0,
+      current: async () => ({ runtime: 'codex-a' }),
       open: async () => ({
         file: 'x',
         size: 10,
@@ -248,6 +273,8 @@ describe('CodexPassiveReading', () => {
         asked += 1;
         return [];
       },
+      assignments: new Assignments(),
+      now: () => 0,
       write: async () => undefined,
     });
 
@@ -323,5 +350,152 @@ describe('CodexPassiveReading — a carried rollout never puts the old login’s
     rollout.text += tokenCount('2026-10-13T09:00:00.000Z', 8);
     await reading.pass();
     expect(written.map(entry => entry.record.fiveHour?.usedPercent)).toEqual([8]);
+  });
+});
+
+describe('CodexPassiveReading — the login assignment is Logins’ own record, not the ferret’s stateAt', () => {
+  const turn = (minute: number, used: number): string => tokenCount(`2026-10-13T08:0${String(minute)}:00.000Z`, used);
+
+  test('three short turns on login A, each followed by an idle change a millisecond later: A shows the last one', async () => {
+    const rollout = new Rollout(turn(1, 1));
+    let stateAt = at('2026-10-13T08:00:00.000Z');
+    const { reading, written } = rig([login('a', [])], () => [session('f', rollout, { login: 'a' }, stateAt)]);
+    await reading.pass();
+    for (const [minute, used] of [
+      [2, 20],
+      [3, 50],
+      [4, 99],
+    ] as const) {
+      rollout.text += turn(minute, used);
+      stateAt = at(`2026-10-13T08:0${String(minute)}:00.001Z`);
+      await reading.pass();
+    }
+
+    expect(written.map(entry => entry.record.fiveHour?.usedPercent)).toEqual([1, 20, 50, 99]);
+  });
+
+  test('keeps its first `since` while the login is the same, moves it on a different login, and writes only a change', async () => {
+    const rollout = new Rollout(turn(1, 1));
+    let who = { login: 'a' };
+    let stateAt = at('2026-10-13T08:00:00.000Z');
+    const { reading, assignments } = rig([login('a', []), login('b', [])], () => [session('f', rollout, who, stateAt)]);
+    await reading.pass();
+    expect(assignments.held).toEqual({ f: { login: 'a', since: at('2026-10-13T08:00:00.000Z') } });
+
+    stateAt = at('2026-10-13T08:09:00.000Z');
+    await reading.pass();
+    expect(assignments.writes).toBe(1);
+
+    who = { login: 'b' };
+    await reading.pass();
+    expect(assignments.held).toEqual({ f: { login: 'b', since: at('2026-10-13T08:09:00.000Z') } });
+    expect(assignments.writes).toBe(2);
+  });
+
+  test('forgets a ferret that is gone, takes now for one with no stateAt, and one with no login or runtime is never attributed', async () => {
+    const rollout = new Rollout(turn(1, 1));
+    let live: readonly PassiveSession[] = [
+      session('f', rollout, { login: 'a' }, Number.NaN),
+      session('g', rollout, {}, 5),
+    ];
+    const { reading, assignments } = rig([login('a', [])], () => live);
+    await reading.pass();
+    expect(assignments.held).toEqual({ f: { login: 'a', since: 1_000 } });
+
+    live = [];
+    await reading.pass();
+    expect(assignments.held).toEqual({});
+  });
+
+  test('survives a restart: the record read back keeps the first instant, so a later idle change cannot lose a reading', async () => {
+    const rollout = new Rollout(turn(1, 1));
+    const shared = new Assignments();
+    const first = rig(
+      [login('a', [])],
+      () => [session('f', rollout, { login: 'a' }, at('2026-10-13T08:00:00.000Z'))],
+      shared,
+    );
+    await first.reading.pass();
+
+    rollout.text += turn(2, 77);
+    const restarted = rig(
+      [login('a', [])],
+      () => [session('f', rollout, { login: 'a' }, at('2026-10-13T08:02:00.001Z'))],
+      shared,
+    );
+    await restarted.reading.pass();
+
+    expect(restarted.written.map(entry => entry.record.fiveHour?.usedPercent)).toEqual([77]);
+    expect(shared.writes).toBe(1);
+  });
+
+  test('tries the record again next pass when writing it failed, with the instant it already chose', async () => {
+    const rollout = new Rollout(turn(1, 1));
+    let stateAt = at('2026-10-13T08:00:00.000Z');
+    const { reading, assignments } = rig([login('a', [])], () => [session('f', rollout, { login: 'a' }, stateAt)]);
+    assignments.failWrites = true;
+    await reading.pass();
+    expect(assignments.held).toEqual({});
+
+    assignments.failWrites = false;
+    stateAt = at('2026-10-13T08:05:00.000Z');
+    await reading.pass();
+    expect(assignments.held).toEqual({ f: { login: 'a', since: at('2026-10-13T08:00:00.000Z') } });
+  });
+});
+
+describe('CodexPassiveReading — a reading is the login’s only if the ferret stayed on it while it was read', () => {
+  test('a move to B while the transcript is opened records nothing for A, and B gets its reading on its own next pass', async () => {
+    const rollout = new Rollout(tokenCount('2026-10-13T08:31:00.000Z', 3));
+    let now: { login: string } = { login: 'a' };
+    let stateAt = at('2026-10-13T08:00:00.000Z');
+    const ferret = () => session('f', rollout, { login: now.login }, stateAt, async () => now);
+    const listed = ferret();
+    const moving: PassiveSession = {
+      ...listed,
+      open: async () => {
+        now = { login: 'b' };
+        stateAt = at('2026-10-13T08:30:00.000Z');
+        return await listed.open();
+      },
+    };
+    let calls = 0;
+    const { reading, written } = rig([login('a', []), login('b', [])], () => (calls++ === 0 ? [moving] : [ferret()]));
+
+    await reading.pass();
+    expect(written).toEqual([]);
+
+    await reading.pass();
+    expect(written.map(entry => entry.id)).toEqual(['b']);
+  });
+
+  test('a ferret that is gone or stopped by the time it was read yields nothing, and is tried again', async () => {
+    const rollout = new Rollout(tokenCount('2026-10-13T08:31:00.000Z', 3));
+    let gone = true;
+    const { reading, written } = rig([login('a', [])], () => [
+      session('f', rollout, { login: 'a' }, 0, async () => (gone ? undefined : { login: 'a' })),
+    ]);
+
+    await reading.pass();
+    expect(written).toEqual([]);
+
+    gone = false;
+    await reading.pass();
+    expect(written.map(entry => entry.id)).toEqual(['a']);
+  });
+});
+
+describe('CodexPassiveReading — only a reading with its own timestamp is attributed', () => {
+  test('A’s carried 99% without a timestamp is not B’s after a later append moved the file time', async () => {
+    const unstamped = `${JSON.stringify({ type: 'event_msg', payload: { type: 'token_count', rate_limits: { primary: { used_percent: 99 } } } })}\n`;
+    const rollout = new Rollout(unstamped);
+    const { reading, written } = rig([login('b', [])], () => [
+      session('f', rollout, { login: 'b' }, at('2026-10-13T08:30:00.000Z')),
+    ]);
+    await reading.pass();
+    rollout.text += `${JSON.stringify({ timestamp: '2026-10-13T08:31:00.000Z', type: 'event_msg', payload: { type: 'task_started' } })}\n`;
+    await reading.pass();
+
+    expect(written).toEqual([]);
   });
 });

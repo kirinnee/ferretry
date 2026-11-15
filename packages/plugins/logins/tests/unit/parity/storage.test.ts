@@ -23,6 +23,6 @@ describe('the files Logins stores', () => {
     expect(LOGINS_MODELS.path).toBe('models.json');
     expect(LOGINS_MODELS.store).toBe('json');
     expect(LOGINS_CREDENTIALS.store).toBe('opaque');
-    expect(manifest.data.state.map(file => file.name)).toEqual(['credentials', 'models']);
+    expect(manifest.data.state.map(file => file.name)).toEqual(['credentials', 'models', 'passive-assignments']);
   });
 });

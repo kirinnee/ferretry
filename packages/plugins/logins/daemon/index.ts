@@ -28,6 +28,7 @@ import { deliverCodexCallback } from './adapters/harness-login/callback-delivery
 import { harnessLoginTimer, spawnHarnessLoginChild } from './adapters/harness-login/login-child.ts';
 import { systemPortHolders } from './adapters/harness-login/port-holders.ts';
 import { OwnedLoginStore } from './adapters/credentials/owned-store.ts';
+import { StatePassiveAssignments } from './adapters/credentials/state-passive-assignments.ts';
 import { codexCredentialSource } from './adapters/credentials/codex-credential.ts';
 import { AnthropicUsageProbe, quotaFetch } from './adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from './adapters/credentials/codex-usage-probe.ts';
@@ -211,14 +212,26 @@ export function buildLoginsDaemon() {
                     id: ferret.id,
                     ...(ferret.runtime === undefined ? {} : { runtime: ferret.runtime }),
                     ...(ferret.login === undefined ? {} : { login: ferret.login }),
-                    // Its last launch: a reading from before it was written on whatever login the ferret had then.
-                    since: Date.parse(ferret.stateAt),
+                    // Only where its login's `since` is first taken from; Logins keeps that record itself.
+                    stateAt: Date.parse(ferret.stateAt),
+                    // The ferret as it is now, asked again once its transcript was read (a move may have come between).
+                    current: async () => {
+                      const now = await ferrets.get(ferret.id);
+                      return now === undefined || now.harness !== 'codex' || now.state === 'stopped'
+                        ? undefined
+                        : {
+                            ...(now.runtime === undefined ? {} : { runtime: now.runtime }),
+                            ...(now.login === undefined ? {} : { login: now.login }),
+                          };
+                    },
                     open: async () => await (await ferrets.harness?.(ferret.id))?.transcriptBytes?.(),
                   },
                 ]
               : [],
           );
         },
+        assignments: new StatePassiveAssignments(state),
+        now: () => clock.nowMs(),
         write: (subject, record) => store.recordPassiveUsage(subject, record),
       });
       jobs.add({

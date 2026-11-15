@@ -14,6 +14,7 @@ import {
   LOGINS_CONFIG,
   LOGINS_CREDENTIALS,
   LOGINS_MODELS,
+  LOGINS_PASSIVE_ASSIGNMENTS,
   LOGINS_READ_MODELS,
   LOGINS_WORDS,
   LoginChanged,
@@ -329,7 +330,7 @@ export default definePlugin({
     private: ['credentials'],
   },
   data: {
-    state: [LOGINS_CREDENTIALS, LOGINS_MODELS],
+    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_PASSIVE_ASSIGNMENTS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
     readModels: LOGINS_READ_MODELS,
     publishes: [LoginSignedIn, LoginChanged, ModelsChanged],
