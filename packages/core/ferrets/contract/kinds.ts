@@ -34,6 +34,13 @@ export interface LaunchSpec {
   readonly model?: string;
   readonly effort?: string;
   /**
+   * The ferret's mode (the record's own): an `interactive` ferret has an owner at the pane and so keeps the harness's
+   * question tool; an `auto` one has nobody to answer, so the tool is withheld. ABSENT is unattended (`auto`), the rule
+   * the Runtimes wrappers have always applied (`FY_SESSION_MODE` unset). Set by Ferrets from the record on every launch
+   * (a start, a resume, Restart CLI, a move, a revive), so every launch of one ferret decides the tool the same way.
+   */
+  readonly mode?: 'interactive' | 'auto';
+  /**
    * This ferret's OWN compaction choice, in tokens or `auto` (its session config, else its start options). A
    * `launch.parts` taker resolves it against the login's default and the model's window; ABSENT means the login's default.
    */
