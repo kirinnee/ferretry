@@ -525,6 +525,8 @@ quiet)
   done
   found=0
   queued=""
+  emptyq=""
+  oddq=""
   for f in "${H}"/state/sessions/*/agenda-*.pending.json "${H}/fleet/.fy-fleet-apply.lock" "${H}"/fleet/shared/*/.migration-journal; do
     if [ -e "${f}" ]; then
       # agenda-changes.pending.json is v4's QUEUE of agenda-change notices for a ferret's next turn end. It is queued
@@ -532,7 +534,16 @@ quiet)
       # drain it. It is not "pending" here; convert carries it into v5's own queue (steps/agenda.ts).
       case "${f}" in
       */agenda-changes.pending.json)
-        queued="${queued} $(basename "$(dirname "${f}")")"
+        # Say what convert will really do with each file (steps/agenda.ts carryChanges): a non-empty queue is carried, an
+        # empty `[]` one is skipped (nothing to carry, so it is NOT counted as carried), and one v5 cannot read is set aside
+        # byte for byte and named in convert's report. Listing all three as "carried" made quiet and convert disagree.
+        fname="$(basename "$(dirname "${f}")")"
+        qkind="$(jq -r 'if type == "array" then (if length == 0 then "empty" else "queue" end) else "odd" end' "${f}" 2>/dev/null)" || qkind=odd
+        case "${qkind}" in
+        queue) queued="${queued} ${fname}" ;;
+        empty) emptyq="${emptyq} ${fname}" ;;
+        *) oddq="${oddq} ${fname}" ;;
+        esac
         continue
         ;;
       esac
@@ -541,8 +552,14 @@ quiet)
     fi
   done
   if [ -n "${queued}" ]; then
-    say "📝 queued agenda changes (not in flight; convert carries them into v5) for:${queued}"
+    say "📝 queued agenda changes (not in flight; convert carries each queue into v5) for:${queued}"
     note_set QUEUED_AGENDA_CHANGES "${queued# }"
+  fi
+  if [ -n "${emptyq}" ]; then
+    say "📝 empty agenda-change queue files (an empty list: nothing to carry; convert skips them and does not count them) for:${emptyq}"
+  fi
+  if [ -n "${oddq}" ]; then
+    say "📝 agenda-change queues that are not a readable list (convert cannot carry them: it sets each aside byte for byte and names it in its report) for:${oddq}"
   fi
   if [ "${found}" = 1 ]; then
     say "⚠️ FOUND: something is pending (names above). Starting v4 for a minute so it can finish, then stopping it again"
@@ -1082,6 +1099,63 @@ rollback)
     rb_quiet before
   fi
 
+  # 1b. Close the panes v5 started, and ONLY those it provably started. The daemon's stop leaves every pane running, so
+  # without this they outlive the rollback as orphans. Closing is destructive (a harness and its unsaved work), so it fails
+  # CLOSED: any doubt means nothing is closed, it is said out loud, and the rollback goes on (v4 coming back matters more).
+  #   - the baseline (pane-owners.tsv and panes.txt) must be a readable, non-empty regular file each: an empty or missing
+  #     baseline cannot say what v4 owned, so it is never read as "v4 owned nothing";
+  #   - the server must be v5's own: ${H}/state/terminals/tmux.sock is a real socket (not a symlink), owned by this user,
+  #     in a folder that really is ${H}/state/terminals (no symlinked state/ or terminals/);
+  #   - a session is closed only when it is named fy-<id>, <id> is a ferret in v5's registry (${H}/state/ferrets/<id>, a real
+  #     folder) and the baseline does not name it. Anything else is left alone and named: a name prefix alone proves nothing.
+  if has_mark starting-v5 || has_mark started-v5; then
+    v5_sock="${H}/state/terminals/tmux.sock"
+    v5_skip=""
+    for bf in "${base}/pane-owners.tsv" "${base}/panes.txt"; do
+      { [ -f "${bf}" ] && [ -r "${bf}" ] && [ -s "${bf}" ]; } || v5_skip="the baseline ${bf} is missing, empty or unreadable, so what v4 owned is unknown"
+    done
+    if [ -z "${v5_skip}" ]; then
+      if [ ! -e "${v5_sock}" ] && [ ! -L "${v5_sock}" ]; then
+        v5_skip="no v5 tmux socket at ${v5_sock}"
+      elif [ -L "${v5_sock}" ] || [ ! -S "${v5_sock}" ] || [ ! -O "${v5_sock}" ]; then
+        v5_skip="${v5_sock} is not v5's own socket file (a symlink, not a socket, or not owned by this user)"
+      elif [ "$(cd -P "${H}/state/terminals" 2>/dev/null && pwd)" != "$(cd -P "${H}" 2>/dev/null && pwd)/state/terminals" ]; then
+        v5_skip="${v5_sock} is not inside ${H}/state/terminals (a symlinked folder)"
+      fi
+    fi
+    if [ -n "${v5_skip}" ]; then
+      case "${v5_skip}" in
+      "no v5 tmux socket"*) ;; # nothing was started on a socket: nothing to say beyond the line below
+      *) say "⚠️ v5's panes were NOT closed: ${v5_skip}. The owner checks 'tmux -S ${v5_sock} ls' by hand" ;;
+      esac
+    elif v5_panes="$(tmux -S "${v5_sock}" list-panes -a -F '#{session_name} #{pane_id}')"; then
+      closed=0 kept_v4=0 close_failed="" unproven=""
+      while read -r session _; do
+        [ -n "${session}" ] || continue
+        # Baseline membership: an awk that cannot read counts as "owned" (unknown is never permission to kill).
+        owned="$(awk -F'\t' -v s="${session}" '$2 == s {f = 1} END {print f ? 1 : 0}' "${base}/pane-owners.tsv")" || owned=1
+        if [ "${owned}" = 0 ]; then
+          owned="$(awk -v s="${session}" '$1 == s {f = 1} END {print f ? 1 : 0}' "${base}/panes.txt")" || owned=1
+        fi
+        fid="${session#fy-}"
+        if [ "${owned}" != 0 ]; then
+          kept_v4=$((kept_v4 + 1))
+        elif [ "${fid}" = "${session}" ] || ! [[ ${fid} =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || [ -L "${H}/state/ferrets/${fid}" ] || [ ! -d "${H}/state/ferrets/${fid}" ]; then
+          unproven="${unproven} ${session}"
+        elif tmux -S "${v5_sock}" kill-session -t "=${session}"; then
+          closed=$((closed + 1))
+        else
+          close_failed="${close_failed} ${session}"
+        fi
+      done < <(awk '{print $1}' <<<"${v5_panes}" | sort -u)
+      say "📝 v5 panes: closed ${closed} tmux session(s) v5 provably started (fy-<id> of a v5 ferret, not in the baseline); left ${kept_v4} v4-owned session(s) alone"
+      [ -z "${unproven}" ] || say "⚠️ left alone, not provably v5's (not fy-<id> of a v5 ferret):${unproven}"
+      [ -z "${close_failed}" ] || say "⚠️ could not close:${close_failed}. They are v5's own panes: the owner closes them by hand (tmux -S ${v5_sock} kill-session -t <name>)"
+    else
+      say "⚠️ tmux could not be read at ${v5_sock}: v5's panes, if any, were not closed. The owner checks 'tmux -S ${v5_sock} ls' by hand"
+    fi
+  fi
+
   # 2. Homes. Only move H aside when the backup exists (otherwise H still IS the v4 home).
   if [ -d "${B}" ]; then
     if [ -e "${H}" ]; then
@@ -1159,8 +1233,28 @@ rollback)
   elif has_mark starting-v5 || has_mark started-v5; then
     if [ "${restart_ferrets}" = 1 ]; then
       # shellcheck disable=SC2086 # the ids are separate words, one per ferret
-      fy4 restart ${ids} || fail "'fy restart ${ids}' failed"
-      say "✅ restarted: ${ids}. Ask the owner to send one of them a message and see it answer"
+      restart_out="$(fy4 restart ${ids})" || fail "'fy restart ${ids}' failed"
+      printf '%s\n' "${restart_out}"
+      # Name only the ferrets that really restarted: the output also lists the ones queued for later, left alone or failed,
+      # and "restarted: <every id>" over a refusal would tell the owner a ferret is back when it is not.
+      if grep -q '^Restarted now: ' <<<"${restart_out}"; then
+        restarted_ids="$(awk '
+          /^[^ ]/ { in_now = ($0 ~ /^Restarted now: /); next }
+          in_now && /^  / { line = $0; sub(/^  /, "", line); if (match(line, /\([^()]*\)$/)) line = substr(line, RSTART + 1, RLENGTH - 2); print line }
+        ' <<<"${restart_out}" | tr '\n' ' ')"
+        n_now="$({ grep -m1 '^Restarted now: ' <<<"${restart_out}" || true; } | sed 's/^Restarted now: //')"
+        n_queued="$({ grep -m1 '^Queued for their next idle moment: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
+        n_left="$({ grep -m1 '^Left alone: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
+        n_failed="$({ grep -m1 '^Failed: ' <<<"${restart_out}" || true; } | sed 's/^[^:]*: //')"
+        say "📝 restart: ${n_now:-0} restarted now, ${n_queued:-0} queued for their next idle moment, ${n_left:-0} left alone, ${n_failed:-0} failed (of $(wc -w <<<"${ids}" | tr -d ' ') asked)"
+        if [ "${n_now:-0}" -gt 0 ]; then
+          say "✅ restarted: ${restarted_ids% }. Ask the owner to send one of them a message and see it answer"
+        else
+          say "⚠️ no ferret was restarted now (see the lines above for each one). Rerun 'fy restart <id>' for the queued or refused ones once they are idle"
+        fi
+      else
+        say "⚠️ 'fy restart' printed no counts to read, so no ferret is claimed restarted. Read its output above, then ask the owner to message one of: ${ids}"
+      fi
     else
       say "⚠️ v5 may have restarted these ferrets with its own hooks. With the owner's yes, run: fy restart ${ids}  (or rerun rollback with --restart). Bare 'fy restart' only reports status."
     fi

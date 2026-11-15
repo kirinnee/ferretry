@@ -124,7 +124,7 @@ panes and tmux keep running and nothing has been moved, so nothing is lost. Read
   do not rerun a third time. Tell the owner the file names (never their content) and that the move cannot go on until they are
   cleared; offer to stay on v4 (below). Nothing has been backed up or converted, so there is nothing to roll back.
 - `agenda-changes.pending.json` is **not** a pending file: it is a ferret's queue of agenda notices for its next turn end, which a
-  quiet window can never drain. `quiet` lists the ferrets under "queued agenda changes" and passes; `convert` carries each queue
+  quiet window can never drain. `quiet` lists the ferrets whose queue holds notices under "queued agenda changes" and passes (an empty `[]` file is listed apart as nothing to carry; an unreadable one is named as one convert sets aside); `convert` carries each non-empty queue
   into v5. If you see it named as a refusal, the script is older than this prompt: stop and say so.
 
 **Bring v4 back while waiting or giving up** (before `backup` only): `fy daemon start` with the v4 `fy` (the one on the
@@ -275,10 +275,10 @@ bash "$S" rollback --notes "$NOTES" --owner-yes            # add --restart once 
 ```
 
 `rollback` reads the notes, so it acts only on what happened: it reaches a quiet point and stops any v5 daemon (proved
-by the process list, not by a marker), moves the v5 home aside only if the backup exists, restores the backup, puts the
+by the process list, not by a marker), closes only the tmux sessions it can prove v5 started (the real v5 socket, `fy-<id>` of a ferret in v5's registry, not named by the baseline; with no readable, non-empty baseline it closes nothing, and it names what it left alone), moves the v5 home aside only if the backup exists, restores the backup, puts the
 v4 programs back from the recorded state (including "neither installed"), restores the recorded `PATH` and `FY_URL`
 exactly, starts v4, and restarts **only the recorded ferrets by id**: v5 may have relaunched their harnesses with its own
-hooks, so `--restart` runs `fy restart <id>...` (bare `fy restart` only reports status). If it exits non-zero, read what
+hooks, so `--restart` runs `fy restart <id>...` (bare `fy restart` only reports status) and then names only the ferrets that really restarted, with the counts of those queued, left alone and failed. If it exits non-zero, read what
 it printed and tell the owner; it is safe to run again. It proves the panes quiet before it moves anything, whether or not
 a daemon is running, and it decides what a live `fyd` is from the notes, not from the `fy` now on the PATH: if that
 `fyd` is the v5 one and no v5 `fy` is left to stop it, it refuses and moves nothing. For an install kind `manual` it

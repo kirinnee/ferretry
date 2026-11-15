@@ -110,8 +110,8 @@ under `src/v4/agenda/engine` and `src/v4/agenda/protocol` (a header names the so
 then applies the v4→v5 difference: `version` 4→1, the dropped `gate`/`gateAttached`/`gateAttachedChangedAt` fields,
 and a `replied` close (no longer a disposition) carried as `done` in the ledger, history and version snapshots. The
 history cursor is recomputed; version archives are copied and set to `user_version` 1. An unfinished v4 commit
-(`agenda-versions.pending.json`, `agenda-history.jsonl.pending`, a non-empty `agenda-changes.pending.json`) fails the
-step by name. `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
+(`agenda-versions.pending.json`, `agenda-history.jsonl.pending`) fails the
+step by name. A non-empty `agenda-changes.pending.json` is queued state and is carried (an empty `[]` one is skipped). `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
 
 Board cards keep their ids exactly (`&F1792` names the same card); counters continue after the highest id; parent,
 dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed cards
