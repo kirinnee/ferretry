@@ -7,7 +7,7 @@ import {
   writeMdComposePref,
 } from '@ferretry/app';
 import { ensureDom, render, run, runAsync, WithAppHooks } from '@ferretry/app/testing';
-import { FERRETS_FILE_OPEN_HOOK, type FerretLiveActivity } from '@ferretry/core-ferrets/contract';
+import { FERRETS_FILE_OPEN_HOOK, FerretsChanged, type FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
@@ -312,6 +312,37 @@ describe('SessionChatPage', () => {
       expect(surfaceOf(wrongShape).onCodeReferenceOpen).toBeUndefined();
       expect(surfaceOf(embedded).onCodeReferenceOpen).toBeUndefined();
       expect(typeof surfaceOf(full).onCodeReferenceOpen).toBe('function');
+    });
+
+    test('keeps the surface and the file proof across working <-> idle, and the file proof across another ferret’s coming', async () => {
+      let rows = [{ id: 'shared', name: 'aniya', state: 'working', folder: '/repo' }, row];
+      const client = fakeClient({ [FLEET]: () => rows });
+      const page = drawWithHook({}, opening, client);
+      const wait = (ms: number) =>
+        runAsync(async () => {
+          await new Promise(resolve => setTimeout(resolve, ms));
+        });
+      await wait(0);
+      const first = surfaceOf(page);
+
+      // Act — any ferret going idle is a read, and moves nothing the proof reads
+      rows = rows.map(each => ({ ...each, state: 'idle' }));
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const idle = surfaceOf(page);
+      // A ferret comes: the callsigns change (the surface is rebuilt), this ferret's folder does not
+      rows = [...rows, { id: 'third', name: 'kim', state: 'working', folder: '/elsewhere' }];
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const grown = surfaceOf(page);
+
+      // Assert
+      expect(client.callsTo(FLEET)).toHaveLength(3);
+      expect(idle).toBe(first);
+      expect(grown).not.toBe(first);
+      expect(grown.agentReferenceResolver({ name: 'kim' })).not.toBeNull();
+      expect(grown.resolveFilePaths).toBe(first.resolveFilePaths);
+      expect(grown.onCodeReferenceOpen).toBe(first.onCodeReferenceOpen);
     });
 
     test('asks Ferrets to open the path in THIS ferret’s Files, and stays quiet when the path is refused', async () => {

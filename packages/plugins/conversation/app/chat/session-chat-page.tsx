@@ -23,7 +23,12 @@ import {
 } from '@ferretry/app';
 import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useAppHook, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
-import { FERRETS_FILE_OPEN_HOOK, type FerretLiveActivity, isFerretsFileOpen } from '@ferretry/core-ferrets/contract';
+import {
+  FERRETS_FILE_OPEN_HOOK,
+  FERRETS_PLUGIN,
+  type FerretLiveActivity,
+  isFerretsFileOpen,
+} from '@ferretry/core-ferrets/contract';
 import { useChatFleet } from './chat-fleet.ts';
 import { FilesPanelBridge } from './files-panel-bridge.tsx';
 import { type ChatSession, isUnread } from './chat-session.ts';
@@ -51,7 +56,7 @@ import type { ChatWidthPreference } from '@ferretry/app';
 import { CompactionChip } from './compaction-card.tsx';
 import { HandoffSourceProvider } from './handoff-message.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
-import { chatReferenceSurface } from './reference-surface.ts';
+import { chatFileProof, chatReferenceSurface } from './reference-surface.ts';
 import { RowSlotProvider } from './row-slots.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { Transcript } from './transcript.tsx';
@@ -220,9 +225,16 @@ export function SessionChatPage({
   // or the navigator — never with a status tick, which would re-parse every rendered block.
   // `:agent` is proved from this daemon's fleet; `@file` only where Ferrets offers an opener AND a workspace shows Files.
   const fleet = useChatFleet(client);
-  const fileOpenHook = useAppHook(daemonId, FERRETS_FILE_OPEN_HOOK);
+  const fileOpenHook = useAppHook(daemonId, FERRETS_FILE_OPEN_HOOK, FERRETS_PLUGIN);
   const fileOpen = !embedded && isFerretsFileOpen(fileOpenHook) ? fileOpenHook : undefined;
   const showFiles = useRef<(() => void) | undefined>(undefined);
+  // The `@file` proof reads this ferret's folder only, so it is built apart from the surface: a fleet change that leaves
+  // the folder alone (another ferret came or went) rebuilds the surface but keeps this value, and no folder is re-listed.
+  const cwd = fleet?.folders.get(ferretId);
+  const files = useMemo(
+    () => chatFileProof({ ferretId, client, fileOpen, cwd, showFiles: () => showFiles.current?.() }),
+    [ferretId, client, fileOpen, cwd],
+  );
   const references = useMemo(
     () =>
       chatReferenceSurface({
@@ -230,12 +242,12 @@ export function SessionChatPage({
         ferretId,
         client,
         fleet,
-        fileOpen,
-        showFiles: () => showFiles.current?.(),
+        files,
         ...(onNavigate === undefined ? {} : { onNavigate }),
       }),
-    // `fleet` keeps its identity until a fact the proof reads changes, so a status tick keeps the surface.
-    [daemonId, ferretId, client, fleet, fileOpen, onNavigate],
+    // `fleet` keeps its identity until a fact the proof reads changes (an id, a callsign, a ferret going live or
+    // dormant, a folder), so a working <-> idle tick keeps the surface.
+    [daemonId, ferretId, client, fleet, files, onNavigate],
   );
   // A message handed to the agent through a file is read back through the same client, so the transcript shows what
   // the person sent rather than the pointer the agent was typed.

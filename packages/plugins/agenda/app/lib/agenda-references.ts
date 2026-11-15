@@ -15,7 +15,12 @@
  * A kind the surface the ask sits in already proves (a chat that built its own) is left as it is.
  */
 
-import { type FerretsFileOpen, provedAgentReference, resolveFilePaths } from '@ferretry/core-ferrets/contract';
+import {
+  type FerretsFileOpen,
+  isLiveAgentCandidate,
+  provedAgentReference,
+  resolveFilePaths,
+} from '@ferretry/core-ferrets/contract';
 import type { AgendaCall } from './agenda-call.ts';
 import type { FerretView } from './ferret-view.ts';
 import type { DaemonId } from './machine.ts';
@@ -43,6 +48,25 @@ export interface AgendaReferenceFacts {
   /** In-app navigation, which is how a proved agent opens. */
   readonly onNavigate: (to: string) => void;
 }
+
+/**
+ * A key over exactly the facts the proofs read from a fleet: each ferret's id, callsign and LIVENESS (never its raw
+ * status), and the folder of `ferretId`. Equal keys mean the fleet may be kept as it is.
+ */
+export const referenceFleetKey = (
+  fleet: readonly FerretView[] | null | undefined,
+  ferretId: string | undefined,
+): string =>
+  fleet === undefined || fleet === null
+    ? ''
+    : JSON.stringify([
+        fleet.map(view => [
+          view.config.id,
+          view.config.teammate,
+          isLiveAgentCandidate({ id: view.config.id, status: view.state.status }),
+        ]),
+        fleet.find(view => view.config.id === ferretId)?.config.cwd ?? null,
+      ]);
 
 /** `outer` plus every kind the facts prove that `outer` does not already. */
 export const agendaReferenceSurface = (outer: ReferenceSurface, facts: AgendaReferenceFacts): ReferenceSurface => {

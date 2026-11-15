@@ -8,7 +8,7 @@
  * live or dormant), so a status tick never rebuilds the reference surface and re-parses every message.
  */
 
-import { type AgentAddressCandidate, FerretsChanged } from '@ferretry/core-ferrets/contract';
+import { type AgentAddressCandidate, FerretsChanged, isLiveAgentCandidate } from '@ferretry/core-ferrets/contract';
 import { browserListRefreshEnvironment, ListRefresh } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useEffect, useState } from 'react';
@@ -41,11 +41,15 @@ export const chatFleetOf = (body: unknown): ChatFleet | undefined => {
   };
 };
 
-/** A key over exactly the facts the proof reads: equal keys mean the surface need not be rebuilt. */
+/**
+ * A key over exactly the facts the proof reads: equal keys mean the surface need not be rebuilt. The proof reads a
+ * ferret's LIVENESS (`isLiveAgentCandidate`), never its raw state, so working <-> idle on any ferret moves nothing.
+ */
 export const chatFleetKey = (fleet: ChatFleet | undefined): string =>
   fleet === undefined
     ? ''
-    : JSON.stringify(fleet.candidates.map(c => [c.id, c.name, c.status])) + JSON.stringify([...fleet.folders]);
+    : JSON.stringify(fleet.candidates.map(c => [c.id, c.name, isLiveAgentCandidate(c)])) +
+      JSON.stringify([...fleet.folders]);
 
 /** How soon a change is read again: quick enough to feel live, slow enough that a burst is one read. */
 const REFRESH_MIN_MS = 1_000;

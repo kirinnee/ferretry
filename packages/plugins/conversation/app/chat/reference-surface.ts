@@ -43,12 +43,42 @@ export interface ChatReferenceSurfaceOptions {
   readonly fileOpen?: FerretsFileOpen | undefined;
   /** Brings the Files panel on screen after an opener asked for a path. */
   readonly showFiles?: (() => void) | undefined;
+  /**
+   * A file proof built once by the caller ({@link chatFileProof}); it wins over `client`/`fileOpen`/`showFiles`. A
+   * caller that rebuilds this surface when the fleet changes keeps THIS value, so the Markdown readers do not
+   * re-run their folder listings for a fleet change that left this ferret's folder alone.
+   */
+  readonly files?: ChatFileProof | undefined;
+}
+
+/** The two props that prove and open an `@file`; a reader re-lists a folder whenever their identity changes. */
+export interface ChatFileProof {
+  readonly resolveFilePaths: NonNullable<ReferenceSurface['resolveFilePaths']>;
+  readonly onCodeReferenceOpen: NonNullable<ReferenceSurface['onCodeReferenceOpen']>;
+}
+
+/** The `@file` proof of one ferret in `cwd`, or `undefined` without a client or an opener (the path stays prose). */
+export function chatFileProof(
+  options: Pick<ChatReferenceSurfaceOptions, 'ferretId' | 'client' | 'fileOpen' | 'showFiles'> & {
+    readonly cwd: string | undefined;
+  },
+): ChatFileProof | undefined {
+  const { ferretId, client, fileOpen, showFiles, cwd } = options;
+  if (client === undefined || fileOpen === undefined) return undefined;
+  return {
+    resolveFilePaths: async (candidates, signal) =>
+      new Map(await resolveFilePaths(client, ferretId, candidates, cwd, signal)),
+    onCodeReferenceOpen: reference => {
+      if (fileOpen.open(ferretId, reference.path)) showFiles?.();
+    },
+  };
 }
 
 /** Assemble the surface one ferret's chat can honestly offer. Build once per daemon and ferret; keep it stable. */
 export function chatReferenceSurface(options: ChatReferenceSurfaceOptions): ReferenceSurface {
-  const { daemonId, ferretId, onNavigate, fleet, client, fileOpen, showFiles } = options;
+  const { daemonId, ferretId, onNavigate, fleet, client } = options;
   const cwd = fleet?.folders.get(ferretId);
+  const files = options.files ?? chatFileProof({ ...options, cwd });
   return {
     fences: fyRenderFences({
       cardEmbed: { daemon: daemonId },
@@ -68,15 +98,7 @@ export function chatReferenceSurface(options: ChatReferenceSurfaceOptions): Refe
             return proved === null ? null : { daemonId, sessionId: proved.id, name: proved.name };
           },
         }),
-    ...(client === undefined || fileOpen === undefined
-      ? {}
-      : {
-          resolveFilePaths: async (candidates, signal) =>
-            new Map(await resolveFilePaths(client, ferretId, candidates, cwd, signal)),
-          onCodeReferenceOpen: reference => {
-            if (fileOpen.open(ferretId, reference.path)) showFiles?.();
-          },
-        }),
+    ...files,
     ...(onNavigate === undefined ? {} : { onNavigate }),
   };
 }

@@ -10,6 +10,7 @@ import {
   type AgendaFerretReferences,
   type AgendaReferenceFacts,
   agendaReferenceSurface,
+  referenceFleetKey,
 } from '../../../app/lib/agenda-references.ts';
 import type { FerretView } from '../../../app/lib/ferret-view.ts';
 import { daemonId } from '../../../app/shell.ts';
@@ -51,6 +52,23 @@ const ferretPage = (over: Partial<AgendaFerretReferences> = {}): AgendaFerretRef
   openAsk: () => undefined,
   showFiles: () => undefined,
   ...over,
+});
+
+describe('referenceFleetKey', () => {
+  test('should read liveness, callsigns and the one ferret’s folder, and nothing else', () => {
+    const base = referenceFleetKey(FLEET, 'f1');
+
+    should(referenceFleetKey(undefined, 'f1')).equal('');
+    should(referenceFleetKey(null, 'f1')).equal('');
+    // working <-> awaiting a question moves nothing the proofs read; a ferret finishing, a new callsign or the folder does
+    should(referenceFleetKey([view('f1', 'aniya', 'idle', '/repo'), FLEET[1] as FerretView], 'f1')).equal(base);
+    should(referenceFleetKey([view('f1', 'aniya', 'stopped', '/repo'), FLEET[1] as FerretView], 'f1')).not.equal(base);
+    should(referenceFleetKey([view('f1', 'kim', 'working', '/repo'), FLEET[1] as FerretView], 'f1')).not.equal(base);
+    should(referenceFleetKey([view('f1', 'aniya', 'working', '/moved'), FLEET[1] as FerretView], 'f1')).not.equal(base);
+    // another ferret's folder is not read, and a page with no ferret of its own reads none
+    should(referenceFleetKey([FLEET[0] as FerretView, view('f2', 'torrey', 'stopped', '/x')], 'f1')).equal(base);
+    should(referenceFleetKey(FLEET, undefined)).not.equal(base);
+  });
 });
 
 describe('agendaReferenceSurface :agent', () => {

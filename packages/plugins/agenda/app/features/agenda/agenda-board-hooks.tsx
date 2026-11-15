@@ -11,7 +11,15 @@
  * A hook nobody provides, or a value without the shape, is no hook: the surfaces draw as they do without Board.
  */
 
-import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from 'react';
 import {
   AGENDA_CARD_ANSWER_HOOK,
   AGENDA_CARD_REFERENCE_HOOK,
@@ -28,7 +36,7 @@ import { type DoneCloseBoard, DoneCloseBoardProvider } from '../../hooks/use-don
 import { type AgendaCardsBoard, boardErr, boardOk } from '../../lib/agenda-cards-actions.ts';
 import { type AgendaReferenceFacts, agendaReferenceSurface } from '../../lib/agenda-references.ts';
 import type { DaemonId } from '../../lib/machine.ts';
-import { ReferenceSurfaceProvider, useAppHook, useReferenceSurface } from '../../shell.ts';
+import { type ReferenceSurface, ReferenceSurfaceProvider, useAppHook, useReferenceSurface } from '../../shell.ts';
 import { AgendaCardsBoardProvider } from './agenda-cards-host.tsx';
 
 /** The provided hooks of one daemon, narrowed: each `undefined` when nobody provides it. */
@@ -130,6 +138,45 @@ function OwnReferences({
   return <ReferenceSurfaceProvider surface={surface}>{children}</ReferenceSurfaceProvider>;
 }
 
+/** The daemon every reference proof below was built against: the page's own, `undefined` outside the providers. */
+const ProofDaemonContext = createContext<DaemonId | undefined>(undefined);
+
+/**
+ * The proofs a surface cannot give a card of ANOTHER machine: the page's proofs (`:agent`, `&card`, `!ask`, `@file`) read
+ * the page's own daemon, and a reference in one daemon's words can never open a same-named thing on another
+ * (docs/reference-standard.md). So a card whose daemon is not the one the proofs were built for is drawn over a surface
+ * with those proofs removed, and its references stay prose. A card of the page's own daemon, and any use outside
+ * {@link AgendaBoardProviders}, keep the surface as it is.
+ */
+export function CardReferenceScope({
+  daemonId,
+  children,
+}: {
+  readonly daemonId: DaemonId;
+  readonly children: ReactNode;
+}) {
+  const proofs = useContext(ProofDaemonContext);
+  const outer = useReferenceSurface();
+  const surface = useMemo(() => withoutProofs(outer), [outer]);
+  if (proofs === undefined || proofs === daemonId) return <>{children}</>;
+  return <ReferenceSurfaceProvider surface={surface}>{children}</ReferenceSurfaceProvider>;
+}
+
+/** `surface` without the proofs and openers that read one daemon's facts. */
+const withoutProofs = (surface: ReferenceSurface): ReferenceSurface => {
+  const {
+    agentReferenceResolver: _agent,
+    taskReferenceResolver: _task,
+    onTaskOpen: _taskOpen,
+    agendaReferenceResolver: _agenda,
+    onAgendaOpen: _agendaOpen,
+    resolveFilePaths: _files,
+    onCodeReferenceOpen: _fileOpen,
+    ...rest
+  } = surface;
+  return rest;
+};
+
 /** Hands the ask surfaces below the provided Done · closes board, the notices' card board and the `&` proof. */
 export function AgendaBoardProviders({
   hooks,
@@ -155,7 +202,9 @@ export function AgendaBoardProviders({
   const drawn = (
     <DoneCloseBoardProvider board={doneClose}>
       <CardReferences onNavigate={onNavigate} reference={hooks.cardReference}>
-        <OwnReferences facts={references}>{children}</OwnReferences>
+        <OwnReferences facts={references}>
+          <ProofDaemonContext.Provider value={daemonId}>{children}</ProofDaemonContext.Provider>
+        </OwnReferences>
       </CardReferences>
     </DoneCloseBoardProvider>
   );

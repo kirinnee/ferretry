@@ -10,7 +10,7 @@ import { ensureDom, interact, type Mounted, mount, render as renderTree } from '
 import type { FerretsFileOpen } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import { type ChatFleet, chatFleetOf } from '../../../../app/chat/chat-fleet.ts';
-import { chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
+import { chatFileProof, chatReferenceSurface } from '../../../../app/chat/reference-surface.ts';
 import { FyRenderBlock } from '../../../../app/render/fy-render-block.tsx';
 
 ensureDom();
@@ -119,6 +119,24 @@ describe('chatReferenceSurface @file', () => {
     // Assert
     should(opened).deepEqual([['f1', 'src/a.ts']]);
     should(shown).equal(1);
+  });
+
+  test('should use the file proof it is handed as it is, and build none without a client and an opener', () => {
+    // Arrange
+    const own = chatFileProof({ ferretId: 'f1', client: client({}), fileOpen, cwd: '/repo' });
+    const rebuilt = (fleet: ChatFleet | undefined) =>
+      chatReferenceSurface({ daemonId: 'd1', ferretId: 'f1', fleet, client: client({}), files: own });
+
+    // Act
+    const first = rebuilt(FLEET);
+    const second = rebuilt(chatFleetOf([{ id: 'f1', name: 'aniya', state: 'idle', folder: '/repo' }]));
+
+    // Assert — the surface is rebuilt, the proof the readers key their listings on is the one it was handed
+    should(first).not.equal(second);
+    should(first.resolveFilePaths).equal(own?.resolveFilePaths);
+    should(second.onCodeReferenceOpen).equal(own?.onCodeReferenceOpen);
+    should(chatFileProof({ ferretId: 'f1', client: undefined, fileOpen, cwd: undefined })).be.undefined();
+    should(chatFileProof({ ferretId: 'f1', client: client({}), fileOpen: undefined, cwd: undefined })).be.undefined();
   });
 
   test('should leave the path as prose with no ferrets.file-open hook, and ask the daemon nothing', async () => {

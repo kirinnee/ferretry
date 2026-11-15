@@ -54,6 +54,81 @@ afterEach(() => {
   seen.length = 0;
 });
 
+describe('useAgendaReferenceFacts, as the fleet changes', () => {
+  /** A store whose snapshot is a new value on every update, as the real one is. */
+  const live = () => {
+    const listeners = new Set<() => void>();
+    let snapshot = { daemons: new Map<string, { sessions: unknown }>() };
+    const runtime = {
+      connection,
+      client: { call: async () => undefined },
+      ferrets: {
+        subscribe: (listener: () => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+        getSnapshot: () => snapshot,
+      },
+    } as unknown as AgendaRuntime;
+    const set = async (rows: ReadonlyArray<readonly [string, string, string, string]>) => {
+      snapshot = {
+        daemons: new Map([
+          [
+            connection.daemonId,
+            {
+              sessions: rows.map(([id, teammate, status, cwd]) => ({
+                config: { id, teammate, cwd },
+                state: { status },
+              })),
+            },
+          ],
+        ]),
+      };
+      await interact(async () => {
+        for (const listener of listeners) listener();
+      });
+    };
+    return { runtime, set };
+  };
+  const ferret: AgendaFerretReferences = { id: 'f1', ledger: [], openAsk: noop, showFiles: noop };
+  function Own({ runtime }: { readonly runtime: AgendaRuntime }) {
+    seen.push(useAgendaReferenceFacts(runtime, noop, ferret));
+    return null;
+  }
+
+  test('keeps the very facts across working <-> idle, and builds new ones when a fact the proofs read changes', async () => {
+    const { runtime, set } = live();
+    await set([['f1', 'aniya', 'working', '/repo']]);
+    view = await mount(
+      <WithAppHooks provided={{}}>
+        <Own runtime={runtime} />
+      </WithAppHooks>,
+    );
+    await interact(async () => undefined);
+    const first = seen.at(-1) as AgendaReferenceFacts;
+
+    // Act — the snapshot is a new value each time
+    await set([['f1', 'aniya', 'idle', '/repo']]);
+    const idle = seen.at(-1) as AgendaReferenceFacts;
+    await set([
+      ['f1', 'aniya', 'working', '/repo'],
+      ['f2', 'kim', 'working', '/other'],
+    ]);
+    const grown = seen.at(-1) as AgendaReferenceFacts;
+    await set([
+      ['f1', 'aniya', 'stopped', '/repo'],
+      ['f2', 'kim', 'working', '/other'],
+    ]);
+    const done = seen.at(-1) as AgendaReferenceFacts;
+
+    // Assert
+    expect(idle).toBe(first);
+    expect(grown).not.toBe(first);
+    expect(done).not.toBe(grown);
+    expect(done.fleet?.[0]?.state.status).toBe('stopped');
+  });
+});
+
 describe('useAgendaReferenceFacts', () => {
   test('hands over this machine’s fleet, its client and the opener Ferrets provides', async () => {
     const open = { open: () => true };

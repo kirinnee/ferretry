@@ -40,11 +40,19 @@ describe('chatFleetOf', () => {
 });
 
 describe('chatFleetKey', () => {
+  test('should read liveness, not the raw state: working <-> idle moves nothing, going dormant does', () => {
+    const working = chatFleetKey(chatFleetOf([ROW]));
+    should(chatFleetKey(chatFleetOf([{ ...ROW, state: 'idle' }]))).equal(working);
+    should(chatFleetKey(chatFleetOf([{ ...ROW, state: 'awaiting_question' }]))).equal(working);
+    should(chatFleetKey(chatFleetOf([{ ...ROW, state: 'completed' }]))).not.equal(working);
+  });
+
   test('should differ only when a fact the proof reads differs', () => {
     const base = chatFleetOf([ROW]);
     should(chatFleetKey(undefined)).equal('');
     should(chatFleetKey(base)).equal(chatFleetKey(chatFleetOf([{ ...ROW, title: 'new title' }])));
     should(chatFleetKey(base)).not.equal(chatFleetKey(chatFleetOf([{ ...ROW, state: 'stopped' }])));
+    should(chatFleetKey(base)).not.equal(chatFleetKey(chatFleetOf([{ ...ROW, name: 'torrey' }])));
     should(chatFleetKey(base)).not.equal(chatFleetKey(chatFleetOf([{ ...ROW, folder: '/elsewhere' }])));
   });
 });
@@ -154,6 +162,10 @@ describe('useChatFleet', () => {
     notify();
     await interact(() => new Promise(resolve => setTimeout(resolve, 1_100)));
     const same = seen.at(-1);
+    state = 'idle';
+    notify();
+    await interact(() => new Promise(resolve => setTimeout(resolve, 1_100)));
+    const idle = seen.at(-1);
     state = 'stopped';
     notify();
     await interact(() => new Promise(resolve => setTimeout(resolve, 1_100)));
@@ -161,8 +173,9 @@ describe('useChatFleet', () => {
     view = null;
 
     // Assert
-    should(reads).equal(3);
+    should(reads).equal(4);
     should(same).equal(first);
+    should(idle).equal(first);
     should(seen.at(-1)).not.equal(first);
     should(seen.at(-1)?.candidates[0]?.status).equal('stopped');
     should(stopped).equal(1);
