@@ -17,7 +17,7 @@ import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSche
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
-import { storedEnvironmentIssue } from './secret-shape.ts';
+import { hasTokenShape, storedEnvironmentIssue } from './secret-shape.ts';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -482,6 +482,17 @@ const refuseUnsafeEnvironment = (ctx: {
         message: `A variable name is longer than ${MAX_ENVIRONMENT_NAME} characters: a variable name is short, and the value under it is not read`,
         input: name.slice(0, 16),
         path: [name],
+        params: { rawSecret: true },
+        continue: true,
+      });
+    } else if (hasTokenShape(name)) {
+      // A key typed into the NAME box is a key all the same: it would be written in plain and shown on every device.
+      // Neither the name nor a path holding it is carried, so the refusal cannot repeat the key.
+      ctx.issues.push({
+        code: 'custom',
+        message: `A variable name looks like a key: a name is a label, so keep the key in the secret store and write \${secret:NAME} as the value`,
+        input: undefined,
+        path: [],
         params: { rawSecret: true },
         continue: true,
       });

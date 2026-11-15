@@ -50,7 +50,8 @@ export function EnvironmentEditor({
     const result = await changes.apply(edit.change);
     if (result.kind === 'applied') {
       await reload();
-      onDone();
+      // A held edit has not taken effect: keep the editor open, so the sentence that says so stays on screen.
+      if (result.outcome.outcome !== 'held') onDone();
     }
   };
 

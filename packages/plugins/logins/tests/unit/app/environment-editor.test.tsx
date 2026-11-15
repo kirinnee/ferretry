@@ -149,6 +149,21 @@ describe('editing a login’s environment', () => {
     await t.view.unmount();
   });
 
+  it('refuses a key typed as a variable NAME before anything is sent, and never shows it', async () => {
+    const t = await setup();
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await click(t.c.querySelector('[data-env-add]'), 'Add a variable');
+    const name = ['ghp', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_');
+    await typeInto(t.field('New variable name'), name);
+    await typeInto(t.field(`${name} value`), 'https://gw.example.test');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.c.textContent?.includes('looks like a key') === true, 'the refusal');
+    expect(t.stages()).toHaveLength(0);
+    // The name sits in the box it was typed into, and nowhere in text.
+    expect(t.c.textContent).not.toContain(name);
+    await t.view.unmount();
+  });
+
   it('adds a variable and removes another, and a removed one can be kept again', async () => {
     const t = await setup();
     await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
@@ -172,6 +187,19 @@ describe('editing a login’s environment', () => {
         REGION: 'us-east-1',
       },
     });
+    await t.view.unmount();
+  });
+
+  it('keeps the editor open with the owner-confirmation sentence when the change is held', async () => {
+    const t = await setup({
+      [APPLY]: { outcome: 'held', sentences: ['ANTHROPIC_BASE_URL now points somewhere new'] },
+    });
+    await click(t.c.querySelector('[data-login-env-edit]'), 'Edit variables');
+    await typeInto(t.field('ANTHROPIC_BASE_URL value'), 'https://gw.example.test/v1');
+    await click(t.c.querySelector('[data-change-submit]'), 'Save variables');
+    await until(() => t.c.textContent?.includes('the owner has to confirm it') === true, 'the held sentence');
+    expect(t.c.textContent).toContain('ANTHROPIC_BASE_URL now points somewhere new');
+    expect(t.c.querySelector('[data-login-env-editor]')).not.toBeNull();
     await t.view.unmount();
   });
 

@@ -6,6 +6,7 @@ import { agentConfig } from '../../../../../core/kernel/host/config/agent.ts';
 import { checkConfigText } from '../../../../../core/kernel/host/config/check.ts';
 import { createConfigFiles } from '../../../../../core/kernel/host/config/service.ts';
 import { createMemoryHostFs } from '../../../../../core/kernel/host/state/memory-fs.ts';
+import { PRESET_ENV_NAMES } from '../../../contract/preset-env-names.ts';
 import {
   LOGINS_CONFIG,
   LoginChangeSchema,
@@ -94,6 +95,42 @@ describe('a login environment', () => {
         should(issues.some(issue => issue.message === `"${bad}" must be a POSIX environment variable name`)).be.true();
         should(JSON.stringify(issues)).not.containEql(SECRET_VALUE);
       }
+    }
+  });
+
+  it('should refuse a name that is a key, in a login file, a harness half, login.add and login.env, without repeating it', () => {
+    // Fake keys, assembled at runtime so no source line holds one. The last is no POSIX name at all.
+    const body = 'a1b2c3d4e5f6a1b2c3d4e5f6';
+    for (const bad of [
+      ['ghp', body].join('_'),
+      ['github', 'pat', body].join('_'),
+      ['sk', 'live', body].join('_'),
+      ['sk', 'ant', body].join('-'),
+    ]) {
+      const env = { [bad]: 'https://gw.example' };
+      const results = [
+        LoginFileSchema.safeParse({ harness: 'claude-code', store: 'environment', env }),
+        LoginHalfSchema.safeParse({ env }),
+        LoginChangeSchema.safeParse({
+          kind: 'login.add',
+          id: 'work',
+          harness: 'claude-code',
+          store: 'environment',
+          env,
+        }),
+        LoginChangeSchema.safeParse({ kind: 'login.env', id: 'work', env }),
+      ];
+      for (const result of results) {
+        const issues = refusal(result);
+        should(issues.some(issue => issue.message.startsWith('A variable name looks like a key'))).be.true();
+        should(JSON.stringify(issues)).not.containEql(body);
+      }
+    }
+  });
+
+  it('should still accept every name a preset sets', () => {
+    for (const name of PRESET_ENV_NAMES) {
+      should(LoginHalfSchema.safeParse({ env: { [name]: 'x' } }).success).be.true();
     }
   });
 

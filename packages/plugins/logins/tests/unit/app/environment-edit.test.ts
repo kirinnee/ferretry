@@ -25,6 +25,13 @@ const newRow = (name: string, value: string): EditRow => ({
 });
 /** A key-shaped string, assembled so no source line holds one. */
 const KEY = ['sk', 'ant', 'a'.repeat(24)].join('-');
+/** Names that are keys as well (POSIX-valid ones, and one that is not), assembled at runtime from fake bodies. */
+const KEY_NAMES = [
+  ['ghp', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_'),
+  ['github', 'pat', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_'),
+  ['sk', 'live', 'a1b2c3d4e5f6a1b2c3d4e5f6'].join('_'),
+  KEY,
+];
 
 describe('editRows', () => {
   it('starts from every variable, a plain one with its value and a secret or hidden one empty', () => {
@@ -120,9 +127,10 @@ describe('envChange', () => {
       kind: 'refused',
       sentence: 'A new variable needs a name.',
     });
-    expect(envChange('zai', [newRow('9LIVES', 'x')])).toMatchObject({
+    expect(envChange('zai', [newRow('9LIVES', 'x')])).toEqual({
       kind: 'refused',
-      sentence: expect.stringContaining('9LIVES is not a variable name'),
+      sentence:
+        "The new variable's name is not a variable name: letters, digits and underscores, not starting with a digit.",
     });
     expect(envChange('zai', [newRow('CODEX_HOME', '/tmp')])).toEqual({
       kind: 'refused',
@@ -135,6 +143,32 @@ describe('envChange', () => {
     expect(envChange('zai', [newRow('REGION', '  ')])).toEqual({
       kind: 'refused',
       sentence: 'REGION needs a value.',
+    });
+  });
+
+  it('refuses a name that is a key, and never repeats it', () => {
+    for (const name of KEY_NAMES) {
+      const edit = envChange('zai', [...rows(), newRow(name, 'https://gw.test')]);
+      expect(edit.kind).toBe('refused');
+      expect(JSON.stringify(edit)).not.toContain(name);
+      expect(JSON.stringify(edit)).not.toContain('a1b2c3d4e5f6');
+    }
+    // A POSIX-valid key says it is a key; one that is not a name at all says so, and neither is echoed.
+    expect(envChange('zai', [newRow(KEY_NAMES[0] as string, 'x')])).toMatchObject({
+      sentence: expect.stringContaining('looks like a key'),
+    });
+    expect(envChange('zai', [newRow(KEY, 'x')])).toMatchObject({
+      sentence: expect.stringContaining('is not a variable name'),
+    });
+  });
+
+  it('accepts variables called __proto__ or constructor, and still refuses one listed twice', () => {
+    const edit = envChange('zai', [newRow('__proto__', 'x'), newRow('constructor', 'y')]);
+    expect(edit.kind).toBe('change');
+    expect(edit.kind === 'change' && Object.keys(edit.change.env)).toEqual(['__proto__', 'constructor']);
+    expect(envChange('zai', [newRow('constructor', 'x'), newRow('constructor', 'y')])).toEqual({
+      kind: 'refused',
+      sentence: 'constructor is listed twice.',
     });
   });
 

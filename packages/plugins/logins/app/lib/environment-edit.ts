@@ -11,6 +11,7 @@
 import {
   type LoginChange,
   type LoginEnvironment,
+  hasTokenShape,
   RESERVED_LOGIN_ENV_NAMES,
   storedEnvironmentIssue,
 } from '../../contract/index.ts';
@@ -62,25 +63,33 @@ const refused = (sentence: string): EnvEdit => ({ kind: 'refused', sentence });
 
 /** The `login.env` change the rows mean, or the one sentence that says why not. */
 export function envChange(loginId: string, rows: readonly EditRow[]): EnvEdit {
-  const env: Record<string, string | { readonly keep: true }> = {};
+  // A Map, not a literal: a variable may be called `__proto__` or `constructor`, and a plain object would lose or misjudge it.
+  const env = new Map<string, string | { readonly keep: true }>();
   for (const row of rows) {
     if (row.removed) continue;
     const name = row.kind === 'new' ? row.name.trim() : row.name;
     if (row.kind === 'new' && name === '' && row.value.trim() === '') continue;
     if (name === '') return refused('A new variable needs a name.');
+    // A name that failed the check is never repeated: it is free text, and may be a key.
     if (!POSIX_NAME.test(name))
-      return refused(`${name} is not a variable name: letters, digits and underscores, not starting with a digit.`);
+      return refused(
+        "The new variable's name is not a variable name: letters, digits and underscores, not starting with a digit.",
+      );
+    if (hasTokenShape(name))
+      return refused(
+        `The new variable's name looks like a key. A name is a label: put the key in Settings › Secrets and write its NAME as \${secret:NAME} in the value.`,
+      );
     if ((RESERVED_LOGIN_ENV_NAMES as readonly string[]).includes(name))
       return refused(`${name} is reserved: Ferretry sets it for the runtime itself.`);
-    if (env[name] !== undefined) return refused(`${name} is listed twice.`);
+    if (env.has(name)) return refused(`${name} is listed twice.`);
     if (row.kind === 'new' && row.value.trim() === '') return refused(`${name} needs a value.`);
     if ((row.kind === 'secret' || row.kind === 'hidden') && row.value === '') {
-      env[name] = { keep: true };
+      env.set(name, { keep: true });
       continue;
     }
     const issue = storedEnvironmentIssue(name, row.value);
     if (issue !== undefined) return refused(issueSentence(name, issue));
-    env[name] = row.value;
+    env.set(name, row.value);
   }
-  return { kind: 'change', change: { kind: 'login.env', id: loginId, env } };
+  return { kind: 'change', change: { kind: 'login.env', id: loginId, env: Object.fromEntries(env) } };
 }
