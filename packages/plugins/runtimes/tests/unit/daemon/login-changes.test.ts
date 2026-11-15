@@ -56,7 +56,9 @@ const UNTIL = instantFromEpochMs(1_793_491_200_000);
 
 const OWNER = { governed: false, decide: () => ({ allowed: true, refusal: 'granted' as const }) };
 
-function world(options: { readonly failPlan?: boolean; readonly applyThrows?: Error } = {}) {
+function world(
+  options: { readonly failPlan?: boolean; readonly applyThrows?: Error; readonly model?: typeof MODEL } = {},
+) {
   const order: string[] = [];
   const warnings: { readonly message: string; readonly fields: Readonly<Record<string, string>> }[] = [];
   const logins = fakeLogins([sampleLogin('claude-you')]);
@@ -69,7 +71,7 @@ function world(options: { readonly failPlan?: boolean; readonly applyThrows?: Er
     },
     document: async () => ({
       format: 'present',
-      model: MODEL,
+      model: options.model ?? MODEL,
       revision: 'rev-1',
       unreadable: [],
       stoodInLogins: [],
@@ -552,6 +554,22 @@ describe('the runtimes on a login, as a change to it would leave them (Logins as
         },
       ]);
     }
+  });
+
+  it('shows a runtime whose profile has something to apply as available once its login is switched on', async () => {
+    const { catalog } = world({
+      model: parseAccountModel({
+        version: 1,
+        credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
+        components: { mcp: { srv: { command: 'srv', args: [] } } },
+        profiles: { default: { layers: ['mcp/srv'] } },
+        runtimes: { 'claude-default': { credential: 'claude-you', profile: 'default', agent: true } },
+      }),
+    });
+
+    should(await catalog.runtimesAfterLoginChange({ kind: 'login.enable', id: 'claude-you' })).eql([
+      { name: 'claude-default', harness: 'claude-code', agent: true, launch: { available: true } },
+    ]);
   });
 
   it('names no runtime for a login none uses, or for a change that edits no runtime', async () => {

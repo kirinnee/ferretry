@@ -53,4 +53,14 @@ describe('codex-paths: which codex, and by which rule (v4 harnessCommand)', () =
       })(),
     ).toBeUndefined();
   });
+
+  test('an absent codex with no extra search path says so rather than naming a list', async () => {
+    expect(await run({ outcome: 'absent', searched: [] })).toEqual({
+      state: 'warn',
+      name: 'codex',
+      requirement: 'alternative',
+      detail: 'not found in the inherited environment, and no extra search path is declared',
+      fix: IMPACT,
+    });
+  });
 });

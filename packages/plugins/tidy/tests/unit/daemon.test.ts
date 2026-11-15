@@ -80,6 +80,26 @@ describe('GET /v1/gc and POST /v1/gc', () => {
   });
 });
 
+describe('POST /v1/tidy/plan reads its body before anything else', () => {
+  test('a body that cannot be read and a body that is not JSON are each refused, with a code to tell them apart', async () => {
+    const r = routes();
+    const unreadable = {
+      request: {
+        query: new Map(),
+        text: async () => {
+          throw new Error('the body was cut off');
+        },
+      } as unknown as ApiRequest,
+      params: new Map(),
+    } as CallContext;
+    await expect(r['POST /v1/tidy/plan'](unreadable)).rejects.toMatchObject({ status: 400, code: 'unreadable_body' });
+    await expect(r['POST /v1/tidy/plan'](call({ raw: '{oops' }))).rejects.toMatchObject({
+      status: 400,
+      code: 'invalid_json',
+    });
+  });
+});
+
 describe('tidy on the test host', () => {
   /** Gate's stand-in admission: who calls is whatever the test says, as the real Gate would stamp it. */
   const gateFor = (standing: () => CallStanding) => new StandInAdmission(() => standing());

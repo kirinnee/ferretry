@@ -129,6 +129,7 @@ describe('the logins cli half', () => {
           launch: { available: false, reason: 'its login "work" is disabled. Use "gamma" instead' },
         },
         { name: 'gamma' },
+        { name: 'delta', launch: { available: true } },
       ],
       expiresAt: LATER,
       state: 'pending',
@@ -145,6 +146,7 @@ describe('the logins cli half', () => {
     should(out.join('')).match(/ {2}alpha \(Claude Code, agent\) — ready to launch\n/);
     should(out.join('')).match(/ {2}beta \(Codex\) — its login "work" is disabled\. Use "gamma" instead\n/);
     should(out.join('')).match(/ {2}gamma\n/);
+    should(out.join('')).match(/ {2}delta — ready to launch\n/);
   });
 
   it('should change nothing for a caller the grants refuse, and exit 1 with the sentence', async () => {

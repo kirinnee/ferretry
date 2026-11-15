@@ -317,6 +317,27 @@ describe('WardenAutoMoveService.run', () => {
     should(recorded.events[0]?.data).deepEqual({ stopped: [{ pid: 4242, program: 'bun' }], survivors: [] });
   });
 
+  it('should stop nothing under a card that was opened while the jobs were being read, even with force-stop on', async () => {
+    // Arrange: nothing open when the hold is first read; a card by the time the jobs are back.
+    let open = false;
+    const { recorded, sweep } = subject({
+      holdNow: () => (open ? 'it has an input card open' : undefined),
+      jobs: () => {
+        open = true;
+        return [job];
+      },
+    });
+
+    // Act
+    const result = await sweep(NOW, config({ forceStopBackground: true }));
+
+    // Assert
+    should(recorded.stoppedFor).deepEqual([]);
+    should(recorded.moves).deepEqual([]);
+    should(result.actions.map(action => action.outcome)).deepEqual(['held']);
+    should(result.actions[0]?.detail).containEql('it has an input card open');
+  });
+
   it('should stop nothing and force nothing when force-stop is on but no job is in the way, and stay put on a refusal', async () => {
     // Arrange: the safety check still refuses — a blind spot, or a blocker that is no job of the ferret's.
     const { recorded, sweep } = subject({
@@ -619,5 +640,49 @@ describe('WardenAutoMoveService.moveCandidates', () => {
     // Assert
     should(unread).deepEqual([{ sessionId: 's1', currentAgent: 'claude-a-wrapper', candidates: [] }]);
     should(skipped).deepEqual([]);
+  });
+});
+
+describe('WardenAutoMoveService.failover', () => {
+  it('should not carry out a verdict’s move on a ferret something of the owner’s is open on, and run nothing', async () => {
+    // Arrange
+    const { service, recorded } = subject({ hold: 'it has an input card open' });
+    const executed: unknown[] = [];
+
+    // Act
+    const refusal = await service
+      .failover(
+        { sessionId: 's1', source: { agent: 'claude-a-wrapper', harness: 'claude' }, named: 'claude-b-wrapper' },
+        config(),
+        NOW,
+        async target => void executed.push(target),
+      )
+      .catch((error: Error) => error);
+
+    // Assert
+    should((refusal as Error).message).equal('not moved: it has an input card open');
+    should(executed).deepEqual([]);
+    should(recorded.ledger).be.undefined();
+  });
+
+  it('should not carry out a verdict’s move on a ferret that is no longer on the login the verdict was about', async () => {
+    // Arrange: a sweep or a person already moved it.
+    const { service, recorded } = subject();
+    recorded.agents.set('s1', 'claude-c-wrapper');
+    const executed: unknown[] = [];
+
+    // Act
+    const refusal = await service
+      .failover(
+        { sessionId: 's1', source: { agent: 'claude-a-wrapper', harness: 'claude' }, named: 'claude-b-wrapper' },
+        config(),
+        NOW,
+        async target => void executed.push(target),
+      )
+      .catch((error: Error) => error);
+
+    // Assert
+    should((refusal as Error).message).equal('it is no longer on the login the verdict was about, so it was not moved');
+    should(executed).deepEqual([]);
   });
 });
