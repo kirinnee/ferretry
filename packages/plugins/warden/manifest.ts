@@ -154,6 +154,14 @@ export default definePlugin({
         audit: { record: WARDEN_CONFIGURED_AUDIT },
         guard: { none: 'settings only' },
       }),
+      route('POST /v1/warden/jev-key', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: wardenConfigure,
+        noStore: true,
+        audit: { record: WARDEN_CONFIGURED_AUDIT },
+        guard: { none: 'names a reference, never a value' },
+      }),
     ],
     // Today's ferret Actions menu row ("Ask the Warden to investigate now…"), contributed rather than written in.
     app: [

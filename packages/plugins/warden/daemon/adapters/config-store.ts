@@ -1,5 +1,11 @@
 import type { ConfigPort, ConfigWriteOutcome } from '@ferretry/kernel/contract';
-import { DEFAULT_WARDEN_CONFIG, WARDEN_CONFIG, effectiveWardenConfig, type WardenFile } from '../../contract/index.ts';
+import {
+  DEFAULT_WARDEN_CONFIG,
+  WARDEN_CONFIG,
+  WARDEN_JEV_KEY_REFERENCE,
+  effectiveWardenConfig,
+  type WardenFile,
+} from '../../contract/index.ts';
 import type { WardenConfig, WardenConfigPatch, WardenConfigStore } from '../lib/index.ts';
 import { WARDEN_CONFIG_SECTIONS } from '../lib/protocol.ts';
 
@@ -99,6 +105,22 @@ export class ConfigWardenConfigStore implements WardenConfigStore {
 
   async read(): Promise<unknown> {
     return effectiveWardenConfig(this.config.file(WARDEN_CONFIG) ?? {});
+  }
+
+  /** Whether the version in effect names the Jev key. A fact about a reference; the value is never read. */
+  jevKeyNamed(): boolean {
+    return ((this.config.file(WARDEN_CONFIG) ?? {}) as WardenFile).jev?.key === WARDEN_JEV_KEY_REFERENCE;
+  }
+
+  /**
+   * The caller's own act of naming the Jev key (`jev.key: ${secret:JEV_API_KEY}`), through `writeAsCaller`: in effect
+   * only when the kernel finds the caller is the owner, otherwise held and answered as sentences. It writes the one
+   * reference and no value, so a caller learns nothing it did not know.
+   */
+  async nameJevKey(): Promise<readonly string[]> {
+    return outcomeOf(
+      await this.config.writeAsCaller(WARDEN_CONFIG, undefined, { patch: { jev: { key: WARDEN_JEV_KEY_REFERENCE } } }),
+    );
   }
 
   async write(config: WardenConfig, patch: WardenConfigPatch): Promise<readonly string[]> {
