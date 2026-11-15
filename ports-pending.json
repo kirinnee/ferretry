@@ -143,9 +143,8 @@
     ],
     "accounts": [
       "[cross: vault] GAP(shells): the \"Don't ask again\" offer on the input card is not drawn: the input card is the `ask:input` renderer Agenda mounts and the input-request owner (Vault) draws, no plugin contributes it yet, and it is not an Accounts surface, and dropping it removes no protection",
-      "[cross: board] GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered)",
+      "[cross: board] GAP(board): the sign-in rule suggestion sheet does not offer the project scope, because the app half has no Board read (\"any\" and \"this ferret\" are offered), and a standing rule scoped to a project fills for no session, because Board answers a ferret's board resolved from its folder when it was not stamped and a rule may only read the STAMPED one (daemon/rules.ts stampedProject)",
       "[cross: access] GAP(access): the device-revoke rule-count warning (\"revoking this device suspends N standing sign-in rules\") needs a slot in Access's revoke-device panel",
-      "[own] GAP(accounts): the sign-in grant engine (`daemon/lib/sign-in-grants/**`) is built and tested (rules, ledger, matcher, clear, plans, sources) but nothing in production calls it: Agenda already mounts `ask:sign-in-approval` (app/features/agenda/ask-renderers.tsx), so the missing wire is Accounts' own, TaskPlanService and SignInRuleService do not yet call the engine",
       "[own] GAP(accounts): Accounts still carries stopgap copies of the Vault's InputSavedSchema (contract/routes/login-entries.ts) and codeTargetProblem (daemon/lib/vault-inputs.ts), pinned to the Vault's by tests/unit/daemon/sign-in-grants/vault-parity.test.ts; rows I34 I163 I164 I168 I170 are now owned and proved by Vault: delete the copies in favour of Vault contract exports once the Vault contract exports them"
     ],
     "agenda": [
