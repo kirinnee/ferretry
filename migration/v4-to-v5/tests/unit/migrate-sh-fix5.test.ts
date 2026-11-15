@@ -20,6 +20,7 @@ const REAL_TOOLS = [
   'basename',
   'cat',
   'chmod',
+  'cmp',
   'comm',
   'cp',
   'date',

@@ -282,7 +282,7 @@ preflight)
   # EVERY external tool a later phase calls, so a missing one stops here and not at verify, after the backup. (nix, brew, curl and
   # xattr are optional and each checked where it is used.)
   missing_tools=""
-  for tool in bash jq tmux bun git awk basename cat chmod comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort tail tr uname wc; do
+  for tool in bash jq tmux bun git awk basename cat chmod cmp comm cp date df dirname du env find grep ls mkdir mktemp mv rm sed sleep sort tail tr uname wc; do
     command -v "${tool}" >/dev/null || missing_tools="${missing_tools:+${missing_tools}, }${tool}"
   done
   [ -z "${missing_tools}" ] || fail "not on PATH: ${missing_tools}; install them and run preflight again"

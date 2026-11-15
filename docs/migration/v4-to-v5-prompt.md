@@ -102,10 +102,13 @@ the owner:
 
 ### Before any `fy` command after `start`
 
-Every step after `start` that runs `fy ...` (the credential repair, the logins, "Check by eye", `fy ask`, `fy secret`, the
-Rollback) first runs `fy --version`. It must print **5.x**. If it prints 4.x, stop: a v4 `fy` left first on the PATH talks to
+Every step after `start` that runs `fy ...` (the credential repair, the logins, "Check by eye", `fy ask`, `fy secret`)
+first runs `fy --version`. It must print **5.x**. If it prints 4.x, stop: a v4 `fy` left first on the PATH talks to
 the v4 daemon (or to whatever it finds), not to v5. Call the v5 `fy` by its full path, or fix the PATH with the owner, and
 run the check again.
+
+`rollback` needs no `fy` check: it runs no `fy` itself and chooses v4 or v5 from the notes. After a rollback, `fy --version`
+must print 4.291.x (v4 is back), and any `fy` after that is the v4 one.
 
 ### If `quiet` exits 1
 
