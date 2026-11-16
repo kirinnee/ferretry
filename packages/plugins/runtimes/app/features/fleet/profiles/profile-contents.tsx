@@ -13,7 +13,16 @@ import type { DragEvent } from 'react';
 import { cn } from '../../../ui.ts';
 import { Button } from '../../../ui.ts';
 import { type CatalogHarness, HARNESS_NAMES } from '../components/component-model.ts';
-import { ITEM_ACTIONS, ITEM_ROW, ItemBody, ItemChips, ItemLine, ItemName, KindTag } from './profile-library.tsx';
+import {
+  ITEM_ACTIONS,
+  ITEM_ROW,
+  ItemBody,
+  ItemChips,
+  ItemLine,
+  ItemName,
+  KindTag,
+  McpStatusFooter,
+} from './profile-library.tsx';
 import { itemName, type OverrideChip, type ProfileItem, RESOLVED_FIELD_WORDS } from './profile-model.ts';
 
 export interface ContentsListProps {
@@ -120,6 +129,7 @@ export function ContentsList(props: ContentsListProps) {
               <X size={14} aria-hidden="true" />
             </Button>
           </span>
+          {item.kind === 'mcp' ? <McpStatusFooter name={item.name} usedByRuntimes={item.usedByRuntimes ?? 0} /> : null}
         </li>
       ))}
       {dropBefore !== null && dropBefore === items.length && items.length > 0 ? (

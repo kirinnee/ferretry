@@ -158,7 +158,7 @@ function LibraryRows({
  * component's name (the subject) and how many runtimes use it. Nothing is drawn where no panel is placed, or off a
  * machine page, so the row reads as it did before the slot.
  */
-function McpStatusFooter({ name, usedByRuntimes }: { readonly name: string; readonly usedByRuntimes: number }) {
+export function McpStatusFooter({ name, usedByRuntimes }: { readonly name: string; readonly usedByRuntimes: number }) {
   const daemon = currentDaemon();
   // Optional footer: placed AND its plugin usable on THIS daemon — with MCP off, the shell's "is off" line under every
   // row would be noise, so nothing is drawn (and the panel never mounts, so it never reads).

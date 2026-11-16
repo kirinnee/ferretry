@@ -125,7 +125,8 @@ const PREVIEW_ROUTES = {
   project: 'POST /v1/ferrets/:ferretId/mcp/project/preview',
   login: 'POST /v1/ferrets/:ferretId/mcp/login/preview',
 } as const;
-const ADD_ROUTES = {
+/** The two writes "Add…" can send: what this device may do with them is the panel's authority to offer it. */
+export const ADD_ROUTES = {
   project: 'POST /v1/ferrets/:ferretId/mcp/project',
   login: 'POST /v1/ferrets/:ferretId/mcp/login',
 } as const;
