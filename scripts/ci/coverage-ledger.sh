@@ -16,7 +16,14 @@
 # an intersection hid real misses when measured. A file only covered across groups therefore fails
 # here, naming the groups, and the remedy is a test for its missed lines in the group that owns it.
 #
-# Only POSIX tools (bash, awk, grep, find, sort, comm), so the CI ledger job runs without a nix shell.
+# A SCOPED RUN (scripts/ci/scope.ts): quick.sh exports FY_CI_SCOPE_FILE for a pull request whose unit tests were narrowed
+# to the changed plugins. The unit ledger is then judged for the packages that RAN only - every platform package and the
+# selected plugins - and the plugins the scope skipped are left out of both the source list and the judged records
+# (their lib files are loaded, but not fully exercised, by the platform tests). It says so in its last line, which is
+# NEVER the complete-ledger sentence: a scoped ledger must not pass for a complete one. int is never scoped.
+#
+# Only POSIX tools (bash, awk, grep, find, sort, comm), so the CI ledger job runs without a nix shell. The scope file is
+# JSON, read with jq like config/test-groups.json above.
 set -euo pipefail
 
 mode="${1:-}"
@@ -92,15 +99,28 @@ fi
 # (contracts, manifests, host entries, skeleton halves) are not judged by either ledger.
 scope="lib/"
 [[ ${mode} == "int" ]] && scope="adapters/"
-mapfile -t scope_dirs < <(find packages -path '*/node_modules' -prune -o -path '*/tests' -prune -o -type d -name "${scope%/}" -print | sort)
+skipped_rels=()
+if [[ ${mode} == "unit" && -n ${FY_CI_SCOPE_FILE:-} ]]; then
+  [[ -f ${FY_CI_SCOPE_FILE} && "$(jq -r '.mode' "${FY_CI_SCOPE_FILE}")" == "scoped" ]] ||
+    { echo "❌ FY_CI_SCOPE_FILE (${FY_CI_SCOPE_FILE}) is not a SCOPED decision" >&2 && exit 1; }
+  mapfile -t skipped_rels < <(jq -r '.skipped[].rel' "${FY_CI_SCOPE_FILE}")
+fi
+# One alternation of the skipped plugins' folders (empty when nothing is skipped), for awk's path tests.
+skipped_alternation="$(IFS='|' && echo "${skipped_rels[*]:-}")"
+mapfile -t scope_dirs < <(find packages -path '*/node_modules' -prune -o -path '*/tests' -prune -o -type d -name "${scope%/}" -print | sort |
+  awk -v skips="${skipped_alternation}" 'skips == "" || $0 !~ ("^(" skips ")/")')
 source_list="$(mktemp)"
 coverage_list="$(mktemp)"
 judged="$(mktemp)"
 trap 'rm -f "${source_list}" "${coverage_list}" "${judged}"' EXIT
 
 # Only the records inside the tier's scope are judged.
-awk -v scope="${scope}" '
-  /^SF:/ { path = substr($0, 4); gsub(/\\\\/, "/", path); keep = (path ~ "(^|/)packages/.*/" scope); }
+awk -v scope="${scope}" -v skips="${skipped_alternation}" '
+  /^SF:/ {
+    path = substr($0, 4); gsub(/\\\\/, "/", path)
+    keep = (path ~ "(^|/)packages/.*/" scope)
+    if (keep && skips != "" && path ~ ("(^|/)(" skips ")/")) keep = 0
+  }
   keep { print }
 ' "${coverage_file}" >"${judged}"
 
@@ -151,4 +171,10 @@ awk '
 missing="$(comm -23 "${source_list}" "${coverage_list}" | head -n 1)"
 [[ -n ${missing} ]] && echo "❌ source file missing from coverage ledger: ${missing}" >&2 && exit 1
 
+if [[ ${#skipped_rels[@]} -gt 0 ]]; then
+  # Deliberately a different sentence from the full run's below, in the log and the step summary.
+  echo "⚠️ SCOPED coverage ledger: 100% for the platform packages and the selected plugins; ${#skipped_rels[@]} unselected plugins were not run and are NOT judged. This is NOT the complete ${mode} production ledger: ${coverage_file}" |
+    tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
+fi
 echo "✅ Coverage artifact matches the complete ${mode} production ledger: ${coverage_file}"
