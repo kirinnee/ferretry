@@ -1,3 +1,4 @@
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import type { WorkHit, WorkKind, WorkSearchResponse } from '../../../contract/index.ts';
 
 /**
@@ -11,8 +12,8 @@ const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 
 const clip = (text: string, width: number): string => (text.length <= width ? text : `${text.slice(0, width - 1)}…`);
 
-/** How a hit is cited: `&F303` for a card, `!A3` for an ask. */
-const hitReference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
+/** How a hit is cited: `&F303` for a card, `^A3` for an ask. */
+const hitReference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : ASK_REFERENCE_SIGIL}${hit.id}`;
 
 /** The matching line of a hit, when it says something the title does not. */
 function matchLine(hit: WorkHit): string {

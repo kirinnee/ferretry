@@ -26,7 +26,7 @@ const entries: readonly TranscriptEntry[] = [
     id: 'e2',
     kind: 'assistant',
     label: 'zoe',
-    text: 'Two ways to go: patch the parser or rewrite the test. Asked on !A1.',
+    text: 'Two ways to go: patch the parser or rewrite the test. Asked on ^A1.',
     at: NOW - 300_000,
   },
 ];

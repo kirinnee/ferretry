@@ -861,11 +861,11 @@ describe('materialiseFleet', () => {
     });
   });
 
-  // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, !A500). Claude Code ranks
+  // A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude Code ranks
   // a folder's `env` above the process environment and a `--settings` file above the folder, so the ONLY way a login's value
   // could beat a repo's is by being written into a `--settings` file. It never is: the login's variables are the process
   // environment the wrapper exports, and nothing else.
-  describe('a login’s environment is not pinned: a project’s .claude env wins (owner, !A500)', () => {
+  describe('a login’s environment is not pinned: a project’s .claude env wins (owner, ^A500)', () => {
     const OVERLAY = `${HOME_A}/.fy/${FIXED_SETTINGS_FILE}`;
     const SECRET_VALUE = 'FIXTURE-LOGIN-TOKEN-4471';
 

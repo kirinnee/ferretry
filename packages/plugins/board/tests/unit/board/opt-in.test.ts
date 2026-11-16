@@ -81,7 +81,7 @@ describe("the owner's Yes", () => {
   });
 
   it('should refuse an item that is not answered on the ferret’s agenda', () => {
-    should(approvalProblem('A12', undefined, FERRET, undefined)).equal('!A12 is not an answered ask on your ledger');
+    should(approvalProblem('A12', undefined, FERRET, undefined)).equal('^A12 is not an answered ask on your ledger');
   });
 
   it('should refuse an item another ferret, the daemon or the owner raised', () => {
@@ -91,7 +91,7 @@ describe("the owner's Yes", () => {
       answered({ raisedBy: 'owner' }),
     ];
     for (const item of others) {
-      should(approvalProblem('A12', item, FERRET, undefined)).equal('!A12 is not an ask you raised');
+      should(approvalProblem('A12', item, FERRET, undefined)).equal('^A12 is not an ask you raised');
     }
   });
 
@@ -101,8 +101,8 @@ describe("the owner's Yes", () => {
     const open = answered({ options: [], answer: undefined });
 
     // Act & Assert
-    should(approvalProblem('A12', choice, FERRET, undefined)).equal('!A12 is not a yes/no question');
-    should(approvalProblem('A12', open, FERRET, undefined)).equal('!A12 is not a yes/no question');
+    should(approvalProblem('A12', choice, FERRET, undefined)).equal('^A12 is not a yes/no question');
+    should(approvalProblem('A12', open, FERRET, undefined)).equal('^A12 is not a yes/no question');
   });
 
   it('should refuse a Yes to another question, even one that names a card or tracking', () => {
@@ -114,7 +114,7 @@ describe("the owner's Yes", () => {
       const problem = approvalProblem('A12', item, FERRET, undefined);
 
       // Assert
-      should(problem).equal('!A12 does not ask "Track this on the board?"', subject);
+      should(problem).equal('^A12 does not ask "Track this on the board?"', subject);
     }
   });
 
@@ -132,7 +132,7 @@ describe("the owner's Yes", () => {
   it('should refuse an ask the ferret or the daemon closed', () => {
     const closers = [answered({ answer: { by: 'other', choice: 'Yes' } }), answered({ answer: { by: 'other' } })];
     for (const item of closers) {
-      should(approvalProblem('A12', item, FERRET, undefined)).equal('!A12 was not answered by the owner');
+      should(approvalProblem('A12', item, FERRET, undefined)).equal('^A12 was not answered by the owner');
     }
   });
 
@@ -143,13 +143,13 @@ describe("the owner's Yes", () => {
       answered({ answer: { by: 'owner', choice: 'not yet' } }),
     ];
     for (const item of notYes) {
-      should(approvalProblem('A12', item, FERRET, undefined)).equal('the owner did not answer Yes to !A12');
+      should(approvalProblem('A12', item, FERRET, undefined)).equal('the owner did not answer Yes to ^A12');
     }
   });
 
   it('should refuse a Yes that already made a card', () => {
     should(approvalProblem('A12', answered(), FERRET, { id: 'F7' })).equal(
-      '!A12 already made &F7; one Yes makes one card',
+      '^A12 already made &F7; one Yes makes one card',
     );
   });
 });
@@ -157,13 +157,13 @@ describe("the owner's Yes", () => {
 describe('the refusal', () => {
   it('should say the board is off, what to do instead and how to ask', () => {
     should(offBoardRefusal('ferretry')).equal(
-      'The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval !A<n>.',
+      'The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" — then, once the owner says Yes, fy card new … --approval <ask>.',
     );
   });
 
   it('should say why a named approval did not count', () => {
-    should(offBoardRefusal('ferretry', 'the owner did not answer Yes to !A12')).containEql(
-      'The approval does not count: the owner did not answer Yes to !A12.',
+    should(offBoardRefusal('ferretry', 'the owner did not answer Yes to ^A12')).containEql(
+      'The approval does not count: the owner did not answer Yes to ^A12.',
     );
   });
 });

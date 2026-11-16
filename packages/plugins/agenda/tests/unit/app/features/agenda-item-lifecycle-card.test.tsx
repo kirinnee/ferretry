@@ -90,7 +90,7 @@ describe('the item head’s version slot and lineage', () => {
   test('offers Merge with… in the ⋯ menu, opening the picker on the card, and says where a split came from', async () => {
     const root = await draw({ splitFrom: 'A3' } as never, { merge });
     expect(root.querySelector('.fy-card [data-agenda-merge-open]')).toBeNull();
-    expect(root.querySelector('[data-agenda-lineage-line="split-from"]')?.textContent).toContain('Split from !A3');
+    expect(root.querySelector('[data-agenda-lineage-line="split-from"]')?.textContent).toContain('Split from ^A3');
     const open = must((await openMenu(root)).querySelector<HTMLElement>('[data-agenda-merge-open]'), 'Merge with…');
     expect(open.textContent).toBe('Merge with…');
     await interact(() => open.click());

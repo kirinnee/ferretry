@@ -175,7 +175,7 @@ this page, which is still how a message reaches the pane.
   as **Not sent** and not retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has
   left they fall through to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched, and so
   do the Agenda items a reply is about (the composer's "re" chips, `referencesOf`): they are stored beside the
-  words and sent as the `!A3` prefix on every attempt, so a reply that leaves after a reload is still about its
+  words and sent as the `^A3` prefix on every attempt, so a reply that leaves after a reload is still about its
   item, while an edit shows only what was typed.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every

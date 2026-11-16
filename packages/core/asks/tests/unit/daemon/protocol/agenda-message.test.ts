@@ -21,28 +21,28 @@ const other = { id: 'A7', quote: 'Ship it?' };
 describe('the agenda chat forms — the words the daemon writes', () => {
   it('words an answer, with a note only when it adds something', () => {
     should(agendaAnswerMessage(ask, 'Button only')).equal(
-      '[answer to !A45 «How should outdated ferrets pick up new instructions after an update?»] Button only',
+      '[answer to ^A45 «How should outdated ferrets pick up new instructions after an update?»] Button only',
     );
-    should(agendaAnswerMessage(other, 'Yes', 'today')).equal('[answer to !A7 «Ship it?»] Yes · note: today');
-    should(agendaAnswerMessage(other, 'Yes', 'Yes')).equal('[answer to !A7 «Ship it?»] Yes');
+    should(agendaAnswerMessage(other, 'Yes', 'today')).equal('[answer to ^A7 «Ship it?»] Yes · note: today');
+    should(agendaAnswerMessage(other, 'Yes', 'Yes')).equal('[answer to ^A7 «Ship it?»] Yes');
   });
 
   it('words a done, a dismiss, a request for information and a discussion', () => {
-    should(agendaDoneMessage(other)).equal('[done !A7 «Ship it?»] The owner marked this done.');
+    should(agendaDoneMessage(other)).equal('[done ^A7 «Ship it?»] The owner marked this done.');
     should(agendaDismissedMessage(other)).equal(
-      '[dismissed !A7 «Ship it?»] Not needed — the owner dismissed this without a reason.',
+      '[dismissed ^A7 «Ship it?»] Not needed — the owner dismissed this without a reason.',
     );
-    should(agendaDismissedMessage(other, 'stale')).equal('[dismissed !A7 «Ship it?»] Not needed: stale');
-    should(agendaNeedsInfoMessage(other)).equal('[needs more info !A7 «Ship it?»] The owner needs more information.');
-    should(agendaNeedsInfoMessage(other, 'which branch?')).equal('[needs more info !A7 «Ship it?»] which branch?');
+    should(agendaDismissedMessage(other, 'stale')).equal('[dismissed ^A7 «Ship it?»] Not needed: stale');
+    should(agendaNeedsInfoMessage(other)).equal('[needs more info ^A7 «Ship it?»] The owner needs more information.');
+    should(agendaNeedsInfoMessage(other, 'which branch?')).equal('[needs more info ^A7 «Ship it?»] which branch?');
     should(agendaDiscussMessage(other, '', 'fy')).equal(
-      '[discuss !A7 «Ship it?»] The owner wants to talk this through before answering: no note. Reply in chat to clear it up; then update the item (`fy agenda edit A7`) or close it if the premise was wrong (`fy agenda done A7`).',
+      '[discuss ^A7 «Ship it?»] The owner wants to talk this through before answering: no note. Reply in chat to clear it up; then update the item (`fy agenda edit A7`) or close it if the premise was wrong (`fy agenda done A7`).',
     );
   });
 
   it('names several items in one reply, and joins a batch a blank line apart', () => {
     should(agendaReMessage([ask, other], 'both?')).equal(
-      '[re !A45 «How should outdated ferrets pick up new instructions after an update?», !A7 «Ship it?»] both?',
+      '[re ^A45 «How should outdated ferrets pick up new instructions after an update?», ^A7 «Ship it?»] both?',
     );
     should(agendaBatchMessage(['a', 'b'])).equal('a\n\nb');
   });
@@ -76,22 +76,22 @@ describe('the agenda chat forms — the same words, read back', () => {
       'why now? Reply soon.',
     );
     should(parseAgendaMessage(agendaDiscussMessage(other, '', 'fy'))?.parts[0]?.text).equal('');
-    should(parseAgendaMessage(`[discuss !A7 «Ship it?»] an older wording`)?.parts[0]?.text).equal('an older wording');
+    should(parseAgendaMessage(`[discuss ^A7 «Ship it?»] an older wording`)?.parts[0]?.text).equal('an older wording');
     should(
-      parseAgendaMessage(`[discuss !A7 «Ship it?»] The owner wants to talk this through before answering: cut short`)
+      parseAgendaMessage(`[discuss ^A7 «Ship it?»] The owner wants to talk this through before answering: cut short`)
         ?.parts[0]?.text,
     ).equal('cut short');
   });
 
   it("reads the owner's own words out of a done, a dismiss and a request for information", () => {
     should(parseAgendaMessage(agendaDoneMessage(other))?.parts[0]).containDeep({ kind: 'done', text: '' });
-    should(parseAgendaMessage('[done !A7 «Ship it?»] an older wording')?.parts[0]?.text).equal('an older wording');
+    should(parseAgendaMessage('[done ^A7 «Ship it?»] an older wording')?.parts[0]?.text).equal('an older wording');
     should(parseAgendaMessage(agendaDismissedMessage(other, 'stale'))?.parts[0]).containDeep({
       kind: 'dismissed',
       text: 'stale',
     });
     should(parseAgendaMessage(agendaDismissedMessage(other))?.parts[0]?.text).equal('');
-    should(parseAgendaMessage('[dismissed !A7 «Ship it?»] gone')?.parts[0]?.text).equal('gone');
+    should(parseAgendaMessage('[dismissed ^A7 «Ship it?»] gone')?.parts[0]?.text).equal('gone');
     should(parseAgendaMessage(agendaNeedsInfoMessage(other))?.parts[0]?.text).equal('');
     should(parseAgendaMessage(agendaNeedsInfoMessage(other, 'which?'))?.parts[0]).containDeep({
       kind: 'needs-info',
@@ -126,11 +126,11 @@ describe('the agenda chat forms — the same words, read back', () => {
 
   it('is not an agenda message unless every form reads', () => {
     should(parseAgendaMessage('hello')).be.undefined();
-    should(parseAgendaMessage('[answer to !A0 «x»] y')).be.undefined();
+    should(parseAgendaMessage('[answer to ^A0 «x»] y')).be.undefined();
     should(parseAgendaMessage('[answer to !a3 «x»] y')).be.undefined();
-    should(parseAgendaMessage('[answer to !A3 «x»]y')).be.undefined();
-    should(parseAgendaMessage('[answer to !A3 «x», !A4 «y»] both')).be.undefined();
-    should(parseAgendaMessage('see [re !A3 «x»] later')).be.undefined();
+    should(parseAgendaMessage('[answer to ^A3 «x»]y')).be.undefined();
+    should(parseAgendaMessage('[answer to ^A3 «x», ^A4 «y»] both')).be.undefined();
+    should(parseAgendaMessage('see [re ^A3 «x»] later')).be.undefined();
     should(parseAgendaMessage(`a note of mine\n\n${agendaDoneMessage(other)}`)).be.undefined();
   });
 });
@@ -145,11 +145,11 @@ describe('agendaChatReply', () => {
 
   it('should head a message naming open items as a reply about them, in the board order', () => {
     // Act
-    const reply = agendaChatReply('!A7 and !A5: leaning SQLite', open, quote);
+    const reply = agendaChatReply('^A7 and ^A5: leaning SQLite', open, quote);
 
     // Assert
     should(reply.message).equal(
-      '[re !A5 «Which storage engine?», !A7 «Restart the relay?»] !A7 and !A5: leaning SQLite',
+      '[re ^A5 «Which storage engine?», ^A7 «Restart the relay?»] ^A7 and ^A5: leaning SQLite',
     );
     should(reply.referenced.map(item => item.id)).deepEqual(['A5', 'A7']);
   });
@@ -157,12 +157,29 @@ describe('agendaChatReply', () => {
   it('should send a message that names nothing open, or only a notice, exactly as typed', () => {
     // Assert
     should(agendaChatReply('just chatting', open, quote)).deepEqual({ message: 'just chatting', referenced: [] });
-    should(agendaChatReply('!A9 seen it', open, quote).message).equal('!A9 seen it');
-    should(agendaChatReply('!A2 is closed', open, quote).message).equal('!A2 is closed');
+    should(agendaChatReply('^A9 seen it', open, quote).message).equal('^A9 seen it');
+    should(agendaChatReply('^A2 is closed', open, quote).message).equal('^A2 is closed');
   });
 
   it('should read a reference only where the reference grammar does', () => {
     // Assert
-    should(referencedAgendaIds('see !A5, (!A7) and !A5 again; not a!A9 or !a3')).deepEqual(['A5', 'A7']);
+    should(referencedAgendaIds('see ^A5, (^A7) and ^A5 again; not a^A9 or !a3')).deepEqual(['A5', 'A7']);
+  });
+});
+
+describe('the attention sigil — written as ^, read as ^ or the legacy !', () => {
+  it('reads a heading written before the change (`!A45`) exactly as the new one, and never writes it', () => {
+    const legacy = '[answer to !A45 «Ship it?»] Yes · note: today';
+    const current = '[answer to ^A45 «Ship it?»] Yes · note: today';
+
+    should(parseAgendaMessage(legacy)?.parts.map(part => part.items)).eql(
+      parseAgendaMessage(current)?.parts.map(part => part.items),
+    );
+    should(parseAgendaMessage(`${legacy}\n\n[done !A7 «Ship it?»] The owner marked this done.`)?.parts).have.length(2);
+    should(agendaAnswerMessage({ id: 'A45', quote: 'Ship it?' }, 'Yes', 'today')).equal(current);
+  });
+
+  it('finds the items a chat message names whichever sigil it used', () => {
+    should(referencedAgendaIds('see !A3, then ^A5 and ^A3. Not x^A9, !a4 or A6.')).eql(['A3', 'A5']);
   });
 });

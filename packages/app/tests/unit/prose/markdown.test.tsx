@@ -178,7 +178,7 @@ describe('Markdown code fences', () => {
 describe('Markdown references', () => {
   test('should leave a reference-shaped token as prose when nothing proves it', () => {
     // Act
-    const tree = render(<Markdown text="ping :zelda about &F12 and !A3" />);
+    const tree = render(<Markdown text="ping :zelda about &F12 and ^A3" />);
 
     // Assert
     should(anchorsOf(tree.root)).be.empty();
@@ -234,7 +234,7 @@ describe('Markdown references', () => {
     // Arrange
     const opened: AgendaId[] = [];
     const tree = render(
-      <Markdown agendaReferenceResolver={() => true} onAgendaOpen={id => opened.push(id)} text="see !A3" />,
+      <Markdown agendaReferenceResolver={() => true} onAgendaOpen={id => opened.push(id)} text="see ^A3" />,
     );
 
     // Act

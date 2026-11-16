@@ -1,4 +1,5 @@
 import type { AgendaClearAgentsResult, AgendaOpenPage } from '../../contract/index.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`;
 
@@ -13,7 +14,8 @@ export function renderOpen(page: AgendaOpenPage): string {
   const lines: string[] = [];
   for (const group of page.sessions) {
     lines.push(`${group.sessionId} (${plural(group.items.length, 'ask', 'asks')})`);
-    for (const ask of group.items) lines.push(`  !${ask.id} [${ask.kind ?? 'task'}] ${ask.subject}`);
+    for (const ask of group.items)
+      lines.push(`  ${ASK_REFERENCE_SIGIL}${ask.id} [${ask.kind ?? 'task'}] ${ask.subject}`);
   }
   if (page.next !== undefined) lines.push('', `More: pass --after ${page.next}`);
   return lines.join('\n');

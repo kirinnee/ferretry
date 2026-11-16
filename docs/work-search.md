@@ -58,7 +58,7 @@ The fields are a **whitelist**. A field added to a schema later is not searchabl
 **Window:** all open work (snoozed and replied agenda items count as open), plus work closed, dropped or
 addressed within the last 30 days. Two things lift it:
 
-- **An exact id** (`F291`, `&F291`, `A3`, `!A3`) always finds its item, whatever its age.
+- **An exact id** (`F291`, `&F291`, `A3`, `^A3`) always finds its item, whatever its age.
 - **`all`** (`all=true`; `fy search --all`; `search_work` with `all: true`; the ⌘K "Everything" scope) searches
   old closed work too.
 
@@ -92,7 +92,7 @@ words never reach an answer unscrubbed while the value is held.
 A token is a run of letters or digits, lower-cased, with accents removed and a plural `s` dropped. Queries
 are ranked in this order:
 
-1. **An exact id** wins: `F303`, `&F303`, `#F303`, `A3`, `!A3`.
+1. **An exact id** wins: `F303`, `&F303`, `#F303`, `A3`, `^A3`.
 2. **Every word must match somewhere.** The last word matches as a prefix, so a half-typed word already finds
    results. A word scores by the best field it appears in: title, then summary and ask, then premise and
    context, then everything else. The whole query found as a phrase in a title scores extra.

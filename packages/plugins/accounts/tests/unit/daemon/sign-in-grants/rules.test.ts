@@ -538,7 +538,7 @@ describe('SignInRuleService.fillCheck: a check that cannot be made drops the old
   });
 });
 
-// Owner decision !A226: this build reports `sign-in-rules-terminal.1`; a daemon not wired for it offers none.
+// Owner decision ^A226: this build reports `sign-in-rules-terminal.1`; a daemon not wired for it offers none.
 describe('RuleSignInGrants: terminal rules only while sign-in-rules-terminal.1 is reported', () => {
   const PASSWORD_ONLY = { ...LOGIN, roles: ['password'] as const };
 

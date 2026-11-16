@@ -476,7 +476,7 @@ export function harnessHomeCases(): void {
     });
   });
 
-  // ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision !A466) ──────────────
+  // ─── skills: Skills' shared folders linked into the Codex home (kernel batch #10, owner decision ^A466) ──────────────
 
   describe('F-0006 prepareHome links the selected skills into the Codex home', () => {
     const INSTALLED = defineState({ name: 'installed', path: 'installed/*', store: 'opaque', format: 1 });

@@ -234,7 +234,7 @@ describe('launchFactsSource', () => {
   });
 
   it('should never read fixed.json: a stale env, a file that is not JSON and one of the wrong shape change nothing', async () => {
-    // A project's own .claude env wins over a login's (owner, !A500): nothing is pinned, so nothing is read, and no
+    // A project's own .claude env wins over a login's (owner, ^A500): nothing is pinned, so nothing is read, and no
     // damaged file can refuse a start (v4 before 4.291.9 read none either).
     for (const text of [
       JSON.stringify({

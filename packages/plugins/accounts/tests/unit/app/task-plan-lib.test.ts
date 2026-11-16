@@ -202,7 +202,7 @@ describe('the ticks', () => {
   });
 });
 
-describe('the passkey a selection needs (!A244)', () => {
+describe('the passkey a selection needs (^A244)', () => {
   it('asks it for a ticked paste line too, never for nothing ticked, and blocks a device that cannot ask', () => {
     const plan = planOf({
       lines: [

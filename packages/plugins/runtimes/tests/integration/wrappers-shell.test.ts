@@ -72,7 +72,7 @@ const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, l
 const MAX_ROUTING_PROMPT_CHARS = 1_200;
 
 describe('the question tool, per ferret (O3)', () => {
-  it("should withhold Claude's question tool, before the prompt, from every ferret, interactive included (!A527)", () => {
+  it("should withhold Claude's question tool, before the prompt, from every ferret, interactive included (^A527)", () => {
     // Arrange
     const wrapper = render(account({ flags: [CLAUDE_NO_QUESTIONS_FLAG, '--model', 'x'] }));
 
@@ -92,7 +92,7 @@ describe('the question tool, per ferret (O3)', () => {
     ]);
   });
 
-  it("should switch Codex's question feature explicitly OFF from the wrapper, whatever the ferret's mode, and never enable it (!A527)", () => {
+  it("should switch Codex's question feature explicitly OFF from the wrapper, whatever the ferret's mode, and never enable it (^A527)", () => {
     // Arrange
     const wrapper = render(account({ kind: 'codex' }));
     const OFF = ['-c', 'features.default_mode_request_user_input=false'];

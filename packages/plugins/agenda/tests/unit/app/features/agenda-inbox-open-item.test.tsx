@@ -414,8 +414,8 @@ describe('the open Inbox item’s History', () => {
         readConversation: async card => {
           asked.push(card.key);
           return [
-            { id: '1', kind: 'assistant', text: 'Asking about !A2 — ship it?', at: NOW - 3_600_000 },
-            { id: '2', kind: 'user', text: 'Hold until Monday !A2', at: NOW - 1_800_000 },
+            { id: '1', kind: 'assistant', text: 'Asking about ^A2 — ship it?', at: NOW - 3_600_000 },
+            { id: '2', kind: 'user', text: 'Hold until Monday ^A2', at: NOW - 1_800_000 },
           ];
         },
       }),

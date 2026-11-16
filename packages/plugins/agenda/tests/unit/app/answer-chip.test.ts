@@ -28,7 +28,7 @@ describe('withReferencePrefix', () => {
     await wrapped.send('s', { message: 'hi' });
     chips = [];
     await wrapped.send('s', { message: 'hi' });
-    expect(sent).toEqual(['!A4 !A7 hi', 'hi']);
+    expect(sent).toEqual(['^A4 ^A7 hi', 'hi']);
     expect(wrapped.who()).toBe('x');
   });
 
@@ -44,7 +44,7 @@ describe('withReferencePrefix', () => {
 
   it('never prefixes a reference the message already carries', async () => {
     const { sent, client } = fakeClient();
-    await withReferencePrefix(client, () => [id('A4')]).send('s', { message: '!A4 yes' });
-    expect(sent).toEqual(['!A4 yes']);
+    await withReferencePrefix(client, () => [id('A4')]).send('s', { message: '^A4 yes' });
+    expect(sent).toEqual(['^A4 yes']);
   });
 });

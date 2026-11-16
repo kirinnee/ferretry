@@ -6,7 +6,7 @@ import { cardAskReference } from '../../../daemon/lib/protocol/agenda-card-asks.
 import { agendaService } from './routes/support.ts';
 
 /**
- * A card ask a v4 ledger carries (`item.cardAsks`, an item such as `!A1 [task]` on `&I1`): the Board's `card` source
+ * A card ask a v4 ledger carries (`item.cardAsks`, an item such as `^A1 [task]` on `&I1`): the Board's `card` source
  * must see it as the card's ask, or a restart raises a SECOND one for the same gate (the duplicate the owner saw after
  * conversion). The carrier keeps its own source (`ferret`); only a read FOR the `card` source lists the carried asks.
  */

@@ -8,20 +8,21 @@ describe('attention references', () => {
     const actual = agendaReference('A3');
 
     // Assert
-    should(actual).equal('!A3');
+    should(actual).equal('^A3');
   });
 
   it('should accept either sigil and none at all', () => {
     // Act + Assert — both styles circulate; rejecting one only punishes a copy-paste.
-    should(parseAgendaReference('!A3')).equal('A3');
+    should(parseAgendaReference('^A3')).equal('A3');
+    should(parseAgendaReference('!A3')).equal('A3'); // the legacy alias: read, never written
     should(parseAgendaReference('?A3')).equal('A3');
     should(parseAgendaReference('A3')).equal('A3');
-    should(parseAgendaReference('  !A12  ')).equal('A12');
+    should(parseAgendaReference('  ^A12  ')).equal('A12');
   });
 
   it('should reject anything that is not an attention id', () => {
     // Act + Assert
-    for (const value of ['', 'A0', 'A', '!B3', 'A3x', '3', '!!A3', 'A03']) {
+    for (const value of ['', 'A0', 'A', '!B3', 'A3x', '3', '!^A3', 'A03']) {
       should(() => parseAgendaReference(value)).throw(/is not an agenda reference/u);
     }
   });

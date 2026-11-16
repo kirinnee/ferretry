@@ -56,7 +56,7 @@ describe('who may have a rule at all', () => {
           signIn({ place, observed: [{ ...tappedFact(`${place.tool}@kirin-box`), surface: 'terminal' }] } as never),
         ),
       ).equal('tool-not-covered');
-    // sudo with the owner's tapped history can have one: what was refused before !A197.
+    // sudo with the owner's tapped history can have one: what was refused before ^A197.
     should(
       ineligibleBecause(
         signIn({

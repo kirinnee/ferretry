@@ -52,8 +52,8 @@ describe('the paste card’s words', () => {
   });
 
   it('should title a paste as a paste and an ordinary card as what it needs', () => {
-    expect(titleWords(pasteRequest(), 'Hadi')).toBe('!A7 · Hadi wants to paste a sealed value');
-    expect(titleWords(terminalRequest(), 'Hadi')).toBe('!A7 · Hadi needs a password');
+    expect(titleWords(pasteRequest(), 'Hadi')).toBe('^A7 · Hadi wants to paste a sealed value');
+    expect(titleWords(terminalRequest(), 'Hadi')).toBe('^A7 · Hadi needs a password');
   });
 
   it('should say where a copy came from and where it goes, from what the daemon saw', () => {
@@ -104,7 +104,7 @@ describe('the paste card', () => {
       expect(root.textContent).toContain('You type nothing');
       expect(root.querySelector('[data-input-value]')).toBeNull();
       expect(root.querySelector('[data-input-send]')).toBeNull();
-      expect(q(root, '[data-input-title]').textContent).toBe('!A7 · The ferret wants to paste a sealed value');
+      expect(q(root, '[data-input-title]').textContent).toBe('^A7 · The ferret wants to paste a sealed value');
       expect(q<HTMLButtonElement>(root, '[data-input-allow]').textContent).toBe('Allow paste');
       expect(root.textContent).not.toContain('Answer it with fy');
     } finally {

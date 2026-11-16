@@ -168,7 +168,7 @@ describe('agenda candidates', () => {
 
     // Assert
     should(advice).containEql('blocking the ferret now, a deadline');
-    should(advice).containEql('fy agenda add … --new "<why none fits; closest is !A2>"');
+    should(advice).containEql('fy agenda add … --new "<why none fits; closest is ^A2>"');
     should(advice).not.containEql('fy agenda edit A2');
     should(out).equal(advice);
   });
@@ -182,7 +182,7 @@ describe('agenda candidates', () => {
     const text = candidate && plan && waysOut('fy', candidate, plan);
 
     // Assert
-    should(text).startWith('Nothing was opened. Join it to !A2:\n  fy agenda edit A2 --still-open');
+    should(text).startWith('Nothing was opened. Join it to ^A2:\n  fy agenda edit A2 --still-open');
     should(text).endWith(
       'or open a new agenda only when none passes the test:\n  fy agenda add … --new "<why none fits>"',
     );
@@ -204,10 +204,10 @@ describe('agenda candidates', () => {
 
     // Assert
     should(text).startWith(
-      'Search, check, then open: these agendas are open, closest first.\n  !A1  needs you  topic 1',
+      'Search, check, then open: these agendas are open, closest first.\n  ^A1  needs you  topic 1',
     );
     should(text).containEql('… and 2 more: zz agenda ls');
-    should(text).containEql('Should this join !A1? It does when all three hold: same place, same context, same pace;');
+    should(text).containEql('Should this join ^A1? It does when all three hold: same place, same context, same pace;');
     should(text).containEql("zz agenda edit A1 --still-open 'Pick the relay region'");
     should(text).endWith(
       'Open a new agenda only when none passes the test:\n  zz agenda add … --new "<why none fits>"',
@@ -224,7 +224,7 @@ describe('agenda candidates', () => {
     // Assert
     should(text).containEql('this ask has blocking the ferret now');
     should(text).not.containEql('zz agenda edit A1');
-    should(text).endWith('  zz agenda add … --new "<why none fits; closest is !A1>"');
+    should(text).endWith('  zz agenda add … --new "<why none fits; closest is ^A1>"');
   });
 
   it('should end by saying a new agenda is opening anyway, with the reason', () => {

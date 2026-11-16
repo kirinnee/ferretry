@@ -103,6 +103,7 @@ import { returnCard, returnLead } from './return-to-lead.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
 import { helperCloseReason } from './sub-card-close.ts';
 import { defaultVisibility, visibilityVerdict } from './visibility.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** Runs work one at a time per key; work under different keys runs together (the kernel's keyed serial). */
 interface BoardSerial {
@@ -1397,7 +1398,7 @@ export class BoardService {
    */
   private async requireThread(caller: BoardCaller, named: string | undefined): Promise<AskRef | undefined> {
     if (named === undefined) return undefined;
-    const ref = `!${named}`;
+    const ref = `${ASK_REFERENCE_SIGIL}${named}`;
     if (caller.kind !== 'ferret') {
       throw new BoardError('invalid', `--thread names a thread on a ferret's own asks; ${ref} is not yours to name`);
     }
@@ -1423,7 +1424,7 @@ export class BoardService {
     const why = linked === undefined ? 'its asks could not be read' : linked.message;
     throw new BoardError(
       'invalid',
-      `!${thread.id} was not linked to the new card, which was created without it: ${why}`,
+      `${ASK_REFERENCE_SIGIL}${thread.id} was not linked to the new card, which was created without it: ${why}`,
     );
   }
 

@@ -42,7 +42,7 @@ describe('attention listing', () => {
     const actual = renderAgendaList(snapshot([humanItem('A1', 'approve  the\n deploy')]));
 
     // Assert — the subject is flattened so the head of an item is always one line.
-    should(row(actual, 1)).equal('  !A1  [question]  approve the deploy');
+    should(row(actual, 1)).equal('  ^A1  [question]  approve the deploy');
   });
 
   it('should show why, how to resolve, and who raised it', () => {
@@ -309,7 +309,7 @@ describe('attention history', () => {
 
     // Assert
     should(row(actual, 0)).equal(`Recent resolutions in ${SESSION} — newest first`);
-    should(row(actual, 1)).equal('  !A1  approve the deploy · resolved by human at 2026-07-31T10:00:00.000Z');
+    should(row(actual, 1)).equal('  ^A1  approve the deploy · resolved by human at 2026-07-31T10:00:00.000Z');
   });
 
   it('should name a dismissal as a dismissal', () => {
@@ -430,10 +430,10 @@ describe('attention history', () => {
 describe('attention confirmations', () => {
   it('should report a mutation with the reference and what is still waiting', () => {
     // Act
-    const actual = renderAgendaMutation('resolved', '!A3', snapshot([humanItem('A1', 'x')]));
+    const actual = renderAgendaMutation('resolved', '^A3', snapshot([humanItem('A1', 'x')]));
 
     // Assert
-    should(actual).equal(`resolved !A3 — 1 open item in ${SESSION}`);
+    should(actual).equal(`resolved ^A3 — 1 open item in ${SESSION}`);
   });
 
   it('should report a mutation that names no reference', () => {
@@ -446,14 +446,14 @@ describe('attention confirmations', () => {
 
   it('should print what the daemon noted about the raise, line by line', () => {
     // Act
-    const actual = renderAgendaMutation('attention !A2 recorded', undefined, {
+    const actual = renderAgendaMutation('attention ^A2 recorded', undefined, {
       ...snapshot([humanItem('A2', 'x')]),
       notes: ['&F12 is asking already; this was raised without the card'],
     });
 
     // Assert
     should(actual.split('\n')).deepEqual([
-      `attention !A2 recorded — 1 open item in ${SESSION}`,
+      `attention ^A2 recorded — 1 open item in ${SESSION}`,
       'Note: &F12 is asking already; this was raised without the card',
     ]);
   });
@@ -464,12 +464,12 @@ describe('attention confirmations', () => {
     const somebody = { ...snapshot([humanItem('A1', 'x')]), enrolled: 2 };
 
     // Act
-    const warned = renderAgendaMutation('attention !A1 recorded', undefined, nobody, 'A1');
-    const quiet = renderAgendaMutation('attention !A1 recorded', undefined, somebody, 'A1');
+    const warned = renderAgendaMutation('attention ^A1 recorded', undefined, nobody, 'A1');
+    const quiet = renderAgendaMutation('attention ^A1 recorded', undefined, somebody, 'A1');
 
     // Assert
     should(warned.split('\n')[1]).startWith('Warning: no device will be notified (0 enrolled).');
-    should(quiet).equal(`attention !A1 recorded — 1 open item in ${SESSION}`);
+    should(quiet).equal(`attention ^A1 recorded — 1 open item in ${SESSION}`);
   });
 });
 
@@ -487,7 +487,7 @@ describe('writing advice', () => {
     // Assert
     should(actual.split('\n')).deepEqual([
       `attention A4 recorded — 0 open items in ${SESSION}`,
-      "Reads hard for someone who hasn't followed — fix it with `agenda edit !A4`:",
+      "Reads hard for someone who hasn't followed — fix it with `agenda edit ^A4`:",
       '  - summary is 120 characters; keep it under 90',
       '  - links ("https://x.example")',
     ]);
@@ -640,7 +640,7 @@ describe('attention cards', () => {
     );
 
     // Assert
-    should(row(actual, 1)).equal('  !A1  [question]  Release');
+    should(row(actual, 1)).equal('  ^A1  [question]  Release');
     should(row(actual, 2)).equal('      ask: Ship the release now?');
     should(row(actual, 3)).equal('      answers: ← No · → Yes');
   });
@@ -732,7 +732,7 @@ describe('attention cards', () => {
     const actual = renderAgendaList(snapshot([humanItem('A1', 'approve the deploy', { ask: { kind: 'permission' } })]));
 
     // Assert
-    should(row(actual, 1)).equal('  !A1  [question]  approve the deploy');
+    should(row(actual, 1)).equal('  ^A1  [question]  approve the deploy');
     should(actual).not.containEql('ask: approve the deploy');
     should(row(actual, 2)).equal('      answers: ← Deny · → Approve');
   });

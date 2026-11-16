@@ -106,7 +106,7 @@ const BULKY = [
 const UPDATE = [
   '[instructions updated] Ferretry changed part of the instructions you were started with. Follow these words in place of the matching part of your system prompt:',
   'Ferretry tools: you can open and drive terminals and browser pages the person watches live.',
-  "Board: all work is a card (&F412) on its project's board; agenda items are !A48.",
+  "Board: all work is a card (&F412) on its project's board; agenda items are ^A48.",
 ].join('\n\n');
 
 const IMAGE = (n: number): string => `assistant/attachment: image [fy-image ${4096 * n}.2048.0 image/png]`;

@@ -235,7 +235,7 @@ describe('composer host warm-up handshake', () => {
           onCommit={() => {
             if (holder.view !== undefined) frames.push(sampleMenu(holder.view, 'References'));
           }}
-          prefix="!"
+          prefix="^"
           read={read}
         />,
         CLIENT,

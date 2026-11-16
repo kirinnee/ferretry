@@ -94,7 +94,7 @@ describe('the owner’s answer reaching a ferret through the conversation', () =
     expect(response.status).toBe(200);
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ ferret: 'f1' });
-    expect(sent[0]?.message).toContain('[answer to !A1 «Ship it?»] Yes');
+    expect(sent[0]?.message).toContain('[answer to ^A1 «Ship it?»] Yes');
   });
 
   it('should hold the answer when the conversation says nothing was typed', async () => {
@@ -223,7 +223,7 @@ describe('a tell from the Vault joining the ferret’s reply batch', () => {
     // Assert
     expect([first, again]).toEqual(['queued', 'known']);
     expect(sent).toHaveLength(1);
-    expect(sent[0]?.message).toBe('[answer to !A1 «Ship it?»] Yes\n\nA3 ended without a value.');
+    expect(sent[0]?.message).toBe('[answer to ^A1 «Ship it?»] Yes\n\nA3 ended without a value.');
   });
 
   it('should be on the Vault’s view alone', async () => {

@@ -114,7 +114,7 @@ describe('the verbs Agenda owns for the items on a board', () => {
 
   test('V-0035 fy agenda dismiss dismisses with the note', async () => {
     const t = run();
-    expect(await t.verb('agenda dismiss <id>', ['!A3'], { n: 'no longer needed' })).toBe(0);
+    expect(await t.verb('agenda dismiss <id>', ['^A3'], { n: 'no longer needed' })).toBe(0);
     expect(t.posted()[0]).toEqual({ action: 'dismiss', id: 'A3', note: 'no longer needed' });
   });
 
@@ -152,7 +152,7 @@ describe('the verbs Agenda owns for the items on a board', () => {
   test('V-0041 fy agenda ls lists the open items of this ferret’s board, or of the board --session names', async () => {
     const own = run();
     expect(await own.verb('agenda ls')).toBe(0);
-    expect(own.out.join('')).toContain('!A3');
+    expect(own.out.join('')).toContain('^A3');
     expect(own.calls[0]?.init?.params).toEqual({ ferretId: 'f1' });
     const owner = run({ env: {} });
     expect(await owner.verb('agenda ls', [], { session: 'f9' })).toBe(0);

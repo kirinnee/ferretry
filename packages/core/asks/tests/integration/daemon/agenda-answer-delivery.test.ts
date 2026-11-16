@@ -83,7 +83,7 @@ describe('R-0334 V-0032 the owner’s answer reaches the ferret through ask.deli
     expect(path.typed.size).toBe(1);
     const [only] = [...path.typed.values()];
     expect(only?.ferret).toBe('f1');
-    expect(only?.message).toContain('[answer to !A1 «Ship it?»] Yes');
+    expect(only?.message).toContain('[answer to ^A1 «Ship it?»] Yes');
     const board = (await half.call('GET /v1/ferrets/:ferretId/agenda', F1)).json<{ delivery?: unknown }>();
     expect(board.delivery).toBeUndefined();
   });

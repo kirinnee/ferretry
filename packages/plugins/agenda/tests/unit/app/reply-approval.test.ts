@@ -101,9 +101,9 @@ describe('a reply offered as the card ask’s answer', () => {
 
 describe('the reply as the composer sends it, and the ask it answers', () => {
   test('is offered for the words the composer stored, the item’s reference in front of them', () => {
-    // The Inbox composer sends "!A304 ok to build!"; the daemon stores those words as they were sent.
+    // The Inbox composer sends "^A304 ok to build!"; the daemon stores those words as they were sent.
     const stored = storedHistory(holding(plan), [
-      { at: new Date(5).toISOString(), by: 'owner', via: 'reply', text: '!A304 ok to build!' },
+      { at: new Date(5).toISOString(), by: 'owner', via: 'reply', text: '^A304 ok to build!' },
     ]);
     expect(replyApproval(holding(plan), stored)).toEqual({
       reply: 'ok to build!',
@@ -113,8 +113,8 @@ describe('the reply as the composer sends it, and the ask it answers', () => {
   });
 
   test('sets aside the item’s own reference in front, and only that one', () => {
-    expect(offered([plan], [owner('!A304 ok to build!')])?.reply).toBe('ok to build!');
-    expect(offered([plan], [owner('!A305 ok to build!')])).toBeNull();
+    expect(offered([plan], [owner('^A304 ok to build!')])?.reply).toBe('ok to build!');
+    expect(offered([plan], [owner('^A305 ok to build!')])).toBeNull();
   });
 
   test('counts the open card asks, never the one-ask mirror, and offers nothing without them', () => {

@@ -12,7 +12,7 @@ import { type RecordedCall, fakeClient } from '../../../support/app/fake-client.
 
 const ENTRIES: Readonly<Partial<Record<ReferenceCatalogPrefix, readonly { token: string; label: string }[]>>> = {
   '&': [{ token: 'F12', label: 'Ship autocomplete' }],
-  '!': [{ token: 'A3', label: 'Choose a renderer' }],
+  '^': [{ token: 'A3', label: 'Choose a renderer' }],
   '/': [{ token: 'floop', label: 'Review until every lens is satisfied.' }],
   $: [{ token: 'floop', label: 'Review until every lens is satisfied.' }],
 };
@@ -38,7 +38,7 @@ function CatalogProbe({
   const catalogs = useComposerReferenceCatalogs(client, ferretId, prefixes);
   onCatalogs?.(catalogs);
   const count = (prefix: ReferenceCatalogPrefix): string => String(catalogs.entries[prefix]?.length ?? '-');
-  return <output>{`${count('&')}:${count('!')}:${count('/')}:${count('$')}`}</output>;
+  return <output>{`${count('&')}:${count('^')}:${count('/')}:${count('$')}`}</output>;
 }
 
 const output = (view: ReactTestRenderer): string => view.root.findByType('output').children.join('');
@@ -76,15 +76,15 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('a prefix nobody provides reads as no entries, never as a failure', async () => {
     const catalogs = await readWith(call => ({ ...answerFor(call), provided: false, entries: [] }));
-    expect(catalogs?.entries).toEqual({ '&': [], '!': [], '/': [], $: [] });
-    expect(catalogs?.provided).toEqual({ '&': false, '!': false, '/': false, $: false });
+    expect(catalogs?.entries).toEqual({ '&': [], '^': [], '/': [], $: [] });
+    expect(catalogs?.provided).toEqual({ '&': false, '^': false, '/': false, $: false });
     expect(catalogs?.failures).toEqual({});
   });
 
   test('publishes a fast family before slow siblings without issuing a second read', async () => {
     let resolveAgenda: ((value: unknown) => void) | undefined;
     const client = fakeClient(call =>
-      call.query.prefix === '!'
+      call.query.prefix === '^'
         ? new Promise(resolve => {
             resolveAgenda = resolve;
           }).then(() => answerFor(call))
@@ -106,12 +106,12 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('keeps the other families when one read fails, and says so under that prefix', async () => {
     const catalogs = await readWith(call => {
-      if (call.query.prefix === '!') throw new Error('asks unavailable');
+      if (call.query.prefix === '^') throw new Error('asks unavailable');
       return answerFor(call);
     });
-    expect(catalogs?.entries['!']).toBeUndefined();
+    expect(catalogs?.entries['^']).toBeUndefined();
     expect(catalogs?.entries['&']).toHaveLength(1);
-    expect(catalogs?.failures).toEqual({ '!': 'asks unavailable' });
+    expect(catalogs?.failures).toEqual({ '^': 'asks unavailable' });
   });
 
   test('refuses an answer about another ferret without erasing the other families', async () => {
@@ -180,8 +180,8 @@ describe('readReferenceCatalog', () => {
 
   test('refuses an answer for another prefix', async () => {
     const client = fakeClient(call => ({ ...answerFor(call), prefix: '&' }));
-    await expect(readReferenceCatalog(client, 'ferret-a', '!', new AbortController().signal)).rejects.toThrow(
-      'the & catalog for !',
+    await expect(readReferenceCatalog(client, 'ferret-a', '^', new AbortController().signal)).rejects.toThrow(
+      'the & catalog for ^',
     );
   });
 
@@ -189,7 +189,7 @@ describe('readReferenceCatalog', () => {
     const client = fakeClient(call => answerFor(call));
     const controller = new AbortController();
     controller.abort(new Error('closed'));
-    await expect(readReferenceCatalog(client, 'ferret-a', '!', controller.signal)).rejects.toThrow('closed');
+    await expect(readReferenceCatalog(client, 'ferret-a', '^', controller.signal)).rejects.toThrow('closed');
     expect(client.calls).toEqual([]);
   });
 });

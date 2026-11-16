@@ -400,7 +400,7 @@ describe('the rest nudge job', () => {
     expect(sends.map(send => [send.sendId.startsWith('agenda-rest-nudge-f1-A1.'), send.senderKind])).toEqual([
       [true, 'daemon'],
     ]);
-    expect(sends[0]?.message).toContain('[attention check] The owner replied on !A1 «Ask A1»');
+    expect(sends[0]?.message).toContain('[attention check] The owner replied on ^A1 «Ask A1»');
   });
 
   test('never reaches a stopped ferret, and says nothing, and breaks nothing, when Conversation is off', async () => {
