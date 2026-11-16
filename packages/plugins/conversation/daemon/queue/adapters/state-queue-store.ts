@@ -1,8 +1,8 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
+  QUEUE_CARRY_STATE,
   QUEUE_SHARD_STATE,
   QUEUE_STATE,
-  QueueCarriedLineSchema,
   type QueueSegmentHeader,
   QueueSegmentHeaderSchema,
   type SegmentMessage,
@@ -11,16 +11,17 @@ import type { QueuedMessage } from '../../seams/protocol.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import { type HeldMessage, UNROTATED_SEGMENT, type QueueEvent, QueueEventSchema, SegmentFold } from '../lib/model.ts';
 import type { SessionQueueStore } from '../lib/ports.ts';
-import {
-  assertCarriable,
-  mergeByOrder,
-  ROTATE_EVENTS,
-  rotationOf,
-  SealedShards,
-  segmentRecords,
-  shardName,
-  shardThrough,
-} from '../lib/rotation.ts';
+import { mergeByOrder, ROTATE_EVENTS, rotationOf, SealedShards, shardName, shardThrough } from '../lib/rotation.ts';
+
+/** What the store tells whoever runs it when a rotation could not be written: once, until one succeeds again. */
+export interface RotationFailure {
+  readonly ferret: string;
+  readonly error: unknown;
+  /** Events in the live segment, which grows until a rotation succeeds. */
+  readonly events: number;
+  /** Bytes of the live file, when it could be measured. */
+  readonly bytes: number | undefined;
+}
 
 /** What the store keeps of one ferret between calls: the live file as it was last read or written, and the shards. */
 interface Held {
@@ -49,9 +50,11 @@ interface Held {
  * so each is parsed once and kept by name.
  *
  * ROTATION. Once the live segment holds `rotateEvents`, the messages that have left the queue for good are written to a
- * shard (a), then the live file is replaced with a header and a line for each message still open (b), both atomically. A crash
- * between the two leaves the old segment whole and authoritative — a reader uses only shards at or before the live
- * segment's `base` — and the next rotation rewrites that shard.
+ * shard and the ones still open to a carry file (`queue-carry/<ferret>~<base>.json`), both atomically (a); then the live
+ * file is replaced with a header alone (b). Nothing a rotation writes is a record of a capped file, so no message however
+ * long can stop one. A crash between (a) and (b) leaves the old segment whole and authoritative — a reader uses only
+ * shards at or before the live segment's `base` and only the carry file of that `base` — and the next rotation replaces them.
+ * A rotation that cannot be written (the disk) is reported once and tried again at the next append.
  *
  * ONE WRITER PER FERRET AT A TIME. Every append runs inside the ferret's queue lock (`SessionQueueStore`), which is what
  * lets a rotation read the live segment and replace it without an append in between, and lets an append trust the fold it kept.
@@ -60,10 +63,15 @@ export class StateQueueStore implements SessionQueueStore {
   private readonly held = new Map<string, Held>();
   /** Every shard parsed so far, by name: a shard is immutable, so it is parsed once. */
   private readonly parsed = new Map<string, readonly HeldMessage[]>();
+  /** The same for carry files. */
+  private readonly carries = new Map<string, readonly SegmentMessage[]>();
+  /** Ferrets whose last rotation failed and was reported, so a disk that stays down is said once. */
+  private readonly failing = new Set<string>();
 
   constructor(
     private readonly state: StatePort,
     private readonly rotateEvents: number = ROTATE_EVENTS,
+    private readonly rotationFailed: (failure: RotationFailure) => void = () => undefined,
   ) {}
 
   async messages(id: SessionId): Promise<readonly QueuedMessage[]> {
@@ -74,7 +82,6 @@ export class StateQueueStore implements SessionQueueStore {
 
   async append(id: SessionId, event: QueueEvent): Promise<void> {
     const held = await this.current(id);
-    this.assertFits(held.fold, event);
     await this.state.append<unknown>(QUEUE_STATE, event, id);
     const version = await this.state.version(QUEUE_STATE, id);
     // Folded in only when nobody has replaced what was kept while this waited; otherwise it is read again.
@@ -86,19 +93,16 @@ export class StateQueueStore implements SessionQueueStore {
     // The event is durable: a rotation that fails must not fail the append, and is tried again at the next one.
     const kept = this.held.get(id);
     if (kept === undefined || kept.fold.events < this.rotateEvents) return;
-    await this.rotate(id, kept).catch(() => this.held.delete(id));
-  }
-
-  /**
-   * Refuses, before anything is written, an event that would leave a message too big to carry through a rotation as one
-   * record. The messages it can make bigger are those it accepts and those it edits; nothing else grows one.
-   */
-  private assertFits(fold: SegmentFold, event: QueueEvent): void {
-    if (event.kind === 'enqueued') assertCarriable(event.message);
-    else if (event.kind === 'edited') {
-      const held = fold.message(event.id);
-      if (held !== undefined) assertCarriable({ ...held, text: event.text });
-    }
+    await this.rotate(id, kept).then(
+      () => void this.failing.delete(id),
+      async (error: unknown) => {
+        this.held.delete(id);
+        if (this.failing.has(id)) return;
+        this.failing.add(id);
+        const bytes = (await this.state.version(QUEUE_STATE, id).catch(() => undefined))?.size;
+        this.rotationFailed({ ferret: id, error, events: kept.fold.events, bytes });
+      },
+    );
   }
 
   /** The live segment and shards as they stand: what was kept when the file is unchanged, else read again. */
@@ -106,7 +110,8 @@ export class StateQueueStore implements SessionQueueStore {
     const version = await this.state.version(QUEUE_STATE, id);
     const kept = this.held.get(id);
     if (kept !== undefined && kept.etag === version?.etag) return kept;
-    const { header, carried, events } = await this.readLive(id);
+    const { header, events } = await this.readLive(id);
+    const carried = await this.carriedBy(id, header);
     const sealed = await this.sealedFor(id, header.base, kept?.sealed);
     const fold = new SegmentFold(header, carried, sealed.ids);
     for (const event of events) fold.apply(event);
@@ -115,29 +120,17 @@ export class StateQueueStore implements SessionQueueStore {
     return held;
   }
 
-  /** The live file: its header (the unrotated one when it has none), the messages it carries, and the events after them. */
-  private async readLive(
-    id: SessionId,
-  ): Promise<{ header: QueueSegmentHeader; carried: SegmentMessage[]; events: QueueEvent[] }> {
+  /** The live file: its header (the unrotated one when it has none) and the events after it. */
+  private async readLive(id: SessionId): Promise<{ header: QueueSegmentHeader; events: QueueEvent[] }> {
     let header: QueueSegmentHeader | undefined;
     let first = true;
-    let owed = 0;
-    const carried: SegmentMessage[] = [];
     const events: QueueEvent[] = [];
     for await (const line of this.state.lines<unknown>(QUEUE_STATE, id)) {
       // Only the first record that parses can be the header; a `segment` line anywhere else is not an event.
       const head = first ? QueueSegmentHeaderSchema.safeParse(line) : undefined;
       if (head?.success === true) {
         header = head.data;
-        owed = head.data.carried;
         first = false;
-        continue;
-      }
-      // The header says how many carried lines follow it; a `carried` line past that count is not an event either.
-      const kept = owed > 0 ? QueueCarriedLineSchema.safeParse(line) : undefined;
-      if (kept?.success === true) {
-        carried.push({ order: kept.data.order, message: kept.data.message });
-        owed -= 1;
         continue;
       }
       const parsed = QueueEventSchema.safeParse(line);
@@ -146,7 +139,25 @@ export class StateQueueStore implements SessionQueueStore {
         first = false;
       }
     }
-    return { header: header ?? UNROTATED_SEGMENT, carried, events };
+    return { header: header ?? UNROTATED_SEGMENT, events };
+  }
+
+  /** The open messages a segment carries: its carry file, the one named for its `base`, parsed once. */
+  private async carriedBy(id: SessionId, header: QueueSegmentHeader): Promise<readonly SegmentMessage[]> {
+    if (header.carried === 0) return [];
+    const name = shardName(id, header.base);
+    const known = this.carries.get(name);
+    if (known !== undefined) return known;
+    const read = await this.state.read(QUEUE_CARRY_STATE, name);
+    if (!read.ok) throw new Error(`queue carry file ${name} is unreadable: ${read.error.reason}`);
+    const messages = read.value?.messages;
+    // The header says how many open messages it carries: a file that is missing or holds another number is not its own.
+    if (messages?.length !== header.carried)
+      throw new Error(
+        `queue carry file ${name} should hold ${header.carried} messages and holds ${messages?.length ?? 'none'}`,
+      );
+    this.carries.set(name, messages);
+    return messages;
   }
 
   /** The shards a segment starting at `base` may use; the ones already parsed are not parsed again. */
@@ -177,25 +188,41 @@ export class StateQueueStore implements SessionQueueStore {
     return entries;
   }
 
-  /** Seals what is final into a shard, then replaces the live file with a header and one line for each message still open. */
+  /** Seals what is final into a shard and carries what is open in a file, then replaces the live file with the header alone. */
   private async rotate(id: SessionId, held: Held): Promise<void> {
     const rotation = rotationOf(held.fold);
-    const { through, sealed, header } = rotation;
+    const { through, sealed, header, carried } = rotation;
     // A shard past the live base is a rotation that never finished: it is not part of the queue, and goes.
     for (const name of await this.shardNames(id))
       if ((shardThrough(id, name) as number) > held.fold.header.base) await this.state.remove(QUEUE_SHARD_STATE, name);
     const name = shardName(id, through);
     if (sealed.length > 0)
       await this.state.write(QUEUE_SHARD_STATE, { format: 1, through, messages: [...sealed] }, name);
-    await this.state.write(QUEUE_STATE, segmentRecords(rotation) as never, id);
+    if (carried.length > 0)
+      await this.state.write(QUEUE_CARRY_STATE, { format: 1, base: through, messages: [...carried] }, name);
+    await this.state.write(QUEUE_STATE, [header] as never, id);
     if (sealed.length > 0) this.parsed.set(name, sealed);
+    if (carried.length > 0) this.carries.set(name, carried);
     const shards = held.sealed.with(through, sealed);
     const version = await this.state.version(QUEUE_STATE, id);
     this.held.set(id, {
       etag: version?.etag,
-      fold: new SegmentFold(header, rotation.carried, shards.ids),
+      fold: new SegmentFold(header, carried, shards.ids),
       sealed: shards,
       answer: undefined,
     });
+    // Housekeeping after the rotation stood: a file it could not remove is removed by the next one.
+    await this.dropOtherCarries(id, name).catch(() => undefined);
+  }
+
+  /** Removes this ferret's carry files other than the live one's: the last segment's, or a rotation that never finished. */
+  private async dropOtherCarries(id: SessionId, keep: string): Promise<void> {
+    const names = (await this.state.list(QUEUE_CARRY_STATE)).filter(
+      name => name !== keep && shardThrough(id, name) !== undefined,
+    );
+    for (const name of names) {
+      this.carries.delete(name);
+      await this.state.remove(QUEUE_CARRY_STATE, name);
+    }
   }
 }

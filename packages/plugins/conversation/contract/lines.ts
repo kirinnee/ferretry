@@ -82,17 +82,15 @@ export const SegmentMessageSchema = z.strictObject({
 export type SegmentMessage = z.infer<typeof SegmentMessageSchema>;
 
 /**
- * The FIRST line of a rotated `queue.jsonl` (a live SEGMENT). A queue is a log that is rotated, so it never grows
- * without bound: when the live segment reaches its limit, its FINAL messages are sealed into a shard
- * (`QueueShardSchema`) and its OPEN ones are carried into the next segment, one `carried` line each
- * (`QueueCarriedLineSchema`) straight after this header.
+ * The ONE line of a rotated `queue.jsonl` that is not an event: its FIRST (a live SEGMENT's header). A queue is a log
+ * that is rotated, so it never grows without bound: when the live segment reaches its limit, its FINAL messages are
+ * sealed into a shard (`QueueShardSchema`) and its OPEN ones are carried into the next segment in a carry file
+ * (`QueueCarrySchema`), which is a document and so has no record cap a long message could pass.
  *
- * - `base`: how many events came before this segment. The event on line `i` after the header and the carried lines
- *   (1-based) is at position `base + i`, which is a message's `version` — so versions survive a rotation unchanged.
- *   The header and the carried lines are not events and have no position.
+ * - `base`: how many events came before this segment. The event on line `i` after the header (1-based) is at position
+ *   `base + i`, which is a message's `version` — so versions survive a rotation unchanged.
  * - `accepted`: how many messages were first accepted before this segment (the next message's `order`).
- * - `carried`: how many `carried` lines follow. A count and not the messages themselves, because a record has a size cap
- *   (1 MiB) that a whole queue's open messages can pass but one message, which already fitted as an `enqueued` line, cannot.
+ * - `carried`: how many open messages the segment's carry file (named for its `base`) holds; none when 0.
  *
  * A file with no header is a segment with base 0, nothing accepted and nothing carried: every log written before
  * rotation existed reads exactly as it did.
@@ -105,15 +103,6 @@ export const QueueSegmentHeaderSchema = z.strictObject({
   carried: NonNegativeInteger,
 });
 export type QueueSegmentHeader = z.infer<typeof QueueSegmentHeaderSchema>;
-
-/** One message still open when its segment was rotated away, exactly as it stood (state, wait reason, `deliveredAs`, version). */
-export const QueueCarriedLineSchema = z.strictObject({
-  v: z.literal(1),
-  kind: z.literal('carried'),
-  order: NonNegativeInteger,
-  message: QueuedMessageSchema.required({ version: true }),
-});
-export type QueueCarriedLine = z.infer<typeof QueueCarriedLineSchema>;
 
 // sends.jsonl ───────────────────────────────────────────────────────────────────────────────────────────────────────
 

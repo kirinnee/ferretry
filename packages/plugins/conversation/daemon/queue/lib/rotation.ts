@@ -1,6 +1,4 @@
-import { MAX_STATE_RECORD_BYTES } from '@ferretry/kernel/contract';
-import type { QueueCarriedLine, QueueSegmentHeader } from '../../../contract/index.ts';
-import type { QueuedMessage } from '../../seams/protocol.ts';
+import type { QueueSegmentHeader } from '../../../contract/index.ts';
 import { type HeldMessage, isFinal, type SegmentFold } from './model.ts';
 
 /**
@@ -9,14 +7,14 @@ import { type HeldMessage, isFinal, type SegmentFold } from './model.ts';
  * WHY. A queue's log was append-only and never compacted: one ferret's reached 29.5 MB (228,788 lines) for 1,727
  * messages, and every look read and folded all of it, several times, every five seconds. The log is now a short LIVE
  * SEGMENT plus immutable SEALED SHARDS: when the segment reaches {@link ROTATE_EVENTS} events, the messages that have
- * left the queue for good are sealed into a shard, the ones still open are carried into the next segment (one line each, under a counting header),
+ * left the queue for good are sealed into a shard, the ones still open are carried into the next segment in a carry file,
  * and the segment starts over. A message keeps its `version` (a position over the WHOLE queue) and its `order`
  * (when it was first accepted) through any number of rotations, so nothing that keys on either notices.
  *
  * WHY 2,000. A message costs about six events (enqueued, waiting, typing, delivered, read, and the odd refusal), so a
  * segment holds a few hundred messages — a header and a live file of well under a megabyte, and a cold parse of a
  * few milliseconds (measured in the realworld timing test), which is all a look ever costs on a log that has seen
- * 200,000 events. A smaller number rotates, and so rewrites the carried lines and a shard, ever more often for no
+ * 200,000 events. A smaller number rotates, and so rewrites the carry file and a shard, ever more often for no
  * gain; a larger one gives back the cost this removes. A ferret that stays busy for a day rotates a few times.
  */
 export const ROTATE_EVENTS = 2_000;
@@ -27,19 +25,9 @@ export interface Rotation {
   readonly through: number;
   /** Messages that will never change again, in the order they were first accepted; may be none. */
   readonly sealed: readonly HeldMessage[];
-  /** The next live segment's header, and the open messages it carries, in the order they were first accepted. */
+  /** The next live segment's header, and the open messages its carry file holds, in the order they were first accepted. */
   readonly header: QueueSegmentHeader;
   readonly carried: readonly HeldMessage[];
-}
-
-/** The next live file, whole: the header, then one `carried` line for each open message. */
-export function segmentRecords(rotation: Rotation): readonly (QueueSegmentHeader | QueueCarriedLine)[] {
-  return [rotation.header, ...rotation.carried.map(carriedLine)];
-}
-
-/** One open message as the `carried` line that keeps it through a rotation. */
-function carriedLine(entry: HeldMessage): QueueCarriedLine {
-  return { v: 1, kind: 'carried', order: entry.order, message: entry.message };
 }
 
 /** Folds a segment into what is sealed and what is carried. Pure: the same segment always rotates the same way. */
@@ -52,47 +40,6 @@ export function rotationOf(fold: SegmentFold): Rotation {
     header: { v: 1, kind: 'segment', base: fold.position, accepted: fold.acceptedCount, carried: carried.length },
     carried,
   };
-}
-
-/**
- * Room kept under the record cap for what a message gains after it is accepted and before it is carried: its wait
- * reason and what it waits behind, the id it was delivered as, its state and times. All are bounded by an id or an
- * enum, a few hundred bytes at most.
- */
-export const CARRIED_HEADROOM_BYTES = 4 * 1024;
-
-/** A message that cannot be carried through a rotation inside one record, so the queue will not take it. */
-export class QueueMessageTooLarge extends Error {
-  constructor(
-    readonly messageId: string,
-    readonly bytes: number,
-    readonly allowed: number,
-  ) {
-    super(
-      `message ${messageId} is ${bytes} bytes as the queue would keep it, over the ${allowed} a record may hold: it is too long to queue`,
-    );
-    this.name = 'QueueMessageTooLarge';
-  }
-}
-
-/**
- * Refuses a message that could not be carried through a rotation as ONE record. A rotation writes each open message as its
- * own line, and a record over the kernel's cap is refused by the file: a rotation that cannot be written is retried at
- * every append while the log grows. So the guarantee is made where the message is accepted or edited — the only two
- * events that make a message bigger — and then holds for every rotation after: `message` here is the message AS IT WILL BE
- * (an edit's new text on the held message), and what it gains later is within {@link CARRIED_HEADROOM_BYTES}.
- */
-export function assertCarriable(message: QueuedMessage): void {
-  const line = JSON.stringify({
-    format: 1,
-    v: 1,
-    kind: 'carried',
-    order: Number.MAX_SAFE_INTEGER,
-    message: { ...message, version: Number.MAX_SAFE_INTEGER },
-  });
-  const bytes = new TextEncoder().encode(line).byteLength;
-  const allowed = MAX_STATE_RECORD_BYTES - CARRIED_HEADROOM_BYTES;
-  if (bytes > allowed) throw new QueueMessageTooLarge(message.id, bytes, allowed);
 }
 
 /** Two lists each in acceptance order, as one list in acceptance order. */

@@ -139,12 +139,6 @@ export interface JsonlRecords<Shape> {
   readonly unreadable: number;
 }
 
-/**
- * The most one record of a `jsonl` file may encode to (a line, excluding its newline). The appender and `write()` refuse a
- * bigger one and the reader skips it, so a writer that builds a record from data of its own sizes it against this.
- */
-export const MAX_STATE_RECORD_BYTES = 1 << 20; // 1 MiB
-
 /** The most `tail` reads from the end of a file. */
 export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
 

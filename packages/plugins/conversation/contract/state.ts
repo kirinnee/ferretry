@@ -37,6 +37,26 @@ export const QUEUE_SHARD_STATE = defineState({
   format: 1,
   schema: QueueShardSchema,
 });
+/**
+ * The OPEN messages a rotation carried into a live segment: `queue-carry/<ferret>~<base>.json`, `base` the live
+ * segment's header `base` and the only carry file it reads. A document rather than records of `queue.jsonl` because a
+ * record is capped (1 MiB) and the open messages together — or one long one that later gained a wait reason — can pass
+ * it, which would make every rotation fail. It is written before the live file is replaced, as a shard is; one whose base
+ * is not the live file's is a rotation that did not finish (or one that has been replaced) and is ignored, then removed.
+ */
+export const QueueCarrySchema = z.strictObject({
+  format: z.literal(1),
+  base: z.number().int().positive(),
+  messages: z.array(SegmentMessageSchema),
+});
+export type QueueCarry = z.infer<typeof QueueCarrySchema>;
+export const QUEUE_CARRY_STATE = defineState({
+  name: 'queue-carry',
+  path: 'queue-carry/*.json',
+  store: 'json',
+  format: 1,
+  schema: QueueCarrySchema,
+});
 /** Lines are the ledger's own records (`SendLineSchema`), last write per send id wins; `SendRecordSchema` is the wire view of one. */
 export const SENDS_STATE = defineState({ name: 'sends', path: '*/sends.jsonl', store: 'jsonl', format: 1 });
 /** What reached a ferret (`InboxLineSchema`), and what it sent (`OutboxLineSchema`). */
@@ -186,6 +206,7 @@ export const MESSAGE_TOKEN_KEY_STATE = defineState({
 export const CONVERSATION_STATE = [
   QUEUE_STATE,
   QUEUE_SHARD_STATE,
+  QUEUE_CARRY_STATE,
   SENDS_STATE,
   INBOX_STATE,
   OUTBOX_STATE,

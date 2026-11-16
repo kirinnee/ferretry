@@ -117,11 +117,6 @@ export class SegmentFold {
       this.held.set(message.id, { order, message });
   }
 
-  /** The message held here under `id`, as it stands now. */
-  message(id: string): VersionedMessage | undefined {
-    return this.held.get(id)?.message;
-  }
-
   /** How many events this segment has applied: the log's rotation counts these. */
   get events(): number {
     return this.applied;

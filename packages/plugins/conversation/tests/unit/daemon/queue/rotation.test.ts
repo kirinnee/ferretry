@@ -8,13 +8,9 @@ import {
   type VersionedMessage,
 } from '../../../../daemon/queue/lib/model.ts';
 import {
-  assertCarriable,
-  CARRIED_HEADROOM_BYTES,
   mergeByOrder,
-  QueueMessageTooLarge,
   ROTATE_EVENTS,
   rotationOf,
-  segmentRecords,
   SealedShards,
   shardName,
   shardThrough,
@@ -156,45 +152,5 @@ describe('the shards a segment may use', () => {
     should(after.base).equal(9);
     should(after.ordered.map(entry => entry.message.id)).eql(['a', 'b']);
     should(before.ordered.map(entry => entry.message.id)).eql(['a']);
-  });
-});
-
-describe('the file a rotation leaves', () => {
-  it('should be a header that counts the open messages, then one carried line for each', () => {
-    const fold = new SegmentFold();
-    for (const event of [enqueued('a'), enqueued('b'), moved('a', 'cancelled')]) fold.apply(event);
-
-    const records = segmentRecords(rotationOf(fold));
-
-    should(records.map(record => record.kind)).eql(['segment', 'carried']);
-    should(records[0]).eql({ v: 1, kind: 'segment', base: 3, accepted: 2, carried: 1 });
-    should(records[1]).containEql({ v: 1, kind: 'carried', order: 1 });
-  });
-});
-
-describe('a message too long to carry', () => {
-  const longer = (bytes: number): VersionedMessage => ({ ...held('big', 0).message, text: 'x'.repeat(bytes) });
-
-  it('should be taken while its carried line fits a record with the headroom to spare, and refused past it', () => {
-    const cap = 1 << 20;
-    const envelope = 400;
-
-    assertCarriable(longer(cap - CARRIED_HEADROOM_BYTES - envelope));
-    should(() => assertCarriable(longer(cap - CARRIED_HEADROOM_BYTES))).throw(QueueMessageTooLarge);
-  });
-
-  it('should say which message, how big it would be and what is allowed', () => {
-    let caught: unknown;
-    try {
-      assertCarriable(longer(1 << 20));
-    } catch (error) {
-      caught = error;
-    }
-
-    should(caught).be.instanceOf(QueueMessageTooLarge);
-    const refused = caught as QueueMessageTooLarge;
-    should(refused.messageId).equal('big');
-    should(refused.bytes).be.above(refused.allowed);
-    should(refused.message).match(/too long to queue/);
   });
 });

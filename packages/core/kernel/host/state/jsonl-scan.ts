@@ -6,10 +6,9 @@
  *
  * Pure: bytes in, lines out.
  */
-import { MAX_STATE_RECORD_BYTES } from '../../contract/index.ts';
 
 /** Maximum encoded size of one record: a line excluding its newline. The appender enforces the same bound. */
-export const MAX_JSONL_RECORD_BYTES = MAX_STATE_RECORD_BYTES;
+export const MAX_JSONL_RECORD_BYTES = 1 << 20; // 1 MiB
 
 export class JsonlRecordTooLargeError extends Error {
   constructor(

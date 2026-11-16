@@ -283,16 +283,6 @@ describe('a segment of a rotated log', () => {
     should(fold.acceptedCount).equal(7);
   });
 
-  it('should answer the message it holds under an id as it stands now, and none for an id it does not hold', () => {
-    const open = [carried('open', 0, 10)];
-    const fold = new SegmentFold(header(open), open);
-    fold.apply(moved('open', 'cancelled', 1));
-
-    should(fold.message('open')?.state).equal('cancelled');
-    should(fold.message('open')?.version).equal(101);
-    should(fold.message('other')).equal(undefined);
-  });
-
   it('should leave a message that an illegal line did not change at its version', () => {
     const open = [carried('open', 0, 10)];
     const fold = new SegmentFold(header(open), open);
