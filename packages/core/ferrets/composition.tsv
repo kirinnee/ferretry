@@ -8,7 +8,7 @@ composition	contract/port.ts	-	-	the FerretsApi port and its token
 composition	contract/slots.ts	-	-	the app slots Ferrets offers (barrel of the generated list)
 composition	contract/state.ts	-	-	the declared state files (barrel of the generated list)
 composition	contract/testing/index.ts	-	-	the Ferrets fake every consumer test uses
-oversize	daemon/adapters/storage/session-storage.ts	1580	2026-12-16	one storage adapter; split by file family when next touched
+oversize	daemon/adapters/storage/session-storage.ts	1600	2026-12-16	one storage adapter; +16 for the journal-version boot skip (heap fix); the split by file family is its own unit (c58-104)
 composition	daemon/index.ts	-	-	implementDaemon shell: the composition root of the Ferrets daemon
 composition	daemon/lib/ferrets/service.ts	-	-	the lifecycle class; H5 U4/U6 slice it, a lifecycle change still edits it
 oversize	daemon/lib/ferrets/service.ts	2950	2026-11-30	lifecycle class; H5 U4/U6 are slicing it, 10 of 80 merges edit it

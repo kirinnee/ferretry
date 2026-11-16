@@ -20,6 +20,9 @@ describe('the session index rebuilt in slices', () => {
   it('should list every session again after the cache file was lost, an equal index to the one before', async () => {
     // Arrange
     const before = await generatedFleet(12);
+    // An append records no journal version (another writer may land a line in between); a full read does, and the
+    // rebuild reads every journal in full. One reconcile puts the "before" index on the same footing.
+    await before.storage.reconcile();
     const listed = before.storage.listSessions();
     const lost = await restartWithCacheLost(before);
     should(lost.storage.listSessions()).deepEqual([]);

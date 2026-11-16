@@ -214,7 +214,7 @@ export function agentConfig(sources: AgentConfigSources): AgentConfig {
         return { summary: `Wrote ${path}; it is in effect.`, etag: outcome.etag };
       case 'held':
         return {
-          summary: `Wrote ${path}, but it loosens what this machine allows (${outcome.sentences.join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner with a card whose Allow confirms it: ${sources.binary} agenda add "<the ask>" --title "<title>" --context "<the facts around it>" --confirms ${path}.`,
+          summary: `Wrote ${path}, but it loosens what this machine allows (${outcome.sentences.join('; ')}), so it waits for the owner to confirm it; the earlier version stays in effect until then. Tell the owner with an item whose Allow confirms it: ${sources.binary} agenda add "<the ask>" --title "<title>" --context "<the facts around it>" --confirms ${path}.`,
           etag: outcome.etag,
         };
       case 'conflict':

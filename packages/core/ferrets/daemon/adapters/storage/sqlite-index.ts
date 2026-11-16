@@ -15,7 +15,7 @@ import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } fr
  */
 
 const SESSION_COLUMNS = `id, status, created_at, updated_at, last_sequence, journal_line,
-  journal_device, journal_inode, journal_size, journal_mtime_ms`;
+  journal_device, journal_inode, journal_size, journal_mtime_ms, journal_version`;
 
 const TABLES = [
   `CREATE TABLE IF NOT EXISTS sessions (
@@ -29,6 +29,8 @@ const TABLES = [
       journal_inode TEXT,
       journal_size INTEGER CHECK (journal_size IS NULL OR journal_size >= 0),
       journal_mtime_ms INTEGER,
+      journal_version TEXT,
+      CHECK (journal_version IS NULL OR journal_device IS NOT NULL),
       CHECK ((journal_device IS NULL AND journal_inode IS NULL AND journal_size IS NULL AND journal_mtime_ms IS NULL)
           OR (journal_device IS NOT NULL AND journal_inode IS NOT NULL AND journal_size IS NOT NULL AND journal_mtime_ms IS NOT NULL))
     )`,
@@ -59,6 +61,7 @@ interface SessionRow {
   readonly journal_inode: string | null;
   readonly journal_size: number | null;
   readonly journal_mtime_ms: number | null;
+  readonly journal_version: string | null;
 }
 
 interface EventRow {
@@ -104,6 +107,7 @@ function sessionFromRow(row: SessionRow): IndexedSession {
     lastSequence: row.last_sequence,
     journalLine: row.journal_line,
     journal: journalFromRow(row),
+    journalVersion: row.journal_version ?? undefined,
   };
 }
 
@@ -120,7 +124,7 @@ function eventFromRow(row: EventRow): EventPointer {
 
 function upsertSession(database: SqliteHandle, session: IndexedSession): void {
   database.run(
-    `INSERT INTO sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          status = excluded.status,
          created_at = excluded.created_at,
@@ -130,7 +134,8 @@ function upsertSession(database: SqliteHandle, session: IndexedSession): void {
          journal_device = excluded.journal_device,
          journal_inode = excluded.journal_inode,
          journal_size = excluded.journal_size,
-         journal_mtime_ms = excluded.journal_mtime_ms`,
+         journal_mtime_ms = excluded.journal_mtime_ms,
+         journal_version = excluded.journal_version`,
     [
       session.id,
       session.status ?? null,
@@ -142,6 +147,7 @@ function upsertSession(database: SqliteHandle, session: IndexedSession): void {
       session.journal?.inode ?? null,
       session.journal?.size ?? null,
       session.journal?.modifiedAtMs ?? null,
+      session.journalVersion ?? null,
     ],
   );
 }

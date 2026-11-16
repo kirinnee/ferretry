@@ -731,8 +731,8 @@ export default definePlugin({
       }),
     ],
     app: [
-      appAction('task.move', { on: 'card', label: 'Move', calls: 'POST /v1/board/tasks/:taskId' }),
-      appAction('task.start', { on: 'card', label: 'Start a ferret', calls: 'POST /v1/board/tasks/:taskId/start' }),
+      appAction('task.move', { on: 'task', label: 'Move', calls: 'POST /v1/board/tasks/:taskId' }),
+      appAction('task.start', { on: 'task', label: 'Start a ferret', calls: 'POST /v1/board/tasks/:taskId/start' }),
     ],
   },
 
