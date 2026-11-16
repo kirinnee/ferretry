@@ -106,6 +106,8 @@ async function entries(core: ClaudeCore, ferret: FerretId): Promise<readonly Tra
   return (await window(core, ferret)).entries;
 }
 
+// The 1 s poll on the injected clock IS the chosen design for following a transcript (britnee ruling, 2026-11-16);
+// it is not a stand-in for a directory watch.
 async function* follow(core: ClaudeCore, ferret: FerretId, signal: AbortSignal): AsyncIterable<TranscriptEntry> {
   const seen = new Set<string>();
   while (!signal.aborted) {

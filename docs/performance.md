@@ -18,7 +18,9 @@ Every number covers only the window it measured.
 - **CPU, memory, system calls, context switches** for the daemon process. Children's CPU and read/write
   system calls are measured on Linux only.
 - **Event loop.** How late its timer ticks fired (p50, p95, max), and the longest stalls with what was
-  running and where the sampled stack spent the time.
+  running and where the sampled stack spent the time. A stall reported on `GET /healthz` and in the daemon log is
+  different: it carries no stacks (and no named work in flight), only how long the loop was silent and what boot
+  step the watchdog was in. That is by design (ruling "8 accept", 2026-11-16).
 - **Hot functions and stacks.** Where the main thread's samples went: what the CPU time was spent on.
 - **Child processes** per minute, by program and subcommand (`tmux capture-pane`, `ps`).
 - **Timers and background work** (the turn watcher, the declared-wait watcher, analytics, …): how often
