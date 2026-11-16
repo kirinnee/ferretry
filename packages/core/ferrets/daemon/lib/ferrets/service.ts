@@ -53,6 +53,8 @@ import type {
   FerretStartedPayload,
   FerretId,
   FerretRecord,
+  FerretRuntimeRecord,
+  FerretRuntimeRename,
   FerretAddress,
   FerretsApi,
   FerretState,
@@ -433,6 +435,16 @@ export interface FerretSessionPort {
    * and writing atomically. The value reaching it has already been parsed by the service.
    */
   setCompactAt?(ferret: FerretId, value: 'auto' | number | undefined): Promise<void>;
+  /**
+   * What the session config says about the runtime this ferret launched as (`agent`, `command[0]`), or `undefined` when
+   * the document is missing or is not an object. Rejects when it cannot be read.
+   */
+  runtimeFacts?(ferret: FerretId): Promise<{ readonly agent?: string; readonly executable?: string } | undefined>;
+  /**
+   * Re-points the session config's `agent` and `command[0]` from the old runtime to the new one under the storage's
+   * locked read-modify-write, keeping every other field. Answers whether the config named the old runtime (and so moved).
+   */
+  repointRuntime?(ferret: FerretId, rename: FerretRuntimeRename): Promise<boolean>;
   /**
    * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
    * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
@@ -1764,12 +1776,41 @@ export class FerretsService implements FerretsApi {
         throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
       return harness.transcript;
     };
+    /**
+     * Whether this ferret's harness takes messages through its own protocol (codex-protocol-send), for this text. A
+     * native slash command (`/compact`) is the TUI's to parse, so it is always typed.
+     */
+    const injects = (text: string): boolean => {
+      const record = this.registry.get(ferret);
+      const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+      return harness?.inject !== undefined && !text.trimStart().startsWith('/');
+    };
+    /**
+     * The harness's own protocol (codex-protocol-send): types nothing and reads no screen, so an unreadable frame cannot
+     * stall the send. Not wrapped in an act: it types nothing (the act deadlock the notes above describe is about keys).
+     * A throw is `unavailable`: nothing reached the harness's protocol call's acceptance.
+     */
+    const inject = async (text: string): Promise<'handed' | 'unavailable' | 'uncertain'> => {
+      const record = this.registry.get(ferret);
+      const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+      if (harness?.inject === undefined) return 'unavailable';
+      try {
+        return await harness.inject(ferret, text);
+      } catch {
+        return 'unavailable';
+      }
+    };
     const attachmentsFolder = this.ports.session?.attachmentsFolder?.bind(this.ports.session);
     const attach = this.ports.session?.attach?.bind(this.ports.session);
     return {
       deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
+        // A harness that takes messages through its own protocol is answered BUSY, nothing typed or handed: Conversation
+        // then takes its queue path, which marks the row as a queued, busy-typed send before `queue` hands it over. A
+        // hand-over looks like nothing on the pane or in the transcript until the agent's current turn ends, and a row
+        // that did not say "queued" was read as absent at its deadline and handed again — a second copy (review #F4344).
+        if (injects(delivery.text)) return err({ refused: 'not_ready', why: 'busy' });
         // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
         // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
         const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
@@ -1790,6 +1831,26 @@ export class FerretsService implements FerretsApi {
         const found = pane();
         if (!found.ok) return found;
         const { handle, runner } = found.value;
+        if (injects(text)) {
+          // Handed to the harness's own protocol: the text as given goes, nothing is typed, and where it landed is for
+          // the transcript to say (`left`). Cut off after it may have been accepted: unconfirmed, never sent again.
+          const handed = await inject(text);
+          if (handed === 'uncertain') return err({ unconfirmed: true, stranded: false });
+          if (handed === 'handed') {
+            this.ports.delivered?.(ferret);
+            return ok('left');
+          }
+          // Not handed, and nothing sent: typed as it always was. `deliver` answered busy without looking, so the pane
+          // is looked at now: an idle one is typed at its prompt (where it lands is again the transcript's to say), a
+          // working one goes to its own queue below.
+          const look = await runner.look?.(handle).catch(() => undefined);
+          if (!midTurn(look)) {
+            const delivered = await written(async () => await runner.deliver(handle, { text }));
+            if (!delivered.ok) return delivered;
+            this.ports.delivered?.(ferret);
+            return ok('left');
+          }
+        }
         const queue = runner.queue?.bind(runner);
         if (queue === undefined) return err({ refused: 'plugin_unavailable' });
         // Ruling #45 (today's `native-file` path): a long message goes by file, written BEFORE any key, and the queue
@@ -2049,6 +2110,54 @@ export class FerretsService implements FerretsApi {
         await this.saveDetails(ferret, { ...before, options });
       }
     }
+  }
+
+  /** Every ferret and the runtime it launched as (`FerretsApi.runtimeRecords`): the record, with the session config's words. */
+  async runtimeRecords(): Promise<readonly FerretRuntimeRecord[]> {
+    await this.ports.ready?.();
+    const read = this.ports.session?.runtimeFacts?.bind(this.ports.session);
+    const rows = await Promise.all(
+      this.registry.list().map(async (ferret): Promise<FerretRuntimeRecord | undefined> => {
+        const facts = await read?.(ferret.id).catch(() => undefined);
+        const agent = facts?.agent ?? ferret.runtime;
+        if (agent === undefined) return undefined;
+        return {
+          id: ferret.id,
+          name: ferret.name,
+          harness: ferret.harness === 'codex' ? 'codex' : 'claude',
+          agent,
+          ...(facts?.executable === undefined ? {} : { executable: facts.executable }),
+          state: ferret.state,
+        };
+      }),
+    );
+    return rows.filter(row => row !== undefined);
+  }
+
+  /**
+   * Re-points every ferret on a renamed runtime (`FerretsApi.repointRuntime`). Each ferret is rewritten on its own mutation
+   * lane, so a start, stop or resume of it is never interleaved: the record's `runtime` through the ordinary durable write,
+   * the session config's `agent` and `command[0]` through the session storage's locked read-modify-write. A ferret that
+   * does not name the old runtime is not written at all, and one that cannot be rewritten is skipped, never reported moved.
+   */
+  async repointRuntime(rename: FerretRuntimeRename): Promise<number> {
+    await this.ports.ready?.();
+    let moved = 0;
+    for (const { id } of this.registry.list()) {
+      try {
+        const done = await this.serial.run(id, async () => {
+          const configMoved = (await this.ports.session?.repointRuntime?.(id, rename)) ?? false;
+          const record = this.registry.get(id);
+          if (record?.runtime !== rename.from) return configMoved;
+          await this.write({ ...record, runtime: rename.to }, record.state, 'moved');
+          return true;
+        });
+        if (done) moved += 1;
+      } catch {
+        // One ferret that cannot be rewritten still resolves through the runtime's former names; the rest still move.
+      }
+    }
+    return moved;
   }
 
   /**

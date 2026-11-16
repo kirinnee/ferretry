@@ -4949,7 +4949,7 @@ pwa/harness/sherpa-smoke-page.ts	voice	249	voice app + workers
 pwa/harness/sherpa-smoke.ts	voice	249	voice app + workers
 pwa/harness/stt-speed-bench-page.ts	voice	249	voice app + workers
 pwa/harness/stt-speed-bench.ts	voice	249	voice app + workers
-pwa/harness/turn-endpointer-noise.ts	voice	249	voice app + workers
+pwa/harness/turn-endpointer-noise.ts	drop+voice	249	turn endpointer, never mounted (dropped by owner, !A525)
 pwa/harness/viewport-matrix.ts	app-shell	267	pwa remainder: shell, UI primitives, router, theme, sealed client, dev harness
 pwa/harness/vosk-smoke-page.ts	voice	249	voice app + workers
 pwa/harness/vosk-smoke.ts	voice	249	voice app + workers
@@ -6197,8 +6197,8 @@ pwa/src/lib/voice-chat/reply-picker.ts	voice	237	voice app
 pwa/src/lib/voice-chat/speakable.ts	voice	237	voice app
 pwa/src/lib/voice-chat/speech-chunks.ts	voice	237	voice app
 pwa/src/lib/voice-chat/speech-synthesis.ts	voice	237	voice app
-pwa/src/lib/voice-chat/turn-endpointer-scoring.ts	voice	237	voice app
-pwa/src/lib/voice-chat/turn-endpointer.ts	voice	237	voice app
+pwa/src/lib/voice-chat/turn-endpointer-scoring.ts	drop+voice	237	turn endpointer, never mounted (dropped by owner, !A525)
+pwa/src/lib/voice-chat/turn-endpointer.ts	drop+voice	237	turn endpointer, never mounted (dropped by owner, !A525)
 pwa/src/lib/voice-chat/voice-choice.ts	voice	237	voice app
 pwa/src/lib/waiting-fold.ts	agenda	265	agenda app
 pwa/src/lib/web-terminals.ts	terminals	239	terminals app
@@ -7622,8 +7622,8 @@ pwa/tests/unit/voice-chat-read-aloud.test.ts	voice	237	voice app
 pwa/tests/unit/voice-chat-reply-picker.test.ts	voice	237	voice app
 pwa/tests/unit/voice-chat-speakable.test.ts	voice	237	voice app
 pwa/tests/unit/voice-chat-speech-synthesis.test.ts	voice	237	voice app
-pwa/tests/unit/voice-chat/turn-endpointer-scoring.test.ts	voice	237	voice app
-pwa/tests/unit/voice-chat/turn-endpointer.test.ts	voice	237	voice app
+pwa/tests/unit/voice-chat/turn-endpointer-scoring.test.ts	drop+voice	237	turn endpointer, never mounted (dropped by owner, !A525)
+pwa/tests/unit/voice-chat/turn-endpointer.test.ts	drop+voice	237	turn endpointer, never mounted (dropped by owner, !A525)
 pwa/tests/unit/waiting-fold.test.ts	agenda	265	agenda app
 pwa/tests/unit/web-terminals.test.ts	terminals	239	terminals app
 pwa/tests/unit/webrtc-carrier.test.ts	connections	230	connections app

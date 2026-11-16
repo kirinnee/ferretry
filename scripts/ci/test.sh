@@ -81,24 +81,8 @@ files=()
 # serially and is judged here, exactly as before.
 if [[ -n ${group} ]]; then
   groups="config/test-groups.json"
-  jq -e --arg mode "${mode}" --arg group "${group}" '.[$mode] // [] | any(.name == $group)' "${groups}" >/dev/null ||
-    { echo "❌ ${mode} has no test group ${group} in ${groups}" >&2 && exit 2; }
-  # The same files the bunfig's `pathIgnorePatterns` leave the tier, which is why the other tier's
-  # directory and SIT are the only exclusions. Bun would also run `*.spec.*`, `*_test.*` and
-  # `*_spec.*` files; nothing here is named like that, and a group must not silently skip one.
-  other_tier="unit"
-  [[ ${mode} == "unit" ]] && other_tier="integration"
-  stray="$(find packages -path '*/node_modules' -prune -o -type f \( -name '*.spec.*' -o -name '*_test.*' -o -name '*_spec.*' -o -name '*.test.js' -o -name '*.test.jsx' \) -print | head -n 1)"
-  [[ -n ${stray} ]] && echo "❌ test groups only collect *.test.ts(x) files, and Bun would also run ${stray}" >&2 && exit 1
-  mapfile -t files < <(
-    find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) \
-      -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -print | sort |
-      jq -R -r --slurpfile groups "${groups}" --arg mode "${mode}" --arg group "${group}" '
-        . as $file
-        | [$groups[0][$mode][] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name
-        | select(. == $group) | "./" + $file
-      '
-  )
+  # The group's files (and the changed-plugin scope's narrowing of them) are group-files.sh's.
+  mapfile -t files < <(./scripts/ci/group-files.sh "${mode}" "${group}")
   [[ ${#files[@]} -eq 0 ]] && echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
   coverage_file="coverage/${mode}/groups/${group}/lcov.info"
   # `--coverage-dir` loses to the bunfig's `coverageDir`, so the group gets a copy that names its own.

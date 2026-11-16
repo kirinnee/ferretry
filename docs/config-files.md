@@ -902,8 +902,13 @@ stays in effect until the owner confirms or discards it. An owner's own edit is 
 `permissionMode` means `skip`** (owner decision !A525: Claude runs with `--permission-mode bypassPermissions`, Codex
 with `approval_policy=never` and `sandbox_mode=danger-full-access`); a file that says `auto` keeps `auto`, and nothing
 rewrites an explicit value. The permission hold therefore judges explicit values: `auto` turned into `skip`, or `auto`
-with the key removed (which reads as `skip`), is held; no value turned into `auto` asks more and is not held. Not
-reached yet, each a declared GAP:
+with the key removed (which reads as `skip`), is held; no value turned into `auto` asks more and is not held.
+
+Both files also take `questionTool: true` (default `false`, owner !A527): by default no ferret has the harness's
+question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
+**interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
+`--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
+so it is **never held**. Not reached yet, each a declared GAP:
 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
