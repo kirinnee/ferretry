@@ -32,7 +32,7 @@ const KNOWN: Readonly<Record<string, { readonly label: string; readonly rank: nu
   files: { label: 'Files', rank: 5 },
   'ferret-agenda': { label: 'Agenda', rank: 6 },
   queue: { label: 'Queue', rank: 6 },
-  'cards-of-ferret': { label: 'Cards', rank: 6 },
+  'cards-of-ferret': { label: 'Tasks', rank: 6 },
   'ferret-warden': { label: 'Warden', rank: 6 },
   'mcp-servers': { label: 'MCP', rank: 6 },
   helpers: { label: 'Helpers', rank: 6 },

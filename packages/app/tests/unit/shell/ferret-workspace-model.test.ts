@@ -48,7 +48,7 @@ describe('the phone ferret page’s chips', () => {
     expect(tabs.slice(6).map(tab => tab.label)).toEqual([
       'Agenda',
       'Queue',
-      'Cards',
+      'Tasks',
       'Warden',
       'MCP',
       'Helpers',

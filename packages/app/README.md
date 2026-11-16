@@ -55,7 +55,7 @@ export default provideToShell(implementApp(manifest, { build }), {
 ## The shared UI kit
 
 `@ferretry/app/ui` is today's PWA primitives and feature-free hooks, copied once so plugins import them instead of
-re-copying: `Button`, `Badge`, `Card`, `BottomSheet`, `ContextMenu`, `SheetTabs`, `UnderlineTabs`, `PickerCombobox`,
+re-copying: `Button`, `Badge`, `BottomSheet`, `ContextMenu`, `SheetTabs`, `UnderlineTabs`, `PickerCombobox`,
 `CommandBar`, `Spinner`, `useDialogFocus`, `useInputModality`, `useLayoutMode`, `cn`, the Trusted Types policies
 (`trustedHighlight`, `trustedWorkerUrl`, `fragmentParsingPolicy`), and the rest. The stylesheet
 (`src/ui/design-system.css`) and Tailwind are loaded once by the shell; `tailwind.config.ts` scans every plugin's
