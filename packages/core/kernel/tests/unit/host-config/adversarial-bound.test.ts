@@ -2,8 +2,8 @@
  * Every hostile shape a configuration file can take, through every door a text comes in by (`config_validate`,
  * `config_write`, a reload of a hand-written file): each answers, never throws, and keeps the last good version in
  * effect. And a text over the cap is refused before anything reads it, in one fixed sentence. Boot is covered by
- * `../host/config-alias-boot.test.ts` with the same shapes. The shapes here are small: the answers are the same at any
- * size, and the bound at the size cap is `tests/perf/host-config/adversarial-bound.test.ts`.
+ * `../host/config-alias-boot.test.ts` with the same shapes. The shapes here are small (a few that change path with size are built at the size that crosses it), and the bound and
+ * the answers at the size cap are `tests/perf/host-config/adversarial-bound.test.ts`.
  */
 import { describe, expect, test } from 'bun:test';
 import type { AgentConfigCall } from '../../../contract/agent-config.ts';
@@ -24,13 +24,21 @@ import {
   wordShapes,
   world,
 } from './adversarial-support.ts';
-import { adversarialTexts, PRIVATE_WORD } from './adversarial-texts.ts';
+import { adversarialTexts, compactAdversarialTexts, PRIVATE_WORD, REFUSED_AT_THE_CAP } from './adversarial-texts.ts';
 import { openDef } from './masked-support.ts';
 
 /** The size the shapes are built to here: small, so time is irrelevant. */
 const SMALL = 8 * 1024;
 
 describe('the hostile shapes themselves', () => {
+  test('a shape that the size cap refuses is built, small, at the size that makes it the same refusal', () => {
+    const small = new Map(compactAdversarialTexts(SMALL));
+    for (const [label, { message }] of REFUSED_AT_THE_CAP) {
+      const read = readConfigText(small.get(label) ?? '');
+      expect({ label, refusal: read.ok ? undefined : read.errors[0]?.message }).toEqual({ label, refusal: message });
+    }
+  });
+
   test('each is at most the cap, and there is one of every kind the reviews found', () => {
     const shapes = adversarialTexts(CONFIG_FILE_MAX_BYTES);
     for (const [, text] of shapes) expect(configTextTooLarge(text)).toBe(false);
@@ -39,7 +47,7 @@ describe('the hostile shapes themselves', () => {
 });
 
 describe('every hostile shape answers, at every door', () => {
-  for (const [label, text] of adversarialTexts(SMALL)) {
+  for (const [label, text] of compactAdversarialTexts(SMALL)) {
     test(`T-0033 T-0034 ${label}: validate and write each answer, and the file is in effect or as it was`, async () => {
       const { fs, files, agent } = await prepared();
       for (const tool of ['config.validate', 'config.write'] as const)

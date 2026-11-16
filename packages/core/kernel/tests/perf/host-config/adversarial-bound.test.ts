@@ -1,7 +1,7 @@
 /**
  * The SPEED half of `../../unit/host-config/adversarial-bound.test.ts`: every hostile shape at the size cap answers
  * within one hard bound through every door a text comes in by, and a text far over the cap is refused as fast as one at
- * it. The answers themselves (the last good version stays, the fixed sentence) are unit's, on small shapes.
+ * it. The answers (the last good version stays, the fixed sentence) are held here at the size cap and in unit on small shapes.
  */
 import { describe, expect, test } from 'bun:test';
 import { findFlagSecrets } from '@ferretry/std/credential-words';
@@ -18,7 +18,7 @@ import {
   voiceDef,
   wordShapes,
 } from '../../unit/host-config/adversarial-support.ts';
-import { adversarialTexts, PRIVATE_WORD } from '../../unit/host-config/adversarial-texts.ts';
+import { adversarialTexts, PRIVATE_WORD, REFUSED_AT_THE_CAP } from '../../unit/host-config/adversarial-texts.ts';
 import { openDef } from '../../unit/host-config/masked-support.ts';
 
 /** A hard bound per call, far above one linear pass: the slow shapes this guards took seconds to days at this size. */
@@ -69,16 +69,22 @@ describe('every hostile shape at the size cap answers within the bound, at every
   for (const [label, text] of adversarialTexts(CONFIG_FILE_MAX_BYTES)) {
     test(`T-0033 T-0034 ${label}: validate and write each answer in under ${BOUND_MS} ms`, async () => {
       const first = await prepared();
+      let last = first;
       let slowest = 0;
       for (const tool of ['config.validate', 'config.write'] as const) {
         const spent = await bestOf(async attempt => {
-          const world = attempt === 0 ? first : await prepared();
-          return await timed(() => world.agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding));
+          last = attempt === 0 ? first : await prepared();
+          return await timed(() => last.agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding));
         });
         slowest = Math.max(slowest, spent);
         expect(spent).toBeLessThan(BOUND_MS);
       }
       clockReads(label, slowest);
+      // Either the text checked and is in effect, or it was refused and the file is as it was.
+      const { fs, files } = last;
+      const now = await fs.readText(VOICE);
+      expect(now === text || now === 'limit: 7\n').toBe(true);
+      if (now !== text) expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });
 
     test(`T-0032 ${label}, hand-written: the reload and config_read each answer in under ${BOUND_MS} ms`, async () => {
@@ -91,6 +97,9 @@ describe('every hostile shape at the size cap answers within the bound, at every
       });
       clockReads(label, reloaded);
       expect(reloaded).toBeLessThan(BOUND_MS);
+      const { files } = last;
+      const state = files.status().files.find(file => file.path === 'voice.yaml')?.state;
+      if (state !== 'ok') expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
       const read = await bestOf(async attempt => {
         let target = last;
         if (attempt > 0) {
@@ -103,6 +112,15 @@ describe('every hostile shape at the size cap answers within the bound, at every
       expect(read).toBeLessThan(BOUND_MS);
     });
   }
+});
+
+describe('the shapes whose answer depends on their size are refused at the cap as the unit tier refuses them small', () => {
+  const full = new Map(adversarialTexts(CONFIG_FILE_MAX_BYTES));
+  for (const [label, { message }] of REFUSED_AT_THE_CAP)
+    test(`${label}: read at the cap, the first refusal is "${message}"`, () => {
+      const read = readConfigText(full.get(label) ?? '');
+      expect(read.ok ? undefined : read.errors[0]?.message).toBe(message);
+    });
 });
 
 describe('a text over the size cap is refused before anything reads it, as fast as one at it', () => {

@@ -1,7 +1,7 @@
 /**
  * The SPEED / SIZE half of `../../unit/host-config/check-memo.test.ts`: 2 000 refused writes of 250 KiB leave the heap
  * flat, and a patch write of a 256 KiB broken file costs one parse, not two. What stays in the memo, and that the patch
- * lands, are unit's.
+ * lands, are held here at the full size and in unit at a small one.
  */
 import { describe, expect, test } from 'bun:test';
 import { CONFIG_FILE_MAX_BYTES, readConfigText } from '@ferretry/std/yaml';
@@ -18,11 +18,12 @@ describe('the memo holds only what a load settled', () => {
     const { files, checks } = world();
     await files.reload();
     // Warm up (250 KiB each), then measure.
-    await refuseWrites(
+    const warmed = await refuseWrites(
       files,
       Array.from({ length: 50 }, (_, n) => n),
       250 * 1024,
     );
+    expect(warmed).toEqual(Array.from({ length: 50 }, () => 'refused'));
     Bun.gc(true);
     const before = process.memoryUsage().heapUsed;
     await refuseWrites(
@@ -34,6 +35,7 @@ describe('the memo holds only what a load settled', () => {
     const grown = process.memoryUsage().heapUsed - before;
     // Before: every refused text (and its issues) stayed, about 500 MB for these 2 000.
     expect(checks.size()).toBe(0);
+    expect(checks.kept.filter(item => item.path.startsWith('logins/'))).toEqual([]);
     expect(grown).toBeLessThan(64 * 1024 * 1024);
   }, 120_000);
 });
@@ -62,6 +64,7 @@ describe("a plugin's patch of a hand-written broken file parses it once", () => 
         const outcome = await files.port('voice').write(voiceDef, undefined, { patch: { limit: 3 } });
         const spent = performance.now() - started;
         expect(outcome.kind, label).toBe('written');
+        expect(files.port('voice').file(voiceDef)?.limit).toBe(3);
         // A little over one parse: two parses of the file took 1.06–1.24 s on a loaded box and cost twice `once`.
         best = Math.min(best, (spent - 100) / Math.max(once, 1));
       }

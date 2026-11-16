@@ -1,6 +1,6 @@
 /**
  * The SPEED half of the alias block of `../../unit/host-config/agent-config.test.ts`: a file at the size limit is checked
- * in one pass, whatever its aliases do. The answers (refused, last good stays) are unit's, at a small size.
+ * in one pass, whatever its aliases do. The answers (refused, last good stays) are held here at the size limit and in unit at a small size.
  */
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
@@ -61,9 +61,12 @@ describe('a file at the size limit is checked in one pass, whatever its aliases 
       await files.reload();
       for (const tool of ['config.validate', 'config.write'] as const) {
         const started = performance.now();
-        await agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding);
+        const answer = await agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding);
         expect(performance.now() - started).toBeLessThan(BOUND_MS);
+        expect(answer.issues?.length).toBeGreaterThan(0);
       }
+      expect(await fs.readText(UPDATES)).toBe('limit: 7\n');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });
 
     test(`T-0032 ${label}, hand-written: the reload answers in under ${BOUND_MS} ms`, async () => {
@@ -74,6 +77,8 @@ describe('a file at the size limit is checked in one pass, whatever its aliases 
       const started = performance.now();
       await files.reload();
       expect(performance.now() - started).toBeLessThan(BOUND_MS);
+      expect(files.status().files.find(file => file.path === 'voice.yaml')?.state).toBe('invalid');
+      expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });
   }
 });

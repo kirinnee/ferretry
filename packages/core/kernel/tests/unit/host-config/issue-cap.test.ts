@@ -15,7 +15,13 @@ import { defineConfig } from '../../../contract/index.ts';
 import { agentConfig } from '../../../host/config/agent.ts';
 import { checkConfigText, countProblems, MAX_CONFIG_ISSUES, moreIssues } from '../../../host/config/check.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { editConfigText, MAX_SYNTAX_ERRORS, readConfigText, setConfigKey } from '@ferretry/std/yaml';
+import {
+  CONFIG_FILE_MAX_BYTES,
+  editConfigText,
+  MAX_SYNTAX_ERRORS,
+  readConfigText,
+  setConfigKey,
+} from '@ferretry/std/yaml';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { filled } from './schema-texts.ts';
 import { captureLog, HOME, manualClock } from './support.ts';
@@ -256,9 +262,9 @@ describe('a flood of % directive lines is refused without being parsed', () => {
     expect(readConfigText(`env:\n${'  K: "100% 50%"\n'.repeat(1)}${'# %\n'.repeat(100)}`).ok).toBe(true);
   });
 
-  test('T-0034 a long run of bare % lines is refused unparsed, at the check, and is told as ONE directive issue', () => {
-    const text = '%\n'.repeat(SMALL / 2);
-    // The work, counted and not timed: parsed, 8 192 bare directives are as many parser errors (50 listed, the rest
+  test('T-0034 256 KiB of bare % lines is refused unparsed, at the check, and is told as ONE directive issue', () => {
+    const text = '%\n'.repeat(CONFIG_FILE_MAX_BYTES / 2);
+    // The work, counted and not timed: parsed, 131 072 bare directives are as many parser errors (50 listed, the rest
     // counted); refused by the pre-count, the answer is the one sentence at the 65th line, with nothing counted.
     const issues = issuesOf(checked(text).result);
     expect(issues).toHaveLength(1);
@@ -274,8 +280,8 @@ describe('a flood of % directive lines is refused without being parsed', () => {
 });
 
 describe('only the first MAX_CONFIG_ISSUES syntax errors are built; the rest are counted', () => {
-  test('T-0033 a soup of 5 000 errors lists the cap and counts every other one', () => {
-    const text = '"\n'.repeat(5_000);
+  test('T-0033 a soup of 100 000 errors lists the cap and counts every other one', () => {
+    const text = '"\n'.repeat(100_000);
     const refused = readConfigText(text);
     if (refused.ok) throw new Error('expected a refusal');
     expect(refused.errors).toHaveLength(MAX_SYNTAX_ERRORS);

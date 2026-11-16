@@ -6,7 +6,7 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { CONFIG_FILE_MAX_BYTES } from '@ferretry/std/yaml';
-import { adversarialTexts, PRIVATE_WORD } from '../host-config/adversarial-texts.ts';
+import { compactAdversarialTexts, PRIVATE_WORD } from '../host-config/adversarial-texts.ts';
 import { aliasesAt, boot, bootOnce, cleanup, FAKE_NAME, home, namesNothing, writeVoice } from './config-alias-world.ts';
 
 /** Fake only: an alias name shaped like a key. */
@@ -102,7 +102,7 @@ describe('a file of aliases, the last unresolved, is read in one pass at boot an
 });
 
 describe('every hostile shape, small: boot never fails', () => {
-  for (const [label, text] of adversarialTexts(8192)) {
+  for (const [label, text] of compactAdversarialTexts(8192)) {
     test(`${label}: boot answers, and the last good version stays unless the file checks`, async () => {
       const at = await home();
       await bootOnce(at, async first => {
