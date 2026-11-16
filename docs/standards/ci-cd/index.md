@@ -36,8 +36,9 @@ sections below still describe the 4.x pipeline in places; on the 5.0 tree the di
   the real tree's TypeScript program (`config/static-tests.txt`, today `scripts/gen/tests/fleet-link-callers.test.ts`).
   That guard takes ~25 s alone but hit its 180 s timeout beside the six unit groups in Quick (PR 1715 run
   43840838787 and two more); Quick's `scripts` part runs every other scripts test, and
-  `scripts/ci/static-tests.test.ts` proves the two parts cover every scripts test exactly once. `guards` starts
-  when the light `format` part ends, so Static still runs three heavy parts at once. Never scoped.
+  `scripts/ci/static-tests.test.ts` proves the two parts cover every scripts test exactly once. `guards` runs
+  AFTER the format/gates/build pool, alone: beside the typecheck gate it got `tsc` OOM-killed on the 8x16 (PR 1730
+  run 43860826531). Both always run; a failure in either fails Static. Never scoped.
 - **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
   Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
   Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the

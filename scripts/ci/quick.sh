@@ -43,13 +43,18 @@ limit=${FY_CI_QUICK_PARALLEL:-2}
 # tree whatever the scope, and none of them reads a test result. CI runs them as their own job (`Static Checks`,
 # `quick.sh --static`) BESIDE the unit tier instead of after it: on one runner they waited ~13 min for the tests and
 # then added ~105 s. Unscoped, on every event Quick runs. `quick.sh` alone (a local run) runs both halves in turn.
-# `guards` (config/static-tests.txt) starts when the light `format` part ends, so Static keeps three heavy parts at once.
-static_parts=(format gates build guards)
+# `guards` (config/static-tests.txt) runs AFTER the pool, alone: it opens the whole tree's TypeScript program, and
+# beside the typecheck gate's tsc it got tsc OOM-killed on the 8x16 (PR 1730 run 43860826531). Both always run;
+# the second does not wait for the first to pass.
+static_parts=(format gates build)
 run_static() {
-  ./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- "${static_parts[@]}"
+  local status=0
+  ./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- "${static_parts[@]}" || status=1
+  ./scripts/ci/parallel.sh coverage/ci/quick/static/guards 1 ./scripts/ci/quick.sh --part -- guards || status=1
+  return "${status}"
 }
 if [[ ${1:-} == --static ]]; then
-  [[ ${dry_run} == 1 ]] && echo "DRY RUN static parts: ${static_parts[*]}" && exit 0
+  [[ ${dry_run} == 1 ]] && echo "DRY RUN static parts: ${static_parts[*]} guards" && exit 0
   run_static
   exit $?
 fi
@@ -114,7 +119,7 @@ if [[ ${dry_run} == 1 ]]; then
   echo "DRY RUN unit groups: ${groups[*]#unit-}"
   echo "DRY RUN unit test files: ${#planned[@]}"
   printf 'DRY RUN unit file %s\n' "${planned[@]}"
-  echo "DRY RUN always-run parts: ${static_parts[*]} scripts"
+  echo "DRY RUN always-run parts: ${static_parts[*]} guards scripts"
   echo "DRY RUN ${guarantee_note}"
   echo "DRY RUN ${ledger_note}"
   echo "DRY RUN check.ts guarantees ${guarantee_args[*]}"
