@@ -1,5 +1,5 @@
-import type { QueuedMessage, QueuedMessageState, QueueWaitReason } from '../wire-send.ts';
-import type { SendFate } from '../stores.ts';
+import type { QueuedMessage, QueuedMessageState, QueueWaitReason } from '../../wire-send.ts';
+import type { SendFate } from '../../stores.ts';
 import type { SendPaneObservation, SendTarget } from '../send/types.ts';
 
 /**

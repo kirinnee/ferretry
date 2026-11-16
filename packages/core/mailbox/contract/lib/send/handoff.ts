@@ -1,9 +1,11 @@
 import type { HarnessKey as HarnessKind } from '@ferretry/core-ferrets/contract';
-import { type QueueAuthor } from '../wire-send.ts';
-import { readHandoffDocument } from '../turn-handoff.ts';
-import { type SessionHandoff, type SessionHandoffAttachment } from '../protocol-names.ts';
+import { type QueueAuthor } from '../../wire-send.ts';
+import { readHandoffDocument } from '../../turn-handoff.ts';
+import { type SessionHandoff, type SessionHandoffAttachment } from '../../protocol-names.ts';
 
 // A contract imports no `node:path`; these are its POSIX forms, for the clean absolute paths a hand-off names.
+// They are NOT `node:path`: `join` only drops trailing slashes from the folder and joins with one `/`; it does not
+// resolve `.` or `..` or collapse inner `//`, so a caller hands it paths that are already clean (the session store's are).
 const trimmed = (path: string): string => (path.length > 1 ? path.replace(/\/+$/u, '') : path);
 const basename = (path: string): string => trimmed(path).slice(trimmed(path).lastIndexOf('/') + 1);
 const dirname = (path: string): string => {

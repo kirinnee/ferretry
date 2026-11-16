@@ -40,9 +40,7 @@ export type MailboxCaller =
  * ledger that proves it, and the person's composer draft. Conversation's port carries all of it unchanged
  * (`ConversationApi extends MailboxApi`).
  */
-export interface MailboxApi {
-  send(ferret: FerretId, caller: MailboxCaller, request: SendRequest): Promise<Result<SendResult, MailboxRefusal>>;
-  interrupt(ferret: FerretId, request: InterruptRequest): Promise<Result<void, MailboxRefusal>>;
+export interface MailboxQueueApi {
   queue(ferret: FerretId): Promise<FerretQueue>;
   editQueued(
     ferret: FerretId,
@@ -50,6 +48,12 @@ export interface MailboxApi {
     request: QueueEditRequest,
   ): Promise<Result<QueuedMessage, MailboxRefusal>>;
   cancelQueued(ferret: FerretId, message: string): Promise<Result<QueuedMessage, MailboxRefusal>>;
+}
+
+/** The whole of the Mailbox's API: the queue's half ({@link MailboxQueueApi}) and the send path's. */
+export interface MailboxApi extends MailboxQueueApi {
+  send(ferret: FerretId, caller: MailboxCaller, request: SendRequest): Promise<Result<SendResult, MailboxRefusal>>;
+  interrupt(ferret: FerretId, request: InterruptRequest): Promise<Result<void, MailboxRefusal>>;
   sends(ferret: FerretId, cursor?: string): Promise<SendListResponse>;
   sendRecord(ferret: FerretId, sendId: string): Promise<SendRecord | undefined>;
   retrySend(ferret: FerretId, sendId: string, force?: boolean): Promise<Result<SendRecord, MailboxRefusal>>;
@@ -89,4 +93,5 @@ export interface MailboxApi {
   retractedDraft?(ferret: FerretId): Promise<string | undefined>;
 }
 
-export const MailboxPort = definePort<MailboxApi>('mailbox');
+/** What the Mailbox serves today: its queue. The send path joins it when it moves in (then this is {@link MailboxApi}). */
+export const MailboxPort = definePort<MailboxQueueApi>('mailbox');

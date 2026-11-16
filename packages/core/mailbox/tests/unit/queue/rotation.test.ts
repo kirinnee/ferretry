@@ -1,7 +1,7 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type HeldMessage, type QueueEvent, SegmentFold, type VersionedMessage } from '@ferretry/core-mailbox/contract';
+import { type HeldMessage, type QueueEvent, SegmentFold, type VersionedMessage } from '../../../contract/index.ts';
 import {
   mergeByOrder,
   ROTATE_EVENTS,
@@ -9,7 +9,7 @@ import {
   SealedShards,
   shardName,
   shardThrough,
-} from '../../../../daemon/queue/lib/rotation.ts';
+} from '../../../contract/index.ts';
 
 const AT = '2026-11-01T08:00:00.000Z' as Instant;
 
