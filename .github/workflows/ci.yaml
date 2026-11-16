@@ -280,10 +280,23 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
+      # DIAGNOSTIC (PR 1685 fix round 2, to be removed): what is on the machine while the perf tier runs.
+      - name: Probe the machine before the perf tier
+        run: |
+          grep -m1 'model name' /proc/cpuinfo; nproc; cat /proc/loadavg; cat /proc/pressure/cpu || true
+          findmnt -n -o TARGET,SOURCE,FSTYPE --target /nix || true
+          echo '--- top CPU now'; ps -eo pid,ppid,pcpu,rss,etime,args --sort=-pcpu | head -12 | cut -c1-200
+          echo '--- nix processes'; pgrep -a -f 'nix|determinate' | cut -c1-200 || true
+          # shellcheck disable=SC2016
+          nohup setsid bash -c 'while :; do echo "=== $(date +%T) load $(cut -d" " -f1-3 /proc/loadavg) cpu: $(head -1 /proc/stat)"; ps -eo pcpu,rss,args --sort=-pcpu | sed -n 2,6p | cut -c1-150; sleep 10; done' >"${RUNNER_TEMP}/perf-sampler.log" 2>&1 &
       - name: Run the perf tier
         env:
           FY_CI_PERF_PARALLEL: '2'
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh perf
+      - name: Show the sampler
+        if: always()
+        continue-on-error: true
+        run: cat "${RUNNER_TEMP}/perf-sampler.log"
       - name: Upload perf results
         if: always()
         continue-on-error: true
