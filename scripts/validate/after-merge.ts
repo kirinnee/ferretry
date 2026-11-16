@@ -45,7 +45,7 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
   },
   {
     id: 'links-keep-history-parse-worker',
-    decision: 'lizzette 2026-11-11: links/keep/history/parse worker move after merge (card &F3447)',
+    decision: 'lizzette 2026-11-11: links/keep/history/parse worker move after merge (task &F3447)',
   },
   {
     id: 'coverage-lag',
@@ -54,7 +54,7 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
   { id: 'host-store-codex-login', decision: 'lizzette 2026-11-11: host-store Codex after merge (&F3468)' },
   {
     id: 'v4-doctor-checks',
-    decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',
+    decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (task &F3715); tmux is in 5.0',
   },
   {
     id: 'app-component-editing',
@@ -71,7 +71,7 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
   {
     id: 'contract-hooks-restore',
     decision:
-      'lizzette 2026-11-13: the four contract hooks stay out of 5.0 hook config; card &C57 restores 5.0 versions after merge',
+      'lizzette 2026-11-13: the four contract hooks stay out of 5.0 hook config; task &C57 restores 5.0 versions after merge',
   },
 ];
 

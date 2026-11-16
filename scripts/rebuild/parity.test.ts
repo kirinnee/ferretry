@@ -167,7 +167,7 @@ test('extracts security descriptors, nested Commander flags, tools, UI, jobs and
   expect(rows.some(row => row.what === 'WS GET /v1/sessions/:id/stream')).toBe(true);
   expect(rows.some(row => row.what.includes('/audit-only'))).toBe(false);
   const command = rows.find(row => row.what === 'fy task patch <id>')!;
-  expect(command.name5).toBe('fy card patch <id>');
+  expect(command.name5).toBe('fy task patch <id>');
   for (const flag of ['--global', '--json', '--session <id>', '-f, --file <path>'])
     expect(command.descriptor).toContain(flag);
   expect(rows.find(row => row.what === 'fy task list')!.status).toContain('removed by design (§1.4');
