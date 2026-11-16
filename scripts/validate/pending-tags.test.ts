@@ -3,15 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { contextFor } from '../gen/lib/check.ts';
+import { KNIP_RUNS, readKnipParts } from '../gen/lib/knip-config.ts';
 import {
   type KnipConfig,
   type KnipIgnore,
+  type KnipRun,
   type PackageRef,
   type TagInput,
   type TaggedFile,
   checkWith,
   knipIgnores,
+  knipPlacementFindings,
   knipShapeFindings,
+  partAllowed,
   tagFindings,
   tagsOf,
 } from './pending-tags.ts';
@@ -406,7 +410,22 @@ describe('pending-tags: check.run over a fixture workspace', () => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), content);
   };
-  const workspace = (over: { vaultSource?: string; knip?: unknown; extra?: Record<string, string> } = {}): string => {
+  const LIB = join(import.meta.dir, '..', 'gen', 'lib', 'knip-config.ts');
+  /** A root config as a repo writes it: its globals, composed with the package files of that run. */
+  const rootConfig = (root: string, part: string, globals: unknown, composed = true): string =>
+    `import { composeKnip } from ${JSON.stringify(LIB)};\nexport const globals = ${JSON.stringify(globals)};\n` +
+    (composed
+      ? `export default composeKnip(${JSON.stringify(root)}, ${JSON.stringify(part)}, globals);\n`
+      : `export default { ...globals, workspaces: { ...globals.workspaces, 'packages/sneaky': {} } };\n`);
+  const workspace = (
+    over: {
+      vaultSource?: string;
+      globals?: unknown;
+      composed?: boolean;
+      appPart?: boolean;
+      extra?: Record<string, string>;
+    } = {},
+  ): string => {
     const root = mkdtempSync(join(tmpdir(), 'pending-tags-'));
     roots.push(root);
     write(root, 'package.json', JSON.stringify({ name: 'root', workspaces: ['packages/*', 'packages/plugins/*'] }));
@@ -437,9 +456,10 @@ describe('pending-tags: check.run over a fixture workspace', () => {
       'docs/rebuild/guarantees.tsv',
       'id\tstatus\towner\twith\tenforcer\tdoc\ttest\nS68\tkept\tvault\t-\tx\tdoc\tS68\n',
     );
-    const knip = over.knip ?? { workspaces: { '.': {}, 'packages/plugins/*': {}, 'packages/app': {} } };
-    write(root, 'knip.json', JSON.stringify(knip));
-    write(root, 'knip.production.json', JSON.stringify(knip));
+    const globals = over.globals ?? { workspaces: { '.': {}, 'packages/plugins/*': {} } };
+    for (const { config, part } of KNIP_RUNS)
+      write(root, config, rootConfig(root, part, globals, over.composed ?? true));
+    if (over.appPart !== false) write(root, 'packages/app/knip.json', '{}');
     for (const [path, content] of Object.entries(over.extra ?? {})) write(root, path, content);
     return root;
   };
@@ -464,18 +484,17 @@ describe('pending-tags: check.run over a fixture workspace', () => {
 
   test('a glob-key ignore, an extra knip key and a stale key are found through the real wiring', async () => {
     const root = workspace({
-      knip: {
+      globals: {
         workspaces: {
           '.': {},
           'packages/plugins/*': { ignore: ['app/skeleton.ts'], ignoreFiles: ['app/y.ts'] },
-          'packages/app': {},
           'packages/gone': {},
         },
       },
     });
     const found = await messages(root);
     expect(found).toContain(
-      'knip.json workspaces["packages/plugins/*"].ignore: "app/skeleton.ts" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
+      'knip.ts workspaces["packages/plugins/*"].ignore: "app/skeleton.ts" is ignored, but no pendingReasons.vault line in ports-pending.json names it',
     );
     expect(found.some(m => m.includes('"ignoreFiles":app/y.ts'))).toBe(true);
     expect(found.some(m => m.includes('workspaces["packages/gone"]: matches no workspace package'))).toBe(true);
@@ -491,5 +510,110 @@ describe('pending-tags: check.run over a fixture workspace', () => {
   test('a file that does not parse is a finding through the real wiring', async () => {
     const root = workspace({ extra: { 'packages/plugins/vault/app/x.ts': 'export const = ; // @pending\n' } });
     expect(await messages(root)).toEqual([expect.stringContaining('packages/plugins/vault/app/x.ts: does not parse')]);
+  });
+
+  test('a package key put back in a root config is a finding: it belongs in the package folder', async () => {
+    const globals = { workspaces: { '.': {}, 'packages/plugins/*': {}, 'packages/app': { entry: ['src/main.tsx'] } } };
+    const both = await messages(workspace({ globals }));
+    expect(both).toContain('knip.ts: packages/app/knip.json: "packages/app" is also a workspace of the root config');
+    const found = await messages(workspace({ globals, appPart: false }));
+    expect(found).toContain(
+      'knip.ts workspaces["packages/app"]: a package\'s own knip settings belong in packages/app/knip.json, not in the root config (the root keeps only ., packages/core/*, packages/plugins/*)',
+    );
+    expect(found).toContain(
+      'knip.production.ts workspaces["packages/app"]: a package\'s own knip settings belong in packages/app/knip.production.json, not in the root config (the root keeps only ., packages/core/*, packages/plugins/*)',
+    );
+  });
+
+  test('a root knip.json, or a part file outside a package folder, is a finding', async () => {
+    const root = workspace({
+      extra: { 'knip.json': '{"workspaces":{}}', 'packages/knip.production.json': '{}', 'docs/knip.json': '{}' },
+    });
+    const found = await messages(root);
+    expect(found.some(m => m.startsWith('knip.json: a root knip.json would replace the composed root config'))).toBe(
+      true,
+    );
+    expect(found.some(m => m.startsWith('packages/knip.production.json: is in no package folder'))).toBe(true);
+    expect(found.some(m => m.startsWith('docs/knip.json: is in no package folder'))).toBe(true);
+  });
+
+  test('a root config that is not the composition of its globals is a finding', async () => {
+    const found = await messages(workspace({ composed: false }));
+    expect(found.some(m => m.startsWith('knip.ts: must export composeKnip('))).toBe(true);
+    expect(found.some(m => m.startsWith('knip.production.ts: must export composeKnip('))).toBe(true);
+  });
+
+  test("a package's own entry needs its reason in that package's allowed object; a stale reason is a finding", async () => {
+    const entry = 'app/lazy.tsx';
+    const bare = workspace({ extra: { 'packages/plugins/vault/knip.json': JSON.stringify({ entry: [entry] }) } });
+    expect(await messages(bare)).toEqual([
+      `knip.ts workspaces["packages/plugins/vault"]: entry "${entry}" keeps code alive without a pending-port tie; remove it, or name "knip.ts#workspaces["packages/plugins/vault"].entry:${entry}" on ALLOWED_KNIP with a reason`,
+    ]);
+    const why = { allowed: { [`entry:${entry}`]: 'loaded by a template import knip cannot follow' } };
+    const named = workspace({
+      extra: { 'packages/plugins/vault/knip.json': JSON.stringify({ entry: [entry], ...why }) },
+    });
+    expect(await messages(named)).toEqual([]);
+    const stale = workspace({ extra: { 'packages/plugins/vault/knip.json': JSON.stringify({ entry: [], ...why }) } });
+    expect(await messages(stale)).toEqual([
+      `packages/plugins/vault/knip.json: allowed "knip.ts#workspaces["packages/plugins/vault"].entry:${entry}" matches no knip setting any more; delete the entry`,
+    ]);
+  });
+});
+
+describe('pending-tags: placement of the knip files', () => {
+  const run = (workspaces: Record<string, Record<string, unknown>>, composed?: unknown): KnipRun => ({
+    config: 'knip.ts',
+    part: 'knip.json',
+    globals: { workspaces },
+    composed: composed ?? { workspaces },
+    parts: [],
+  });
+
+  test('only the root workspace and the two globs may stay in a root config', () => {
+    expect(knipPlacementFindings([run({ '.': {}, 'packages/core/*': {}, 'packages/plugins/*': {} })], [])).toEqual([]);
+    expect(knipPlacementFindings([run({ 'packages/cli': {} })], []).map(f => f.where)).toEqual([
+      'knip.ts workspaces["packages/cli"]',
+    ]);
+  });
+
+  test('a part file belongs in a package folder, never at the root', () => {
+    const files = ['packages/app/knip.json', 'packages/core/gate/knip.production.json', 'packages/plugins/x/knip.json'];
+    expect(knipPlacementFindings([], files)).toEqual([]);
+    expect(knipPlacementFindings([], ['knip.json', 'packages/deep/er/knip.json']).map(f => f.where)).toEqual([
+      'knip.json',
+      'packages/deep/er/knip.json',
+    ]);
+  });
+
+  test('partAllowed names each reason by the composed id and the file that wrote it', () => {
+    const parts = [
+      { where: 'packages/cli/knip.json', dir: 'packages/cli', settings: {}, allowed: { 'ignore:src/a.ts': 'why' } },
+    ];
+    const { allowed, origins } = partAllowed([{ ...run({}), parts }]);
+    expect([...allowed]).toEqual([['knip.ts#workspaces["packages/cli"].ignore:src/a.ts', 'why']]);
+    expect([...origins]).toEqual([['knip.ts#workspaces["packages/cli"].ignore:src/a.ts', 'packages/cli/knip.json']]);
+  });
+
+  test('a part file is read from every package folder, and a malformed one is named', () => {
+    const root = mkdtempSync(join(tmpdir(), 'knip-parts-'));
+    try {
+      mkdirSync(join(root, 'packages/plugins/a'), { recursive: true });
+      mkdirSync(join(root, 'packages/plugins/b'), { recursive: true });
+      writeFileSync(join(root, 'packages/plugins/a/knip.json'), '{"entry":["x.ts"],"allowed":{"entry:x.ts":"why"}}');
+      expect(readKnipParts(root, 'knip.json')).toEqual([
+        {
+          where: 'packages/plugins/a/knip.json',
+          dir: 'packages/plugins/a',
+          settings: { entry: ['x.ts'] },
+          allowed: { 'entry:x.ts': 'why' },
+        },
+      ]);
+      expect(readKnipParts(root, 'knip.production.json')).toEqual([]);
+      writeFileSync(join(root, 'packages/plugins/b/knip.json'), '[1]');
+      expect(() => readKnipParts(root, 'knip.json')).toThrow('packages/plugins/b/knip.json: is not a JSON object');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -1,0 +1,10 @@
+{
+  "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+  "project": ["**/*.{ts,tsx}"],
+  "ignoreIssues": {
+    "contract/wire.ts": ["duplicates"]
+  },
+  "allowed": {
+    "ignoreIssues[\"contract/wire.ts\"]": "`ShellCacheKeySchema` (wire.ts) is a second name for `NarHashSchema`, kept as its own word of the cache vocabulary; knip reports that alias as a duplicate export. Not a pending-port gap."
+  }
+}
