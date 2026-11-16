@@ -104,7 +104,7 @@ function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsIte
 
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
-  const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'auto';
+  const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'skip';
   /** The settings items (`config/codex/settings/`) the runtime's profile selects, now: what a home written now would merge. */
   const settingsNow = async (runtime: string | undefined): Promise<ReadonlyMap<string, SettingsItem>> => {
     const all =

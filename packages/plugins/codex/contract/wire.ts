@@ -159,7 +159,7 @@ export const HarnessUpdateUnverifiedBodySchema = z.looseObject({
 
 // ─── config (config/harness-codex.yaml, codex/settings/*.yaml, codex/hooks/*.yaml) ──────────────
 
-/** How the fixed layer sets the harness's permission mode: `auto` asks before anything risky, `skip` never asks. */
+/** How the fixed layer sets the harness's permission mode: `skip` never asks (the default: owner decision !A525), `auto` asks before anything risky. */
 export const PermissionModeSchema = z.enum(['auto', 'skip']);
 
 /** A path an operator writes: absolute or `~`-relative (docs/harness-paths.md). Never a credential. */
@@ -175,7 +175,7 @@ export const HarnessConfigSchema = z.strictObject({
   binary: HarnessPathSchema.optional(),
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
-  permissionMode: PermissionModeSchema.default('auto'),
+  permissionMode: PermissionModeSchema.default('skip'),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 

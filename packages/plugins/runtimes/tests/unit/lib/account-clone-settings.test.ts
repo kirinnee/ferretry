@@ -504,14 +504,14 @@ describe('clone settings: controls are one keyed document', () => {
 
   it('lists only the fields that differ, with loosening flagged', () => {
     const analysis = analyseCloneSettings(
-      [controls({ agentPermissions: 'skip', agentControl: { terminals: true, ferretrySettings: true, files: false } })],
+      [controls({ agentPermissions: 'auto', agentControl: { terminals: true, ferretrySettings: true, files: false } })],
       undefined,
     );
     const rows = Object.fromEntries(
       (reviewCloneSettings(analysis)[0]?.keys ?? []).map(row => [row.key, [row.outcome, row.loosens === true]]),
     );
     should(rows).eql({
-      agentPermissions: ['both', true],
+      agentPermissions: ['both', false],
       'agentControl.ferretrySettings': ['both', true],
       'agentControl.files': ['both', false],
     });
@@ -533,7 +533,7 @@ describe('clone settings: controls are one keyed document', () => {
 
   it('taking some fields is a smaller change with only those fields', () => {
     const analysis = analyseCloneSettings(
-      [controls({ agentPermissions: 'skip', agentControl: { files: false, ferretrySettings: true } })],
+      [controls({ agentPermissions: 'auto', agentControl: { files: false, ferretrySettings: true } })],
       undefined,
     );
     const plan = planCloneSettings(analysis, {
@@ -568,7 +568,7 @@ describe('clone settings: controls are one keyed document', () => {
 
   it('a source that says nothing about a control does not drop it', () => {
     const analysis = analyseCloneSettings([controls({})], {
-      controls: base({ agentPermissions: 'auto', 'agentControl.terminals': true }),
+      controls: base({ agentPermissions: 'skip', 'agentControl.terminals': true }),
     });
     should(reviewCloneSettings(analysis)[0]?.keys).eql([]);
   });

@@ -561,7 +561,7 @@ export class ClaudeHarness implements Harness {
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
     return {
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
+      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'skip',
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),

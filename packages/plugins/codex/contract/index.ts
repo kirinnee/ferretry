@@ -158,9 +158,13 @@ export const CODEX_LAUNCH_SETTINGS = defineState({
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** Today's `machineLoosening` rule for the permission mode, kept word for word. */
+/**
+ * The `machineLoosening` rule for the permission mode. An unset mode means `skip` (owner decision !A525), so only an
+ * EXPLICIT `auto` going to `skip` (or being removed, which reads as `skip`) is a loosening; no value to an explicit
+ * `auto` is a tightening.
+ */
 export const harnessConfigLoosens: Loosens<HarnessConfig> = (before, after) =>
-  (before?.permissionMode ?? 'auto') === 'auto' && after.permissionMode === 'skip'
+  before?.permissionMode === 'auto' && after.permissionMode === 'skip'
     ? ['agents now skip every permission prompt']
     : [];
 

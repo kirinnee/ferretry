@@ -258,6 +258,41 @@ test('agenda check: attentionNudge carries when agendaNudge is absent, and is no
   expect(report.notCarried.map(item => item.what)).not.toContain('config/machine.yaml attentionNudge');
 });
 
+/** The permission mode as the owner's FILE says it (not the schema's reading, which fills in the default). */
+const rawMode = async (path: string): Promise<unknown> => {
+  const document = parse(await text(path), { version: '1.2', uniqueKeys: true }) as Record<string, unknown> | null;
+  return document === null ? undefined : document.permissionMode;
+};
+
+test('!A525 a v4 agentPermissions value is carried as the EXPLICIT value in both harness files, never rewritten', async () => {
+  for (const mode of ['skip', 'auto'] as const) {
+    await yaml('machine.yaml', `agentPermissions: ${mode}\n`);
+    expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+    // The value is in the file as the owner had it; it is not left to the schema's default.
+    expect(await rawMode('harness-claude-code.yaml')).toBe(mode);
+    expect(await rawMode('harness-codex.yaml')).toBe(mode);
+    await f.clean();
+    f = await fixture();
+  }
+});
+
+test('!A525 a v4 machine.yaml with no agentPermissions writes no permissionMode: that home takes the new default (skip)', async () => {
+  await yaml('machine.yaml', 'defaultRuntime: claude-old\n');
+  expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+  expect(await exists('harness-claude-code.yaml')).toBe(false);
+  expect(await exists('harness-codex.yaml')).toBe(false);
+  // What a missing file or key means to the harness plugins is the new default.
+  expect(ClaudeHarnessSchema.parse({}).permissionMode).toBe('skip');
+  expect(CodexHarnessSchema.parse({}).permissionMode).toBe('skip');
+});
+
+test('!A525 the full v4 home keeps the explicit skip in the file text', async () => {
+  await fullHome();
+  expect((await settingsStep.run(f.ctx())).status).toBe('converted');
+  expect(await rawMode('harness-claude-code.yaml')).toBe('skip');
+  expect(await rawMode('harness-codex.yaml')).toBe('skip');
+});
+
 test('the Global lessons component is dropped and every profile stops layering it (v5 gives lessons to every ferret)', async () => {
   await yaml('components/instructions/lessons.yaml', 'file: instructions/lessons.md\n');
   await yaml('components/instructions/house.yaml', 'file: instructions/house.md\n');

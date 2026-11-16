@@ -9,7 +9,12 @@ import { FakeRunner, harnessConformance } from '@ferretry/core-ferrets/contract/
 import type { FerretId, SpawnResult, StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { state as kernelState } from '@ferretry/kernel/host';
-import { CLAUDE_CODE_HOOKS, CLAUDE_CODE_LAUNCH_SETTINGS, CLAUDE_CODE_SETTINGS } from '../../contract/index.ts';
+import {
+  CLAUDE_CODE_HOOKS,
+  CLAUDE_CODE_LAUNCH_SETTINGS,
+  CLAUDE_CODE_SETTINGS,
+  HarnessConfigSchema,
+} from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
 import { defineState } from '@ferretry/kernel/contract';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
@@ -1751,6 +1756,57 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     await harness.start(spec({ effort: 'high' }), runner({}), {} as never);
 
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  describe('!A525 the default permission mode is bypass: a harness file that says nothing skips every prompt', () => {
+    const modeOf = (command: readonly string[] | undefined): string | undefined =>
+      command?.[(command?.indexOf('--permission-mode') ?? -1) + 1];
+    const launchedWith = async (file: () => unknown, call: 'start' | 'resume' = 'start') => {
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      const { harness } = build({ state, config: { file, collection: () => new Map() } });
+      const started: { command?: readonly string[] } = {};
+      const result =
+        call === 'start'
+          ? await harness.start(spec(), runner(started), {} as never)
+          : await harness.resume(spec(), runner(started), {} as never, 'a-conversation-1');
+      expect(result.ok).toBe(true);
+      return { harness, command: started.command };
+    };
+
+    test('no harness file at all launches with --permission-mode bypassPermissions, on a start and on a resume', async () => {
+      expect(modeOf((await launchedWith(() => undefined)).command)).toBe('bypassPermissions');
+      expect(modeOf((await launchedWith(() => undefined, 'resume')).command)).toBe('bypassPermissions');
+    });
+
+    test('a parsed file with no permissionMode launches bypass; an explicit auto launches auto', async () => {
+      expect(modeOf((await launchedWith(() => HarnessConfigSchema.parse({}))).command)).toBe('bypassPermissions');
+      expect(modeOf((await launchedWith(() => HarnessConfigSchema.parse({ permissionMode: 'auto' }))).command)).toBe(
+        'auto',
+      );
+    });
+
+    test('the launch record is made under the default, so a ferret launched with no file is current, and explicit skip is the same fingerprint', async () => {
+      const bare = await launchedWith(() => undefined);
+      expect(await bare.harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      const explicit = await launchedWith(() => ({ searchPaths: [], permissionMode: 'skip' }));
+      expect(await explicit.harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      // The record the bare launch wrote answers current against an explicit auto only if the mode were still the old default.
+      const drifting = { mode: undefined as 'auto' | undefined };
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      const { harness } = build({
+        state,
+        config: {
+          file: () => (drifting.mode === undefined ? undefined : { searchPaths: [], permissionMode: drifting.mode }),
+          collection: () => new Map(),
+        },
+      });
+      await harness.start(spec(), runner({}), {} as never);
+      drifting.mode = 'auto';
+      expect(await harness.launchSettings(FERRET)).toEqual({
+        kind: 'drifted',
+        sections: ['permission-mode', 'fixed-layer'],
+      });
+    });
   });
 
   describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
