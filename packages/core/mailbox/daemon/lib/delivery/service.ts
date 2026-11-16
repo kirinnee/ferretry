@@ -660,6 +660,12 @@ export class SessionSendService {
     const settled = routeSend(target, second);
     if (settled === 'revive') return { kind: 'revive' };
     if (second.draft !== undefined) throw composerOccupiedRefusal(second.draft);
+    // A compaction is not a running turn the harness queues behind: nothing is typed until it is done.
+    if (second.compacting === true)
+      throw new SendNotReady(
+        `the agent is compacting its context; ${request.id} is typed when it is done`,
+        'compacting',
+      );
     if (settled === 'idle') return await this.deliver(target, request, payload, sender);
     return await this.queue(target, request, payload, sender);
   }

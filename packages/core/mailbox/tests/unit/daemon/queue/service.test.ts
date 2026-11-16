@@ -251,3 +251,37 @@ describe('how long a ferret message is held', () => {
     should([heldMs(action.message), heldMs(fyi.message)]).eql([5_000, 9_000]);
   });
 });
+
+describe("a message's lane", () => {
+  it('should be decided once at accept from the sender, kind, ask and now, and stored on the enqueued line', async () => {
+    const { store, service } = subject();
+    const cases = [
+      ['owner', { sender: 'human' }],
+      ['ferretry', { sender: 'daemon' }],
+      ['urgent', { sender: 'agent', label: 'blocker' }],
+      ['urgent', { sender: 'agent', replyExpected: true }],
+      ['urgent', { sender: 'agent', label: 'fyi', replyExpected: true }],
+      ['urgent', { sender: 'agent', interrupt: true }],
+      ['fyi', { sender: 'agent', label: 'fyi' }],
+      ['action', { sender: 'agent', label: 'action' }],
+      ['action', { sender: 'agent' }],
+    ] as const;
+
+    for (const [index, [lane, request]] of cases.entries()) {
+      const { message } = await service.enqueue(ID, { id: `m${index}`, text: 'hi', ...request });
+      should(message.lane).equal(lane);
+    }
+
+    const lines = (store.logs.get(ID) ?? []).flatMap(event => (event.kind === 'enqueued' ? [event.message.lane] : []));
+    should(lines).eql(cases.map(([lane]) => lane));
+  });
+
+  it('should be the same lane on a retried request, never worked out again', async () => {
+    const { service } = subject();
+    const first = await service.enqueue(ID, { id: 'm1', sender: 'agent', label: 'fyi', text: 'a' });
+    const retry = await service.enqueue(ID, { id: 'm1', sender: 'agent', label: 'blocker', text: 'a' });
+
+    should(first.message.lane).equal('fyi');
+    should(retry.message.lane).equal('fyi');
+  });
+});

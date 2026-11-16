@@ -11,6 +11,7 @@ import { z } from 'zod';
 import {
   QueuedMessageIdSchema,
   QueuedMessageSchema,
+  QueuePromotionSchema,
   QueuedMessageStateSchema,
   QueueAuthorSchema,
   QueueWaitReasonSchema,
@@ -66,6 +67,17 @@ export const QueueEventSchema = z.discriminatedUnion('kind', [
     reason: QueueWaitReasonSchema.optional(),
     /** The send of this ferret's own whose unsubmitted text holds the box (B144); only beside `draft`. */
     behind: z.string().min(1).optional(),
+  }),
+  /**
+   * An action or fyi answered what its receiver waits on, so it goes as urgent. The message keeps its `lane` and gains
+   * `promoted`, so a person can see why it jumped ahead. Legal only while it still waits; written once.
+   */
+  z.object({
+    v: z.literal(1),
+    kind: z.literal('promoted'),
+    at: InstantSchema,
+    id: QueuedMessageIdSchema,
+    to: QueuePromotionSchema,
   }),
 ]);
 export type QueueEvent = z.infer<typeof QueueEventSchema>;
