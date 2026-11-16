@@ -1,4 +1,5 @@
-import type { HandoffPointer, TranscriptImageMarker } from '../../contract/index.ts';
+import type { HandoffPointer } from '@ferretry/core-mailbox/contract';
+import type { TranscriptImageMarker } from '../../contract/index.ts';
 import type { SessionStatus } from '@ferretry/core-ferrets/contract';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
 import type { SentMessage } from './peer-delivery.ts';

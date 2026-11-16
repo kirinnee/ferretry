@@ -4,15 +4,15 @@ import type { SwallowedWord, VerbInvocation } from '@ferretry/kernel/manifest';
  * The shell's `parseArgs` (`packages/cli/src/lib/argv.ts`), code for code, so a test types a verb the way `fy` hands it
  * over: `--name=value`, `--name value` (a value when it does not start with `-`, or is a negative number), a lone
  * `--name` is a switch, `--no-name` is off, a repeat is a list, `--` ends options, and every word an option took is
- * recorded in `swallowed`. A plugin's tests reach another package only through its contract, so the rule is copied
- * here; `packages/cli/tests/unit/browser-shell-argv-copy.test.ts` fails the moment this body and the shell's differ.
+ * recorded in `swallowed`; a name in `switches` (the verb's declared switches) never takes one. A plugin's tests reach
+ * another package only through its contract, so the rule is copied here; `packages/cli/tests/unit/browser-shell-argv-copy.test.ts` fails the moment this body and the shell's differ.
  */
 type OptionValue = string | boolean | readonly string[];
 
 /** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
 const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
 
-export function parseArgs(tokens: readonly string[]): VerbInvocation {
+export function parseArgs(tokens: readonly string[], switches: ReadonlySet<string> = new Set()): VerbInvocation {
   const args: string[] = [];
   const options: Record<string, OptionValue> = {};
   const swallowed: SwallowedWord[] = [];
@@ -45,7 +45,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       continue;
     }
     const next = tokens[index + 1];
-    if (next !== undefined && isWord(next)) {
+    if (!switches.has(body) && next !== undefined && isWord(next)) {
       put(body, next);
       swallowed.push({ option: body, word: next, at: args.length });
       index += 1;

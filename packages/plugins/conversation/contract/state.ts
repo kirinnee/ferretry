@@ -4,7 +4,7 @@ import { StoredRenderMetaSchema } from './wire-media.ts';
 import { FinderFileSchema, LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
 import { PromptWaitRecordSchema } from './wire-prompt.ts';
-import { SegmentMessageSchema } from './lines.ts';
+import { SegmentMessageSchema } from '@ferretry/core-mailbox/contract';
 
 /** An opaque or secret file is bytes the kernel never parses: the schema types the port, it checks nothing. */
 const BYTES = z.instanceof(Uint8Array);

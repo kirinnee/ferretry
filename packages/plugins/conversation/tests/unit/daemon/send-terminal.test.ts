@@ -11,7 +11,7 @@ import {
   SendComposerUnreadable,
   SendLandingUnconfirmed,
   SendPaneNotReady,
-} from '../../../daemon/delivery/lib/types.ts';
+} from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId(ferretId('f1'));

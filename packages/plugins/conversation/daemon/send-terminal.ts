@@ -17,7 +17,7 @@ import {
   type SendPaneObservation,
   type SendQueueOutcome,
   type SendTerminal,
-} from './delivery/lib/types.ts';
+} from '@ferretry/core-mailbox/contract';
 import { deliveryAnswer, refusalAnswer, STRANDED_SENTENCE, UNCONFIRMED_SENTENCE } from './harness-seam.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
 

@@ -215,7 +215,8 @@ export function planResume(
 
 /** The document a revived agent reads for its new turn. */
 export function resumeTurnDocument(prompt: string, settings: SessionResumeSettings): string {
-  return `${prompt}\n\n${settings.turnProtocolReminder}\n`;
+  const reminder = settings.turnProtocolReminder.trim();
+  return reminder === '' ? `${prompt}\n` : `${prompt}\n\n${reminder}\n`;
 }
 
 /** What is typed into the replacement terminal so the agent picks the new turn up. */

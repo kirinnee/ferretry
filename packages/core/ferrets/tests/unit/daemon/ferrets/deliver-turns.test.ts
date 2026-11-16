@@ -56,9 +56,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     const kept = await stat(turnFile(w, id, 2));
     expect((await revive(w, id, 'Carry on with the tests.')).ok).toBe(true);
     expect((await stat(turnFile(w, id, 2))).ino).toBe(kept.ino);
-    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
-      `Carry on with the tests.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(`Carry on with the tests.\n`);
     expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
       turnFileInstruction(turnFile(w, id, 3)),
     ]);
@@ -69,9 +67,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     // The next revive numbers after it, and an auto ferret with no message is given the default prompt.
     await w.service.stop(id as never, 'now');
     expect((await revive(w, id)).ok).toBe(true);
-    expect(await readFile(turnFile(w, id, 4), 'utf8')).toBe(
-      `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 4), 'utf8')).toBe(`${defaultSessionResumeSettings.defaultResumePrompt}\n`);
   });
 
   test('GAP(deliver) a revive writes turn-NNN.md once: a turn written but never counted is handed over again only as an exact replay, proved in place', async () => {
@@ -115,12 +111,12 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     // The owner's words stay theirs, and Ferretry's default prompt is never drawn as the owner's.
     expect(turns?.[1]).toEqual({
       turn: 2,
-      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Do X.\n`,
       by: { kind: 'owner' },
     });
     expect(turns?.[2]).toEqual({
       turn: 3,
-      text: `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `${defaultSessionResumeSettings.defaultResumePrompt}\n`,
     });
   });
 
@@ -141,12 +137,12 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     const turns = await w.files.port.turns?.(id as never, { strict: true });
     expect(turns?.[1]).toEqual({
       turn: 2,
-      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Do X.\n`,
       by: { kind: 'owner' },
     });
     expect(turns?.[2]).toEqual({
       turn: 3,
-      text: `Something else.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Something else.\n`,
     });
   });
 
@@ -160,12 +156,8 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
 
     expect((await revive(w, id, 'Second revive words.')).ok).toBe(true);
 
-    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(
-      `First revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
-    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
-      `Second revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(`First revive words.\n`);
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(`Second revive words.\n`);
     expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
       turnFileInstruction(turnFile(w, id, 2)),
       turnFileInstruction(turnFile(w, id, 3)),
@@ -185,7 +177,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     await expect(stat(turnFile(w, id, 2).replace(/\.md$/u, '.by.json'))).rejects.toThrow();
     expect((await w.files.port.turns?.(id as never, { strict: true }))?.[1]).toEqual({
       turn: 2,
-      text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Again.\n`,
     });
   });
 
@@ -719,7 +711,7 @@ describe('FerretsApi.turns: a ferret’s turn documents, behind the mayTouch cal
 
     expect(await turns?.list()).toEqual([
       { turn: 1, text: '# Assigned task\n\nBuild the thing.\n' },
-      { turn: 2, text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`, by: { kind: 'owner' } },
+      { turn: 2, text: `Again.\n`, by: { kind: 'owner' } },
     ]);
     expect(await w.service.turns('mw7bp88g-0000ffff' as never)).toBeUndefined();
   });

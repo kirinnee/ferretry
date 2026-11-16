@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { combinedDelivery, type HandoffDocument, turnFileInstruction } from '../../../../contract/index.ts';
+import { combinedDelivery, type HandoffDocument, turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import { AttachmentGalleryProvider } from '../../../../app/composer/attachment-gallery.tsx';
 import {
   type HandoffSource,
