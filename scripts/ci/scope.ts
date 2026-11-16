@@ -250,7 +250,9 @@ interface PackageJson {
 /** Every file under `dir` (relative to `root`, `/`-separated), without entering `node_modules` or following a symlink. */
 function* walk(root: string, dir: string): Generator<string> {
   for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.tmp') continue;
+    // No package keeps source in a dot-directory; tests make temporary ones inside packages (`.fy-worker-contract-*`)
+    // and delete them while another test walks the real workspace, which then read a vanished directory (ENOENT).
+    if (entry.name === 'node_modules' || (entry.isDirectory() && entry.name.startsWith('.'))) continue;
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) yield* walk(root, path);
     else if (entry.isFile()) yield path;
