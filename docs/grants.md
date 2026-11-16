@@ -238,6 +238,13 @@ finished ferret reported), and `GET /v1/lessons/directory`, which names every fe
 narrowed off fleet use still read the whole fleet.) The gate is the **device's** only: a ferret's own credential is never
 grant-governed (`presentation.local`) and the host's admin token over loopback is ungoverned, so the owner's `fy` and
 the app of a device holding `fleet.use` (every default device, and a `--limited` one) read exactly what they did.
+**Changing a ferret's pin board is `fleet.use` too (c58-sec2).** `POST /v1/ferrets/:ferretId/pins` is the one route that
+adds, edits and removes a note or message pin (the body's `action`; there is no PATCH or DELETE), so it asks the same
+`fleet.use` as the read: a device narrowed off fleet use is refused (`403 grant_device_not_granted`) before the body is read
+and could otherwise have rewritten notes it is not allowed to see. It is `use`, not `configure`: a note pin changes no host
+behaviour, and `configure` would put the passkey step-up on the app's ordinary pin button. Admission is unchanged for a
+ferret's own credential and for the owner over loopback. The owner's sidebar pin (`…/pin`, `…/unpin`, below) is a different
+act and stays capability-free.
 This list is what that change touched and no more: it says nothing about any other route that names a ferret (the
 asks and agenda reads, `/v1/gc`, the skills inventory, `/v1/projects`, `/v1/links/history`, `/v1/renders`), which are
 neither opened nor closed by it.
