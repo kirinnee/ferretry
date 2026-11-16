@@ -313,6 +313,24 @@ so the contract test (`packages/daemon/tests/contract/question-hook.test.ts`) pi
 real CLI, and the live bytes that showed the regression are the unit fixtures
 (`packages/daemon/tests/fixtures/question-asked/`).
 
+## After a compaction a Claude ferret re-reads what it owes
+
+A compaction keeps a summary and drops the rest, so a ferret can lose its assigned task, its card, its open agenda
+items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
+(`daemon/lib/harness/compaction.ts` in the Claude Code plugin), beside the question hook and never in a settings entry:
+
+- `PreCompact` (manual and auto) prints what the summary must keep — task, card id and status, agenda item ids, owed
+  messages, PR links;
+- `SessionStart` with the matcher `compact` prints, once the compaction is done, what to read again:
+  `fy logs <session> --turn 1`, `fy card show <card id>` (`fy board status` when the id is lost), `fy agenda ls` and
+  `fy agenda show <id>`, `fy transcript <session> --tail` and `fy reply <id> <text>`. The only value it reads is
+  `FY_SESSION_ID`; it prints no credential and always exits 0.
+
+Both are in the `fixed-layer` fingerprint, so a ferret launched before them reads as **Restart needed**. A Codex ferret
+has no equivalent yet: no compact-prompt setting is documented in this repo, and a hook of Ferretry's own would need its
+own `hooks.state` trust entry (`harness-dialogs.md`); the declared gap is `GAP(codex-compaction)` in the Codex
+plugin's `ports-pending.json`.
+
 The model a relaunch asks for is the one the ferret is on: the CLI's own report when it is newer than the
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;
 otherwise the recorded decision. A model the login has stopped serving falls back to its default.

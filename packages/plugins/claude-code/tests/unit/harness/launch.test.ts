@@ -22,6 +22,7 @@ import {
   CLAUDE_QUESTION_HOOKS,
   CLAUDE_PROMPTS_SEEN,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_COMPACTION_HOOKS } from '../../../daemon/lib/harness/compaction.ts';
 import pending from '../../../ports-pending.json';
 
 const settings = new Map([
@@ -140,7 +141,7 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS },
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
