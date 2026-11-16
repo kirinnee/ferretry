@@ -7,5 +7,6 @@ export * from './page.ts';
 export * from './policy.ts';
 export * from './ports.ts';
 export * from './queueing-sends.ts';
+export * from './rotation.ts';
 export * from './service.ts';
 export * from './settings.ts';

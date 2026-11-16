@@ -2,7 +2,15 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
-import { canMove, foldQueue, isFinal, type QueueEvent, QueueEventSchema } from '../../../../daemon/queue/lib/model.ts';
+import {
+  canMove,
+  foldQueue,
+  isFinal,
+  UNROTATED_SEGMENT,
+  type QueueEvent,
+  QueueEventSchema,
+  SegmentFold,
+} from '../../../../daemon/queue/lib/model.ts';
 
 /**
  * A session's queue is the fold of its log. These pin what each event may change, from where the message
@@ -217,5 +225,79 @@ describe('a combined delivery in the fold', () => {
 
     should(folded[0]).not.have.property('deliveredAs');
     should(QueueEventSchema.parse(moved('m1', 'typing', 1))).not.have.property('batch');
+  });
+});
+
+describe('a segment of a rotated log', () => {
+  const carried = (id: string, order: number, version: number, overrides: Partial<QueuedMessage> = {}) => ({
+    order,
+    message: { ...message({ id, ...overrides }), version },
+  });
+  const header = (carry: ReturnType<typeof carried>[], base = 100, accepted = 7) => ({
+    v: 1 as const,
+    kind: 'segment' as const,
+    base,
+    accepted,
+    carried: carry.length,
+  });
+
+  it('should count a position from the segment’s base, so a version is a position over the whole queue', () => {
+    const fold = new SegmentFold(header([]));
+
+    fold.apply(enqueued({ id: 'a' }));
+    fold.apply(moved('a', 'typing', 1));
+
+    should(fold.events).equal(2);
+    should(fold.position).equal(102);
+    should(fold.messages.map(held => [held.message.id, held.message.version, held.order])).eql([['a', 102, 7]]);
+    should(fold.acceptedCount).equal(8);
+  });
+
+  it('should start from the messages the header carries, with their version, state and place in the order', () => {
+    const open = [
+      carried('late', 5, 90, { state: 'delivered', deliveredAs: 'lead' }),
+      carried('early', 2, 80, { state: 'typing', waitReason: 'draft' }),
+    ];
+    const fold = new SegmentFold(header(open), open);
+
+    fold.apply(moved('late', 'read', 1));
+    fold.apply(enqueued({ id: 'new' }));
+
+    should(fold.messages.map(held => [held.message.id, held.order, held.message.state, held.message.version])).eql([
+      ['early', 2, 'typing', 80],
+      ['late', 5, 'read', 101],
+      ['new', 7, 'queued', 102],
+    ]);
+    should(fold.messages[0]?.message.deliveredAs).equal(undefined);
+  });
+
+  it('should take an enqueued line for a carried or sealed message as the retry it is', () => {
+    const open = [carried('open', 0, 10)];
+    const fold = new SegmentFold(header(open), open, new Set(['sealed']));
+
+    fold.apply(enqueued({ id: 'open', text: 'again' }));
+    fold.apply(enqueued({ id: 'sealed', text: 'again' }));
+
+    should(fold.messages.map(held => [held.message.id, held.message.text])).eql([['open', 'ship it']]);
+    should(fold.position).equal(102);
+    should(fold.acceptedCount).equal(7);
+  });
+
+  it('should leave a message that an illegal line did not change at its version', () => {
+    const open = [carried('open', 0, 10)];
+    const fold = new SegmentFold(header(open), open);
+
+    fold.apply(moved('open', 'read', 1));
+
+    should(fold.messages[0]?.message.version).equal(10);
+  });
+
+  it('should read a log with no header as one that begins at position zero, as foldQueue always did', () => {
+    const events = [enqueued({ id: 'a' }), enqueued({ id: 'b' }), moved('a', 'typing', 2)];
+    const fold = new SegmentFold();
+    for (const event of events) fold.apply(event);
+
+    should(fold.messages.map(held => held.message)).eql(foldQueue(events));
+    should(UNROTATED_SEGMENT).eql({ v: 1, kind: 'segment', base: 0, accepted: 0, carried: 0 });
   });
 });
