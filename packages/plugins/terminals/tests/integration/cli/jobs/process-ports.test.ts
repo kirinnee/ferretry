@@ -5,6 +5,9 @@ import { RealJobProcess, RealJobSignals, RealJobTimers } from '../../../../cli/a
 
 describe('the real process ports of the job verbs', () => {
   it('should read this process, and learn its stdout file only when it is a file', () => {
+    const codes: number[] = [];
+    new RealJobProcess(undefined, code => void codes.push(code)).exit(75);
+    should(codes).deepEqual([75]);
     const real = new RealJobProcess();
     should(real.pid).equal(process.pid);
     should(real.cwd()).equal(process.cwd());
@@ -40,6 +43,10 @@ describe('the real process ports of the job verbs', () => {
 
   it('should keep the clock and sleep, and wake early when told to', async () => {
     const timers = new RealJobTimers();
+    const deadline = timers.deadline(5);
+    should(deadline.aborted).be.false();
+    await timers.sleep(60);
+    should(deadline.aborted).be.true();
     should(Math.abs(timers.nowMs() - Date.now())).be.below(1000);
     await timers.sleep(5);
     const abort = new AbortController();

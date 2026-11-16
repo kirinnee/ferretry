@@ -176,6 +176,8 @@ describe('the tmux job runtime', () => {
       async () => undefined,
     );
     await should(stuck.list()).be.rejectedWith(/server exited unexpectedly/u);
+    // The default pause (a real 40 ms) between tries, which a real server's race would otherwise be the only thing to reach.
+    should(await new TmuxJobRuntime(new ScriptedTmux([gone, ok('')]), plainShell).list()).deepEqual([]);
   });
 
   it('should close a session, treat one already gone as closed, and report any other failure', async () => {

@@ -3,7 +3,10 @@ import type { IJobProcess, IJobSignals, IJobTimers } from '../../lib/jobs/ports.
 
 /** This process, as the job verbs read it. */
 export class RealJobProcess implements IJobProcess {
-  constructor(private readonly readLink: (path: string) => string = readlinkSync) {}
+  constructor(
+    private readonly readLink: (path: string) => string = readlinkSync,
+    private readonly endProcess: (code: number) => void = code => process.exit(code),
+  ) {}
 
   get pid(): number {
     return process.pid;
@@ -14,7 +17,7 @@ export class RealJobProcess implements IJobProcess {
   }
 
   exit(code: number): void {
-    process.exit(code);
+    this.endProcess(code);
   }
 
   /** Linux names a descriptor's target under /proc; macOS has no such file, so nothing is learned there. */
