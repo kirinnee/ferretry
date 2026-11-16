@@ -1,6 +1,6 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { MODES, NUDGES, REST_NUDGES, type RestNudgesFile, SEEN } from '../../contract/index.ts';
-import type { RestNudgeRecord, RestNudgeStore } from '../lib/rest-nudge.ts';
+import { pruneRecords, type RestNudgeRecord, type RestNudgeStore } from '../lib/rest-nudge.ts';
 import type { NudgeMark, NudgeStore } from '../lib/turn-nudge.ts';
 import type { SeenStore } from '../lib/seen.ts';
 import { emptySeen } from '../lib/seen.ts';
@@ -110,6 +110,20 @@ export class StateRestNudgeStore implements RestNudgeStore {
       }
       return next;
     });
+  }
+
+  async prune(roster: readonly string[], resting: Readonly<Record<string, readonly string[]>>): Promise<void> {
+    const read = await this.state.read(REST_NUDGES);
+    if (!read.ok) throw new Error(read.error.sentence);
+    // Nothing to drop is no write at all: a sweep every minute must not rewrite an unchanged file.
+    const held = read.value?.ferrets ?? {};
+    if (pruneRecords(held, roster, resting) === held) return;
+    const result = await this.state.update(REST_NUDGES, current => ({
+      format: 1 as const,
+      // Pruned again over what is there NOW (a reservation may have landed since the read); the instants are the file's own.
+      ferrets: pruneRecords(current?.ferrets ?? {}, roster, resting) as RestNudgesFile['ferrets'],
+    }));
+    if (!result.ok) throw new Error(result.error.sentence);
   }
 
   /** Replaces one ferret's records, atomically with the read; a ferret left with none is removed from the file. */

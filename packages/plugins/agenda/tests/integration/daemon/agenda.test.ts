@@ -425,4 +425,54 @@ describe('the rest nudge job', () => {
 
     await expect(host.runJob('rest-nudge')).rejects.toThrow('the board is damaged');
   });
+
+  describe('forgetting counters', () => {
+    const counter = { since: '2020-01-01T00:00:00.000Z', nudges: 2, at: '2020-01-01T01:00:00.000Z', sendId: 's1' };
+    const stored = (host: { state(name: string): { files: Map<string, string> } }) =>
+      JSON.parse(host.state('agenda').files.get('rest-nudges.json') ?? '{"ferrets":{}}').ferrets as Record<
+        string,
+        Record<string, unknown>
+      >;
+
+    test('closing the last nudged item drops its record on the next sweep, with no ferret nudged', async () => {
+      const { host, asks, conversation } = await silent();
+      await host.runJob('rest-nudge');
+      expect(Object.keys(stored(host))).toEqual(['f1']);
+
+      asks.snapshots = async () => [{ sessionId: 'f1', items: [] }] as never;
+      await host.runJob('rest-nudge');
+
+      expect(stored(host)).toEqual({});
+      expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    });
+
+    test('a ferret that is gone loses its records, and one whose board could not be read keeps them', async () => {
+      const { host, asks } = await silent();
+      host
+        .state('agenda')
+        .files.set(
+          'rest-nudges.json',
+          JSON.stringify({ format: 1, ferrets: { f1: { A1: counter }, f9: { A1: counter } } }),
+        );
+
+      asks.snapshots = async () => [] as never;
+      await host.runJob('rest-nudge');
+
+      expect(Object.keys(stored(host))).toEqual(['f1']);
+    });
+
+    test('an unchanged file is not rewritten by a sweep', async () => {
+      const { host, asks } = await silent();
+      asks.snapshots = async () => [{ sessionId: 'f1', items: [resting('A1', 'f1')] }] as never;
+      const text = JSON.stringify({
+        format: 1,
+        ferrets: { f1: { A1: { ...counter, at: new Date(host.clock.now()).toISOString(), sendId: 'planted' } } },
+      });
+      host.state('agenda').files.set('rest-nudges.json', text);
+
+      await host.runJob('rest-nudge');
+
+      expect(host.state('agenda').files.get('rest-nudges.json')).toBe(text);
+    });
+  });
 });

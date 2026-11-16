@@ -199,6 +199,9 @@ export default implementDaemon(manifest, {
         records: async ferret => await restStore.records(ferret),
         reserve: async (ferret, taken, live) => await restStore.reserve(ferret, taken, live),
         release: async (ferret, sendId, prior) => await restStore.release(ferret, sendId, prior),
+        prune: async (roster, resting) => await restStore.prune(roster, resting),
+        // Every ferret Ferrets still lists (stopped ones too: they can resume); a removed or archived one is not.
+        roster: async () => (await ferrets.list()).map(ferret => ferret.id as string),
         enabled: () => config().agendaNudge,
         boards: async () => await asks.snapshots(),
         // Nothing is counted while Conversation is off: a count spent on a nudge that cannot be typed would be lost.

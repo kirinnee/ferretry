@@ -223,5 +223,60 @@ describe('StateRestNudgeStore over the agenda state folder', () => {
     await expect(store.records('f1')).rejects.toThrow('rest-nudges.json');
     await expect(store.reserve('f1', { A1: rec('s1') }, ['A1'])).rejects.toThrow('rest-nudges.json');
     await expect(store.release('f1', 's1', { A1: undefined })).rejects.toThrow('rest-nudges.json');
+    await expect(store.prune(['f1'], {})).rejects.toThrow('rest-nudges.json');
+  });
+
+  /** The store over a state port that counts the writes it is asked for. */
+  const counted = () => {
+    const { folder, state } = fixture();
+    const writes = { count: 0 };
+    const port = {
+      ...state,
+      update: (async (...args: Parameters<typeof state.update>) => {
+        writes.count += 1;
+        return await state.update(...args);
+      }) as typeof state.update,
+    };
+    return { folder, state, store: new StateRestNudgeStore(port), writes };
+  };
+
+  test('pruning drops a closed item’s record, a removed ferret’s, and an emptied ferret, in one write, and a restart reads the rest', async () => {
+    const { folder, store, writes } = counted();
+    await store.reserve('f1', { A1: rec('s1'), A2: rec('s1') }, ['A1', 'A2']);
+    await store.reserve('f2', { A1: rec('x') }, ['A1']);
+    await store.reserve('f3', { A1: rec('y') }, ['A1']);
+    writes.count = 0;
+
+    await store.prune(['f1', 'f2'], { f1: ['A1'], f2: [] });
+
+    expect(writes.count).toBe(1);
+    const restarted = new StateRestNudgeStore(fixture(folder).state);
+    expect(await restarted.records('f1')).toEqual({ A1: rec('s1') });
+    expect(await restarted.records('f2')).toEqual({});
+    expect(await restarted.records('f3')).toEqual({});
+  });
+
+  test('pruning keeps every record of a ferret on the roster whose board was not read, and writes nothing when nothing is dropped', async () => {
+    const { store, writes } = counted();
+    await store.reserve('f1', { A1: rec('s1') }, ['A1']);
+    writes.count = 0;
+
+    await store.prune(['f1'], {});
+    await store.prune(['f1'], { f1: ['A1'] });
+    await new StateRestNudgeStore(fixture().state).prune([], {});
+
+    expect(writes.count).toBe(0);
+    expect(await store.records('f1')).toEqual({ A1: rec('s1') });
+  });
+
+  test('a refused prune write is reported', async () => {
+    const { store, state } = counted();
+    await store.reserve('f1', { A1: rec('s1') }, ['A1']);
+    const refusing = new StateRestNudgeStore({
+      ...state,
+      update: (async () => ({ ok: false, error: { sentence: 'the state would not take the write' } })) as never,
+    });
+
+    await expect(refusing.prune([], {})).rejects.toThrow('the state would not take the write');
   });
 });

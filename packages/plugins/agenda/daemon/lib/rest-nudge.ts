@@ -44,6 +44,9 @@ export const REST_NUDGE_SWEEP_MS = 60_000;
 /** How every rest nudge's send id begins; Conversation also knows a send as Agenda's by its author. */
 export const AGENDA_REST_NUDGE_ID_PREFIX = 'agenda-rest-nudge-';
 
+/** What `failed` is told when the prune, not any one ferret's nudge, is what failed. */
+export const PRUNE_SUBJECT = 'the rest-nudge counters';
+
 export type RestItem = AskBoardSnapshot['items'][number];
 
 /** What was recorded of one item's nudges: the rest it was for, how many went, when the last did, and its send. */
@@ -62,6 +65,41 @@ export interface RestNudgeStore {
   reserve(ferret: string, taken: Readonly<Record<string, RestNudgeRecord>>, live: readonly string[]): Promise<void>;
   /** Takes back a nudge whose send typed nothing: each item still holding `sendId` returns to `prior` (or to none). */
   release(ferret: string, sendId: string, prior: Readonly<Record<string, RestNudgeRecord | undefined>>): Promise<void>;
+  /**
+   * Forgets what can no longer count ({@link pruneRecords}), at most one write and none when nothing is dropped. `roster`
+   * is every ferret that still exists; `resting` is, for each board READ this sweep, the ids still resting on it.
+   */
+  prune(roster: readonly string[], resting: Readonly<Record<string, readonly string[]>>): Promise<void>;
+}
+
+/** Every ferret's records, by ferret then by item id. */
+export type RestNudgeRecords = Readonly<Record<string, Readonly<Record<string, RestNudgeRecord>>>>;
+
+/**
+ * The records left after dropping what can no longer count, or `all` itself (the same object) when nothing is dropped. A ferret not on the
+ * `roster` (removed, archived) loses every record. For a ferret whose board was read (a key of `resting`) only the items
+ * still resting on it keep theirs, so a closed item's counter goes even when no ferret is nudged. A ferret on the roster
+ * whose board was NOT read (no key) keeps everything: an unreadable board must never cost a ferret its budget.
+ */
+export function pruneRecords(
+  all: RestNudgeRecords,
+  roster: readonly string[],
+  resting: Readonly<Record<string, readonly string[]>>,
+): RestNudgeRecords {
+  let dropped = false;
+  const kept: Record<string, Readonly<Record<string, RestNudgeRecord>>> = {};
+  for (const [ferret, records] of Object.entries(all)) {
+    if (!roster.includes(ferret)) {
+      dropped = true;
+      continue;
+    }
+    const ids = resting[ferret];
+    const left =
+      ids === undefined ? records : Object.fromEntries(Object.entries(records).filter(([id]) => ids.includes(id)));
+    if (Object.keys(left).length !== Object.keys(records).length) dropped = true;
+    if (Object.keys(left).length > 0) kept[ferret] = left;
+  }
+  return dropped ? kept : all;
 }
 
 /** The record that belongs to the rest the item is in now; one from an earlier rest counts for nothing. */
@@ -152,6 +190,8 @@ export interface AgendaRestNudgePorts extends RestNudgeStore {
   readonly enabled: () => boolean;
   /** Every board that may hold a resting item. */
   readonly boards: () => Promise<readonly AskBoardSnapshot[]>;
+  /** Every ferret that still exists (live or stopped, not removed or archived): the rest are forgotten by the prune. */
+  readonly roster: () => Promise<readonly string[]>;
   /** Whether the ferret can be nudged now: running (a stopped or gone one never is) and Conversation there to type it. */
   readonly running: (ferret: string) => Promise<boolean>;
   /** Now, as an instant. */
@@ -177,14 +217,35 @@ export class AgendaRestNudger {
   async sweep(): Promise<number> {
     if (!this.ports.enabled()) return 0;
     let nudged = 0;
-    for (const board of await this.ports.boards()) {
+    const boards = await this.ports.boards();
+    for (const board of boards) {
       try {
         if (await this.nudge(board)) nudged += 1;
       } catch (error) {
         this.ports.failed(board.sessionId, error);
       }
     }
+    await this.prune(boards);
     return nudged;
+  }
+
+  /**
+   * Forgets the counters that can no longer count, whether or not anything was nudged: a closed item's, and a removed or
+   * archived ferret's. Only a board READ this sweep speaks for its items; a ferret whose board is not among `boards`
+   * keeps its budget. A failure here costs nothing but a later prune, so it is reported and never fails the sweep.
+   */
+  private async prune(boards: readonly AskBoardSnapshot[]): Promise<void> {
+    try {
+      const resting = Object.fromEntries(
+        boards.map(board => [
+          board.sessionId,
+          board.items.filter(item => recordOf(item, {}) !== undefined).map(item => item.id),
+        ]),
+      );
+      await this.ports.prune(await this.ports.roster(), resting);
+    } catch (error) {
+      this.ports.failed(PRUNE_SUBJECT, error);
+    }
   }
 
   private async nudge(board: AskBoardSnapshot): Promise<boolean> {

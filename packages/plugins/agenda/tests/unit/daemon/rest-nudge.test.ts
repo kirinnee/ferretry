@@ -6,6 +6,8 @@ import {
   AGENDA_REST_NUDGE_MAX_MS,
   AGENDA_REST_NUDGE_MS,
   AgendaRestNudger,
+  PRUNE_SUBJECT,
+  pruneRecords,
   restNudgeCount,
   restNudgeDueAt,
   restNudgeMessage,
@@ -166,7 +168,14 @@ const world = (
   const sent: Array<{ ferret: string; sendId: string; message: string }> = [];
   const failures: unknown[] = [];
   const reserved: string[][] = [];
-  const state = { failSend: over.failSend, enabled: over.enabled ?? true, running: over.running ?? true };
+  const pruneWrites: string[][] = [];
+  const state = {
+    failSend: over.failSend,
+    enabled: over.enabled ?? true,
+    running: over.running ?? true,
+    roster: undefined as readonly string[] | undefined,
+    rosterFails: false,
+  };
   const boards = over.boards ?? [board(resting('A1'), resting('A2', { title: 'Ask A2' }))];
   const ports: AgendaRestNudgePorts = {
     records: async ferret => files.get(ferret) ?? {},
@@ -186,6 +195,19 @@ const world = (
       }
       files.set(ferret, next);
     },
+    // The way the state adapter behaves: a write only when something is dropped.
+    prune: async (roster, resting) => {
+      const held = Object.fromEntries(files);
+      const dropped = pruneRecords(held, roster, resting);
+      if (dropped === held) return;
+      pruneWrites.push(Object.keys(dropped));
+      files.clear();
+      for (const [ferret, records] of Object.entries(dropped)) files.set(ferret, { ...records });
+    },
+    roster: async () => {
+      if (state.rosterFails) throw new Error('the roster is unreadable');
+      return state.roster ?? boards.map(each => each.sessionId);
+    },
     enabled: () => state.enabled,
     boards: async () => boards,
     running: async () => state.running,
@@ -198,7 +220,7 @@ const world = (
     failed: (_ferret, error) => void failures.push(error),
   };
   const nudger = () => new AgendaRestNudger(ports, 'fy');
-  return { clock, files, sent, failures, reserved, state, nudger, ports, boards };
+  return { clock, files, sent, failures, reserved, pruneWrites, state, nudger, ports, boards };
 };
 
 describe('the silence nudge sweep', () => {
@@ -366,5 +388,135 @@ describe('the silence nudge sweep', () => {
     expect(sent).toHaveLength(2);
     expect(sent[1]?.sendId).toBe(`${AGENDA_REST_NUDGE_ID_PREFIX}${FERRET}-A1.${Date.parse(at(100))}.1`);
     expect(Object.keys(files.get(FERRET) ?? {})).toEqual(['A1']);
+  });
+});
+
+describe('forgetting counters that can no longer count', () => {
+  const OTHER = 'ms9zzzzz-12345678';
+  const noted = (...ids: string[]): Record<string, RestNudgeRecord> =>
+    Object.fromEntries(ids.map(id => [id, record()]));
+
+  test('closing the last nudged item and sweeping drops its record, with nothing due and nobody nudged', async () => {
+    const { clock, nudger, files, sent, boards } = world();
+    clock.value = at(31);
+    await nudger().sweep();
+    expect(Object.keys(files.get(FERRET) ?? {})).toEqual(['A1', 'A2']);
+
+    boards.splice(0, 1, board());
+    clock.value = at(32);
+    expect(await nudger().sweep()).toBe(0);
+
+    expect(files.has(FERRET)).toBe(false);
+    expect(sent).toHaveLength(1);
+  });
+
+  test('an item that is no longer resting loses its record while a resting one keeps its own', async () => {
+    const { clock, nudger, files, boards } = world();
+    clock.value = at(31);
+    await nudger().sweep();
+
+    boards.splice(0, 1, board(resting('A1'), resting('A2', { resting: { sub: 'working', at: at(40) } })));
+    clock.value = at(32);
+    await nudger().sweep();
+
+    expect(Object.keys(files.get(FERRET) ?? {})).toEqual(['A1']);
+  });
+
+  test('a removed or archived ferret’s records are gone, and a ferret still on the roster keeps its own', async () => {
+    const { nudger, files, state, boards } = world();
+    boards.push({ ...board(resting('A9')), sessionId: OTHER } as AskBoardSnapshot);
+    files.set(FERRET, noted('A1'));
+    files.set(OTHER, noted('A9'));
+    files.set('ms0gone0-00000000', noted('A1'));
+
+    state.roster = [FERRET, OTHER];
+    await nudger().sweep();
+
+    expect([...files.keys()].sort()).toEqual([FERRET, OTHER].sort());
+  });
+
+  test('a ferret whose board has gone from the roster loses its records even though no board speaks for it', async () => {
+    const { nudger, files, state } = world();
+    files.set(OTHER, noted('A9'));
+    state.roster = [FERRET];
+    await nudger().sweep();
+    expect(files.has(OTHER)).toBe(false);
+  });
+
+  test('a board that could not be read this sweep keeps its counters, even with every other board empty', async () => {
+    const { nudger, files, state, boards, pruneWrites } = world();
+    files.set(OTHER, noted('A9'));
+    boards.splice(0, 1, board());
+    state.roster = [FERRET, OTHER];
+
+    await nudger().sweep();
+
+    expect(files.get(OTHER)).toEqual(noted('A9'));
+    expect(pruneWrites).toEqual([]);
+  });
+
+  test('nothing changed means no write, however often the sweep runs', async () => {
+    const { clock, nudger, pruneWrites } = world();
+    clock.value = at(31);
+    const sweeper = nudger();
+    await sweeper.sweep();
+    for (let minute = 32; minute < 60; minute += 1) {
+      clock.value = at(minute);
+      await sweeper.sweep();
+    }
+    expect(pruneWrites).toEqual([]);
+  });
+
+  test('one sweep that drops several things writes once', async () => {
+    const { nudger, files, state, boards, pruneWrites } = world();
+    boards.splice(0, 1, board(resting('A1')));
+    files.set(FERRET, noted('A1', 'A2', 'A3'));
+    files.set(OTHER, noted('A9'));
+    state.roster = [FERRET];
+    await nudger().sweep();
+    expect(pruneWrites).toEqual([[FERRET]]);
+    expect(Object.keys(files.get(FERRET) ?? {})).toEqual(['A1']);
+  });
+
+  test('is skipped while the nudge is off, and a prune that fails is reported without failing the sweep', async () => {
+    const off = world({ enabled: false });
+    off.files.set(OTHER, noted('A9'));
+    await off.nudger().sweep();
+    expect(off.files.has(OTHER)).toBe(true);
+
+    const { clock, nudger, state, failures, sent } = world();
+    state.rosterFails = true;
+    clock.value = at(31);
+    expect(await nudger().sweep()).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(failures).toHaveLength(1);
+    expect(String(failures[0])).toContain('the roster is unreadable');
+    expect(PRUNE_SUBJECT).toBe('the rest-nudge counters');
+  });
+
+  test('a board that cannot be read at all fails the sweep before anything is dropped', async () => {
+    const { ports, files } = world();
+    files.set(OTHER, noted('A9'));
+    const sweeper = new AgendaRestNudger(
+      {
+        ...ports,
+        boards: async () => {
+          throw new Error('the board is damaged');
+        },
+      },
+      'fy',
+    );
+    await expect(sweeper.sweep()).rejects.toThrow('the board is damaged');
+    expect(files.get(OTHER)).toEqual(noted('A9'));
+  });
+
+  test('pruneRecords hands back its own input when nothing is dropped, and drops an emptied ferret', () => {
+    const all = { [FERRET]: noted('A1') };
+    expect(pruneRecords(all, [FERRET], { [FERRET]: ['A1'] })).toBe(all);
+    expect(pruneRecords(all, [FERRET], {})).toBe(all);
+    const empty = { [FERRET]: {} };
+    expect(pruneRecords(empty, [FERRET], { [FERRET]: [] })).toBe(empty);
+    expect(pruneRecords(all, [FERRET], { [FERRET]: [] })).toEqual({});
+    expect(pruneRecords(all, [], {})).toEqual({});
   });
 });
