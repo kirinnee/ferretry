@@ -260,9 +260,14 @@ export class DaemonStorage {
     return false;
   }
 
-  /** The journal's file identity from one `lstat` (no read); `undefined` when it is absent or cannot be told. */
+  /**
+   * The journal's file identity from one `lstat` (no read). `undefined` when it is absent, cannot be told, or is not
+   * one an equal etag can be trusted for (`settled`: a device and nanosecond ctime that no caller can set back, old
+   * enough that a later write could not share it): the journal is then read in full, as before.
+   */
   private async journalEtag(id: SessionId): Promise<string | undefined> {
-    return (await this.state.version(FerretHistoryFiles, id).catch(() => undefined))?.etag;
+    const version = await this.state.version(FerretHistoryFiles, id).catch(() => undefined);
+    return version?.settled === true ? version.etag : undefined;
   }
 
   /** Notes the journal `session`'s row now describes, or forgets it when there is none to note. */
@@ -382,7 +387,8 @@ export class DaemonStorage {
     }
     // Taken BEFORE the read: a journal that moves in between leaves a stale identity, which never matches.
     const etag = await this.journalEtag(id);
-    const source = await this.readSource(id);
+    const read = await this.readSession(id);
+    const source = read.source;
     if (source === undefined) {
       this.index.removeSession(id);
       this.rememberJournal(id, undefined, undefined);
@@ -390,7 +396,9 @@ export class DaemonStorage {
     }
     this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
     const applied = this.applySource(source);
-    this.rememberJournal(id, etag, applied.session);
+    // Only a journal read to its end is one the row can be said to describe: a read cut short by an io fault indexed
+    // what it got, and must be read again.
+    this.rememberJournal(id, read.journal.complete ? etag : undefined, applied.session);
     return applied;
   }
 
@@ -440,8 +448,8 @@ export class DaemonStorage {
         fingerprint: current.journal,
       },
     };
-    const result = this.applyMetadataRefresh(source);
-    return { ...result, eventCount: this.index.countEvents(id) };
+    // No `eventCount`: counting the pointers is a scan of every one of them, and a document write ignores it.
+    return { ...this.applyMetadataRefresh(source), eventCount: 0 };
   }
 
   async syncSession(id: SessionId): Promise<RebuildResult> {
