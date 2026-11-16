@@ -5,6 +5,7 @@ import {
   type ConversationApi,
   conversationFor,
   LinkKept,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   SearchSources,
@@ -146,6 +147,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
             form: true,
             apply: answer => a.applyQuestionAnswer(answer),
           },
+          // A ferret parked on a permission prompt or a dialog is a card the owner cannot answer here: the console does.
+          'ask.sources:prompt': { schema: PromptAskRefSchema, title: 'Prompt', form: false },
           // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
           'launch.parts': () => [
             {
@@ -174,6 +177,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
             release: ferret => b.release(ferret),
             look: (ferret, phase) => a.turns.look(ferret, phase),
             lookQuestion: ferret => a.questions.look(ferret),
+            lookPrompt: ferret => a.promptChanged(ferret),
             forget: ferret => a.turns.forget(ferret),
             withdrawQuestion: ferret =>
               void a

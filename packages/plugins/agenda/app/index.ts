@@ -62,6 +62,10 @@ const half = implementApp(manifest, {
         'ferret-agenda-mode': lazyComponent<PanelProps>(
           async () => (await surfacesOf()).panels['ferret-agenda-mode'] as AppComponent<PanelProps>,
         ),
+        // Conversation's `conversation.row-body` slot: an agenda message drawn as its card instead of its words.
+        'agenda-message': lazyComponent<PanelProps>(
+          async () => (await surfacesOf()).panels['agenda-message'] as AppComponent<PanelProps>,
+        ),
         // Drawn from `shell.navPanels` below (no machine), never from a machine's half.
         'needs-you': () => null,
       },

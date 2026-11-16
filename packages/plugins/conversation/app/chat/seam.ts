@@ -7,14 +7,9 @@
  *   - FerretActionContribution / FerretActionEntry .... GAP(ferrets, Q1): today's `session-actions/registry.ts` shapes
  *     (the `run` and `confirm` entries the chat contributes: "Clear stuck messages", "Dismiss all cancelled"). The
  *     Actions menu that lists them is the Ferrets app half's; until it lands the chat builds them and nothing lists them.
- *   - AgendaMessageOr / useAgendaChatReply ............ GAP(agenda): the agenda card an answer from the Agenda reads as
- *     (today's `agenda-message.tsx`). Its reader (`parseAgendaMessage`) is the Asks daemon's protocol and the Agenda
- *     app's copy; neither is a contract Conversation may import. Until Agenda draws it here (a `conversation.row`
- *     panel), every agenda message is drawn as it always was when it was not recognised: its words (`fallback`).
  */
 
 import type { LucideIcon } from 'lucide-react';
-import { createElement, Fragment, type ReactNode } from 'react';
 
 // ─── the ferret's Actions menu (Ferrets) ───────────────────────────────────────────────────────────────────────────
 
@@ -48,13 +43,3 @@ export interface FerretActionContribution<Context> {
   readonly order: number;
   readonly build: (context: Context) => FerretActionEntry | null;
 }
-
-// ─── the agenda card a message reads as (Agenda) ───────────────────────────────────────────────────────────────────
-
-/** A message drawn as its agenda card, or as `fallback` when it is not one. GAP(agenda): always `fallback` here. */
-export function AgendaMessageOr({ fallback }: { readonly text: string; readonly fallback: ReactNode }) {
-  return createElement(Fragment, null, fallback);
-}
-
-/** A message on its way, worded as the ferret will receive it. GAP(agenda): the open items are not read here. */
-export const useAgendaChatReply = (text: string): string => text;
