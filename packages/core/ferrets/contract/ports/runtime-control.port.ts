@@ -9,7 +9,7 @@ import type { RuntimeControlRequest, RuntimeModelCatalog } from '../view/runtime
  *
  * AUTHORIZATION, enforced here and not by the route so every transport gets it: with no `caller` (a person: the admin
  * token with no ferret behind it, or a device) any ferret may be switched; with a `caller` (a ferret acting) only that
- * ferret and its lead and helpers may be (the same `mayTouch` rule as stop, resume and the harness seam). Anyone else is
+ * ferret and its helpers (its descendants) may be, NEVER its lead (the same `mayTouch` rule as stop, resume and the harness seam). Anyone else is
  * refused with an `ApiError` 403 `forbidden`, as `harness` refuses. Every other refusal is a {@link RuntimeControlError}.
  */
 export interface RuntimeControlApi {

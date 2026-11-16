@@ -4,12 +4,15 @@ import {
   type DeliveryOutcome,
   FORM_KEYS,
   type FormKey,
+  PICKER_KEYS,
+  type PickerKey,
   HARNESS_STOP_KEYS,
   type RunnerFormCapture,
   type QueueOutcome,
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
   type RunnerHeldAt,
+  type RunnerPaneIdentity,
   type RunnerPaneObservation,
   type Runner,
   type RunnerDelivery,
@@ -41,6 +44,7 @@ import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
 import { TmuxController } from '../../lib/tmux/controller.ts';
+import type { ProcessTreeRead } from '../../lib/session/processes/ports.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 import { scriptLine } from '../../lib/tmux/script.ts';
 import { guardedWriteArguments, GUARD_REFUSED } from '../../lib/tmux/write-guard.ts';
@@ -225,6 +229,20 @@ function isFerretSession(session: string): boolean {
   return session.startsWith(FERRET_TMUX_PREFIX) && !session.startsWith(TERMINAL_TMUX_PREFIX);
 }
 
+/**
+ * What the runner asks of the machine to identify a pane's root process and to signal one proved descendant of it (c58-37).
+ * Every member is a read except `signal`, which sends ONE signal to ONE pid and throws as `process.kill` does.
+ */
+export interface PaneProcessHost {
+  /** The start value of `pid` now, read fresh (Linux start ticks, macOS epoch seconds); `undefined` once it exited. */
+  startOf(pid: number): Promise<number | undefined>;
+  /** Descendants of `rootPid`, parents before children, each with its own start. */
+  tree(rootPid: number): Promise<ProcessTreeRead>;
+  signal(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void;
+  /** Pids that are never signalled whatever the tree says: this daemon and every parent of it. Read fresh per call. */
+  protectedPids(): Promise<readonly number[]>;
+}
+
 export interface TmuxRunnerOptions {
   readonly tmux: TmuxCommandPort;
   readonly spawn: SpawnPort;
@@ -245,6 +263,11 @@ export interface TmuxRunnerOptions {
    * (a locator that failed) still rejects the start: it fails closed, never open.
    */
   readonly launchGuard?: TmuxLaunchGuard;
+  /**
+   * The machine reads behind `identify` (a pid's start) and `signalDescendant` (the tree, the protected pids, the one
+   * signal). Absent: `identify` names the pane without a start, and `signalDescendant` signals nothing.
+   */
+  readonly processes?: PaneProcessHost;
   /** Where a refused launch is said. */
   readonly log?: Pick<Log, 'warn'>;
   /**
@@ -337,6 +360,69 @@ export class TmuxRunner implements Runner {
     const present = await this.options.tmux.execute(['has-session', '-t', session]).catch(() => undefined);
     if (present === undefined || present.code === 0) return false;
     return /can't find session/iu.test(present.stderr) || isTmuxServerAbsent(present.stderr);
+  }
+
+  /**
+   * The pane behind `handle` now, read only (`list-panes -a`: the one question tmux answers EXACTLY by pane id, where
+   * `display-message -t %n` answers the current pane for an id that is gone). `'gone'` only when a server that answered
+   * does not list the pane, or tmux says it has no server; every other failure proves nothing and is `undefined`. A pane
+   * outside a ferret's session is not vouched for (`undefined`). A dead pane tmux keeps has no pid.
+   */
+  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+    if (!PANE_ID.test(handle)) return undefined;
+    const listed = await this.options.tmux.execute(['list-panes', '-a', '-F', PANE_FACTS]).catch(() => undefined);
+    if (listed === undefined) return undefined;
+    if (listed.code !== 0) return isTmuxServerAbsent(listed.stderr) ? 'gone' : undefined;
+    const facts = listed.stdout
+      .split('\n')
+      .map(parsePaneFacts)
+      .find(candidate => candidate?.paneId === handle);
+    if (facts === undefined) return 'gone';
+    if (!isFerretSession(facts.session)) return undefined;
+    if (facts.dead || facts.pid <= 0) return { handle };
+    const start = await this.options.processes?.startOf(facts.pid).catch(() => undefined);
+    return { handle, pid: facts.pid, ...(start === undefined ? {} : { processStart: String(start) }) };
+  }
+
+  /**
+   * ONE signal to ONE pid, and only a pid PROVED to be a descendant of this pane's root with this start at this moment.
+   * The proof is the tree read now (`rootPid`'s descendants, each with its own start), never what the caller remembers;
+   * the start is read again immediately before the signal, and the root must be the same run on both sides of the tree
+   * read. Refused (`false`, nothing sent): no process host, a signal other than SIGTERM or SIGKILL, a pid that is not a
+   * plain pid above init, a caller that could not read the start, a pane that is gone, dead or not a ferret's, a tree that
+   * could not be read, a pid that is the root, not below it or reused, and a protected pid (the daemon or a parent of
+   * it, which a daemon started from inside a ferret's pane would otherwise be). Nothing is written to the pane.
+   */
+  async signalDescendant(
+    handle: RunnerHandle,
+    pid: number,
+    start: string | undefined,
+    signal: 'SIGTERM' | 'SIGKILL',
+  ): Promise<boolean> {
+    const host = this.options.processes;
+    if (host === undefined || (signal !== 'SIGTERM' && signal !== 'SIGKILL')) return false;
+    if (!Number.isSafeInteger(pid) || pid <= 1 || start === undefined || start === '') return false;
+    const pane = await this.identify(handle);
+    if (pane === undefined || pane === 'gone' || pane.pid === undefined || pane.processStart === undefined)
+      return false;
+    if (pid === pane.pid || (await host.protectedPids()).includes(pid)) return false;
+    const tree = await host.tree(pane.pid).catch(() => undefined);
+    if (tree === undefined || tree.kind !== 'read') return false;
+    const target = tree.rows.find(candidate => candidate.pid === pid && String(candidate.start) === start);
+    if (target === undefined) return false;
+    // The pane root must still be the run identified above, and the target still the run proved below it.
+    const rootNow = await host.startOf(pane.pid).catch(() => undefined);
+    const targetNow = await host.startOf(pid).catch(() => undefined);
+    if (rootNow === undefined || String(rootNow) !== pane.processStart) return false;
+    if (targetNow === undefined || String(targetNow) !== start) return false;
+    try {
+      host.signal(pid, signal);
+      return true;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === 'ESRCH' || code === 'EPERM') return false;
+      throw error;
+    }
   }
 
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
@@ -580,6 +666,18 @@ export class TmuxRunner implements Runner {
   async formKey(handle: RunnerHandle, key: FormKey): Promise<void> {
     if (!(FORM_KEYS as readonly string[]).includes(key))
       throw new TypeError('that key is not one a form is driven with');
+    const pane = await this.guardedPane(handle);
+    try {
+      await new TmuxController(pane.port).sendKey(pane.session, key);
+    } catch (error) {
+      throw typedNotLost(error, { ...pane.written(), typings: 0 });
+    }
+  }
+
+  /** Live model switch: ONE row digit of the closed {@link PICKER_KEYS}, guarded exactly as {@link TmuxRunner.formKey}. */
+  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+    if (!(PICKER_KEYS as readonly string[]).includes(key))
+      throw new TypeError('that key is not one a model picker is driven with');
     const pane = await this.guardedPane(handle);
     try {
       await new TmuxController(pane.port).sendKey(pane.session, key);
