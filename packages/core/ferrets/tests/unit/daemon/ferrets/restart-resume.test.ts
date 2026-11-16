@@ -18,7 +18,7 @@ const record = (over: Partial<FerretRecord> = {}): FerretRecord =>
   ({
     runtime: 'claude-main',
     harness: 'claude-code',
-    mode: 'plan',
+    mode: 'interactive',
     folder: '/work/lead',
     handle: '%1',
     ...over,
