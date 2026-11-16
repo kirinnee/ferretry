@@ -11,6 +11,7 @@ import { z } from 'zod';
 import type { ChildEnvironment, InputRequestId } from '@ferretry/core-vault/contract';
 import type { Brand, Instant, JsonValue, Result } from '@ferretry/std';
 import type { FerretRole, HarnessKey, LoginKindKey, PackId, RunnerKey } from './ids.ts';
+import type { HarnessHistorySource } from './history.ts';
 import type { InitialAttachment, StartOptions } from './port.ts';
 
 /**
@@ -899,6 +900,12 @@ export interface Harness {
    * or missing record is `unknown`, never a throw. Absent: Ferrets claims nothing about this harness's settings.
    */
   launchSettings?(ferret: FerretId): Promise<HarnessLaunchSettings>;
+  /**
+   * Additive (the conversation index): the past conversations this harness holds, as read-only trees Conversation walks
+   * and reads for its listing (`HarnessHistorySource`): the owner's own home, each ferret home and, later, the shared pool.
+   * Total: a tree that cannot be reached is left out, never an error. Absent: this harness lists no history.
+   */
+  historySources?(): Promise<readonly HarnessHistorySource[]>;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;

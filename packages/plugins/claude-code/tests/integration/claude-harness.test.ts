@@ -473,6 +473,37 @@ describe('ClaudeHarness', () => {
     expect(roots.root('harness-history').resolve('projects').ok).toBe(false);
   });
 
+  test('historySources offers the owner’s home and each ferret home as read-only trees, a linked home as nothing', async () => {
+    const { harness } = build();
+    await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+    await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), '0123456789');
+    await mkdir(join(AGENT_HOMES(), 'scout', 'projects/q'), { recursive: true });
+    await Bun.write(join(AGENT_HOMES(), 'scout', 'projects/q/c-2.jsonl'), 'abcdef');
+    await mkdir(join(fixture, 'pool'), { recursive: true });
+    await mkdir(join(AGENT_HOMES(), 'pooled'), { recursive: true });
+    await symlink(join(fixture, 'pool'), join(AGENT_HOMES(), 'pooled', 'projects'));
+
+    const sources = await harness.historySources();
+
+    expect(sources.map(source => [source.kind, source.label])).toEqual(
+      expect.arrayContaining([
+        ['computer', 'owner'],
+        ['ferret-home', 'scout'],
+      ]),
+    );
+    const owner = sources.find(source => source.kind === 'computer');
+    const scout = sources.find(source => source.label === 'scout');
+    const pooled = sources.find(source => source.label === 'pooled');
+    expect((await owner?.files.entries('projects/p'))?.map(entry => [entry.name, entry.kind, entry.size])).toEqual([
+      ['c-1.jsonl', 'file', 10],
+    ]);
+    expect(new TextDecoder().decode(await owner?.files.read('projects/p/c-1.jsonl', 2, 4))).toBe('2345');
+    expect(await scout?.files.stat('projects/q/c-2.jsonl')).toMatchObject({ size: 6 });
+    // A home whose history is a link lists nothing here (a pool lists it once), and the seam has no way to write.
+    expect(await pooled?.files.entries('projects')).toEqual([]);
+    expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
+  });
+
   test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
     const { harness } = build();
     await mkdir(join(fixture, 'outside'), { recursive: true });

@@ -60,6 +60,7 @@ import type {
   FerretState,
   FerretSummary,
   Harness,
+  HarnessHistorySource,
   HarnessKey,
   LaunchPart,
   LaunchPartSource,
@@ -852,6 +853,20 @@ export class FerretsService implements FerretsApi {
 
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
+  }
+
+  /** What each harness that offers any holds of past conversations; one that fails offers none. */
+  async historySources(): Promise<
+    readonly { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[]
+  > {
+    const found: { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[] = [];
+    for (const key of this.ports.harnessKeys()) {
+      const harness = this.ports.harness(key);
+      if (harness?.historySources === undefined) continue;
+      const sources = await harness.historySources().catch((): readonly HarnessHistorySource[] => []);
+      if (sources.length > 0) found.push({ harness: key, sources });
+    }
+    return found;
   }
 
   /** The handle `ferret.json` keeps while the ferret runs; a stop clears it. */

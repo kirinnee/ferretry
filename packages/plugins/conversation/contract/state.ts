@@ -151,6 +151,18 @@ export const SEARCH_STATE = defineState({
   store: 'sqlite-cache',
   format: 1,
 });
+/**
+ * The conversation index (shared-history design §3.3): one row per transcript file of every harness history Conversation
+ * lists (the owner's own homes, each ferret's home, later the pool), so a link listing is one indexed query instead of a
+ * read of every transcript. A CACHE: dropped and rebuilt when its format or layout does not match, it grants nothing and
+ * holds only what the transcripts already say (it never holds a whole message; previews are cut to 120 characters).
+ */
+export const CONVERSATION_INDEX_STATE = defineState({
+  name: 'conversation-index',
+  path: 'conversation-index.sqlite',
+  store: 'sqlite-cache',
+  format: 1,
+});
 /** The key that signs a message token (G41's bounded fragments); `0600`, never read back by any route. */
 export const MESSAGE_TOKEN_KEY_STATE = defineState({
   name: 'message-token-key',
@@ -182,6 +194,7 @@ export const CONVERSATION_STATE = [
   LINKS_STATE,
   FINDER_STATE,
   SEARCH_STATE,
+  CONVERSATION_INDEX_STATE,
   MESSAGE_TOKEN_KEY_STATE,
 ] as const;
 

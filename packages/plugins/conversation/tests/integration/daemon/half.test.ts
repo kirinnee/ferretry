@@ -156,18 +156,13 @@ describe('the merged half', () => {
     expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
-  test('a render saved is served back, and a link listing and its preview say plainly that they are not in 5.0 yet', async () => {
+  test('a link listing answers from the conversation index (empty while no harness offers history), and an unknown preview is a 404', async () => {
     const host = await boot();
     const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
-    expect(links.status).toBe(503);
-    // One fixed sentence, never a raw error: the app draws `error` as it is.
-    expect(links.json()).toMatchObject({
-      code: 'conversation_harness_unavailable',
-      error: expect.stringContaining('Not in 5.0 yet'),
-    });
+    expect(links.status).toBe(200);
+    expect(links.json()).toMatchObject({ conversations: [], matched: 0, skipped: 0 });
     const preview = await host.request('GET', '/v1/links/conversations/claude-code/abc/preview', { as: owner() });
-    expect(preview.status).toBe(503);
-    expect(preview.json()).toMatchObject({ error: (links.json() as { error: string }).error });
+    expect(preview.status).toBe(404);
     const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
     expect([400, 404]).toContain(unknown.status);
   });
