@@ -16,7 +16,7 @@ verdict | judge)
   # Full CI red. Once the switch is 'true' it must succeed like every other job.
   if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |
-    ["quick", "int", "full-gates", "compile", "smoke"]
+    ["quick", "static", "int", "full-gates", "compile", "smoke"]
       | all(.[]; $needs[.].result == "success")
     and ($strict == "false" or $needs["strict-guarantees"].result == "success")
     and ($needs["full-pending"].result == "success" or

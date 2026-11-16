@@ -83,8 +83,20 @@ if [[ -n ${group} ]]; then
   groups="config/test-groups.json"
   # The group's files (and the changed-plugin scope's narrowing of them) are group-files.sh's.
   mapfile -t files < <(./scripts/ci/group-files.sh "${mode}" "${group}")
-  [[ ${#files[@]} -eq 0 ]] && echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
   coverage_file="coverage/${mode}/groups/${group}/lcov.info"
+  if [[ ${#files[@]} -eq 0 ]]; then
+    # Only a SCOPED unit run can empty a group (group-files.sh refuses an empty group otherwise and fails, which
+    # `mapfile` would not notice): re-check that here, then leave an empty ledger and a marker, so the ledger and
+    # the timings report the group as scoped out instead of missing.
+    if [[ ${mode} == unit && -n ${FY_CI_SCOPE_FILE:-} ]] && ./scripts/ci/group-files.sh "${mode}" "${group}" >/dev/null 2>&1; then
+      mkdir -p "${coverage_file%/*}"
+      : >"${coverage_file}"
+      echo "scoped out" >"${coverage_file%/*}/scoped-out"
+      echo "📝 ${mode} test group ${group}: scoped out, nothing to run"
+      exit 0
+    fi
+    echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
+  fi
   # `--coverage-dir` loses to the bunfig's `coverageDir`, so the group gets a copy that names its own.
   config="coverage/${mode}/groups/${group}/bunfig.toml"
   mkdir -p "${config%/*}"

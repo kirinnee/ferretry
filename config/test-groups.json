@@ -2,7 +2,29 @@
   "schemaVersion": 1,
   "unit": [
     {
-      "name": "all",
+      "name": "kernel",
+      "prefixes": ["packages/core/kernel/"]
+    },
+    {
+      "name": "runtimes",
+      "prefixes": ["packages/plugins/runtimes/"]
+    },
+    {
+      "name": "conversation-voice",
+      "prefixes": ["packages/plugins/conversation/", "packages/plugins/voice/"]
+    },
+    {
+      "name": "plugins-a",
+      "prefixes": [
+        "packages/plugins/catalogs/",
+        "packages/plugins/browsers/",
+        "packages/plugins/terminals/",
+        "packages/plugins/board/",
+        "packages/std/"
+      ]
+    },
+    {
+      "name": "everything-else",
       "prefixes": ["packages/"]
     }
   ],

@@ -32,6 +32,27 @@ if [[ ${CI:-} == true ]]; then
 fi
 printf 'Quick cache action hit: %s\n' "${FY_CI_CACHE_HIT:-unknown (no cache action output)}" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
+limit=${FY_CI_QUICK_PARALLEL:-2}
+[[ ${limit} =~ ^[1-9][0-9]*$ ]] || {
+  echo "❌ FY_CI_QUICK_PARALLEL must be a positive integer" >&2
+  exit 2
+}
+[[ ${CI:-} != true && ${limit} -gt 2 ]] && limit=2
+
+# THE STATIC PARTS - formatting, every pre-commit gate (typecheck included) and the build checks - judge the whole
+# tree whatever the scope, and none of them reads a test result. CI runs them as their own job (`Static Checks`,
+# `quick.sh --static`) BESIDE the unit tier instead of after it: on one runner they waited ~13 min for the tests and
+# then added ~105 s. Unscoped, on every event Quick runs. `quick.sh` alone (a local run) runs both halves in turn.
+static_parts=(format gates build)
+run_static() {
+  ./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- "${static_parts[@]}"
+}
+if [[ ${1:-} == --static ]]; then
+  [[ ${dry_run} == 1 ]] && echo "DRY RUN static parts: ${static_parts[*]}" && exit 0
+  run_static
+  exit $?
+fi
+
 # THE CHANGED-PLUGIN SCOPE (scripts/ci/scope.ts, docs/standards/ci-cd "Changed-plugin scope"): a pull request into
 # rebuild/5.0-after that only touches plugin packages runs those plugins, what depends on them and the platform
 # packages' tests. Every other run (a push, main, another base, the full-ci label, any file outside the plugins, any
@@ -57,17 +78,15 @@ else
   scope_mode=full
   unset FY_CI_SCOPE_FILE
 fi
-static_parts=(format gates build scripts)
 
+# THE UNIT TIER RUNS AS SEVERAL GROUPS SIDE BY SIDE (config/test-groups.json, longest first): each group is one bun
+# process with its own ledger, judged together below. One group of all 3,398 files took 794 s on one core of the 8x16;
+# the groups split it by package and the kernel group (~260 s) is the floor. The repository tooling's own tests
+# (`scripts`) are one more part in the same pool, because the guarantee proof below reads their JUnit report.
 mapfile -t groups < <(jq -r '.unit[].name | "unit-" + .' config/test-groups.json)
+test_parts=("${groups[@]}" scripts)
 rm -rf coverage/unit/groups
 status=0
-limit=${FY_CI_QUICK_PARALLEL:-2}
-[[ ${limit} =~ ^[1-9][0-9]*$ ]] || {
-  echo "❌ FY_CI_QUICK_PARALLEL must be a positive integer" >&2
-  exit 2
-}
-[[ ${CI:-} != true && ${limit} -gt 2 ]] && limit=2
 
 # The always-run proofs: whatever the scope, these judge the whole repository. Only the PASS proof of the test-owned
 # rows needs every unit test's report, so a scoped run proves those rows by EXISTENCE and says so.
@@ -85,24 +104,31 @@ fi
 if [[ ${dry_run} == 1 ]]; then
   # What this run would do, from the SAME variables the real run uses.
   # The files test.sh would run, from the same script it asks.
-  mapfile -t planned < <(./scripts/ci/group-files.sh unit "${groups[0]#unit-}" 2>/dev/null)
+  planned=()
+  for group in "${groups[@]}"; do
+    mapfile -t group_files < <(./scripts/ci/group-files.sh unit "${group#unit-}" 2>/dev/null)
+    planned+=("${group_files[@]}")
+  done
   echo "DRY RUN scope mode: ${scope_mode}"
+  echo "DRY RUN unit groups: ${groups[*]#unit-}"
   echo "DRY RUN unit test files: ${#planned[@]}"
   printf 'DRY RUN unit file %s\n' "${planned[@]}"
-  echo "DRY RUN always-run parts: ${static_parts[*]}"
+  echo "DRY RUN always-run parts: ${static_parts[*]} scripts"
   echo "DRY RUN ${guarantee_note}"
   echo "DRY RUN ${ledger_note}"
   echo "DRY RUN check.ts guarantees ${guarantee_args[*]}"
   echo "DRY RUN check.ts parity-ticks ${parity_args[*]}"
   exit 0
 fi
-# First measurement doubled the archive test from its separate-run ~3.4s baseline to 8.37s.
-# Finish the complete unit tier before starting static/build CPU work; never raise timeouts.
-./scripts/ci/parallel.sh coverage/ci/quick "${limit}" ./scripts/ci/quick.sh --part -- "${groups[@]}" || status=1
+# The static parts are NOT in this pool: in CI they are their own job (above), and a test's timing budget is never raised
+# to make room for them. Locally (`quick.sh` with no flag) they run after the tests, as before.
+./scripts/ci/parallel.sh coverage/ci/quick "${limit}" ./scripts/ci/quick.sh --part -- "${test_parts[@]}" || status=1
 bun scripts/ci/unit-timings.ts || status=1
 # Judge even a red run: a missing group or uncovered source is reported alongside test failures.
 ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups || status=1
-./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- "${static_parts[@]}" || status=1
+if [[ ${FY_CI_STATIC_JOB:-} != 1 ]]; then
+  run_static || status=1
+fi
 # THE GUARANTEE PROOF (redesign §10.5): every kept Appendix D row has a test named with its id AND that test passed in the
 # unit tier's JUnit reports (the unit groups, and the repository tooling's own `scripts` part). Judged after every part, so a
 # red run still reports it, and ANY default-mode finding fails the job. `--tier unit` leaves the rows tested only in the

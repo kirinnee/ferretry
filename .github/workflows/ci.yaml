@@ -98,7 +98,6 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-          path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
       # The only-down checks (ports-pending, after-merge) need the commit they may not grow from; a one-commit
       # checkout has none. The repository is public, so this fetch needs no credentials.
@@ -119,6 +118,8 @@ jobs:
           # above, and on main deletes it first so the cache a pull request reads is a clean proof.
           FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
           FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+          # The static parts (format, gates, build) are the `static` job's, which runs beside this one.
+          FY_CI_STATIC_JOB: '1'
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/quick.sh
       - name: Upload unit coverage
         if: always()
@@ -146,12 +147,64 @@ jobs:
           path: |
             coverage/ci/quick/*.log
             coverage/ci/quick/*.tsv
-            coverage/ci/quick/hooks/
-            coverage/ci/quick/static/
           if-no-files-found: warn
       - name: Prune the Nix store cache
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
+
+  # The static parts of the quick set - formatting, every pre-commit gate (typecheck included) and the build checks -
+  # BESIDE the unit tier instead of after it (`quick.sh --static`). They read no test result and are never scoped: the
+  # same events as Quick, the whole tree. On Quick's runner they started only after its ~13 min of tests and added
+  # ~105 s; here they finish while the tests run. A 4x8: the gates run four at a time, as they did on the 8x16.
+  static:
+    name: Static Checks
+    if: ${{ (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    runs-on:
+      [
+        nscloud-ubuntu-24.04-amd64-4x8-with-cache,
+        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-size-10gb,
+        nscloud-cache-allow-commit-from-main,
+      ]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        id: cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+          path: ~/.cache/ferretry-tsc
+      - uses: ./.github/actions/install-nix
+      # The only-down gates (ports-pending, after-merge) need the commit they may not grow from.
+      - name: Fetch the base the only-down checks compare against
+        env:
+          FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: ./scripts/ci/check-base.sh
+      - name: Run the static parts
+        env:
+          FY_CI_QUICK_PARALLEL: '3'
+          FY_CI_GATE_PARALLEL: '4'
+          # quick.sh derives FY_TSC_CACHE_DIR from $HOME, the directory mounted above, and on main empties it first.
+          FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
+          FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/quick.sh --static
+      - name: Upload static part results
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: static-parts
+          path: |
+            coverage/ci/quick/hooks/
+            coverage/ci/quick/static/
+          if-no-files-found: warn
 
   # Starts immediately, before Namespace provisioning. A new head has no full proof yet.
   full-pending:
@@ -431,7 +484,7 @@ jobs:
 
   full:
     name: Full CI
-    needs: [quick, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
+    needs: [quick, static, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
     if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     timeout-minutes: 5
     permissions:

@@ -26,11 +26,13 @@ sections below still describe the 4.x pipeline in places; on the 5.0 tree the di
   (`harness-contract-latest.yaml` and its realworld leg), and Realworld's macOS containment, Safari and
   tmux 3.8 proofs. Realworld is nightly and dispatch only (#1573).
 - **Quick Checks** on every pull request: install (whose `postinstall` regenerates the plugin
-  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (one `all` group
-  globbing `packages/`), the coverage ledger over every `lib/` directory at any depth, treefmt, every
+  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (five groups split by
+  package, run side by side, longest first) with the repository tooling's own tests beside them, and the coverage
+  ledger over every `lib/` directory at any depth.
+- **Static Checks** on exactly the same events, BESIDE Quick (`quick.sh --static`): treefmt, every
   pre-commit hook (typecheck of every workspace package and `scripts/`, the 5.0 checks through
   `scripts/validate/rebuild-checks.sh`), and the build part (Nix `fy` + `fyd`, the Worker rehearsals once
-  ported, the app bundle once it has a build script).
+  ported, the app bundle once it has a build script). Never scoped.
 - **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
   Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
   Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the
@@ -48,7 +50,8 @@ cancel a running set.
 
 | Set / job                                                | PR runner           | Other events                          | Work                                                        |
 | -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger  |
+| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | five unit groups + scripts tests side by side; unit ledger  |
+| Static Checks                                            | Namespace 4x8       | Namespace 4x8                         | format, every pre-commit gate, build checks                 |
 | Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
 | Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
 | Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
@@ -98,11 +101,23 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   status, waits for all parts even after a failure, and writes per-part durations to
   the job summary and `coverage/ci/<set>/results.tsv`. Each tier's 100% ledger runs
   in the same job after its groups; a missing or failed group keeps the job red.
-  Quick finishes all unit groups first, then runs format/gates/build under
-  `nice -n 10`. The first 8x16 run doubled the archive unit test from 3.819 seconds
-  on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
-  this ordering rather than a timeout increase. Its summary names each group's
-  slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+  `parallel.sh` is a POOL: the next part starts the moment any running part ends, so parts are listed longest
+  first. The contention rule still holds - no test budget is raised to make room for other work - and is now met by
+  RUNNER, not by ordering: the static parts (format/gates/build, `nice -n 10`) run in their own `Static Checks` job,
+  so Quick's 8x16 runs only the five unit groups and the scripts tests (six processes on eight cores). The first 8x16
+  run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
+  instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
+  `unit-timings.tsv` in the part artifact.
+- **Why five unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
+  files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
+  260 s, runtimes 149, voice 75, conversation 58, catalogs 31, std 24, browsers 23, terminals 23, board 20, ferrets 20,
+  everything else ~118. The groups keep each package whole (the ledger passes a file only when ONE group covers it
+  100%) and balance by those seconds: `kernel` (~260), `runtimes` (~150), `conversation-voice` (~133), `plugins-a`
+  (catalogs, browsers, terminals, board, std: ~120) and `everything-else` (~140). The kernel group is the floor; going
+  lower means splitting the kernel package, which the per-group ledger rule forbids. Rebalance from
+  `unit-timings.tsv` and the JUnit per-file times, never by guessing. A SCOPED run may leave a group with no file;
+  only then is an empty group not a failure (`group-files.sh` says so, `test.sh` leaves an empty ledger and a
+  `scoped-out` marker).
 - **One-folder rule.** `one-folder.yaml` runs `scripts/ci/one-folder.ts` on a pull request into `rebuild/5.0-after`: every changed
   file outside the PR's home package must be named under `## Outside files` in the PR body, with a reason (the rule is
   [Architecture, "One feature, one folder"](../architecture/index.md)). It is a workflow of its own because it reads the PR body, so
@@ -370,7 +385,8 @@ waits on the entire CI workflow on `main`, where Quick and Full both always run.
 
 | Job              | Check name                           | Work                                                                                                                                                |
 | ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                  |
+| `quick`          | Quick Checks                         | `quick.sh`: five unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                 |
+| `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build                                                             |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |
 | `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                          |

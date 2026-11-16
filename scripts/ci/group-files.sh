@@ -41,8 +41,16 @@ if [[ ${mode} == "unit" && -n ${FY_CI_SCOPE_FILE:-} ]]; then
     { echo "❌ FY_CI_SCOPE_FILE (${FY_CI_SCOPE_FILE}) is not a SCOPED decision" >&2 && exit 1; }
   all_files=${#files[@]}
   mapfile -t files < <(printf '%s\n' "${files[@]}" | bun scripts/ci/scope.ts filter "${FY_CI_SCOPE_FILE}")
-  echo "📝 SCOPED unit run: ${#files[@]} of ${all_files} unit test files ($((all_files - ${#files[@]})) belong to plugins the scope skipped)" |
+  echo "📝 SCOPED unit run, group ${group}: ${#files[@]} of ${all_files} unit test files ($((all_files - ${#files[@]})) belong to plugins the scope skipped)" |
     tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
+  # A group whose EVERY file belongs to a skipped plugin has nothing left to run: that is the scope's decision, said
+  # out loud, and the only empty group that is not a failure. It prints no file; test.sh records the group as
+  # scoped out. A group that held no file BEFORE the scope (all_files 0) still fails below.
+  if [[ ${#files[@]} -eq 0 && ${all_files} -gt 0 ]]; then
+    echo "📝 SCOPED: unit group ${group} has no test file left (all ${all_files} belong to plugins the scope skipped)" |
+      tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}" >&2
+    exit 0
+  fi
 fi
 [[ ${#files[@]} -eq 0 ]] && echo "❌ ${mode} test group ${group} holds no test files" >&2 && exit 1
 printf '%s\n' "${files[@]}"
