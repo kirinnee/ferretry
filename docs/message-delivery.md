@@ -24,8 +24,11 @@ this page, which is still how a message reaches the pane.
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
   **5.0 rotates it** (`StateQueueStore`, `lib/rotation.ts`): `queue.jsonl` is a short LIVE SEGMENT, and at 2,000
   events its finished messages (`read`, `cancelled`, `failed`) are sealed into an immutable shard,
-  `queue-shards/<ferret>~<through>.json`, while its open ones are carried in the new segment's first line,
-  `{"kind":"segment","base":N,"accepted":M,"carried":[…]}`. `base` is how many events came before the segment, so a
+  `queue-shards/<ferret>~<through>.json`, while its open ones are carried into the new segment: a first line
+  `{"kind":"segment","base":N,"accepted":M,"carried":K}` and then K `{"kind":"carried","order":…,"message":…}` lines,
+  one record each because a record is capped at 1 MiB (a queue's open messages together can pass it; one message
+  cannot, and the queue refuses one that would not fit as a carried line). `base` is how many events came before the
+  segment (the header and carried lines are not events), so a
   message's `version` (the position of its latest change) and its place in the list survive any number of rotations
   unchanged; a file with no header is a segment at base 0, so every log written before rotation reads as it did.
   The shard is written first and the live file replaced second, both atomically, and a reader uses only shards at or

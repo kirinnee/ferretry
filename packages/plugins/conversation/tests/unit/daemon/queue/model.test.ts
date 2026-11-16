@@ -238,7 +238,7 @@ describe('a segment of a rotated log', () => {
     kind: 'segment' as const,
     base,
     accepted,
-    carried: carry,
+    carried: carry.length,
   });
 
   it('should count a position from the segment’s base, so a version is a position over the whole queue', () => {
@@ -254,12 +254,11 @@ describe('a segment of a rotated log', () => {
   });
 
   it('should start from the messages the header carries, with their version, state and place in the order', () => {
-    const fold = new SegmentFold(
-      header([
-        carried('late', 5, 90, { state: 'delivered', deliveredAs: 'lead' }),
-        carried('early', 2, 80, { state: 'typing', waitReason: 'draft' }),
-      ]),
-    );
+    const open = [
+      carried('late', 5, 90, { state: 'delivered', deliveredAs: 'lead' }),
+      carried('early', 2, 80, { state: 'typing', waitReason: 'draft' }),
+    ];
+    const fold = new SegmentFold(header(open), open);
 
     fold.apply(moved('late', 'read', 1));
     fold.apply(enqueued({ id: 'new' }));
@@ -273,7 +272,8 @@ describe('a segment of a rotated log', () => {
   });
 
   it('should take an enqueued line for a carried or sealed message as the retry it is', () => {
-    const fold = new SegmentFold(header([carried('open', 0, 10)]), new Set(['sealed']));
+    const open = [carried('open', 0, 10)];
+    const fold = new SegmentFold(header(open), open, new Set(['sealed']));
 
     fold.apply(enqueued({ id: 'open', text: 'again' }));
     fold.apply(enqueued({ id: 'sealed', text: 'again' }));
@@ -283,8 +283,19 @@ describe('a segment of a rotated log', () => {
     should(fold.acceptedCount).equal(7);
   });
 
+  it('should answer the message it holds under an id as it stands now, and none for an id it does not hold', () => {
+    const open = [carried('open', 0, 10)];
+    const fold = new SegmentFold(header(open), open);
+    fold.apply(moved('open', 'cancelled', 1));
+
+    should(fold.message('open')?.state).equal('cancelled');
+    should(fold.message('open')?.version).equal(101);
+    should(fold.message('other')).equal(undefined);
+  });
+
   it('should leave a message that an illegal line did not change at its version', () => {
-    const fold = new SegmentFold(header([carried('open', 0, 10)]));
+    const open = [carried('open', 0, 10)];
+    const fold = new SegmentFold(header(open), open);
 
     fold.apply(moved('open', 'read', 1));
 
@@ -297,6 +308,6 @@ describe('a segment of a rotated log', () => {
     for (const event of events) fold.apply(event);
 
     should(fold.messages.map(held => held.message)).eql(foldQueue(events));
-    should(UNROTATED_SEGMENT).eql({ v: 1, kind: 'segment', base: 0, accepted: 0, carried: [] });
+    should(UNROTATED_SEGMENT).eql({ v: 1, kind: 'segment', base: 0, accepted: 0, carried: 0 });
   });
 });

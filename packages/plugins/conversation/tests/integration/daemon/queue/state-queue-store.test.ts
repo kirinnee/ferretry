@@ -83,8 +83,8 @@ describe('a rotated queue log', () => {
         total + (JSON.parse(files.documents.get(key) as string) as { messages: unknown[] }).messages.length,
       0,
     );
-    const header = JSON.parse(live[0] as string) as { carried: unknown[]; accepted: number };
-    should(sealed + header.carried.length).be.above(0);
+    const header = JSON.parse(live[0] as string) as { carried: number; accepted: number };
+    should(sealed + header.carried).be.above(0);
     should(header.accepted).be.above(0);
     const expected = foldQueue(events);
     should(await store.messages(F1)).eql(expected);
@@ -135,25 +135,24 @@ describe('a rotated queue log', () => {
     ])
       await store.append(F1, event);
 
+    // The header says how many open messages follow it; each is a line of its own.
     const lines = liveLines(fs).map(line => JSON.parse(line) as Record<string, unknown>);
-    should(lines).have.length(1);
-    const header = lines[0] as {
-      kind: string;
-      base: number;
-      accepted: number;
-      carried: Array<{ order: number; message: QueuedMessage }>;
-    };
+    should(lines).have.length(3);
+    const [header, ...carried] = lines as [
+      { kind: string; base: number; accepted: number; carried: number },
+      ...Array<{ kind: string; order: number; message: QueuedMessage }>,
+    ];
     should(header.kind).equal('segment');
     should(header.base).equal(6);
     should(header.accepted).equal(3);
-    should(
-      header.carried.map(entry => [entry.order, entry.message.id, entry.message.state, entry.message.version]),
-    ).eql([
+    should(header.carried).equal(2);
+    should(carried.map(entry => entry.kind)).eql(['carried', 'carried']);
+    should(carried.map(entry => [entry.order, entry.message.id, entry.message.state, entry.message.version])).eql([
       [0, 'a', 'typing', 4],
       [1, 'b', 'queued', 5],
     ]);
-    should(header.carried[0]?.message.deliveredAs).equal('a');
-    should(header.carried[1]?.message.waitReason).equal('draft');
+    should(carried[0]?.message.deliveredAs).equal('a');
+    should(carried[1]?.message.waitReason).equal('draft');
     const shard = JSON.parse(fs.snapshot().get(shardFiles(fs)[0] as string) as string) as {
       through: number;
       messages: Array<{ order: number; message: QueuedMessage }>;
@@ -308,7 +307,7 @@ describe('a crash in the middle of a rotation', () => {
 
     should(await restarted.messages(F1)).eql(foldQueue([...events, next]));
     should(shardFiles(seeded.fs)).eql([`${HOME}/state/conversation/queue-shards/f1~000000000007.json`]);
-    should(liveLines(seeded.fs)).have.length(1);
+    should(liveLines(seeded.fs)).have.length(2);
     should(await new StateQueueStore(seeded.port, 6).messages(F1)).eql(foldQueue([...events, next]));
   });
 
@@ -335,7 +334,7 @@ describe('a crash in the middle of a rotation', () => {
 describe('reading the live file and the shards', () => {
   it('should take the header only from the first line that parses, and skip a stray one', async () => {
     const { port, store } = world();
-    const header = { v: 1, kind: 'segment', base: 10, accepted: 1, carried: [] };
+    const header = { v: 1, kind: 'segment', base: 10, accepted: 1, carried: 0 };
     await port.append<unknown>(QUEUE_STATE, { nonsense: true }, F1);
     await port.append<unknown>(QUEUE_STATE, header, F1);
     await port.append<unknown>(QUEUE_STATE, enqueued('a'), F1);
@@ -348,6 +347,8 @@ describe('reading the live file and the shards', () => {
   it('should start a segment of a header past zero from its carried messages', async () => {
     const { port, store } = world();
     const carried = {
+      v: 1,
+      kind: 'carried',
       order: 4,
       message: {
         ...(enqueued('old') as Extract<QueueEvent, { kind: 'enqueued' }>).message,
@@ -355,7 +356,10 @@ describe('reading the live file and the shards', () => {
         version: 77,
       },
     };
-    await port.append<unknown>(QUEUE_STATE, { v: 1, kind: 'segment', base: 100, accepted: 5, carried: [carried] }, F1);
+    await port.append<unknown>(QUEUE_STATE, { v: 1, kind: 'segment', base: 100, accepted: 5, carried: 1 }, F1);
+    await port.append<unknown>(QUEUE_STATE, carried, F1);
+    // A carried line past the count the header gave is no event, and changes nothing.
+    await port.append<unknown>(QUEUE_STATE, { ...carried, order: 9, message: { ...carried.message, id: 'extra' } }, F1);
     await port.append<unknown>(QUEUE_STATE, enqueued('new'), F1);
 
     should((await store.messages(F1)).map(entry => [entry.id, entry.state, entry.version])).eql([
@@ -443,7 +447,7 @@ describe('a live file changed by somebody else', () => {
     fs.seed(LIVE, text(enqueued('a')));
     should(await states(store)).eql([['a', 'queued']]);
 
-    await port.write(QUEUE_STATE, [{ v: 1, kind: 'segment', base: 50, accepted: 9, carried: [] }] as never, F1);
+    await port.write(QUEUE_STATE, [{ v: 1, kind: 'segment', base: 50, accepted: 9, carried: 0 }] as never, F1);
     should(await states(store)).eql([]);
   });
 
@@ -504,5 +508,62 @@ describe('a live file changed by somebody else', () => {
         ['a', 'cancelled'],
         ['b', 'typing'],
       ]);
+  });
+});
+
+describe('open messages too big for one header', () => {
+  const big = (id: string, bytes: number): QueueEvent => {
+    const event = enqueued(id) as Extract<QueueEvent, { kind: 'enqueued' }>;
+    return { ...event, message: { ...event.message, text: 'x'.repeat(bytes) } };
+  };
+
+  it('should rotate several 600 KB open messages, one record each, and keep the live file bounded', async () => {
+    const { fs, port, store } = world(5);
+    const events: QueueEvent[] = [big('a', 600_000), big('b', 600_000), big('c', 600_000), big('d', 600_000)];
+    for (const event of events) await store.append(F1, event);
+    // The fifth event reaches the limit: four messages of 600 KB are open, which no single record could hold.
+    const more = moved('a', 'typing');
+    events.push(more);
+    await store.append(F1, more);
+
+    const lines = liveLines(fs);
+    should(lines).have.length(5);
+    should(lines.every(line => line.length < 1 << 20)).be.true();
+    should(JSON.parse(lines[0] as string)).containEql({ kind: 'segment', base: 5, carried: 4 });
+    should(await store.messages(F1)).eql(foldQueue(events));
+    should(await new StateQueueStore(port, 5).messages(F1)).eql(foldQueue(events));
+
+    // And it goes on rotating, with the same versions a log that never rotated gives.
+    for (let n = 0; n < 12; n += 1) {
+      const next = n % 2 === 0 ? moved('a', 'delivered') : moved('a', 'read');
+      events.push(next);
+      await store.append(F1, next);
+    }
+    should(liveLines(fs).length).be.belowOrEqual(5 + 5);
+    should(await store.messages(F1)).eql(foldQueue(events));
+  });
+
+  it('should refuse, before writing anything, a message too long to carry, so no rotation can ever fail on size', async () => {
+    const { fs, store } = world(5);
+    await store.append(F1, enqueued('a'));
+
+    await should(store.append(F1, big('huge', 1_045_000))).be.rejectedWith(/too long to queue/);
+
+    should(liveLines(fs)).have.length(1);
+    should((await store.messages(F1)).map(entry => entry.id)).eql(['a']);
+  });
+
+  it('should refuse an edit that would make a waiting message too long to carry, and take one that fits', async () => {
+    const { fs, store } = world(50);
+    await store.append(F1, enqueued('a'));
+    const edit = (text: string, id = 'a'): QueueEvent => ({ v: 1, kind: 'edited', at: AT, id, text, revision: 2 });
+
+    await should(store.append(F1, edit('y'.repeat(1_045_000)))).be.rejectedWith(/too long to queue/);
+    should(liveLines(fs)).have.length(1);
+
+    await store.append(F1, edit('y'.repeat(900_000)));
+    should((await store.messages(F1))[0]?.text.length).equal(900_000);
+    // An edit of a message that is not there changes nothing and is not judged against one.
+    await store.append(F1, edit('z', 'ghost'));
   });
 });

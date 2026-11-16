@@ -1,4 +1,9 @@
-import { type QueueEvent, QueueEventSchema, type QueueSegmentHeader } from '../../../contract/index.ts';
+import {
+  type QueueEvent,
+  QueueEventSchema,
+  type QueueSegmentHeader,
+  type SegmentMessage,
+} from '../../../contract/index.ts';
 import type { QueuedMessage, QueuedMessageState } from '../../seams/protocol.ts';
 
 /**
@@ -83,7 +88,7 @@ export interface HeldMessage {
  * A live SEGMENT's header, as the model sees it (`QueueSegmentHeaderSchema`). `UNROTATED_SEGMENT` is what a log with no
  * header is: it begins at position 0, has accepted nothing and carries nothing.
  */
-export const UNROTATED_SEGMENT: QueueSegmentHeader = { v: 1, kind: 'segment', base: 0, accepted: 0, carried: [] };
+export const UNROTATED_SEGMENT: QueueSegmentHeader = { v: 1, kind: 'segment', base: 0, accepted: 0, carried: 0 };
 
 /**
  * One live segment of a queue, folded EVENT BY EVENT.
@@ -104,11 +109,17 @@ export class SegmentFold {
 
   constructor(
     readonly header: QueueSegmentHeader = UNROTATED_SEGMENT,
+    carried: readonly SegmentMessage[] = [],
     private readonly sealed: ReadonlySet<string> = new Set(),
   ) {
     this.accepted = header.accepted;
-    for (const { order, message } of [...header.carried].sort((a, b) => a.order - b.order))
+    for (const { order, message } of [...carried].sort((a, b) => a.order - b.order))
       this.held.set(message.id, { order, message });
+  }
+
+  /** The message held here under `id`, as it stands now. */
+  message(id: string): VersionedMessage | undefined {
+    return this.held.get(id)?.message;
   }
 
   /** How many events this segment has applied: the log's rotation counts these. */
