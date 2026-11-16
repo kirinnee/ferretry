@@ -82,6 +82,10 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
   const proposed = useRef(slot.onChosen);
   proposed.current = slot.onChosen;
   const onChosen = useCallback((chosen: ChosenRuntime | null) => proposed.current(chosenFerretAccount(chosen)), []);
+  // Stable for the same reason; `onOffered` is optional, so what the page hands over is read at call time.
+  const told = useRef(slot.onOffered);
+  told.current = slot.onOffered;
+  const onOffered = useCallback((wrappers: readonly string[] | null) => told.current?.(wrappers), []);
   return (
     <RuntimeButtons
       client={{ subscribe: client.subscribe ?? noSubscribe }}
@@ -91,6 +95,7 @@ function AccountField({ client, store, slot }: FieldProps): ReactNode {
       noAccounts={slot.noAccounts as ReactNode}
       now={now}
       onChosen={onChosen}
+      onOffered={onOffered}
       onValueChange={slot.onValueChange}
       store={store}
       usage={rows}
