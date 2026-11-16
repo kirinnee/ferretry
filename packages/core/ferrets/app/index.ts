@@ -2,6 +2,8 @@ import { provideToShell, type ShellProvides } from '@ferretry/app';
 import type { AppComponent, PanelProps, ScreenProps } from '@ferretry/kernel/manifest';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { FERRETS_FILE_OPEN_HOOK } from '../contract/app-hooks.ts';
+import { createFileOpen } from './features/files/file-open-hook.ts';
 import { ferretsCommands } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 import { askOwnersList } from './lib/ask-owners.ts';
@@ -69,7 +71,11 @@ export default provideToShell(
   {
     commands: ferretsCommands,
     // Conversation's work search names whose ask it found: the one list of callsigns, read once per daemon.
-    hooks: { [ASK_OWNERS_HOOK]: ({ client }) => askOwnersList(client) },
+    hooks: {
+      [ASK_OWNERS_HOOK]: ({ client }) => askOwnersList(client),
+      // Conversation's and Agenda's `@file` links ask Files to show a path (a request only; Files reads through the daemon).
+      [FERRETS_FILE_OPEN_HOOK]: ({ client }) => createFileOpen(client),
+    },
     deviceSettings: { 'needs-you': deviceSetting('needs-you') },
   },
 );

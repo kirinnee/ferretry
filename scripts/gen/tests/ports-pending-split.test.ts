@@ -11,7 +11,7 @@ import { dirname, join } from 'node:path';
 import { portsPendingLines } from '../../validate/after-merge.ts';
 import { check as portsPending, ownershipFindings, readPending } from '../../validate/ports-pending.ts';
 import { contextFor } from '../lib/check.ts';
-import { readPendingMerged, readPendingMergedBase } from '../lib/pending-files.ts';
+import { pendingFilePaths, readPendingMerged, readPendingMergedBase } from '../lib/pending-files.ts';
 import { type Fixture, fixture, skeletonHalf } from './fixture.ts';
 
 const made: Fixture[] = [];
@@ -155,5 +155,91 @@ describe('ports-pending split across files', () => {
     expect(merged.unwired).toEqual([]);
     expect(() => readPendingMergedBase(dir, 'no-such-ref')).toThrow();
     expect(readPendingMergedBase(tree({}), 'file:/nonexistent')).toBeUndefined();
+  });
+
+  test('a pending file under a dot directory is found and rejected, not skipped', async () => {
+    const f = ws({ pending: ['alpha'], pendingHalves: { alpha: HALVES } }, ['alpha']);
+    f.write('.mistyped/ports-pending.json', doc({ pending: ['ghost'], pendingReasons: { ghost: ['a hidden gap'] } }));
+    expect(pendingFilePaths(f.root)).toContain('.mistyped/ports-pending.json');
+    const findings = await portsPending.run(contextFor(f.root, { base: 'file:/nonexistent' }));
+    expect(
+      findings.some(x => x.where === '.mistyped/ports-pending.json' && x.message.includes('outside the rule')),
+    ).toBe(true);
+  });
+
+  test('only metadata and dependency trees are skipped: .git, node_modules, .worktrees, .direnv', () => {
+    const dir = tree({
+      'ports-pending.json': doc({ unwired: [] }),
+      '.git/ports-pending.json': doc({}),
+      'node_modules/pkg/ports-pending.json': doc({}),
+      '.worktrees/other/ports-pending.json': doc({}),
+      '.direnv/ports-pending.json': doc({}),
+      '.other/ports-pending.json': doc({}),
+      'packages/plugins/alpha/node_modules/x/ports-pending.json': doc({}),
+    });
+    expect(pendingFilePaths(dir)).toEqual(['.other/ports-pending.json', 'ports-pending.json']);
+  });
+
+  test('a git ref lists every pending filename, so an out-of-rule file reaches the checks', () => {
+    const dir = tree({
+      'ports-pending.json': doc({ unwired: [] }),
+      '.mistyped/ports-pending.json': doc({ pending: ['ghost'] }),
+      'docs/ports-pending.json': doc({ pending: ['stray'] }),
+    });
+    const run = (...args: string[]): void => {
+      const r = spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+        cwd: dir,
+        encoding: 'utf8',
+      });
+      if (r.status !== 0) throw new Error(`git ${args.join(' ')}: ${r.stderr}`);
+    };
+    run('init', '-q');
+    run('add', '-A');
+    run('commit', '-q', '-m', 'base');
+    const merged = JSON.parse(readPendingMergedBase(dir, 'HEAD') ?? '{}');
+    expect([...merged.pending].sort()).toEqual(['ghost', 'stray']);
+  });
+});
+
+describe('ownership of unwired seams', () => {
+  const seam = (path: string): object => ({ seam: `code:${path}`, card: '&F1', why: 'a gap' });
+  const alpha = 'packages/plugins/alpha/daemon/index.ts:missing';
+  const messages = (files: Record<string, string>): string[] =>
+    ownershipFindings(tree(files)).map(x => `${x.where}: ${x.message}`);
+
+  test("alpha's code seam in beta's file is a finding", () => {
+    const found = messages({
+      'ports-pending.json': doc({ unwired: [] }),
+      'packages/plugins/beta/ports-pending.json': doc({ unwired: [seam(alpha)] }),
+    });
+    expect(found.some(m => m.startsWith('packages/plugins/beta/ports-pending.json:') && m.includes('alpha'))).toBe(
+      true,
+    );
+  });
+
+  test("alpha's code seam in the root file is a finding", () => {
+    const found = messages({ 'ports-pending.json': doc({ unwired: [seam(alpha)] }) });
+    expect(found.some(m => m.startsWith('ports-pending.json:') && m.includes('alpha'))).toBe(true);
+  });
+
+  test("alpha's code seam in its own file, and a hook seam in the root, are clean", () => {
+    expect(
+      messages({
+        'ports-pending.json': doc({ unwired: [{ seam: 'hook:card.moving', card: '&F1', why: 'a hook' }] }),
+        'packages/plugins/alpha/ports-pending.json': doc({ unwired: [seam(alpha)] }),
+      }),
+    ).toEqual([]);
+  });
+
+  test('the real Accounts seam moved to the root is a finding', () => {
+    const accounts = 'packages/plugins/accounts/daemon/index.ts:notBuiltRoute';
+    expect(messages({ 'ports-pending.json': doc({ unwired: [seam(accounts)] }) }).length).toBeGreaterThan(0);
+  });
+
+  test('a malformed unwired entry is a finding, not a crash', () => {
+    const found = messages({
+      'packages/plugins/alpha/ports-pending.json': doc({ unwired: [{ seam: 3 }, 'x'] }),
+    });
+    expect(found.length).toBeGreaterThan(0);
   });
 });

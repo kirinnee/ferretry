@@ -130,6 +130,9 @@ function readBase(root: string, ref: string): PortsPending | undefined {
   }
 }
 
+/** An `unwired` seam that names a file inside a package: `code:packages/<core|plugins>/<id>/…`. Group 1 is the owner. */
+const PACKAGE_SEAM = /^code:packages\/(?:core|plugins)\/([^/]+)\//u;
+
 const OWNED_KEYS = ['format', 'pending', 'pendingReasons', 'pendingHalves', 'pendingAppPorts', 'unwired'];
 
 /** Findings for a file outside the rule, or one that holds a line some other owner keeps. */
@@ -165,6 +168,26 @@ export function ownershipFindings(root: string): Finding[] {
             ? `holds ${id}'s lines; the root file keeps only repo-wide "unwired" seams, move them to ${id}'s own ports-pending.json`
             : `holds ${id}'s lines; this file is ${owner}'s, move them to ${id}'s own ports-pending.json`,
         );
+    if (doc.unwired === undefined) continue;
+    if (!Array.isArray(doc.unwired)) {
+      add('"unwired" is not a list');
+      continue;
+    }
+    for (const entry of doc.unwired as unknown[]) {
+      const seam = (entry as { seam?: unknown } | null)?.seam;
+      if (typeof seam !== 'string') {
+        add('an "unwired" entry has no "seam" text');
+        continue;
+      }
+      // A seam naming a file inside a package belongs to that package's file; hooks and the like are repo-wide.
+      const seamOwner = PACKAGE_SEAM.exec(seam)?.[1];
+      if (seamOwner !== undefined && seamOwner !== owner)
+        add(
+          `holds the "unwired" seam ${seam}, which is ${seamOwner}'s; ${
+            owner === undefined ? 'the root file keeps only repo-wide seams' : `this file is ${owner}'s`
+          }, move it to ${seamOwner}'s own ports-pending.json`,
+        );
+    }
   }
   return findings;
 }

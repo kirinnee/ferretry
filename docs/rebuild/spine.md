@@ -194,7 +194,7 @@ Refusals (`refusals.ts`): `KERNEL_REFUSALS` (`plugin_unavailable`, `plugin_faile
   (hooks and ports no single package owns). Edit only your own plugin's file, so parallel units do not collide. The
   check reads every file and merges them: a line named in two files, or a pending file anywhere else, is a finding,
   and a line that moves between files is neither closed nor added. Print the total open-gap count on a ref with
-  `git ls-tree -r --name-only <ref> | rg '(^|/)ports-pending\.json$' | while read -r f; do git show "<ref>:$f"; done | jq -s '[.[].pendingReasons // {} | .[] | length] | add'`.
+  `git ls-tree -r --name-only "$ref" | rg '(^|/)ports-pending\.json$' | while read -r f; do git show "$ref:$f"; done | jq -s '[.[].pendingReasons // {} | .[] | length] | add'` (set `ref` first, e.g. `ref=origin/rebuild/5.0-after`).
 - `release.json` (root): `{ "format": 1, "version": "5.0.0", "scope": ["kernel", …] }` — the release scope (§10.6). A
   cut removes the id here and moves its pending line to `deferred.json` (`{ "format": 1, "deferred": [] }`, created by
   the first cut).

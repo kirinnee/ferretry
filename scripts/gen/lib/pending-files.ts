@@ -26,12 +26,20 @@ export interface PendingText {
 
 const KEYS = ['pending', 'pendingReasons', 'pendingHalves', 'pendingAppPorts', 'unwired'] as const;
 
-/** Every `ports-pending.json` under `root`, root-relative, sorted; skips dot directories and `node_modules`. */
+/**
+ * The only directories the working-tree walk does not enter, each by exact name: `.git` (VCS metadata), `node_modules`
+ * (installed dependencies), `.worktrees` (other checkouts of this repo, each with its own copies) and `.direnv` (the
+ * nix shell cache). Every other directory, dot directories included, is searched: a pending file the rule does not
+ * allow must be found to be rejected, not skipped.
+ */
+export const NOT_SEARCHED = ['.git', 'node_modules', '.worktrees', '.direnv'] as const;
+
+/** Every `ports-pending.json` under `root`, root-relative, sorted; skips only the directories in `NOT_SEARCHED`. */
 export function pendingFilePaths(root: string): string[] {
   const found: string[] = [];
   const walk = (rel: string): void => {
     for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
-      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+      if ((NOT_SEARCHED as readonly string[]).includes(entry.name)) continue;
       const next = rel === '' ? entry.name : `${rel}/${entry.name}`;
       if (entry.isDirectory()) walk(next);
       else if (entry.name === PENDING_FILE) found.push(next);
@@ -45,11 +53,14 @@ export function readPendingTexts(root: string): PendingText[] {
   return pendingFilePaths(root).map(where => ({ where, text: readFileSync(join(root, where), 'utf8') }));
 }
 
-/** A ref's committed pending files. Throws when git cannot list the ref; `[]` when the ref holds none. */
+/**
+ * A ref's committed pending files, EVERY path whose last segment is `ports-pending.json` wherever it sits: the ownership
+ * check, not the listing, decides which are allowed. Throws when git cannot list the ref; `[]` when it holds none.
+ */
 export function readPendingTextsAt(root: string, ref: string): PendingText[] {
   const listed = spawnSync('git', ['ls-tree', '-r', '--name-only', ref], { cwd: root, encoding: 'utf8' });
   if (listed.status !== 0) throw new Error(`git cannot list ${ref}`);
-  const paths = listed.stdout.split('\n').filter(p => p === PENDING_FILE || OWNED_FILE.test(p));
+  const paths = listed.stdout.split('\n').filter(p => p === PENDING_FILE || p.endsWith(`/${PENDING_FILE}`));
   return paths.map(where => {
     const shown = spawnSync('git', ['show', `${ref}:${where}`], { cwd: root, encoding: 'utf8' });
     if (shown.status !== 0) throw new Error(`git cannot read ${ref}:${where}`);

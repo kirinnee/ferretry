@@ -12,6 +12,7 @@ import {
   listing,
   NOW,
   runtimeField,
+  sequencedRuntimeField,
   settle,
   type,
 } from '../../../support/app/links.ts';
@@ -349,6 +350,89 @@ describe('ContinueConversation continuing', () => {
     expect(text('[data-continue-runtimes="api-codex"] [data-continue-no-runtime]')).toBe(
       'No Codex runtime on this machine yet. Add one in Settings › Runtimes, then try again.',
     );
+  });
+
+  describe('when the runtime slot reports what it offers', () => {
+    const KEPT_ONE = () => ({
+      kept: [{ id: 'shop-cart', ferret: 's-5', name: 'shop', state: 'working' }],
+      refused: [],
+    });
+    const pick = async (): Promise<void> => {
+      await click('[data-continue-row="shop-cart"]');
+      await click(action(SHOP));
+    };
+
+    it('takes the only runtime at once: no runtime step, one keep, then the new ferret opens', async () => {
+      const navigated: string[] = [];
+      await open({
+        navigated,
+        keep: KEPT_ONE,
+        runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true),
+      });
+      await pick();
+      expect(view?.container.querySelector('[data-continue-runtimes]')).toBeNull();
+      expect(sentKeep()).toEqual({
+        harness: 'claude-code',
+        runtime: 'claude-default-w',
+        conversations: [{ id: 'shop-cart', start: true }],
+      });
+      expect(client.callsTo(KEEP)).toHaveLength(1);
+      expect(navigated).toEqual(['s-5']);
+    });
+
+    it('opens the runtime step when two runtimes can run it, and keeps only on the one picked', async () => {
+      await open({
+        keep: KEPT_ONE,
+        runtimeField: runtimeField({ 'claude-code': ['claude-default-w', 'claude-work'] }, true),
+      });
+      await pick();
+      expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
+      expect(client.callsTo(KEEP)).toHaveLength(0);
+      await continueOn('claude-work');
+      expect(sentKeep()).toMatchObject({ runtime: 'claude-work' });
+    });
+
+    it('keeps the step and its sentence when no runtime can run it', async () => {
+      await open({ runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true) });
+      await click('[data-continue-row="api-codex"]');
+      await click(action('conversation:codex:api-codex'));
+      expect(text('[data-continue-runtimes="api-codex"] [data-continue-no-runtime]')).toContain('No Codex runtime');
+      expect(client.callsTo(KEEP)).toHaveLength(0);
+    });
+
+    it('decides nothing while the roster is unread, and a list that changes later continues nothing', async () => {
+      await open({
+        keep: KEPT_ONE,
+        runtimeField: sequencedRuntimeField([null, ['claude-default-w', 'claude-work'], ['claude-work']]),
+      });
+      await pick();
+      expect(text('[data-continue-runtimes="shop-cart"]')).toContain('Continue on which runtime?');
+      expect(client.callsTo(KEEP)).toHaveLength(0);
+      await click('[data-test-offer-next]');
+      await click('[data-test-offer-next]');
+      expect(client.callsTo(KEEP)).toHaveLength(0);
+      expect(find('[data-continue-runtimes="shop-cart"]')).toBeTruthy();
+    });
+
+    it('takes the only runtime the first time the list is read, even after an unread moment', async () => {
+      await open({ keep: KEPT_ONE, runtimeField: sequencedRuntimeField([null, ['claude-work']]) });
+      await pick();
+      expect(client.callsTo(KEEP)).toHaveLength(0);
+      await click('[data-test-offer-next]');
+      expect(sentKeep()).toMatchObject({ runtime: 'claude-work' });
+    });
+
+    it('decides again each time the step is opened', async () => {
+      await open({
+        keep: () => ({ kept: [], refused: [{ id: 'shop-cart', code: 'unavailable', reason: 'No room.' }] }),
+        runtimeField: runtimeField({ 'claude-code': ['claude-default-w'] }, true),
+      });
+      await pick();
+      expect(client.callsTo(KEEP)).toHaveLength(1);
+      expect(text(`[data-continue-issue="${SHOP}"]`)).toBe('No room.');
+      await click(action(SHOP));
+      expect(client.callsTo(KEEP)).toHaveLength(2);
+    });
   });
 
   it('says it cannot continue a conversation of a CLI this app has no words for', async () => {
