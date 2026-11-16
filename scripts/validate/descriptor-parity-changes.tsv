@@ -152,11 +152,9 @@ route	POST /v1/ferrets/:ferretId/fork	added	session routes renamed /v1/sessions/
 route	POST /v1/sessions/:sessionId/handover	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/handover	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/handover	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets/:ferretId/handover	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/handover/cancel	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/handover/cancel	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/relaunch-settings	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets/:ferretId/relaunch-settings	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/conversion-preview	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/conversion-preview	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/migrate	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged
@@ -180,9 +178,7 @@ route	PUT /v1/ferrets/:ferretId/agenda/:id/seen	added	session routes renamed /v1
 route	POST /v1/sessions/:sessionId/agenda/replies	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/agenda/replies	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets/:ferretId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets	moved-changed	session routes renamed /v1/sessions to /v1/ferrets (design §1.4); 5.0 adds consultsGrants, because a start outside every registered project is terminal.use for a governed device (route-security/launch.ts) and Gate gives a call its grant standing only when the route asks for it; without it every such start answered 503 launch_gate_unavailable instead of the terminal.use decision. This ENABLES that granted start (it is not refusal-only), so it is excused by name in RESTORED_ACTS (descriptor-parity.ts), which restores 4.x and is held to the Gate test that proves a granted device reaches the decision while an ungranted device and a relayed caller stay refused
 route	POST /v1/sessions/:sessionId/stop	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -204,13 +200,11 @@ route	GET /v1/ferrets/:ferretId/fs/changes	added	session routes renamed /v1/sess
 route	GET /v1/sessions/:sessionId/fs/diff	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/ferrets/:ferretId/fs/diff	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/by-request/:requestId	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets/by-request/:requestId	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/pin	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/pin	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/unpin	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/unpin	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/sessions/:sessionId/pins	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/ferrets/:ferretId/pins	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/pins	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/pins	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/sessions/:sessionId/signal	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -434,3 +428,12 @@ route	POST /v1/ferrets/:ferretId/surfaces/browser/tools	added	session routes ren
 socket	GET /v1/sessions/:sessionId/browser/stream	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 socket	GET /v1/ferrets/:ferretId/browser/stream	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	GET /v1/catalog-installs/targets	added	new in 5.0 (B16): the runtimes an item can be installed into on this machine (ids, names, profile, harness), read from the item provider's runtime installer; v4 read the fleet runtime catalog (GET /v1/fleet/runtimes), which Catalogs has no plugin edge to. fleet.use, any caller, no store
+route	GET /v1/ferrets	moved-changed	session routes renamed /v1/sessions to /v1/ferrets (design §1.4); 5.0 adds the fleet use capability (c58-sec1): a ferret record carries the folder, login, transcript location and the resume handle, and 4.x let a paired device the owner had narrowed to no fleet use read it; a tightening only, a ferret's own credential is never grant-governed so agents read what 4.x gave them
+route	GET /v1/ferrets/:ferretId	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec1), as on the list; a tightening only
+route	GET /v1/ferrets/by-request/:requestId	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec1), as on the list; a tightening only
+route	GET /v1/ferrets/:ferretId/pins	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec1): the pin notes are free text; a tightening only
+route	GET /v1/ferrets/:ferretId/handover	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec1): the receipt names accounts; a tightening only
+route	GET /v1/ferrets/:ferretId/relaunch-settings	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec1): how the process was launched; a tightening only
+route	GET /v1/restarts	changed	5.0 adds the fleet use capability (c58-sec1): the outdated and waiting ferrets by id and name; a device the owner narrowed to no fleet use read them in 4.x; a tightening only
+route	GET /v1/archived-sessions	changed	5.0 adds the fleet use capability (c58-sec1): the newest archived ferrets in full (folder, launch settings, transcript location); a device the owner narrowed to no fleet use read them in 4.x; a tightening only
+socket	GET /v1/events	changed	5.0 adds the fleet use capability (c58-sec1): the journal replay and fleet tail carry every ferret's events, with free text (a ferret's question to the owner, stop reasons, the harness conversation id); a device the owner narrowed to no fleet use read them in 4.x; the live readout and transcript follow were already fenced by lineage; a tightening only
