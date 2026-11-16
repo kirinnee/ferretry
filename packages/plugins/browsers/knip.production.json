@@ -3,7 +3,6 @@
   "project": ["**/*.{ts,tsx}", "!tests/**"],
   "ignore": [
     "daemon/holds/site.ts",
-    "daemon/stream/socket-downstream.ts",
     "daemon/proxy/firewall/marker-reader.ts",
     "daemon/proxy/firewall/state.ts",
     "daemon/proxy/wire/firewall.ts"
