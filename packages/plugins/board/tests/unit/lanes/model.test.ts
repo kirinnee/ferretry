@@ -260,7 +260,7 @@ describe('laneGateProblems', () => {
     should(plain(laneGateProblems(FERRETRY, disguised, { released: 'closed' }))).deepEqual([
       {
         laneId: 'closed',
-        why: 'removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
+        why: 'removes Released, which waits for the owner, and sends its tasks into the closed lane, which closes them',
       },
     ]);
   });
@@ -275,17 +275,17 @@ describe('laneGateProblems', () => {
 
     // Act + Assert
     should(whys(laneGateProblems(FERRETRY, without('merged'), { merged: 'implement' }))).deepEqual([
-      'removes Merged, and moves its cards to In progress',
+      'removes Merged, and moves its tasks to In progress',
     ]);
     should(
       whys(
         laneGateProblems(FERRETRY, { ...intoNew, doneLane: 'closed', notGoodLane: 'implement' }, { merged: 'later' }),
       ),
-    ).deepEqual(['removes Merged, and sends its cards into Later, a lane that is new']);
+    ).deepEqual(['removes Merged, and sends its tasks into Later, a lane that is new']);
     should(plain(laneGateProblems(FERRETRY, without('todo'), { todo: 'implement' }))).deepEqual([
       {
         laneId: 'plan',
-        why: 'removes Todo, and sends its cards to In progress, past Plan/Design, which waits for the owner',
+        why: 'removes Todo, and sends its tasks to In progress, past Plan/Design, which waits for the owner',
       },
     ]);
     should(whys(laneGateProblems(FERRETRY, without('merged')))).deepEqual(['removes Merged']);
@@ -313,9 +313,9 @@ describe('laneGateProblems', () => {
 
     // Act + Assert
     should(whys(laneGateProblems(FERRETRY, swapped))).deepEqual([
-      'makes Released the closed lane, which closes the cards in it',
+      'makes Released the closed lane, which closes the tasks in it',
       'makes Released automatic: it would stop waiting for the owner',
-      'makes Closed an open lane, which reopens the cards in it',
+      'makes Closed an open lane, which reopens the tasks in it',
     ]);
   });
 
@@ -342,7 +342,7 @@ describe('laneGateProblems', () => {
 
     // Act + Assert
     should(whys(laneGateProblems(FERRETRY, rewired))).deepEqual([
-      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+      'changes where "OK to build" on Plan/Design sends tasks: In progress → the closed lane, which closes them',
     ]);
     should(whys(laneGateProblems(FERRETRY, ungated))).deepEqual(['drops the owner gate of Released']);
   });
@@ -358,7 +358,7 @@ describe('laneGateProblems', () => {
 
     // One line for the workflows it moves in; and "OK to build", which goes on to the next lane, now skips building.
     should(whys(laneGateProblems(FERRETRY, moved))).deepEqual([
-      'changes where "OK to build" on Plan/Design sends cards: In progress → Merged',
+      'changes where "OK to build" on Plan/Design sends tasks: In progress → Merged',
       'moves Plan/Design among the lanes design-first and research-first work walks',
     ]);
   });
@@ -380,7 +380,7 @@ describe('laneGateProblems', () => {
 
     // Assert: the owner's next "OK to build" would close the card; and no such layout is accepted any more.
     should(said).containEql(
-      'changes where "OK to build" on Plan/Design sends cards: In progress → the closed lane, which closes them',
+      'changes where "OK to build" on Plan/Design sends tasks: In progress → the closed lane, which closes them',
     );
     should(closedLaneProblems(reordered)).deepEqual([
       ['lanes', 'the closed lane is the last lane: nothing comes after done'],
@@ -411,7 +411,7 @@ describe('laneGateProblems', () => {
 
     should(whys(laneGateProblems(FERRETRY, withStop))).deepEqual([
       `removes the answer "${gateOptions(plan)[0]?.label ?? ''}" from Plan/Design`,
-      'adds the answer "Stop" to Plan/Design, which sends cards to the closed lane, which closes them',
+      'adds the answer "Stop" to Plan/Design, which sends tasks to the closed lane, which closes them',
     ]);
   });
 });
@@ -437,8 +437,8 @@ describe('laneChangeLines', () => {
 
     // Act + Assert
     should(laneChangeLines(live, next, relocate)).deepEqual([
-      'removes 5 lanes that wait for the owner (Owner review 0 … Owner review 4), and sends their cards into the closed lane, which closes them',
-      'removes Doing, and moves its cards to Todo',
+      'removes 5 lanes that wait for the owner (Owner review 0 … Owner review 4), and sends their tasks into the closed lane, which closes them',
+      'removes Doing, and moves its tasks to Todo',
     ]);
   });
 
@@ -824,16 +824,16 @@ describe('Done and Not good lanes', () => {
 
   it('should refuse a Done lane that is not the closed lane, and a Not good lane work cannot resume in', () => {
     should(problemsOf({ ...layout(SOUND), doneLane: 'doing' })).deepEqual([
-      'doneLane: Done moves a card to the closed lane',
+      'doneLane: Done moves a task to the closed lane',
     ]);
     should(problemsOf({ ...layout(SOUND), notGoodLane: 'closed' })).deepEqual([
-      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+      'notGoodLane: Not good moves a task back to an active lane, where work resumes',
     ]);
     should(problemsOf({ ...layout(SOUND), notGoodLane: 'todo' })).deepEqual([
-      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+      'notGoodLane: Not good moves a task back to an active lane, where work resumes',
     ]);
     should(problemsOf({ ...layout(SOUND), notGoodLane: 'ghost' })).deepEqual([
-      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+      'notGoodLane: Not good moves a task back to an active lane, where work resumes',
     ]);
     should(problemsOf({ ...layout([SOUND[0] as Lane, lane('closed', 'closed')]), notGoodLane: 'todo' })).deepEqual([]);
   });

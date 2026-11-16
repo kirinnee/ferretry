@@ -333,7 +333,7 @@ describe('moving a card', () => {
 
     // Assert
     should(refused.code).equal('owner-gate');
-    should(refused.message).containEql('only the owner closes a card');
+    should(refused.message).containEql('only the owner closes a task');
     should(stored(ports).laneId).equal('closed');
   });
 
@@ -522,7 +522,7 @@ describe('reopening a card', () => {
 
   it.each([
     { name: 'forward', to: 'review', message: 'move it on instead' },
-    { name: 'into the closed lane', to: 'closed', message: 'a reopen opens a card' },
+    { name: 'into the closed lane', to: 'closed', message: 'a reopen opens a task' },
   ])('should refuse a reopen $name', async ({ to, message }) => {
     // Act
     const error = await refusal(
@@ -603,9 +603,9 @@ describe('dependencies', () => {
 
   it.each([
     { name: 'itself', task: { id: 'F1' }, code: 'invalid' },
-    { name: 'a card on another machine', task: { id: 'F2', machineId: 'mac' }, code: 'invalid' },
-    { name: 'a missing card', task: { id: 'F9' }, code: 'not-found' },
-    { name: 'a card it already depends on', task: { id: 'F2' }, code: 'invalid' },
+    { name: 'a task on another machine', task: { id: 'F2', machineId: 'mac' }, code: 'invalid' },
+    { name: 'a missing task', task: { id: 'F9' }, code: 'not-found' },
+    { name: 'a task it already depends on', task: { id: 'F2' }, code: 'invalid' },
   ])('should refuse a dependency on $name', async ({ task, code }) => {
     // Arrange
     const { service } = serviceWith([
@@ -881,7 +881,7 @@ describe('everything else on a card', () => {
     // Act
     await service.act(
       'F1',
-      action({ action: 'edit', summary: 'one file per card', premise: 'the store collides' }),
+      action({ action: 'edit', summary: 'one file per task', premise: 'the store collides' }),
       child,
     );
     const retitle = await refusal(service.act('F1', action({ action: 'edit', title: 'Board v2' }), child));
@@ -893,7 +893,7 @@ describe('everything else on a card', () => {
     const nothing = await refusal(service.act('F1', action({ action: 'edit', title: 'Board v2' }), lead));
 
     // Assert
-    should(stored(ports)).match({ summary: 'one file per card', premise: 'the store collides', title: 'Board v2' });
+    should(stored(ports)).match({ summary: 'one file per task', premise: 'the store collides', title: 'Board v2' });
     should(
       stored(ports)
         .history.filter(event => event.type === 'field-edited')
@@ -911,12 +911,12 @@ describe('everything else on a card', () => {
     const created = await service.create(create({ howToTest: '1. Open the Board' }), lead);
     await service.act(
       created.card.id,
-      action({ action: 'edit', howToTest: '1. Open the Board\n2. Tap the card' }),
+      action({ action: 'edit', howToTest: '1. Open the Board\n2. Tap the task' }),
       lead,
     );
 
     // Assert
-    should(stored(ports)).match({ howToTest: '1. Open the Board\n2. Tap the card' });
+    should(stored(ports)).match({ howToTest: '1. Open the Board\n2. Tap the task' });
     should(lastEvent(ports)).match({ type: 'field-edited', field: 'howToTest' });
   });
 
@@ -1492,7 +1492,7 @@ describe('refiling a card', () => {
     // Assert
     should(lastEvent(ports, 'F10')).match({
       type: 'note',
-      text: 'sub-card alert, not typed to the interactive lead: &F11 PR #1 CI is red.',
+      text: 'sub-task alert, not typed to the interactive lead: &F11 PR #1 CI is red.',
       actor: { kind: 'daemon' },
     });
   });
@@ -1542,7 +1542,7 @@ describe('refiling a card', () => {
   it.each([
     { name: 'into the closed lane of its category', laneId: undefined },
     { name: 'into the closed lane it names', laneId: 'closed' },
-  ])('should carry a card that is already closed $name, past the gate', async ({ laneId }) => {
+  ])('should carry a task that is already closed $name, past the gate', async ({ laneId }) => {
     // Arrange: Merged closes on the `pr` board, so the card is closed there already.
     const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
 
@@ -1642,10 +1642,10 @@ describe('a daemon trigger', () => {
       stored: { projectId: OTHER_PROJECT, laneId: 'merged' },
       trigger: 'release.published' as const,
     },
-    { name: 'a card already there', stored: { laneId: 'review' }, trigger: 'pr.opened' as const },
-    { name: 'a card past it', stored: { laneId: 'merged' }, trigger: 'pr.opened' as const },
+    { name: 'a task already there', stored: { laneId: 'review' }, trigger: 'pr.opened' as const },
+    { name: 'a task past it', stored: { laneId: 'merged' }, trigger: 'pr.opened' as const },
     {
-      name: 'a dropped card',
+      name: 'a dropped task',
       stored: { laneId: 'implement', dropped: { reason: 'no', at: NOW } },
       trigger: 'pr.opened' as const,
     },
@@ -1691,7 +1691,7 @@ describe('reading the board', () => {
 
   it("should serve one project's open cards with its lanes, counts and the quarantined files", async () => {
     // Arrange
-    const store = new MemoryBoardStore(board(), [{ id: 'F9', reason: 'the card file is not valid JSON' }]);
+    const store = new MemoryBoardStore(board(), [{ id: 'F9', reason: 'the task file is not valid JSON' }]);
     const { service } = serviceWith([], { store });
 
     // Act
@@ -1701,7 +1701,7 @@ describe('reading the board', () => {
     should(response.cards.map(entry => entry.id).sort()).eql(['F1', 'F3']);
     should(response.laneSet?.projectId).equal(PROJECT);
     should(response.counts).match({ closedHidden: 1, stale: 0 });
-    should(response.quarantined).eql([{ id: 'F9', reason: 'the card file is not valid JSON' }]);
+    should(response.quarantined).eql([{ id: 'F9', reason: 'the task file is not valid JSON' }]);
     should(response.nextCursor).be.null();
   });
 
@@ -2199,7 +2199,7 @@ describe('lanes follow PR facts at the write', () => {
       lane: 'tested',
       trigger: 'release.running',
     },
-  ])('should move a card at once on a linked PR that is $name', async ({ pr, lane, trigger }) => {
+  ])('should move a task at once on a linked PR that is $name', async ({ pr, lane, trigger }) => {
     // Arrange
     const { ports, service } = serviceWith([card({ laneId: 'implement' }), holding(pr)], {
       runningVersion: () => '4.114.0',
@@ -2437,10 +2437,10 @@ describe('creating a card for a thread (--thread)', () => {
   it('refuses a thread already linked to another card, and a link the ledger refuses', async () => {
     const taken = thread({ card: { id: 'F9' } });
     should((await refusal(withThread(taken).service.create(forThread, lead))).message).match(
-      /already linked to .*F9.*one thread, one card/,
+      /already linked to .*F9.*one thread, one task/,
     );
     should((await refusal(withThread(thread(), 'already linked to F9').service.create(forThread, lead))).message).match(
-      /was not linked to the new card, which was created without it: already linked to F9/,
+      /was not linked to the new task, which was created without it: already linked to F9/,
     );
   });
 

@@ -188,7 +188,7 @@ describe('planClashes', () => {
     // Assert
     should(result.waits).eql([]);
     should(result.unqueued.map(clash => clash.card.id)).eql(['F2']);
-    should(result.unqueued[0]?.why).containEql('already waits on this card');
+    should(result.unqueued[0]?.why).containEql('already waits on this task');
   });
 
   it('should stop adding at the most dependencies a card may hold', () => {
@@ -313,7 +313,7 @@ describe('planClashes across shipping units (review round 2)', () => {
 
     // Assert
     should(result.waits).eql([]);
-    should(result.unqueued[0]?.why).containEql("PR already waits on this card's PR");
+    should(result.unqueued[0]?.why).containEql("PR already waits on this task's PR");
   });
 
   it('should queue a child with its own PR behind the PR that ships its sibling helper', () => {
@@ -382,7 +382,7 @@ describe('planClashes and the board service (review round 3)', () => {
     should(stored(ports, 'F3').dependsOn).eql([]);
     should(stored(ports, 'F3').history.at(-1)).match({ type: 'note' });
     should((stored(ports, 'F3').history.at(-1) as { text: string }).text).containEql(
-      "PR already waits on this card's PR",
+      "PR already waits on this task's PR",
     );
   });
 

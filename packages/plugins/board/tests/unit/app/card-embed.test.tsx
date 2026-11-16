@@ -92,7 +92,7 @@ describe('CardEmbed: a card', () => {
   it('says so, in a quiet note and never as a link, when the card does not exist or cannot be read', async () => {
     const { store } = serving(new Map([['F2', card('F2')]]), new Set(['F2']));
     const missing = await show(store, { kind: 'card', id: 'F404' });
-    expect(missing.querySelector('[data-embed-note="F404"]')?.textContent).toContain('No card with this id.');
+    expect(missing.querySelector('[data-embed-note="F404"]')?.textContent).toContain('No task with this id.');
     expect(missing.querySelector('a')).toBeNull();
     await view?.unmount();
     const unreadable = await show(store, { kind: 'card', id: 'F2' });
@@ -146,7 +146,7 @@ describe('CardEmbed: a list of cards', () => {
     expect(heads(root)).toEqual(['Todo', 'Review/CI']);
     expect([...root.querySelectorAll('.fy-board-lane__count')].map(node => node.textContent)).toEqual(['1', '2']);
     expect(text(root)).toContain('First');
-    expect(root.querySelector('[data-embed-note="F9"]')?.textContent).toContain('No card with this id.');
+    expect(root.querySelector('[data-embed-note="F9"]')?.textContent).toContain('No task with this id.');
     expect(root.querySelector('[data-embed-note="F8"]')?.textContent).toContain('could not be read');
     expect([...(frame?.children ?? [])].at(-1)).toBe(root.querySelector('[data-embed-note="F8"]') ?? undefined);
   });
@@ -218,7 +218,7 @@ describe('CardEmbed: the children of a card', () => {
 
   it('says when a parent has no cards under it, and when its cards cannot be read', async () => {
     const empty = await show(serving(new Map([['F10', card('F10')]])).store, { kind: 'children', parent: 'F10' });
-    expect(empty.querySelector('[data-embed-note="F10"]')?.textContent).toContain('No cards under this one.');
+    expect(empty.querySelector('[data-embed-note="F10"]')?.textContent).toContain('No tasks under this one.');
     await view?.unmount();
     const port = fakePort({
       card: async () => ({ card: card('F10'), laneSet: lanes }),
@@ -232,7 +232,7 @@ describe('CardEmbed: the children of a card', () => {
 
   it('says there is no such card, not that it has no children, when the parent does not exist', async () => {
     const root = await show(serving(new Map()).store, { kind: 'children', parent: 'F999' });
-    expect(root.querySelector('[data-embed-note="F999"]')?.textContent).toContain('No card with this id.');
+    expect(root.querySelector('[data-embed-note="F999"]')?.textContent).toContain('No task with this id.');
     expect(root.querySelector('.fy-card-embed-board')).toBeNull();
   });
 

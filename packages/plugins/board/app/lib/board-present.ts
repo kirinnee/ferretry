@@ -154,7 +154,7 @@ const testSegment = (task: Pick<CardView, 'howToTest'>, category: LaneCategory |
       text: 'How to test',
       icon: 'test-steps',
       tone: 'accent',
-      title: 'The card says how to test it',
+      title: 'The task says how to test it',
       optional: false,
     };
   }

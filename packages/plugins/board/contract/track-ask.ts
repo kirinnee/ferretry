@@ -4,4 +4,4 @@
  * own parser: the wording and the flags the command needs cannot drift apart unseen.
  */
 export const TRACK_ASK_COMMAND =
-  'fy agenda add -k yesno "Track this on the board?" --premise "<what you are doing>" --context "<why it needs a card>"';
+  'fy agenda add -k yesno "Track this on the board?" --premise "<what you are doing>" --context "<why it needs a task>"';

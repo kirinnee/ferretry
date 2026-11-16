@@ -239,7 +239,7 @@ export class GitHubWatcher {
           : repos.map(repo => ({
               repo,
               branch: card.links.branch as string,
-              because: `its head branch ${card.links.branch as string} is the card's branch`,
+              because: `its head branch ${card.links.branch as string} is the task's branch`,
             }));
       const own = assigned.get(session) === 1;
       const ferretBranch = own ? await this.ferretBranch(session) : null;

@@ -67,15 +67,15 @@ export const visibilityVerdict = (
   const owner: readonly BoardStanding[] = ['owner-human'];
   if (!KEEPERS.includes(standing)) {
     return {
-      message: 'only the card’s owner ferret, a lead above it or the owner may change its visibility',
+      message: 'only the task’s owner ferret, a lead above it or the owner may change its visibility',
       allowed: KEEPERS,
     };
   }
   if ((card.askedBy ?? cardAskedBy(card)) === 'person' && to === 'private') {
-    return { message: 'only the owner may make a card they asked for private', allowed: owner };
+    return { message: 'only the owner may make a task they asked for private', allowed: owner };
   }
   if (card.parent !== null && to === 'public') {
-    return { message: 'a sub-card is private unless the owner makes it public', allowed: owner };
+    return { message: 'a sub-task is private unless the owner makes it public', allowed: owner };
   }
   return null;
 };

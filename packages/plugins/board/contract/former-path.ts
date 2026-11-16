@@ -16,7 +16,7 @@ export type FormerPath<Key extends string> = Key extends `${infer Head}/v1/board
   : Key;
 
 export const formerPath = <const Key extends string>(key: Key): FormerPath<Key> =>
-  key.replace('/v1/board/tasks', '/v1/board/cards').replace(':taskId', ':cardId') as FormerPath<Key>;
+  key.replace('/v1/board/tasks', '/v1/board/cards').replaceAll(':taskId', ':cardId') as FormerPath<Key>;
 
 /** `handlers` keyed by the route they answer, and again by its former path: the one handler under both keys. */
 export const withFormerPaths = <const Handlers extends Readonly<Record<string, unknown>>>(

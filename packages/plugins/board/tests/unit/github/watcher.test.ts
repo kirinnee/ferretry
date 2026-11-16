@@ -348,8 +348,8 @@ describe('GitHubWatcher: auto-link', () => {
     should(
       task.history.filter(event => event.type === 'note').map(event => (event as { text: string }).text),
     ).deepEqual([
-      "PR #950 linked automatically: its head branch feat/x is the card's branch",
-      "PR #951 linked automatically: its head branch feat/x is the card's branch",
+      "PR #950 linked automatically: its head branch feat/x is the task's branch",
+      "PR #951 linked automatically: its head branch feat/x is the task's branch",
     ]);
     should(task.laneId).equal('review');
     should(field(subject.gh.calls[0] ?? [], 'b0')).equal('feat/x');
