@@ -1,3 +1,4 @@
+import { unwrapStopHookDelivery } from '../../../../contract/peer-messages.ts';
 import { parseTranscriptJsonl } from './jsonl.ts';
 import { ClaudeObservedInputObserver } from './observed-input.ts';
 import type {
@@ -183,6 +184,24 @@ function claudeUsage(
   };
 }
 
+/**
+ * One text block as a message event. A message Ferretry handed to the idle agent through the Stop hook is recorded inside the
+ * harness's hook-feedback wrapper (and flagged as the harness's own); when its text opens with Ferretry's banner or notice
+ * it is read as the NORMAL message it is — the text alone, not marked harness-written — so the chat shows the ferret that
+ * sent it. Any other Stop-hook feedback is left exactly as the harness wrote it.
+ */
+function userMessage(
+  role: TranscriptRole,
+  metadata: TranscriptEventMetadata,
+  source: { readonly inputSource?: 'harness'; readonly compactSummary?: true },
+  text: string,
+): TranscriptEvent {
+  const handed = role === 'user' ? unwrapStopHookDelivery(text) : null;
+  return handed === null
+    ? ({ ...metadata, ...source, kind: 'message', text } as TranscriptEvent)
+    : ({ ...metadata, kind: 'message', text: handed } as TranscriptEvent);
+}
+
 /** Pure Claude Code JSONL parser implementing the shared transcript contract. */
 export class ClaudeTranscriptParser implements TranscriptParser {
   readonly harness = 'claude' as const;
@@ -339,7 +358,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);
       if (typeof value === 'string') {
-        events.push({ ...blockMetadata, ...source, kind: 'message', text: value });
+        events.push(userMessage(role, blockMetadata, source, value));
         continue;
       }
 
@@ -359,7 +378,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       }
 
       if (blockType === 'text' && typeof block.text === 'string') {
-        events.push({ ...blockMetadata, ...source, kind: 'message', text: block.text });
+        events.push(userMessage(role, blockMetadata, source, block.text));
         continue;
       }
       if (blockType === 'thinking' && role === 'assistant' && typeof block.thinking === 'string') {

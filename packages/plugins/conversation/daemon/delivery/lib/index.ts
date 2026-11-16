@@ -3,6 +3,7 @@ export * from './interrupt.ts';
 export * from './notifier.ts';
 export * from './policy.ts';
 export * from './retraction.ts';
+export * from './rewake.ts';
 export * from './service.ts';
 export * from './settings.ts';
 export * from './stranded.ts';

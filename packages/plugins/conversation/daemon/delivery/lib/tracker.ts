@@ -104,6 +104,22 @@ interface SendStuckAlarm {
   stuck(id: SessionId, record: SendRecord, waitedMs: number): Promise<void>;
 }
 
+/**
+ * The tracker's side of a Claude ferret's rewake inbox: whether a message left there is still unclaimed, taking it back, and
+ * the one notice an owner's stuck send earns. The adapter checks the ferret is Claude and its listener is armed.
+ */
+interface SendTrackerRewake {
+  /** The message left for `sendId` has not been claimed by the listener. */
+  waiting(id: SessionId, sendId: string): Promise<boolean>;
+  /** Takes back an unclaimed message; `true` when it was still there and is gone now. */
+  withdraw(id: SessionId, sendId: string): Promise<boolean>;
+  /**
+   * Leaves the agent the notice that an owner's message is waiting (`OWNER_NUDGE_TEXT`), when the ferret is a Claude one whose
+   * listener is armed. Answers whether it was left; `false` means try again at a later look.
+   */
+  nudge(id: SessionId, record: SendRecord): Promise<boolean>;
+}
+
 /** Every session this daemon holds, for the re-derivation a restart owes its in-flight sends. */
 interface SendRoster {
   sessions(): readonly SessionId[];
@@ -118,6 +134,8 @@ export interface SendTrackerPorts {
   readonly notifier: SendFailureNotifier;
   /** Told once when a send has been stuck past `stuckAlarmMs` (see {@link SendStuckAlarm}). */
   readonly alarm: SendStuckAlarm;
+  /** A Claude ferret's rewake inbox. Absent: no send goes by hook and no owner nudge is left. */
+  readonly rewake?: SendTrackerRewake;
   readonly scheduler: SendScheduler;
   readonly roster: SendRoster;
   /** Its own queue: a look reads a whole transcript and must not hold the send lock while it does. */
@@ -594,6 +612,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     now: number,
   ): Promise<SendRecord> {
     if (record.untyped === true) return await this.typeUntyped(id, record, now);
+    if (record.path === 'hook') return await this.unhandedHook(id, record, now);
     // Still reading a long transcript is waiting, not unreadable: the lead's 369 MB transcript was called
     // unreadable on every look, each send to it settled "unconfirmed" and its sender was told it may need
     // sending again — though every one had arrived. The hold ceiling still ends a read that never finishes.
@@ -685,6 +704,40 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   }
 
   /**
+   * A message left in the rewake inbox, past the time the listener should have claimed it.
+   *
+   * CLAIMED (the file is gone from the inbox): the listener has it and the agent was woken on it, so it is NEVER typed — the
+   * transcript is what proves it, and a wake queued behind a busy turn can take a while. It is looked at again, up to the
+   * hold ceiling, exactly like a message held in the harness's queue.
+   *
+   * UNCLAIMED: the listener never handed it over (not armed any more, a Stop that never came, a hook the harness dropped).
+   * The file is taken back FIRST — if the listener claims it in that instant the take-back fails and the message stays
+   * the listener's — and only then is the send turned into the typed one it would have been, and typed the way an owner's
+   * send nothing was typed for is: when the pane reads clear, ahead of the rest.
+   */
+  private async unhandedHook(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    const inbox = this.ports.rewake;
+    if (inbox !== undefined) {
+      const stillThere = await inbox.waiting(id, record.sendId).catch(() => true);
+      const taken = stillThere ? await inbox.withdraw(id, record.sendId).catch(() => false) : false;
+      if (!taken) return await this.holdOff(id, record, now);
+    }
+    const typed = record.fallback ?? { path: 'direct' as const, text: record.message };
+    const next =
+      (await this.ports.ledger.settle(id, record.sendId, {
+        path: typed.path,
+        matchText: typed.text,
+        fallback: undefined,
+        untyped: true,
+        attempt: 1,
+        attemptAt: new Date(now).toISOString(),
+        deadlineAt: undefined,
+      })) ?? record;
+    await this.ports.repository.journal(id, 'control.send_hook_unclaimed', { sendId: record.sendId, path: typed.path });
+    return await this.typeUntyped(id, next, now);
+  }
+
+  /**
    * Types a person's send that nothing was typed for, now that its look is due.
    *
    * None of the absence proofs below apply: no key was ever sent, so no copy can be in the composer, the
@@ -698,7 +751,32 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       return await this.settle(id, record, 'timed_out', 'ferret_ended');
     const typed = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
     if (typed !== undefined && typed.untyped !== true) return await this.unstuck(id, typed, now);
-    return await this.holdOff(id, await this.raiseStuck(id, typed ?? record, now), now);
+    const waiting = await this.nudgeOwner(id, typed ?? record, now);
+    return await this.holdOff(id, await this.raiseStuck(id, waiting, now), now);
+  }
+
+  /**
+   * LEAVES THE AGENT ONE NOTICE THAT THE OWNER'S MESSAGE IS WAITING. An idle harness draws nothing by itself, so a composer
+   * the reader could not place stays unreadable until something redraws it. The owner's own words can never go by hook
+   * (the harness frames a hook's text as a system notification, not as the owner), so the daemon leaves a notice with none of
+   * them in it, asking the agent to end its turn; the woken turn redraws the screen and the next retype (every
+   * `untypedLookMs`) types the owner's message as real input. Once per send, and only for the owner's.
+   */
+  private async nudgeOwner(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    const inbox = this.ports.rewake;
+    if (
+      inbox === undefined ||
+      record.senderKind !== 'human' ||
+      record.nudgedAt !== undefined ||
+      now - Date.parse(record.acceptedAt) < this.settings.ownerNudgeMs
+    )
+      return record;
+    const left = await inbox.nudge(id, record).catch(() => false);
+    if (!left) return record;
+    const marked =
+      (await this.ports.ledger.settle(id, record.sendId, { nudgedAt: new Date(now).toISOString() })) ?? record;
+    await this.ports.repository.journal(id, 'control.send_nudged', { sendId: record.sendId });
+    return marked;
   }
 
   /**

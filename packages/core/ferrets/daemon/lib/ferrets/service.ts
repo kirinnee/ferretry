@@ -33,6 +33,7 @@ import type {
   FerretTurnDocument,
   FerretTurnWritten,
   FerretTurns,
+  FerretRewake,
   FerretPrompt,
   HarnessDeliveryFailure,
   HarnessFile,
@@ -137,6 +138,8 @@ const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
 export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
 /** Where the agent puts media it made to show the person (today's `SESSION_MEDIA_VARIABLE`, docs/hypermedia.md). */
 export const MEDIA_FOLDER_VARIABLE = 'FY_MEDIA_DIR';
+/** The ferret's rewake inbox: where Ferretry leaves a message for the Stop hook's listener to hand to an idle Claude Code agent. */
+export const REWAKE_FOLDER_VARIABLE = 'FY_REWAKE_DIR';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -445,6 +448,20 @@ export interface FerretSessionPort {
    * `GET /v1/ferrets/:ferretId/fs/file?scope=media`. Unbound, or a folder that cannot be made: the variable is not set.
    */
   mediaFolder?(ferret: FerretId): Promise<FencedPath>;
+  /**
+   * Additive (Claude rewake): THIS ferret's REWAKE INBOX (`rewake/` in its own session folder), made private if it is
+   * missing, and handed to the pane as `FY_REWAKE_DIR`: the folder the Stop hook's listener hands messages to the idle
+   * agent from. Unbound, or a folder that cannot be made: the variable is not set and the listener exits at once.
+   */
+  rewakeFolder?(ferret: FerretId): Promise<FencedPath>;
+  /** Additive (Claude rewake): whether the listener's heartbeat was touched within `withinMs` (it is waiting to hand a message over). */
+  rewakeArmed?(ferret: FerretId, withinMs: number): Promise<boolean>;
+  /** Additive (Claude rewake): leaves one message in the inbox, whole (never half a file), under a name derived from `sendId`. */
+  rewakeDeposit?(ferret: FerretId, sendId: string, text: string): Promise<void>;
+  /** Additive (Claude rewake): whether the message left for `sendId` is still in the inbox, unclaimed. */
+  rewakeWaiting?(ferret: FerretId, sendId: string): Promise<boolean>;
+  /** Additive (Claude rewake): takes back an unclaimed message; `true` when it was still there and is gone now. */
+  rewakeWithdraw?(ferret: FerretId, sendId: string): Promise<boolean>;
   /**
    * Additive (structured questions): THIS ferret's `question-asked.json` as the hook left it (raw text, bounded) and its
    * modification time; `undefined` when absent, unreadable or over the bound. Reads only. Unbound: no question is seen.
@@ -1998,6 +2015,31 @@ export class FerretsService implements FerretsApi {
   }
 
   /**
+   * A ferret's rewake inbox, bound to that ferret (`FerretsApi.rewake`). The same `mayTouch` rule as `turns`. `undefined`
+   * for a ferret this daemon does not know or a daemon whose session files bind no inbox.
+   */
+  async rewake(ferret: FerretId, caller?: FerretId): Promise<FerretRewake | undefined> {
+    await this.ports.ready?.();
+    if (this.registry.get(ferret) === undefined) return undefined;
+    this.requireMayTouch(caller, ferret);
+    const session = this.ports.session;
+    if (
+      session?.rewakeArmed === undefined ||
+      session.rewakeDeposit === undefined ||
+      session.rewakeWaiting === undefined ||
+      session.rewakeWithdraw === undefined
+    )
+      return undefined;
+    const { rewakeArmed, rewakeDeposit, rewakeWaiting, rewakeWithdraw } = session;
+    return {
+      armed: async withinMs => await rewakeArmed.call(session, ferret, withinMs),
+      deposit: async (sendId, text) => await rewakeDeposit.call(session, ferret, sendId, text),
+      waiting: async sendId => await rewakeWaiting.call(session, ferret, sendId),
+      withdraw: async sendId => await rewakeWithdraw.call(session, ferret, sendId),
+    };
+  }
+
+  /**
    * What the ferret's pane is asking right now (`FerretsApi.prompt`), masked. The same `mayTouch` rule as `harness`.
    * `undefined` for a ferret this daemon does not know; `{}` when nothing is recorded or it could not be read.
    */
@@ -2808,6 +2850,9 @@ export class FerretsService implements FerretsApi {
     // The ferret's media folder (F-0327), made if missing; a folder that cannot be made sets nothing.
     const mediaFolder = await this.ports.session?.mediaFolder?.(ferret).catch(() => undefined);
     if (mediaFolder !== undefined) env[MEDIA_FOLDER_VARIABLE] = mediaFolder;
+    // The ferret's rewake inbox, made if missing; a folder that cannot be made sets nothing (the listener then exits at once).
+    const rewakeFolder = await this.ports.session?.rewakeFolder?.(ferret).catch(() => undefined);
+    if (rewakeFolder !== undefined) env[REWAKE_FOLDER_VARIABLE] = rewakeFolder;
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
     // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the

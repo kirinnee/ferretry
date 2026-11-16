@@ -1,3 +1,4 @@
+import { unwrapStopHookDelivery } from '../../../../contract/peer-messages.ts';
 import type { ObservedHumanInput, TranscriptInputObserver, TranscriptObservationContext } from './types.ts';
 import { transcriptObject, transcriptString } from './value.ts';
 
@@ -89,7 +90,10 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
 
     const message = transcriptObject(record.message);
     if (record.type !== 'user' || message?.role !== 'user') return [];
-    const text = claudeUserText(message.content ?? record.content);
+    const written = claudeUserText(message.content ?? record.content);
+    // A message Ferretry handed over through the Stop hook is recorded inside the harness's hook-feedback wrapper: the proof
+    // is the text it carried, which is what the send was looked for by.
+    const text = written === undefined ? undefined : (unwrapStopHookDelivery(written) ?? written);
     if (text === undefined || text.trim().length === 0) return [];
     const observedAt = transcriptString(record.timestamp) ?? context.observedAt;
     if (observedAt === undefined) return [];

@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AGENT_BASE_INSTRUCTION, CLAUDE_QUESTION_HOOKS, tomlString } from '../../../daemon/lib/account/fixed-layer.ts';
+import {
+  AGENT_BASE_INSTRUCTION,
+  CLAUDE_QUESTION_HOOKS,
+  CLAUDE_REWAKE_HOOKS,
+  tomlString,
+} from '../../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../../daemon/lib/account/ids.ts';
 import {
   FIXED_SETTINGS_FILE,
@@ -769,7 +774,7 @@ describe('materialiseFleet', () => {
         permissions: { defaultMode: 'auto' },
         remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
       });
       should(only(result, `${HOME_A}/settings.json`)).match({
         layers: [{ settings: { permissions: { defaultMode: 'auto' } } }],
@@ -794,7 +799,7 @@ describe('materialiseFleet', () => {
             permissions: { defaultMode: 'bypassPermissions' },
             remoteControlAtStartup: false,
             skipDangerousModePermissionPrompt: true,
-            hooks: CLAUDE_QUESTION_HOOKS,
+            hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
           },
           null,
           2,

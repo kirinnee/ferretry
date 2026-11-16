@@ -126,6 +126,10 @@ export const SendLineSchema = z.strictObject({
   /** When an untyped send was said to be stuck (`stuckAlarmMs`); cleared once a try types it or it settles. */
   stuckAt: InstantSchema.optional(),
   cancelEffect: SendCancelEffectSchema.optional(),
+  /** Only on a `hook` send: what is typed instead if the listener does not hand it over in time. */
+  fallback: z.strictObject({ path: z.enum(['direct', 'turn-file']), text: z.string() }).optional(),
+  /** When the owner-waiting notice was left for this send, so it is left once. */
+  nudgedAt: InstantSchema.optional(),
   /** The failure notices a final fate still owes its senders, shortened one member at a time as each is sent. */
   noticesOwed: z.array(z.strictObject({ from: z.string().min(1), sendId: z.string().min(1) })).optional(),
   at: InstantSchema,

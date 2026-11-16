@@ -50,7 +50,8 @@
  *   still turns it on for the one ferret that asks (`remoteControlArgs`), and only an org policy lock
  *   can outrank us. Codex has nothing to switch: its `remote_control` feature is removed (0.156.1) and
  *   its remote control is a separate `codex remote-control` daemon, not a session startup behaviour.
- * - The overlay carries one `PreToolUse` hook for `AskUserQuestion` ({@link CLAUDE_QUESTION_HOOKS}).
+ * - The overlay carries one `PreToolUse` hook for `AskUserQuestion` ({@link CLAUDE_QUESTION_HOOKS}) and one `Stop` hook,
+ *   the rewake listener ({@link CLAUDE_REWAKE_HOOKS}).
  *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
  *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
  *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
@@ -237,6 +238,63 @@ export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV
  */
 export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
+};
+
+const REWAKE_FOLDER_ENV = 'FY_REWAKE_DIR';
+
+/**
+ * The listener the `Stop` hook runs (`asyncRewake`): it waits in the background after a turn ends and, when Ferretry leaves a
+ * message in the folder `FY_REWAKE_DIR` names, hands it to the idle agent by exiting 2 with the message on stderr — Claude Code
+ * starts a new turn on that text (measured on 2.1.317). POSIX `sh` and nothing else: no bun, no node, no network, and the
+ * message text is printed nowhere but that one stderr.
+ *
+ * - No `FY_REWAKE_DIR` (a person's own terminal, an older daemon): it exits 0 at once and changes nothing.
+ * - It writes its own token to `armed`; a NEWER listener replaces the token, and the older one sees it is no longer its own and
+ *   exits 0, so re-arming at every Stop never doubles a delivery.
+ * - Every second it touches `armed` (the heartbeat the daemon reads by modification time) and claims the OLDEST `*.md` by an
+ *   atomic `mv` into `taken/`: one message per wake, the next Stop re-arms and takes the next.
+ * - stdin is drained in the background so Claude never writes into a closed pipe.
+ */
+export const CLAUDE_REWAKE_HOOK_COMMAND = [
+  'cat > /dev/null 2>&1 &',
+  `d="$${REWAKE_FOLDER_ENV}"`,
+  '[ -n "$d" ] && [ -d "$d" ] || exit 0',
+  'umask 077',
+  'mkdir -p "$d/taken" 2>/dev/null',
+  'me="$$-$(date +%s)"',
+  'printf %s "$me" > "$d/armed.$$.tmp" 2>/dev/null && mv -f "$d/armed.$$.tmp" "$d/armed" 2>/dev/null || exit 0',
+  'while :; do',
+  '  [ "$(cat "$d/armed" 2>/dev/null)" = "$me" ] || exit 0',
+  '  touch "$d/armed" 2>/dev/null',
+  '  for f in "$d"/*.md; do',
+  '    [ -f "$f" ] || break',
+  '    t="$d/taken/${f##*/}"',
+  '    if mv "$f" "$t" 2>/dev/null; then cat "$t" >&2; exit 2; fi',
+  '  done',
+  '  sleep 1',
+  'done',
+].join('\n');
+
+/**
+ * How long Claude Code lets the listener run before killing it silently. Without a timeout it is killed before ~660 s and no
+ * wake ever happens (measured), so the listener is given a day and re-armed at every Stop.
+ */
+export const CLAUDE_REWAKE_TIMEOUT_SECONDS = 86_400;
+
+/** The overlay's `Stop` hook. Added beside the question hook, which it leaves as it was. */
+export const CLAUDE_REWAKE_HOOKS: SettingsObject = {
+  Stop: [
+    {
+      hooks: [
+        {
+          type: 'command',
+          command: CLAUDE_REWAKE_HOOK_COMMAND,
+          asyncRewake: true,
+          timeout: CLAUDE_REWAKE_TIMEOUT_SECONDS,
+        },
+      ],
+    },
+  ],
 };
 
 /** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
@@ -643,7 +701,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           permissions: { defaultMode: mode },
           [CLAUDE_REMOTE_CONTROL_KEY]: false,
           ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
-          hooks: CLAUDE_QUESTION_HOOKS,
+          hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
         },
         claudeJson: {
           hasCompletedOnboarding: true,

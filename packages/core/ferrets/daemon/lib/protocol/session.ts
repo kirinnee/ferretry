@@ -68,7 +68,15 @@ export { SessionProvenanceSchema, SessionSpawnOriginSchema, WardenLineageSourceS
  */
 export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out', 'cancelled']);
 
-export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
+export const SendPathSchema = z.enum([
+  'direct',
+  'turn-file',
+  'native-inline',
+  'native-file',
+  'revive',
+  'revive-queue',
+  'hook',
+]);
 
 /** Why a send settled without proof of delivery. */
 export const SendUnaccountedReasonSchema = z.enum([

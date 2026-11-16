@@ -85,6 +85,16 @@ export interface SendTrackerSettings {
   readonly strandedBackoffMaxMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
+  /**
+   * How long a message left in a Claude ferret's rewake inbox (a `hook` send) may sit there unclaimed before it is taken
+   * back and typed as it always was. The listener claims within a second of an armed Stop.
+   */
+  readonly rewakeProofMs: number;
+  /**
+   * How long an owner's send may stay untyped before the agent is left ONE notice that a message is waiting (with none of
+   * the owner's words in it), so its turn ends and its screen is redrawn.
+   */
+  readonly ownerNudgeMs: number;
 }
 
 export const defaultSendTrackerSettings: SendTrackerSettings = {
@@ -98,6 +108,8 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   busyExtensionMs: 60_000,
   untypedLookMs: 5_000,
   stuckAlarmMs: 2 * 60_000,
+  rewakeProofMs: 20_000,
+  ownerNudgeMs: 30_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
@@ -172,6 +184,8 @@ export function attemptsAllowed(record: SendRecord, settings: SendTrackerSetting
 export function deadlineOf(record: SendRecord, settings: SendTrackerSettings): number {
   if (record.deadlineAt !== undefined) return Date.parse(record.deadlineAt);
   if (record.untyped === true) return Date.parse(record.attemptAt ?? record.acceptedAt) + settings.untypedLookMs;
+  // A message left in the rewake inbox is looked at again soon after the listener should have claimed it, not on an agent's schedule.
+  if (record.path === 'hook') return Date.parse(record.attemptAt ?? record.acceptedAt) + settings.rewakeProofMs;
   // A revive that has not reported what it typed is still relaunching, or cannot say: either way the
   // first attempt's window cannot have started yet.
   if (record.path === 'revive' && record.matchText === undefined)

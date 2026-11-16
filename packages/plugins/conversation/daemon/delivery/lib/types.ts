@@ -51,7 +51,12 @@ export type SendPath =
   /** The session was terminal or its pane was gone: the message became a revive's first turn. */
   | 'revive'
   /** The revive was refused, so the message is held durably for an explicit one. */
-  | 'revive-queue';
+  | 'revive-queue'
+  /**
+   * Nothing was typed: the message was left in the ferret's rewake inbox and Claude Code's Stop-hook listener hands it to
+   * the idle agent (Ferrets' `FerretRewake`). Only a ferret's or the daemon's words go this way, never the owner's.
+   */
+  | 'hook';
 
 /**
  * What the daemon KNOWS about a send, as distinct from what it hoped.
@@ -81,6 +86,7 @@ const DISPOSITIONS: Readonly<Record<SendPath, SendDisposition>> = {
   'native-file': 'queued',
   revive: 'revived',
   'revive-queue': 'queued-for-revive',
+  hook: 'delivered',
 };
 
 /**
@@ -200,11 +206,28 @@ export interface SendRecord {
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
   /**
+   * Only on a `hook` send: what is typed instead if the listener has not handed the message over in time — the path it would
+   * have gone by and the exact text (the message itself, or the pointer at its turn document). The daemon's own
+   * bookkeeping: it never leaves the daemon.
+   */
+  readonly fallback?: SendFallback | undefined;
+  /**
+   * When the daemon left the owner-waiting notice (`OWNER_NUDGE_TEXT`) for this send, so it is left ONCE however many
+   * looks follow. Only on an owner's send. The daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly nudgedAt?: string | undefined;
+  /**
    * The failure notices a final `unaccounted` / `timed_out` fate still owes its senders, written in the
    * SAME ledger line as the fate and shortened one member at a time as each notice is sent, so a crash
    * between the fate and the news cannot drop any. The daemon's own bookkeeping: it never leaves the daemon.
    */
   readonly noticesOwed?: readonly SendNoticeOwed[] | undefined;
+}
+
+/** What a `hook` send is typed as when the listener does not hand it over (see {@link SendRecord.fallback}). */
+interface SendFallback {
+  readonly path: 'direct' | 'turn-file';
+  readonly text: string;
 }
 
 /** The fields the tracker and a re-attempt may move on an existing record. */
@@ -229,6 +252,8 @@ export type SendSettlement = Partial<
     | 'untyped'
     | 'stuckAt'
     | 'cancelEffect'
+    | 'fallback'
+    | 'nudgedAt'
     | 'noticesOwed'
     | 'held'
     | 'path'

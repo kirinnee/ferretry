@@ -20,6 +20,7 @@ import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harnes
 import {
   CLAUDE_QUESTION_HOOK_COMMAND,
   CLAUDE_QUESTION_HOOKS,
+  CLAUDE_REWAKE_HOOKS,
   CLAUDE_PROMPTS_SEEN,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
 import pending from '../../../ports-pending.json';
@@ -140,7 +141,7 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,

@@ -251,3 +251,37 @@ export function splitFerretryNotice(notice: string): { readonly headline: string
   const details = rest.join('\n\n').trim();
   return { headline: headline.trim(), details: details === '' ? null : details };
 }
+
+/**
+ * A message Ferretry handed to an idle Claude Code agent through the Stop hook's listener, as the harness RECORDS it:
+ *
+ *     <task-notification>
+ *     <summary>Stop hook feedback</summary>
+ *     </task-notification>
+ *     <system-reminder>
+ *     Stop hook blocking error from command "Stop": <the text the listener printed>
+ *
+ *     </system-reminder>
+ *
+ * (measured on Claude Code 2.1.317). The harness may put its own "[SYSTEM NOTIFICATION - NOT USER INPUT]" line before it.
+ */
+const STOP_HOOK_DELIVERY =
+  /^\s*(?:\[SYSTEM NOTIFICATION - NOT USER INPUT\][^\n]*\n+)?<task-notification>\s*<summary>Stop hook feedback<\/summary>\s*<\/task-notification>\s*<system-reminder>\s*Stop hook blocking error from command "Stop": ([\s\S]*?)\s*<\/system-reminder>\s*$/u;
+
+/**
+ * The text inside a Stop-hook delivery, when — and only when — that text opens with Ferretry's own banner or notice form
+ * (a peer banner, a combined delivery's header, or the `[ferretry]` tag). Anything else a Stop hook says (a person's own hook,
+ * a different tool) is NOT unwrapped and stays what the harness shows today: a hook's feedback. `null` for those, and for any
+ * text that is not a Stop-hook delivery at all.
+ *
+ * The one reader both ends use: the transcript match that proves the delivery arrived and the chat row that shows it as a
+ * normal message from the ferret that sent it.
+ */
+export function unwrapStopHookDelivery(text: string): string | null {
+  const wrapped = STOP_HOOK_DELIVERY.exec(text);
+  const inner = wrapped?.[1];
+  if (inner === undefined || inner.trim() === '') return null;
+  const ours =
+    parsePeerEnvelope(inner) !== null || parseCombinedDelivery(inner) !== null || parseFerretryNotice(inner) !== null;
+  return ours ? inner : null;
+}

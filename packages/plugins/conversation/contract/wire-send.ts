@@ -14,7 +14,15 @@ export type MessageLabel = z.infer<typeof MessageLabelSchema>;
 export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out', 'cancelled']);
 export type SendFate = z.infer<typeof SendFateSchema>;
 
-export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
+export const SendPathSchema = z.enum([
+  'direct',
+  'turn-file',
+  'native-inline',
+  'native-file',
+  'revive',
+  'revive-queue',
+  'hook',
+]);
 export type SendPath = z.infer<typeof SendPathSchema>;
 
 export const SendUnaccountedReasonSchema = z.enum([

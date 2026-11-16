@@ -4,8 +4,8 @@
 
 import { parseFerretryNotice, parsePeerEnvelope } from '../../contract/index.ts';
 
-/** A leading producer tag: `[ferretry]`, `[board]`, `[agenda]`, `[warden]`, `[re !A12 …]`, `[answer to !A3 …]`. */
-const LEADING_TAG = /^\s*\[(ferretry|board|agenda|warden|learning|re\s[^\]\n]*|answer to\s[^\]\n]*)\]\s*/iu;
+/** A leading producer tag: `[ferretry]`, `[board]`, `[agenda]`, `[warden]`, `[delivery]`, `[re !A12 …]`, `[answer to !A3 …]`. */
+const LEADING_TAG = /^\s*\[(ferretry|board|agenda|warden|learning|delivery|re\s[^\]\n]*|answer to\s[^\]\n]*)\]\s*/iu;
 const TRAILING_FOOTER = /\n*No reply needed\.[^\n]*\s*$/u;
 
 export interface FramedText {

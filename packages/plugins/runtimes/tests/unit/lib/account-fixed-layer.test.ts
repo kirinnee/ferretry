@@ -13,6 +13,8 @@ import {
   CLAUDE_PROMPTS_SEEN,
   CLAUDE_QUESTION_HOOK_COMMAND,
   CLAUDE_QUESTION_HOOKS,
+  CLAUDE_REWAKE_HOOK_COMMAND,
+  CLAUDE_REWAKE_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
   claudeToolsConfig,
@@ -202,7 +204,7 @@ describe('fixedLayerFor — Claude', () => {
           permissions: { defaultMode: 'auto' },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
-          hooks: CLAUDE_QUESTION_HOOKS,
+          hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
         },
         claudeJson: {
           hasCompletedOnboarding: true,
@@ -235,7 +237,7 @@ describe('fixedLayerFor — Claude', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
-      hooks: CLAUDE_QUESTION_HOOKS,
+      hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_REWAKE_HOOKS },
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
@@ -256,9 +258,17 @@ describe('fixedLayerFor — Claude', () => {
 
     // Assert — Claude 2.1.281 writes an AskUserQuestion call to its transcript only once the form is
     // answered, so the hook is how the daemon learns of an open one: before the form, for that tool alone.
-    should(actual.claudeSettingsOverlay?.hooks).deepEqual({
-      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-    });
+    const hooks = actual.claudeSettingsOverlay?.hooks as Record<string, unknown>;
+    should(hooks.PreToolUse).deepEqual([
+      { matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] },
+    ]);
+    // The rewake listener rides beside it: a Stop hook that waits a day, whose exit-2 stderr wakes an idle agent.
+    should(hooks.Stop).deepEqual([
+      {
+        hooks: [{ type: 'command', command: CLAUDE_REWAKE_HOOK_COMMAND, asyncRewake: true, timeout: 86_400 }],
+      },
+    ]);
+    should(CLAUDE_REWAKE_HOOK_COMMAND).containEql('"$FY_REWAKE_DIR"');
     // The file it writes is the one the daemon names per pane, and it never fails the tool it watches.
     should(CLAUDE_QUESTION_HOOK_COMMAND).containEql('"$FY_QUESTION_FILE"');
     should(CLAUDE_QUESTION_HOOK_COMMAND).endWith('exit 0');

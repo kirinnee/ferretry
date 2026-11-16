@@ -66,7 +66,11 @@ import { memoryStorage, sessionConfig, sessionState } from '../../support/daemon
 import { generatedFleet, restartWithCacheLost, sessionIdAt } from '../../support/daemon/index-rebuild-world.ts';
 import { INDEX_REBUILD_JOB } from '../../../daemon/modules/index-rebuild.ts';
 import { parseSessionId } from '../../../daemon/lib/session-id.ts';
-import { MEDIA_FOLDER_VARIABLE, QUESTION_FILE_VARIABLE } from '../../../daemon/lib/ferrets/service.ts';
+import {
+  MEDIA_FOLDER_VARIABLE,
+  QUESTION_FILE_VARIABLE,
+  REWAKE_FOLDER_VARIABLE,
+} from '../../../daemon/lib/ferrets/service.ts';
 import { ARCHIVE_PASS_JOB } from '../../../daemon/modules/archive.ts';
 import {
   archiveWorld,
@@ -312,6 +316,14 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     const id = await start(h, 'fenn');
     const env = vault.asked.at(-1) ?? {};
     expect(env[QUESTION_FILE_VARIABLE]).toEndWith(`/sessions/${id}/question-asked.json`);
+    await h.stop();
+  });
+
+  test('a launch hands the pane its own rewake inbox (FY_REWAKE_DIR) inside its session folder', async () => {
+    const { h, vault } = await host();
+    const id = await start(h, 'hale');
+    const env = vault.asked.at(-1) ?? {};
+    expect(env[REWAKE_FOLDER_VARIABLE]).toEndWith(`/sessions/${id}/rewake`);
     await h.stop();
   });
 

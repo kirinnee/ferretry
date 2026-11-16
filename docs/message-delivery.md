@@ -1108,6 +1108,68 @@ went", so `send()` threw before it told the tracker. The deliverer saw a ledger 
 
 The Warden's `inbox_stuck` ([B148](#b148-a-ferret-whose-inbox-is-stuck)) is the detector for whatever still gets past these.
 
+## A Claude agent is handed a ferret's message by its Stop hook (`path: hook`)
+
+A Claude Code agent that is **idle** can be woken without a key being pressed. Claude Code runs a `Stop` hook
+entry marked `asyncRewake` in the background after a turn ends; when that command exits **2**, its stderr starts a
+new turn and the agent acts on the text. Ferretry uses it for **ferret-to-ferret messages and daemon notices only**.
+
+**Measured (Claude Code 2.1.317, throwaway sessions, 2026-11-16).**
+
+- Without a `timeout` the hook is killed silently before ~660 s and nothing wakes. With `"timeout": 7200` it ran
+  660 s and woke. The listener is given **86400 s** and loops inside.
+- The transcript records the wake as a `user` entry whose text is
+  `<task-notification>\n<summary>Stop hook feedback</summary>\n</task-notification>\n<system-reminder>\nStop hook blocking error from command "Stop": <stderr text>\n\n</system-reminder>`,
+  and the model is told it is `[SYSTEM NOTIFICATION - NOT USER INPUT]`. The TUI shows "● Stop hook feedback".
+
+**Who may go this way — and who never does.** The harness frames the text as a system notification, **not as the
+person**. So the owner's words **never** go this way: they stay typed, as real user input. A Warden composer act never
+does either (it exists to repair the composer), nor does a send-now (`--now`, which needs the keyboard). A ferret's
+message and a daemon notice (a failed-send notice, Agenda's turn-end check) may.
+
+**The pieces.**
+
+| Piece                                                                                                                   | Where                                                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Inbox: `rewake/` in the ferret's own session folder, `0700`, named to the pane as `FY_REWAKE_DIR` (like `FY_MEDIA_DIR`) | Ferrets: `session-files.ts`, `service.ts`; the kernel allows `<ferret>/rewake` as a `sessions` scope    |
+| Listener: a POSIX-`sh` `Stop` hook in the **fixed overlay** (no bun, no node, no network)                               | `claude-code/daemon/lib/harness/fixed-layer.ts` (and its copy in `runtimes/.../account/fixed-layer.ts`) |
+| Decision + ledger row `path: 'hook'`                                                                                    | Conversation: `host.ts` `viaHook`, `delivery/lib/rewake.ts`                                             |
+| Fallback and nudge                                                                                                      | `delivery/lib/tracker.ts` (`unhandedHook`, `nudgeOwner`)                                                |
+| Proof                                                                                                                   | the Claude transcript reader unwraps the wrapper (`unwrapStopHookDelivery`)                             |
+
+**The listener.** It exits 0 at once when `FY_REWAKE_DIR` is unset or missing (a person's own terminal, an older
+daemon). It writes its own token to `armed`; a **newer** listener replaces the token and the older one then exits 0,
+so re-arming at every Stop never doubles a delivery. Every second it touches `armed` (the heartbeat, read by
+modification time) and claims the **oldest** `*.md` by an atomic `mv` into `taken/`, prints it on stderr and exits 2
+— **one message per wake**; the next Stop re-arms and takes the next. It never prints message text anywhere else.
+
+**The send.** For a Claude ferret whose `armed` is under 5 s old, an agent or daemon send writes **exactly what would
+have been typed, banner line included** (`[message from ferret X (session …) — not from the owner] To reply: …`) to
+`rewake/<name>.md` (published whole, `0600`), ledgers it `accepted` with `path: hook`, and types nothing. A daemon
+notice that opens with neither a banner nor the `[ferretry]` tag is given the tag, which is how the chat knows it.
+The turn document is still written, so the row keeps its turn and can fall back (below).
+
+**Proof is the transcript, as for any send.** The Claude reader (`observed-input.ts` for the tracker's proof,
+`claude.ts` for the chat) unwraps the measured wrapper — **only** when the text inside opens with Ferretry's own
+banner, combined-delivery header or `[ferretry]` tag. Any other Stop-hook feedback (a person's own hook) stays exactly
+what the harness shows today. In the 5.0 chat a hook-delivered message is therefore a **normal row with its sender's
+name**, never a "Stop hook feedback" blob; the owner nudge is a **Ferretry · Delivery** notice row.
+
+**Fallbacks — a message is never lost to this road.**
+
+- Listener not armed → typed, as before.
+- File still unclaimed `rewakeProofMs` (20 s) after it was left → the tracker takes the file back first (an atomic
+  unlink: if the listener claims it in that instant, it stays the listener's), then turns the row into the typed send
+  it would have been (`fallback`) and types it the way an owner's untyped send is typed — when the pane reads clear.
+- **Claimed but not yet in the transcript** → never typed (that would be the copy); it waits, like a message held in
+  Claude's own queue, up to the hold ceiling, and then settles unconfirmed with the usual notice to its sender.
+
+**The owner nudge.** An owner's send that is still untyped past 30 s (`ownerNudgeMs`: the composer cannot be read, so
+the tracker keeps trying every `untypedLookMs`) to a Claude ferret whose listener is armed earns **one** daemon notice
+in the inbox: `[ferretry] [delivery] A message from the owner is waiting to be typed into your input box. Finish
+briefly and end your turn.` It carries **none of the owner's words**. The woken turn redraws the screen, and the
+tracker's next retype types the owner's message as real input. Once per send (`nudgedAt`).
+
 ## Declared gaps
 
 - **A message held in Claude's own queue while the ferret is idle is not pushed.** Claude submits what it
@@ -1126,6 +1188,9 @@ The Warden's `inbox_stuck` ([B148](#b148-a-ferret-whose-inbox-is-stuck)) is the 
 - **`inbox_stuck` re-checks a hung hand-over; it does not prevent one.** The send-path cause (a declared-wait status
   trusted as idle, and a pre-key throw that skips tracking) is B153's.
 
+- **The Stop-hook road is measured on Claude Code 2.1.317 only.** A different release may frame hook feedback otherwise;
+  the unwrap then does not match, the delivery stays unproven (never retyped once claimed), and settles unconfirmed.
+  A listener the harness kills before 24 h simply stops being armed, and sends are typed.
 - **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
   rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows
   (unconfirmed, never retyped), and as no queue at all once it does not — where the mid-turn guard above

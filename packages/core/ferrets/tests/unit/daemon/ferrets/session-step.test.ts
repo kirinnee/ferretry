@@ -176,6 +176,46 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
     });
   });
 
+  describe('the ferret’s rewake inbox (Claude Stop-hook listener)', () => {
+    /** The environment the launch asked the vault to resolve, and whether the harness was still launched. */
+    const launchedWith = async (rewakeFolder: FerretSessionPort['rewakeFolder']) => {
+      const log: string[] = [];
+      const seen: Readonly<Record<string, string>>[] = [];
+      const session: FerretSessionPort = { ...recorder(log), ...(rewakeFolder === undefined ? {} : { rewakeFolder }) };
+      const f = fixture(session, [], log, {
+        vault: {
+          childEnvironment: async (_ferret, env) => {
+            seen.push({ ...env });
+            return ok(emptyChildEnvironment());
+          },
+        },
+      });
+      const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+      return { started, env: seen.at(-1) ?? {}, log };
+    };
+
+    test('a launch hands the pane the folder as FY_REWAKE_DIR', async () => {
+      const { started, env } = await launchedWith(async ferret => fenced(`/sessions/${ferret}/rewake`));
+      expect(started.ok).toBe(true);
+      expect(env['FY_REWAKE_DIR']).toBe('/sessions/f1/rewake');
+    });
+
+    test('a folder that cannot be made sets no variable and the ferret still launches', async () => {
+      const { started, env, log } = await launchedWith(async () => {
+        throw new Error('FIXTURE_SECRET no rewake folder');
+      });
+      expect(started.ok).toBe(true);
+      expect(env['FY_REWAKE_DIR']).toBeUndefined();
+      expect(log).toContain('runner.start');
+    });
+
+    test('a daemon that binds no rewake folder sets no variable', async () => {
+      const { started, env } = await launchedWith(undefined);
+      expect(started.ok).toBe(true);
+      expect(env['FY_REWAKE_DIR']).toBeUndefined();
+    });
+  });
+
   describe('a start with opening attachments (V-0443)', () => {
     const NOTES = Buffer.from('Ship the login fix.').toString('base64');
     const attachments: FerretsPorts['openingAttachments'] = () => ({

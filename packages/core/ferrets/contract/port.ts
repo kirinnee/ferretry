@@ -477,6 +477,22 @@ export interface FerretTurns {
   clearMarkers?(): Promise<void>;
 }
 
+/**
+ * A Claude Code ferret's REWAKE INBOX (additive): the folder its Stop hook's listener hands messages to the idle agent from.
+ * Bound to the one ferret it was opened for. Only Ferretry's own words travel this way (an agent's or the daemon's): the
+ * harness frames them as a hook notice, never as the person's input.
+ */
+export interface FerretRewake {
+  /** The listener is waiting right now: its heartbeat was touched within `withinMs`. */
+  armed(withinMs: number): Promise<boolean>;
+  /** Leaves one message, whole and private, under a name derived from `sendId` (the same id twice is one message). */
+  deposit(sendId: string, text: string): Promise<void>;
+  /** The message left for `sendId` is still in the inbox: the listener has not claimed it. */
+  waiting(sendId: string): Promise<boolean>;
+  /** Takes back an unclaimed message; `true` when it was still there and is gone now (the listener never had it). */
+  withdraw(sendId: string): Promise<boolean>;
+}
+
 /** A turn document Ferrets wrote: its number and the absolute file the agent is pointed at. */
 export interface FerretTurnWritten {
   readonly turn: number;
@@ -762,6 +778,12 @@ export interface FerretsApi {
    * same `mayTouch` rule as `harness`: anyone else is refused with a 403 `forbidden`, so no agent reads another's turns.
    */
   turns?(ferret: FerretId, caller?: FerretId): Promise<FerretTurns | undefined>;
+  /**
+   * A Claude Code ferret's rewake inbox (additive): where Ferretry leaves a message for the Stop hook's listener to hand to
+   * the idle agent. `undefined` for a ferret this daemon does not know, or one whose session files bind no inbox. The same
+   * `mayTouch` rule as `turns`.
+   */
+  rewake?(ferret: FerretId, caller?: FerretId): Promise<FerretRewake | undefined>;
   /**
    * What the ferret's pane is asking right now (additive, U4): the dialog or permission prompt the turn watch recorded,
    * masked, for Claude Code's panels. `undefined` for a ferret this daemon does not know; `{}` when nothing is asked or

@@ -679,6 +679,10 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
           scoped.set('deeperMedia', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/media/x' }));
           scoped.set('bareMedia', ctx.kernel.roots.root('sessions', { subfolder: '/media' }));
           scoped.set('upMedia', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/media' }));
+          scoped.set('rewake', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/rewake' }));
+          scoped.set('deeperRewake', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/rewake/x' }));
+          scoped.set('bareRewake', ctx.kernel.roots.root('sessions', { subfolder: '/rewake' }));
+          scoped.set('upRewake', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/rewake' }));
           scoped.set('homeA', ctx.kernel.roots.root('agent-homes', { subfolder: 'aaa-1' }));
           scoped.set('homeB', ctx.kernel.roots.root('agent-homes', { subfolder: 'bbb-2' }));
           scoped.set('homeUp', ctx.kernel.roots.root('agent-homes', { subfolder: '../x' }));
@@ -717,6 +721,9 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
       'deeperMedia',
       'bareMedia',
       'upMedia',
+      'deeperRewake',
+      'bareRewake',
+      'upRewake',
     ])
       expect(handle(key).resolve('environment.json')).toEqual({ ok: false, error: 'outside' });
     // a ferret's own `attachments` folder is the one nested scope, and a file written through it is that folder's alone
@@ -729,6 +736,11 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
     await media.writeText(resolved(media, 'chart.txt'), 'in-media');
     expect(await media.readText(resolved(media, 'chart.txt'))).toBe('in-media');
     await expect(a.readText(resolved(a, 'chart.txt'))).rejects.toThrow();
+    // and its own `rewake` folder: the inbox a Claude agent's Stop-hook listener hands messages from
+    const rewake = handle('rewake');
+    await rewake.writeText(resolved(rewake, 'message.md'), 'in-rewake');
+    expect(await rewake.readText(resolved(rewake, 'message.md'))).toBe('in-rewake');
+    await expect(a.readText(resolved(a, 'message.md'))).rejects.toThrow();
     await host.stop();
   });
 

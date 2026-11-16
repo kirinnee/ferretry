@@ -307,6 +307,12 @@ a form that is gone. The hook is in the overlay only, never in a settings entry,
 `PreToolUse` hooks keep running beside it; it prints nothing and always exits 0, so it never changes what
 Claude decides.
 
+The same overlay carries one more hook, on `Stop`, marked `asyncRewake` with a 24-hour `timeout`: the **rewake
+listener**. The daemon names the ferret's inbox to the pane as `FY_REWAKE_DIR` (`state/sessions/<id>/rewake/`,
+`0700`), and the listener hands a message left there to the idle agent (exit 2, text on stderr). Unset — a person's own
+terminal, an older daemon — it exits 0 at once. It is in the overlay only, so a person's own `Stop` hooks run beside it.
+How it is used, who may go this way and what the fallbacks are: [message-delivery.md](message-delivery.md#a-claude-agent-is-handed-a-ferrets-message-by-its-stop-hook-path-hook).
+
 Declared gaps: a ferret launched before this change has neither the hook nor the variable until its next
 launch; and the hold-back itself is live-only — against a loopback model both versions write the call early —
 so the contract test (`packages/daemon/tests/contract/question-hook.test.ts`) pins the hook mechanism on the

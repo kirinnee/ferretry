@@ -128,6 +128,25 @@ const ATTACHMENTS_FOLDER = 'attachments';
 /** The folder of a ferret's own session folder its agent puts media in (`FY_MEDIA_DIR`; today's `SessionPaths.media`). */
 const MEDIA_FOLDER = 'media';
 
+/**
+ * The folder a ferret's own session folder keeps its REWAKE INBOX in (`FY_REWAKE_DIR`): a message Ferretry deposits there
+ * as `<name>.md` is handed to an idle Claude Code agent by the listener its `Stop` hook runs (see the harness plugin's
+ * fixed layer). The listener keeps `armed` (its heartbeat, by modification time) beside the messages and moves the one
+ * it hands over into `taken/`.
+ */
+const REWAKE_FOLDER = 'rewake';
+const REWAKE_ARMED_FILE = 'armed';
+
+/** The name a deposited message is kept under: ordered by when it was deposited, so the listener hands over the oldest first. */
+function rewakeFile(sendId: string, at: number): string {
+  const readable = sendId
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/gu, '_')
+    .slice(0, 48);
+  const digest = createHash('sha256').update(sendId).digest('hex').slice(0, 12);
+  return `${String(at).padStart(14, '0')}-${readable}-${digest}.md`;
+}
+
 /** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
 const QUESTION_ASKED_FILE = 'question-asked.json';
 
@@ -247,6 +266,19 @@ export class SessionFiles {
         await new OwnFolder(this.mediaRoot(id)).ensure();
         return named.value;
       },
+      // The rewake inbox (`FY_REWAKE_DIR`): `rewake/` in the ferret's own session folder, made `0700`.
+      rewakeFolder: async ferret => {
+        const id = parseSessionId(ferret);
+        const named = this.root(id).resolve(REWAKE_FOLDER);
+        if (!named.ok) throw new Error('the rewake folder of this ferret could not be named');
+        await new OwnFolder(this.root(id)).ensure();
+        await new OwnFolder(this.rewakeRoot(id)).ensure();
+        return named.value;
+      },
+      rewakeArmed: async (ferret, withinMs) => await this.rewakeArmed(parseSessionId(ferret), withinMs),
+      rewakeDeposit: async (ferret, sendId, text) => await this.rewakeDeposit(parseSessionId(ferret), sendId, text),
+      rewakeWaiting: async (ferret, sendId) => await this.rewakeWaiting(parseSessionId(ferret), sendId),
+      rewakeWithdraw: async (ferret, sendId) => await this.rewakeWithdraw(parseSessionId(ferret), sendId),
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
         return firstTurnInstruction(await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt)));
@@ -514,6 +546,73 @@ export class SessionFiles {
   /** The ferret's `media/` folder and nothing else of its session (F-0327): what `scope=media` reads. */
   mediaRoot(ferret: string): RootHandle {
     return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: `${ferret}/${MEDIA_FOLDER}` });
+  }
+
+  /** The ferret's `rewake/` folder and nothing else of its session: what the Stop hook's listener reads. */
+  rewakeRoot(ferret: string): RootHandle {
+    return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: `${ferret}/${REWAKE_FOLDER}` });
+  }
+
+  /** Whether the listener's heartbeat (`armed`) was touched within `withinMs`; an absent or unreadable one is not armed. */
+  private async rewakeArmed(id: SessionId, withinMs: number): Promise<boolean> {
+    try {
+      const root = this.rewakeRoot(id);
+      const named = root.resolve(REWAKE_ARMED_FILE);
+      if (!named.ok) return false;
+      const stat = await root.stat(named.value);
+      if (stat === undefined || stat.kind !== 'file') return false;
+      const touched = Date.parse(stat.modified);
+      return Number.isFinite(touched) && Date.parse(this.deps.clock.now()) - touched < withinMs;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Deposits one message for the listener: published whole (a temporary name, then a rename), `0600`. */
+  private async rewakeDeposit(id: SessionId, sendId: string, text: string): Promise<void> {
+    await new OwnFolder(this.root(id)).ensure();
+    const root = this.rewakeRoot(id);
+    await new OwnFolder(root).ensure();
+    const existing = await this.rewakeNamed(id, sendId);
+    if (existing !== undefined) return;
+    const named = root.resolve(rewakeFile(sendId, Date.parse(this.deps.clock.now())));
+    if (!named.ok) throw new Error('a rewake message of this ferret could not be named');
+    await root.publish(named.value, new TextEncoder().encode(text), { mode: 0o600 });
+  }
+
+  /** The name of the file a send's message waits in, when the listener has not taken it. */
+  private async rewakeNamed(id: SessionId, sendId: string): Promise<string | undefined> {
+    const root = this.rewakeRoot(id);
+    const folder = root.resolve('.');
+    if (!folder.ok) return undefined;
+    const digest = createHash('sha256').update(sendId).digest('hex').slice(0, 12);
+    return (await root.list(folder.value).catch((): readonly string[] => [])).find(name =>
+      name.endsWith(`-${digest}.md`),
+    );
+  }
+
+  private async rewakeWaiting(id: SessionId, sendId: string): Promise<boolean> {
+    return (await this.rewakeNamed(id, sendId)) !== undefined;
+  }
+
+  /**
+   * Takes back a message the listener has not claimed: `true` when it was still there and is gone now. The removal is ONE
+   * unlink, so it and the listener's `mv` into `taken/` cannot both succeed; a removal of a name already gone says nothing,
+   * so what the listener took is told by where it went: a file now in `taken/` was the listener's, never ours.
+   */
+  private async rewakeWithdraw(id: SessionId, sendId: string): Promise<boolean> {
+    const name = await this.rewakeNamed(id, sendId);
+    if (name === undefined) return false;
+    const root = this.rewakeRoot(id);
+    const file = root.resolve(name);
+    const claimed = root.resolve(`taken/${name}`);
+    if (!file.ok || !claimed.ok) return false;
+    try {
+      await root.remove(file.value);
+      return (await root.stat(claimed.value)) === undefined;
+    } catch {
+      return false;
+    }
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */

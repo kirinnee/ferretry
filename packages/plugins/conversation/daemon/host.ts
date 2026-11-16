@@ -47,8 +47,13 @@ import {
   handoffView,
   isDirectSend,
   isFileBackedQueue,
+  inboxText,
   isUnconfirmedTyping,
   lookBeforeReading,
+  mayGoByHook,
+  OWNER_NUDGE_TEXT,
+  ownerNudgeSendId,
+  REWAKE_ARMED_WITHIN_MS,
   paneMidTurn,
   peerMessageKind,
   peerPreamble,
@@ -654,6 +659,8 @@ export function buildConversationA(deps: {
     await kernel.state.write(newest, new TextEncoder().encode(`${header}\n${frame.visible}\n`), ferret);
     return kernel.state.pathOf(newest, ferret);
   };
+  /** The ferret's rewake inbox (the Stop-hook listener's), or none: an unknown ferret, a daemon with no inbox. */
+  const rewakeOf = async (ferret: SessionId) => await ferrets.rewake?.(ferret).catch(() => undefined);
   const failureNotifier = new AgentSendFailureNotifier(
     {
       send: async request =>
@@ -731,6 +738,21 @@ export function buildConversationA(deps: {
                   sender: record.from ?? 'unknown',
                 }),
               );
+        },
+      },
+      // A Claude ferret's rewake inbox (the Stop-hook listener's). A ferret without one: the inbox answers "still there" and
+      // "taken back", so a message that was never going to be handed over is typed (never lost), and no notice is left.
+      rewake: {
+        waiting: async (id, sendId) => (await (await rewakeOf(id))?.waiting(sendId)) ?? true,
+        withdraw: async (id, sendId) => (await (await rewakeOf(id))?.withdraw(sendId)) ?? true,
+        nudge: async (id, record) => {
+          const inbox = await rewakeOf(id);
+          const target = await readTarget(id).catch(() => undefined);
+          if (inbox === undefined || target?.harness !== 'claude' || !(await inbox.armed(REWAKE_ARMED_WITHIN_MS)))
+            return false;
+          // NONE of the owner's words: only that one is waiting (see `OWNER_NUDGE_TEXT`).
+          await inbox.deposit(ownerNudgeSendId(record.sendId), OWNER_NUDGE_TEXT);
+          return true;
         },
       },
       scheduler,
@@ -1031,7 +1053,12 @@ export function buildConversationA(deps: {
     request: TypedSend,
     text: string,
     fromName: string | undefined,
-    shape: { readonly path: SendPath; readonly matchText?: string; readonly turn?: number },
+    shape: {
+      readonly path: SendPath;
+      readonly matchText?: string;
+      readonly turn?: number;
+      readonly fallback?: { readonly path: 'direct' | 'turn-file'; readonly text: string };
+    },
   ) => {
     const at = kernel.clock.now();
     return await ledger.accept(ferret, {
@@ -1043,6 +1070,7 @@ export function buildConversationA(deps: {
       message: text,
       ...(shape.matchText === undefined ? {} : { matchText: shape.matchText }),
       ...(shape.turn === undefined ? {} : { turn: shape.turn }),
+      ...(shape.fallback === undefined ? {} : { fallback: shape.fallback }),
       fate: 'accepted',
       attempt: 1,
       attemptAt: at,
@@ -1107,6 +1135,53 @@ export function buildConversationA(deps: {
     });
     return { ferret, disposition: 'revived', sendId: request.sendId, fate: 'accepted' };
   };
+  /**
+   * THE REWAKE ROAD. The message the agent would have been typed — banner and all — is left whole in the ferret's rewake
+   * inbox, and the listener its Stop hook runs hands it to the idle agent. The row is `hook`, accepted BEFORE the file is
+   * left (the same id twice is one message), and it carries what is typed instead (`fallback`) should the listener not claim
+   * the file within `rewakeProofMs`: the tracker then takes the file back and types it as it always was. The transcript is
+   * the proof, as for any send. `undefined` when this send does not go this way, or the file could not be left (nothing was
+   * delivered and the row is taken back), and the caller types it.
+   */
+  const viaHook = async (
+    ferret: SessionId,
+    request: TypedSend,
+    text: string,
+    fromName: string | undefined,
+    sent: { readonly typed: string; readonly path: 'direct' | 'turn-file'; readonly turn?: number },
+  ): Promise<SendResult | undefined> => {
+    const target = await readTarget(ferret);
+    if (
+      !mayGoByHook({
+        harness: target.harness,
+        agent: request.senderSessionId !== undefined,
+        notice: request.notice === true || request.agenda === true,
+        warden: request.warden === true,
+        now: request.now === true,
+      })
+    )
+      return undefined;
+    const inbox = await rewakeOf(ferret);
+    if (inbox === undefined || !(await inbox.armed(REWAKE_ARMED_WITHIN_MS).catch(() => false))) return undefined;
+    const left = inboxText(text);
+    const accepted = await accepting(ferret, request, left, fromName, {
+      path: 'hook',
+      matchText: left,
+      ...(sent.turn === undefined ? {} : { turn: sent.turn }),
+      fallback: { path: sent.path, text: sent.typed },
+    });
+    if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
+    try {
+      await inbox.deposit(request.sendId, left);
+    } catch {
+      // Nothing was left, so nothing can arrive: the row is taken back and the message is typed instead.
+      await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
+      return undefined;
+    }
+    await sendRepository.journal(ferret, 'control.send_hooked', { sendId: request.sendId });
+    if (sent.turn !== undefined) await (await turnsOf(ferret))?.clearMarkers?.().catch(() => undefined);
+    return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
+  };
   const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
     if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) {
@@ -1144,6 +1219,10 @@ export function buildConversationA(deps: {
               ? undefined
               : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
     );
+    // A Claude ferret whose Stop-hook listener is waiting is handed an AGENT's message or a daemon notice without a key being
+    // pressed; the owner's words and the Warden's acts are never handed over this way (see `mayGoByHook`).
+    const handed = await viaHook(ferret, request, text, fromName, sent);
+    if (handed !== undefined) return handed;
     // What the transcript will hold is the message, or the pointer typed for it.
     const accepted = await accepting(ferret, request, text, fromName, {
       path: sent.path,
