@@ -153,6 +153,15 @@ const FAILED_ENDS: ReadonlySet<FerretEndCause['kind']> = new Set([
   'start_failed',
 ]);
 
+/** Why a held (daemon-origin) launch will not revive a ferret that ended on purpose. */
+const ENDED_ON_PURPOSE =
+  'this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it';
+
+/** An end somebody chose: the owner's stop, or the ferret's own `signal done`. A crash, a lost terminal and the rest were nobody's choice. */
+function endedOnPurpose(record: FerretRecord): boolean {
+  return record.state === 'stopped' && (record.cause?.kind === 'stopped' || record.cause?.kind === 'completed');
+}
+
 /** Everything the service reaches outside its own memory. The daemon half binds these to kernel ports. */
 export interface FerretsPorts {
   /** Resolves once the held ferret records are loaded (a read before then would see no ferret). */
@@ -1299,7 +1308,31 @@ export class FerretsService implements FerretsApi {
     this.requireTokens();
     if (await this.isCutOff(ferret))
       return failed('refused', 'the owner cut off this ferret; a confirmed owner resume is required');
+    // The launch is the DAEMON's, with no `expect` to judge the ferret's standing, so a stop its owner chose, or an end
+    // that finished its work, is checked here: this method never revives what somebody ended on purpose.
+    const held = this.registry.get(ferret);
+    if (held !== undefined && endedOnPurpose(held)) return failed('refused', ENDED_ON_PURPOSE);
     return await this.resumeHeld(ferret, undefined, { origin: DAEMON_ORIGIN, noTurn: true });
+  }
+
+  /**
+   * Why a lifecycle start of this ferret must be refused BEFORE it changes anything (its record, its credential, its
+   * conversation lease), or `undefined` when {@link launchHeld} will open a pane. The lifecycle asks it ahead of the
+   * launch because the launch would otherwise do nothing AFTER the credential was re-issued: a ferret the registry
+   * calls live but whose terminal this daemon cannot see (no handle, or the runner is off) answers "already running"
+   * without launching, and a hash rotated over a pane that still runs cuts that pane off from Ferretry.
+   */
+  async heldLaunchRefusal(ferret: FerretId): Promise<string | undefined> {
+    await this.ports.ready?.();
+    this.requireTokens();
+    const held = this.registry.get(ferret);
+    if (held === undefined) return `no ferret ${ferret}`;
+    if (await this.isCutOff(ferret)) return 'the owner cut off this ferret; a confirmed owner resume is required';
+    if (endedOnPurpose(held)) return ENDED_ON_PURPOSE;
+    if (held.state !== 'stopped')
+      return `ferret ${ferret} is recorded as ${held.state}, so a launch would open no pane and only re-issue its credential: stop it first`;
+    if (this.ports.runner() === undefined) return 'no runner plugin is on';
+    return undefined;
   }
 
   private async resumeHeld(

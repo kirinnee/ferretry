@@ -34,6 +34,7 @@ import type { ClockPort } from '../lib/ports.ts';
 import { CoupledCapabilityHashStore, type SessionCutOffMark, type TokenCutOff } from '../lib/tokens/cut-off-mark.ts';
 import type { SessionProtocolEnvelope } from '../adapters/session/lifecycle/storage-session-lifecycle-repository.ts';
 import { type SessionId, parseSessionId, tryParseSessionId } from '../lib/session-id.ts';
+import type { SessionConversationLeases } from '../lib/session/peers/conversation-lease.ts';
 import {
   defaultSessionLifecycleSettings,
   type SessionCapabilityHashStore,
@@ -101,6 +102,12 @@ export interface SessionFilesDeps {
    * lifecycle refuses at the launch, before anything is typed.
    */
   readonly launcher?: SessionLifecycleLauncher;
+  /**
+   * One live writer per harness conversation: every lifecycle claims the conversation its argv names before its pane
+   * exists, and frees it when the session is over. The daemon always binds it; a unit fixture may leave it off, and
+   * its lifecycles then launch without a claim.
+   */
+  readonly leases?: SessionConversationLeases;
   /**
    * The registry's record of a ferret and its start options, which its session document is made from (ruling #31b).
    * `undefined` for a ferret the registry does not hold: no document can be made for it.
@@ -523,8 +530,8 @@ export class SessionFiles {
 
   /**
    * One lifecycle for one session: its stores on its own folder, the shared gate and queue. Built without today's
-   * conversation `leases` and board `projects` (GAP(ports-pending: Session adapters)): until `leases` is bound, two
-   * lifecycles could each launch a pane over one harness conversation.
+   * board `projects` (GAP(ports-pending: Session adapters)). The conversation `leases` are the daemon's own, bound by
+   * the root: the claim is made before a pane exists, and a stop or a failure frees it.
    */
   createLifecycle = (id: SessionId, envelope?: SessionProtocolEnvelope): SessionLifecycleService =>
     new SessionLifecycleService(
@@ -546,6 +553,7 @@ export class SessionFiles {
           hashes: this.hashes,
         }),
         launches: this.launchGate,
+        ...(this.deps.leases === undefined ? {} : { leases: this.deps.leases }),
       },
       defaultSessionLifecycleSettings,
     );
