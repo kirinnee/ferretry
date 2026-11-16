@@ -13,6 +13,10 @@ describe('TT kernel.hostFacts', () => {
       () => nowhere.procFile(1.5, 'stat'),
       () => nowhere.procFdLink(1, '../../etc/passwd'),
       () => nowhere.procTaskChildren(1, -1),
+      () => nowhere.procWorkingDirectory(0),
+      () => nowhere.procWorkingDirectory(-1),
+      () => nowhere.procWorkingDirectory(1.5),
+      () => nowhere.procWorkingDirectory('1' as unknown as number),
       () => nowhere.cgroupFile('../../etc', 'cpu.max'),
       () => nowhere.cgroupChildren('user.slice/..'),
       () => nowhere.blockScheduler(-1, 0),
@@ -22,9 +26,25 @@ describe('TT kernel.hostFacts', () => {
     await expect(nowhere.procFile('self', 'cgroup')).rejects.toThrow(/ENOENT/);
   });
 
+  test('the working folder of a process that is not there is undefined, not a fault', async () => {
+    expect(await nowhere.procWorkingDirectory(4242)).toBeUndefined();
+  });
+
+  test('darwin has no procfs: the answer is undefined without a read, a bad pid still refuses', async () => {
+    const mac = nodeHostFacts({ proc: '/nonexistent-proc', sys: '/nonexistent-sys', platform: 'darwin' });
+    expect(mac.platform).toBe('darwin');
+    expect(await mac.procWorkingDirectory(1)).toBeUndefined();
+    await expect(mac.procWorkingDirectory(0)).rejects.toBeInstanceOf(RangeError);
+  });
+
   test('a plugin without permissions.hostFacts reads nothing; one with it gets the host’s facts', async () => {
-    const facts = { ...undeclaredHostFacts('x', nowhere), pids: async () => [1, 2] };
+    const facts = {
+      ...undeclaredHostFacts('x', nowhere),
+      pids: async () => [1, 2],
+      procWorkingDirectory: async (pid: number) => (pid === 1 ? '/work/one' : undefined),
+    };
     const seen: Record<string, () => Promise<readonly number[]>> = {};
+    const cwd: Record<string, () => Promise<string | undefined>> = {};
     const half = (id: string, hostFacts?: true) =>
       implementDaemon(
         definePlugin({
@@ -39,6 +59,7 @@ describe('TT kernel.hostFacts', () => {
         {
           build: ctx => {
             seen[id] = () => ctx.kernel.hostFacts.pids();
+            cwd[id] = () => ctx.kernel.hostFacts.procWorkingDirectory(1);
             return {};
           },
         },
@@ -46,6 +67,8 @@ describe('TT kernel.hostFacts', () => {
     const host = await testHost({ plugins: [half('terminals', true), half('other')], hostFacts: facts });
     expect(await seen['terminals']?.()).toEqual([1, 2]);
     await expect(seen['other']?.() ?? Promise.resolve()).rejects.toThrow('did not declare permissions.hostFacts');
+    expect(await cwd['terminals']?.()).toBe('/work/one');
+    await expect(cwd['other']?.() ?? Promise.resolve()).rejects.toThrow('did not declare permissions.hostFacts');
     await host.stop();
   });
 });
