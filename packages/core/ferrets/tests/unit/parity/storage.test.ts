@@ -487,7 +487,8 @@ describe('ferret documents parity (the v4 session folder is state/ferrets/<ferre
     const everyFile = [...files.keys(), ...h.state('ferrets').bytes.keys()];
     expect(everyFile.some(key => key.includes('session-version'))).toBe(false);
     expect(everyFile).toContain(`${id}/config.json`);
-    expect(manifest.data.state.every(file => file.format === 1)).toBe(true);
+    // The index is a rebuilt cache, not a document: its format moves when its columns do (2 holds the journal version).
+    expect(manifest.data.state.every(file => file.format === (file.store === 'sqlite-cache' ? 2 : 1))).toBe(true);
     await h.stop();
   });
 });
