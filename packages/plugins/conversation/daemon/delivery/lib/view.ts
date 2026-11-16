@@ -45,6 +45,8 @@ export function sendRecordView(record: SendRecord): SendRecordView {
     ...optional('deadlineAt', record.deadlineAt),
     ...optional('retryable', record.retryable),
     ...optional('typedNotSent', record.typedNotSent),
+    // Only an open send is stuck: a settled one says its own fate.
+    ...optional('stuckAt', record.fate === 'accepted' ? record.stuckAt : undefined),
     ...optional('cancelEffect', record.cancelEffect),
   } as SendRecordView;
 }

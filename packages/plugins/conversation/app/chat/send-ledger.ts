@@ -99,6 +99,11 @@ export interface LedgerSendRecord {
   readonly retryable?: true;
   /** The message is sitting typed in the agent’s composer and was never submitted. */
   readonly typedNotSent?: true;
+  /**
+   * When the daemon said this send is STUCK: nothing could be typed for it past its limit, because the agent’s input
+   * box could not be proven empty. The daemon keeps trying; only an open send carries it.
+   */
+  readonly stuckAt?: string;
   /** What a `cancelled` fate did to the agent’s screen. */
   readonly cancelEffect?: SendCancelEffect;
   /**
@@ -343,6 +348,7 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
     ...optional('attemptAt', str(row['attemptAt'])),
     ...(row['retryable'] === true ? { retryable: true as const } : {}),
     ...(row['typedNotSent'] === true ? { typedNotSent: true as const } : {}),
+    ...optional('stuckAt', str(row['stuckAt'])),
     ...optional('cancelEffect', literal(row['cancelEffect'], [...CANCEL_EFFECTS] as SendCancelEffect[])),
   };
 };

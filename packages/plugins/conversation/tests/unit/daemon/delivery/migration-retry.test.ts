@@ -130,6 +130,7 @@ async function world(claimKey: string, at: Schedule = SCHEDULES['an hour before 
         resubmit: async () => (await ledger.list(F1)).find(row => row.sendId === 'send-1')!,
       },
       notifier: { notify: async () => {} },
+      alarm: { stuck: async () => {} },
       scheduler: { schedule: () => {}, cancelAll: () => {} },
       roster: { sessions: () => [] },
       serial,

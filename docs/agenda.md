@@ -336,6 +336,14 @@ fields every item already carries, so an item from any daemon reads as exactly o
   BEFORE it is sent, so a restart, or a failure after the first item was recorded, resumes that very message and
   never sends a second; and the completion is checked against the episode and count it was decided on, so a reply
   that arrives while the send is in flight keeps its own full 30 minutes. A `working` item and a snoozed one are never nudged; nor is a card the daemon raised.
+  **5.0** (`agenda/daemon/lib/rest-nudge.ts`, a job every minute) keeps v4's words and schedule and adds a HARD CAP: at
+  most **7 nudges per item per rest** (30 min, 1 h, 2 h, 4 h, 8 h, 16 h, then one at the 24 h ceiling), where v4 nudged
+  daily for ever. Asks owns the items (Agenda reads their boards); the counts are Agenda's own
+  (`state/agenda/rest-nudges.json`, per ferret and item, with the rest they belong to) and are written BEFORE the send
+  and given back only when the send is known to have typed nothing, so a restart or an unconfirmed send never lets a
+  silent ferret be nudged more often. The send is the turn-end check's: Conversation's `agenda` caller, which never
+  revives a stopped or archived ferret and is never the owner's words. The words start with `[attention check]`, so a
+  turn they start is not turn-end checked, and a rest nudge never resets that check's own cap.
 
 **What a Resting item stores.** The field every app reads stays `parked: { reason: 'replied', at }` (or
 `waitingOn: 'ferret'` for a request for more information), so an app from before Resting lists it under

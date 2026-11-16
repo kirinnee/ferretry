@@ -97,6 +97,7 @@ async function tracked(
         resubmit: async () => record,
       },
       notifier: { notify: async () => {} },
+      alarm: { stuck: async () => {} },
       scheduler: { schedule: () => {}, cancelAll: () => {} },
       roster: { sessions: () => [] },
       serial: { run: async (_id: unknown, work: () => Promise<unknown>) => await work() },

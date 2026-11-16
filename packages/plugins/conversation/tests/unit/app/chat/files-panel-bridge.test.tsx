@@ -16,6 +16,7 @@ const inWorkspace = (ferret: string, shown: string[], target: { current: (() => 
       daemon="alpha"
       ferret={ferret}
       showPanel={panel => shown.push(`${ferret}:${panel}`)}
+      shows={() => true}
     >
       <FilesPanelBridge ferretId="shared" target={target} />
     </FerretWorkspaceActionsProvider>,
