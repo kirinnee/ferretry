@@ -211,7 +211,7 @@ export default definePlugin({
       tool('browser_ask_owner', { ...TOOL, guard: GUARD_NONE, summary: 'hand a page to the owner' }),
       tool('browser_request_input', {
         ...TOOL,
-        guard: { none: 'raises an input card through the Vault; answers its state, never a value' },
+        guard: { none: 'raises an input through the Vault; answers its state, never a value' },
         summary: 'ask the owner to type a password or code into a page',
       }),
     ],

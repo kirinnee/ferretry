@@ -86,8 +86,8 @@ export function BoardSwitchView({
           <span className="block text-ui font-semibold text-fg">Use the board</span>
           <span className="mt-0.5 block text-meta leading-base text-muted">
             {on
-              ? 'Ferrets here keep a card for their work, and are reminded when they forget.'
-              : 'Ferrets here make no card unless you ask for one, or their lead hands them one.'}
+              ? 'Ferrets here keep a task for their work, and are reminded when they forget.'
+              : 'Ferrets here make no task unless you ask for one, or their lead hands them one.'}
           </span>
         </span>
         <span

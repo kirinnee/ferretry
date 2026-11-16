@@ -237,7 +237,7 @@ export function stepUpRoutes(
           if (bound === undefined)
             return errorResponse(
               404,
-              'that task plan selection is not waiting for a passkey: stage it again from the plan card',
+              'that task plan selection is not waiting for a passkey: stage it again from the plan',
               STAGE_REFUSALS.taskPlan.code,
             );
           return answer(await service.stepUpOptions(caller(context), body.origin, body.act, bound), value =>
