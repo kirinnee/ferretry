@@ -5,6 +5,7 @@ import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
+import { CHANNEL_LAUNCH_ENV } from '@ferretry/plugin-runtimes/contract';
 import {
   COMPONENT_MCP_SLOT,
   PROFILE_COMPONENTS_KEY,
@@ -297,6 +298,8 @@ export default definePlugin({
     roots: ['work', 'imports', 'project-files'],
     // A catalog install adds a server to a project's `.mcp.json` (the root of a project or worktree the daemon knows) and nothing else there.
     projectFiles: ['.mcp.json'],
+    // `fy mcp serve` reads whether the launch gave Claude the channel flag (the Claude channel, docs/claude-channel.md).
+    cliEnvReads: [CHANNEL_LAUNCH_ENV],
     // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
     // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). A check reaches the same hosts.
     network: [{ resolver: 'mcp-sign-in' }],

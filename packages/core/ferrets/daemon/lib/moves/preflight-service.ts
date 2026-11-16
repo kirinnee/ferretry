@@ -15,7 +15,7 @@ import {
   type ProcessObservation,
 } from './inflight-report.ts';
 import { type MoveOutcome, renderMoveOutcome } from './outcome-render.ts';
-import type { ProcessInventoryPort } from './process-inventory-port.ts';
+import type { MovePane, ProcessInventoryPort } from './process-inventory-port.ts';
 import { type ReportMeta, renderInflightCli, renderInflightReport } from './report-render.ts';
 import { requesterCall } from './requester-call.ts';
 import { restartNotice } from './restart-notice.ts';
@@ -26,7 +26,8 @@ export interface MoveTargetView {
   readonly sessionId: string;
   /** The harness family. Only `codex` reports background terminals in its pane footer. */
   readonly harness: string;
-  readonly tmuxSession: string;
+  /** The ferret's pane, reached through its runner: the process tree and the codex footer are read from it. */
+  readonly pane: MovePane;
   readonly status: SessionStatus;
   /** Whose turn it is (the turn watch's answer); only `working` means a turn is in progress. See {@link InflightReport.midTurn}. */
   readonly turnState?: SessionTurnState;
@@ -35,19 +36,6 @@ export interface MoveTargetView {
   readonly turn: number;
   readonly openTools: readonly string[];
   readonly subprocessSince?: string;
-}
-
-/**
- * Reads a pane's visible text. Codex prints its background-terminal count in the footer.
- *
- * `undefined` means the pane is CONFIRMED ABSENT — the terminal this session used to have is gone,
- * so there is no footer and no background terminals rather than a footer nobody could read. It is
- * distinct from a throw, which is the honest answer when the pane may exist and the read failed:
- * one is an observation, the other is a blind spot, and collapsing them makes every move of a
- * stopped codex session refuse on evidence nobody could have produced.
- */
-export interface PaneSnapshotPort {
-  visible(tmuxSession: string): Promise<string | undefined>;
 }
 
 const CODEX_HARNESS = 'codex';
@@ -78,10 +66,7 @@ function detail(error: unknown): string {
  * gate then refuses on. Losing a signal must never look like the absence of work.
  */
 export class MovePreflight {
-  constructor(
-    private readonly inventory: ProcessInventoryPort,
-    private readonly panes: PaneSnapshotPort,
-  ) {}
+  constructor(private readonly inventory: ProcessInventoryPort) {}
 
   /** `chatTail` is the transcript window the session's open tool ids are joined against. */
   async inspect(
@@ -89,7 +74,7 @@ export class MovePreflight {
     chatTail: readonly unknown[] = [],
     options: { readonly requesterPid?: number } = {},
   ): Promise<InflightReport> {
-    const collected = await this.inventory.collect(view.tmuxSession);
+    const collected = await this.inventory.collect(view.pane);
     // The call that asked for the move is not work the move interrupts; see requesterCall for the proof it needs.
     const chain = collected.kind === 'observed' ? requesterCall(collected.processes, options.requesterPid) : [];
     const own = new Set(chain);
@@ -119,7 +104,7 @@ export class MovePreflight {
   ): Promise<{ readonly count: number; readonly blindSpots: readonly string[] }> {
     if (view.harness !== CODEX_HARNESS) return { count: 0, blindSpots: [] };
     try {
-      const visible = await this.panes.visible(view.tmuxSession);
+      const visible = await view.pane.screen();
       // A pane that is gone ran nothing: reporting zero here is an observation, not an assumption.
       return { count: visible === undefined ? 0 : backgroundTerminalCount(visible), blindSpots: [] };
     } catch (error) {

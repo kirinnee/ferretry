@@ -642,6 +642,40 @@ describe('FleetCredentialsService — launchStores', () => {
   });
 });
 
+describe('FleetCredentialsService — launchStores carries the organisation type for the channel default', () => {
+  it('should name a Claude login’s organisation type from what the store reads, and leave it out when none is read', async () => {
+    const asked: string[] = [];
+    const { service } = serviceOf({
+      organizationType: async source => {
+        asked.push(source.harness === 'claude' ? source.accountFile : 'codex');
+        return source.harness === 'claude' && source.accountFile.includes('claude-work')
+          ? 'claude_enterprise'
+          : undefined;
+      },
+    });
+
+    const stores = await service.launchStores();
+
+    should(stores.find(store => store.id === 'claude-work')).containEql({ organizationType: 'claude_enterprise' });
+    should(stores.find(store => store.id === 'claude-you')).not.have.property('organizationType');
+    // A Codex login has no organisation type to read: the store is never asked for it.
+    should(stores.find(store => store.id === 'codex-team')).not.have.property('organizationType');
+    should(asked).not.containEql('codex');
+  });
+
+  it('should leave it out when the store cannot read it (the reader throws, or the machine is wired without one)', async () => {
+    const failing = serviceOf({
+      organizationType: async () => {
+        throw new Error('unreadable');
+      },
+    });
+    const bare = serviceOf();
+
+    for (const { service } of [failing, bare])
+      should((await service.launchStores()).some(store => 'organizationType' in store)).be.false();
+  });
+});
+
 describe('FleetCredentialsService — an environment login in the list, and the kept list', () => {
   const environment = {
     catalog: async () => ({ presets: [] }) as ProviderPresetCatalog,

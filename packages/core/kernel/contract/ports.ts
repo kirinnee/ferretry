@@ -58,6 +58,8 @@ export interface KernelPorts {
    * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
    */
   readonly timings: DaemonTimings;
+  /** How blocked this daemon's event loop has been, read-only and open to every plugin ({@link LoopPort}). */
+  readonly loop: LoopPort;
   /** This plugin's OWN secrets, for its own daemon-side use: declared, named by its own config, known to the Vault. */
   readonly secrets: SecretsPort;
   /**
@@ -1501,6 +1503,19 @@ export interface BindPort {
  */
 /** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
 export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+
+/**
+ * The event loop's own account of its lateness, from the 250 ms tick that also feeds `GET /healthz`. Read-only: there is
+ * no write, no restart lever and no way to reach the meter's detail from here, so it needs no permission.
+ */
+export interface LoopPort {
+  /**
+   * The total milliseconds the loop has been unable to run anything since this daemon started, through NOW (a late tick
+   * that has not fired yet is counted). Never decreasing, so the blocked time over a window is the difference of two
+   * readings. `0` on a host whose composition root does not run the tick (a suite).
+   */
+  blockedMs(): number;
+}
 
 /**
  * The daemon's OWN process counters, for a plugin that reports on the daemon itself (Usage's `fy daemon profile`). A port of

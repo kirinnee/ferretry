@@ -5,7 +5,7 @@
  *   find ({@link ConfigCheckMemo.keepOnly}). So the memo describes the files the last load settled and nothing else: a
  *   write that is refused (under a new name, say) leaves nothing behind, however many there are.
  * - **At most {@link CHECKS_KEPT} checks per file**: the accepted text, the one on disk, and one being written.
- * - **A text is never a key.** A check is found by the sha256 of its text, so a text that was refused — a pasted
+ * - **A text is never a key.** A check is found by the keyed digest (the etag) of its text, so a text that was refused — a pasted
  *   secret, say — is not held here by its key; only a check of a text a load read from disk (which the load holds
  *   anyway) is kept at all.
  *

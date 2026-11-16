@@ -313,6 +313,27 @@ test('owned metadata retains today’s expiry/missing/unreadable rules and rerea
   }
 });
 
+test('the organisation type is read from the account file ALONE: only oauthAccount.organizationType, never a token beside it', async () => {
+  const f = await fixture();
+  const store = new OwnedLoginStore(f.root, () => NOW);
+  const catalog = store.catalog(() => new Map([['claude', { harness: 'claude-code', store: 'ferretry' }]]));
+  const entry = await catalog.entry('claude');
+  const source = catalog.emailSource(entry);
+  if (source === undefined) throw new Error('no source');
+
+  expect(await store.organizationType(source)).toBeUndefined();
+  await f.put('claude/sign-in/.claude.json', {
+    oauthAccount: { emailAddress: 'a@example.test', organizationType: ' claude_max ' },
+    primaryApiKey: 'sk-ant-must-never-be-read',
+  });
+  expect(await store.organizationType(source)).toBe('claude_max');
+  await f.put('claude/sign-in/.claude.json', { oauthAccount: { emailAddress: 'a@example.test' } });
+  expect(await store.organizationType(source)).toBeUndefined();
+  await writeFile(join(f.base, 'claude/sign-in/.claude.json'), '{', { mode: 0o600 });
+  expect(await store.organizationType(source)).toBeUndefined();
+  expect(await store.organizationType({ harness: 'codex', resolution: entry.resolution as never })).toBeUndefined();
+});
+
 test('S175 owned store refuses host paths, traversal, Claude links and links escaping the owned root', async () => {
   const f = await fixture();
   const store = new OwnedLoginStore(f.root, () => NOW);

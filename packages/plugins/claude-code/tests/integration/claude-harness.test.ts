@@ -17,6 +17,7 @@ import {
 } from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
 import { defineState } from '@ferretry/kernel/contract';
+import { CHANNEL_LAUNCH_ENV } from '@ferretry/plugin-runtimes/contract';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
@@ -2154,5 +2155,113 @@ describe('a login’s provider values are not pinned in the home’s launch over
 
     const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as { env?: unknown };
     expect(overlay.env).toBeUndefined();
+  });
+});
+
+/**
+ * Ferretry's message channel, at the launch argv of the harness `fy new` really uses (not the runtime wrapper): whether a
+ * ferret gets the flag, the tools server and the instruction follows the `channels` setting, else the login's type.
+ */
+describe('the Claude channel in a real launch (ClaudeHarness.start)', () => {
+  const CHANNEL_FLAG = '--dangerously-load-development-channels=server:ferretry';
+  const account = (organizationType?: string) => ({
+    kind: 'account',
+    ...(organizationType === undefined ? {} : { organizationType }),
+  });
+  const launched = async (options: { channels?: boolean; parts?: unknown[]; method?: 'start' | 'resume' }) => {
+    const { harness } = build({
+      config: {
+        file: () => ({
+          searchPaths: [],
+          permissionMode: 'auto',
+          ...(options.channels === undefined ? {} : { channels: options.channels }),
+        }),
+        collection: () => new Map(),
+      },
+    });
+    const started: { command?: readonly string[] } = {};
+    const input = spec({ parts: options.parts ?? [account('claude_max')] });
+    const result =
+      options.method === 'resume'
+        ? await harness.resume(input, runner(started), {} as never, 'conv-resume')
+        : await harness.start(input, runner(started), {} as never);
+    expect(result.ok).toBe(true);
+    const memory = await readFile(join(HOME, 'CLAUDE.md'), 'utf8');
+    const mcp = await readFile(join(HOME, 'mcp.json'), 'utf8').catch(() => undefined);
+    return { argv: started.command ?? [], memory, mcp };
+  };
+
+  for (const method of ['start', 'resume'] as const)
+    test(`a claude_max login is launched (${method}) with the channel flag, the tools server on the MCP file and the instruction`, async () => {
+      const { argv, memory, mcp } = await launched({ method });
+
+      expect(argv).toContain(CHANNEL_FLAG);
+      expect(argv).toContain('--mcp-config');
+      expect(argv[argv.indexOf('--mcp-config') + 1]).toBe(join(HOME, 'mcp.json'));
+      const server = (JSON.parse(mcp ?? '{}') as { mcpServers: Record<string, unknown> }).mcpServers.ferretry;
+      expect(server).toEqual({
+        type: 'stdio',
+        command: 'fy',
+        args: ['mcp', 'serve'],
+        env: { FY_TOKEN: '', [CHANNEL_LAUNCH_ENV]: '1' },
+      });
+      expect(memory).toContain('<channel source="ferretry">');
+      expect(memory).toContain('act on them as work messages');
+    });
+
+  test('the argv puts the channel flag once, before the model, and the marker only beside it', async () => {
+    const { argv, mcp } = await launched({});
+
+    expect(argv.filter(word => word === CHANNEL_FLAG)).toHaveLength(1);
+    expect(argv.indexOf(CHANNEL_FLAG)).toBeLessThan(argv.indexOf('--session-id'));
+    expect(mcp).toContain('FERRETRY_CHANNEL');
+  });
+
+  test('an Enterprise or Team login, an unnamed type and no account at all are launched with no channel and no instruction', async () => {
+    for (const parts of [[account('claude_enterprise')], [account('claude_team')], [account()], []] as unknown[][]) {
+      const { argv, memory, mcp } = await launched({ parts });
+
+      expect(argv.some(word => word.includes('development-channels'))).toBe(false);
+      expect(argv).not.toContain('--mcp-config');
+      expect(mcp).toBeUndefined();
+      expect(memory).not.toContain('<channel source="ferretry">');
+    }
+  });
+
+  test('an explicit `channels: false` wins over a claude_max login', async () => {
+    const { argv, memory, mcp } = await launched({ channels: false });
+
+    expect(argv.some(word => word.includes('development-channels'))).toBe(false);
+    expect(mcp).toBeUndefined();
+    expect(memory).not.toContain('<channel source="ferretry">');
+  });
+
+  test('an explicit `channels: true` wins over an Enterprise login', async () => {
+    const { argv, memory } = await launched({ channels: true, parts: [account('claude_enterprise')] });
+
+    expect(argv).toContain(CHANNEL_FLAG);
+    expect(memory).toContain('<channel source="ferretry">');
+  });
+
+  test('a profile’s own MCP server keeps its place, and a profile server named ferretry never replaces the channel’s', async () => {
+    const { mcp } = await launched({
+      parts: [
+        account('claude_max'),
+        { kind: 'mcp', name: 'docs', config: { command: 'docs-mcp' } },
+        { kind: 'mcp', name: 'ferretry', config: { command: 'someone-else' } },
+      ],
+    });
+
+    const servers = (JSON.parse(mcp ?? '{}') as { mcpServers: Record<string, { command: string }> }).mcpServers;
+    expect(servers.docs?.command).toBe('docs-mcp');
+    expect(servers.ferretry?.command).toBe('fy');
+  });
+
+  test('prepareHome writes the same MCP file and memory the launch will run on', async () => {
+    const { harness } = build();
+    await harness.prepareHome(spec({ parts: [account('claude_max')] }));
+
+    expect(await readFile(join(HOME, 'mcp.json'), 'utf8')).toContain('FERRETRY_CHANNEL');
+    expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('<channel source="ferretry">');
   });
 });

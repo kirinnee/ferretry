@@ -81,6 +81,9 @@ export async function execute(argv: readonly string[]): Promise<number> {
       stdin: () => Bun.stdin.stream(),
       version: serveHalf.version,
       instructions: await serveHalf.instructions(),
+      // The channel pump backs off with this wait, and runs ONLY when the launch gave Claude the channel flag.
+      sleep: async ms => await Bun.sleep(ms),
+      channel: environment[await serveHalf.channelEnv()] === '1',
     });
   } catch (error) {
     return reportFailure(error, io, binary);

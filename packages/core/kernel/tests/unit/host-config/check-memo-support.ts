@@ -10,7 +10,7 @@ import type { checkConfigText } from '../../../host/config/check.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
-import { captureLog, HOME, loginsDef, manualClock } from './support.ts';
+import { captureLog, HOME, loginsDef, manualClock, TEST_ETAG_KEY } from './support.ts';
 
 export type Checked = ReturnType<typeof checkConfigText>;
 
@@ -48,6 +48,7 @@ export function world(options: { fs?: HostFs & { seed(path: string, data: string
     clock: manualClock(),
     log: captureLog(),
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     checks,
     defs: [
       { plugin: 'voice', def: voiceDef },

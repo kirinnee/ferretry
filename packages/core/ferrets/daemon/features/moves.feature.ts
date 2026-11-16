@@ -1,8 +1,11 @@
 import type { CallContext } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { Harnesses } from '../../contract/index.ts';
+import { type FerretId, type RunnerHandle, Harnesses, Runners } from '../../contract/index.ts';
 import type { SessionId } from '../lib/session-id.ts';
-import { ferretsMoveResume, movedTarget } from '../lib/ferrets/move-resume.ts';
+import { ferretsMoveResume, ferretsRestartResume, movedTarget } from '../lib/ferrets/move-resume.ts';
+import { paneIdentityKey } from '../lib/moves/pane-identity.ts';
+import type { MovePane } from '../lib/moves/process-inventory-port.ts';
+import { createSessionDirectory } from '../lib/session/directory/index.ts';
 import { relaunchSettings } from '../modules/relaunch-settings.ts';
 import { buildMoves, MOVE_ROUTE_KEYS } from '../moves.ts';
 import { movesDeps } from '../moves-deps.ts';
@@ -22,6 +25,41 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     mayAct,
     late,
   } = f;
+  // THE FERRET'S PANE, through its own runner by the registry's handle (c58-37): never a tmux session name. Both answers are
+  // three-valued: a ferret with no handle has no pane (proved gone), a runner that cannot identify or read one is a blind
+  // spot the gate refuses on.
+  const runnerOf = (ferret: FerretId) => {
+    const key = registry.get(ferret)?.runner;
+    const found = key === undefined ? 'unavailable' : hooks.provider(Runners, key);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const identify = async (id: SessionId) => {
+    const record = registry.get(id as unknown as FerretId);
+    if (record?.handle === undefined) return 'gone' as const;
+    const runner = runnerOf(id as unknown as FerretId);
+    return runner?.identify === undefined ? undefined : await runner.identify(record.handle as RunnerHandle);
+  };
+  const pane = (id: SessionId): MovePane => ({
+    identify: async () => await identify(id),
+    screen: async () => {
+      const record = registry.get(id as unknown as FerretId);
+      if (record?.handle === undefined) return undefined;
+      const runner = runnerOf(id as unknown as FerretId);
+      if (runner?.lastScreen === undefined) throw new Error('the runner cannot read the pane');
+      return await runner.lastScreen(record.handle as RunnerHandle);
+    },
+  });
+  // ONE reader of a ferret's documents as every other surface reads them (as the runtime control builds it).
+  const directory = createSessionDirectory({
+    sessions: () => sessionStore.listSessions(),
+    find: id => sessionStore.findSession(id),
+    readConfig: async id => await sessionStore.readConfig(id).catch(() => undefined),
+    readState: async id => await sessionStore.readState(id).catch(() => undefined),
+    // A view names its session's folder, and 5.0 names no state folder to any caller: the ferret's own id stands for it.
+    directory: id => `sessions/${id}`,
+    ended: () => true,
+    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
+  });
   // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
   // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
   // serves (today: beside the warden sweep) and disarmed when it stops.
@@ -30,6 +68,23 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     movesDeps(ctx, {
       storage: sessionStore,
       clientName: 'fy',
+      move: {
+        sessions: directory,
+        pane,
+        // What identifies the pane a rollback must find unchanged: handle, pid and start; unknown proves nothing.
+        paneIdentity: async id => paneIdentityKey(await identify(id)),
+        // No tool names are read from the transcript yet, so an open tool is classified unknown and the gate refuses on it
+        // (the fail-closed answer a session with no transcript always gave).
+        transcripts: { tail: async () => [] },
+        restart: {
+          record: id => {
+            const record = registry.get(id as unknown as FerretId);
+            // A ferret with no runtime recorded names none to restart on, so the move answers as it does for any other runtime.
+            return record?.runtime === undefined ? undefined : { runtime: record.runtime, handle: record.handle };
+          },
+          relaunch: ferretsRestartResume(service, ferret => registry.get(ferret)),
+        },
+      },
       environment: sessionFiles.environment,
       createLifecycle: sessionFiles.createLifecycle,
       // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
