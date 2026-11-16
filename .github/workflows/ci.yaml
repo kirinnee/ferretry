@@ -66,8 +66,8 @@ env:
 jobs:
   # Can this push to `main` skip the full set because the merged pull request already proved this exact tree?
   # scripts/ci/proof-reuse.sh decides and FAILS CLOSED (docs/standards/ci-cd, "Proof reuse on main"). Every expensive
-  # job below `needs` it and starts with `!cancelled() && needs.proof.outputs.proved != 'true'`: a proof job that
-  # failed leaves the output empty, so the jobs run exactly as they did before this job existed. It runs on every
+  # job below `needs` it and starts with `!cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')`: a proof job that
+  # died before sealing leaves `decided` empty, so the jobs run exactly as they did before this job existed. It runs on every
   # event that runs anything (the same guard as `quick`), so the graph has one shape; off `main` it answers "no"
   # in a second, and an unrelated label or a retitle still runs no job at all.
   proof:
@@ -81,7 +81,14 @@ jobs:
       actions: read
     # GitHub, not Namespace: a few API calls and no Nix (docs/standards/ci-cd, "Runners").
     runs-on: ubuntu-latest
+    # NON-BLOCKING at workflow level: a crashed, timed-out or cancelled proof job must not fail the CI workflow (Release
+    # listens to the workflow conclusion). With `continue-on-error` the job's `result` reads `success` even when it
+    # failed (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error),
+    # so `result` cannot tell consumers whether the decision finished. `decided` can: only the LAST step writes it, and
+    # only `if: success()`, so any earlier failure or a timeout leaves it empty.
+    continue-on-error: true
     outputs:
+      decided: ${{ steps.seal.outputs.decided }}
       proved: ${{ steps.decide.outputs.proved }}
       proof: ${{ steps.decide.outputs.proof }}
     steps:
@@ -95,12 +102,16 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           MACOS_SMOKE: ${{ vars.MACOS_SMOKE }}
         run: ./scripts/ci/proof-reuse.sh
+      - id: seal
+        name: Seal the decision (last step; runs only if everything before it succeeded)
+        if: ${{ success() }}
+        run: echo 'decided=true' >>"${GITHUB_OUTPUT}"
 
   # Shared setup once, then independent processes with separate logs and coverage directories.
   quick:
     name: Quick Checks
     needs: proof
-    if: ${{ !cancelled() && needs.proof.outputs.proved != 'true' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -213,7 +224,7 @@ jobs:
   int:
     name: Integration Tests
     needs: proof
-    if: ${{ !cancelled() && needs.proof.outputs.proved != 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -270,7 +281,7 @@ jobs:
   strict-guarantees:
     name: Strict Guarantees
     needs: [quick, int, proof]
-    if: ${{ !cancelled() && needs.proof.outputs.proved != 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -320,7 +331,7 @@ jobs:
   # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
   full-gates:
     needs: proof
-    if: ${{ !cancelled() && needs.proof.outputs.proved != 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 15
     name: Full Gates
     permissions:
@@ -348,7 +359,7 @@ jobs:
 
   compile:
     needs: proof
-    if: ${{ !cancelled() && needs.proof.outputs.proved != 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     name: Compile Binaries + SIT
     permissions:
@@ -406,7 +417,7 @@ jobs:
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
   smoke:
-    if: ${{ !cancelled() && needs.compile.result == 'success' && needs.proof.outputs.proved != 'true' && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && needs.compile.result == 'success' && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
     needs: [compile, proof]
@@ -458,7 +469,7 @@ jobs:
   smoke-darwin:
     name: Smoke darwin-arm64
     needs: [compile, proof]
-    if: ${{ !cancelled() && needs.compile.result == 'success' && needs.proof.outputs.proved != 'true' && (vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null))) }}
+    if: ${{ !cancelled() && needs.compile.result == 'success' && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null))) }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
@@ -490,6 +501,7 @@ jobs:
           MACOS_SMOKE: ${{ vars.MACOS_SMOKE }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          PROOF_DECIDED: ${{ needs.proof.outputs.decided }}
           PROOF_REUSED: ${{ needs.proof.outputs.proved }}
           PROOF_URL: ${{ needs.proof.outputs.proof }}
         run: ./scripts/ci/full-status.sh verdict

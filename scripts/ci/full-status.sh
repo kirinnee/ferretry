@@ -18,10 +18,12 @@ verdict | judge)
   # Proof reuse on main (scripts/ci/proof-reuse.sh): a push whose tree the merged pull request already
   # proved with the whole set. Only a `push` may say so, and it is honoured only with a URL to show for it.
   if [[ ${PROOF_REUSED:-} == true ]]; then
-    if [[ ${EVENT_NAME:-} == push && -n ${PROOF_URL:-} ]]; then
+    # Same predicate as every job in ci.yaml: `proved` counts only when the proof job SEALED its decision
+    # (`decided`, written by its last step). A job that wrote proved=true and then died is not a proof.
+    if [[ ${PROOF_DECIDED:-} == true && ${EVENT_NAME:-} == push && -n ${PROOF_URL:-} ]]; then
       proof_reused=true
     else
-      echo "⚠️ PROOF_REUSED=true ignored: only a push with a proof URL may reuse a proof; judging the jobs" >&2
+      echo "⚠️ PROOF_REUSED=true ignored: only a sealed decision on a push with a proof URL may reuse a proof; judging the jobs" >&2
     fi
   fi
   if [[ ${proof_reused} == true ]]; then

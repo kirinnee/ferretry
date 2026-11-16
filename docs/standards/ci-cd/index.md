@@ -598,19 +598,21 @@ A status is only a claim; rule f reads the run behind it. The decision is
 `Proof reuse: NO - <reason>. Every job runs.`
 
 **What a yes skips.** Every expensive job — `quick`, `int`, `strict-guarantees`, `full-gates`, `compile`, `smoke`, `smoke-darwin` — has
-`proof` in its `needs` and `needs.proof.outputs.proved != 'true'` in its `if`. `full-pending` is untouched (already
+`proof` in its `needs` and `!(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')` in its `if` — **reuse only a SEALED yes**. `full-pending` is untouched (already
 pull-request only). `proof` itself carries `quick`'s event guard, so an unrelated label or a retitle still runs no job.
 **A failed proof job must not skip tests**, so a job that had no status function now starts with
-`!cancelled() &&`: a failed `proof` leaves `proved` empty, the condition is true, and the job runs. Where the
+`!cancelled() &&`: a `proof` that died before sealing leaves `decided` empty, the condition is true, and the job runs. Where the
 job had an implicit `success()` over another need (`smoke`, `smoke-darwin`) it also keeps
 `needs.compile.result == 'success'`, so a failed `compile` still skips it as before.
-`scripts/test/ci-sets.ts` compares every job's start condition, with the proof failed, empty or `false`,
+`scripts/test/ci-sets.ts` compares every job's start condition, with the proof failed or cancelled (even with `proved=true` written), unsealed, empty or `false`,
 against the pre-proof graph written out in the test, across events and need results.
 
-**The verdict.** `full` needs `proof` and gets `PROOF_REUSED`/`PROOF_URL`. With a reused proof `full-status.sh`
+**The verdict.** `full` needs `proof` and gets `PROOF_DECIDED`/`PROOF_REUSED`/`PROOF_URL`. With a sealed, reused proof `full-status.sh`
 succeeds on a **push** that has a URL (no job failed or was cancelled), writing the proof line to the
-summary; a pull request or dispatch never reuses a proof, and with `proved != true` the verdict judges the jobs
-exactly as before. `proof` itself is never a gate: its failure changes no verdict. `Release` is unchanged — it
+summary; a pull request or dispatch never reuses a proof, and with no sealed `proved=true` the verdict judges the jobs
+exactly as before. `proof` itself is never a gate: its failure changes no verdict.
+
+**Why `decided`, and why `continue-on-error`.** A job's outputs are read whatever its result, so a crash, post-step failure or timeout after `proved=true` was written would still look like a yes. The `proof` job therefore ends with a `seal` step (`if: success()`) that alone writes `decided=true`; an earlier failure or a timeout leaves it empty and every job runs. Separately the job is `continue-on-error: true`, so a failed proof cannot turn the CI workflow red and stop `Release`, which listens to the workflow conclusion ([GitHub: `jobs.<job_id>.continue-on-error`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error)). That setting makes the job's `needs.proof.result` read `success` even when it failed, which is why consumers read `decided` and never `result`. `ci-sets.ts` pins both: the flag and the last-step seal, and a model of the workflow conclusion. `Release` is unchanged — it
 fires on CI `completed` + `success`, which a reused proof produces.
 
 **Known cost.** A reused push does not run `quick`, the job that refreshes the Namespace Nix/tsc cache from

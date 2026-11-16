@@ -12,7 +12,9 @@ type Job = {
   'runs-on'?: string[] | string;
   permissions?: Record<string, string>;
   env?: Record<string, string>;
-  steps?: { name?: string; env?: Record<string, string> }[];
+  'continue-on-error'?: boolean;
+  outputs?: Record<string, string>;
+  steps?: { id?: string; if?: string; name?: string; env?: Record<string, string> }[];
 };
 type Workflow = {
   on?: { pull_request?: { types?: string[] } };
@@ -368,6 +370,10 @@ for (const name of Object.keys(legacy)) {
         // Nothing proved: the proof job failed or was cancelled (no output), or succeeded with `false`.
         for (const proof of [
           { result: 'failure', outputs: {} },
+          { result: 'failure', outputs: { proved: 'true', proof: 'https://x' } },
+          { result: 'cancelled', outputs: { proved: 'true', proof: 'https://x' } },
+          { result: 'success', outputs: { proved: 'true', proof: 'https://x' } }, // continue-on-error: failed, result reads success
+          { result: 'success', outputs: { decided: '', proved: 'true', proof: 'https://x' } },
           { result: 'success', outputs: { proved: 'false', proof: '' } },
           { result: 'success', outputs: { proved: '', proof: '' } },
         ]) {
@@ -397,7 +403,7 @@ for (const name of expensive) {
           need(job.if, `if of ${name}`),
           needsList(job),
           event('push'),
-          { ...needs, proof: { result: 'success', outputs: { proved: 'true', proof: 'https://x' } } },
+          { ...needs, proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: 'https://x' } } },
           vars,
         ),
         false,
@@ -407,7 +413,7 @@ for (const name of expensive) {
 assert.equal(
   starts(conditionOf(ci, 'full'), needsOf('full'), event('push'), {
     ...successful,
-    proof: { result: 'success', outputs: { proved: 'true', proof: 'https://x' } },
+    proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: 'https://x' } },
   }),
   true,
   'the verdict still runs when the proof is reused',
@@ -419,6 +425,7 @@ const fullEnv = need(
   ).env,
   'judge env',
 );
+assert.equal(fullEnv.PROOF_DECIDED, '${{ needs.proof.outputs.decided }}');
 assert.equal(fullEnv.PROOF_REUSED, '${{ needs.proof.outputs.proved }}');
 assert.equal(fullEnv.PROOF_URL, '${{ needs.proof.outputs.proof }}');
 assert.deepEqual(Object.keys(need(jobOf(ci, 'proof').permissions, 'proof permissions')).sort(), [
@@ -431,7 +438,10 @@ assert.deepEqual(Object.keys(need(jobOf(ci, 'proof').permissions, 'proof permiss
 // The proved verdict: a reused proof is a success on a push, skipped jobs and all; it is honoured nowhere else.
 const proofUrl = 'https://github.com/fixture/repo/actions/runs/77';
 const skippedAll = Object.fromEntries(Object.keys(ci.jobs).map(name => [name, { result: 'skipped', outputs: {} }]));
-const reusedNeeds = { ...skippedAll, proof: { result: 'success', outputs: { proved: 'true', proof: proofUrl } } };
+const reusedNeeds = {
+  ...skippedAll,
+  proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: proofUrl } },
+};
 const judgeProof = (needs: object, env: Record<string, string>, eventName = 'push') => {
   const summaryFile = join(tmpdir(), `ci-proof-summary-${process.pid}-${Math.random().toString(36).slice(2)}`);
   writeFileSync(summaryFile, '');
@@ -452,7 +462,7 @@ const judgeProof = (needs: object, env: Record<string, string>, eventName = 'pus
   return { code: result.exitCode, summary: written, stderr: result.stderr.toString() };
 };
 {
-  const reused = judgeProof(reusedNeeds, { PROOF_REUSED: 'true', PROOF_URL: proofUrl });
+  const reused = judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl });
   assert.equal(reused.code, 0, 'a reused proof on a push is a success');
   assert.ok(reused.summary.includes(proofUrl), 'the summary shows the proof it relied on');
   // Not proved: the very same skipped graph is a failure, as it always was.
@@ -463,22 +473,32 @@ const judgeProof = (needs: object, env: Record<string, string>, eventName = 'pus
   );
   assert.notEqual(judgeProof(reusedNeeds, { PROOF_REUSED: '' }).code, 0);
   assert.notEqual(judgeProof(reusedNeeds, {}).code, 0);
+  // An unsealed decision (the proof job died after writing proved=true) is no proof, whatever else is true.
+  for (const decided of ['', 'false'])
+    assert.notEqual(
+      judgeProof(reusedNeeds, { PROOF_DECIDED: decided, PROOF_REUSED: 'true', PROOF_URL: proofUrl }).code,
+      0,
+      `an unsealed decision (${JSON.stringify(decided)}) cannot reuse a proof`,
+    );
   // Only a push, and only with a URL to show.
   for (const eventName of ['pull_request', 'workflow_dispatch'])
     assert.notEqual(
-      judgeProof(reusedNeeds, { PROOF_REUSED: 'true', PROOF_URL: proofUrl }, eventName).code,
+      judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl }, eventName).code,
       0,
       `${eventName} cannot reuse a proof`,
     );
   assert.notEqual(
-    judgeProof(reusedNeeds, { PROOF_REUSED: 'true', PROOF_URL: '' }).code,
+    judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: '' }).code,
     0,
     'a reused proof needs its URL',
   );
   // A job that failed or was cancelled is never excused by a proof.
   for (const result of ['failure', 'cancelled'])
     assert.notEqual(
-      judgeProof({ ...reusedNeeds, int: { result } }, { PROOF_REUSED: 'true', PROOF_URL: proofUrl }).code,
+      judgeProof(
+        { ...reusedNeeds, int: { result } },
+        { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl },
+      ).code,
       0,
       `a ${result} job beside a reused proof is a failure`,
     );
@@ -488,6 +508,51 @@ const judgeProof = (needs: object, env: Record<string, string>, eventName = 'pus
     judgeProof({ ...successful, proof: { result: 'success', outputs: { proved: 'false' } } }, { PROOF_REUSED: 'false' })
       .code,
     0,
+  );
+}
+
+// ─── The proof job is an optimisation, never a gate ───────────────────────────────────────────────
+// GitHub semantics relied on (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error):
+// a job with `continue-on-error: true` that fails does not fail the workflow run, and `needs.<job>.result` reads
+// `success`. So (1) the workflow conclusion is modelled below as "red iff a job WITHOUT continue-on-error failed",
+// and (2) `result` is useless as a signal; the `decided` output, written only by the last step under `success()`,
+// is the one the consumers read (asserted through every `if:` and the verdict env above).
+{
+  const proofJob = jobOf(ci, 'proof');
+  assert.equal(proofJob['continue-on-error'], true, 'a failed proof job must not fail the CI workflow (Release)');
+  const steps = need(proofJob.steps, 'proof steps');
+  const last = need(steps[steps.length - 1], 'last proof step');
+  assert.equal(last.id, 'seal', 'the sealing step must be the last step');
+  assert.equal(last.if, '${{ success() }}', 'the seal runs only when every earlier step succeeded');
+  assert.equal(need(proofJob.outputs, 'proof outputs').decided, '${{ steps.seal.outputs.decided }}');
+  assert.deepEqual(
+    steps.filter(step => step.id !== undefined && step.id !== 'seal' && step.id !== 'decide').map(step => step.id),
+    [],
+    'nothing but decide and seal may write the proof outputs',
+  );
+  const workflowRed = (outcomes: Record<string, 'success' | 'failure' | 'cancelled' | 'skipped'>) =>
+    Object.entries(outcomes).some(
+      ([name, outcome]) => outcome === 'failure' && jobOf(ci, name)['continue-on-error'] !== true,
+    );
+  const allGreen = Object.fromEntries(Object.keys(ci.jobs).map(name => [name, 'success'] as const));
+  assert.equal(workflowRed(allGreen), false);
+  assert.equal(
+    workflowRed({ ...allGreen, proof: 'failure' }),
+    false,
+    'proof failing alone must keep the workflow green',
+  );
+  assert.equal(workflowRed({ ...allGreen, proof: 'failure', int: 'failure' }), true, 'other failures still fail it');
+  assert.equal(workflowRed({ ...allGreen, quick: 'failure' }), true);
+  // A failed proof leaves the expensive jobs running (decided empty), so the old gates judge the tree as before.
+  assert.equal(
+    judge({ ...successful, proof: { result: 'success', outputs: { proved: 'true', proof: proofUrl } } }, '', 'push'),
+    0,
+    'a failed proof with the full set green keeps the verdict green',
+  );
+  assert.notEqual(
+    judge({ ...successful, int: { result: 'failure' }, proof: { result: 'success', outputs: { proved: 'true' } } }),
+    0,
+    'a failed proof never excuses a failed gate',
   );
 }
 
