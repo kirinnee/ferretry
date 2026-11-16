@@ -672,7 +672,7 @@ export const agendaStep: Step = {
   notCarried: [
     {
       what: 'item fields gate, gateAttached and gateAttachedChangedAt',
-      why: 'v5 deleted the standalone gate item and the older-app mirror; a card gate rides the item’s cardAsks, which are kept',
+      why: 'v5 deleted the standalone gate item and the older-app mirror; a task gate rides the item’s cardAsks, which are kept',
     },
     {
       what: 'the replied disposition',
@@ -704,7 +704,7 @@ export const agendaStep: Step = {
     },
     {
       what: 'notifications.jsonl direct pushes, outcomes, and stop, deadline, wake, phone-approval and info pushes',
-      why: 'v5 keys those buzzes by an instant or another plugin’s key, so a carried line could never match one; only an ask’s own buzz (a ping notice, a card ask) and the owner’s opens (seen) are carried',
+      why: 'v5 keys those buzzes by an instant or another plugin’s key, so a carried line could never match one; only an ask’s own buzz (a ping notice, a task ask) and the owner’s opens (seen) are carried',
     },
     {
       what: 'v4 set-aside agenda files whose name v5 cannot hold',
