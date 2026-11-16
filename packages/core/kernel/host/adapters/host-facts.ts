@@ -60,15 +60,27 @@ function deviceNumber(value: number, label: string): string {
   return String(value);
 }
 
+/** A read that finds no process (or no right to look) answers `undefined`; anything else is a real fault. */
+const NO_ANSWER = new Set(['ENOENT', 'ESRCH', 'EACCES', 'EPERM', 'ENOTDIR']);
+/** What `readlink` appends when the target was removed after the process entered it. */
+const REMOVED_SUFFIX = ' (deleted)';
+
 /** The real `/proc` and `/sys`; a suite points the roots at a fixture tree. `launchGuard` is decided at boot by the kernel; left out, the guard fails closed (active). */
 export function nodeHostFacts(
-  roots: { readonly proc?: string; readonly sys?: string; readonly launchGuard?: () => HostLaunchGuard } = {},
+  roots: {
+    readonly proc?: string;
+    readonly sys?: string;
+    readonly launchGuard?: () => HostLaunchGuard;
+    /** Default `process.platform`; a suite names `'darwin'` to see the no-procfs answers. */
+    readonly platform?: string;
+  } = {},
 ): HostFactsPort {
+  const platform = roots.platform ?? process.platform;
   const proc = roots.proc ?? '/proc';
   const sys = roots.sys ?? '/sys';
   const cgroupRoot = join(sys, 'fs', 'cgroup');
   const port: HostFactsPort = {
-    platform: process.platform,
+    platform,
     cpus: availableParallelism(),
     totalMemoryBytes: totalmem(),
     pids: async () => (await readdir(proc)).filter(name => /^[1-9][0-9]*$/u.test(name)).map(name => Number(name)),
@@ -84,6 +96,17 @@ export function nodeHostFacts(
       return { character: found.isCharacterDevice(), device: found.rdev };
     },
     procExecutable: async pid => await readlink(join(proc, pidOf(pid), 'exe')),
+    procWorkingDirectory: async pid => {
+      const checked = pidOf(pid);
+      if (platform === 'darwin') return undefined;
+      try {
+        const target = await readlink(join(proc, checked, 'cwd'));
+        return target.endsWith(REMOVED_SUFFIX) ? undefined : target;
+      } catch (cause) {
+        if (NO_ANSWER.has((cause as NodeJS.ErrnoException).code ?? '')) return undefined;
+        throw cause;
+      }
+    },
     cgroupFile: async (path, file) =>
       await readFile(join(cgroupRoot, ...cgroupPathOf(path), allowedFile(file, CGROUP_FILES)), 'utf8'),
     cgroupChildren: async path => await readdir(join(cgroupRoot, ...cgroupPathOf(path))),
@@ -120,6 +143,7 @@ export function undeclaredHostFacts(plugin: string, base: HostFactsPort): HostFa
     procFdLink: refuse,
     procFdReach: refuse,
     procExecutable: refuse,
+    procWorkingDirectory: refuse,
     cgroupFile: refuse,
     cgroupChildren: refuse,
     blockScheduler: refuse,
