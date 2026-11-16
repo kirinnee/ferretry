@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { combinedDelivery } from '../../../../contract/index.ts';
+import { combinedDelivery } from '@ferretry/core-mailbox/contract';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { SystemNoticeRow } from '../../../../app/transcript/agent-message-rows.tsx';
 import { LedgerMessage } from '../../../../app/chat/ledger-message.tsx';

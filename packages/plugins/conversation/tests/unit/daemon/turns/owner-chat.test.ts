@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
-import type { QueuedMessage } from '../../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { SessionOwnerChat, typedWords } from '../../../../daemon/turns/lib/owner-chat.ts';
 
 const AT = '2026-11-07T09:00:00.000Z' as Instant;

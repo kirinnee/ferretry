@@ -7,7 +7,7 @@
 
 import { DaemonCallError } from '@ferretry/app';
 import { heldRead, type PluginClient } from '@ferretry/kernel/manifest';
-import { FerretQueueSchema, type QueuedMessage, QueueEditRequestSchema } from '../../contract/index.ts';
+import { FerretQueueSchema, type QueuedMessage, QueueEditRequestSchema } from '@ferretry/core-mailbox/contract';
 import type { LedgerSendRecord } from '../chat/send-ledger.ts';
 import { type OutboxEntry, type SendOutbox, WAITING_REASON } from '../composer/send-outbox.ts';
 

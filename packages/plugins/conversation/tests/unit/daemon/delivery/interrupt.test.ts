@@ -7,7 +7,7 @@ import {
   type SendTarget,
   type SendTransition,
   SendUnavailable,
-} from '../../../../daemon/delivery/lib/types.ts';
+} from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { KeyedSerialExecutor } from '../../../../daemon/seams/keyed-serial-executor.ts';
 

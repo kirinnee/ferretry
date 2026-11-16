@@ -38,7 +38,7 @@ import {
   parseFerretryNotice,
   parseHandoffPointer,
   parsePeerEnvelope,
-} from '../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 
 /**
  * One paste block. The closing tag is matched with or without attributes — transcripts have been seen

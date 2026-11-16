@@ -1880,7 +1880,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
       expect(now.claudeCodeHints).toEqual({ disabled: true });
     });
 
-    test('turning the waiver on never marks a running ferret outdated (outside the recorded launch settings)', async () => {
+    test('turning the waiver on (effective in bypass mode) marks a running ferret outdated', async () => {
       const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
       let waiver = false;
       const live = {
@@ -1890,7 +1890,21 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
       const { harness } = build({ state, config: live });
       await harness.start(spec(), runner({}), {} as never);
       waiver = true;
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'drifted', sections: ['fixed-layer'] });
+    });
+
+    test('turning the waiver off marks a ferret launched with it on outdated', async () => {
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      let waiver = true;
+      const live = {
+        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        collection: () => new Map(),
+      };
+      const { harness } = build({ state, config: live });
+      await harness.start(spec(), runner({}), {} as never);
       expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      waiver = false;
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'drifted', sections: ['fixed-layer'] });
     });
   });
 

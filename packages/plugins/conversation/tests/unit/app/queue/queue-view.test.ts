@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { QueuedMessage } from '../../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import {
   CLAMP_CHARS,
   CLAMP_LINES,
