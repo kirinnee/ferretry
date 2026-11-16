@@ -650,7 +650,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'chart', 'card, board (live cards), map, image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'chart', 'task, board (live tasks), map, image, video, audio, pdf'];
     const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
@@ -676,14 +676,14 @@ describe('hypermedia teaching', () => {
     should(teaching).containEql(
       'Explainers are ADHD-friendly: answer first, one idea per line, plain words, bold only the key point, an example per point.',
     );
-    // fy-render draws in chat, agenda tabs and cards, so "chat only" no longer contradicts the agenda's tabs.
-    should(teaching).containEql('Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.');
+    // fy-render draws in chat, agenda tabs and tasks, so "chat only" no longer contradicts the agenda's tabs.
+    should(teaching).containEql('Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.');
     should(teaching).not.containEql('Chat only');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
     // Map, media and chart's full spec are one command away, named with the binary.
     should(teaching).containEql('full spec: `zz render guide chart`');
-    should(teaching).containEql('- card, board (live cards), map, image, video, audio, pdf: `zz render guide <type>`');
+    should(teaching).containEql('- task, board (live tasks), map, image, video, audio, pdf: `zz render guide <type>`');
     should(teaching).not.containEql('`fy ');
     should(teaching).containEql('auto-themed: no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
@@ -889,29 +889,29 @@ describe('AGENDA_INSTRUCTION', () => {
 });
 
 describe('BOARD_INSTRUCTION', () => {
-  it('should make the board opt-in: a card only when asked, handed one or switched on', () => {
+  it('should make the board opt-in: a task only when asked, handed one or switched on', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the daemon's opt-in refusal says how to ask for the Yes (`board/opt-in.ts`).
-    should(text).startWith('Board: opt-in, enforced; overrides other card rules.');
+    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
     should(text).containEql(
-      "Card only if the project's board is on (`zz board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`).",
+      "Task only if the project's board is on (`zz board`), under your task (`--parent`), or on the owner's Yes (`--approval <ask>`).",
     );
     should(text).not.containEql('!A'); // `!` starts a shell command in the agent's composer: only `^A<n>` is taught
-    should(text).not.containEql('all work is a card');
+    should(text).not.containEql('all work is a task');
     should(text).not.containEql('make one)');
   });
 
-  it('should say a card never asks, its agenda moves it, and one card is never an umbrella', () => {
+  it('should say a task never asks, its agenda moves it, and one task is never an umbrella', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
     should(text).containEql(
-      "Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it.",
+      "Tasks (&F<n>) never ask: answers, tests, Done ride the task's ask on the agenda, which moves it.",
     );
-    should(text).containEql('One outcome, no umbrellas; add to a related card.');
+    should(text).containEql('One outcome, no umbrellas; add to a related task.');
   });
 
   it('should teach planning as a phase, the title as a sitrep and the status rewritten whole', () => {
@@ -922,36 +922,36 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql('Planning is a lane.');
     should(text).containEql("Title+summary=what it's doing (sitrep).");
     should(text).containEql(
-      'Each step: `zz card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz card patch <id> --file f`.',
+      'Each step: `zz task show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz task patch <id> --file f`.',
     );
-    should(text).not.containEql('no cards for planning');
+    should(text).not.containEql('no tasks for planning');
   });
 
-  it("should teach that the owner's asks are public top-level cards, never --parent or --private", () => {
+  it("should teach that the owner's asks are public top-level tasks, never --parent or --private", () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
-    // Assert — the board answers "status of all I asked?"; a sub-card or a private card is hidden from it.
+    // Assert — the board answers "status of all I asked?"; a sub-task or a private task is hidden from it.
     should(text).containEql(
-      'Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards.',
+      'Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper tasks.',
     );
-    // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
+    // The gate words are gone: the ask of a task lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
     should(text).not.containEql('raise nothing');
     should(text).not.containEql('owner closes');
   });
 
-  it('should teach working a card, with the real verbs and the binary name given', () => {
+  it('should teach working a task, with the real verbs and the binary name given', () => {
     // Act
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
     should(text).containEql('howToTest (where/do/see) before try');
-    should(text).containEql('`zz card move <id> <lane> --reason "<why>"`');
+    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('Blocked: `zz card depend`/`block`.');
-    should(text).containEql('`zz card reopen <id> --to <lane> --ask "<words>"`');
+    should(text).containEql('Blocked: `zz task depend`/`block`.');
+    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
     should(text).containEql("Owner's bug:");
     should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
@@ -1210,23 +1210,23 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
-    should(text).containEql('Link your PR `zz card link <id> --pr <url>` (or `--branch`)');
-    should(text).containEql('`zz card note`');
+    should(text).containEql('Link your PR `zz task link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('`zz task note`');
     should(text).containEql(
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make.',
     );
-    // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one card edit a sub-ferret may make.
+    // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one task edit a sub-ferret may make.
     should(text).containEql(
-      'With a card: each step, `zz card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `zz card patch <id> --file f`; `zz card note` adds history.',
+      'With a task: each step, `zz task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `zz task patch <id> --file f`; `zz task note` adds history.',
     );
     // The holder writes its own How to test now, so its report no longer carries the steps.
     should(text).not.containEql('Your final report says how the owner tests it.');
     should(text).containEql(
-      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz card claim <id>`, don't ask. No card? Make none.",
+      "it moves itself (start, PR, merge, `zz signal done`). Lead's task? `zz task claim <id>`, don't ask. No task? Make none.",
     );
     should(text).not.containEql('agenda add');
-    should(text).not.containEql('card move');
-    should(text).not.containEql('task ');
+    should(text).not.containEql('task move');
+    should(text).not.match(/card/i);
   });
 
   it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
@@ -1235,7 +1235,7 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     const lead = leadInstruction('fy').length;
     const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
     should(sub).be.below(lead);
-    // 759 → 840 for the card-status line (&C48, cap 760 → 880); still smaller than the lead's prompt.
+    // 759 → 840 for the task-status line (&C48, cap 760 → 880); still smaller than the lead's prompt.
     should(SUB_FERRET_INSTRUCTION('fy').length).be.below(880);
   });
 
@@ -1277,13 +1277,35 @@ describe('the exact words of the Notify, Board and Sub-ferret rules (snapshots)'
 
   it('should say exactly this for Board', () => {
     should(BOARD_INSTRUCTION('fy')).equal(
-      'Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (`fy board`), under your card (`--parent`), or on the owner\'s Yes (`--approval <ask>`). Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card\'s ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it\'s doing (sitrep). Each step: `fy card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy card patch <id> --file f`. `fy card move <id> <lane> --reason "<why>"`. Blocked: `fy card depend`/`block`. Owner\'s bug: `fy card reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.',
+      'Board: opt-in, enforced; overrides other task rules. Task only if the project\'s board is on (`fy board`), under your task (`--parent`), or on the owner\'s Yes (`--approval <ask>`). Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper tasks. Tasks (&F<n>) never ask: answers, tests, Done ride the task\'s ask on the agenda, which moves it. One outcome, no umbrellas; add to a related task. Planning is a lane. Title+summary=what it\'s doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner\'s bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.',
     );
   });
 
-  it('should say exactly this for the Sub-ferret card line', () => {
+  it('should say exactly this for the Sub-ferret task line', () => {
     should(SUB_FERRET_INSTRUCTION('fy').split('\n')[1]).equal(
-      "With a card: each step, `fy card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy card patch <id> --file f`; `fy card note` adds history. Link your PR `fy card link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy card claim <id>`, don't ask. No card? Make none.",
+      "With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none.",
     );
+  });
+});
+
+describe('the words every injected prompt uses for a piece of work', () => {
+  it('should say task, never the former word or the verb that carried it, in any prompt a ferret is given', () => {
+    // Arrange
+    const prompts = [
+      AGENT_BASE_INSTRUCTION('fy'),
+      NOTIFY_INSTRUCTION('fy'),
+      BOARD_INSTRUCTION('fy'),
+      SUB_FERRET_INSTRUCTION('fy'),
+      HYPERMEDIA_INSTRUCTION('fy'),
+      leadInstruction('fy'),
+      ...FERRET_SECTIONS('fy').map(section => section.text),
+    ];
+
+    // Assert — a person reads "task" (the glossary word); an input form is "an input", never "an input task".
+    for (const prompt of prompts) should(prompt).not.match(/\bcards?\b/i);
+    should(BOARD_INSTRUCTION('fy')).containEql('`fy task show <id> --yaml`');
+    should(SUB_FERRET_INSTRUCTION('fy')).containEql('`fy task claim <id>`');
+    should(AGENT_BASE_INSTRUCTION('fy')).containEql('types each value in an input');
+    should(AGENT_BASE_INSTRUCTION('fy')).not.containEql('input task');
   });
 });

@@ -154,7 +154,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other card rules. Card only if the project's board is on (`fy board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`). Public=the owner's asks ("everything I asked?"): top-level, never `--private`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: `fy card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy card patch <id> --file f`. `fy card move <id> <lane> --reason "<why>"`. Blocked: `fy card depend`/`block`. Owner's bug: `fy card reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Task only if the project's board is on (`fy board`), under your task (`--parent`), or on the owner's Yes (`--approval <ask>`). Public=the owner's asks ("everything I asked?"): top-level, never `--private`; private=your helper tasks. Tasks (&F<n>) never ask: answers, tests, Done ride the task's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related task. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `^A48`; nothing prints the retired `#F412`
@@ -241,7 +241,7 @@ carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` laun
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: each step, `fy card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy card patch <id> --file f`; `fy card note` adds history. Link your PR `fy card link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy card claim <id>`, don't ask. No card? Make none.
+With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
