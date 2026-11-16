@@ -39,14 +39,23 @@ describe('the composition root', () => {
     const deps = await sessionFilesDeps();
 
     // Assert
-    expect(deps).toContain('leases: new ConversationLeases(');
-    expect(deps).toContain('new ConversationLeaseStateDisk(');
+    expect(deps).toContain('leases: conversationLeases,');
+    expect(source).toContain('const conversationLeases = new ConversationLeases(');
+    expect(source).toContain('new ConversationLeaseStateDisk(');
     expect(source).toContain("Required<Pick<SessionFilesDeps, 'tokenCutOff' | 'launcher' | 'leases'>>");
+  });
+
+  test('should hand the SAME leases to Ferrets’ launch, so the one place every pane opens holds its conversation', async () => {
+    // Arrange
+    const source = await readFile(ROOT, 'utf8');
+
+    // Assert
+    expect(source).toMatch(/vault: needs\.vault,\s*asks: needs\.asks,\s*leases: conversationLeases,/u);
   });
 
   test('should name the holder as this daemon’s pid, so a restarted daemon still reads a pane it launched as writing by its session', async () => {
     // Arrange
-    const deps = await sessionFilesDeps();
+    const deps = await readFile(ROOT, 'utf8');
 
     // Assert
     expect(deps).toMatch(

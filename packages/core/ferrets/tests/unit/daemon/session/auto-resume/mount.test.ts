@@ -103,12 +103,15 @@ const events = (h: TestHost, id: FerretId): readonly { type: string; data: Recor
     .map(line => JSON.parse(line) as { type: string; data: Record<string, unknown> });
 const types = (h: TestHost, id: FerretId) => events(h, id).map(event => event.type);
 
-/** Moves the driven clock and lets what it woke run to its end. */
+/**
+ * Moves the driven clock and lets what it woke run to its end. A launch now takes its conversation's lease on the real disk
+ * (the lock file), which is not a microtask, so each turn waits a real millisecond.
+ */
 async function advance(h: TestHost, by: number): Promise<void> {
   await h.clock.advance(by);
   for (let turn = 0; turn < 40; turn += 1) {
     await h.clock.advance(0);
-    await Bun.sleep(0);
+    await Bun.sleep(1);
   }
   await h.settle();
 }

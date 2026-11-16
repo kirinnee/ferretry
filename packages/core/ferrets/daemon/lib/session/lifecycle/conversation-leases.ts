@@ -1,12 +1,15 @@
 import type { FerretId, FerretRecord, FerretState, HarnessKey } from '../../../../contract/index.ts';
 import {
   type ConversationHolderStanding,
+  type ConversationId,
+  ConversationIdSchema,
   ConversationLeaseHeldError,
   type ConversationLeaseStore,
   conversationFromArguments,
   type HistoryHarness,
 } from '../../../../contract/conversation-lease.ts';
 import { type SessionId, tryParseSessionId } from '../../session-id.ts';
+import type { FerretLaunchLeases } from '../../ferrets/launch-leases.ts';
 import type { SessionConversationLeases } from '../peers/conversation-lease.ts';
 import { type ResumableSessionStatus, TERMINAL_RESUME_STATUSES } from '../resume/types.ts';
 
@@ -69,12 +72,12 @@ function fields(document: unknown): Readonly<Record<string, unknown>> | undefine
  * must be the pane's, not this daemon's, or a restarted daemon's dead pid would let it take the conversation while the
  * pane writes. So the lease names this daemon's pid only from `claim` (before any pane exists) until
  * {@link ConversationLeases.moveToPane}, which the lifecycle calls as soon as the pane has opened (a pane the daemon
- * launches never runs the runtime wrapper, so no wrapper claim ever moves it). Only `SessionLifecycleService.start` holds
- * a lease at all in 5.0: `FerretsService.launch` paths (`fy new`, resume, revive, Restart, move) hold none (unit c58-36d). That is the whole of what a session can
- * claim for: its OWN lease. A claim for another session's conversation names a different session, so a live holder
+ * launches never runs the runtime wrapper, so no wrapper claim ever moves it). `FerretsService.launch` (the one place every pane
+ * opens: `fy new`, resume, revive, Restart, move) claims and moves the lease the same way through {@link FerretLaunchLeases},
+ * and frees it when the ferret stops. That is the whole of what a session can claim for: its OWN lease. A claim for another session's conversation names a different session, so a live holder
  * refuses it whoever asks, and only a holder that is over lets it take the conversation.
  */
-export class ConversationLeases implements SessionConversationLeases {
+export class ConversationLeases implements SessionConversationLeases, FerretLaunchLeases {
   constructor(
     private readonly store: ConversationLeaseStore,
     private readonly sessions: ConversationLeaseSessions,
@@ -91,6 +94,24 @@ export class ConversationLeases implements SessionConversationLeases {
     await this.lease(sessionId, command, pid);
   }
 
+  /** {@link FerretLaunchLeases.claimConversation}: the conversation a launch resumes or binds, as this daemon, before a pane exists. */
+  async claimConversation(ferret: FerretId, conversation: string): Promise<void> {
+    await this.leaseConversation(ferret, conversation, this.holderPid);
+  }
+
+  /** {@link FerretLaunchLeases.moveConversationToPane}: a renewal as the pane's process; fails closed without its pid. */
+  async moveConversationToPane(ferret: FerretId, conversation: string, pid: number | undefined): Promise<void> {
+    await this.leaseConversation(ferret, conversation, pid);
+  }
+
+  private async leaseConversation(ferret: FerretId, named: string, pid: number | undefined): Promise<void> {
+    const id = tryParseSessionId(ferret);
+    const launch = id === undefined ? undefined : this.sessions.launchOf(id);
+    const conversation = ConversationIdSchema.safeParse(named).data;
+    if (id === undefined || launch === undefined || conversation === undefined) return;
+    await this.hold(id, launch, conversation, pid);
+  }
+
   private async lease(sessionId: string, command: readonly string[], pid: number | undefined): Promise<void> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return;
@@ -99,6 +120,15 @@ export class ConversationLeases implements SessionConversationLeases {
     // Index 0 is the executable, never an argument.
     const conversation = conversationFromArguments(launch.harness, command.slice(1));
     if (conversation === undefined) return;
+    await this.hold(id, launch, conversation, pid);
+  }
+
+  private async hold(
+    id: SessionId,
+    launch: NonNullable<ReturnType<ConversationLeaseSessions['launchOf']>>,
+    conversation: ConversationId,
+    pid: number | undefined,
+  ): Promise<void> {
     if (pid === undefined)
       throw new Error(
         `session ${id} could not tell which process runs its terminal, so conversation ${conversation} cannot be kept ` +
