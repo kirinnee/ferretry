@@ -3,7 +3,7 @@
   "pending": ["browsers"],
   "pendingReasons": {
     "browsers": [
-      "[compose] GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet: wire the firewall doctor row and the Logins shared fact when Runtimes carries browserPorts; it must arrive without Browsers depending on Runtimes (a hook/slot Runtimes fills, or Logins asking Runtimes directly)",
+      "[compose] GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet: wire the firewall doctor row and the Logins shared fact when Runtimes carries browserPorts; it must arrive without Browsers depending on Runtimes (a hook/slot Runtimes fills, or Logins asking Runtimes directly); daemon/holds/site.ts (the holds site key, tested as I97) is ported and tested but no daemon composition consumes it yet",
       "[own] GAP(browsers): the shell asks Browsers where a link opens (shell.links, built per machine, S7) but Browsers does not provide it yet, so the in-app link sheet and workspace host are ported and nothing in the shell mounts them: links keep opening in this device's browser. Browsers also gives the anchor its ARIA when it provides links (LinkProvision.anchor: aria-haspopup dialog for the sheet, aria-controls for a pane), as v4 did"
     ]
   }

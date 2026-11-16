@@ -11,6 +11,7 @@ import {
   pageHoldTarget,
   WITHHELD_FAILURE,
 } from '../../../daemon/holds/index.ts';
+import { siteOf } from '../../../daemon/holds/site.ts';
 
 const SECRET = 'hunter2-the-value';
 const PAGE = { id: 'pg-1', reference: '%browser:app' };
@@ -139,5 +140,20 @@ describe('a failed call under a hold', () => {
     );
     expect(out).toBeInstanceOf(PageHeld);
     expect((out as PageHeld).code).toBe('holds_unavailable');
+  });
+});
+
+describe('the site a host belongs to', () => {
+  test('I97 hosts group by their last two labels, port dropped, never narrower than the registrable domain', () => {
+    expect(siteOf('mail.example.com')).toBe('example.com');
+    expect(siteOf('accounts.example.com:8443')).toBe('example.com');
+    expect(siteOf('Example.COM')).toBe('example.com');
+    expect(siteOf('a.b.example.co.uk')).toBe('co.uk');
+  });
+
+  test('I97 an IP address or a one-label host is its own site', () => {
+    expect(siteOf('127.0.0.1:3000')).toBe('127.0.0.1');
+    expect(siteOf('[::1]:8080')).toBe('[::1]');
+    expect(siteOf('localhost')).toBe('localhost');
   });
 });
