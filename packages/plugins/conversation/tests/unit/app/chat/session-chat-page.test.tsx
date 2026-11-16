@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
-import { createLiveActivityHub, deviceControls, PanelSlot, writeMdComposePref } from '@ferretry/app';
-import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
-import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
+import {
+  createLiveActivityHub,
+  deviceControls,
+  PanelSlot,
+  ReferenceSurfaceProvider,
+  writeMdComposePref,
+} from '@ferretry/app';
+import { ensureDom, render, run, runAsync, WithAppHooks } from '@ferretry/app/testing';
+import { FERRETS_FILE_OPEN_HOOK, FerretsChanged, type FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
@@ -245,7 +251,117 @@ describe('SessionChatPage', () => {
     expect(source.daemon.daemonId).toBe('alpha');
     expect(source.sessionId).toBe('shared');
     expect(await source.read('turn-008')).toMatchObject({ name: 'turn-008', message: 'look at this' });
-    expect(client.calls).toMatchObject([{ route: HANDOFF, params: { ferretId: 'shared', name: 'turn-008' } }]);
+    expect(client.callsTo(HANDOFF)).toMatchObject([
+      { route: HANDOFF, params: { ferretId: 'shared', name: 'turn-008' } },
+    ]);
+  });
+
+  describe('references', () => {
+    const FLEET = 'GET /v1/ferrets';
+    const row = { id: 'other', name: 'torrey', state: 'idle', folder: '/repo' };
+    const opening = { open: () => true };
+    const surfaceOf = (page: ReturnType<typeof draw>) => page.root.findByType(ReferenceSurfaceProvider).props.surface;
+    const drawWithHook = (overrides: Partial<PageProps>, hook: unknown, client: FakeClient) => {
+      const page = render(
+        <WithAppHooks provided={hook === undefined ? {} : { [FERRETS_FILE_OPEN_HOOK]: hook }}>
+          <SessionChatPage
+            client={client}
+            daemonId="alpha"
+            entries={[]}
+            session={ferretView('shared')}
+            {...overrides}
+          />
+        </WithAppHooks>,
+      );
+      mounted.push(page);
+      return page;
+    };
+
+    test('proves :agent from the fleet this daemon lists, through the half’s own client', async () => {
+      const client = fakeClient({ [FLEET]: () => [row] });
+      const page = draw({}, client);
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(client.callsTo(FLEET)).toHaveLength(1);
+      expect(surfaceOf(page).agentReferenceResolver({ name: 'torrey' })).toEqual({
+        daemonId: 'alpha',
+        sessionId: 'other',
+        name: 'torrey',
+      });
+    });
+
+    test('proves no agent before the fleet is read', () => {
+      const page = draw({}, fakeClient({ [FLEET]: () => [row] }));
+
+      expect(surfaceOf(page).agentReferenceResolver).toBeUndefined();
+    });
+
+    test('opens an @file only where Ferrets gives an opener and a workspace shows Files', async () => {
+      const client = () => fakeClient({ [FLEET]: () => [row] });
+      const without = drawWithHook({}, undefined, client());
+      const wrongShape = drawWithHook({}, { open: 'no' }, client());
+      const embedded = drawWithHook({ embedded: true }, opening, client());
+      const full = drawWithHook({}, opening, client());
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(surfaceOf(without).onCodeReferenceOpen).toBeUndefined();
+      expect(surfaceOf(wrongShape).onCodeReferenceOpen).toBeUndefined();
+      expect(surfaceOf(embedded).onCodeReferenceOpen).toBeUndefined();
+      expect(typeof surfaceOf(full).onCodeReferenceOpen).toBe('function');
+    });
+
+    test('keeps the surface and the file proof across working <-> idle, and the file proof across another ferret’s coming', async () => {
+      let rows = [{ id: 'shared', name: 'aniya', state: 'working', folder: '/repo' }, row];
+      const client = fakeClient({ [FLEET]: () => rows });
+      const page = drawWithHook({}, opening, client);
+      const wait = (ms: number) =>
+        runAsync(async () => {
+          await new Promise(resolve => setTimeout(resolve, ms));
+        });
+      await wait(0);
+      const first = surfaceOf(page);
+
+      // Act — any ferret going idle is a read, and moves nothing the proof reads
+      rows = rows.map(each => ({ ...each, state: 'idle' }));
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const idle = surfaceOf(page);
+      // A ferret comes: the callsigns change (the surface is rebuilt), this ferret's folder does not
+      rows = [...rows, { id: 'third', name: 'kim', state: 'working', folder: '/elsewhere' }];
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const grown = surfaceOf(page);
+
+      // Assert
+      expect(client.callsTo(FLEET)).toHaveLength(3);
+      expect(idle).toBe(first);
+      expect(grown).not.toBe(first);
+      expect(grown.agentReferenceResolver({ name: 'kim' })).not.toBeNull();
+      expect(grown.resolveFilePaths).toBe(first.resolveFilePaths);
+      expect(grown.onCodeReferenceOpen).toBe(first.onCodeReferenceOpen);
+    });
+
+    test('asks Ferrets to open the path in THIS ferret’s Files, and stays quiet when the path is refused', async () => {
+      const asked: Array<[string, string]> = [];
+      const refusing = { open: (ferret: string, path: string) => (asked.push([ferret, path]), path !== 'bad') };
+      const client = fakeClient({ [FLEET]: () => [row] });
+      const page = drawWithHook({}, refusing, client);
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      run(() => surfaceOf(page).onCodeReferenceOpen({ path: 'src/a.ts' }));
+      run(() => surfaceOf(page).onCodeReferenceOpen({ path: 'bad' }));
+
+      expect(asked).toEqual([
+        ['shared', 'src/a.ts'],
+        ['shared', 'bad'],
+      ]);
+    });
   });
 
   test('a send returns the transcript to the tail and still refreshes the chat', () => {

@@ -80,6 +80,8 @@ export interface RuntimeButtonsProps {
   readonly onValueChange: (next: string) => void;
   /** Told which offered runtime the draft names now (or `null`), so the model box can follow it. */
   readonly onChosen: (chosen: ChosenRuntime | null) => void;
+  /** Told the wrappers that can run a session now (`null` until the roster is read), whenever they change. */
+  readonly onOffered?: (wrappers: readonly string[] | null) => void;
   /** Drawn INSTEAD of the buttons when the roster was read and nothing can run a session. */
   readonly noAccounts: ReactNode;
   /** A Launch button's runtime, used only when offered and usable. */
@@ -190,6 +192,7 @@ export function RuntimeButtons({
   value,
   onValueChange,
   onChosen,
+  onOffered,
   noAccounts,
   preferred,
   harness,
@@ -222,6 +225,18 @@ export function RuntimeButtons({
   useEffect(() => {
     onChosen(selected === null ? null : { account: selected });
   }, [selected, onChosen]);
+
+  // Said as one string so a roster read again with the same runtimes does not tell the page twice.
+  // The store keeps its last catalog while it reads again, so a roster is only SETTLED when the slice says it is
+  // ready: loading, re-reading after a change event and an error all leave the offer undecided (`null`), never the
+  // stale list a page could act on as if it were the machine's current runtimes.
+  const settled = slice.status === 'ready';
+  const usable =
+    offered === null || !settled ? null : offered.filter(option => option.available).map(option => option.wrapper);
+  const usableKey = usable === null ? null : JSON.stringify(usable);
+  useEffect(() => {
+    onOffered?.(usableKey === null ? null : (JSON.parse(usableKey) as string[]));
+  }, [usableKey, onOffered]);
 
   if (offered === null) {
     if (slice.status !== 'error') {
