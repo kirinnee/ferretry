@@ -560,6 +560,9 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'runtimes.yaml',
       'agenda.yaml',
       'conversation.yaml',
+      // Owner decision !A525: reachable, with a binary/searchPaths change and a looser permission mode held.
+      'harness-claude-code.yaml',
+      'harness-codex.yaml',
       'logins/work.yaml',
       'profiles/p.yaml',
       'runtimes/r.yaml',
@@ -585,8 +588,13 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       // Not mapped until their loosenings are ported, or holding what today's agent never reached (GAP lines).
       'browsers.yaml',
       'usage.yaml',
-      'harness-claude-code.yaml',
-      'harness-codex.yaml',
+      // Only the two exact harness files are reached: no other `harness-*` name, no folder, no path around them.
+      'harness-gemini.yaml',
+      'harness-claude-code.yml',
+      'harness-claude-code',
+      'harness/claude-code.yaml',
+      'harness-codex.yaml/x.yaml',
+      './harness-codex.yaml',
       'instructions/x.yaml',
       'endpoints/x.yaml',
       // No today equivalent at all.

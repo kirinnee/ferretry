@@ -120,6 +120,17 @@ const ROWS: readonly Row[] = [
     neverLoosens: { text: 'keepInSync: false\n', why: "today's machineLoosening judged no conversations key" },
   },
   {
+    // Owner decision !A525: reachable; a looser permission mode is held here, a binary/searchPaths change below.
+    path: 'harness-claude-code.yaml',
+    base: 'permissionMode: auto\n',
+    loosening: { text: 'permissionMode: skip\n', sentence: 'agents now skip every permission prompt' },
+  },
+  {
+    path: 'harness-codex.yaml',
+    base: 'permissionMode: auto\n',
+    loosening: { text: 'permissionMode: skip\n', sentence: 'agents now skip every permission prompt' },
+  },
+  {
     path: 'logins/work.yaml',
     base: 'harness: claude-code\nbudget:\n  daily:\n    hard: 5\n',
     loosening: { text: 'harness: claude-code\nbudget:\n  daily:\n    hard: 50\n', sentence: 'daily hard limit' },
@@ -369,7 +380,14 @@ const TODAY_HOLDS: readonly TodayHold[] = [
   { today: 'machine', words: 'agents may now control project files', door: [controlOn('files')] },
   { today: 'machine', words: 'agents may now control Ferretry settings', door: [controlOn('ferretrySettings')] },
   { today: 'machine', words: 'agents may now control page scripts', door: [controlOn('pageScripts')] },
-  { today: 'machine', words: 'agents now skip every permission prompt', out: 'harness-claude-code.yaml' },
+  {
+    today: 'machine',
+    words: 'agents now skip every permission prompt',
+    door: [
+      { path: 'harness-claude-code.yaml', base: 'permissionMode: auto\n', text: 'permissionMode: skip\n' },
+      { path: 'harness-codex.yaml', base: 'permissionMode: auto\n', text: 'permissionMode: skip\n' },
+    ],
+  },
   {
     today: 'machine',
     words:
@@ -706,6 +724,8 @@ const TODAY_KINDS_OF: Readonly<Record<string, readonly string[]>> = {
   'runtimes.yaml': [],
   'agenda.yaml': [],
   'conversation.yaml': [],
+  'harness-claude-code.yaml': ['machine'],
+  'harness-codex.yaml': ['machine'],
   logins: ['login'],
   runtimes: ['runtime'],
   profiles: [],
@@ -764,16 +784,7 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
 
   test('R-0073 the files kept out include the person-only ones and the ones whose loosenings are not ported', () => {
     const places = outside.map(({ def }) => placeOf(def));
-    for (const place of [
-      'gate.yaml',
-      'plugins.yaml',
-      'catalogs.yaml',
-      'browsers.yaml',
-      'usage.yaml',
-      'harness-claude-code.yaml',
-      'harness-codex.yaml',
-      'endpoints',
-    ])
+    for (const place of ['gate.yaml', 'plugins.yaml', 'catalogs.yaml', 'browsers.yaml', 'usage.yaml', 'endpoints'])
       expect(places).toContain(place);
   });
 
@@ -799,4 +810,184 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
       }
       expect(await fs.readText(`${HOME}/config/${path}`).catch(() => undefined)).toBeUndefined();
     });
+});
+
+/**
+ * Owner decision !A525: an agent may edit the two harness files through the config tools, and a looser permission mode
+ * or ANY change of the harness `binary` / `searchPaths` (a path is code execution) is HELD for the owner through the
+ * same writer and hold every other file uses; an owner's edit is not held.
+ */
+const HARNESS_FILES = [
+  { path: 'harness-claude-code.yaml', program: 'Claude Code' },
+  { path: 'harness-codex.yaml', program: 'Codex' },
+] as const;
+
+for (const { path, program } of HARNESS_FILES)
+  describe(`T-0034 ${path}: an agent edits it; a binary/searchPaths change and a looser mode are held`, () => {
+    /** The owner's own write (confirmed), then a reload: what the agent then edits is this. */
+    const ownerWrites = async (files: ReturnType<typeof world>['files'], text: string): Promise<void> => {
+      const { plugin, def } = owning(path);
+      expect((await files.write(plugin, def, undefined, text, { confirmedLoosening: true })).kind).toBe('applied');
+      await files.reload();
+    };
+    const agentWrites = async (agent: ReturnType<typeof world>['agent'], text: string) =>
+      await agent.run(call({ tool: 'config.write', path, text }), ferret);
+
+    const HELD: readonly {
+      readonly name: string;
+      readonly base: string;
+      readonly text: string;
+      readonly said: string;
+    }[] = [
+      {
+        name: 'a binary added',
+        base: 'permissionMode: auto\n',
+        text: 'binary: /opt/evil/bin\n',
+        said: 'binary changed',
+      },
+      { name: 'a binary changed', base: 'binary: /opt/a\n', text: 'binary: /opt/b\n', said: 'binary changed' },
+      { name: 'a binary removed', base: 'binary: /opt/a\n', text: 'permissionMode: auto\n', said: 'binary changed' },
+      {
+        name: 'a search path added',
+        base: 'permissionMode: auto\n',
+        text: 'searchPaths: [/opt/x]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'a search path changed',
+        base: 'searchPaths: [/opt/x]\n',
+        text: 'searchPaths: [/opt/y]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'search paths reordered',
+        base: 'searchPaths: [/a, /b]\n',
+        text: 'searchPaths: [/b, /a]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'search paths emptied',
+        base: 'searchPaths: [/opt/x]\n',
+        text: 'searchPaths: []\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'one path split into two',
+        base: 'searchPaths: ["/a /b"]\n',
+        text: 'searchPaths: [/a, /b]\n',
+        said: 'searchPaths changed',
+      },
+      {
+        name: 'a binary and a looser mode together',
+        base: 'permissionMode: auto\n',
+        text: 'binary: /opt/b\npermissionMode: skip\n',
+        said: 'agents now skip every permission prompt',
+      },
+      {
+        name: 'a looser permission mode',
+        base: 'permissionMode: auto\n',
+        text: 'permissionMode: skip\n',
+        said: 'agents now skip every permission prompt',
+      },
+    ];
+
+    for (const held of HELD)
+      test(`${held.name}: HELD, the tighter version stays in effect, approval applies it, refusal leaves it`, async () => {
+        for (const verdict of ['approve', 'refuse'] as const) {
+          const { agent, files, fs } = world();
+          await files.reload();
+          await ownerWrites(files, held.base);
+          const before = inEffect(files, path);
+          const answer = await agentWrites(agent, held.text);
+          expect(answer.summary).toStartWith(`Wrote ${path}, but it loosens what this machine allows (`);
+          expect(answer.summary).toContain(held.said);
+          expect(answer.summary).toContain(`--confirms ${path}`);
+          expect(inEffect(files, path)).toEqual(before);
+          expect(files.held().map(edit => edit.path)).toEqual([path]);
+          const id = files.held()[0]?.id as string;
+          if (verdict === 'approve') {
+            expect(await files.writer().confirm(id)).toBe(true);
+            await files.reload();
+            expect(inEffect(files, path)).not.toEqual(before);
+            expect(files.held()).toEqual([]);
+          } else {
+            expect(await files.writer().discard(id)).toBe(true);
+            await files.reload();
+            expect(inEffect(files, path)).toEqual(before);
+            expect(files.held()).toEqual([]);
+            expect(await fs.readText(`${HOME}/config/${path}`)).toBe(held.base);
+          }
+        }
+      });
+
+    test('the sentence names the program and what changed, never a path', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/old/secretish-name\nsearchPaths: [/opt/old]\n');
+      const answer = await agentWrites(agent, 'binary: /opt/new/secretish-name\nsearchPaths: [/opt/new]\n');
+      expect(answer.summary).toContain(`${program} program (binary changed)`);
+      expect(answer.summary).toContain(`${program} program in different directories (searchPaths changed)`);
+      expect(answer.summary).not.toContain('/opt/');
+    });
+
+    const APPLIED: readonly { readonly name: string; readonly base: string; readonly text: string }[] = [
+      { name: 'a permission mode tightened', base: 'permissionMode: skip\n', text: 'permissionMode: auto\n' },
+      {
+        name: 'a comment added, binary and search paths as they were',
+        base: 'binary: /opt/a\nsearchPaths: [/a, /b]\n',
+        text: '# kept\nbinary: /opt/a\nsearchPaths: [/a, /b]\n',
+      },
+      { name: 'the same document written again', base: 'permissionMode: auto\n', text: 'permissionMode: auto\n' },
+      {
+        name: 'the mode tightened while the binary is left as it was',
+        base: 'binary: /opt/a\npermissionMode: skip\n',
+        text: 'binary: /opt/a\npermissionMode: auto\n',
+      },
+    ];
+    for (const applied of APPLIED)
+      test(`${applied.name}: applied at once, nothing held`, async () => {
+        const { agent, files } = world();
+        await files.reload();
+        await ownerWrites(files, applied.base);
+        const answer = await agentWrites(agent, applied.text);
+        expect(answer.summary).toBe(`Wrote ${path}; it is in effect.`);
+        expect(files.held()).toEqual([]);
+      });
+
+    test('a first write that names no binary and no search paths is applied', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      expect((await agentWrites(agent, 'permissionMode: auto\n')).summary).toBe(`Wrote ${path}; it is in effect.`);
+      expect(files.held()).toEqual([]);
+    });
+
+    test('an OWNER edit of the binary and the search paths is applied, not held', async () => {
+      const { files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/a\nsearchPaths: [/a]\n');
+      const { plugin, def } = owning(path);
+      const outcome = await files.write(plugin, def, undefined, 'binary: /opt/b\nsearchPaths: [/b]\n', {
+        confirmedLoosening: true,
+      });
+      expect(outcome.kind).toBe('applied');
+      expect(files.held()).toEqual([]);
+      expect(inEffect(files, path)).toMatchObject({ binary: '/opt/b', searchPaths: ['/b'] });
+    });
+
+    test('it is listed to an agent once it exists, and an agent reads it through the config tool', async () => {
+      const { agent, files } = world();
+      await files.reload();
+      await ownerWrites(files, 'binary: /opt/a\n');
+      const listing = await agent.run(call({ tool: 'config.read' }), ferret);
+      expect(listing.files?.map(file => file.path)).toContain(path);
+      const read = await agent.run(call({ tool: 'config.read', path }), ferret);
+      expect(read.summary).toBe(`${path} (ok).`);
+    });
+  });
+
+test('T-0034 the reach grew by exactly the two harness files: no other file became reachable', () => {
+  const reachable = DECLARED.filter(({ def }) => agentMayName(samplePath(def))).map(({ def }) => placeOf(def));
+  for (const { path } of HARNESS_FILES) expect(reachable).toContain(path);
+  for (const place of ['gate.yaml', 'plugins.yaml', 'browsers.yaml', 'usage.yaml', 'endpoints'])
+    expect(reachable).not.toContain(place);
 });

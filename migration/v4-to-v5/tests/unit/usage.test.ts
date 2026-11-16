@@ -1,8 +1,19 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { PausesFileSchema, PauseToldFileSchema, PricingFileSchema } from '@ferretry/plugin-usage/contract';
+import {
+  CompactionHistoryFileSchema,
+  PausesFileSchema,
+  PauseToldFileSchema,
+  PricingFileSchema,
+} from '@ferretry/plugin-usage/contract';
 import { chmod, mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { usageStep, V5_USAGE_PAUSE_TOLD, V5_USAGE_PAUSES, V5_USAGE_PRICING } from '../../src/steps/usage.ts';
+import {
+  usageStep,
+  V5_USAGE_COMPACTION_HISTORY,
+  V5_USAGE_PAUSE_TOLD,
+  V5_USAGE_PAUSES,
+  V5_USAGE_PRICING,
+} from '../../src/steps/usage.ts';
 import { AT, fixture } from './ferret-fixture.ts';
 
 let f: Awaited<ReturnType<typeof fixture>>;
@@ -191,5 +202,56 @@ test('a home with no usage files converts to nothing; a dry run writes nothing',
   expect(report.status).toBe('converted');
   expect(report.note).toStartWith('dry run: nothing written');
   expect(report.kept).toContainEqual({ what: 'budget pauses', count: 1 });
+  expect(await readdir(f.to).catch(() => [])).toEqual([]);
+});
+
+const SAMPLE = (durationMs: number, extra: Record<string, unknown> = {}): Record<string, unknown> => ({
+  harness: 'claude',
+  durationMs,
+  at: AT,
+  ...extra,
+});
+
+test('the v4 compaction history is carried: the newest fifty valid entries, format 1, 0600, none refused quoted', async () => {
+  const entries = Array.from({ length: 55 }, (_, index) => SAMPLE(index + 1, index === 2 ? { model: 'm' } : {}));
+  await f.put('compaction-history.json', {
+    version: 1,
+    entries: [...entries, SAMPLE(-5, { model: 'FAKE-REFUSED' }), { nonsense: true }],
+  });
+  const report = await usageStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(report.note).toBe('2 compaction history entr(ies) v5 refuses dropped');
+  expect(JSON.stringify(report)).not.toContain('FAKE-REFUSED');
+  expect(report.kept).toContainEqual({ what: 'compaction durations', count: 50 });
+  const written = await stamped(V5_USAGE_COMPACTION_HISTORY);
+  expect(written.keys).toEqual(['format', 'entries']);
+  const body = CompactionHistoryFileSchema.parse(written.body);
+  expect(body.entries.map(entry => entry.durationMs)).toEqual(Array.from({ length: 50 }, (_, index) => index + 6));
+  expect((await stat(join(f.to, V5_USAGE_COMPACTION_HISTORY))).mode & 0o777).toBe(0o600);
+});
+
+test('a garbled or foreign v4 compaction history is carried as empty and said so, never quoted', async () => {
+  await mkdir(join(f.from), { recursive: true });
+  await writeFile(join(f.from, 'compaction-history.json'), '{"FAKE-GARBLED');
+  const garbled = await usageStep.run(f.ctx());
+  expect(garbled.status).toBe('converted');
+  expect(garbled.note).toBe('compaction-history.json is garbled: carried as no compaction history');
+  expect(JSON.stringify(garbled)).not.toContain('FAKE-GARBLED');
+  expect(CompactionHistoryFileSchema.parse((await stamped(V5_USAGE_COMPACTION_HISTORY)).body)).toEqual({ entries: [] });
+
+  await f.put('compaction-history.json', { version: 2, entries: [SAMPLE(1)] });
+  const foreign = await usageStep.run(f.ctx());
+  expect(foreign.note).toBe('compaction-history.json is garbled: carried as no compaction history');
+  expect(foreign.kept).toContainEqual({ what: 'compaction durations', count: 0 });
+});
+
+test('no v4 compaction history writes nothing, and a dry run reports without writing', async () => {
+  expect((await usageStep.run(f.ctx())).kept).not.toContainEqual(
+    expect.objectContaining({ what: 'compaction durations' }),
+  );
+  expect(await stat(join(f.to, V5_USAGE_COMPACTION_HISTORY)).catch(() => undefined)).toBeUndefined();
+  await f.put('compaction-history.json', { version: 1, entries: [SAMPLE(7)] });
+  const dry = await usageStep.run(f.ctx(true));
+  expect(dry.kept).toContainEqual({ what: 'compaction durations', count: 1 });
   expect(await readdir(f.to).catch(() => [])).toEqual([]);
 });
