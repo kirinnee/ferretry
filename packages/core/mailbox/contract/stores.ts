@@ -5,13 +5,11 @@
  * and a ledger over them. Moved here unchanged from Conversation's send path.
  */
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { z } from 'zod';
 import type { QueueEvent } from './lines.ts';
-import type { QueueAuthor, SendCancelEffectSchema, SendEvidence, SendUnaccountedReason } from './wire-send.ts';
+import type { SendCancelEffect, SendQueueProof } from './protocol-names.ts';
+import type { QueueAuthor, SendEvidence, SendUnaccountedReason } from './wire-send.ts';
 
 type SessionId = FerretId;
-type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
-type SendQueueProof = 'transcript' | 'pane';
 
 /**
  * How a message physically reached (or will reach) the agent.

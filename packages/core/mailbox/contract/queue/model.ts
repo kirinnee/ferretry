@@ -1,5 +1,5 @@
-import { type QueueEvent, QueueEventSchema } from '../../../contract/index.ts';
-import type { QueuedMessage, QueuedMessageState } from '../../seams/protocol.ts';
+import { type QueueEvent, QueueEventSchema } from '../lines.ts';
+import type { QueuedMessage, QueuedMessageState } from '../wire-send.ts';
 
 /**
  * A session's queue as a LOG OF WHAT HAPPENED, folded into the messages it holds.

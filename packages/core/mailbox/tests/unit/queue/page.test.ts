@@ -1,10 +1,10 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import type { QueuedMessage, QueuedMessageState } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage, QueuedMessageState } from '../../../contract/index.ts';
 import should from 'should';
-import { DEFAULT_SEND_PAGE } from '../../../../daemon/delivery/lib/page.ts';
-import { isOpenMessage, queuePage } from '../../../../daemon/queue/lib/page.ts';
-import { at } from '../../../support/instant.ts';
+import { DEFAULT_SEND_PAGE } from '../../../contract/index.ts';
+import { isOpenMessage, queuePage } from '../../../contract/index.ts';
+import { at } from '../../support/instant.ts';
 
 /** A message enqueued `minutes` after a fixed instant, read unless a case says otherwise. */
 const message = (id: string, minutes: number, state: QueuedMessageState = 'read'): QueuedMessage => ({

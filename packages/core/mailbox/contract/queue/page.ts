@@ -1,5 +1,5 @@
-import type { QueuedMessage } from '../../seams/protocol.ts';
-import { type SendPageQuery, windowPage } from '../../delivery/lib/page.ts';
+import type { QueuedMessage } from '../wire-send.ts';
+import { type SendPageQuery, windowPage } from '../send/page.ts';
 
 /**
  * ONE PAGE OF A SESSION'S QUEUE, answered the way the send ledger is (`session/send/page.ts`).

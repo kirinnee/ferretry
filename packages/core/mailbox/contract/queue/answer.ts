@@ -1,5 +1,7 @@
-import type { QueuedMessage, QueueWaitReason, SendDisposition, SendFate } from '../../seams/protocol.ts';
-import { dispositionOf, type SendRecord } from '../../delivery/lib/types.ts';
+import type { QueuedMessage, QueueWaitReason, SendFate } from '../wire-send.ts';
+import type { SendDisposition } from '../protocol-names.ts';
+import { type SendRecord } from '../stores.ts';
+import { dispositionOf } from '../send/types.ts';
 
 /**
  * What a sender is told once the deliverer's first look at its message is over: what the send ledger —

@@ -1,4 +1,5 @@
-import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from './transcript-types.ts';
+import type { SessionId } from '../session-id.ts';
+import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '../transcript.ts';
 
 /**
  * Issues that make a transcript read BLIND to its newest records — the only ones a send could be
@@ -37,4 +38,27 @@ export function foldSendEvidenceBatch(watch: SendEvidenceWatch, batch: Transcrip
     blind: watch.blind || batch.issues.some(issue => BLIND.has(issue.code)),
     partial: watch.partial || batch.issues.some(issue => issue.code === 'window-capped'),
   };
+}
+
+/** One read of a session's transcript evidence. `readable: false` means absence cannot be proven. */
+export interface SendEvidenceReading {
+  readonly readable: boolean;
+  /** The session has no transcript the daemon can prove is its own, which no amount of waiting fixes. */
+  readonly unbound?: true;
+  /**
+   * Not unreadable — still reading. A look reads a bounded amount and keeps its place, so a huge
+   * transcript is read across several looks; until the window reaches the end, absence is not yet
+   * provable, and that is a reason to look again, never to call a message unconfirmed.
+   */
+  readonly catchingUp?: true;
+  readonly inputs: readonly ObservedHumanInput[];
+}
+
+/** The transcript side: what the harness has recorded the agent receiving or holding. */
+export interface SendEvidenceSource {
+  /**
+   * What the transcript holds from `since` on — the acceptance of the oldest send being looked for,
+   * before which nothing can prove one. A source may read less than the whole file because of it.
+   */
+  read(id: SessionId, since: string): Promise<SendEvidenceReading>;
 }

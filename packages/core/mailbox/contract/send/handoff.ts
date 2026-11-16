@@ -1,11 +1,16 @@
-import { basename, dirname, join } from 'node:path';
 import type { HarnessKey as HarnessKind } from '@ferretry/core-ferrets/contract';
-import {
-  type QueueAuthor,
-  readHandoffDocument,
-  type SessionHandoff,
-  type SessionHandoffAttachment,
-} from '../../seams/protocol.ts';
+import { type QueueAuthor } from '../wire-send.ts';
+import { readHandoffDocument } from '../turn-handoff.ts';
+import { type SessionHandoff, type SessionHandoffAttachment } from '../protocol-names.ts';
+
+// A contract imports no `node:path`; these are its POSIX forms, for the clean absolute paths a hand-off names.
+const trimmed = (path: string): string => (path.length > 1 ? path.replace(/\/+$/u, '') : path);
+const basename = (path: string): string => trimmed(path).slice(trimmed(path).lastIndexOf('/') + 1);
+const dirname = (path: string): string => {
+  const at = trimmed(path).lastIndexOf('/');
+  return at < 0 ? '.' : at === 0 ? '/' : trimmed(path).slice(0, at);
+};
+const join = (folder: string, name: string): string => `${trimmed(folder)}/${name}`;
 
 /**
  * What the person sent in one hand-off, read back out of the document the agent was pointed at.

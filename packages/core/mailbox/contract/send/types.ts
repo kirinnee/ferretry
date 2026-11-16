@@ -1,16 +1,11 @@
-import type { SendDisposition, SessionHealth, SessionStatus } from '../../seams/protocol.ts';
-import type { SessionId } from '../../seams/ferret-id.ts';
-import type {
-  LedgerFate as SendFate,
-  LedgerPath as SendPath,
-  LedgerRecord as SendRecord,
-  SendLedger,
-  SendNoticeOwed,
-  SendSenderKind,
-  SendSettlement,
-} from '@ferretry/core-mailbox/contract';
+import type { SendDisposition } from '../protocol-names.ts';
+import type { SessionHealth, SessionStatus } from '../ferret-types.ts';
+import type { SessionId } from '../session-id.ts';
+import type { SendLedger, SendNoticeOwed, SendPath, SendRecord, SendSenderKind, SendSettlement } from '../stores.ts';
 
-export type { SendFate, SendLedger, SendNoticeOwed, SendPath, SendRecord, SendSenderKind, SendSettlement };
+// `SendFate`, `SendPath` and `SendRecord` are the ledger's own and clash with the wire's of the same names: they leave
+// the package as `LedgerFate`, `LedgerPath` and `LedgerRecord` (index.ts).
+export type { SendLedger, SendNoticeOwed, SendSenderKind, SendSettlement };
 
 /**
  * Handing a RUNNING session its next turn — the verb the daemon declared on the wire and could not

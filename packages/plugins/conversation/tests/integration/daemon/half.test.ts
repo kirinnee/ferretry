@@ -7,7 +7,7 @@ import { StateAnswerLedger } from '../../../daemon/questions/adapters/index.ts';
 import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
 import { StateSendChannel, StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
-import type { SendRecord } from '../../../daemon/delivery/lib/index.ts';
+import type { SendRecord } from '../../../daemon/seams/ledger-types.ts';
 
 const clock = { now: () => instantFromEpochMs(1_794_052_800_000) };
 const f1 = parseSessionId('f1');

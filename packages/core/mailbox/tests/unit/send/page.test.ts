@@ -1,8 +1,8 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import type { SendRecord } from '../../../../daemon/seams/protocol.ts';
+import type { SendRecord } from '../../../contract/index.ts';
 import should from 'should';
-import { DEFAULT_SEND_PAGE, isOpenSend, sendPage } from '../../../../daemon/delivery/lib/page.ts';
+import { DEFAULT_SEND_PAGE, isOpenSendRow, sendPage } from '../../../contract/index.ts';
 
 /** A send accepted `minutes` after a fixed instant, delivered unless a case says otherwise. */
 const send = (id: string, minutes: number, overrides: Partial<SendRecord> = {}): SendRecord => ({
@@ -94,10 +94,10 @@ describe('a page of sends', () => {
   });
 
   it('should call a send open while its fate can still change or it is held, never once withdrawn', () => {
-    should(isOpenSend(send('a', 1, { fate: 'accepted' }))).be.true();
-    should(isOpenSend(send('a', 1, { held: true }))).be.true();
-    should(isOpenSend(send('a', 1))).be.false();
-    should(isOpenSend(send('a', 1, { fate: 'cancelled' }))).be.false();
-    should(isOpenSend(send('a', 1, { fate: 'accepted', withdrawn: true }))).be.false();
+    should(isOpenSendRow(send('a', 1, { fate: 'accepted' }))).be.true();
+    should(isOpenSendRow(send('a', 1, { held: true }))).be.true();
+    should(isOpenSendRow(send('a', 1))).be.false();
+    should(isOpenSendRow(send('a', 1, { fate: 'cancelled' }))).be.false();
+    should(isOpenSendRow(send('a', 1, { fate: 'accepted', withdrawn: true }))).be.false();
   });
 });

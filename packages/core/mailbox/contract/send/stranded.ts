@@ -1,6 +1,6 @@
-import { parseHandoffPointer } from '../../seams/protocol.ts';
-import { composerTransport, lonePasteOf } from '../../seams/composer.ts';
-import type { SendPath, SendRecord } from './types.ts';
+import { parseHandoffPointer } from '../turn-handoff.ts';
+import { composerTransport, lonePasteOf } from './composer.ts';
+import type { SendPath, SendRecord } from '../stores.ts';
 
 /**
  * Recognising a POINTER THE DAEMON ITSELF TYPED, left sitting in the composer because its Enter never

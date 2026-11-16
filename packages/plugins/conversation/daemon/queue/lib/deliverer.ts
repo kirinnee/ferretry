@@ -1,13 +1,19 @@
-import type { QueuedMessage, QueueWaitReason } from '../../seams/protocol.ts';
+import type { QueuedMessage, QueueWaitReason } from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendScheduler } from '../../delivery/lib/tracker.ts';
-import type { SendFate } from '../../delivery/lib/types.ts';
-import { type DeliveryView, type HandOver, movesFrom, type OwnDraft, reasonForWaiting } from './delivery.ts';
-import { foldQueue, type QueueEvent } from './model.ts';
-import { deliveryOrder, planDelivery } from './policy.ts';
+import type { SendFate } from '../../seams/ledger-types.ts';
+import {
+  type DeliveryView,
+  type HandOver,
+  movesFrom,
+  type OwnDraft,
+  reasonForWaiting,
+} from '@ferretry/core-mailbox/contract';
+import { foldQueue, type QueueEvent } from '@ferretry/core-mailbox/contract';
+import { deliveryOrder, planDelivery } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from './ports.ts';
-import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './settings.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
 
 /**
  * THE ONE OWNER OF DELIVERY for a session's queue: it decides WHEN a message goes and IN WHAT ORDER, and

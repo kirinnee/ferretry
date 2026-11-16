@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { turnFileInstruction } from '../../../../contract/index.ts';
+import { turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import {
   handedOverDraft,

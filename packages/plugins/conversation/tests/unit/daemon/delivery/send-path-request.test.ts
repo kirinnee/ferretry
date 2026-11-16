@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { requestOf } from '../../../../daemon/queue/adapters/send-path-delivery.ts';
 import { at } from '../../../support/instant.ts';

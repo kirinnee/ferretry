@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { answerOf } from '../../../../daemon/queue/lib/answer.ts';
-import { type SendRecord } from '../../../../daemon/delivery/lib/types.ts';
-import { at } from '../../../support/instant.ts';
+import { answerOf } from '../../../contract/index.ts';
+import { type LedgerRecord as SendRecord } from '../../../contract/index.ts';
+import { at } from '../../support/instant.ts';
 
 const AT = at('2026-10-30T17:00:00.000Z');
 const record = (overrides: Partial<SendRecord>): SendRecord => ({

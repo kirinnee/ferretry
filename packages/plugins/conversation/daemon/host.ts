@@ -15,26 +15,28 @@ import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
-  type ConversationApi,
-  type ConversationCaller,
-  type ConversationRefusal,
   type MailboxHost,
-  MessageBeforeSend,
   parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   type PeerMessageLabel,
   QueueChanged,
+  type QueuedMessage,
+  type SendRecord,
+  type SendResult,
+} from '@ferretry/core-mailbox/contract';
+import {
+  type ConversationApi,
+  type ConversationCaller,
+  type ConversationRefusal,
+  MessageBeforeSend,
   QuestionAnswered,
   QuestionAsked,
-  type QueuedMessage,
   QUESTION_ANSWERED_STATE,
   QUESTION_STATE,
   QUEUE_STATE,
   type Question,
-  type SendRecord,
   SENDS_STATE,
   STUCK_FRAME_STATES,
-  type SendResult,
   TurnEnded,
 } from '../contract/index.ts';
 import {
@@ -43,6 +45,7 @@ import {
   StateSendChannel,
   StateSendLedger,
 } from './delivery/adapters/index.ts';
+import { type SendPath } from './seams/ledger-types.ts';
 import {
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
@@ -51,15 +54,11 @@ import {
   isDirectSend,
   isFileBackedQueue,
   isUnconfirmedTyping,
-  lookBeforeReading,
   paneMidTurn,
   peerMessageKind,
   peerPreamble,
   queuedPayloadInstruction,
   routeSend,
-  type SendPath,
-  AgentSendFailureNotifier,
-  SendTracker,
   type SendTarget,
   type SendTerminal,
   type SendTurnStore,
@@ -69,13 +68,18 @@ import {
   SendDraftRefused,
   SendPending,
   SendRefused,
-  SessionInterrupt,
-  SessionSendService,
   sendPayload,
   sendRecordFor,
   sendRecordView,
+} from '@ferretry/core-mailbox/contract';
+import {
+  lookBeforeReading,
+  AgentSendFailureNotifier,
+  SendTracker,
+  SessionInterrupt,
+  SessionSendService,
 } from './delivery/lib/index.ts';
-import type { SessionStatus } from './seams/ferret-types.ts';
+import type { SessionStatus } from '@ferretry/core-mailbox/contract';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
@@ -98,7 +102,7 @@ import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/in
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
-import { answerOf } from './queue/lib/answer.ts';
+import { answerOf } from '@ferretry/core-mailbox/contract';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
@@ -124,7 +128,7 @@ import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
-import type { SessionHandoff, SessionView } from './seams/protocol.ts';
+import type { SessionHandoff, SessionView } from '@ferretry/core-mailbox/contract';
 
 /**
  * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off

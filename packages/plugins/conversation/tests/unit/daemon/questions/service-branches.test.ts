@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { PendingQuestion } from '../../../../daemon/seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import {
   StructuredQuestionAttemptFailed,

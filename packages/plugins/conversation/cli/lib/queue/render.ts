@@ -1,4 +1,4 @@
-import type { QueuedMessage, QueueWaitReason } from '../../../contract/index.ts';
+import type { QueuedMessage, QueueWaitReason } from '@ferretry/core-mailbox/contract';
 
 /** The tick a person reads for each state: one when accepted, two when delivered, three when read. */
 const MARK: Readonly<Record<QueuedMessage['state'], string>> = {

@@ -1,8 +1,9 @@
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendMessageRequest } from './service.ts';
 import type { SendFailureNotifier } from './tracker.ts';
-import { sendFailureNotice, sendStuckNotice } from './tracking.ts';
-import type { SendRecord, SendRepository } from './types.ts';
+import { sendFailureNotice, sendStuckNotice } from '@ferretry/core-mailbox/contract';
+import type { SendRecord } from '../../seams/ledger-types.ts';
+import type { SendRepository } from '@ferretry/core-mailbox/contract';
 
 /**
  * Hands a failed peer send back to the agent that sent it, as a message in ITS session.

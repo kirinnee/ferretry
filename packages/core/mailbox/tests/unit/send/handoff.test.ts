@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { assignedTaskDocument, messageWithAttachments } from '../../../../daemon/seams/protocol.ts';
+import { assignedTaskDocument, messageWithAttachments } from '../../../contract/index.ts';
 import should from 'should';
-import { handoffFolders, handoffReadArguments, handoffView } from '../../../../daemon/delivery/lib/handoff.ts';
+import { handoffFolders, handoffReadArguments, handoffView } from '../../../contract/index.ts';
 
 const context = { reminder: 'Keep the protocol.', attachmentRoot: '/state/attachments/d/s1' };
 

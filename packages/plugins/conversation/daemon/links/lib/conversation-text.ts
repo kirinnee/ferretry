@@ -3,7 +3,7 @@ import { CONVERSATION_EXCHANGE_TEXT_MAX, type LinkPreview } from '../../../contr
 import { CONVERSATION_EXCHANGE_COUNT } from '../../../contract/index.ts';
 
 type ConversationExchangeMessage = LinkPreview['messages'][number];
-import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '../../../contract/index.ts';
+import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '@ferretry/core-mailbox/contract';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import type { TranscriptEvent } from '../../reader/lib/transcript/types.ts';
 

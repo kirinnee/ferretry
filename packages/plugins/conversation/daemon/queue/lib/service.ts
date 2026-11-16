@@ -1,10 +1,10 @@
 import { type Instant, instantFromEpochMs } from '@ferretry/std';
-import type { PeerMessageLabel, QueueAuthor, QueuedMessage, SendSenderKind } from '../../seams/protocol.ts';
+import type { PeerMessageLabel, QueueAuthor, QueuedMessage, SendSenderKind } from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import { foldQueue } from './model.ts';
+import { foldQueue } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from './ports.ts';
-import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './settings.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
 
 /** A message as its sender hands it over, before the queue gives it a state. */
 export interface QueueRequest {

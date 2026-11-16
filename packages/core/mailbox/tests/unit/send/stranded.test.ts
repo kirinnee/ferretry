@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/seams/protocol.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '../../../contract/index.ts';
 import should from 'should';
+import { type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
-  type SendRecord,
   retractedPointer,
   sameComposerText,
   showsOwnPointer,
@@ -11,8 +11,8 @@ import {
   strandedPointerSend,
   strandedSend,
   showsOwnText,
-} from '../../../../daemon/delivery/lib/index.ts';
-import { at } from '../../../support/instant.ts';
+} from '../../../contract/index.ts';
+import { at } from '../../support/instant.ts';
 
 /**
  * Telling a pointer Ferretry typed itself, and never got submitted, from anything a person wrote.

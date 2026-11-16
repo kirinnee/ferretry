@@ -1,7 +1,7 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { QUEUE_STATE } from '../../../contract/index.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import { type QueueEvent, QueueEventSchema } from '../lib/model.ts';
+import { type QueueEvent, QueueEventSchema } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from '../lib/ports.ts';
 
 /**

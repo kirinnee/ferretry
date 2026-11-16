@@ -1,5 +1,6 @@
-import type { QueuedMessage, QueuedMessageState, QueueWaitReason } from '../../seams/protocol.ts';
-import type { SendFate, SendPaneObservation, SendTarget } from '../../delivery/lib/types.ts';
+import type { QueuedMessage, QueuedMessageState, QueueWaitReason } from '../wire-send.ts';
+import type { SendFate } from '../stores.ts';
+import type { SendPaneObservation, SendTarget } from '../send/types.ts';
 
 /**
  * WHEN A QUEUED MESSAGE MAY GO, and where one already handed over stands — the pure half of delivery.

@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  combinedDelivery,
-  type LogPage,
-  type LogPageOptions,
-  QueueChanged,
-  turnFileInstruction,
-} from '../../../../contract/index.ts';
+import { combinedDelivery, QueueChanged, turnFileInstruction } from '@ferretry/core-mailbox/contract';
+import { type LogPage, type LogPageOptions } from '../../../../contract/index.ts';
 import {
   ACTED_WATCH_MS,
   NUDGE_SETTLE_MS,

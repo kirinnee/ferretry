@@ -4,7 +4,7 @@ import type { Authority, ViewPlace } from '@ferretry/app';
 import { interact, type Mounted, mount, must, settleUntil, WithViewPlace } from '@ferretry/app/testing';
 import { patchFerretHypermedia, readFerretHypermedia } from '../../../../app/toolbar/hypermedia-api.ts';
 import { HypermediaPanel } from '../../../../app/toolbar/hypermedia-panel.tsx';
-import type { HypermediaState } from '../../../../contract/index.ts';
+import type { HypermediaState } from '@ferretry/core-mailbox/contract';
 import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
 import { withClient } from '../../../support/app/client.tsx';
 
