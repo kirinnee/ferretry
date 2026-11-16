@@ -27,7 +27,7 @@ describe('what keeps a finished session live', () => {
     );
     should([...kept]).deepEqual([
       ['a', 'pinned'],
-      ['b', 'on a card still in flight'],
+      ['b', 'on a task still in flight'],
       ['c', 'open agenda item'],
     ]);
   });

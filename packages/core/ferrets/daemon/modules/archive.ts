@@ -141,7 +141,7 @@ export function buildArchive(deps: ArchiveDeps): MountedArchive {
     board: async (): Promise<readonly OpenCardStanding[]> => {
       const asked = boards();
       // Nobody answers for the cards: the archive reads that as "board unreadable" and keeps every ferret.
-      if (asked.length === 0) throw new Error('no board is wired to say which ferrets are on an open card');
+      if (asked.length === 0) throw new Error('no board is wired to say which ferrets are on an open task');
       const answers = await Promise.all(
         asked.map(
           async source => await answer(deps, 'the board', ArchiveCardStandingsSchema, async () => await source.cards()),

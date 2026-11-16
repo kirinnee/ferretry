@@ -85,7 +85,8 @@ const start = (role: 'start' | 'new', { api, environment, env, readText, readByt
             : undefined;
     const title = text(invocation, 'name');
     const label = text(invocation, 'label');
-    const card = text(invocation, 'card');
+    // `--card` is the flag's former name: still read, no longer declared or listed.
+    const card = text(invocation, 'task', 'card');
     const model = text(invocation, 'model');
     const effort = text(invocation, 'effort');
     const fast = choice(invocation, 'fast');

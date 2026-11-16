@@ -49,7 +49,7 @@ export default fragment({
       options: [
         {
           flag: '--subtree',
-          help: 'one table of every live descendant (and those ended in the last 2h): model, state, card, PR and its last line',
+          help: 'one table of every live descendant (and those ended in the last 2h): model, state, task, PR and its last line',
         },
         { flag: '--json', help: 'print the session, or with --subtree its rows, as JSON' },
       ],

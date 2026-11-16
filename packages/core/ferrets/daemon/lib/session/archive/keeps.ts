@@ -44,7 +44,7 @@ export async function sessionKeeps(
     if (pinned === undefined) kept.set(id, 'pins unreadable');
     else if (pinned.set.has(id)) kept.set(id, 'pinned');
     else if (onCards === undefined) kept.set(id, 'board unreadable');
-    else if (onCards.set.has(id)) kept.set(id, 'on a card still in flight');
+    else if (onCards.set.has(id)) kept.set(id, 'on a task still in flight');
     else pending.push(id);
   }
   for (let at = 0; at < pending.length; at += AGENDA_READS_AT_ONCE) {

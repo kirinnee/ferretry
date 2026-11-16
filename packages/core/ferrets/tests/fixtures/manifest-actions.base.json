@@ -132,7 +132,7 @@
       "options": [
         {
           "flag": "--subtree",
-          "help": "one table of every live descendant (and those ended in the last 2h): model, state, card, PR and its last line"
+          "help": "one table of every live descendant (and those ended in the last 2h): model, state, task, PR and its last line"
         },
         {
           "flag": "--json",
@@ -189,8 +189,8 @@
           "help": "ownership label; filter later with `ps --label`"
         },
         {
-          "flag": "--card <id>",
-          "help": "an existing card it takes over (assigned to it; no second card is made); needs a prompt"
+          "flag": "--task <id>",
+          "help": "an existing task it takes over (assigned to it; no second task is made); needs a prompt"
         },
         {
           "flag": "--prompt-file <file>",
@@ -331,8 +331,8 @@
           "help": "ownership label; filter later with `ps --label`"
         },
         {
-          "flag": "--card <id>",
-          "help": "an existing card it takes over (assigned to it; no second card is made); needs a prompt"
+          "flag": "--task <id>",
+          "help": "an existing task it takes over (assigned to it; no second task is made); needs a prompt"
         },
         {
           "flag": "--prompt-file <file>",

@@ -1,6 +1,6 @@
 import type { SubtreeRow, SubtreeView } from '../../../contract/index.ts';
 
-const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'CARD', 'PR', 'LAST'];
+const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'TASK', 'PR', 'LAST'];
 
 /** `3m`, `2h`, `5d`: the coarsest whole unit, `now` under a minute. */
 function sinceLabel(nowMs: number, instant: string): string {
@@ -28,8 +28,10 @@ export function prCell(pr: SubtreeRow['pr']): string {
     .join(' ');
 }
 
-const cardCell = (row: SubtreeRow): string =>
-  row.card === undefined ? '-' : [row.card.ref, row.card.lane].filter(part => part !== undefined).join(' ');
+const cardCell = (row: SubtreeRow): string => {
+  const task = row.task ?? row.card; // `card` is the former key
+  return task === undefined ? '-' : [task.ref, task.lane].filter(part => part !== undefined).join(' ');
+};
 
 /** The table a lead reads: one line per descendant, a helper's own helpers indented beneath it. */
 export function renderSubtreeTable(view: SubtreeView, nowMs: number | undefined): string[] {

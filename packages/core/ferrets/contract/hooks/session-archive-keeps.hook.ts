@@ -61,6 +61,6 @@ export const ArchiveKeeps = defineHook('session.archive-keeps', {
   mode: 'contribute',
   item: z.custom<ArchiveKeepSource>(
     isArchiveKeepSource,
-    'a keep source is a board with cards() or an agenda with hasOpenItem()',
+    'a keep source is a board that lists its tasks or an agenda with hasOpenItem()',
   ),
 });
