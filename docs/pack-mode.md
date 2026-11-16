@@ -148,6 +148,8 @@ itself, 7 characters of headroom. The next rule must be paid for in words. The s
 to test; the old "Your final report says how the owner tests it" went, since the holder now writes it); it is not in
 the lead's total, and the sub-ferret prompt (2,631) stays smaller than the lead's (2,910).
 
+The owner's rule "agents should always rebase before pushing" (C58 O17, 2026-11-16) added one sentence to Tools, 1,261 → 1,516: before every push, rebase your own branch onto the latest base and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on (merge the base into those). The rest of the wording is pinned by tests, so the **whole-prompt cap went `8_000` → `8_250`** and the Tools cap 1,300 → 1,530: 8,232 measured. The `pre-push` gate that backs it is in [Linting](standards/linting/index.md#pushing-a-branch-that-is-behind-its-base).
+
 ## The routing prompt
 
 ONE setting says which model runs which kind of sub-task: `prompt` in `config/models-guide.yaml`, plain text of

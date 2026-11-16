@@ -13,6 +13,7 @@ let
   hookTypes = [
     "pre-commit"
     "commit-msg"
+    "pre-push"
   ];
   configPath = ".pre-commit-config.yaml";
 

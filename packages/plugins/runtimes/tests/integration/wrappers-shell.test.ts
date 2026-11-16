@@ -435,7 +435,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     };
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
-    // stays under 8 KB (docs/pack-mode.md records the sizes: raised from 7.4 KB for the input bridge's login rule in the tools section, from 6.7 KB for Attention's steps and
+    // stays under 8,250 (the 8 KB budget, plus the 250 the git push rule took: see below; docs/pack-mode.md records the sizes: raised from 7.4 KB for the input bridge's login rule in the tools section, from 6.7 KB for Attention's steps and
     // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
     // Board section (749, card-writing, How to test and the lane-by-category rule included, in tightened words) was paid for by naming the tools by prefix, moving map, media and chart's full spec
     // behind `fy render guide`, and compressing the lessons rule: 7,246 measured (the lane-by-category rule was paid for by tightening the Hypermedia wording), so keep 150 of headroom.
@@ -456,14 +456,16 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // F909 taught the body as the live document (`--where`=short status; rewrite the body whole with `edit --body-file`; chat points at it), paid for in part by the old body and `--where` words (agenda 1,269 → 1,289, cap 1,300): 7,829 measured, 21 under the 7,850 cap.
     // The owner's-asks-are-public-cards rule (board 631 → 757, cap 760; the whole-prompt cap 7,850 → 7,950, as the rest of the wording is pinned by tests) was paid for in part by Pack (1,046 → 1,038) and Tools (1,299 → 1,294): 7,942 measured (7,956 counting the section separators, which the cap has never counted), 8 under the 7,950 cap.
     // The owner's split-by-content-kind rule (&F946: "tabs by content kind (serial stays one)") took agenda 1,289 → 1,311 (cap 1,320), paid for in part by the open line's placeholders; the rest of the wording is pinned, so the whole-prompt cap went 7,950 → 7,970 (`8_000 - 30`, still under 8 KB): 7,964 measured.
+    // The owner's rebase-before-push rule (C58 O17, one sentence in Tools: 1,261 → 1,516) is the one rule that could not be paid for in
+    // words (everything else is pinned by tests), so the whole-prompt cap went 8,000 → 8,250 and Tools 1,300 → 1,530: 8,232 measured.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     // The owner's board, agenda and explainer rules (&C48: board 757 → 814, agenda 1,311 → 1,380, hypermedia 1,320 → 1,209)
     // were paid for in words. The cap now counts the blank line between sections, as the composed prompt has it: 7,993
     // measured, under the 8 KB itself.
     const separators = 2 * (Object.keys(sizes).length - 1);
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + separators + longestRouting).be.below(8_000);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + separators + longestRouting).be.below(8_250);
     should(sizes.pack).be.below(1_050);
-    should(sizes.tools).be.below(1_300);
+    should(sizes.tools).be.below(1_530);
     should(sizes.board).be.below(860);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);

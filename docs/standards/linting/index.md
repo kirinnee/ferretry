@@ -62,6 +62,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-test-tiers`              | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts                                                                      |
 | `a-job-ceilings`            | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                                                                                     |
 | `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                                                                                                                  |
+| `a-pre-push-fresh`          | a pushed branch contains its base's tip (`pre-push` stage; `FY_ALLOW_BEHIND_PUSH=1` pushes anyway)                                                                |
 
 The root `typecheck` project does not include `scripts/test/**`, and the E2E harness project does,
 under the same strictness plus `strict`. `task test:e2e` typechecks that project before running any
@@ -142,6 +143,32 @@ pre-commit run a-commit-msg --hook-stage commit-msg --commit-msg-filename .git/C
 
 > `pre-commit run` stashes unstaged changes for the duration of the run. Finish or stage
 > in-flight edits before running it if anything else is writing to the tree.
+
+## Pushing a branch that is behind its base
+
+Agents rebase their own branch before every push (owner, 2026-11-16). `a-pre-push-fresh` enforces it on the
+`pre-push` stage through `scripts/validate/pre-push-fresh.sh`: after a quiet `git fetch origin <base>` it refuses
+the push unless `git merge-base --is-ancestor origin/<base> <pushed sha>` holds, and says:
+
+```text
+<branch> is behind <base>: rebase onto origin/<base> first (or merge it on a shared branch). Set FY_ALLOW_BEHIND_PUSH=1 to push anyway.
+```
+
+- **Branch and commit** are the push's DESTINATION (`refs/heads/<branch>`) and the pushed sha, so `git push origin <sha>:refs/heads/<branch>` is gated like a branch push.
+- **Base** is `git config branch.<name>.ferretry-base` when set, else the branch this one was cut from (its upstream
+  while that is another branch, as after `git worktree add -b <name> origin/<base>`), else the nearest of origin's
+  long-lived branches (`origin/HEAD`'s branch, `main`, `rebuild/*`, `release/*`) read from refs already fetched: the one
+  whose fork point with the pushed commit is newest. When several are equally near the push passes if it contains
+  any of them, and when no base can be told with confidence it passes with a warning. Set `ferretry-base` to
+  be certain. No network call asks a PR's base (`gh pr view` is not used).
+- **Rebase** your own branch (`git fetch && git rebase origin/<base>`, then `git push --force-with-lease`). On a
+  release, integration or stacked branch, merge the base in instead; never rewrite those.
+- **Skipped:** tag pushes, branch deletes and a push of the base branch itself.
+- **Offline:** when the fetch fails the push is allowed, with a warning. The gate never blocks on the network.
+- **Escape:** `FY_ALLOW_BEHIND_PUSH=1 git push …`. `scripts/validate/pre-push-fresh.sh --help` prints the same.
+- Only the first branch of a multi-ref push is checked (pre-commit runs a `pre-push` hook once per push).
+
+The hook is installed by the same devshell launcher as `pre-commit` and `commit-msg` (`nix/git-hooks.nix`).
 
 ## `.pre-commit-config.yaml` is generated
 
