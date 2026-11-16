@@ -91,6 +91,12 @@ export interface MailboxApi extends MailboxQueueApi {
    * undialogued pane shows exactly it. Reads the pane and presses nothing; `undefined` when none (or the pane cannot be read).
    */
   retractedDraft?(ferret: FerretId): Promise<string | undefined>;
+  /**
+   * Additive (&F4744): one look of the delivery queue at a ferret's messages (the deliverer's own `look`): what was handed
+   * over is settled, what may go is handed over. It presses nothing the deliverer would not, and never throws: a look
+   * that fails answers nothing. The Warden's `inbox_stuck` sweep asks it before it judges a queue.
+   */
+  deliveryLook?(ferret: FerretId): Promise<void>;
 }
 
 /** What the Mailbox serves: its queue and the send path. */

@@ -4,7 +4,10 @@ import { parseSessionId } from '../../../contract/index.ts';
 import type { ObservedHumanInput } from '../../../contract/index.ts';
 import { type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
+  EntriesRetractionProof,
+  harnessEntries,
   judgeWatchedSends,
+  replyProofInEntries,
   replyProofInTail,
   type SendTranscriptTail,
   TranscriptRetractionProof,
@@ -105,6 +108,85 @@ describe('the retraction proof a send path asks', () => {
     should(await proof.unanswered(ID, delivered({ fate: 'accepted' }))).be.false();
     should(await new TranscriptRetractionProof(new Tail(undefined)).unanswered(ID, delivered())).be.false();
     should(await new TranscriptRetractionProof(new Tail(new Error('EACCES'))).unanswered(ID, delivered())).be.false();
+  });
+});
+
+describe('the same proof over the parsed entries a harness plugin reads (&F4744)', () => {
+  const REPLY = { id: 'b446a203-0000-4000-8000-000000000000', role: 'assistant' as const };
+  const rewound = { id: TAKEN_BACK, role: 'user' as const };
+  const later = { id: ANSWERED, role: 'user' as const };
+
+  it('says unanswered when the user entry is there and no assistant entry follows it', () => {
+    should(replyProofInEntries([rewound], TAKEN_BACK)).equal('unanswered');
+    should(
+      replyProofInEntries([REPLY, rewound, { id: 'x', role: 'tool' }, { id: 'y', role: 'system' }], TAKEN_BACK),
+    ).equal('unanswered');
+  });
+
+  it('says answered when any assistant entry follows it, even one for a later prompt', () => {
+    should(replyProofInEntries([rewound, REPLY], TAKEN_BACK)).equal('answered');
+    should(replyProofInEntries([rewound, later, REPLY], TAKEN_BACK)).equal('answered');
+  });
+
+  it('says unknown for a record not read, one that is not a user entry, or a key that is not a record id', () => {
+    should(replyProofInEntries([later], TAKEN_BACK)).equal('unknown');
+    should(replyProofInEntries([{ id: TAKEN_BACK, role: 'assistant' }], TAKEN_BACK)).equal('unknown');
+    should(replyProofInEntries([rewound], 'aeeeefa4')).equal('unknown');
+    should(replyProofInEntries([], TAKEN_BACK)).equal('unknown');
+  });
+
+  const delivered = (overrides: Partial<SendRecord> = {}): SendRecord => ({
+    sendId: 'turn-007',
+    acceptedAt: at('2026-11-06T08:23:30.847Z'),
+    acceptedTurn: 6,
+    path: 'turn-file',
+    message: 'turn seven',
+    turn: 7,
+    fate: 'delivered',
+    evidence: {
+      key: TAKEN_BACK,
+      harness: 'claude',
+      kind: 'chat.user',
+      proof: 'normal-user-record',
+      observedAt: at('2026-11-06T08:23:31.388Z'),
+      shapeVersion: 1,
+      matchedTurn: 7,
+      tier: 'turn-instruction',
+    },
+    ...overrides,
+  });
+
+  it('reads the entries through the harness seam of the ferret, and has none for a ferret without one', async () => {
+    const seen: string[] = [];
+    const seamed = harnessEntries({
+      harness: async id => {
+        seen.push(id);
+        return { transcript: { read: async () => [rewound, REPLY] } } as never;
+      },
+    });
+    should(await seamed.entries(ID)).eql([rewound, REPLY]);
+    should(seen).eql([ID]);
+    should(await harnessEntries({}).entries(ID)).be.undefined();
+    should(await harnessEntries({ harness: async () => undefined }).entries(ID)).be.undefined();
+  });
+
+  it('proves a Claude send settled on its own user record, and nothing else', async () => {
+    const proof = new EntriesRetractionProof({ entries: async () => [rewound] });
+    const evidence = delivered().evidence!;
+    should(await proof.unanswered(ID, delivered())).be.true();
+    should(await proof.unanswered(ID, delivered({ evidence: { ...evidence, harness: 'codex' } }))).be.false();
+    should(
+      await proof.unanswered(ID, delivered({ evidence: { ...evidence, proof: 'native-queue-drain' } })),
+    ).be.false();
+    should(await proof.unanswered(ID, delivered({ evidence: undefined }))).be.false();
+    should(await proof.unanswered(ID, delivered({ fate: 'accepted' }))).be.false();
+    should(await new EntriesRetractionProof({ entries: async () => undefined }).unanswered(ID, delivered())).be.false();
+    const broken = new EntriesRetractionProof({
+      entries: async () => {
+        throw new Error('EACCES');
+      },
+    });
+    should(await broken.unanswered(ID, delivered())).be.false();
   });
 });
 

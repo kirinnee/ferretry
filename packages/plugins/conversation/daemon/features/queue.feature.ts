@@ -87,6 +87,7 @@ export default {
       | 'composer'
       | 'resubmitStuck'
       | 'retractedDraft'
+      | 'deliveryLook'
     > = {
       send: async (ferret, caller, request) => await mailbox.send(ferret, caller, request),
       ownerWords: async (ferret, options) => {
@@ -109,6 +110,7 @@ export default {
         (await mailbox.resubmitStuck?.(ferret, caller, sendId)) ??
         err({ code: 'unavailable', message: 'the Mailbox cannot re-submit a stuck send' }),
       retractedDraft: async ferret => await mailbox.retractedDraft?.(ferret),
+      deliveryLook: async ferret => await mailbox.deliveryLook?.(ferret),
       composer: async (ferret, action, draft) => await mailbox.composer(ferret, action, draft),
     };
 
