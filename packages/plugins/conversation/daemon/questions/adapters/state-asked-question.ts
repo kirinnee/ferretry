@@ -2,7 +2,7 @@ import { type Instant, InstantSchema } from '@ferretry/std';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { type Question, QUESTION_STATE } from '../../../contract/index.ts';
 import { type AskedQuestion, parseAskedQuestion } from '../lib/asked.ts';
-import type { PendingQuestion } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
 
 /**
  * The one lane every change to a ferret's `question.json` runs in, keyed by the ferret: the writer, the exact-id clear

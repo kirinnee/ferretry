@@ -5,7 +5,7 @@
  * the composer keeps the person's text and offers the three things that finish the job.
  */
 
-import { unconfirmedSendId } from '../../contract/index.ts';
+import { unconfirmedSendId } from '@ferretry/core-mailbox/contract';
 import { DaemonCallError } from './seam.ts';
 
 /** The send a `send_unconfirmed` answer names, or `undefined` for any other failure. */

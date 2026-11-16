@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { ferretActor } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import { COMPOSER_OCCUPIED_CODE, SEND_UNCONFIRMED_CODE } from '../../../../daemon/seams/protocol.ts';
+import { COMPOSER_OCCUPIED_CODE, SEND_UNCONFIRMED_CODE } from '@ferretry/core-mailbox/contract';
 import {
   type SentDraftClearer,
   SessionSendError,

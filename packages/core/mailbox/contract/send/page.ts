@@ -1,4 +1,4 @@
-import type { SendRecord as SendRecordView } from '../../seams/protocol.ts';
+import type { SendRecord as SendRecordView } from '../wire-send.ts';
 
 /**
  * ONE PAGE OF A SESSION'S SENDS, newest first.
@@ -38,7 +38,7 @@ const FINAL_FATES: ReadonlySet<string> = new Set(['delivered', 'cancelled']);
  * A send whose row a reader must still see wherever it is in the ledger: one in flight or uncertain
  * (accepted, queued, unaccounted, timed out) and one held for a revive. A withdrawn send was never typed.
  */
-export const isOpenSend = (send: SendRecordView): boolean =>
+export const isOpenSendRow = (send: SendRecordView): boolean =>
   send.withdrawn !== true && (send.held === true || !FINAL_FATES.has(send.fate));
 
 /** How a log's entries are told apart, ordered and judged open: the three facts a window needs. */
@@ -85,7 +85,7 @@ export const windowPage = <T>(all: readonly T[], query: SendPageQuery, keys: Win
 const SEND_KEYS: WindowKeys<SendRecordView> = {
   id: send => send.sendId,
   at: send => send.acceptedAt,
-  open: isOpenSend,
+  open: isOpenSendRow,
 };
 
 /**

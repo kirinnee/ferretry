@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
+import { parseSessionId } from '../../../contract/index.ts';
 import {
   authorizeSend,
   defaultSessionSendSettings,
@@ -22,7 +22,7 @@ import {
   SendUnavailable,
   sendPayload,
   turnInstruction,
-} from '../../../../daemon/delivery/lib/index.ts';
+} from '../../../contract/index.ts';
 
 /**
  * The decisions a send makes before it touches anything.

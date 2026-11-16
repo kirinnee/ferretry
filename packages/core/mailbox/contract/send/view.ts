@@ -1,13 +1,9 @@
-import type { SendRecord as SendRecordView } from '../../seams/protocol.ts';
-import type { ObservedHumanInput, TranscriptWindow } from '../../seams/transcript-types.ts';
-import { foldSendEvidenceBatch, type SendEvidenceWatch } from '../../seams/send-evidence.ts';
-import {
-  drainTranscriptWindow,
-  type SessionTranscriptReader,
-  type TranscriptTarget,
-} from '../../seams/transcript-reader.ts';
-import type { SendEvidenceReading, SendEvidenceSource } from './tracker.ts';
-import type { SendRecord } from './types.ts';
+import type { SendRecord as SendRecordView } from '../wire-send.ts';
+import type { ObservedHumanInput, TranscriptWindow } from '../transcript.ts';
+import { foldSendEvidenceBatch, type SendEvidenceWatch } from './send-evidence.ts';
+import { drainTranscriptWindow, type SessionTranscriptReader, type TranscriptTarget } from './transcript-reader.ts';
+import type { SendEvidenceReading, SendEvidenceSource } from './send-evidence.ts';
+import type { SendRecord } from '../stores.ts';
 
 /**
  * A ledger record as the wire carries it.

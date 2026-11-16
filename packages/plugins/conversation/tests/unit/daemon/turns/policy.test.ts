@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { HarnessDialog, PermissionRequest } from '../../../../daemon/seams/protocol.ts';
+import type { HarnessDialog, PermissionRequest } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import {
   isTurnStatus,

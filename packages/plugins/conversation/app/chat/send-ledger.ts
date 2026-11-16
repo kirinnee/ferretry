@@ -29,7 +29,7 @@ import type {
   SendPath,
   SenderKind,
   SendUnaccountedReason,
-} from '../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 import type { OutboxView, QueueView } from '../queue/send-queue.ts';
 
 /** What cancelling did to the agent's screen. */

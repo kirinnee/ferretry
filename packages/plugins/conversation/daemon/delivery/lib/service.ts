@@ -4,7 +4,7 @@ import {
   type QueueAuthor,
   type SendCancelEffect,
   type SendDisposition,
-} from '../../seams/protocol.ts';
+} from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import {
@@ -21,8 +21,8 @@ import {
   sendPayload,
   turnInstruction,
   typedIntoBusyPane,
-} from './policy.ts';
-import type { SessionSendSettings } from './settings.ts';
+} from '@ferretry/core-mailbox/contract';
+import type { SessionSendSettings } from '@ferretry/core-mailbox/contract';
 import {
   retractedPointer,
   sameComposerText,
@@ -30,9 +30,10 @@ import {
   strandablePointer,
   strandableText,
   strandedSend,
-} from './stranded.ts';
-import type { SendRetractionProof } from './retraction.ts';
-import { isOpenSend } from './tracking.ts';
+} from '@ferretry/core-mailbox/contract';
+import type { SendRetractionProof } from '@ferretry/core-mailbox/contract';
+import { isOpenSend } from '@ferretry/core-mailbox/contract';
+import { type SendPath, type SendRecord } from '../../seams/ledger-types.ts';
 import {
   type ComposerDraftAction,
   type ComposerDraftOutcome,
@@ -53,10 +54,8 @@ import {
   type SendNotReadyCause,
   SendPaneNotReady,
   type SendPaneObservation,
-  type SendPath,
   SendPending,
   type SendQueueOutcome,
-  type SendRecord,
   SendRefused,
   type SendRepository,
   SendRetypeWithheld,
@@ -68,7 +67,7 @@ import {
   type SendTracking,
   type SendTurnStore,
   SendUnconfirmed,
-} from './types.ts';
+} from '@ferretry/core-mailbox/contract';
 
 export interface SessionSendPorts {
   readonly repository: SendRepository;

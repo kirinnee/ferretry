@@ -1,11 +1,11 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage } from '../../../contract/index.ts';
 import should from 'should';
-import { boardOnly, deliveryOrder, effectiveLabel, planDelivery } from '../../../../daemon/queue/lib/policy.ts';
-import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '../../../../daemon/queue/lib/settings.ts';
-import { type SendTarget } from '../../../../daemon/delivery/lib/types.ts';
-import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
+import { boardOnly, deliveryOrder, effectiveLabel, planDelivery } from '../../../contract/index.ts';
+import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '../../../contract/index.ts';
+import { type SendTarget } from '../../../contract/index.ts';
+import { parseSessionId } from '../../../contract/index.ts';
 
 const at = (seconds: number): Instant =>
   new Date(Date.UTC(2026, 9, 30, 13, 0, seconds)).toISOString() as Instant as Instant;

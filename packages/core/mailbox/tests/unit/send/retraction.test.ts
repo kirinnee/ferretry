@@ -1,15 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
-import type { ObservedHumanInput } from '../../../../daemon/seams/transcript-types.ts';
+import { parseSessionId } from '../../../contract/index.ts';
+import type { ObservedHumanInput } from '../../../contract/index.ts';
+import { type LedgerRecord as SendRecord } from '../../../contract/index.ts';
 import {
   judgeWatchedSends,
   replyProofInTail,
-  type SendRecord,
   type SendTranscriptTail,
   TranscriptRetractionProof,
-} from '../../../../daemon/delivery/lib/index.ts';
-import { at } from '../../../support/instant.ts';
+} from '../../../contract/index.ts';
+import { at } from '../../support/instant.ts';
 
 /**
  * &B153: telling a pointer the harness took back from one a person recalled, from the transcript alone. The

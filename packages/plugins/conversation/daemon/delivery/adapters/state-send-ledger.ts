@@ -3,7 +3,8 @@ import { SENDS_STATE } from '../../../contract/index.ts';
 import { deepFreezeJson, type JsonValue } from '../../seams/json.ts';
 import type { ClockPort } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { SendLedger, SendRecord, SendSettlement } from '../lib/types.ts';
+import type { SendRecord } from '../../seams/ledger-types.ts';
+import type { SendLedger, SendSettlement } from '@ferretry/core-mailbox/contract';
 
 /**
  * The durable send ledger, as an append-only log in the ferret's own state file.

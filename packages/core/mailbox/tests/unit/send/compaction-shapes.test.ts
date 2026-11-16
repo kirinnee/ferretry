@@ -5,9 +5,9 @@ import {
   COMPACTION_SHAPES,
   COMPACTION_TEXTS,
   NOT_COMPACTION_LINES,
-} from '../../../../../../std/tests/support/compaction-shapes.ts';
-import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
-import { routeSend, type SendPaneObservation, type SendTarget } from '../../../../daemon/delivery/lib/index.ts';
+} from '../../../../../std/tests/support/compaction-shapes.ts';
+import { parseSessionId } from '../../../contract/index.ts';
+import { routeSend, type SendPaneObservation, type SendTarget } from '../../../contract/index.ts';
 
 /**
  * &B188: the shared table of every Claude compaction status shape (`@ferretry/std`'s `tests/support/compaction-shapes.ts`),

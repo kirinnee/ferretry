@@ -29,7 +29,7 @@
  * the turn-prompt path, which reads the protocol's own pointer format.
  */
 
-import { parseHandoffPointer } from '../../contract/index.ts';
+import { parseHandoffPointer } from '@ferretry/core-mailbox/contract';
 
 /** Chip tone derived from a notification status or an interrupt notice. */
 export type SystemBlockTone = 'ok' | 'warn' | 'err';

@@ -3,15 +3,14 @@ import {
   type PeerMessageKind,
   type PeerMessageLabel,
   peerEnvelopePreamble,
-  queuedMessageInstruction,
-  turnFileInstruction,
-} from '../../seams/protocol.ts';
-import { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '../../questions/lib/answer-ledger.ts';
+} from '../peer-messages.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '../turn-handoff.ts';
+import { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '../answer-release.ts';
 import type { SessionSendSettings } from './settings.ts';
+import { type SendRecord } from '../stores.ts';
 import {
   IDLE_SEND_STATUSES,
   type SendPaneObservation,
-  type SendRecord,
   SendRefused,
   type SendTarget,
   SendUnavailable,
