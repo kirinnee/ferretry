@@ -200,6 +200,24 @@ function lastRecordEnd(bytes: Uint8Array): number {
   return at < 0 ? 0 : at + 1;
 }
 
+/**
+ * Where the records of `bytes` that are COMPLETE end, which is where the next read starts. A record is complete at its
+ * newline — or, for the last one a writer has not yet terminated, as soon as it is a whole JSON object (an object that
+ * parses was fully written; the newline that follows is a blank line). Counting such a record and then starting the next read
+ * before it would read it again and count it twice. A half-written record stays out until the rest of it arrives.
+ */
+function completeRecordsEnd(bytes: Uint8Array): number {
+  const terminated = lastRecordEnd(bytes);
+  const rest = decode(bytes.subarray(terminated)).trim();
+  if (!rest.startsWith('{')) return terminated;
+  try {
+    JSON.parse(rest);
+    return bytes.length;
+  } catch {
+    return terminated;
+  }
+}
+
 /** The last instant of `events`, and the model they last name. */
 function activity(events: readonly TranscriptEvent[]): { first?: number; last?: number; model?: string } {
   let first: number | undefined;
@@ -279,15 +297,6 @@ export class ConversationIndex {
   /** Whether a full build has completed at least once, here or in an earlier run: a listing waits for none before that. */
   get built(): boolean {
     return this.#open().query<{ v: string }>("SELECT v FROM meta WHERE k = 'built'")[0]?.v === '1';
-  }
-
-  /** Whether an update is running now. */
-  get refreshing(): boolean {
-    return this.#running !== undefined;
-  }
-
-  get rowCount(): number {
-    return this.#open().query<{ n: number }>('SELECT count(*) AS n FROM conv')[0]?.n ?? 0;
   }
 
   #write(rows: readonly RowInput[]): void {
@@ -400,6 +409,10 @@ export class ConversationIndex {
       }
     }
 
+    // Codex's thread names first, so a row described below already carries its name — and so the row a delta is folded into
+    // (`Work.old`, read next) already holds today's name instead of reverting it.
+    for (const source of sources) await this.#codexNames(source);
+
     const work: Work[] = [];
     // Every tree is walked at once: the walk waits on the disk, and each tree is a different part of it.
     const walked = await Promise.all(sources.map(async source => ({ source, listed: await this.#walk(source) })));
@@ -440,9 +453,6 @@ export class ConversationIndex {
           ]);
         }
     }
-    // Codex's thread names first, so a row described below already carries its name.
-    for (const source of sources) await this.#codexNames(source);
-
     // Newest first, so a listing during a cold build shows the conversations people are most likely to want.
     work.sort((a, b) => b.found.mtimeMs - a.found.mtimeMs);
     await this.#run(work);
@@ -567,7 +577,7 @@ export class ConversationIndex {
       head_sha: used.headSha,
       ferret_id: old?.ferret_id ?? null,
       ferret_name: old?.ferret_name ?? null,
-      index_title: this.#indexTitle(source, found.nameId),
+      index_title: this.#indexTitle(source, result?.row.id ?? found.nameId),
     };
     if (result === undefined)
       // Describes no conversation (no message the owner said, or no folder): remembered so an unchanged file is not read again,
@@ -623,7 +633,7 @@ export class ConversationIndex {
         headText: undefined,
         tailText: undefined,
         partial: false,
-        scanned: lastRecordEnd(bytes),
+        scanned: completeRecordsEnd(bytes),
         headSha: sha(bytes.subarray(0, Math.min(HASH_BYTES, bytes.length))),
       };
     }
@@ -644,7 +654,7 @@ export class ConversationIndex {
       headText: headCut,
       tailText: tailCut,
       partial: true,
-      scanned: tailStart + lastRecordEnd(tail),
+      scanned: tailStart + completeRecordsEnd(tail),
       headSha: sha(head.subarray(0, Math.min(HASH_BYTES, head.length))),
     };
   }
@@ -695,7 +705,7 @@ export class ConversationIndex {
     if (head === undefined || sha(head) !== old.head_sha) return undefined;
     const bytes = await source.files.read(found.path, old.scanned, found.size - old.scanned);
     if (bytes === undefined) return undefined;
-    const complete = lastRecordEnd(bytes);
+    const complete = completeRecordsEnd(bytes);
     const text = decode(bytes.subarray(0, complete));
     // A rename (or a new generated title) changes the name, and the name's wrapper rule needs the whole conversation: re-read.
     const names = transcriptNames(source.parser, text);
@@ -855,8 +865,10 @@ export class ConversationIndex {
     }
     const winner = `NOT EXISTS (SELECT 1 FROM conv d WHERE d.harness = c.harness AND d.id = c.id AND d.ok = 1 AND d.rowid <> c.rowid${kindClause('d')}
       AND (d.last_at > c.last_at OR (d.last_at = c.last_at AND d.rowid < c.rowid)))`;
-    // Across every kind the newest copy is a settled flag; among some kinds only, it is compared in the query.
-    const filter = `FROM conv c WHERE ${where.join(' AND ')} AND ${kinds.length === 0 ? 'c.win = 1' : winner}`;
+    // Across every kind the newest copy is a settled flag — unless rows were written since it was settled (a build or a
+    // refresh in progress: a row just written has not been compared with its copies yet), when it is compared in the query
+    // like among some kinds only.
+    const filter = `FROM conv c WHERE ${where.join(' AND ')} AND ${kinds.length === 0 && !this.#changed ? 'c.win = 1' : winner}`;
     const filterParams = [...params, ...kinds];
     const matched = db.query<{ n: number }>(`SELECT count(*) AS n ${filter}`, filterParams)[0]?.n ?? 0;
     const limit = query.limit === undefined ? -1 : query.limit;

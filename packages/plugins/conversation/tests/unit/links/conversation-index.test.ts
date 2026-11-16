@@ -227,6 +227,86 @@ describe('the conversation index updater', () => {
   });
 });
 
+describe('big and awkward files', () => {
+  const filler = (bytes: number) =>
+    Array.from(
+      { length: Math.ceil(bytes / 1000) },
+      () => claudeRecord('assistant', 'w'.repeat(900), '2026-02-01T09:00:00.000Z') + '\n',
+    ).join('');
+
+  test('a tail with nothing the owner said is widened until it holds the latest message', async () => {
+    const { index, owner } = setup();
+    owner.set(
+      pathOf(A),
+      talk('the first request', '2026-02-01T09:00:00.000Z') +
+        filler(300_000) +
+        talk('a message deep in the middle', '2026-02-02T09:00:00.000Z') +
+        filler(300_000),
+    );
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({
+      preview: 'the first request',
+      latest: 'a message deep in the middle',
+    });
+  });
+
+  test('a first record too large for the head is found by one wider look at the beginning', async () => {
+    const { index, owner } = setup();
+    owner.set(
+      pathOf(A),
+      `${claudeRecord('user', `${'q'.repeat(400_000)}`, '2026-02-01T09:00:00.000Z')}\n${filler(300_000)}`,
+    );
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ id: A, turns: 1 });
+    expect(index.query().conversations[0]?.row.preview.startsWith('qqqq')).toBe(true);
+  });
+
+  test('a failing source list, or a transcript that cannot be parsed, is said once and never breaks the update', async () => {
+    const warnings: string[] = [];
+    const owner = new MemoryHistory();
+    owner.set(pathOf(A), talk('hello there', '2026-02-01T09:00:00.000Z'));
+    const source: IndexSource = {
+      harness: 'claude-code',
+      parser: 'claude',
+      kind: 'computer',
+      label: 'owner',
+      files: owner,
+    };
+    const broken = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => Promise.reject(new Error('no sources')),
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+      warn: message => void warnings.push(message),
+    });
+    await broken.refresh();
+    expect(warnings).toEqual(['The conversation index could not be updated: no sources']);
+    const unparsable = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => [source],
+      ferretNames: async () => new Map(),
+      parsers: { ...PARSERS, claude: { parse: async () => Promise.reject(new Error('bad parse')) } },
+      nowMs: () => 0,
+      warn: message => void warnings.push(message),
+    });
+    await unparsable.refresh();
+    expect(warnings.at(-1)).toBe('A transcript could not be indexed: bad parse');
+    expect(unparsable.query().matched).toBe(0);
+  });
+
+  test('a listing can be narrowed to one harness, and a listed conversation names the tree its file is in', async () => {
+    const { index, owner } = setup();
+    owner.set(pathOf(A), talk('hello there', '2026-02-01T09:00:00.000Z'));
+    await index.refresh();
+    expect(index.query({ harness: 'claude-code' }).matched).toBe(1);
+    expect(index.query({ harness: 'codex' }).matched).toBe(0);
+    const found = index.get('claude-code', A);
+    expect(found && index.sourceOf(found)?.label).toBe('owner');
+    expect(index.sourceOf({ harness: 'codex', kind: 'computer', label: 'owner' })).toBeUndefined();
+  });
+});
+
 describe('a conversation whose every message is a hand-off pointer (a ferret’s)', () => {
   const pointer = (n: number) =>
     `Read the file /home/x/.ferretry/state/ferrets/sessions/scout/turns/turn-00${n}.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
@@ -348,5 +428,126 @@ describe('when a listing waits', () => {
     tick(4000);
     await index.ready();
     expect(index.query().matched).toBe(2);
+  });
+});
+
+describe('review round 1: records, names and duplicates while the index is written', () => {
+  const AT = '2026-02-01T09:00:00.000Z';
+  const rollout = (id: string) => `sessions/2026/10/10/rollout-2026-10-10T09-00-00-${id}.jsonl`;
+  const codexSetup = () => {
+    const sqlite = memorySqlite();
+    const home = new MemoryHistory();
+    const index = new ConversationIndex({
+      sqlite: () => sqlite,
+      sources: async () => [{ harness: 'codex', parser: 'codex', kind: 'computer', label: 'owner', files: home }],
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+    });
+    return { index, home };
+  };
+  const codexMessage = (text: string) =>
+    `${JSON.stringify({
+      type: 'response_item',
+      timestamp: AT,
+      payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] },
+    })}\n`;
+
+  test('a last record whose newline has not been written yet is counted once, when its newline and the next record arrive', async () => {
+    const { index, owner } = setup();
+    owner.set(pathOf(A), `${claudeRecord('user', 'first', AT)}\n${claudeRecord('user', 'second', AT)}`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.turns).toBe(2);
+    owner.append(pathOf(A), `\n${claudeRecord('user', 'third', AT)}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ turns: 3, latest: 'third' });
+  });
+
+  test('a half-written last record is left out until the rest of it arrives, then counted once', async () => {
+    const { index, owner } = setup();
+    const second = claudeRecord('user', 'second', AT);
+    owner.set(pathOf(A), `${claudeRecord('user', 'first', AT)}\n${second.slice(0, 30)}`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row.turns).toBe(1);
+    owner.append(pathOf(A), `${second.slice(30)}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ turns: 2, latest: 'second' });
+  });
+
+  test('an unterminated last record of a large file (read from its two ends) is counted once too', async () => {
+    const { index, owner } = setup();
+    const big = claudeRecord('assistant', 'x'.repeat(2 * 1024 * 1024), AT);
+    owner.set(
+      pathOf(A),
+      `${claudeRecord('user', 'first', AT)}\n${big}\n${big}\n${big}\n${claudeRecord('user', 'second', AT)}`,
+    );
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ turnsAtLeast: true, latest: 'second' });
+    const before = index.query().conversations[0]?.row.turns ?? 0;
+    owner.append(pathOf(A), `\n${claudeRecord('user', 'third', AT)}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ turns: before + 1, latest: 'third' });
+  });
+
+  test('a Codex thread renamed in the same refresh its rollout grew keeps the new name', async () => {
+    const { index, home } = codexSetup();
+    home.set(rollout(CODEX), codexRollout(CODEX, '/work/app', 'first'));
+    home.set('session_index.jsonl', `${JSON.stringify({ id: CODEX, thread_name: 'Old name' })}\n`);
+    await index.refresh();
+    home.append(rollout(CODEX), codexMessage('second'));
+    home.set('session_index.jsonl', `${JSON.stringify({ id: CODEX, thread_name: 'New name' })}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ title: 'New name', turns: 2, latest: 'second' });
+    await index.refresh();
+    expect(index.query({ words: ['new', 'name'] }).matched).toBe(1);
+    expect(index.query({ words: ['old', 'name'] }).matched).toBe(0);
+  });
+
+  test('a Codex session name is looked up by the id the rollout records, not the one its file name carries', async () => {
+    const { index, home } = codexSetup();
+    home.set(rollout(CODEX), codexRollout(B, '/work/app', 'first'));
+    home.set('session_index.jsonl', `${JSON.stringify({ id: B, thread_name: 'Actual title' })}\n`);
+    await index.refresh();
+    expect(index.query().conversations[0]?.row).toMatchObject({ id: B, title: 'Actual title' });
+  });
+
+  test('a listing during a refresh does not show a conversation twice because its other copy is already indexed', async () => {
+    const sqlite = memorySqlite();
+    const owner = new MemoryHistory();
+    const ferret = new MemoryHistory();
+    const ids = Array.from({ length: 32 }, (_, i) => `3b1a4a52-0000-4000-8000-${String(i).padStart(12, '0')}`);
+    for (const id of ids)
+      for (const home of [owner, ferret]) home.set(pathOf(id), `${claudeRecord('user', 'first', AT)}\n`);
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => (release = resolve));
+    let reached!: () => void;
+    const paused = new Promise<void>(resolve => (reached = resolve));
+    let held = false;
+    const index = new ConversationIndex({
+      sqlite: () => sqlite,
+      sources: async () => [
+        { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: owner },
+        { harness: 'claude-code', parser: 'claude', kind: 'ferret-home', label: 'scout', files: ferret },
+      ],
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+      yieldToLoop: async () => {
+        const rows = sqlite.query<{ n: number }>('SELECT count(*) AS n FROM conv')[0]?.n ?? 0;
+        if (!held && rows >= 64) {
+          held = true;
+          reached();
+          await gate;
+        }
+      },
+    });
+    const run = index.refresh();
+    await paused;
+    const during = index.query();
+    release();
+    await run;
+    expect(during.matched).toBe(32);
+    expect(during.conversations).toHaveLength(32);
+    expect(index.query().matched).toBe(32);
   });
 });
