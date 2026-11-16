@@ -296,7 +296,9 @@ no flag was found that turns Plan mode's off. The Runtimes wrapper has no opt-in
 never enables Codex's (declared GAP; the setting governs the harness launch). The pane is also handed
 `FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part. The setting and a
 ferret's mode are outside the recorded launch's fixed-layer fingerprint, so changing either cannot make a running
-ferret read as outdated; it takes effect at the ferret's next launch.
+ferret read as outdated; it takes effect at the ferret's next launch. The Claude `dangerousRmWaiver` setting is the
+exception: its EFFECT (the setting on AND bypass mode) is in the `fixed-layer` fingerprint, so turning it off leaves a
+ferret launched with it on **Restart needed**. A record from before this reads as off, so no earlier ferret is flagged.
 
 ## Claude's questions reach the app through a hook
 
