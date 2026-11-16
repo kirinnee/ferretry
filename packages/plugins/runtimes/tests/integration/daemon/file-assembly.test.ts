@@ -3,13 +3,13 @@
  * change that lands configuration documents ALL OR NONE before the fleet, and what is still unavailable and says so.
  */
 import { afterEach, describe, expect, it } from 'bun:test';
-import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { FleetCatalogServiceDeps } from '../../../daemon/lib/service/catalog-service.ts';
 import { configThenFleet, fileFleetCatalogDeps } from '../../../daemon/adapters/account-model-files.ts';
 import { readTextFolder } from '../../../daemon/adapters/setup-files.ts';
-import { fileAssembly, fleetHost } from '../../../daemon/host-assembly.ts';
+import { fileAssembly, fleetHost, hostClaudeAccountText } from '../../../daemon/host-assembly.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { ConfigWriteInvalid } from '../../../daemon/lib/service/ports.ts';
 import { FleetApplyAfterConfigError, type FleetApplyPlan } from '../../../daemon/lib/provisioning.ts';
@@ -49,6 +49,26 @@ describe('the host the file adapters stand on', () => {
     await expect(host.files.readText(join(world.home, 'machine.yaml'))).rejects.toThrow(
       /outside the folders Runtimes may read/u,
     );
+  });
+});
+
+describe('the person’s own Claude account file, read through the same host mount', () => {
+  it('gives the text of ~/.claude.json, and nothing for a missing file, a link or one larger than an account file', async () => {
+    const world = await fleetWorld();
+    const read = hostClaudeAccountText(kernelOver(world).kernel);
+    expect(await read()).toBeUndefined();
+
+    await writeFile(join(world.person, '.claude.json'), '{"oauthAccount":{"organizationType":"claude_max"}}');
+    expect(await read()).toBe('{"oauthAccount":{"organizationType":"claude_max"}}');
+
+    await rm(join(world.person, '.claude.json'));
+    await writeFile(join(world.person, 'elsewhere.json'), '{"oauthAccount":{"organizationType":"claude_max"}}');
+    await symlink(join(world.person, 'elsewhere.json'), join(world.person, '.claude.json'));
+    expect(await read()).toBeUndefined();
+
+    await rm(join(world.person, '.claude.json'));
+    await writeFile(join(world.person, '.claude.json'), `{"pad":"${'x'.repeat(2 * 1024 * 1024)}"}`);
+    expect(await read()).toBeUndefined();
   });
 });
 

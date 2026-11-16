@@ -1,3 +1,4 @@
+import { isFerretryChannelOrigin, unwrapFerretryChannel } from './channel.ts';
 import { parseTranscriptJsonl } from './jsonl.ts';
 import { ClaudeObservedInputObserver } from './observed-input.ts';
 import type {
@@ -113,6 +114,11 @@ function harnessWritten(record: Record<string, unknown>): boolean {
  */
 function synthetic(message: Record<string, unknown>): boolean {
   return message.model === '<synthetic>';
+}
+
+/** A channel message's own words when it came through Ferretry's channel; any other text as it is. */
+function unwrapped(text: string | undefined, channelled: boolean): string | undefined {
+  return channelled && text !== undefined ? (unwrapFerretryChannel(text) ?? text) : text;
 }
 
 function isClaudeAttachmentType(type: string): boolean {
@@ -237,7 +243,14 @@ export class ClaudeTranscriptParser implements TranscriptParser {
     if (recordType === 'attachment') {
       const attachment = transcriptObject(record.attachment);
       const origin = transcriptObject(attachment?.origin);
-      if (attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' && origin?.kind === 'human') {
+      // A message through Ferretry's own channel is a person's words in all but the wrapper (see channel.ts): it draws as
+      // the typed message it carries.
+      const channelled = isFerretryChannelOrigin(origin);
+      if (
+        attachment?.type === 'queued_command' &&
+        attachment.commandMode === 'prompt' &&
+        (origin?.kind === 'human' || channelled)
+      ) {
         // A prompt queued while Claude was busy is a string, or (seen on 2.1.281) content blocks: its text, and a
         // pasted image among them. This record is its only place in the chat once the request snapshots that
         // repeat it are dropped (&B157), so both shapes draw: the words as one message, each picture after them.
@@ -246,12 +259,14 @@ export class ClaudeTranscriptParser implements TranscriptParser {
         const words = parts
           .map((part, blockIndex) => ({
             blockIndex,
-            text:
+            text: unwrapped(
               typeof part === 'string'
                 ? part
                 : transcriptObject(part)?.type === 'text'
                   ? transcriptString(transcriptObject(part)?.text)
                   : undefined,
+              channelled,
+            ),
           }))
           .filter((part): part is { blockIndex: number; text: string } => (part.text?.trim().length ?? 0) > 0);
         // The words sit at their first block, so a picture pasted BEFORE them keeps a point of its own.
@@ -325,8 +340,11 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const content = message.content ?? record.content;
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
+    // Ferretry's own channel: written by the harness (`isMeta`) but carrying another ferret's or the daemon's words, which
+    // are a message in the chat like a typed one, not the harness's own record.
+    const channelled = role === 'user' && isFerretryChannelOrigin(record.origin);
     const harnessSource =
-      (role === 'user' && harnessWritten(record)) || (role === 'assistant' && synthetic(message))
+      (role === 'user' && !channelled && harnessWritten(record)) || (role === 'assistant' && synthetic(message))
         ? ({ inputSource: 'harness' } as const)
         : {};
     // Claude marks a compaction's summary on the raw record. Every block it splits into carries the marker, so
@@ -339,7 +357,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);
       if (typeof value === 'string') {
-        events.push({ ...blockMetadata, ...source, kind: 'message', text: value });
+        events.push({ ...blockMetadata, ...source, kind: 'message', text: unwrapped(value, channelled) ?? value });
         continue;
       }
 
@@ -359,7 +377,12 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       }
 
       if (blockType === 'text' && typeof block.text === 'string') {
-        events.push({ ...blockMetadata, ...source, kind: 'message', text: block.text });
+        events.push({
+          ...blockMetadata,
+          ...source,
+          kind: 'message',
+          text: unwrapped(block.text, channelled) ?? block.text,
+        });
         continue;
       }
       if (blockType === 'thinking' && role === 'assistant' && typeof block.thinking === 'string') {

@@ -37,6 +37,7 @@ const DISPOSITIONS: Readonly<Record<SendPath, SendDisposition>> = {
   'native-file': 'queued',
   revive: 'revived',
   'revive-queue': 'queued-for-revive',
+  channel: 'delivered',
 };
 
 /**

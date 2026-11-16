@@ -298,6 +298,8 @@ function slimEntry(model: Model): string {
     `  version: ${JSON.stringify(version)},`,
     `  load: async () => (await import('${file(SLIM_SERVE.plugin, SLIM_SERVE.serve)}')).serveTools,`,
     `  instructions: async () => (await import('${file(SLIM_SERVE.instructionsPlugin, SLIM_SERVE.instructions)}')).TOOLS_SERVER_INSTRUCTIONS,`,
+    // The variable the Claude launch sets only when it passes the channel flag (Runtimes owns the name).
+    `  channelEnv: async () => (await import('${file(SLIM_SERVE.instructionsPlugin, SLIM_SERVE.instructions)}')).CHANNEL_LAUNCH_ENV,`,
     '};',
     '',
   ].join('\n');

@@ -4,7 +4,8 @@ import type { DaemonContext } from '@ferretry/kernel/manifest';
 import { FERRET_SESSIONS_ROOT } from '../contract/index.ts';
 import type manifest from '../manifest.ts';
 import type { DaemonStorage } from './adapters/storage/session-storage.ts';
-import type { ProcessHostFacts } from './adapters/moves/process-inventory.ts';
+import { KernelProcessProbe, PaneProcessInventory, type ProcessHostFacts } from './adapters/moves/process-inventory.ts';
+import { MovePreflight } from './lib/moves/preflight-service.ts';
 import type { MovesDeps } from './moves.ts';
 import type { SessionMoveNeeds } from './modules/session-move.ts';
 import type { SessionForkNeeds } from './modules/session-fork.ts';
@@ -58,6 +59,14 @@ function unboundFn<T extends (...args: never[]) => unknown>(what: string): T {
 }
 
 /** What `index.ts` hands over: the one storage the moves share, opened over the kernel's state port. */
+/** What Ferrets binds of the MOVE's own needs (the rest stay fail-closed skeletons; see the GAP list above). */
+type MoveOwn = Partial<
+  Pick<
+    SessionMoveNeeds,
+    'sessions' | 'preflight' | 'pane' | 'restart' | 'paneIdentity' | 'transcripts' | 'accountResolver'
+  >
+>;
+
 export interface MovesOwn {
   readonly storage: DaemonStorage;
   /** The binary name a person drives, which an account resolution is typed with. */
@@ -70,6 +79,8 @@ export interface MovesOwn {
   readonly environment?: SessionForkNeeds['environment'];
   /** One lifecycle for one session on its own folder; unbound, a fork refuses before it writes. */
   readonly createLifecycle?: SessionForkNeeds['createLifecycle'];
+  /** What a Restart (a move onto the runtime the ferret is already on) is built from; unbound, it answers 503 before it writes. */
+  readonly move?: MoveOwn;
 }
 
 export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): MovesDeps {
@@ -145,7 +156,16 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       sessions: unbound('The session directory'),
       resume: own.resume ?? unbound('Resuming a ferret'),
       launch: own.launch ?? unbound('Launching a ferret'),
-      preflight: unbound('The move preflight'),
+      // The gate: the pane's process tree below the root its runner names, over the kernel's own host facts. The project's
+      // configured servers are not read (no cwd read yet), so a server it cannot explain stays unclassified, never assumed.
+      preflight: new MovePreflight(
+        new PaneProcessInventory(new KernelProcessProbe(kernel.spawn, host, kernel.clock), {
+          binaryName: own.clientName,
+          toolsServerArguments: ['mcp', 'serve'],
+          statuslineSubcommand: 'statusline',
+          servers: { read: async () => [] },
+        }),
+      ),
       askAgent: unboundFn('Queueing a message'),
       planner: unbound('The session planner'),
       sessionDirectory,
@@ -165,7 +185,11 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       persistedReasoningEffort: unboundFn('The persisted reasoning effort'),
       contextWindowForSession: unboundFn('The context window'),
       signals: unbound('Signalling a process'),
+      pane: unboundFn('The ferret pane'),
+      restart: unbound('Restarting a ferret'),
       clientName: own.clientName,
+      // Last, so what Ferrets binds replaces the fail-closed skeleton above it.
+      ...own.move,
     },
   };
 }
