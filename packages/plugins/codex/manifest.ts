@@ -164,6 +164,7 @@ export default definePlugin({
       'realpath',
       'readlink',
       'printenv',
+      'env',
       'uname',
     ],
     secrets: [],

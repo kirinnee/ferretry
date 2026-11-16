@@ -1776,12 +1776,32 @@ export class FerretsService implements FerretsApi {
         throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
       return harness.transcript;
     };
+    /**
+     * The harness's own protocol, tried BEFORE any look or key (codex-protocol-send): a harness that can be handed a
+     * message types nothing and reads no screen, so an unreadable frame cannot stall the send. Not wrapped in an act: it
+     * types nothing (the act deadlock the notes above describe is about keys). Anything but `handed` — including a
+     * harness without the method — falls through to the typing path unchanged.
+     */
+    const injected = async (text: string): Promise<boolean> => {
+      const record = this.registry.get(ferret);
+      const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+      if (harness?.inject === undefined) return false;
+      try {
+        return (await harness.inject(ferret, text)) === 'handed';
+      } catch {
+        return false;
+      }
+    };
     const attachmentsFolder = this.ports.session?.attachmentsFolder?.bind(this.ports.session);
     const attach = this.ports.session?.attach?.bind(this.ports.session);
     return {
       deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
+        if (await injected(delivery.text)) {
+          this.ports.delivered?.(ferret);
+          return ok('turn-started');
+        }
         // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
         // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
         const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
@@ -1802,6 +1822,12 @@ export class FerretsService implements FerretsApi {
         const found = pane();
         if (!found.ok) return found;
         const { handle, runner } = found.value;
+        // Handed to the harness's own protocol: the FULL text goes (no file-backed pointer), nothing is typed, and where
+        // it landed is for the transcript to say.
+        if (await injected(text)) {
+          this.ports.delivered?.(ferret);
+          return ok('left');
+        }
         const queue = runner.queue?.bind(runner);
         if (queue === undefined) return err({ refused: 'plugin_unavailable' });
         // Ruling #45 (today's `native-file` path): a long message goes by file, written BEFORE any key, and the queue

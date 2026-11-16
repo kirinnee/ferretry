@@ -30,6 +30,12 @@ export function registeredCodex() {
   let sleepFree = false;
   let nowMs = 0;
   let codexMissing = false;
+  /** Every `env …` child the harness ran (`codex queue`), and what the next one answers. */
+  const queueRuns: { program: string; args: readonly string[]; timeout: unknown }[] = [];
+  let queueAnswer: { exitCode: number | null; signal?: string | null; stdout: string; throws?: boolean } = {
+    exitCode: 0,
+    stdout: '',
+  };
   const kicks: string[] = [];
   const catalogChildren: Started[] = [];
   const childSpawn = catalogSpawn(catalogChildren);
@@ -116,10 +122,16 @@ export function registeredCodex() {
   };
   const jobs: { readonly id: string; readonly schedule: unknown; run(signal: AbortSignal): Promise<void> }[] = [];
   const warnings: string[] = [];
+  const warningFields: unknown[] = [];
   const kernel = {
     roots: { root },
     jobs: { add: (job: (typeof jobs)[number]) => void jobs.push(job), kick: (id: string) => void kicks.push(id) },
-    log: { warn: (message: string) => void warnings.push(message) },
+    log: {
+      warn: (message: string, fields?: unknown) => {
+        warnings.push(message);
+        warningFields.push(fields);
+      },
+    },
     // One entry per declared file and name, as the kernel keeps them: two files never share a name's entry.
     state: {
       read: async (def: { name: string }, name?: string) => ok(state.get(stateKey(def, name))),
@@ -130,19 +142,31 @@ export function registeredCodex() {
     config: { file: () => ({ permissionMode, searchPaths: [] }), collection: () => new Map() },
     spawn: {
       start: childSpawn.start,
-      run: async (program: string, args: string[]) => ({
-        exitCode: 0,
-        signal: null,
-        stderr: '',
-        stdout:
-          program === 'which'
-            ? codexMissing
-              ? ''
-              : '/opt/bin/codex\n'
-            : program === 'printenv' && args[0] === 'HOME'
-              ? '/fixture-owner\n'
-              : '',
-      }),
+      run: async (program: string, args: string[], options?: { timeout?: unknown }) => {
+        if (program === 'env') {
+          queueRuns.push({ program, args, timeout: options?.timeout });
+          if (queueAnswer.throws === true) throw new Error('spawn failed');
+          return {
+            exitCode: queueAnswer.exitCode,
+            signal: queueAnswer.signal ?? null,
+            stderr: '',
+            stdout: queueAnswer.stdout,
+          };
+        }
+        return {
+          exitCode: 0,
+          signal: null,
+          stderr: '',
+          stdout:
+            program === 'which'
+              ? codexMissing
+                ? ''
+                : '/opt/bin/codex\n'
+              : program === 'printenv' && args[0] === 'HOME'
+                ? '/fixture-owner\n'
+                : '',
+        };
+      },
     },
     redaction: {
       read: async (fn: (scope: { text(s: string): string }) => unknown) => {
@@ -198,12 +222,18 @@ export function registeredCodex() {
     catalogChildren,
     state,
     warnings,
+    warningFields,
     files,
     reads,
     windows,
     rootsUsed,
     privateDirectories,
     commands,
+    queueRuns,
+    /** What the next `env … codex queue` child answers. */
+    answerQueue: (answer: typeof queueAnswer) => {
+      queueAnswer = answer;
+    },
     runner,
     spec,
     at,
