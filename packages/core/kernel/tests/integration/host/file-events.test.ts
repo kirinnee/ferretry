@@ -8,8 +8,8 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { EventEmitter } from 'node:events';
-import type { FSWatcher } from 'node:fs';
-import { mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { type FSWatcher, watch } from 'node:fs';
+import { mkdir, mkdtemp, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { milliseconds } from '@ferretry/std';
@@ -22,6 +22,7 @@ import {
   polledOnly,
   undeclaredFileEvents,
 } from '../../../host/adapters/file-events.ts';
+import { watchConfigFiles } from '../../../host/config/watcher.ts';
 import { configService } from '../../../host/wiring.ts';
 import { createNodeHostFs } from '../../../host/state/host-fs.ts';
 import { captureLog, updatesDef } from '../../unit/host-config/support.ts';
@@ -83,14 +84,150 @@ describe('nodeFileEvents on a real directory', () => {
     expect(heard).toBe(0);
   });
 
-  test('a directory that is not there is polled instead, named by its error code, and its poll ends at close', async () => {
+  test('a directory that is not there is polled, but is missing rather than a platform limit, so it is not listed', async () => {
     const root = await fresh();
     const missing = join(root, 'never-made');
     const events = nodeFileEvents(systemClock(), { pollMs: milliseconds(25) });
     let heard = 0;
     const subscription = events.watchDirectory(missing, () => (heard += 1));
-    expect(events.polled()).toEqual([{ directory: missing, reason: 'ENOENT', everyMs: 25 }]);
+    expect(events.polled()).toEqual([]);
     await until(() => heard >= 3, 'three polls');
+    subscription.close();
+    const settled = heard;
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(heard).toBe(settled);
+  });
+
+  test('a directory the platform refuses for another reason is listed, and its poll ends at close', async () => {
+    const events = nodeFileEvents(systemClock(), {
+      pollMs: milliseconds(25),
+      watcher: () => {
+        throw Object.assign(new Error('no more watches'), { code: 'EMFILE' });
+      },
+    });
+    let heard = 0;
+    const subscription = events.watchDirectory('/h/full', () => (heard += 1));
+    expect(events.polled()).toEqual([{ directory: '/h/full', reason: 'EMFILE', everyMs: 25 }]);
+    await until(() => heard >= 3, 'three polls');
+    subscription.close();
+    expect(events.polled()).toEqual([]);
+  });
+
+  test('a directory armed through a symlink is heard (it is watched on its real path)', async () => {
+    const root = await fresh();
+    await mkdir(join(root, 'real'));
+    await symlink(join(root, 'real'), join(root, 'link'));
+    const events = nodeFileEvents(systemClock());
+    let heard = 0;
+    const subscription = events.watchDirectory(join(root, 'link'), () => (heard += 1));
+    stops.push(() => subscription.close());
+    await writeFile(join(root, 'real', 'machine.yaml'), 'a: 1\n');
+    await until(() => heard > 0, 'the create through the link');
+    expect(events.polled()).toEqual([]);
+  });
+});
+
+describe('nodeFileEvents when the watched folder is replaced', () => {
+  test('a folder deleted and recreated is watched again by recheck, and a file in the new one is heard', async () => {
+    const root = await fresh();
+    const folder = join(root, 'config');
+    await mkdir(folder);
+    const events = nodeFileEvents(systemClock());
+    let heard = 0;
+    const subscription = events.watchDirectory(folder, () => (heard += 1));
+    stops.push(() => subscription.close());
+    await rm(folder, { recursive: true });
+    await mkdir(folder);
+    subscription.recheck();
+    const afterRecheck = heard;
+    await writeFile(join(folder, 'machine.yaml'), 'a: 1\n');
+    await until(() => heard > afterRecheck, 'the create in the recreated folder');
+  });
+
+  test('a folder renamed away and recreated is watched again by recheck', async () => {
+    const root = await fresh();
+    const folder = join(root, 'config');
+    await mkdir(folder);
+    const events = nodeFileEvents(systemClock());
+    let heard = 0;
+    const subscription = events.watchDirectory(folder, () => (heard += 1));
+    stops.push(() => subscription.close());
+    await rename(folder, join(root, 'config.old'));
+    await mkdir(folder);
+    subscription.recheck();
+    const afterRecheck = heard;
+    await writeFile(join(folder, 'machine.yaml'), 'a: 1\n');
+    await until(() => heard > afterRecheck, 'the create in the recreated folder');
+  });
+
+  test('a symlinked folder retargeted after the watch began is watched again by recheck', async () => {
+    const root = await fresh();
+    await mkdir(join(root, 'first'));
+    await mkdir(join(root, 'second'));
+    await symlink(join(root, 'first'), join(root, 'link'));
+    const events = nodeFileEvents(systemClock());
+    let heard = 0;
+    const subscription = events.watchDirectory(join(root, 'link'), () => (heard += 1));
+    stops.push(() => subscription.close());
+    await unlink(join(root, 'link'));
+    await symlink(join(root, 'second'), join(root, 'link'));
+    subscription.recheck();
+    const afterRecheck = heard;
+    await writeFile(join(root, 'second', 'machine.yaml'), 'a: 1\n');
+    await until(() => heard > afterRecheck, 'the create in the new target');
+  });
+
+  test('a recheck of a folder that did not change opens nothing and tells nobody', async () => {
+    const root = await fresh();
+    let armed = 0;
+    const real = nodeFileEvents(systemClock(), {
+      watcher: (directory, onEvent, onError) => {
+        armed += 1;
+        return watch(directory, { persistent: false }, () => onEvent()).on('error', onError);
+      },
+    });
+    let heard = 0;
+    const subscription = real.watchDirectory(root, () => (heard += 1));
+    stops.push(() => subscription.close());
+    subscription.recheck();
+    subscription.recheck();
+    expect(armed).toBe(1);
+    expect(heard).toBe(0);
+  });
+
+  test('a folder that is missing is polled, and is watched as soon as it exists', async () => {
+    const root = await fresh();
+    const folder = join(root, 'later');
+    const events = nodeFileEvents(systemClock(), { pollMs: milliseconds(60_000) });
+    let heard = 0;
+    const subscription = events.watchDirectory(folder, () => (heard += 1));
+    stops.push(() => subscription.close());
+    await mkdir(folder);
+    subscription.recheck();
+    const afterRecheck = heard;
+    await writeFile(join(folder, 'machine.yaml'), 'a: 1\n');
+    await until(() => heard > afterRecheck, 'the create in the folder that appeared');
+  });
+
+  test('two errors from one watch poll once, and closing ends that poll', async () => {
+    const watcher = new EventEmitter() as EventEmitter & { close(): void };
+    let closed = 0;
+    watcher.close = () => {
+      closed += 1;
+    };
+    const events = nodeFileEvents(systemClock(), {
+      pollMs: milliseconds(25),
+      watcher: (_directory, _onEvent, onError) => {
+        watcher.on('error', onError);
+        return watcher as unknown as FSWatcher;
+      },
+    });
+    let heard = 0;
+    const subscription = events.watchDirectory('/h/config', () => (heard += 1));
+    watcher.emit('error', Object.assign(new Error('gone'), { code: 'EIO' }));
+    watcher.emit('error', Object.assign(new Error('gone again'), { code: 'EIO' }));
+    expect(closed).toBe(1);
+    expect(events.polled()).toHaveLength(1);
     subscription.close();
     expect(events.polled()).toEqual([]);
     const settled = heard;
@@ -205,6 +342,59 @@ describe('configService over real file events', () => {
   });
 });
 
+describe('the config watcher re-arms a folder that was replaced', () => {
+  /** A watcher whose fingerprint never moves, so a heard event can only have come from a watch, not the backstop read. */
+  const watchOnly = (tree: { directories(): Promise<readonly string[]>; events: FileEvents }) => {
+    let events = 0;
+    const stop = watchConfigFiles({
+      fingerprint: async () => 'same',
+      onEvent: () => {
+        events += 1;
+      },
+      onChange: async () => undefined,
+      onError: error => {
+        throw error;
+      },
+      timers: { setInterval, clearInterval, setTimeout, clearTimeout },
+      events: configTreeEvents(tree.events, tree.directories),
+      intervalMs: 100,
+    });
+    stops.push(stop);
+    return { events: () => events };
+  };
+
+  test('a folder deleted and recreated: after the backstop tick an edit in it is heard at once, not at the next tick', async () => {
+    const root = await fresh();
+    const folder = join(root, 'config');
+    await mkdir(folder);
+    const real = nodeFileEvents(systemClock());
+    const watcher = watchOnly({ events: real, directories: async () => [folder] });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await rm(folder, { recursive: true });
+    await mkdir(folder);
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const before = watcher.events();
+    await writeFile(join(folder, 'machine.yaml'), 'a: 1\n');
+    await until(() => watcher.events() > before, 'the event from the re-armed watch');
+  });
+
+  test('a symlinked folder retargeted: after the backstop tick an edit in the new target is heard', async () => {
+    const root = await fresh();
+    await mkdir(join(root, 'first'));
+    await mkdir(join(root, 'second'));
+    await symlink(join(root, 'first'), join(root, 'link'));
+    const real = nodeFileEvents(systemClock());
+    const watcher = watchOnly({ events: real, directories: async () => [join(root, 'link')] });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    await unlink(join(root, 'link'));
+    await symlink(join(root, 'second'), join(root, 'link'));
+    await new Promise(resolve => setTimeout(resolve, 350));
+    const before = watcher.events();
+    await writeFile(join(root, 'second', 'machine.yaml'), 'a: 1\n');
+    await until(() => watcher.events() > before, 'the event from the re-armed watch');
+  });
+});
+
 describe('what a plugin is handed of the file events', () => {
   const polled = [{ directory: '/h/a', reason: 'EMFILE', everyMs: 1_000 }];
 
@@ -228,7 +418,7 @@ describe('configTreeEvents', () => {
       polled: () => [],
       watchDirectory: directory => {
         seen.push(directory);
-        return { close: () => undefined };
+        return { close: () => undefined, recheck: () => undefined };
       },
     };
     const tree = configTreeEvents(events, async () => ['/h/config', '/h/config/logins']);
