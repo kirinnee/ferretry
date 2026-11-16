@@ -450,6 +450,24 @@ const CASES: Readonly<Record<string, Case>> = {
       ),
     ]);
   },
+  'move: numbered root-file conflicts preserve the earlier journal': async side => {
+    const home = side.harness.root('agent-homes');
+    const pool = side.harness.historyPool();
+    await home.makeDirectory(resolved(home, 'f1'));
+    await home.writeText(resolved(home, 'f1/history.jsonl'), 'new journal');
+    await pool.makeDirectory(resolved(pool, '.conflicts/f1'));
+    await pool.writeText(resolved(pool, '.conflicts/f1/history.jsonl'), 'earlier journal');
+    await home.moveToHistoryPool(
+      resolved(home, 'f1/history.jsonl'),
+      pool,
+      resolved(pool, '.conflicts/f1/history.jsonl.2'),
+    );
+    return {
+      source: await kindAt(home, 'f1/history.jsonl'),
+      earlier: await pool.readText(resolved(pool, '.conflicts/f1/history.jsonl')),
+      moved: await pool.readText(resolved(pool, '.conflicts/f1/history.jsonl.2')),
+    };
+  },
   'move: two homes merge and a conflict keeps the source ferret name': async side => {
     const root = side.harness.root('agent-homes');
     const pool = side.harness.historyPool();
@@ -532,6 +550,28 @@ const CASES: Readonly<Record<string, Case>> = {
       ),
       source: await kindAt(root, 'f1/projects/a'),
       target: await kindAt(pool, 'projects/a'),
+    };
+  },
+  'move: one file only; a folder holding a hard-linked file never carries it into the pool': async side => {
+    const root = side.harness.root('agent-homes');
+    const pool = side.harness.historyPool();
+    await root.makeDirectory(resolved(root, 'f1/projects'));
+    await root.makeDirectory(resolved(root, 'f1/sessions'));
+    await root.writeText(resolved(root, 'f1/projects/a'), 'mine');
+    await side.plantHardLink();
+    const results = [];
+    for (const source of ['projects', 'sessions', 'projects/a'])
+      results.push(
+        await outcome(
+          async () => await root.moveToHistoryPool(resolved(root, `f1/${source}`), pool, resolved(pool, source)),
+          async () => 'moved',
+        ),
+      );
+    return {
+      results,
+      source: await kindAt(root, 'f1/projects/a'),
+      projects: await kindAt(pool, 'projects'),
+      sessions: await kindAt(pool, 'sessions'),
     };
   },
   'move: an existing target, missing parent/source and linked home all refuse': async side => {
@@ -756,6 +796,25 @@ test('both hosts reject an invalid pool declaration at boot, before granting a v
 
 test('the pinned outcomes, on the real roots', async () => {
   const side = await real();
+  expect(await CASES['move: numbered root-file conflicts preserve the earlier journal']?.(await real())).toEqual({
+    source: 'nothing',
+    earlier: 'earlier journal',
+    moved: 'new journal',
+  });
+  expect(
+    await CASES['move: one file only; a folder holding a hard-linked file never carries it into the pool']?.(
+      await real(),
+    ),
+  ).toEqual({
+    results: ['refused:not_file', 'refused:not_file', 'root:hard_link'],
+    source: 'file',
+    projects: 'nothing',
+    sessions: 'nothing',
+  });
+  const existingTargetCase = CASES['move: an existing target, missing parent/source and linked home all refuse'];
+  if (existingTargetCase === undefined) throw new Error('the target-conflict case is missing');
+  const existingTarget = (await existingTargetCase(await real())) as { results: string[] };
+  expect(existingTarget.results[0]).toBe('refused:exists');
   expect(
     await CASES['link: a folder entry and a file entry are made, in two ferret homes, to one pool']?.(side),
   ).toEqual({

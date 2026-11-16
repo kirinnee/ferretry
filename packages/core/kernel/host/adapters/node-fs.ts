@@ -20,13 +20,21 @@ import {
 import { userInfo } from 'node:os';
 import { dirname } from 'node:path';
 import { type DescriptorBracket, loadProcessBracket } from './pinned/descriptor-bracket.ts';
-import { type DescriptorCalls, isSingleName, loadDescriptorCalls } from './pinned/descriptor-calls.ts';
+import {
+  type DescriptorCalls,
+  isSingleName,
+  loadDescriptorCalls,
+  loadNoReplaceRename,
+  type NoReplaceRename,
+  selfTestNoReplaceRename,
+} from './pinned/descriptor-calls.ts';
 import {
   type FolderSteps,
   folderSteps,
   fstatOf,
   type HeldChild,
   type HeldFile,
+  heldFolderOf,
   holdFolder,
 } from './pinned/descriptor-folder.ts';
 
@@ -108,6 +116,15 @@ export interface OpenedDirectory {
    * throws `ENOSYS`. The caller closes the returned file. Additive.
    */
   openFile(leaf: string): Promise<OpenedFile>;
+  /**
+   * Moves `leaf` of THIS folder to `toLeaf` of `into` (another folder this host opened) with
+   * `renameat2(RENAME_NOREPLACE)` on the two held descriptors, after proving both are still the folders they were
+   * opened on: a taken `toLeaf` throws `EEXIST` and nothing moves, in the kernel, atomically. Neither leaf is followed.
+   * `undefined` where this host has no no-replace move (macOS; a Linux whose `renameat2` did not load or failed its
+   * self-test): the caller refuses, never falls back to a plain rename. A filesystem without the flag throws `EINVAL`.
+   * Additive.
+   */
+  readonly renameNoReplace?: (leaf: string, into: OpenedDirectory, toLeaf: string) => Promise<void>;
   /** Sets this folder's permission bits through the descriptor (`fchmod`), never by name. */
   chmod(mode: number): Promise<void>;
   /**
@@ -308,6 +325,12 @@ export function nodeFs(
      * process's one bracket on macOS, none elsewhere.
      */
     readonly bracket?: () => DescriptorBracket;
+    /**
+     * Where a host WITH `descriptorFolder` gets `renameat2(RENAME_NOREPLACE)` (`OpenedDirectory.renameNoReplace`): asked
+     * once, on the first folder opened, then self-tested in a scratch folder (asynchronously); a throw or rejection from
+     * either means none. Default: loaded from the C library on Linux, none elsewhere.
+     */
+    readonly noReplaceRename?: () => NoReplaceRename | Promise<NoReplaceRename>;
   } = {},
 ): HostFs {
   const loadCalls =
@@ -339,6 +362,19 @@ export function nodeFs(
     }
     return bracket;
   };
+  const loadNoReplace =
+    options.noReplaceRename ??
+    (process.platform === 'linux'
+      ? async () => {
+          const loaded = loadNoReplaceRename();
+          await selfTestNoReplaceRename(loaded);
+          return loaded;
+        }
+      : undefined);
+  // Asked once, without blocking: every folder opened after the first waits on the same answer.
+  let noReplace: Promise<NoReplaceRename | undefined> | undefined;
+  const noReplaceOrNone = (): Promise<NoReplaceRename | undefined> =>
+    (noReplace ??= (async () => await loadNoReplace?.())().catch(() => undefined));
   const descriptorFolder =
     options.descriptorFolder ?? (process.platform === 'linux' ? '/proc/self/fd' : '/nonexistent-descriptor-folder');
   // Asked once, without blocking: whether this host reaches an open descriptor by number.
@@ -425,6 +461,7 @@ export function nodeFs(
     const [handle, identity] = await opened(path, READ_DIRECTORY);
     const descriptorCalls = reached ? undefined : callsOrNone();
     const workingDirectory = descriptorCalls === undefined ? undefined : bracketOrNone();
+    const noReplaceCall = reached ? await noReplaceOrNone() : undefined;
     const at =
       descriptorCalls === undefined
         ? undefined
@@ -478,6 +515,22 @@ export function nodeFs(
           });
         return await openReadAt(`${descriptorFolder}/${String(handle.fd)}/${leaf}`);
       },
+      renameNoReplace:
+        noReplaceCall === undefined
+          ? undefined
+          : async (leaf, into, toLeaf) => {
+              const other = heldFolderOf(into);
+              if (other === undefined)
+                throw Object.assign(new Error('EBADF: refusing to rename: that folder is not held'), { code: 'EBADF' });
+              for (const folder of [{ fd: handle.fd, device: identity.device, inode: identity.inode }, other]) {
+                const now = await fstatOf(folder.fd);
+                if (now.dev !== folder.device || now.ino !== folder.inode)
+                  throw Object.assign(new Error('EBADF: a held folder is no longer the one it was opened on'), {
+                    code: 'EBADF',
+                  });
+              }
+              noReplaceCall.renameNoReplace(handle.fd, leaf, other.fd, toLeaf);
+            },
       chmod: async mode => await handle.chmod(mode),
       sync: async () => {
         try {

@@ -25,8 +25,15 @@ import { err } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import { defineState, type StateFileDef } from '../../../contract/define.ts';
 import type { RootHandle, RootName, RootsPort } from '../../../contract/ports.ts';
-import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
-import { HistoryPoolError, historyEntryFor, isFerretHome, poolCredentialVerdict } from '../../../host/history-pool.ts';
+import { type HostFs, nodeFs, type OpenedDirectory } from '../../../host/adapters/node-fs.ts';
+import {
+  HistoryPoolError,
+  historyEntryFor,
+  historyMoveNames,
+  historyMovePart,
+  isFerretHome,
+  poolCredentialVerdict,
+} from '../../../host/history-pool.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { credentialHomeLinkVerdict } from '../../../host/shared-credentials.ts';
 import {
@@ -70,6 +77,8 @@ afterEach(async () => {
   hook.afterSymlink = undefined;
   hook.beforeRename = undefined;
   hook.afterOpenDirectory = undefined;
+  hook.noNoReplace = false;
+  hook.afterRename = undefined;
 
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
@@ -84,10 +93,42 @@ const hook: {
   beforePool: undefined | (() => Promise<void>);
   /** Run just after the link is made, before the kernel proves it: the target is replaced in that instant. */
   afterSymlink: undefined | ((path: string) => Promise<void>);
+  /** Run inside the move, after every check the kernel makes and just before `rename(2)` / `renameat2(2)` itself. */
   beforeRename?: () => Promise<void>;
   afterOpenDirectory?: (path: string) => Promise<void>;
+  /** A kernel or filesystem without `RENAME_NOREPLACE`: the move itself answers `ENOSYS`, as such a host would. */
+  noNoReplace?: boolean;
+  /** Run just after a successful no-replace move, before the kernel judges the file at its new name. */
+  afterRename?: () => Promise<void>;
 } = { beforeSymlink: undefined, symlinkTo: undefined, noReach: false, beforePool: undefined, afterSymlink: undefined };
 let stateOfPlugin = '';
+
+/**
+ * The same folder object (the host knows which descriptor it holds BY the object), its no-replace move wrapped with the
+ * hooks, and every child it opens wrapped the same way (a held walk opens children from the parent, not by path).
+ */
+function withMoveHooks(folder: OpenedDirectory): OpenedDirectory {
+  const move = folder.renameNoReplace;
+  const openChild = folder.openChild.bind(folder);
+  return Object.assign(folder, {
+    renameNoReplace:
+      move === undefined
+        ? undefined
+        : async (leaf: string, into: OpenedDirectory, toLeaf: string) => {
+            if (hook.noNoReplace === true)
+              throw Object.assign(new Error('ENOSYS: no renameat2 on this test host'), { code: 'ENOSYS' });
+            await hook.beforeRename?.();
+            await move(leaf, into, toLeaf);
+            const after = hook.afterRename;
+            hook.afterRename = undefined;
+            await after?.();
+          },
+    openChild: async (leaf: string, make?: { readonly mode: number }) => {
+      const opened = await openChild(leaf, make);
+      return { ...opened, folder: withMoveHooks(opened.folder) };
+    },
+  });
+}
 
 const fs: HostFs = {
   ...baseFs,
@@ -108,7 +149,8 @@ const fs: HostFs = {
     }
     const folder = await baseFs.openDirectory(path);
     await hook.afterOpenDirectory?.(path);
-    return hook.noReach ? { ...folder, entryPath: () => undefined, at: undefined } : folder;
+    if (hook.noReach) return { ...folder, entryPath: () => undefined, at: undefined, renameNoReplace: undefined };
+    return withMoveHooks(folder);
   },
 };
 
@@ -421,18 +463,226 @@ describe('the pool view and checked move', () => {
     expect(await modeOf(`${w.poolPath}/.conflicts/f1`)).toBe(0o700);
   });
 
-  test('a whole folder, an empty folder, and a leaf symlink move as themselves', async () => {
+  test('only one regular file moves: a folder, an empty folder or a link is not_file before anything is made', async () => {
     const w = await poolWorld();
     await w.makeHome('f1');
     await w.all.writeText(resolved(w.all, 'f1/projects/-work/a'), 'a');
     await w.all.makeDirectory(resolved(w.all, 'f1/sessions'));
     await symlink(`${w.home}/state/logins/credentials/work/auth.json`, `${w.homePath('f1')}/history.jsonl`);
-    for (const entry of ['projects', 'sessions', 'history.jsonl'])
-      await w.all.moveToHistoryPool(resolved(w.all, `f1/${entry}`), w.pool, resolved(w.pool, entry));
-    expect(await w.pool.readText(resolved(w.pool, 'projects/-work/a'))).toBe('a');
-    expect((await lstat(`${w.poolPath}/sessions`)).isDirectory()).toBe(true);
-    expect((await lstat(`${w.poolPath}/history.jsonl`)).isSymbolicLink()).toBe(true);
-    expect(await refusalOf(w.pool.readText(resolved(w.pool, 'history.jsonl')))).toBe('root:link_escape');
+    await symlink(`${w.homePath('f1')}/projects/-work/a`, `${w.homePath('f1')}/projects/-work/alias`);
+    for (const [from, to] of [
+      ['projects', 'projects'],
+      ['projects/-work', 'projects/-work'],
+      ['sessions', 'sessions'],
+      ['history.jsonl', 'history.jsonl'],
+      ['projects/-work/alias', 'projects/-work/alias'],
+    ] as const)
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, `f1/${from}`), w.pool, resolved(w.pool, to))),
+      ).toBe('not_file');
+    expect(await readdir(w.poolPath)).toEqual([]);
+    expect(await w.all.readText(resolved(w.all, 'f1/projects/-work/a'))).toBe('a');
+    expect((await lstat(`${w.homePath('f1')}/history.jsonl`)).isSymbolicLink()).toBe(true);
+    // A file entry is itself a file leaf, and moves.
+    await rm(`${w.homePath('f1')}/history.jsonl`);
+    await w.all.writeText(resolved(w.all, 'f1/history.jsonl'), 'h');
+    await w.all.moveToHistoryPool(resolved(w.all, 'f1/history.jsonl'), w.pool, resolved(w.pool, 'history.jsonl'));
+    expect(await w.pool.readText(resolved(w.pool, 'history.jsonl'))).toBe('h');
+    expect(await exists(`${w.homePath('f1')}/history.jsonl`)).toBe(false);
+  });
+
+  test('a hard-linked file nested in a folder never enters the pool, by the folder or by itself', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/-work/deep/a.jsonl'), 'nested');
+    await hardLink(`${w.homePath('f1')}/projects/-work/deep/a.jsonl`, `${w.parent}/second-name`);
+    for (const from of ['projects', 'projects/-work', 'projects/-work/deep'])
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, `f1/${from}`), w.pool, resolved(w.pool, from))),
+      ).toBe('not_file');
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(
+          resolved(w.all, 'f1/projects/-work/deep/a.jsonl'),
+          w.pool,
+          resolved(w.pool, 'projects/-work/deep/a.jsonl'),
+        ),
+      ),
+    ).toBe('root:hard_link');
+    expect(await readdir(w.poolPath)).toEqual([]);
+    expect(await readFile(`${w.homePath('f1')}/projects/-work/deep/a.jsonl`, 'utf8')).toBe('nested');
+  });
+
+  test('a hard link added after the checks is caught at the new name and the file is moved back', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    hook.beforeRename = async () => {
+      hook.beforeRename = undefined;
+      await hardLink(`${w.homePath('f1')}/projects/a`, `${w.parent}/late-name`);
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:hard_link');
+    expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('source');
+    expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
+  });
+
+  test('a late hard link whose move back is blocked is dropped from the pool, never kept there', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    hook.beforeRename = async () => {
+      hook.beforeRename = undefined;
+      await hardLink(`${w.homePath('f1')}/projects/a`, `${w.parent}/late-name`);
+    };
+    hook.afterRename = async () => {
+      await writeFile(`${w.homePath('f1')}/projects/a`, 'took the old name', { mode: 0o600 });
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:hard_link');
+    expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
+    expect(await readFile(`${w.parent}/late-name`, 'utf8')).toBe('source');
+    expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('took the old name');
+  });
+
+  test('a one-name file whose move back is blocked stays at the pool name, and the refusal still says changed', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    hook.beforeRename = async () => {
+      hook.beforeRename = undefined;
+      await rename(`${w.homePath('f1')}/projects/a`, `${w.parent}/moved-aside`);
+      await writeFile(`${w.homePath('f1')}/projects/a`, 'swapped', { mode: 0o600 });
+    };
+    hook.afterRename = async () => {
+      await writeFile(`${w.homePath('f1')}/projects/a`, 'took the old name', { mode: 0o600 });
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:changed');
+    expect(await readFile(`${w.poolPath}/projects/a`, 'utf8')).toBe('swapped');
+    expect((await stat(`${w.poolPath}/projects/a`)).nlink).toBe(1);
+  });
+
+  test('a source swapped after the checks is caught at the new name and moved back', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    hook.beforeRename = async () => {
+      hook.beforeRename = undefined;
+      await rename(`${w.homePath('f1')}/projects/a`, `${w.parent}/moved-aside`);
+      await writeFile(`${w.homePath('f1')}/projects/a`, 'swapped', { mode: 0o600 });
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:changed');
+    expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('swapped');
+    expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
+  });
+
+  test('a target created after the checks is never replaced: exists, and the source stays (renameat2 NOREPLACE)', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    await w.pool.makeDirectory(resolved(w.pool, 'projects'));
+    hook.beforeRename = async () => {
+      hook.beforeRename = undefined;
+      await writeFile(`${w.poolPath}/projects/a`, 'raced in', { mode: 0o600 });
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('exists');
+    expect(await readFile(`${w.poolPath}/projects/a`, 'utf8')).toBe('raced in');
+    expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('source');
+  });
+
+  test('a second history.jsonl conflict lands at its numbered name on the real disk', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    for (const [text, to] of [
+      ['first', '.conflicts/f1/history.jsonl'],
+      ['second', '.conflicts/f1/history.jsonl.2'],
+    ] as const) {
+      await w.all.writeText(resolved(w.all, 'f1/history.jsonl'), text);
+      await w.all.moveToHistoryPool(resolved(w.all, 'f1/history.jsonl'), w.pool, resolved(w.pool, to));
+    }
+    expect(await w.pool.readText(resolved(w.pool, '.conflicts/f1/history.jsonl'))).toBe('first');
+    expect(await w.pool.readText(resolved(w.pool, '.conflicts/f1/history.jsonl.2'))).toBe('second');
+    expect(await exists(`${w.homePath('f1')}/history.jsonl`)).toBe(false);
+  });
+
+  test('two ferrets moving the same file name at once: one lands, the other is exists and keeps its file', async () => {
+    const w = await poolWorld();
+    for (const ferret of ['f1', 'f2']) {
+      await w.makeHome(ferret);
+      await w.all.writeText(resolved(w.all, `${ferret}/projects/-work/same.jsonl`), ferret);
+    }
+    await w.pool.makeDirectory(resolved(w.pool, 'projects/-work'));
+    // Both movers pass every check before either moves: the barrier opens only when both are at the move.
+    let arrived = 0;
+    let open: () => void = () => undefined;
+    const barrier = new Promise<void>(resolve => {
+      open = resolve;
+    });
+    hook.beforeRename = async () => {
+      arrived += 1;
+      if (arrived === 2) open();
+      await barrier;
+    };
+    const results = await Promise.all(
+      ['f1', 'f2'].map(
+        async ferret =>
+          await refusalOf(
+            w.all.moveToHistoryPool(
+              resolved(w.all, `${ferret}/projects/-work/same.jsonl`),
+              w.pool,
+              resolved(w.pool, 'projects/-work/same.jsonl'),
+            ),
+          ),
+      ),
+    );
+    expect(arrived).toBe(2);
+    expect([...results].sort()).toEqual(['exists', 'ok']);
+    const winner = results[0] === 'ok' ? 'f1' : 'f2';
+    const loser = winner === 'f1' ? 'f2' : 'f1';
+    expect(await readFile(`${w.poolPath}/projects/-work/same.jsonl`, 'utf8')).toBe(winner);
+    expect(await readFile(`${w.homePath(loser)}/projects/-work/same.jsonl`, 'utf8')).toBe(loser);
+    hook.beforeRename = undefined;
+    // The loser's caller keeps it under its own name: neither conversation is lost.
+    await w.all.moveToHistoryPool(
+      resolved(w.all, `${loser}/projects/-work/same.jsonl`),
+      w.pool,
+      resolved(w.pool, `.conflicts/${loser}/projects/-work/same.jsonl`),
+    );
+    expect(await readFile(`${w.poolPath}/.conflicts/${loser}/projects/-work/same.jsonl`, 'utf8')).toBe(loser);
+  });
+
+  test('names Claude really writes (`<hash>@v1`, a space) move; a hidden name below the entry does not', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    for (const name of ['file-history/s1/0a1b@v1', 'projects/-work/a b.jsonl']) {
+      await w.all.writeText(resolved(w.all, `f1/${name}`), name);
+      await w.all.moveToHistoryPool(resolved(w.all, `f1/${name}`), w.pool, resolved(w.pool, name));
+      expect(await w.pool.readText(resolved(w.pool, name))).toBe(name);
+    }
+    await w.all.writeText(resolved(w.all, 'f1/projects/.hidden'), 'x');
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/.hidden'), w.pool, resolved(w.pool, 'projects/visible')),
+      ),
+    ).toBe('denied');
   });
 
   test('every lexical refusal leaves the source and target untouched', async () => {
@@ -478,7 +728,7 @@ describe('the pool view and checked move', () => {
         await refusalOf(
           w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, `projects/${target}`)),
         ),
-      ).toBe('root:outside');
+      ).toBe('exists');
       expect(await w.all.readText(resolved(w.all, 'f1/projects/a'))).toBe('source');
     }
     expect(await w.pool.readText(resolved(w.pool, 'projects/file'))).toBe('target');
@@ -518,14 +768,28 @@ describe('the pool view and checked move', () => {
       ),
     ).toBe('root:no_descriptor_reach');
     hook.noReach = false;
-    hook.beforeRename = async () => {
-      throw Object.assign(new Error('cross device'), { code: 'EXDEV' });
-    };
+    // A Linux host with descriptor paths but no working renameat2: never a plain rename instead.
+    hook.noNoReplace = true;
     expect(
       await refusalOf(
         w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
       ),
-    ).toBe('root:changed');
+    ).toBe('root:no_descriptor_reach');
+    hook.noNoReplace = false;
+    for (const [code, refusal] of [
+      ['EINVAL', 'root:no_descriptor_reach'],
+      ['ENOSYS', 'root:no_descriptor_reach'],
+      ['EXDEV', 'root:changed'],
+    ] as const) {
+      hook.beforeRename = async () => {
+        throw Object.assign(new Error(code), { code });
+      };
+      expect(
+        await refusalOf(
+          w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+        ),
+      ).toBe(refusal);
+    }
     expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('source');
     expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
   });
@@ -1163,6 +1427,85 @@ describe('the pure rules', () => {
     expect(declaredHistoryEntry(CLAUDE, 'projects')).toEqual({ name: 'projects', kind: 'folder' });
     expect(declaredHistoryEntry(CLAUDE, 'Projects')).toBeUndefined();
     expect(declaredHistoryEntry(undefined, 'projects')).toBeUndefined();
+  });
+
+  test('45: a move carries any name below the entry but a hidden one, a separator or a NUL', () => {
+    for (const part of [
+      '0a1b@v1',
+      'a b.jsonl',
+      'x%y~z',
+      '-work',
+      'rollout-2026-11-16T08-00-00-x.jsonl',
+      '~x',
+      '%x',
+      '@x',
+    ])
+      expect(historyMovePart(part)).toBe(true);
+    for (const part of ['', '.', '..', '.x', 'a/b', 'a\\b', 'a\u0000b']) expect(historyMovePart(part)).toBe(false);
+    const top = '/h/state/p/agent-homes';
+    const pool = '/h/state/p/history-pool';
+    expect(() =>
+      historyMoveNames(CLAUDE, top, `${top}/f1/file-history/s/0a@v1`, pool, `${pool}/file-history/s/0a@v1`),
+    ).not.toThrow();
+    expect(() => historyMoveNames(CLAUDE, top, `${top}/f1/projects/.x`, pool, `${pool}/projects/x`)).toThrow(
+      HistoryPoolError,
+    );
+    expect(() => historyMoveNames(CLAUDE, top, `${top}/f1/projects/x`, pool, `${pool}/projects/.x`)).toThrow(
+      HistoryPoolError,
+    );
+  });
+
+  test('numbered conflicts for top-level file entries stay confined to that entry and ferret', () => {
+    const top = '/h/state/p/agent-homes';
+    const pool = '/h/state/p/history-pool';
+    const from = `${top}/f1/history.jsonl`;
+    for (const suffix of ['2', '10', '1000'])
+      expect(() =>
+        historyMoveNames(CLAUDE, top, from, pool, `${pool}/.conflicts/f1/history.jsonl.${suffix}`),
+      ).not.toThrow();
+    for (const target of [
+      '.conflicts/f2/history.jsonl.2',
+      '.conflicts/f1/history.jsonl.other',
+      '.conflicts/f1/history.jsonl.1',
+      '.conflicts/f1/history.jsonl.02',
+      '.conflicts/f1/history.jsonl.2/child',
+      '.conflicts/f1/projects.2',
+    ])
+      expect(() => historyMoveNames(CLAUDE, top, from, pool, `${pool}/${target}`)).toThrow(HistoryPoolError);
+    expect(() =>
+      historyMoveNames(CLAUDE, top, `${top}/f1/projects/x`, pool, `${pool}/.conflicts/f1/projects.2`),
+    ).toThrow(HistoryPoolError);
+  });
+
+  test('46: a file entry may keep a numbered conflict name, and only that one shape', () => {
+    const top = '/h/state/p/agent-homes';
+    const pool = '/h/state/p/history-pool';
+    const move = (from: string, to: string): string => {
+      try {
+        historyMoveNames(CLAUDE, top, `${top}/${from}`, pool, `${pool}/${to}`);
+        return 'ok';
+      } catch (error) {
+        return error instanceof HistoryPoolError ? error.refusal : 'thrown';
+      }
+    };
+    for (const to of ['.conflicts/f1/history.jsonl', '.conflicts/f1/history.jsonl.2', '.conflicts/f1/history.jsonl.10'])
+      expect(move('f1/history.jsonl', to)).toBe('ok');
+    for (const to of [
+      '.conflicts/f1/history.jsonl.1',
+      '.conflicts/f1/history.jsonl.0',
+      '.conflicts/f1/history.jsonl.02',
+      '.conflicts/f1/history.jsonl.x',
+      '.conflicts/f1/history.jsonl.2.3',
+      '.conflicts/f1/history.jsonl.',
+      '.conflicts/f2/history.jsonl.2',
+      '.conflicts/f1/history.jsonl.2/x',
+      'history.jsonl.2',
+      '.conflicts/f1/history.json.2',
+    ])
+      expect(move('f1/history.jsonl', to)).toBe('denied');
+    // A folder entry has no numbered shape: its conflicts keep the entry name and number the file below it.
+    expect(move('f1/projects/a', '.conflicts/f1/projects.2')).toBe('denied');
+    expect(move('f1/projects/a', '.conflicts/f1/projects/a.2')).toBe('ok');
   });
 
   test('42: isFerretHome is exactly one folder below the top', () => {

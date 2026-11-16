@@ -2175,55 +2175,31 @@ async function start(world: World): Promise<TestHost> {
             if (!testFolderExists(parent)) throw new RootError('outside');
             if (!world.roots.has(source) && !testLinks.has(source) && !testFolderExists(source))
               throw new RootError('outside');
-            if (testHardLinks.has(source)) throw new RootError('hard_link');
+            // As production: a placed credential, itself or below, is judged first (`placedMoveGuard`), then ONE regular
+            // file moves, never a folder (its children were never each proved) or a link.
             const carried = placedCredentialLinks
               .affected(source)
               .filter(([path, mark]) => testLinks.get(path) === mark);
             const verdict = placedLinkMoveVerdict(carried);
             if (verdict !== undefined) throw new RootError(verdict);
+            if (!world.roots.has(source) || testLinks.has(source)) return refuseHistory('not_file');
+            if (testHardLinks.has(source)) throw new RootError('hard_link');
             if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
             await targetPool.makeDirectory(posix.dirname(target) as FencedPath);
-            if (
-              destination.files.has(target) ||
-              destination.links.has(target) ||
-              destination.folders.has(target) ||
-              [...destination.files.keys(), ...destination.links.keys(), ...destination.folders].some(key =>
-                key.startsWith(target + '/'),
-              )
-            )
-              throw new RootError('outside');
-            const under = (key: string): boolean => key === source || key.startsWith(source + '/');
-            const placed = (key: string): string => target + key.slice(source.length);
-            for (const [key, text] of [...world.roots])
-              if (under(key)) {
-                destination.files.set(placed(key), text);
-                if (testHardLinks.delete(key)) destination.markHardLink(placed(key));
-                inodes.set(placed(key), inodes.get(key) ?? ++nextInode);
-                poolFileMarks.set(placed(key), destination.version(placed(key)) as Uint8Array);
-                inodes.delete(key);
-                world.roots.delete(key);
-              }
-            for (const [key, pointsAt] of [...testLinks])
-              if (under(key)) {
-                destination.links.set(placed(key), pointsAt);
-                testLinks.delete(key);
-              }
-            for (const key of [...testMadeFolders])
-              if (under(key)) {
-                destination.folders.add(placed(key));
-                testMadeFolders.delete(key);
-              }
-            for (const [key, mode] of [...testModes])
-              if (under(key)) {
-                testModes.set(placed(key), mode);
-                testModes.delete(key);
-              }
-            for (const [key, modified] of [...testModified])
-              if (under(key)) {
-                testModified.set(placed(key), modified);
-                testModified.delete(key);
-              }
-            placedCredentialLinks.forgetUnder(source);
+            // As production's `renameat2(RENAME_NOREPLACE)`: anything at the target refuses `exists`, the source untouched.
+            if (destination.files.has(target) || destination.links.has(target) || destination.folders.has(target))
+              return refuseHistory('exists');
+            destination.files.set(target, world.roots.get(source) as string);
+            inodes.set(target, inodes.get(source) ?? ++nextInode);
+            poolFileMarks.set(target, destination.version(target) as Uint8Array);
+            inodes.delete(source);
+            world.roots.delete(source);
+            const mode = testModes.get(source);
+            if (mode !== undefined) testModes.set(target, mode);
+            testModes.delete(source);
+            const modified = testModified.get(source);
+            if (modified !== undefined) testModified.set(target, modified);
+            testModified.delete(source);
           },
           rename: async (from, to) => {
             if (isReadOnlyRoot(name) || !takesRenames(name)) throw new RootError('read_only');

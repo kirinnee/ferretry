@@ -953,12 +953,18 @@ export interface RootHandle {
    */
   linkHistory(home: FencedPath, entry: string): Promise<void>;
   /**
-   * Moves one listed history entry (or a leaf below it) out of ONE ferret home into this plugin's minted pool view.
-   * `to` is `<same entry>/...` or `.conflicts/<same ferret>/<same entry>/...`. Parents are made `0700` only in the pool.
-   * No overwrite (`outside`), copy fallback (`changed` across devices), hard-linked file (`hard_link`), placed
-   * credential link (`link_escape`), or followed link. A leaf link moves as a link. Only an `agent-homes` home handle
-   * has this door (`not_internal`); another plugin's or a forged pool view is `not_own`. No descriptor reach refuses
-   * `no_descriptor_reach`. The look-then-rename window is the same declared GAP as `rename` (docs/secrets.md).
+   * Moves ONE regular file of a listed history entry (the file entry itself, or a file below a folder entry) out of ONE
+   * ferret home into this plugin's minted pool view. A folder, a link or any other kind is `not_file` before anything is
+   * made: the caller walks a folder and moves its files, so every file is judged on its own. `to` is
+   * `<same entry>/...` or `.conflicts/<same ferret>/<same entry>/...`; a path component below the entry may be any
+   * name but an empty or hidden one, or one with `/`, `\` or NUL (`denied`). Parents are made `0700` only in the pool.
+   * The move is `renameat2(RENAME_NOREPLACE)` between the two held parent folders: a taken target is `exists` (a
+   * `HistoryPoolError`) with the source left where it was, decided by the kernel in the move itself. After the move the
+   * file is judged again at its new name; a different file or a second name moves it back and refuses `changed` /
+   * `hard_link`. No copy fallback (`changed` across devices), no hard-linked file (`hard_link`), no placed credential
+   * link (`link_escape`), no followed link. Only an `agent-homes` home handle has this door (`not_internal`); another
+   * plugin's or a forged pool view is `not_own`. A host without a no-replace move (macOS; a Linux whose `renameat2` did
+   * not load, failed its self-test, or a filesystem without the flag) refuses `no_descriptor_reach`: never a plain rename.
    */
   moveToHistoryPool(from: FencedPath, pool: RootHandle, to: FencedPath): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */

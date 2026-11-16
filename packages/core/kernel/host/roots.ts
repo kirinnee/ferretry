@@ -1817,6 +1817,86 @@ async function renameChecked(
   }
 }
 
+/** Errnos of a no-replace move that mean THIS filesystem or kernel has no such move: refused like a host without one. */
+const NO_NOREPLACE: ReadonlySet<string> = new Set(['EINVAL', 'ENOSYS', 'ENOTSUP', 'EOPNOTSUPP']);
+
+/**
+ * The history-pool move of ONE regular file (`moveToHistoryPool`): both parents opened checked and held, the source looked
+ * at through its held parent without following it (a regular file with one name, passing `guard`), then
+ * `renameat2(RENAME_NOREPLACE)` between the two held descriptors. A taken target is `exists` with the source untouched,
+ * decided by the kernel in the same call (no look-then-move window on the target). A host with no no-replace move
+ * (macOS, a `renameat2` that did not load or failed its self-test, a filesystem without the flag) is
+ * `no_descriptor_reach`: there is no plain-rename fallback.
+ *
+ * The source checks and the move are still two calls (a same-user writer can swap the leaf or add a hard link in
+ * between), so the file is looked at AGAIN at its new name through the held target folder: a different inode, kind or a
+ * second name moves it straight back (no-replace again) and refuses `changed` / `hard_link`. A move back that cannot be
+ * made (its old name taken meanwhile) still refuses, and leaves: a file with a second name DROPPED from the pool (its
+ * other name keeps the bytes), a one-name file at the pool name, or nothing when another actor took the new name first.
+ * So a refusal from this function does not say the source is still at its old name: the caller treats any refusal
+ * after the move began as "maybe moved" and looks again.
+ */
+async function moveFileNoReplace(
+  from: Checked,
+  to: Checked,
+  guard: (found: FileIdentity) => void | Promise<void>,
+): Promise<void> {
+  const fromParent = dirname(from.full);
+  const toParent = dirname(to.full);
+  const source = await openCheckedFolder(from.scope, fromParent);
+  try {
+    const target = await openCheckedFolder(to.scope, toParent);
+    try {
+      const sourceName = basename(from.full);
+      const targetName = basename(to.full);
+      const move = source.renameNoReplace;
+      const back = target.renameNoReplace;
+      if (move === undefined || back === undefined) return refuse('no_descriptor_reach');
+      await refuseHeldName(from.scope, from.full);
+      await refuseHeldName(to.scope, to.full);
+      const fromAt = await entry(from.scope, source, fromParent, sourceName);
+      const toAt = await entry(to.scope, target, toParent, targetName);
+      const moving = await from.scope.fs.identity(fromAt);
+      if (moving === undefined) return refuse('outside');
+      if (moving.kind !== 'file') return refuseHistory('not_file');
+      if (moving.links > 1) return refuse('hard_link');
+      await guard(moving);
+      await move(sourceName, target, targetName).catch((error: unknown) => {
+        const code = errnoOf(error);
+        if (code === 'EEXIST') return refuseHistory('exists');
+        if (code !== undefined && NO_NOREPLACE.has(code)) return refuse('no_descriptor_reach');
+        return refuse('changed');
+      });
+      const landed = await to.scope.fs.identity(toAt).catch(() => undefined);
+      const verdict =
+        landed === undefined || landed.kind !== 'file' || !same(landed, moving)
+          ? ('changed' as const)
+          : landed.links > 1
+            ? ('hard_link' as const)
+            : undefined;
+      if (verdict !== undefined) {
+        const restored = await back(targetName, source, sourceName).then(
+          () => true,
+          () => false,
+        );
+        // Not moved back (its old name was taken meanwhile): a file with a second name must still not stay in the pool.
+        // Another name holds its bytes, so dropping the pool name loses nothing; it is dropped only while that name is
+        // still the very file judged (GAP, declared: the look and the `unlink` are two calls, in the pool's own folder).
+        if (!restored && landed?.kind === 'file' && landed.links > 1) {
+          const now = await to.scope.fs.identity(toAt).catch(() => undefined);
+          if (now?.kind === 'file' && same(now, landed) && now.links > 1)
+            await to.scope.fs.unlink(toAt).catch(() => undefined);
+        }
+        refuse(verdict);
+      }
+    } finally {
+      await target.close();
+    }
+  } finally {
+    await source.close();
+  }
+}
+
 /** The same placed-credential guard for a rename within a root and a move into the pool. */
 async function placedMoveGuard(source: Checked): Promise<(found: FileIdentity) => Promise<void>> {
   const recorded = PLACED_LINKS.affected(source.full);
@@ -2711,27 +2791,22 @@ function rootHandle(setup: HandleSetup): RootHandle {
       const source = { ...reached, scope: { ...reached.scope, literal: true as const, heldFrom: sourceAnchor } };
       if (relative(source.scope.base.real, source.full) !== relative(root, lexical.value)) refuse('link_escape');
       const guard = await placedMoveGuard(source);
-      // Prove the source before creating anything, including the last hard-link check under the held parent.
+      // Prove the source before creating anything: ONE regular file (a folder's children were never each proved, so a
+      // folder never moves whole), one name, no placed credential, and a host with a no-replace move.
       const held = await openCheckedFolder(source.scope, dirname(source.full));
       try {
-        if (held.entryPath('') === undefined) return refuse('no_descriptor_reach');
         const found = await fs.identity(await entry(source.scope, held, dirname(source.full), basename(source.full)));
         if (found === undefined) return refuse('outside');
-        if (found.kind === 'file' && found.links > 1) return refuse('hard_link');
+        if (found.kind !== 'file') return refuseHistory('not_file');
+        if (found.links > 1) return refuse('hard_link');
         await guard(found);
+        if (held.renameNoReplace === undefined) return refuse('no_descriptor_reach');
       } finally {
         await held.close();
       }
       await pool.makeDirectory(dirname(destination.value) as FencedPath);
       const target = await known.realParent(to);
-      await pinning(
-        target.full,
-        async () =>
-          await renameChecked(source, target, async found => {
-            if (found.kind === 'file' && found.links > 1) refuse('hard_link');
-            await guard(found);
-          }),
-      );
+      await pinning(target.full, async () => await moveFileNoReplace(source, target, guard));
       PLACED_LINKS.forgetUnder(source.full);
     },
     ensurePrivateDirectory: async path => {
