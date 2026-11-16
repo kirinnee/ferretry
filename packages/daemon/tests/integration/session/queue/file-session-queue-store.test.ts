@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rename, rm, stat, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -192,5 +192,127 @@ describe('a queue change on the real log is announced after it is on disk, and a
     should(onDisk).eql([1, 2, 3, 10]);
     should(first?.messages.map(message => message.id)).eql(['a', 'c']);
     should(older?.messages.map(message => message.id)).eql(['b']);
+  });
+});
+
+describe('a queue log read again after it grew (&F4319)', () => {
+  const moved = (id: string, state: 'typing' | 'delivered' | 'read'): QueueEvent => ({
+    v: 1,
+    kind: 'moved',
+    at: AT,
+    id,
+    state,
+  });
+
+  it('should hand back the events it already parsed, and parse only the lines appended since', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    const first = await subject.read(ID);
+
+    await subject.append(ID, moved('m1', 'typing'));
+    const second = await subject.read(ID);
+
+    should(second).deepEqual([enqueued, moved('m1', 'typing')]);
+    should(second[0]).equal(first[0]);
+    should(foldQueue(second).map(message => [message.id, message.state, message.version])).eql([['m1', 'typing', 2]]);
+  });
+
+  it('should read a whole file again when it was replaced, even with as many bytes as before', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, moved('m1', 'typing'));
+    await subject.append(ID, enqueued);
+    await subject.read(ID);
+
+    // Same length, new file: the kept prefix belongs to the old inode.
+    const replacement = `${JSON.stringify(enqueued)}\n${JSON.stringify(moved('m1', 'typing'))}\n`;
+    await writeFile(`${subject.file(ID)}.next`, replacement);
+    await rename(`${subject.file(ID)}.next`, subject.file(ID));
+
+    should(foldQueue(await subject.read(ID)).map(message => message.state)).eql(['typing']);
+  });
+
+  it('should read a whole file again when it shrank', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    await subject.append(ID, moved('m1', 'typing'));
+    await subject.read(ID);
+
+    await truncate(subject.file(ID), (await readFile(subject.file(ID), 'utf8')).indexOf('\n') + 1);
+
+    should(await subject.read(ID)).deepEqual([enqueued]);
+  });
+
+  it('should read a whole file again when the kept prefix no longer ends a line where it did', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    await subject.read(ID);
+
+    // Rewritten in place and longer: the byte the kept prefix ended on is now inside a line.
+    const rewritten = `${JSON.stringify({ ...enqueued, at: `${AT} ` })}\n${JSON.stringify(moved('m1', 'read'))}\n`;
+    await writeFile(subject.file(ID), rewritten);
+
+    should((await subject.read(ID)).map(event => event.kind)).eql(['moved']);
+  });
+
+  it('should read a torn final line once it is whole, and never keep it while torn', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    const line = JSON.stringify(moved('m1', 'typing'));
+    await appendFile(subject.file(ID), line.slice(0, 20));
+    should(await subject.read(ID)).deepEqual([enqueued]);
+
+    await appendFile(subject.file(ID), `${line.slice(20)}\n`);
+
+    should(await subject.read(ID)).deepEqual([enqueued, moved('m1', 'typing')]);
+  });
+
+  it('should still parse a final line that is whole but has no newline, as before', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    await appendFile(subject.file(ID), JSON.stringify(moved('m1', 'typing')));
+
+    should(await subject.read(ID)).deepEqual([enqueued, moved('m1', 'typing')]);
+    await appendFile(subject.file(ID), `\n${JSON.stringify(moved('m1', 'delivered'))}\n`);
+    should(foldQueue(await subject.read(ID)).map(message => message.state)).eql(['delivered']);
+  });
+
+  it('should answer a log removed after it was read as empty, and one written again from scratch', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    await subject.append(ID, moved('m1', 'typing'));
+    await subject.read(ID);
+
+    await rm(subject.file(ID));
+    should(await subject.read(ID)).be.empty();
+    await subject.append(ID, enqueued);
+
+    should(await subject.read(ID)).deepEqual([enqueued]);
+  });
+
+  it('should keep every answer right when more logs are read than it keeps', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-queue-test-'));
+    homes.add(home);
+    const subject = new FileSessionQueueStore(id => join(home, id), 1);
+    const other = parseSessionId('session-2');
+    await subject.append(ID, enqueued);
+    await subject.append(other, enqueued);
+
+    for (let round = 0; round < 3; round++) {
+      await subject.append(ID, moved('m1', 'typing'));
+      should(await subject.read(ID)).have.length(2 + round);
+      should(await subject.read(other)).have.length(1);
+    }
+  });
+
+  it('should answer two reads of the same log at once with the same events', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    await subject.read(ID);
+    await subject.append(ID, moved('m1', 'typing'));
+
+    const [a, b] = await Promise.all([subject.read(ID), subject.read(ID)]);
+
+    should(a).deepEqual(b);
+    should(a).have.length(2);
   });
 });

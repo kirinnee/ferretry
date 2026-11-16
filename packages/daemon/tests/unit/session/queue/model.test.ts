@@ -217,3 +217,58 @@ describe('a combined delivery in the fold', () => {
     should(QueueEventSchema.parse(moved('m1', 'typing', 1))).not.have.property('batch');
   });
 });
+
+describe('folding a log that grew (&F4319)', () => {
+  /** The same answer a fold from nothing gives: fresh copies of every event, so nothing kept can be reused. */
+  const fresh = (events: readonly QueueEvent[]): readonly QueuedMessage[] =>
+    foldQueue(events.map(event => structuredClone(event)));
+
+  const log = (): QueueEvent[] => [
+    enqueued({ id: 'a' }),
+    enqueued({ id: 'b', enqueuedAt: at(1) }),
+    moved('a', 'typing', 2),
+    moved('a', 'delivered', 3),
+    { v: 1, kind: 'waiting', at: at(4), id: 'b', reason: 'unreadable' },
+    moved('b', 'typing', 5),
+    moved('a', 'read', 6),
+  ];
+
+  it('should carry on from where the last fold of the same events ended, with the answer a fold from nothing gives', () => {
+    const events = log();
+    for (let length = 1; length <= events.length; length++)
+      should(foldQueue(events.slice(0, length))).deepEqual(fresh(events.slice(0, length)));
+  });
+
+  it('should give back the very answer it gave when nothing was appended', () => {
+    const events = log();
+    const first = foldQueue(events);
+
+    should(foldQueue([...events])).equal(first);
+  });
+
+  it('should fold a shorter log of the same events, read after a longer one, from the start', () => {
+    const events = log();
+    foldQueue(events);
+
+    should(foldQueue(events.slice(0, 3))).deepEqual(fresh(events.slice(0, 3)));
+    should(foldQueue(events)).deepEqual(fresh(events));
+  });
+
+  it('should fold from the start when the event the last fold ended on is no longer where it was', () => {
+    const events = log();
+    foldQueue(events.slice(0, 4));
+    const rewritten = [...events.slice(0, 3), moved('a', 'failed', 3, 'pane gone'), ...events.slice(4)];
+
+    should(foldQueue(rewritten)).deepEqual(fresh(rewritten));
+  });
+
+  it('should leave an answer already given alone when the log it came from grows', () => {
+    const events = log();
+    const before = foldQueue(events.slice(0, 2));
+    const snapshot = structuredClone(before);
+
+    foldQueue(events);
+
+    should(before).deepEqual(snapshot);
+  });
+});
