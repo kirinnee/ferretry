@@ -375,7 +375,7 @@ describe('AgendaInboxPage rows', () => {
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-agenda-row]'), 'the item row');
     expect(link.getAttribute('href')).toBe('/d/laptop/agenda/sess-2/A2');
     expect(link.textContent).toContain('Ship it?');
-    expect(link.textContent).toContain('!A2');
+    expect(link.textContent).toContain('^A2');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
     expect(navigated).toEqual([]);
     expect(mounted.container.querySelector('[data-agenda-inbox]')?.getAttribute('data-agenda-inbox')).toBe('card');
@@ -443,7 +443,7 @@ describe('AgendaInboxPage rows', () => {
       must(mounted.container.querySelector<HTMLButtonElement>('[data-agenda-clear]'), 'Clear').click(),
     );
     expect(mounted.container.querySelector('[data-agenda-notice]')).toBeNull();
-    expect(toast(mounted).textContent).toContain('Cleared !N1');
+    expect(toast(mounted).textContent).toContain('Cleared ^N1');
     await advance(fake, 6_000);
     expect(fake.commits.map(commit => [commit.card.item.id, commit.action.kind])).toEqual([['N1', 'resolve']]);
     await mounted.unmount();
@@ -652,11 +652,11 @@ describe('AgendaInboxPage on a phone', () => {
           reads.push(card.item.id);
           return [
             { id: 'a0', kind: 'assistant', text: 'Cut the release branch.', at: 1 },
-            { id: 'u1', kind: 'user', text: '!A2 is staging green?', at: 2 },
+            { id: 'u1', kind: 'user', text: '^A2 is staging green?', at: 2 },
             {
               id: 'a1',
               kind: 'assistant',
-              text: 'Piper merged the probe.\n\nOn !A2: yes, all green.\n\nKylene is on the lockfile.',
+              text: 'Piper merged the probe.\n\nOn ^A2: yes, all green.\n\nKylene is on the lockfile.',
               at: 3,
             },
           ];
@@ -679,7 +679,7 @@ describe('AgendaInboxPage on a phone', () => {
     const sent = (id: string, fate: string, extra: object = {}) => ({
       id,
       kind: 'user' as const,
-      text: `!A2 words ${id}`,
+      text: `^A2 words ${id}`,
       at: 2,
       send: { sendId: `s-${id}`, fate, ...extra },
     });
@@ -858,7 +858,7 @@ describe('AgendaNeedsYou', () => {
     );
     await interact(() => done.click());
     expect(mounted.container.querySelector('[data-agenda-needs-you]')).toBeNull();
-    expect(toast(mounted).textContent).toContain('Marked !A1 done');
+    expect(toast(mounted).textContent).toContain('Marked ^A1 done');
     await interact(() => undoButton(mounted).click());
     expect(mounted.container.querySelector('[data-agenda-card="A1"]')).not.toBeNull();
     await advance(fake, 10_000);

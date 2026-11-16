@@ -79,7 +79,7 @@ describe('R-0333 M3 the agenda knows who started whom, and which card a ferret w
     });
     const refused = await half.call(BOARD, LEAD, add({ task: { id: 'F12' } }), as('lead'));
     expect(refused.status).toBeGreaterThanOrEqual(400);
-    expect(refused.body).toContain('already asks the owner on !A7');
+    expect(refused.body).toContain('already asks the owner on ^A7');
   });
 
   it('with Board off, an add keeps only the card it names and a gate it cannot read is asking', async () => {

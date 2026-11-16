@@ -1,3 +1,4 @@
+import { askReference, stripAskReferenceSigil } from '@ferretry/core-asks/contract';
 import type { z } from 'zod';
 import {
   type BoardActivityFilter,
@@ -144,13 +145,14 @@ export function createPrLinks(options: BoardCreateOptions): string[] {
   return trimmedAll(options.pr).map(requirePrUrl);
 }
 
-/** The ask `--approval` / `--thread` names, in any spelling `fy ask` takes (`!A12`, `?A12`, `A12`). */
+/** The ask `--approval` / `--thread` names, in any spelling `fy ask` takes (`^A12`, the older `!A12` / `?A12`, `A12`). */
 const requireAgendaFlag = (flag: string, value: string): string => {
-  const candidate = value.trim().replace(/^[?!]/u, '');
-  const parsed = AskIdTextSchema.safeParse(candidate);
+  const parsed = AskIdTextSchema.safeParse(stripAskReferenceSigil(value));
   return parsed.success
     ? parsed.data
-    : refuse(`${flag}: "${value.trim()}" is not an ask reference — they look like !A3 (see \`fy ask list\`)`);
+    : refuse(
+        `${flag}: "${value.trim()}" is not an ask reference — they look like ${askReference('A3')} (see \`fy ask list\`)`,
+      );
 };
 
 export function buildBoardCreateRequest(

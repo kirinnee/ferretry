@@ -53,12 +53,12 @@ function world() {
 describe('a tell joins the ferret’s reply batch', () => {
   it('goes out with an answer for the same ferret as ONE send, joined by a blank line as today', async () => {
     const { batcher, sent, time, tell } = world();
-    await batcher.add(FERRET, 'A1', '[answer to !A1 «ok?»] yes');
+    await batcher.add(FERRET, 'A1', '[answer to ^A1 «ok?»] yes');
     expect(await tell(FERRET, 'A3 ended without a value.', 'input-ended-f-A3')).toBe('queued');
     time.ms += AGENDA_REPLY_SETTLE_MS;
     await batcher.flush(FERRET);
     expect(sent.length).toBe(1);
-    expect(sent[0]?.message).toBe('[answer to !A1 «ok?»] yes\n\nA3 ended without a value.');
+    expect(sent[0]?.message).toBe('[answer to ^A1 «ok?»] yes\n\nA3 ended without a value.');
   });
 
   it('is told once per send id, and a different ferret’s same id is a different tell', async () => {

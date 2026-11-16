@@ -581,7 +581,7 @@ describe('renderCard', () => {
       .and.containEql('  commit  abc123')
       .and.containEql('  doc     docs/a.md');
     should(lines).containEql('Files').and.containEql('  src/a.ts').and.containEql('  src/b.ts');
-    should(lines).containEql('On the agenda').and.containEql('  !A1, !A2');
+    should(lines).containEql('On the agenda').and.containEql('  ^A1, ^A2');
     should(lines.some(line => line.includes('waiting on you'))).be.false();
   });
 
@@ -590,7 +590,7 @@ describe('renderCard', () => {
     const lines = renderCard(card({ openAsks: [{ ferret: DENISHA, id: 'A1' }] }), lanes, [], names).split('\n');
 
     // Assert
-    should(lines).containEql('  !A1');
+    should(lines).containEql('  ^A1');
     should(lines.some(line => line.includes('waiting on you:'))).be.false();
   });
 

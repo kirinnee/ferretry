@@ -35,8 +35,8 @@ const daemon = (item: AgendaItem): { readonly client: PluginClient; readonly cal
           nextCursor: null,
           previousCursor: null,
           messages: [
-            { point: 'p1', role: 'user', text: '!A2 is staging green?', timestamp: at, selectionBinding: 'b1' },
-            { point: 'p2', role: 'assistant', text: 'On !A2: yes, all green.', timestamp: at, selectionBinding: 'b2' },
+            { point: 'p1', role: 'user', text: '^A2 is staging green?', timestamp: at, selectionBinding: 'b1' },
+            { point: 'p2', role: 'assistant', text: 'On ^A2: yes, all green.', timestamp: at, selectionBinding: 'b2' },
           ],
         };
       if (route === 'GET /v1/ferrets/:ferretId/sends')
@@ -48,7 +48,7 @@ const daemon = (item: AgendaItem): { readonly client: PluginClient; readonly cal
               acceptedAt: at,
               acceptedTurn: 1,
               path: 'direct',
-              message: '!A2 is staging green?',
+              message: '^A2 is staging green?',
               attachmentIds: [],
               fate: 'delivered',
             },

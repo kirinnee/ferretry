@@ -149,7 +149,7 @@ describe('agenda controller add', () => {
     });
 
     // Assert
-    should(out.messages[0]).startWith('agenda !A2 recorded');
+    should(out.messages[0]).startWith('agenda ^A2 recorded');
   });
 
   it('should read the board before writing so the new id can be identified', async () => {
@@ -269,7 +269,7 @@ describe('agenda controller resolve and dismiss', () => {
     const { controller, gateway, out } = build(SESSION, snapshot([]));
 
     // Act
-    await controller.resolve('!A1', { approve: true, note: '  after the smoke test  ' });
+    await controller.resolve('^A1', { approve: true, note: '  after the smoke test  ' });
 
     // Assert
     should(gateway.applied).deepEqual([
@@ -283,7 +283,7 @@ describe('agenda controller resolve and dismiss', () => {
         },
       },
     ]);
-    should(out.messages[0]).equal(`resolved !A1 — 0 open items in ${SESSION}`);
+    should(out.messages[0]).equal(`resolved ^A1 — 0 open items in ${SESSION}`);
   });
 
   it('should send --reason as the note and say the question was withdrawn when a ferret closes it unanswered', async () => {
@@ -301,13 +301,13 @@ describe('agenda controller resolve and dismiss', () => {
     const { controller, gateway, out } = build(SESSION, withdrawn);
 
     // Act
-    await controller.resolve('!A1', { reason: '  The owner answered in chat  ' });
+    await controller.resolve('^A1', { reason: '  The owner answered in chat  ' });
 
     // Assert
     should(gateway.applied).deepEqual([
       { sessionId: SESSION, request: { action: 'resolve', id: 'A1', note: 'The owner answered in chat' } },
     ]);
-    should(out.messages[0]).startWith('withdrew the unanswered question !A1');
+    should(out.messages[0]).startWith('withdrew the unanswered question ^A1');
   });
 
   it('should answer a yes or no card with --yes and --no', async () => {
@@ -366,7 +366,7 @@ describe('agenda controller resolve and dismiss', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'dismiss', id: 'A1', note: 'no longer relevant' });
-    should(out.messages[0]).equal(`dismissed !A1 — 0 open items in ${SESSION}`);
+    should(out.messages[0]).equal(`dismissed ^A1 — 0 open items in ${SESSION}`);
   });
 
   it('should dismiss without a note', async () => {
@@ -418,14 +418,14 @@ describe('agenda controller edit', () => {
     const { controller, gateway, out } = build(SESSION, warned);
 
     // Act
-    await controller.edit('!A1', { summary: 'Approve the deploy?', context: ['one', 'two'] });
+    await controller.edit('^A1', { summary: 'Approve the deploy?', context: ['one', 'two'] });
 
     // Assert
     should(gateway.applied[0]).deepEqual({
       sessionId: SESSION,
       request: { action: 'edit', id: 'A1', subject: 'Approve the deploy?', context: '- one\n- two' },
     });
-    should(out.messages[0]).containEql('edited !A1');
+    should(out.messages[0]).containEql('edited ^A1');
     should(out.messages[0]).containEql('summary is long');
   });
 
@@ -522,13 +522,13 @@ describe('agenda controller steps and body', () => {
     const loud = new AgendaController(gateway, out, SESSION);
 
     // Act
-    await controller.step('!A1', '2', {});
+    await controller.step('^A1', '2', {});
     await loud.step('A1', ' 1 ', { undo: true });
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'progress', id: 'A1', step: 1, done: true });
     should(gateway.applied[1]?.request).deepEqual({ action: 'progress', id: 'A1', step: 0, done: false });
-    should(out.messages[0]).containEql('unticked step 1 of !A1');
+    should(out.messages[0]).containEql('unticked step 1 of ^A1');
     await should(controller.step('A1', '0', {})).be.rejectedWith(/counts from 1/u);
     await should(controller.step('A1', 'two', {})).be.rejectedWith(/counts from 1/u);
   });
@@ -547,7 +547,7 @@ describe('agenda controller send-now', () => {
 
     // Assert
     should(gateway.flushed).deepEqual([SESSION]);
-    should(out.messages).deepEqual([`sent !A2, !A3 to ${SESSION} now`]);
+    should(out.messages).deepEqual([`sent ^A2, ^A3 to ${SESSION} now`]);
   });
 
   it('should say when nothing was held', async () => {
@@ -573,7 +573,7 @@ describe('agenda controller discuss', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'discuss', id: 'A1', note: 'Why this account?' });
-    should(out.messages[0]).containEql('asked to discuss !A1');
+    should(out.messages[0]).containEql('asked to discuss ^A1');
   });
 
   it('should send no note when none was given, and reject a bad reference before the daemon', async () => {
@@ -600,7 +600,7 @@ describe('agenda controller surface', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1', why: 'Still open: the account' });
-    should(out.messages[0]).containEql('surfaced !A1');
+    should(out.messages[0]).containEql('surfaced ^A1');
   });
 
   it('should send no why when none was given, and reject a bad reference before the daemon', async () => {
@@ -627,7 +627,7 @@ describe('agenda controller needs-info', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1', note: 'Which account?' });
-    should(out.messages[0]).containEql('asked for more information on !A1');
+    should(out.messages[0]).containEql('asked for more information on ^A1');
   });
 
   it('should send no note when none was given, and reject a bad reference before the daemon', async () => {
@@ -682,7 +682,7 @@ describe('agenda controller add — related work', () => {
 
     // Assert
     const message = (failure as Error).message;
-    should(message).match(/!A3\s+resting/u);
+    should(message).match(/\^A3\s+resting/u);
     should(message).containEql(
       "fy agenda edit A3 --still-open 'pick a relay' --still-open 'choose a relay' --premise 'Two relays are up' --premise 'A ferret needs the owner.' --context 'Cost differs' --context 'The work waits on this answer.' --question-answer 'choose a relay' --summary 'choose a relay'",
     );
@@ -728,10 +728,10 @@ describe('agenda controller add — related work', () => {
       const failure = await controller.add(['choose', 'a', 'relay'], brief).catch((error: unknown) => error);
 
       // Assert
-      should(asked).eql(['Should this join !A3? [y/N]']);
+      should(asked).eql(['Should this join ^A3? [y/N]']);
       should(gateway.applied).eql([]);
       const message = (failure as Error).message;
-      should(message).startWith('Nothing was opened. Join it to !A3:');
+      should(message).startWith('Nothing was opened. Join it to ^A3:');
       should(message).containEql("fy agenda edit A3 --still-open 'choose a relay'");
       should(message).containEql('fy agenda add … --new "<why none fits>"');
     },
@@ -756,10 +756,10 @@ describe('agenda controller add — related work', () => {
     should(quiet.gateway.applied).eql([]);
     should((refused as Error).message).containEql('blocking the ferret now');
     should((refused as Error).message).not.containEql('fy agenda edit A3');
-    should((refused as Error).message).containEql('--new "<why none fits; closest is !A3>"');
+    should((refused as Error).message).containEql('--new "<why none fits; closest is ^A3>"');
     should(declined.gateway.applied).eql([]);
     should(declined.out.messages[0]).containEql('Nothing was opened. This ask has');
-    should(declined.out.messages[0]).containEql('--new "<why none fits; closest is !A3>"');
+    should(declined.out.messages[0]).containEql('--new "<why none fits; closest is ^A3>"');
   });
 
   it('should print the candidates as JSON with --json, and open nothing', async () => {
@@ -868,7 +868,7 @@ describe('agenda controller tabs (agenda.tabs.1)', () => {
     const { controller, out } = withTabs();
 
     // Act
-    await controller.show('!A2', { tab: 'main' });
+    await controller.show('^A2', { tab: 'main' });
     await controller.show('A2', { tab: 'Risks' });
 
     // Assert
@@ -884,7 +884,7 @@ describe('agenda controller tabs (agenda.tabs.1)', () => {
 
     // Assert
     should(out.messages[0]).containEql('tab Risks: The export may slip.');
-    should(out.messages[0]).containEql('tabs: Where we are now · Risks (one in full: agenda show !A2 --tab <name>)');
+    should(out.messages[0]).containEql('tabs: Where we are now · Risks (one in full: agenda show ^A2 --tab <name>)');
   });
 });
 
@@ -965,7 +965,7 @@ describe('agenda controller add — what it refuses before anything is raised', 
     // Assert
     should(gateway.applied).be.empty();
     should(out.messages[0]).equal(
-      "!A3 is already yours, so nothing was raised. Reword it instead:\nfy agenda edit A3 --title 'Pick a relay' --summary 'choose a relay'",
+      "^A3 is already yours, so nothing was raised. Reword it instead:\nfy agenda edit A3 --title 'Pick a relay' --summary 'choose a relay'",
     );
   });
 
@@ -991,7 +991,7 @@ describe('agenda controller add — what it refuses before anything is raised', 
       .catch((e: unknown) => e);
 
     // Assert
-    should((failure as Error).message).equal('no agenda item !A7 in your agenda; nothing was raised');
+    should((failure as Error).message).equal('no agenda item ^A7 in your agenda; nothing was raised');
     should(gateway.applied).be.empty();
   });
 });
@@ -1028,7 +1028,7 @@ describe('agenda controller answer and rest', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'edit', id: 'A4', questionAnswer: 'Relay B is cheaper' });
-    should(out.messages[0]).containEql('answered !A4');
+    should(out.messages[0]).containEql('answered ^A4');
   });
 
   it('should refuse an answer of only blanks, and a bad reference, before the daemon is asked', async () => {
@@ -1052,7 +1052,7 @@ describe('agenda controller answer and rest', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'rest', id: 'A4', why: 'Reading the logs' });
-    should(out.messages[0]).containEql('resting (working) !A4');
+    should(out.messages[0]).containEql('resting (working) ^A4');
   });
 
   it('should refuse resting without saying what is being done', async () => {
@@ -1085,7 +1085,7 @@ describe('agenda controller snooze and unsnooze', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'snooze', id: 'A1', until: '2026-11-04T16:00:00.000Z' });
-    should(out.messages[0]).containEql('snoozed until 2026-11-04T16:00:00.000Z !A1');
+    should(out.messages[0]).containEql('snoozed until 2026-11-04T16:00:00.000Z ^A1');
   });
 
   it('should snooze until a time given, naming --until when it is not a time', async () => {
@@ -1122,6 +1122,6 @@ describe('agenda controller snooze and unsnooze', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'unsnooze', id: 'A1' });
-    should(out.messages[0]).containEql('back on the list !A1');
+    should(out.messages[0]).containEql('back on the list ^A1');
   });
 });

@@ -14,7 +14,7 @@ import { MachineScripts } from '../../../../daemon/lib/inputs/machine-scripts.ts
 import type { InputCaller as ServiceCaller } from '../../../../daemon/lib/inputs/ports.ts';
 import { FACTS, inputRequestService, RAISE, SESSION } from './support.ts';
 
-/** The adaptive lock (!A149) through the REAL input service: the card says it, and the hold runs it. */
+/** The adaptive lock (^A149) through the REAL input service: the card says it, and the hold runs it. */
 
 const HOST: ServiceCaller = { kind: 'owner', actor: { kind: 'host' }, carrier: 'loopback' };
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');

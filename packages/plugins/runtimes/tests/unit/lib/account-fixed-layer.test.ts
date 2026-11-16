@@ -838,7 +838,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // No item type (the owner: "now agenda doesn't have a "main" type any more"): the stage chain is not taught.
     should(text).not.containEql('Type:');
     should(text).not.containEql('`--stage`');
-    // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
+    // All discussion about an agenda lands in it, the owner's words verbatim (^A304), copied by `log` (DoD 16).
     should(text).containEql(
       'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
     );
@@ -874,7 +874,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
     // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
-    // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
+    // owner on ^A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
     // and a ferret's own tabs, paid for by dropping ", `--where`=short status". Then 1,311: the owner's split rule (&F946),
@@ -907,6 +907,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql(
       "Card only if the project's board is on (`zz board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`).",
     );
+    should(text).not.containEql('!A'); // `!` starts a shell command in the agent's composer: only `^A<n>` is taught
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
   });
@@ -1042,7 +1043,7 @@ describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
 });
 
 describe('launchInstructions', () => {
-  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (!A527)', () => {
+  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (^A527)', () => {
     // Arrange
     const binary = 'zz';
     const env = {

@@ -173,7 +173,7 @@ describe('the header’s filters', () => {
     const ids = (query: string) => filterInboxCards([a10, a3, a9], { machine: null, query }).map(card => card.item.id);
     expect(ids('RESTART')).toEqual(['A3']);
     expect(ids('owner settings')).toEqual(['A10']);
-    expect(ids('!a9')).toEqual(['A9']);
+    expect(ids('^a9')).toEqual(['A9']);
     expect(ids('diene-migrate')).toEqual(['A10', 'A9']);
     expect(ids('hadi')).toEqual(['A3']);
     expect(ids('  ')).toEqual(['A10', 'A3', 'A9']);

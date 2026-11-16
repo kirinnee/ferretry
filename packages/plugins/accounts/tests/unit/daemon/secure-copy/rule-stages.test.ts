@@ -1,5 +1,5 @@
 /**
- * Changes waiting for their bound passkey (owner decision !A244, secrev-1334): a stage allows nothing, lives one
+ * Changes waiting for their bound passkey (owner decision ^A244, secrev-1334): a stage allows nothing, lives one
  * challenge's life, is bound to its own bytes and kind, and is answered only by the device that staged it or the one
  * that took a machine stage. Each stager's cap refuses a new stage and drops none that waits.
  */

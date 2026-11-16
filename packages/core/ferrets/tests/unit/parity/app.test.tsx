@@ -1,6 +1,6 @@
 /**
  * Ferrets' app half, parity with today's session screens, panels and sheets (docs/design/rebuild-parity.tsv, owner
- * `ferrets`; owner decision !A468: ONE test per screen or panel host per state, its title naming every row it proves).
+ * `ferrets`; owner decision ^A468: ONE test per screen or panel host per state, its title naming every row it proves).
  *
  * The half the shell builds is mounted over a scripted client and the test reads what it drew: the new-ferret screen,
  * the Actions panel and its menu, the three paused-restart panels, the move page's convert side, and Info. The views'

@@ -42,7 +42,7 @@ nothing stores or returns it.
 
 ## The agenda card
 
-The input form **is** an agenda item of `kind: 'input'`, referenced like any item (`!A7`; no new
+The input form **is** an agenda item of `kind: 'input'`, referenced like any item (`^A7`; no new
 sigil, see [the reference standard](reference-standard.md)). Its `input.requestId` points at the
 request. The card lives until it is answered, cancelled or expired, and **survives a daemon restart**:
 the facts are RAM-only, so after a restart the card reads "re-observing" and the daemon observes the
@@ -60,7 +60,7 @@ for a restarted daemon and an app that cannot draw the form. Only a card that is
 item still open) takes the prompt out of the context; a closed record and an older version keep it as written.
 
 The generic agenda answer **refuses** `kind: 'input'` (400 `use_input_form`), so a value can never be
-typed into the agent's pane as `[answer to !A7] hunter2`. The agent adds `kind: 'input'` items only
+typed into the agent's pane as `[answer to ^A7] hunter2`. The agent adds `kind: 'input'` items only
 through the input tool; the generic add refuses it.
 
 ## The shapes
@@ -129,7 +129,7 @@ beside the field) and "Password" (`secret`) on one card, and the daemon types ea
 - **One write**: the target adapter gets the values in field order and types them under one binding
   check, with Enter (submit) after the last. Each value that is not `plain` is masked before it is typed.
 - **A login on two pages is two cards**: the second names the first in `chain` and reads "Step 2 · after
-  !A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
+  ^A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
   SAME session's input requests that this daemon holds; another session's card or an unknown one is refused.
 - **Only a password input is green.** `autocomplete="current-password"` or `"new-password"` says what a field
   is for, not that it hides what is typed: a text input carrying it stays amber.
@@ -527,7 +527,7 @@ input service's `steerOf`):
     since the card was raised (below), so a standing rule's history is unchanged.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
-`[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
+`[redacted:input ^A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
 and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 - **The same text is scrubbed everywhere.** The ephemeral window and the vault's `SecretRedactor` are
@@ -1105,7 +1105,7 @@ place by `--domain`/`--for`, or `--tool`/`--host`/`--dest`; the method by `--met
 echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 owner_only`, `fy` says so and tries
 no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
 `fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
-At the machine, `fy input answer <!A7> --account <ACCOUNT>` answers a waiting card with an account (only its name is
+At the machine, `fy input answer <^A7> --account <ACCOUNT>` answers a waiting card with an account (only its name is
 sent, and the daemon types it), and
 `--save-as <ACCOUNT> [--label <text>]` keeps the value you type as an account. When the daemon matched an account to
 the card, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".

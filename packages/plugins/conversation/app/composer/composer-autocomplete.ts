@@ -41,6 +41,7 @@ import {
   type SuggestionKeys,
 } from '@ferretry/app';
 import { fieldScore } from '@ferretry/app/ui';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /**
  * `%` IS ITS OWN TRIGGER RATHER THAN A FIFTH `@` TIER.
@@ -95,7 +96,7 @@ export interface ComposerReferenceTierLegendItem {
 export const COMPOSER_REFERENCE_TIERS: readonly ComposerReferenceTierLegendItem[] = [
   { tier: 1, trigger: '@', label: 'Files' },
   { tier: 2, trigger: '@@', label: 'Agents', direct: ':' },
-  { tier: 3, trigger: '@@@', label: 'Asks', direct: '!' },
+  { tier: 3, trigger: '@@@', label: 'Asks', direct: ASK_REFERENCE_SIGIL },
   { tier: 4, trigger: '@@@@', label: 'Cards', direct: '&' },
 ];
 

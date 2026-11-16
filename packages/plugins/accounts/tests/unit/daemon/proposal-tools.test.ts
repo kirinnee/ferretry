@@ -96,7 +96,7 @@ describe('account_propose', () => {
     should(seen.suggestions).eql([]);
     should(answer.text)
       .containEql('Proposed a recipe')
-      .and.containEql('(!A7)')
+      .and.containEql('(^A7)')
       .and.containEql('You do not need to wait');
     should(answer.data).eql({ recipe: { id: PROPOSAL, login: 'GITHUB_A', state: 'pending', agendaItemId: 'A7' } });
   });
@@ -119,7 +119,7 @@ describe('account_propose', () => {
     should(seen.suggestions).eql([['F1', { signIn: SIGN_IN, why: 'every deploy' }]]);
     should(answer.isError).not.equal(true);
     should(answer.text)
-      .containEql('Suggested a standing rule for github.com (!A8)')
+      .containEql('Suggested a standing rule for github.com (^A8)')
       .and.containEql('you will not hear back');
     should(answer.data).eql({});
   });
@@ -252,7 +252,7 @@ describe('task_plan', () => {
 
     should(answer.isError).not.equal(true);
     should(seen.plans).eql([['F1', CALL]]);
-    should(answer.text).containEql('Asked the owner to approve 1 line in advance (!A193)');
+    should(answer.text).containEql('Asked the owner to approve 1 line in advance (^A193)');
     should(answer.data).eql({
       taskPlan: {
         id: PLAN.id,
@@ -311,6 +311,6 @@ describe('task_plan', () => {
 
     const answer = await run(tools.task_plan, CALL);
 
-    should(answer.text).containEql('(![card])').and.not.containEql('A193');
+    should(answer.text).containEql('(^[card])').and.not.containEql('A193');
   });
 });

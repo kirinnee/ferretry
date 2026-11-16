@@ -305,7 +305,7 @@ describe('the passkey step-up wire', () => {
     ]);
   });
 
-  it('should bind an approve-paste-rule step-up to one staged paste rule, never to another kind of stage (!A244)', () => {
+  it('should bind an approve-paste-rule step-up to one staged paste rule, never to another kind of stage (^A244)', () => {
     const stage = `prs_${'a'.repeat(24)}`;
 
     should(stepUp.STEP_UP_ACTS.approvePasteRule).equal('approve-paste-rule');

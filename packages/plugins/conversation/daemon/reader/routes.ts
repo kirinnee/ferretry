@@ -1,5 +1,6 @@
 import {
   ApiError,
+  conditionalTag,
   type ApiResponse,
   decodeParameter,
   jsonResponse,
@@ -8,7 +9,6 @@ import {
   textResponse,
 } from '@ferretry/kernel/contract';
 import { createHash } from 'node:crypto';
-import { namesTag } from './lib/http.ts';
 import {
   type MessageBackwardRead,
   TranscriptReadError,
@@ -82,11 +82,10 @@ const entityTag = (body: string): string => `"${createHash('sha256').update(body
 
 /** The answer, or a 304 when `If-None-Match` already names it. */
 function conditional(response: ApiResponse, call: Call): ApiResponse {
-  const etag = entityTag(response.body);
+  const { etag, held } = conditionalTag(call.request, entityTag(response.body));
   const headers = new Map(response.headers);
   headers.set('etag', etag);
-  const ifNoneMatch = call.request.headers.get('if-none-match');
-  if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, etag)) {
+  if (held) {
     headers.delete('content-type');
     return { status: 304, headers, body: '' };
   }
@@ -181,12 +180,12 @@ export function readerRoutes({ reads, images, exists }: ReaderRoutes) {
       const handle = decodeParameter(call.params.get('handle') ?? '');
       try {
         const found = await images.lookup(id, handle ?? '');
+        const { etag, held } = conditionalTag(call.request, found.etag);
         const headers = new Map([
           ['cache-control', IMAGE_CACHE_CONTROL],
-          ['etag', found.etag],
+          ['etag', etag],
         ]);
-        const ifNoneMatch = call.request.headers.get('if-none-match');
-        if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, found.etag)) return { status: 304, headers, body: '' };
+        if (held) return { status: 304, headers, body: '' };
         return jsonResponse(await found.download(), 200, Object.fromEntries(headers));
       } catch (error) {
         if (error instanceof TranscriptImageError)

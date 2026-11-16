@@ -54,7 +54,7 @@ describe('the open Inbox item’s composer', () => {
     await runAsync(async () => {
       view.root.findByType('form').props.onSubmit({ preventDefault() {} });
     });
-    expect(sent).toEqual([{ sessionId: 'sess-2', message: '!A5 only after lunch' }]);
+    expect(sent).toEqual([{ sessionId: 'sess-2', message: '^A5 only after lunch' }]);
     run(() => view.unmount());
   });
 
