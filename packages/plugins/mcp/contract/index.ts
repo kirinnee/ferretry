@@ -20,6 +20,7 @@ import {
 
 export * from './oauth-state.ts';
 export * from './rules.ts';
+export * from './slots.ts';
 export * from './wire.ts';
 
 export const MCP = 'mcp' as const;

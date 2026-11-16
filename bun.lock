@@ -304,6 +304,7 @@
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
+        "@ferretry/plugin-mcp": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-skills": "workspace:*",

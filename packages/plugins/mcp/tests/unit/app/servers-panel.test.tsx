@@ -4,8 +4,15 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
-import { type Mounted, must } from '@ferretry/app/testing';
-import { type McpCheckResult, type McpInventory, McpInventorySchema } from '../../../contract/index.ts';
+import { type Mounted, must, noteClientDaemon, WithSlotPanels } from '@ferretry/app/testing';
+import {
+  isMcpRowSlotProps,
+  MCP_INSTALL_SLOT,
+  MCP_ROW_SLOT,
+  type McpCheckResult,
+  type McpInventory,
+  McpInventorySchema,
+} from '../../../contract/index.ts';
 import { McpServersPanel } from '../../../app/views/servers-panel.tsx';
 import { type Answers, CALLBACK, type Call, completion, MCP, mcpFlow, NOW, scriptedClient } from './mcp-fixtures.ts';
 import { click, mountSettled, settle, text, type } from './mcp-view-support.tsx';
@@ -254,5 +261,72 @@ describe('DOM tests — the panel after a sign-in lands', () => {
     expect(text(root, '[data-mcp-row="notion"] [data-mcp-status]')).toBe('Not checked yet');
     await click(document.body, '[data-mcp-sign-in-done]');
     expect(document.body.querySelector('[data-mcp-sign-in]')).toBeNull();
+  });
+});
+
+describe('DOM tests — the slots the panel offers', () => {
+  const placed = (id: string) => ({
+    plugin: 'catalogs',
+    id,
+    view: (props: Record<string, unknown>) => <i data-test-slot={id} data-test-props={JSON.stringify(props)} />,
+  });
+  const slots = { [MCP_ROW_SLOT]: [placed('mcp-row')], [MCP_INSTALL_SLOT]: [placed('mcp-install')] };
+  const slotted = async (options: { readonly canControl?: boolean; readonly daemon?: string | null } = {}) => {
+    const client = scriptedClient({ [SERVERS]: MCP });
+    if (options.daemon !== null) noteClientDaemon(client, options.daemon ?? 'studio');
+    mounted = await mountSettled(
+      <WithSlotPanels slots={slots}>
+        <McpServersPanel
+          canControl={options.canControl ?? true}
+          client={client}
+          ferretId="ferret-a"
+          now={() => NOW}
+          searchDebounceMs={0}
+        />
+      </WithSlotPanels>,
+    );
+    return mounted.container;
+  };
+  const drawn = (root: HTMLElement, id: string) =>
+    [...root.querySelectorAll(`[data-test-slot="${id}"]`)].map(node =>
+      JSON.parse(node.getAttribute('data-test-props') ?? '{}'),
+    );
+
+  it('offers mcp.row on every server’s status line, with that server’s own data', async () => {
+    const root = await slotted();
+    const rowsDrawn = drawn(root, 'mcp-row');
+    expect(rowsDrawn.map(row => [row.name, row.scope, row.ferret])).toEqual([
+      ['ferretry', 'ferretry', 'ferret-a'],
+      ['scratch', 'local', 'ferret-a'],
+      ['lint', 'project', 'ferret-a'],
+      ['notion', 'project', 'ferret-a'],
+      ['github', 'user', 'ferret-a'],
+      ['linear', 'component', 'ferret-a'],
+    ]);
+    expect(rowsDrawn.every(row => isMcpRowSlotProps(row))).toBe(true);
+    expect(rowsDrawn[3]?.id).toBe('id-notion-project');
+    // On the row's own status line, beside Check, not under the details.
+    expect(
+      root.querySelector('[data-mcp-row="notion"] [data-mcp-status] ~ [data-slot="mcp.row"] [data-test-slot]'),
+    ).not.toBeNull();
+  });
+
+  it('offers mcp.install in the header, beside Add…, to a caller who may control the ferret', async () => {
+    const root = await slotted();
+    expect(drawn(root, 'mcp-install')).toEqual([{ subject: 'ferret-a', ferret: 'ferret-a' }]);
+    expect(root.querySelector('[data-mcp-add]')?.previousElementSibling?.getAttribute('data-slot')).toBe('mcp.install');
+  });
+
+  it('offers no install way in to a caller who may not control the ferret', async () => {
+    const root = await slotted({ canControl: false });
+    expect(drawn(root, 'mcp-install')).toEqual([]);
+    expect(drawn(root, 'mcp-row')).toHaveLength(6);
+  });
+
+  it('offers neither slot to a client the shell did not bind to a daemon', async () => {
+    const root = await slotted({ daemon: null });
+    expect(drawn(root, 'mcp-row')).toEqual([]);
+    expect(drawn(root, 'mcp-install')).toEqual([]);
+    expect(rows(root, 'data-context-mcp')).toHaveLength(6);
   });
 });
