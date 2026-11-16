@@ -490,7 +490,16 @@ describe('a runtime wrapper, run', () => {
     should(result.status).equal(0);
     // `cwd` is already physical: its parent came from realpath (which Bun mis-resolves for a name holding a backslash).
     const args = (result.harness as string).split('\n').slice(1, -1);
-    should(args).eql(['--no-alt-screen', '-c', codexTrustOverride(cwd), 'resume', '--last']);
+    // Every Codex launch that does not opt in also carries an explicit OFF for the question tool (#1671), before the trust.
+    should(args).eql([
+      '--no-alt-screen',
+      '-c',
+      'features.default_mode_request_user_input=false',
+      '-c',
+      codexTrustOverride(cwd),
+      'resume',
+      '--last',
+    ]);
   });
 
   it('should say why a runtime cannot start, and not start it', async () => {
