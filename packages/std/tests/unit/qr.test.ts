@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { localQr, MAX_QR_VERSION, QrEncodeError } from '../../../src/ui/local-qr.ts';
+import { localQr, MAX_QR_VERSION, QrEncodeError } from '../../src/qr.ts';
 
 describe('S14 localQr: the one local encoder', () => {
   it('draws a square symbol with the finder patterns a scanner looks for', () => {

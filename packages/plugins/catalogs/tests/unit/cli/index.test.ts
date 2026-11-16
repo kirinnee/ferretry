@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PluginClient, VerbInvocation } from '@ferretry/kernel/manifest';
-import qrcode from 'qrcode-generator';
+import { localQr } from '@ferretry/std/qr';
 import { BlockQrEncoder } from '../../../cli/adapters/qr.ts';
 import cli from '../../../cli/index.ts';
 import manifest from '../../../manifest.ts';
@@ -144,12 +144,9 @@ describe('fy catalog / fy member', () => {
 });
 
 describe('BlockQrEncoder', () => {
-  test('draws the QR the library computes, a square with a quiet zone, in both sizes', async () => {
+  test('draws the QR the shared encoder computes, a square with a quiet zone, in both sizes', async () => {
     const link = 'https://app.ferretry.test/join#v1;url=x;fp=y;share=z';
-    const code = qrcode(0, 'L');
-    code.addData(link);
-    code.make();
-    const modules = code.getModuleCount() + 2;
+    const modules = localQr(link).size + 2;
     const large = (await new BlockQrEncoder().encode(link, 'large')).split('\n');
     const compact = (await new BlockQrEncoder().encode(link, 'compact')).split('\n');
     expect(large).toHaveLength(modules);

@@ -21,7 +21,7 @@
  * devices this product runs on — and the person aiming the camera would have no way to know why.
  */
 
-import type { QrMatrix } from '../lib/qr-code.ts';
+import type { QrMatrix } from '@ferretry/app';
 
 /** The standard's margin, in modules. Four, and it is not a style choice. */
 const QUIET_ZONE = 4;

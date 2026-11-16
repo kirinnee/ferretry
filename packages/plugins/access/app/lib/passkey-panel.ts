@@ -8,7 +8,7 @@
 
 import { type StepUpRefusal, stepUpRefusalCode } from '@ferretry/core-gate/contract';
 import { FyHttpError } from '../shell-grants.ts';
-import { PasskeyCeremonyError, passkeySentence } from './passkeys.ts';
+import { PasskeyCeremonyError, passkeySentence } from '@ferretry/app';
 
 /** What changing a setting costs, said where a person decides to add a passkey (docs/design/zero-trust.md B2). */
 export const PASSKEY_COST_SENTENCE =

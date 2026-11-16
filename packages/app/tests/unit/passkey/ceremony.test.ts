@@ -4,7 +4,6 @@
  */
 
 import { describe, it } from 'bun:test';
-import { toBase64Url } from '../../../app/shell-grants.ts';
 import should from 'should';
 import {
   type AssertionOptionsWire,
@@ -14,7 +13,8 @@ import {
   PasskeyCeremonyError,
   passkeySentence,
   type RegistrationOptionsWire,
-} from '../../../app/lib/passkeys.ts';
+} from '../../../src/passkey/ceremony.ts';
+import { toBase64Url } from '../../../src/session/session-transport.ts';
 
 const ORIGIN = 'https://ferretry.pages.dev';
 const buffer = (...values: number[]) => Uint8Array.from(values).buffer as ArrayBuffer;
