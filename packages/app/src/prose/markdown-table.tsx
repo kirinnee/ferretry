@@ -67,7 +67,7 @@ export function MarkdownTable({ store = defaultStore, ...table }: MarkdownTableP
     <div className="md-table" data-md-table-view={view}>
       <fieldset aria-label="Table view" className="md-table-tools">
         <button aria-pressed={view === 'cards'} onClick={() => store.set('cards')} type="button">
-          Cards
+          Stacked
         </button>
         <button aria-pressed={view === 'table'} onClick={() => store.set('table')} type="button">
           Table
