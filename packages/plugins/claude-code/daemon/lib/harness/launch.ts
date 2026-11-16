@@ -1,7 +1,7 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
-import { fixedLayer } from './fixed-layer.ts';
+import { CLAUDE_HOME_ENV, fixedLayer } from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
 import { startupModelArguments } from './startup.ts';
 
@@ -140,7 +140,8 @@ export function readAllowArguments(folders: readonly string[]): readonly string[
  * before anything risky) or `bypassPermissions`.
  */
 export function launchCommand(inputs: CommandInputs): readonly string[] {
-  return ['env', `CLAUDE_CONFIG_DIR=${inputs.home}`, ...seededCommand(claudeCommand(inputs))];
+  const fixed = Object.entries(CLAUDE_HOME_ENV).map(([name, value]) => `${name}=${value}`);
+  return ['env', `CLAUDE_CONFIG_DIR=${inputs.home}`, ...fixed, ...seededCommand(claudeCommand(inputs))];
 }
 
 /** Claude itself and its flags: what the seed `exec`s. */

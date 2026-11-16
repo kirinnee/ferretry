@@ -14,11 +14,28 @@ export const V4_WARDEN_DIR = 'state/warden';
 export const V4_WARDEN_STATE = 'state/warden/state.json';
 export const V4_WARDEN_REPORTS = 'state/warden/reports';
 export const V4_WARDEN_JEV_CHECKS = 'state/warden/jev-checks';
+export const V4_WARDEN_AUTO_MIGRATE = 'state/warden/auto-migrate.json';
 
 /** `lib/warden/jev-checks.ts` `jevCheckFileName`: `<day>.jsonl`. */
 export const V4_JEV_CHECK_FILE = /^(\d{4}-\d{2}-\d{2})\.jsonl$/u;
 
 const Instant = z.iso.datetime({ offset: true });
+
+/**
+ * One ferret's entry of the login-move ledger (`lib/warden/auto-migrate.ts` `AutoMigrateSessionMemory`): the moves of the
+ * last hour, an ask to stop its background jobs, and the last reason it was held. v5's mover keeps the same shape.
+ */
+export const V4AutoMigrateSession = z.object({
+  moves: z.array(z.string().min(1)).default([]),
+  asked: z
+    .object({
+      at: z.string().min(1),
+      trigger: z.enum(['rate_limited', 'budget_exceeded']),
+      from: z.string().min(1),
+    })
+    .optional(),
+  held: z.string().min(1).optional(),
+});
 
 /** `lib/warden/state.ts` `BlessingSchema`; the store is keyed by session id, one blessing each. */
 export const V4Blessing = z.object({

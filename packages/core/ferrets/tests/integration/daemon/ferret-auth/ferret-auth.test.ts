@@ -571,11 +571,14 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
       'new',
       '--runtime',
       'rt',
+      '--allow-scratch',
       '--mode',
       'interactive',
       '--cwd',
       daemon.folder,
       'say hello',
+      // The test's folder is a temporary one, which `fy new` refuses unless asked; this test is about the login.
+      '--allow-scratch',
     ]);
     const listing = JSON.parse((await daemon.call('GET', '/v1/ferrets')).text) as { id: string; runtime?: string }[];
     expect(listing.find(ferret => ferret.id === id)?.runtime).toBe('rt');
@@ -711,6 +714,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
       'new',
       '--runtime',
       'rt-off',
+      '--allow-scratch',
       '--mode',
       'interactive',
       '--cwd',
@@ -770,6 +774,7 @@ describe('a start by runtime reaches the provider signed in (merge bar 11)', () 
         'new',
         '--runtime',
         runtime,
+        '--allow-scratch',
         '--mode',
         'interactive',
         '--cwd',

@@ -187,3 +187,40 @@ describe('a ledger this browser can no longer read', () => {
     expect(rows[0]?.unread).toBeUndefined();
   });
 });
+
+describe('the ledger poll costs a 304 when nothing moved', () => {
+  /** A daemon whose ledger is named by a counter, answering a conditional read the way the route does. */
+  const polling = () => {
+    const state = { version: 1, asked: [] as Array<string | undefined> };
+    const client = {
+      call: async () => {
+        throw new Error('the ledger is polled through the conditional read');
+      },
+      conditional: async (_route: string, _params: unknown, init?: { readonly ifNoneMatch?: string }) => {
+        state.asked.push(init?.ifNoneMatch);
+        const etag = `"ledger-${String(state.version)}"`;
+        return init?.ifNoneMatch === etag
+          ? ({ status: 304, etag } as const)
+          : ({ status: 200, etag, body: { sends: [{ sendId: `s${String(state.version)}` }] } } as const);
+      },
+    };
+    return { client, state };
+  };
+
+  it('a 304 keeps the rows already held, the very ones', async () => {
+    const { client, state } = polling();
+    const first = await readLedgerSends(client, 'f1');
+    const again = await readLedgerSends(client, 'f1');
+    expect(again).toBe(first);
+    expect(state.asked).toEqual([undefined, '"ledger-1"']);
+  });
+
+  it('a 200 replaces them, and the next poll names the new etag', async () => {
+    const { client, state } = polling();
+    await readLedgerSends(client, 'f1');
+    state.version = 2;
+    expect(await readLedgerSends(client, 'f1')).toEqual([{ sendId: 's2' }]);
+    await readLedgerSends(client, 'f1');
+    expect(state.asked).toEqual([undefined, '"ledger-1"', '"ledger-2"']);
+  });
+});

@@ -179,6 +179,7 @@ describe('commands parity', () => {
               allowContextDowngrade: true,
               forceInflight: true,
               conversation: 'fresh',
+              requesterPid: process.pid,
             },
             headers: { 'x-fy-request-id': 'k1' },
           },

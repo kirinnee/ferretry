@@ -547,7 +547,8 @@ never in `tests/unit/`.
   `process.cpuUsage` / `threadCpuUsage` / `resourceUsage` / `memoryUsage`), uses the `linear-time` helper, or feeds a
   `Date.now()` difference or a named duration to an upper bound. A fake that REPLACES a clock marks its line
   `// not-a-budget: <reason>`, printed for the reviewer. `config/perf-pending.txt` lists the files not moved yet; it
-  only shrinks, and a listed file with nothing left to move fails too. Empty list = no timing claim in the unit tier.
+  only shrinks (every listed path must also be on the base's list, `FY_CHECK_BASE`; the change that introduces the
+  list is the bootstrap, and an unreadable base fails), and a listed file with nothing left to move fails too. Empty list = no timing claim in the unit tier.
 - GAP: a helper OUTSIDE `tests/unit/` that measures time on a unit test's behalf is seen only through the
   `linear-time` name; give any new timing helper a name the gate matches, or put it under `tests/perf/`.
 

@@ -53,11 +53,18 @@ if [[ ${mode} == "perf" ]]; then
   # No ledger, so the files are dealt one by one, round robin in path order: the same split on every run. Each
   # process is swept on its own (TMPDIR, HOME, leak sweep) like the unit groups'. A budget keeps the generous per-test
   # timeout of the other non-unit tiers.
-  [[ "$(tier_file_count perf)" -eq 0 ]] && empty_tier perf perf
+  # ONE enumeration, status-checked: a failing `find` must never read as an empty tier (nothing would run, green).
+  perf_list="$(mktemp)"
+  if ! { find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path '*/tests/perf/*' -print | sort; } >"${perf_list}"; then
+    echo "❌ could not enumerate the perf test files (find or sort failed)" >&2 && rm -f "${perf_list}" && exit 1
+  fi
+  mapfile -t perf_files <"${perf_list}"
+  rm -f "${perf_list}"
+  [[ ${#perf_files[@]} -eq 0 ]] && empty_tier perf perf
   perf_processes=${FY_CI_PERF_PARALLEL:-1}
   [[ ${perf_processes} =~ ^[1-9][0-9]*$ ]] || { echo "❌ FY_CI_PERF_PARALLEL must be a positive integer" >&2 && exit 2; }
-  mapfile -t perf_files < <(find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path '*/tests/perf/*' -print | sort)
   [[ ${perf_processes} -gt ${#perf_files[@]} ]] && perf_processes=${#perf_files[@]}
+  [[ ${perf_processes} -lt 1 ]] && echo "❌ ${#perf_files[@]} perf test files but no process to run them" >&2 && exit 1
   rm -rf coverage/perf
   echo "🧪 Running ${#perf_files[@]} perf test files in ${perf_processes} process(es)..."
   perf_pids=()
@@ -118,13 +125,19 @@ files=()
 if [[ -n ${group} ]]; then
   groups="config/test-groups.json"
   # The group's files (and the changed-plugin scope's narrowing of them) are group-files.sh's.
-  mapfile -t files < <(./scripts/ci/group-files.sh "${mode}" "${group}")
+  # group-files.sh's status is CARRIED, never inferred from its output: it exits 0 with no file only for a group the
+  # scope emptied, and exits non-zero (with the reason) for everything else, a crashed filter included.
+  group_list="$(mktemp)"
+  group_status=0
+  ./scripts/ci/group-files.sh "${mode}" "${group}" >"${group_list}" || group_status=$?
+  [[ ${group_status} -ne 0 ]] && echo "❌ ${mode} test group ${group}: group-files.sh failed (exit ${group_status})" >&2 && rm -f "${group_list}" && exit "${group_status}"
+  mapfile -t files <"${group_list}"
+  rm -f "${group_list}"
   coverage_file="coverage/${mode}/groups/${group}/lcov.info"
   if [[ ${#files[@]} -eq 0 ]]; then
-    # Only a SCOPED unit run can empty a group (group-files.sh refuses an empty group otherwise and fails, which
-    # `mapfile` would not notice): re-check that here, then leave an empty ledger and a marker, so the ledger and
-    # the timings report the group as scoped out instead of missing.
-    if [[ ${mode} == unit && -n ${FY_CI_SCOPE_FILE:-} ]] && ./scripts/ci/group-files.sh "${mode}" "${group}" >/dev/null 2>&1; then
+    # group-files.sh succeeded with no file: only a SCOPED unit run can do that. Leave an empty ledger and a marker, so
+    # the ledger and the timings report the group as scoped out instead of missing.
+    if [[ ${mode} == unit && -n ${FY_CI_SCOPE_FILE:-} ]]; then
       mkdir -p "${coverage_file%/*}"
       : >"${coverage_file}"
       echo "scoped out" >"${coverage_file%/*}/scoped-out"

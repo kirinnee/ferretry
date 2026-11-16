@@ -28,8 +28,10 @@ import {
   type QueuedMessage,
   QUESTION_ANSWERED_STATE,
   QUESTION_STATE,
+  QUEUE_STATE,
   type Question,
   type SendRecord,
+  SENDS_STATE,
   STUCK_FRAME_STATES,
   type SendResult,
   TurnEnded,
@@ -406,11 +408,21 @@ export function buildConversationA(deps: {
   let questionAsksReconciled = false;
 
   const queue = new SessionQueueService({
-    store: new NotifyingSessionQueueStore(new StateQueueStore(kernel.state), {
-      publish: async (id, _type, data) => {
-        await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+    store: new NotifyingSessionQueueStore(
+      new StateQueueStore(kernel.state, undefined, failure =>
+        kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
+          ferret: failure.ferret,
+          events: failure.events,
+          bytes: failure.bytes,
+          error: String(failure.error),
+        }),
+      ),
+      {
+        publish: async (id, _type, data) => {
+          await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+        },
       },
-    }),
+    ),
     clock,
     serial: queueSerial,
   });
@@ -1265,6 +1277,26 @@ export function buildConversationA(deps: {
    * What a ferret's queue holds. A ferret nobody knows and nothing was ever queued for is not "an empty queue": it is not a
    * ferret, so `fy queue <typo>` is refused with the sentence the send path uses instead of reporting that nothing waits.
    */
+  /**
+   * A cheap token for a log that moves with every line appended: the identity of its file (one `lstat`), `absent` when
+   * there is none. The poll's `If-None-Match` is answered from this, so a chat nobody typed into costs a stat.
+   */
+  const fileStamp = async (file: typeof SENDS_STATE | typeof QUEUE_STATE, id: SessionId): Promise<string> =>
+    (await kernel.state.version(file, id))?.etag ?? 'absent';
+  const sendsStamp = async (id: string): Promise<string> => {
+    const parsed = parseSessionId(id);
+    // The same look a read takes first, so a send the pane has settled moves the stamp.
+    await lookFirst(parsed);
+    return await fileStamp(SENDS_STATE, parsed);
+  };
+  const queueStamp = async (id: string): Promise<string> => {
+    const ferret = parseSessionId(id);
+    const stamp = await fileStamp(QUEUE_STATE, ferret);
+    // As `queueMessages` answers: a queue nobody ever wrote to, of a ferret nobody knows, is not found, never "unchanged".
+    if (stamp === 'absent' && (await ferrets.get(ferret)) === undefined)
+      throw new SessionSendError('not_found', `session not found: ${id}`);
+    return stamp;
+  };
   const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => {
     const ferret = parseSessionId(id);
     const held = await queue.list(ferret);
@@ -1547,8 +1579,10 @@ export function buildConversationA(deps: {
         },
         interrupt: async (id: string) => await interruptFerret(id),
         sends: records,
+        sendsStamp,
         sendStatus: async (id, sendId, options) => await awaitStatus(parseSessionId(id), sendId, options),
         queue: queueMessages,
+        queueStamp,
         editQueued: async (id, messageId, text) =>
           await queue.edit(parseSessionId(id), messageId, text).catch(queueFailure),
         cancelQueued: async (id, messageId) => await queue.cancel(parseSessionId(id), messageId).catch(queueFailure),

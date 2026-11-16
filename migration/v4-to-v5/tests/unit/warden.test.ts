@@ -101,6 +101,48 @@ test('carries the sweep memory, moves blessings to remembered.json and drops the
   expect(JSON.stringify(report)).not.toContain(FAKE_CAPABILITY);
 });
 
+test('!A527 carries the login-move ledger under autoMoveMemory, skipping a damaged entry, beside the sweep memory', async () => {
+  await f.put('state/warden/state.json', { lastSweepAt: AT });
+  await f.put('state/warden/auto-migrate.json', {
+    sessions: {
+      moved: { moves: [AT] },
+      asked: { moves: [], asked: { at: AT, trigger: 'rate_limited', from: 'claude-a-wrapper' } },
+      held: { moves: [], held: 'rate_limited|claude-a-wrapper|no_target' },
+      broken: { moves: 'FAKE-NOT-A-LIST' },
+    },
+  });
+  const report = await wardenStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  expect(report.kept).toContainEqual({ what: 'login-move ledger entries', count: 3 });
+  expect(report.note).toContain('1 damaged login-move ledger entr(ies) not carried');
+
+  const state = WardenStateFileSchema.parse(await read(V5_WARDEN_STATE));
+  expect(state.lastSweepAt).toBe(AT);
+  expect(state.autoMoveMemory).toEqual({
+    sessions: {
+      asked: { moves: [], asked: { at: AT, trigger: 'rate_limited', from: 'claude-a-wrapper' } },
+      held: { moves: [], held: 'rate_limited|claude-a-wrapper|no_target' },
+      moved: { moves: [AT] },
+    },
+  });
+});
+
+test('!A527 a ledger with no sweep memory beside it still reaches v5, and one that is not a ledger is named, not carried', async () => {
+  await f.put('state/warden/auto-migrate.json', { sessions: { only: { moves: [AT] } } });
+  const alone = await wardenStep.run(f.ctx());
+  expect(alone.status).toBe('converted');
+  expect(WardenStateFileSchema.parse(await read(V5_WARDEN_STATE)).autoMoveMemory).toEqual({
+    sessions: { only: { moves: [AT] } },
+  });
+
+  await f.clean();
+  f = await fixture();
+  await f.put('state/warden/auto-migrate.json', ['FAKE-NOT-A-LEDGER']);
+  const bad = await wardenStep.run(f.ctx());
+  expect(bad.note).toContain('1 damaged login-move ledger entr(ies) not carried');
+  await expect(readFile(join(f.to, V5_WARDEN_STATE), 'utf8')).rejects.toThrow();
+});
+
 test('copies reports byte for byte with their mode, leaving a link behind unfollowed', async () => {
   const reports = join(f.from, 'state/warden/reports');
   await mkdir(reports, { recursive: true });
