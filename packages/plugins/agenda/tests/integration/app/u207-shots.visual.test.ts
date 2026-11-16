@@ -84,23 +84,24 @@ describe('u2-07 screenshots', () => {
             } else {
               await tab.waitForSelector('.fy-attn-deck__top', { timeout: 5_000 });
               await tab.evaluate(() => {
-                const target = [...document.querySelectorAll('p')].find(p =>
-                  p.textContent?.includes('keeps every finished item'),
+                const target = [...document.querySelectorAll<HTMLElement>('.fy-attn-deck__top p')].find(
+                  p => p.textContent?.includes('keeps every finished item') && p.getClientRects().length > 0,
                 );
-                if (target === undefined) throw new Error('no prose to select');
+                if (target === undefined) throw new Error('no visible prose to select');
                 const range = document.createRange();
                 range.selectNodeContents(target);
                 const selection = window.getSelection();
                 selection?.removeAllRanges();
                 selection?.addRange(range);
-                const rect = target.getBoundingClientRect();
+                const rects = [...range.getClientRects()];
+                const last = rects[rects.length - 1] ?? target.getBoundingClientRect();
                 target.dispatchEvent(new Event('pointerdown', { bubbles: true }));
                 target.dispatchEvent(
                   new MouseEvent('contextmenu', {
                     bubbles: true,
                     cancelable: true,
-                    clientX: rect.left + 40,
-                    clientY: rect.top + 10,
+                    clientX: Math.max(last.left + 8, last.right - 60),
+                    clientY: last.top + last.height / 2,
                   }),
                 );
               });
