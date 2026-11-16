@@ -296,13 +296,23 @@ describe('MCP sign-in discovery — review hardening', () => {
       '[64:ff9b::7f00:1]', // 64:ff9b::/96 → 127.0.0.1
       '[64:ff9b::a9fe:a9fe]', // → 169.254.169.254
       '[64:ff9b::c0a8:101]', // → 192.168.1.1
+      '[::7f00:1]', // IPv4-compatible ::/96 → 127.0.0.1
+      '[::a9fe:a9fe]', // → 169.254.169.254
+      '[::a00:1]', // → 10.0.0.1
     ])
       should(isPrivateLiteral(host)).be.true();
     // The dotted spellings reach the same hosts: the URL parser rewrites them into the groups above.
     for (const endpoint of ['https://[::ffff:0:127.0.0.1]/t', 'https://[64:ff9b::127.0.0.1]/t'])
       should(isPrivateLiteral(new URL(endpoint).hostname)).be.true();
     // A public IPv4 inside the same prefixes stays public, and other prefixes are not decoded.
-    for (const host of ['[::ffff:0:808:808]', '[64:ff9b::808:808]', '[64:ff9b:1::7f00:1]', '[::ffff:1:7f00:1]'])
+    for (const host of [
+      '[::ffff:0:808:808]',
+      '[64:ff9b::808:808]',
+      '[64:ff9b:1::7f00:1]',
+      '[::ffff:1:7f00:1]',
+      '[::808:808]',
+      '[::2:1:1]',
+    ])
       should(isPrivateLiteral(host)).be.false();
   });
 
@@ -311,9 +321,13 @@ describe('MCP sign-in discovery — review hardening', () => {
       'https://[::ffff:0:7f00:1]/t',
       'https://[64:ff9b::7f00:1]/t',
       'https://[64:ff9b::a9fe:a9fe]/t',
+      'https://[::7f00:1]/t',
+      'https://[::a9fe:a9fe]/t',
+      'https://[::127.0.0.1]/t',
     ])
       should(endpointAllowed(endpoint, SERVER)).be.false();
     should(endpointAllowed('https://[64:ff9b::808:808]/t', SERVER)).be.true();
+    should(endpointAllowed('https://[::808:808]/t', SERVER)).be.true();
     // A server that is itself private may name them.
     should(endpointAllowed('https://[64:ff9b::7f00:1]/t', 'https://10.0.0.5/mcp')).be.true();
   });
@@ -325,6 +339,13 @@ describe('MCP sign-in discovery — review hardening', () => {
     should(endpointAllowed('http://localhost../token', 'http://localhost../mcp')).be.true();
     should(endpointAllowed('https://10.0.0.1../token', SERVER)).be.false();
     should(endpointAllowed('https://auth.example.com../token', SERVER)).be.true();
+    // A spelling the parser leaves as a name while dots trail it is read again, as the address it is.
+    for (const host of ['127.1...', '127.1..', '0x7f.1...', '2130706433..', '169.254.169.254..', '10.1..'])
+      should(endpointAllowed(`https://${host}/token`, SERVER)).be.false();
+    should(endpointAllowed('https://127.1.../token', 'https://localhost/mcp')).be.true();
+    // …and one that is no host once the dots are gone is refused, never judged public.
+    should(endpointAllowed('https://256.1.1.1../token', SERVER)).be.false();
+    should(endpointAllowed('https://auth.example.com/token', 'https://256.1.1.1../mcp')).be.false();
     // A host that is nothing but dots has no name left to judge: refused, whoever the server is.
     for (const endpoint of ['https://../token', 'https://./token'])
       for (const server of [SERVER, 'https://localhost/mcp']) should(endpointAllowed(endpoint, server)).be.false();
