@@ -10,7 +10,7 @@ export const QUEUE_CHANGED_EVENT = 'control.queue_changed';
 /** What a {@link QUEUE_CHANGED_EVENT} says: which message, and which kind of change. */
 export interface QueueChangedEventData {
   readonly messageId: string;
-  readonly change: 'enqueued' | 'edited' | 'moved' | 'waiting';
+  readonly change: 'enqueued' | 'edited' | 'moved' | 'waiting' | 'promoted';
 }
 
 /**

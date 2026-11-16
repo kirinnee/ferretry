@@ -2,7 +2,15 @@ import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import type { QueuedMessage } from '../../../contract/index.ts';
 import should from 'should';
-import { boardOnly, deliveryOrder, effectiveLabel, planDelivery } from '../../../contract/index.ts';
+import {
+  boardOnly,
+  deliveryOrder,
+  effectiveLabel,
+  LANE_COLOUR,
+  LANE_ORDER,
+  planDelivery,
+  promotedToUrgent,
+} from '../../../contract/index.ts';
 import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '../../../contract/index.ts';
 import { type SendTarget } from '../../../contract/index.ts';
 import { parseSessionId } from '../../../contract/index.ts';
@@ -236,5 +244,92 @@ describe('what to deliver next, and when', () => {
   it('should deliver nothing while a message is being typed', () => {
     should(plan([message('t', 'agent', 0, 'typing'), ferret('b', 0, 'blocker')])).equal(undefined);
     should(plan([message('typing', 'agent', 0, 'typing'), message('owner', 'human', 1)])).equal(undefined);
+  });
+});
+
+describe('lanes decide delivery', () => {
+  const lane = (
+    id: string,
+    laneName: NonNullable<QueuedMessage['lane']>,
+    seconds: number,
+    extra: Partial<QueuedMessage> = {},
+  ) =>
+    ({
+      ...message(id, laneName === 'owner' ? 'human' : laneName === 'ferretry' ? 'daemon' : 'agent', seconds),
+      lane: laneName,
+      ...(laneName === 'action' ? { holdUntil: at(seconds + 60) } : {}),
+      ...(laneName === 'fyi' ? { holdUntil: at(seconds + 600) } : {}),
+      ...extra,
+    }) satisfies QueuedMessage;
+  const target = { id: parseSessionId('s'), status: 'running', mode: 'auto', turn: 1 } as const satisfies SendTarget;
+  const plan = (queue: readonly QueuedMessage[], nowSeconds: number, view: Partial<SendTarget> = {}) =>
+    planDelivery(queue, { target: { ...target, ...view } }, at(nowSeconds), defaultQueueCoalesceSettings);
+  const ids = (result: ReturnType<typeof plan>): string[] =>
+    result?.kind === 'batch'
+      ? result.members.map(entry => entry.id)
+      : result?.kind === 'single'
+        ? [result.message.id]
+        : [];
+
+  it('should go owner, then urgent carrying what waits, then ferretry, then the held action and fyi', () => {
+    const queue = [
+      lane('fyi', 'fyi', 0),
+      lane('action', 'action', 1),
+      lane('warden', 'ferretry', 2),
+      lane('urgent', 'urgent', 3),
+      lane('owner', 'owner', 4),
+    ];
+
+    should(ids(plan(queue, 10))).eql(['owner']);
+    should(ids(plan(queue.slice(0, 4), 10))).eql(['fyi', 'action', 'urgent']);
+    should(ids(plan([queue[0]!, queue[1]!, queue[2]!], 10))).eql(['warden']);
+  });
+
+  it('should let Ferretry pass a held action or fyi, but never one that is already due', () => {
+    const queue = [lane('action', 'action', 0), lane('fyi', 'fyi', 1), lane('warden', 'ferretry', 2)];
+
+    should(ids(plan(queue, 30))).eql(['warden']);
+    should(ids(plan(queue, 61))).eql(['action', 'fyi']);
+  });
+
+  it('should read the stored lane, never the label or flags again', () => {
+    // Accepted as an fyi: a label that now says blocker does not make it urgent.
+    const stored = lane('f', 'fyi', 0, { label: 'blocker', replyExpected: true, interrupt: true });
+
+    should(effectiveLabel(stored, target, defaultQueueCoalesceSettings)).equal('fyi');
+    should(plan([stored], 10)).eql({ kind: 'hold', until: stored.holdUntil });
+  });
+
+  it('should derive the lane of an old message that has none, from its fields, for this read only', () => {
+    const old = { ...message('o', 'agent', 0), label: 'fyi', holdUntil: at(600) } satisfies QueuedMessage;
+
+    should(effectiveLabel(old, target, defaultQueueCoalesceSettings)).equal('fyi');
+    should(effectiveLabel({ ...old, replyExpected: true }, target, defaultQueueCoalesceSettings)).equal('blocker');
+  });
+
+  it('should promote an action or fyi that answers what the receiver waits on, and no other lane', () => {
+    const waiting = { waiting: { peer: 'peer-1' } } as const;
+    const settings = defaultQueueCoalesceSettings;
+    const withTarget = { ...target, ...waiting };
+    const reply = (laneName: NonNullable<QueuedMessage['lane']>) => lane('r', laneName, 0, { from: 'peer-1' });
+
+    should(promotedToUrgent(reply('action'), withTarget, settings)).be.true();
+    should(promotedToUrgent(reply('fyi'), withTarget, settings)).be.true();
+    should(promotedToUrgent(reply('urgent'), withTarget, settings)).be.false();
+    should(promotedToUrgent(reply('action'), target, settings)).be.false();
+    should(promotedToUrgent(reply('action'), withTarget, { ...settings, coalesce: false })).be.false();
+    should(ids(plan([reply('fyi')], 1, waiting))).eql(['r']);
+  });
+
+  it('should send every lane at once, one turn each, with the kill switch off', () => {
+    const queue = [lane('a', 'action', 0), lane('f', 'fyi', 1)];
+    const result = planDelivery(queue, { target }, at(2), { ...defaultQueueCoalesceSettings, coalesce: false });
+
+    should(result).eql({ kind: 'single', message: queue[0] });
+  });
+
+  it('should name a colour token per lane', () => {
+    should(LANE_COLOUR).eql({ owner: '--accent', urgent: '--err', ferretry: '--ok', action: '--warn', fyi: '--pend' });
+    should(LANE_ORDER).eql(['owner', 'urgent', 'ferretry', 'action', 'fyi']);
   });
 });
