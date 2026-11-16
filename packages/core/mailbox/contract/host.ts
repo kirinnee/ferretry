@@ -17,6 +17,12 @@ export interface MailboxHost {
   readonly ledger: SendLedger;
 }
 
+const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+
+/** True when `value` carries a queue store and a send ledger (their methods are checked by the types, not at runtime). */
+const isMailboxHost = (value: unknown): value is MailboxHost =>
+  isObject(value) && isObject(value.queue) && isObject(value.ledger);
+
 /**
  * `mailbox.host`: the Mailbox's one slot. A security-path provide hook (a message to an agent goes through it), so only
  * Conversation may take it. With no provider the Mailbox does not run a quiet empty store: it says so at boot and
@@ -26,5 +32,6 @@ export const MailboxHosts = defineHook('mailbox.host', {
   mode: 'provide',
   key: z.literal(MAILBOX_HOST_KEY),
   takers: ['conversation'],
-  value: z.custom<MailboxHost>(),
+  // A shape check, not a bare cast: a provider that hands over anything but a queue and a ledger is refused at provide time.
+  value: z.custom<MailboxHost>(isMailboxHost, 'a Mailbox host is { queue, ledger }'),
 });
