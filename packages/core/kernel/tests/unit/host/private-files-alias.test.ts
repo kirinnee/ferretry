@@ -6,7 +6,8 @@ import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
 import type { FerretId } from '../../../contract/ids.ts';
 import type { RootHandle, RootName } from '../../../contract/ports.ts';
 import { type FileIdentity, type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
-import { DEFAULT_RECHECK_MS } from '../../../host/fence-index.ts';
+import { fenceOf } from '../../../host/fence-guard.ts';
+import { DEFAULT_RECHECK_MS, identityKey } from '../../../host/fence-index.ts';
 import { RootError, rootsPortFor } from '../../../host/roots.ts';
 import { composePrivateFiles } from '../../../manifest/privacy.ts';
 
@@ -199,6 +200,22 @@ async function rotate(folder: string): Promise<void> {
 const restedFolders = (l: Layout): Set<string> =>
   new Set([l.sessions, ...Array.from({ length: SESSIONS }, (_, n) => `${l.sessions}/s${String(n).padStart(4, '0')}`)]);
 
+const LOOKS = ['right after the rotation', 'one look later', 'two looks later'];
+
+/**
+ * What a serve says, so a recurrence names its mechanism: which look served, and whether the index (asked only once
+ * something was served, so a passing run looks no more than before) held the session folder's identity. Not held: the
+ * folder pin was missing. Held: the read got past a pinned folder.
+ */
+async function servedLooks(fs: HostFs, l: Layout, answers: readonly string[]): Promise<readonly string[]> {
+  const served = LOOKS.filter((_, at) => answers[at]?.startsWith('served:'));
+  if (served.length === 0) return [];
+  const folder = await REAL.identity(l.target);
+  const fence = await fenceOf(fs, l.home, LIST, DEFAULT_RECHECK_MS).catch(() => undefined);
+  const held = folder !== undefined && fence?.keys.has(identityKey(folder)) === true;
+  return served.map(look => `served ${look}; the index then ${held ? 'HELD' : 'did NOT hold'} the folder's key`);
+}
+
 const wait = async (ms: number): Promise<void> => {
   await new Promise(done => setTimeout(done, ms));
 };
@@ -227,7 +244,8 @@ describe('PF-flat a credential published into a RESTING session folder is never 
         await mkdir(alias, { recursive: true });
         // A folder that rests with no file at all: the session never had an environment, or it ended before this boot.
         if (way === 'empty') await rm(`${l.target}/${ENV}`);
-        const root = door.make(l, bind(resting(REAL, l.sessions, rested), alias, l.target));
+        const fs = bind(resting(REAL, l.sessions, rested), alias, l.target);
+        const root = door.make(l, fs);
         // The first look builds the index; every session folder rests.
         expect(await readOf(root, 'own.txt')).toBe('served:mine');
         // The session ended: its file is gone (the index has not seen that yet).
@@ -246,7 +264,7 @@ describe('PF-flat a credential published into a RESTING session folder is never 
           await wait(LOOK_MS);
           answers.push(await readOf(root, `alias/${ENV}`));
         }
-        expect(answers.filter(answer => answer.startsWith('served:'))).toEqual([]);
+        expect(await servedLooks(fs, l, answers)).toEqual([]);
         expect(answers).toEqual(['refused:fenced', 'refused:fenced', 'refused:fenced']);
         // The control: nothing else on the disk is refused by it.
         expect(await readOf(root, 'own.txt')).toBe('served:mine');

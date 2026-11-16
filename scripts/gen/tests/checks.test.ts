@@ -427,6 +427,65 @@ describe('context-imports', () => {
   });
 });
 
+describe('context-imports: a manifest split into fragments (manifest/)', () => {
+  const fragments = (body: string): Fixture =>
+    ws(
+      [
+        {
+          id: 'alpha',
+          contract: 'export const x = 1;\n',
+          files: {
+            'daemon/index.ts': 'export {};\n',
+            'manifest/kit.ts': `import { z } from 'zod';\nimport { route } from '${SDK}';\nimport { x } from '../contract/index.ts';\nexport const kit = [z, route, x];\n`,
+            'manifest/actions/10-a.actions.ts': body,
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+
+  test('a fragment may import its kit, the kernel manifest, a contract and zod', async () => {
+    const f = fragments(
+      `import { z } from 'zod';\nimport { route } from '${SDK}';\nimport { x } from '../../contract/index.ts';\nimport { kit } from '../kit.ts';\nexport default [z, route, x, kit];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('manifest/actions/10-a.actions.ts');
+    expect(found).not.toContain('manifest/kit.ts');
+  });
+
+  test('planted: a fragment that imports its own daemon, or node:fs, is refused', async () => {
+    const f = fragments(
+      `import '../../daemon/index.ts';\nimport { readFileSync } from 'node:fs';\nexport default [readFileSync];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).toContain('alpha/manifest/actions/10-a.actions.ts:1: ../../daemon/index.ts');
+    expect(found).toContain('a manifest imports only');
+    expect(found).toContain('node:fs');
+  });
+
+  test("manifest.ts keeps its narrow exemption: its own fragments' generated list and nothing else generated", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          files: {
+            'manifest/generated/actions.ts': 'export default [];\n',
+            'manifest/generated/other.ts': 'export default [];\n',
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+    f.write(
+      'packages/plugins/alpha/manifest.ts',
+      `import actions from './manifest/generated/actions.ts';\nimport other from './manifest/generated/other.ts';\nexport default [actions, other];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./manifest/generated/actions.ts');
+    expect(found).toContain('./manifest/generated/other.ts');
+  });
+});
+
 describe('context-imports: the generated barrels of a contract', () => {
   test("a contract may import its own folders' generated barrel, and no other generated file", async () => {
     const f = ws(
