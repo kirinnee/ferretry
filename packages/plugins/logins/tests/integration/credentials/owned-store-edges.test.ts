@@ -334,3 +334,63 @@ describe('the status ports', () => {
     expect(await readdir(f.base)).toEqual([]);
   });
 });
+
+describe('the sign-in read handed to the housekeeping worker', () => {
+  test('is named by its path inside the credentials root, and only an owned store is named at all', async () => {
+    const f = await fixture();
+    const store = new OwnedLoginStore(f.root, () => NOW);
+    const claude = {
+      harness: 'claude',
+      store: 'ferretry',
+      ownedDirectory: join(f.base, 'claude'),
+      credentialFile: join(f.base, 'claude', '.credentials.json'),
+    } as never;
+    const codex = {
+      harness: 'codex',
+      store: 'ferretry',
+      ownedDirectory: join(f.base, 'codex'),
+      canonicalFile: join(f.base, 'codex', 'auth.json'),
+    } as never;
+
+    expect([store.signInFile(claude), store.signInFile(codex)]).toEqual([
+      'claude/.credentials.json',
+      'codex/auth.json',
+    ]);
+    expect(() =>
+      store.signInFile({ harness: 'claude', store: 'host', credentialFile: '/home/x/.claude' } as never),
+    ).toThrow('only an owned login store may be read');
+    expect(() =>
+      store.signInFile({
+        ...(claude as object),
+        ownedDirectory: '/elsewhere',
+        credentialFile: '/elsewhere/c.json',
+      } as never),
+    ).toThrow('outside the owned login root');
+  });
+
+  test('is made by the port it was given, and this thread reads no sign-in for it', async () => {
+    const f = await fixture();
+    const reads: string[] = [];
+    const store = new OwnedLoginStore(
+      {
+        ...f.root,
+        readText: async path => {
+          reads.push(path);
+          return '';
+        },
+      },
+      () => NOW,
+    );
+    const answer = { result: { usageBased: true, ok: false }, local: { shape: { kind: 'decided' } } } as never;
+    const ports = store.statusPorts({
+      anthropic: {} as never,
+      codex: {} as never,
+      refresh: { refresh: async () => ({ outcome: 'ran' }) },
+      usageIntervalMs: 60_000,
+      activeUsage: async () => answer,
+    });
+
+    expect(await ports.activeUsage({ harness: 'claude', store: 'ferretry' } as never)).toBe(answer);
+    expect(reads).toEqual([]);
+  });
+});

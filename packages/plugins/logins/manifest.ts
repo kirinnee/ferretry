@@ -194,6 +194,7 @@ export default definePlugin({
           { flag: '--preset <id>', help: 'an environment login from a provider preset (see `fy login presets`)' },
           {
             flag: '--env <NAME=VALUE>',
+            // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
             help: 'an environment login variable: a plain value, or ${secret:NAME} for a secret (repeat it) (default: {})',
           },
           { flag: '--cloud-credential <reference>', help: 'aws-profile:<name>, gcloud-adc[:<path>] or azure-cli' },
@@ -344,6 +345,10 @@ export default definePlugin({
 
   onboarding: [{ id: 'login', title: 'Sign in', order: 30 }],
   doctor: ['logins-store'],
+  // The free usage read of a sign-in runs on this thread: its code reads, parses and uses the token, and only facts come
+  // back. The kernel's grant service on main serves the file read and the request, so the blob and the Bearer header
+  // pass through main's heap as locals of that service, which never logs, answers or keeps them (S175–S177).
+  workers: ['housekeeping'],
 
   permissions: {
     // Logins' own sign-in stores (§7.7): the kernel gives this internal root to Logins alone.

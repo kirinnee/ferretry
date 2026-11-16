@@ -671,7 +671,7 @@ interface CredentialReadOptions {
 }
 
 /** The free read's answer, and the facts of the very material whose token it sent: ONE read of the store. */
-interface ActiveUsageRead {
+export interface ActiveUsageRead {
   readonly result: FleetUsageProbeResult;
   readonly local: LocalCredentialFacts;
 }
