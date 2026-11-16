@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { WardenFlagSchema } from '../../contract/index.ts';
 import {
   ferretStateOf,
   toWireAgenda,
@@ -39,6 +40,26 @@ describe('the words on the wire', () => {
 
     // Assert
     should(flag).eql({ kind: 'unattended_question', ferret: 'f1', state: 'idle', name: 'rae', detail: 'x' });
+  });
+
+  it('should send the task an orphaned flag is about under `task`, and still read the key it had before', () => {
+    // Arrange
+    const anomaly = {
+      kind: 'orphaned_card',
+      sessionId: 'f1',
+      status: 'awaiting_question',
+      detail: 'x',
+      task: { id: 'F1' },
+    } as never;
+    const oldSpelling = { kind: 'orphaned_card', ferret: 'f1', state: 'idle', detail: 'x', card: { id: 'F1' } };
+
+    // Act
+    const flag = toWireFlag(anomaly);
+
+    // Assert
+    should(flag.task).eql({ id: 'F1' });
+    should(flag).not.have.property('card');
+    should(WardenFlagSchema.safeParse(oldSpelling).success).equal(true);
   });
 
   it('should carry the blessing under the ferret', () => {

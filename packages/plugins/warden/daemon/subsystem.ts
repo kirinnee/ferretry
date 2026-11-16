@@ -300,7 +300,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
       if (held === undefined)
         return "whether something of the owner's is open on it could not be checked (Accounts did not answer)";
       if (held)
-        return 'it has something of the owner open (an input card, a sign-in approval on their phone, a plan card or a secret it copied)';
+        return 'it has something of the owner open (an input, a sign-in approval on their phone, a plan or a secret it copied)';
       return await ownerHoldReason(
         {
           inputCardOpen: () => false,

@@ -685,7 +685,7 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
     expect(before).toBe(false);
     expect(last(changes).autoMove.enabled).toBe(true);
     expect(text(renderer)).toContain('Stop its background jobs if they are in the way');
-    expect(text(renderer)).toContain('same chat, same card');
+    expect(text(renderer)).toContain('same chat, same task');
     run(() => renderer.unmount());
   });
 

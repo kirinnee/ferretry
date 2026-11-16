@@ -69,7 +69,7 @@ export function toWireFlag(anomaly: Internal.WardenAnomaly): WardenFlag {
       assignedWarden: anomaly.assignedWarden,
       ledger: anomaly.ledger,
       subject: anomaly.subject,
-      card: anomaly.task === undefined ? undefined : { id: anomaly.task.id },
+      task: anomaly.task === undefined ? undefined : { id: anomaly.task.id },
     }),
   );
 }

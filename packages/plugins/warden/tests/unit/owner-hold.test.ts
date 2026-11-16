@@ -55,13 +55,13 @@ describe('ownerHoldReason', () => {
   });
 
   it.each([
-    ['an input card', { inputCardOpen: () => true }, 'it has an input card open for the owner'],
+    ['an input', { inputCardOpen: () => true }, 'it has an input open for the owner'],
     [
       'a phone approval',
       { phoneApprovalOpen: () => true },
       'it is waiting for the owner to approve a sign-in on their phone',
     ],
-    ['a plan card', { planAwaitingOwner: () => true }, 'it has a plan card waiting for the owner'],
+    ['a plan', { planAwaitingOwner: () => true }, 'it has a plan waiting for the owner'],
     ['a held secret', { heldSecrets: () => 1 }, 'it holds a secret it copied, which a move would drop'],
     [
       'a terminal handed to the owner',

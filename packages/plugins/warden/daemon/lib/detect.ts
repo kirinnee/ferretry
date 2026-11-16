@@ -116,7 +116,7 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   agent_frozen: 'Session frozen',
   provider_unavailable: 'Provider is unavailable',
   owner_request: 'You asked for an investigation',
-  orphaned_card: 'A card has no ferret working it',
+  orphaned_card: 'A task has no ferret working it',
   report_overdue: 'A sub-ferret has not answered its parent',
   input_stuck: 'A ferret is stuck on an unsent message',
   inbox_stuck: 'A ferret has messages stuck in Ferretry’s queue',

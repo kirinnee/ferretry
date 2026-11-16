@@ -128,7 +128,7 @@ export const autoMoveSummary = (config: WardenConfig): string => {
   const jobs = moving.forceStopBackground
     ? 'The Warden stops its own background jobs first if it must.'
     : `Its background jobs are never stopped by the Warden: it asks the ferret and waits ${wait}, then tells you.`;
-  return ` When ${when}, a ferret is moved to ${where} — same chat, same card — ${often}. ${jobs}`;
+  return ` When ${when}, a ferret is moved to ${where} — same chat, same task — ${often}. ${jobs}`;
 };
 
 /** Ticks one login on or off the owner's move list; a login ticked on goes last, so the list keeps its order. */
