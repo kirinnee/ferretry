@@ -908,6 +908,36 @@ describe('WardenAutoMoveService: nowhere to go, so wait and resume at the reset'
     should(recorded.resumed).deepEqual(['s1', 's1']);
   });
 
+  it('should never hand a turn to an interactive ferret at the reset: no resume, no ledger entry, and a notice that does not promise one', async () => {
+    // Arrange: a person's own terminal, no headroom elsewhere, defaults (resume allowed), limit already reset.
+    const view = (resetAt: number): WardenSessionView =>
+      ({
+        config: { id: 's1', mode: 'interactive', agent: 'claude-a-wrapper', harness: 'claude' },
+        state: { status: 'rate_limited', quota: { resetAt } },
+        hasLiveMonitor: true,
+      }) as WardenSessionView;
+    const { recorded, ledger, sweep } = subject({ facts: async () => spent });
+
+    // Act
+    const before = await sweep(NOW, config(), [view(NOW + 60 * MINUTE)]);
+    const waitingAfterBefore = ledger().sessions.s1;
+    const after = await sweep(NOW + 2 * 60 * MINUTE, config(), [view(NOW + 60 * MINUTE)]);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+    should([...before.resumed, ...after.resumed]).deepEqual([]);
+    should(waitingAfterBefore?.waiting).be.undefined();
+    should(ledger().sessions.s1?.waiting).be.undefined();
+    should(ledger().sessions.s1?.resumed).be.undefined();
+    should(after.actions.map(action => action.action)).not.containEql('resume');
+    should(recorded.notices).have.length(1);
+    should(recorded.notices[0]?.subject).not.containEql('resumes on its own');
+    should(recorded.notices[0]?.subject).not.containEql('being resumed now');
+    should(recorded.notices[0]?.subject).match(
+      /It stays where it is; you can resume it yourself after Nov 1, 5:00\sAM PST\.$/,
+    );
+  });
+
   it('should leave it alone when the owner does not let the Warden resume alone, and say so', async () => {
     // Arrange
     const noResume: WardenConfig = {

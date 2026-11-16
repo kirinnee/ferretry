@@ -148,6 +148,9 @@ const commandList = (jobs: readonly AgentJob[]): string =>
 
 /** What happens to a ferret that has nowhere to go: it waits, and when it carries on by itself. */
 function stayPutWords(subject: AutoMoveSubject, config: WardenConfig, nowMs: number): string {
+  // An interactive ferret is a person's own terminal: the Warden never hands it a turn, so it promises none.
+  if (subject.mode === 'interactive' && subject.resetAt !== undefined)
+    return `It stays where it is; you can resume it yourself after ${pacificOf(subject.resetAt)}.`;
   if (subject.resetAt === undefined || !config.mayActAlone.resume)
     return 'It stays where it is; resume it yourself when the limit is over.';
   return subject.resetAt > nowMs
@@ -216,6 +219,8 @@ export class WardenAutoMoveService {
   ): Promise<{ readonly memory: AutoMoveMemory; readonly action?: WardenAction; readonly resumed: boolean }> {
     const { resetAt } = subject;
     const none = { memory, resumed: false };
+    // Never a turn typed into the owner's own terminal, and no wait remembered for it: the notice is all it gets.
+    if (subject.mode === 'interactive') return none;
     if (resetAt === undefined || !config.mayActAlone.resume) return none;
     const reset = isoFromMs(resetAt);
     if (resetAt > nowMs) {
