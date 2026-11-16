@@ -1761,9 +1761,12 @@ link that lets a harness plugin pool, and it is built so it can share history an
 harness. That is the owner's ask and v4's behaviour (v4 linked each login home's history entries to `fleet/shared/<harness>`).
 A conversation can hold anything its ferret saw or typed: a pasted token, a file's text, a command's output. Pooling makes
 those transcripts readable by every ferret on the harness, exactly as v4 did; it does not make them readable to anyone else.
+Claude's pooled list also includes `session-env`, `shell-snapshots` and `paste-cache`. These can contain environment
+values or pasted secrets. They stay pooled for v4 parity: **any ferret on that harness can read them**, just as it can
+read the transcripts.
 
 **The door.** `RootHandle.linkHistory(home, entry)` on an `agent-homes` handle makes `<home>/<entry>` a symlink to the REAL
-path of `<pool>/<entry>`, where the pool is the caller's own `state/<plugin>/<folder>/` (outside every root, so never a
+path of `<pool>/<entry>`, where the pool is the caller's own `state/<plugin>/<folder>/` (outside the ferret-home tree, so never a
 credential home). It is on `RootHandle`, beside `linkCredential` and `copyShared`, because it writes into the handle's root
 through the same checked, no-follow folder descriptors, and the handle already knows its plugin. A plugin declares it in its
 manifest and can use nothing else of it:
@@ -1795,7 +1798,7 @@ fact), identically on the real roots port and the testing host (`tests/unit/test
 | `changed` / `hard_link`   | the pool already holds the wrong kind at the entry (or a file where the pool folder belongs), or a file with a second name; or the link made did not land on the pool entry's real path, or the pool entry is no longer the one proved when it was made (a different inode, kind or link count, found again after the link is published): the link THIS call made is taken back                              |
 | `no_descriptor_reach`     | a host that reaches an open folder by no descriptor path (macOS today): the link is never made by a path a swapped parent could redirect                                                                                                                                                                                                                                                                     |
 
-The pool folder and the entry in it are made on first use by the kernel, and what is already in the pool is kept as it is.
+The pool base is made `0700` at boot; the entry in it is made on first use by the kernel. What is already in the pool is kept as it is.
 The pool is reached by ONE descent (`reachHistoryEntry` in `host/roots.ts`): the plugin's state folder is checked once and is
 the anchor; the pool folder and then the entry are opened from their parent's descriptor with `O_DIRECTORY | O_NOFOLLOW`
 (a `0700` folder, or an empty `0600` file made exclusively), and every component that is already there is judged by name
@@ -1806,6 +1809,32 @@ entry's real path, and the entry is reached AGAIN from the anchor (no link on th
 count, the private-place fence) and is the same file or folder it held when it made the link; otherwise it takes back the
 link it made and refuses.
 
+**Reading, writing and moving into the pool (PR 3).** `RootsPort.historyPool(): RootHandle` synchronously returns a
+writable internal view of only the caller's own declared opaque, non-private pool tree. The kernel makes its base
+`0700` at boot, before plugin code runs. Permission (`not_permitted`), ownership/private-place (`not_own`), then the
+declared `agent-homes` root (`not_declared`) are checked in that order. The view uses the regular RootHandle machinery:
+whole or windowed reads, `openBytes`, listing, writes and copies, fenced to that pool with the same immutable/private
+guards. Every held read or write starts with the same `reachHistoryEntry` proof from the checked plugin state folder,
+then descends from that held pool descriptor. A link at any level is
+never followed, including a link pointing elsewhere inside the pool. A hard-linked file is not read. The view cannot
+reach homes, credentials, another plugin's state, or other state of its own plugin. It has no `linkHistory` or
+`moveToHistoryPool` door (`not_internal`). It is never either end of `linkTo` or link-mode `copyTree`, nor the place of
+`linkCredential` or link-mode `copyShared` (`link_escape`); copying bytes into it remains allowed.
+
+`RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` moves ONE entry by `rename(2)` from a ferret's home to
+that plugin's minted pool view (a forged view or another plugin's is `not_own`). The source is
+`<agent-homes>/<ferret>/<listed entry>/...`, or the listed entry itself; a home/root name is `not_home`, and the same
+fixed deny list and closed entry list still apply (`denied`, `not_listed`). The target is `<same entry>/...` or
+`.conflicts/<same ferret>/<same entry>/...`; other shapes are `denied`, and `.conflicts` is special only in that first
+position. Parents are made `0700` only inside the pool. Both parents are held through the no-follow descriptor walk,
+then the existing `renameChecked` moves between those descriptors. An existing target is `outside`; a source file
+with another hard link is `hard_link`; a placed credential link, itself or inside a moving folder, is `link_escape`.
+Private-place guards hold at both ends; the pool end reuses `reachHistoryEntry` and its held base, including the
+device/inode check that refuses a real agent home swapped into the pool's place. A leaf link moves as a link,
+without opening its target. Another device is
+`changed`, with no copy fallback. A host without descriptor reach is `no_descriptor_reach`. Refusals move no entry;
+empty target-parent folders already made may remain.
+
 **What it does not touch.** `credentialHomeLinkVerdict` is unchanged: `linkTo` and `copyTree` link mode still refuse every
 link into or out of `agent-homes` and `credentials`, the pool link included. The pool is not a credential's place or source:
 `linkCredential` links `<home>/<file>` one level only (so never into a pooled folder) and also refuses, defence in depth,
@@ -1814,6 +1843,12 @@ file, a skill or a plugin folder is never a pooled entry, so a ferret's login, c
 kernel's own reads and writes never follow a pool link out of the root (`link_escape`); only the harness child does.
 
 **Declared gaps.**
+
+- **Move's look-then-rename window.** `moveToHistoryPool` reuses `renameChecked` and its existing GAP: the source guard,
+  the target-absence look and `rename(2)` are separate calls. A same-user writer can swap the source leaf or add a hard
+  link after its last check, or create a target file/empty folder that the rename then replaces. A non-empty target folder is never replaced.
+  This needs `renameat2(RENAME_NOREPLACE)` for the target half; descriptor-held parents prevent a swapped ancestor from
+  redirecting the operation, but do not make the leaf checks conditional on the move.
 
 - **Same-user reach.** The agent runs as the same user, so a ferret on a harness can read, rewrite or delete any pooled
   transcript, and so can poison what another ferret resumes (a rewritten history is read as that ferret's own past). The

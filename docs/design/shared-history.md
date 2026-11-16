@@ -85,6 +85,14 @@ Leases live at `fleet/shared/<harness>/.leases`.
     scoped to one ferret; a home that is not exactly one folder below the top of `agent-homes` is `not_home`.
   - The kernel ensures the pool itself (folder and entry, owner-only) inside the call, after every refusal; there is no
     separate ensure member. A caller that needs the pool before any home exists makes it with its own state port.
+  - **PR 3:** `RootsPort.historyPool(): RootHandle` gives a synchronous, writable internal view of only that plugin's
+    own opaque, non-private pool; boot now makes its base `0700` before plugin code runs. It reads, lists, writes,
+    copies and supports windowed reads/`openBytes` through the regular fenced no-follow descriptor machinery. It has
+    no history door, can never source or place generic links, and cannot reach other state or a ferret home.
+  - **PR 3:** `RootHandle.moveToHistoryPool(from, pool, to): Promise<void>` renames one listed history entry or leaf
+    out of one ferret home into its minted pool view, including `.conflicts/<ferret>/<entry>/...`. Missing pool parents
+    are made `0700`; existing targets, hard-linked source files and placed credentials are refused. No copy fallback,
+    no followed leaf link, no descriptor reach means refusal. It retains `renameChecked`'s declared look-then-move GAP.
   - **macOS:** the held-folder steps have no `symlinkat` yet, so a host with no `/proc/self/fd` refuses
     `no_descriptor_reach`. PR 3 pools on Linux; macOS pooling needs a `symlinkat` step in `FolderSteps` first (open point 4).
 - **Existing homes.** A home whose entry is already a real folder (a 5.0 ferret that ran before this) has its files

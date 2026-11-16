@@ -1097,6 +1097,11 @@ async function bootLocked(
       adapters.fs,
       { home, plugin: manifest.id },
       manifest.permissions?.roots ?? [],
+      {
+        ...(manifest.permissions?.historyPool === undefined ? {} : { historyPool: manifest.permissions.historyPool }),
+        stateFiles: manifest.data?.state ?? [],
+        privateFiles,
+      },
     );
     const worktreesBase = await ensureWorktreesBase(
       adapters.fs,

@@ -9,7 +9,7 @@
  * gave), the name is one the manifest lists and the kernel's deny list allows, and the place is the top of one ferret home.
  * The rules here are pure and shared by the real roots port (`./roots.ts`) and the testing host (`../testing/host.ts`).
  */
-import { dirname, basename } from 'node:path';
+import { dirname, basename, relative } from 'node:path';
 import type { HistoryPoolEntryDecl, HistoryPoolPermission } from '../manifest/types.ts';
 import { declaredHistoryEntry, historyPoolNameRefusal, poolStateFolder } from '../manifest/history-pool.ts';
 import type { StateFileDef } from '../contract/define.ts';
@@ -72,6 +72,35 @@ export function poolEntryFolder(
   const def = states.find(candidate => candidate.name === permission.state);
   if (def === undefined || poolStateFolder(permission, states) === undefined) return undefined;
   return ownStateTree(states, def, entry);
+}
+
+/** The whole pool, subject to exactly the ownership rule used for a linked entry. */
+export function ownHistoryPool(permission: HistoryPoolPermission | undefined, states: readonly StateFileDef[]): string {
+  if (permission === undefined) return refuseHistory('not_permitted');
+  const entry = poolEntryFolder(permission, states, 'projects');
+  return entry === undefined ? refuseHistory('not_own') : dirname(entry);
+}
+
+/** Pure lexical move policy, shared by both hosts. The root has already fenced both absolute names. */
+export function historyMoveNames(
+  permission: HistoryPoolPermission | undefined,
+  top: string,
+  from: string,
+  pool: string,
+  to: string,
+): void {
+  if (permission === undefined) refuseHistory('not_permitted');
+  const source = relative(top, from).split('/');
+  const ferret = source[0];
+  const entry = source[1];
+  if (ferret === undefined || entry === undefined || !isFerretHome(top, `${top}/${ferret}`)) refuseHistory('not_home');
+  historyEntryFor(permission, entry);
+  const target = relative(pool, to).split('/');
+  const normal = target[0] === entry;
+  const conflict = target[0] === '.conflicts' && target[1] === ferret && target[2] === entry;
+  const parts = conflict ? target.slice(1) : target;
+  if ((!normal && !conflict) || !parts.every(part => /^[A-Za-z0-9_-][A-Za-z0-9._%~-]*$/u.test(part)))
+    refuseHistory('denied');
 }
 
 /**

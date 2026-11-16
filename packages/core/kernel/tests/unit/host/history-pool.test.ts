@@ -68,6 +68,9 @@ afterEach(async () => {
   hook.noReach = false;
   hook.beforePool = undefined;
   hook.afterSymlink = undefined;
+  hook.beforeRename = undefined;
+  hook.afterOpenDirectory = undefined;
+
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
@@ -81,10 +84,17 @@ const hook: {
   beforePool: undefined | (() => Promise<void>);
   /** Run just after the link is made, before the kernel proves it: the target is replaced in that instant. */
   afterSymlink: undefined | ((path: string) => Promise<void>);
+  beforeRename?: () => Promise<void>;
+  afterOpenDirectory?: (path: string) => Promise<void>;
 } = { beforeSymlink: undefined, symlinkTo: undefined, noReach: false, beforePool: undefined, afterSymlink: undefined };
 let stateOfPlugin = '';
+
 const fs: HostFs = {
   ...baseFs,
+  rename: async (from, to) => {
+    await hook.beforeRename?.();
+    await baseFs.rename(from, to);
+  },
   symlink: async (target, path) => {
     await hook.beforeSymlink?.(path);
     await baseFs.symlink(hook.symlinkTo?.(target) ?? target, path);
@@ -97,6 +107,7 @@ const fs: HostFs = {
       await run();
     }
     const folder = await baseFs.openDirectory(path);
+    await hook.afterOpenDirectory?.(path);
     return hook.noReach ? { ...folder, entryPath: () => undefined, at: undefined } : folder;
   },
 };
@@ -165,6 +176,385 @@ const link = async (w: World, ferret: string, entry: string, handle: RootHandle 
 
 const modeOf = async (path: string): Promise<number> => (await stat(path)).mode & 0o777;
 const exists = async (path: string): Promise<boolean> => (await lstat(path).catch(() => undefined)) !== undefined;
+
+/** Production boot makes the pool's base before the plugin can request its synchronous view. */
+async function poolWorld() {
+  const w = await world();
+  expect(
+    await ensureInternalRootBases(fs, { home: w.home, plugin: 'claude-code' }, ['agent-homes'], {
+      historyPool: CLAUDE,
+      stateFiles: [POOL],
+    }),
+  ).toEqual([]);
+  const pool = w.claude.historyPool();
+  return { ...w, pool };
+}
+
+describe('the pool view and checked move', () => {
+  test('boot never follows an existing pool alias or a plugin-state folder swapped during descent', async () => {
+    const w = await world();
+    const sibling = `${w.home}/state/claude-code/sibling`;
+    await mkdir(sibling, { mode: 0o755 });
+    await symlink(sibling, w.poolPath);
+    const boot = async () =>
+      await ensureInternalRootBases(fs, { home: w.home, plugin: 'claude-code' }, ['agent-homes'], {
+        historyPool: CLAUDE,
+        stateFiles: [POOL],
+      });
+    expect(await boot()).toEqual([{ name: 'agent-homes', refusal: 'link_escape' }]);
+    expect(await modeOf(sibling)).toBe(0o755);
+    await rm(w.poolPath);
+    const outside = `${w.parent}/outside`;
+    await mkdir(outside, { mode: 0o755 });
+    hook.afterOpenDirectory = async at => {
+      if (at !== `${w.home}/state/claude-code`) return;
+      hook.afterOpenDirectory = undefined;
+      const state = `${w.home}/state/claude-code`;
+      await rename(state, `${state}-held`);
+      await symlink(outside, state);
+    };
+    expect(['link_escape', 'changed']).toContain((await boot())[0]?.refusal ?? 'none');
+    expect(await exists(`${outside}/history-pool`)).toBe(false);
+    expect(await modeOf(outside)).toBe(0o755);
+  });
+  test('a swapped pool base is refused during descriptor descent, before an outside transcript is read', async () => {
+    const w = await poolWorld();
+    const path = resolved(w.pool, 'projects/a');
+    await w.pool.writeText(path, 'inside');
+    const outside = `${w.parent}/outside`;
+    await mkdir(`${outside}/projects`, { recursive: true });
+    await writeFile(`${outside}/projects/a`, 'outside');
+    hook.beforePool = async () => {
+      await rename(w.poolPath, `${w.poolPath}-held`);
+      await symlink(outside, w.poolPath);
+    };
+    expect(['root:link_escape', 'root:changed']).toContain(await refusalOf(w.pool.readText(path)));
+    expect(await readFile(`${outside}/projects/a`, 'utf8')).toBe('outside');
+  });
+
+  for (const operation of ['read', 'write', 'move', 'boot'] as const)
+    test(`${operation} refuses a real agent home swapped in for the pool after its identity check`, async () => {
+      const w = await poolWorld();
+      if (operation === 'read') await w.pool.writeText(resolved(w.pool, '.claude.json'), 'old pool');
+      await w.makeHome('f1');
+      await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+      hook.beforePool = async () => {
+        await rename(w.poolPath, `${w.poolPath}-held`);
+        await rename(w.homePath('f1'), w.poolPath);
+      };
+      if (operation === 'boot') {
+        const answer = await ensureInternalRootBases(fs, { home: w.home, plugin: 'claude-code' }, ['agent-homes'], {
+          historyPool: CLAUDE,
+          stateFiles: [POOL],
+        });
+        expect(answer).toEqual([{ name: 'agent-homes', refusal: 'changed' }]);
+      } else {
+        const action =
+          operation === 'read'
+            ? w.pool.readText(resolved(w.pool, '.claude.json'))
+            : operation === 'write'
+              ? w.pool.writeText(resolved(w.pool, 'projects/new/note'), 'bad')
+              : w.all.moveToHistoryPool(
+                  resolved(w.all, 'f1/projects/a'),
+                  w.pool,
+                  resolved(w.pool, 'projects/new/note'),
+                );
+        expect(await refusalOf(action)).toBe('root:changed');
+      }
+      expect(await readFile(`${w.poolPath}/projects/a`, 'utf8')).toBe('source');
+      expect(await readFile(`${w.poolPath}/.claude.json`, 'utf8')).toBe('{}');
+      expect(await exists(`${w.poolPath}/projects/new`)).toBe(false);
+    });
+
+  for (const swapped of ['home', 'parent'] as const)
+    test(`a ${swapped} swapped before the held descent refuses and leaves both entries untouched`, async () => {
+      const w = await poolWorld();
+      await w.makeHome('f1');
+      await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'inside');
+      const outside = `${w.parent}/outside`;
+      await mkdir(`${outside}/projects`, { recursive: true });
+      await writeFile(`${outside}/a`, 'outside parent');
+      await writeFile(`${outside}/projects/a`, 'outside home');
+      const from = swapped === 'home' ? w.homePath('f1') : `${w.homePath('f1')}/projects`;
+      hook.afterOpenDirectory = async at => {
+        if (at !== w.home) return;
+        hook.afterOpenDirectory = undefined;
+        await rename(from, `${from}-held`);
+        await symlink(outside, from);
+      };
+      expect(['root:link_escape', 'root:changed']).toContain(
+        await refusalOf(
+          w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+        ),
+      );
+      expect(await readFile(`${outside}/a`, 'utf8')).toBe('outside parent');
+      expect(await readFile(`${outside}/projects/a`, 'utf8')).toBe('outside home');
+      expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
+      expect(await readFile(swapped === 'home' ? `${from}-held/projects/a` : `${from}-held/a`, 'utf8')).toBe('inside');
+    });
+  test('boot makes the base 0700; the view writes, lists, reads windows and holds arbitrary bytes', async () => {
+    const w = await poolWorld();
+    expect(w.pool.internal).toBe(true);
+    expect(await modeOf(w.poolPath)).toBe(0o700);
+    const path = resolved(w.pool, 'projects/-home-user-proj/abc.jsonl');
+    const bytes = new Uint8Array([0, 255, 11, 128, 65]);
+    await w.pool.writeBytes(path, bytes);
+    expect(await w.pool.list(resolved(w.pool, 'projects'))).toEqual(['-home-user-proj']);
+    expect(await w.pool.readBytes(path)).toEqual(bytes);
+    expect(await w.pool.readBytes(path, { offset: 1, length: 3 })).toEqual(bytes.slice(1, 4));
+    const held = await w.pool.openBytes?.(path);
+    expect(held).toBeDefined();
+    try {
+      expect(await held?.read(1, 2)).toEqual(bytes.slice(1, 3));
+      expect(await held?.stillNames()).toBe(true);
+    } finally {
+      await held?.close();
+    }
+    await w.pool.writeText(resolved(w.pool, 'projects/-home-user-proj/text'), 'hello');
+    expect(await w.pool.readText(resolved(w.pool, 'projects/-home-user-proj/text'))).toBe('hello');
+    await w.makeHome('f1');
+    expect(await link(w, 'f1', 'projects')).toBe('ok');
+    expect(await readFile(`${w.homePath('f1')}/projects/-home-user-proj/abc.jsonl`)).toEqual(Buffer.from(bytes));
+    expect(await refusalOf(w.all.readBytes(resolved(w.all, 'f1/projects/-home-user-proj/abc.jsonl')))).toBe(
+      'root:link_escape',
+    );
+  });
+
+  test('permission, ownership, private state and declared root refusals are synchronous and ordered', async () => {
+    const w = await world();
+    const get = (port: RootsPort) => refusalOf(Promise.resolve().then(() => port.historyPool()));
+    expect(await get(w.port('claude-code', [], { historyPool: undefined }))).toBe('not_permitted');
+    expect(await get(w.port('claude-code', [], { stateFiles: [] }))).toBe('not_own');
+    expect(
+      await get(w.port('claude-code', ['agent-homes'], { privateFiles: ['state/claude-code/history-pool/private/*'] })),
+    ).toBe('not_own');
+    expect(await get(w.port('claude-code', []))).toBe('root:not_declared');
+    for (const folder of ['agent-homes', 'credentials', 'sessions']) {
+      const def = defineState({ name: 'pool', path: `${folder}/*`, store: 'opaque', format: 1 });
+      expect(await get(w.port('claude-code', ['agent-homes'], { stateFiles: [def] }))).toBe('not_own');
+    }
+    expect(await exists(w.poolPath)).toBe(false);
+  });
+
+  test('pool views cannot reach other state, credentials, homes or another plugin', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    for (const path of [w.homePath('f1') + '/.claude.json', `${w.home}/state/logins/credentials/work/auth.json`])
+      expect(await refusalOf(w.pool.readText(path as FencedPath))).toBe('root:outside');
+    expect(w.pool.resolve('../agent-homes/f1').ok).toBe(false);
+    const other = w.port('other', ['agent-homes']).historyPool();
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'mine');
+    expect(
+      await refusalOf(w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), other, resolved(other, 'projects/a'))),
+    ).toBe('not_own');
+    expect(await w.all.readText(resolved(w.all, 'f1/projects/a'))).toBe('mine');
+  });
+
+  test('links inside the pool, even to another pool file, and hard-linked files are never read', async () => {
+    const w = await poolWorld();
+    await w.pool.writeText(resolved(w.pool, 'projects/good'), 'kept');
+    await symlink(`${w.poolPath}/projects/good`, `${w.poolPath}/projects/alias`);
+    await hardLink(`${w.poolPath}/projects/good`, `${w.poolPath}/projects/hard`);
+    for (const operation of ['readText', 'readBytes', 'openBytes'] as const) {
+      expect(
+        await refusalOf(
+          (async (): Promise<unknown> => await w.pool[operation]?.(resolved(w.pool, 'projects/alias')))(),
+        ),
+      ).toBe('root:link_escape');
+      expect(
+        await refusalOf((async (): Promise<unknown> => await w.pool[operation]?.(resolved(w.pool, 'projects/hard')))()),
+      ).toBe('root:hard_link');
+    }
+    expect(await refusalOf(w.pool.writeText(resolved(w.pool, 'projects/alias'), 'bad'))).toBe('root:link_escape');
+    expect(await readFile(`${w.poolPath}/projects/good`, 'utf8')).toBe('kept');
+  });
+
+  test('the pool has no history door and cannot be either end of any generic link door', async () => {
+    const w = await poolWorld();
+    await w.pool.makeDirectory(resolved(w.pool, 'projects'));
+    await w.makeHome('f1');
+    const downloads = w.claude.root('downloads');
+    await downloads.makeDirectory(resolved(downloads, 'd'));
+    expect(await refusalOf(w.pool.linkHistory(resolved(w.pool, 'projects'), 'projects'))).toBe('not_internal');
+    expect(
+      await refusalOf(w.pool.moveToHistoryPool(resolved(w.pool, 'projects'), w.pool, resolved(w.pool, 'projects/x'))),
+    ).toBe('not_internal');
+    for (const [place, source, from, to] of [
+      [w.pool, downloads, 'd', 'alias'],
+      [downloads, w.pool, 'projects', 'alias'],
+    ] as const) {
+      expect(await refusalOf(place.linkTo(resolved(place, to), { root: source, path: resolved(source, from) }))).toBe(
+        'root:link_escape',
+      );
+      expect(await refusalOf(place.copyTree(source, resolved(source, from), resolved(place, to), { link: true }))).toBe(
+        'root:link_escape',
+      );
+      expect(await exists(`${w.poolPath}/alias`)).toBe(false);
+    }
+    const logins = w.port('logins', ['credentials'], { shareCredentials: ['auth.json'] });
+    const credential = await logins.shareCredential({ folder: 'work', file: 'auth.json', receiver: 'claude-code' });
+    expect(await refusalOf(w.pool.linkCredential(credential, resolved(w.pool, 'auth.json')))).toBe('root:link_escape');
+  });
+
+  test('two homes merge into one slug; a conflict is preserved under the source ferret name', async () => {
+    const w = await poolWorld();
+    for (const ferret of ['f1', 'f2']) {
+      await w.makeHome(ferret);
+      await w.all.writeText(resolved(w.all, `${ferret}/projects/-work/${ferret}.jsonl`), ferret);
+      const own = w.claude.root('agent-homes', { subfolder: ferret });
+      await own.moveToHistoryPool(
+        resolved(own, `projects/-work/${ferret}.jsonl`),
+        w.pool,
+        resolved(w.pool, `projects/-work/${ferret}.jsonl`),
+      );
+      expect(await exists(`${w.homePath(ferret)}/projects/-work/${ferret}.jsonl`)).toBe(false);
+    }
+    expect(await w.pool.list(resolved(w.pool, 'projects/-work'))).toEqual(['f1.jsonl', 'f2.jsonl']);
+    await w.all.writeText(resolved(w.all, 'f1/projects/-work/f2.jsonl'), 'conflict');
+    await w.all.moveToHistoryPool(
+      resolved(w.all, 'f1/projects/-work/f2.jsonl'),
+      w.pool,
+      resolved(w.pool, '.conflicts/f1/projects/-work/f2.jsonl'),
+    );
+    expect(await w.pool.readText(resolved(w.pool, '.conflicts/f1/projects/-work/f2.jsonl'))).toBe('conflict');
+    expect(await w.pool.readText(resolved(w.pool, 'projects/-work/f2.jsonl'))).toBe('f2');
+    expect(await modeOf(`${w.poolPath}/.conflicts/f1`)).toBe(0o700);
+  });
+
+  test('a whole folder, an empty folder, and a leaf symlink move as themselves', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/-work/a'), 'a');
+    await w.all.makeDirectory(resolved(w.all, 'f1/sessions'));
+    await symlink(`${w.home}/state/logins/credentials/work/auth.json`, `${w.homePath('f1')}/history.jsonl`);
+    for (const entry of ['projects', 'sessions', 'history.jsonl'])
+      await w.all.moveToHistoryPool(resolved(w.all, `f1/${entry}`), w.pool, resolved(w.pool, entry));
+    expect(await w.pool.readText(resolved(w.pool, 'projects/-work/a'))).toBe('a');
+    expect((await lstat(`${w.poolPath}/sessions`)).isDirectory()).toBe(true);
+    expect((await lstat(`${w.poolPath}/history.jsonl`)).isSymbolicLink()).toBe(true);
+    expect(await refusalOf(w.pool.readText(resolved(w.pool, 'history.jsonl')))).toBe('root:link_escape');
+  });
+
+  test('every lexical refusal leaves the source and target untouched', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    for (const entry of ['auth.json', 'settings.json', 'skills', '.hidden', 'unlisted']) {
+      await w.all.writeText(resolved(w.all, `f1/${entry}`), 'kept');
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, `f1/${entry}`), w.pool, resolved(w.pool, entry))),
+      ).toBe(entry === 'unlisted' ? 'not_listed' : 'denied');
+      expect(await readFile(`${w.homePath('f1')}/${entry}`, 'utf8')).toBe('kept');
+      expect(await exists(`${w.poolPath}/${entry}`)).toBe(false);
+    }
+    for (const target of ['sessions/a', '.conflicts/f2/projects/a', '.conflicts/f1/sessions/a', 'projects/.hidden/a']) {
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, target))),
+      ).toBe('denied');
+      expect(await exists(`${w.poolPath}/${target}`)).toBe(false);
+    }
+    for (const source of ['', 'f1'])
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, source), w.pool, resolved(w.pool, 'projects/a'))),
+      ).toBe('not_home');
+    for (const targetPool of [w.all, { ...w.pool }] as RootHandle[])
+      expect(
+        await refusalOf(
+          w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), targetPool, resolved(w.pool, 'projects/a')),
+        ),
+      ).toBe('not_own');
+    expect(await w.all.readText(resolved(w.all, 'f1/projects/a'))).toBe('source');
+  });
+
+  test('an existing file, folder or link at the target is never overwritten', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    await w.pool.writeText(resolved(w.pool, 'projects/file'), 'target');
+    await w.pool.makeDirectory(resolved(w.pool, 'projects/folder'));
+    await symlink(`${w.poolPath}/projects/file`, `${w.poolPath}/projects/link`);
+    for (const target of ['file', 'folder', 'link']) {
+      expect(
+        await refusalOf(
+          w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, `projects/${target}`)),
+        ),
+      ).toBe('root:outside');
+      expect(await w.all.readText(resolved(w.all, 'f1/projects/a'))).toBe('source');
+    }
+    expect(await w.pool.readText(resolved(w.pool, 'projects/file'))).toBe('target');
+    expect((await lstat(`${w.poolPath}/projects/link`)).isSymbolicLink()).toBe(true);
+  });
+
+  test('a hard-linked source, a placed credential itself or inside a folder is never moved', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    await hardLink(`${w.homePath('f1')}/projects/a`, `${w.parent}/other-name`);
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:hard_link');
+    const logins = w.port('logins', ['credentials'], { shareCredentials: ['auth.json'] });
+    const receiver = w.claude.root('agent-homes', { subfolder: 'f1/projects' });
+    const credential = await logins.shareCredential({ folder: 'work', file: 'auth.json', receiver: 'claude-code' });
+    await receiver.linkCredential(credential, resolved(receiver, 'auth.json'));
+    for (const entry of ['projects/auth.json', 'projects'])
+      expect(
+        await refusalOf(w.all.moveToHistoryPool(resolved(w.all, `f1/${entry}`), w.pool, resolved(w.pool, entry))),
+      ).toBe('root:link_escape');
+    expect((await lstat(`${w.homePath('f1')}/projects/auth.json`)).isSymbolicLink()).toBe(true);
+    expect(await exists(`${w.poolPath}/projects`)).toBe(false);
+  });
+
+  test('cross-device and no-descriptor refusals never fall back to copying', async () => {
+    const w = await poolWorld();
+    await w.makeHome('f1');
+    await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'source');
+    hook.noReach = true;
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:no_descriptor_reach');
+    hook.noReach = false;
+    hook.beforeRename = async () => {
+      throw Object.assign(new Error('cross device'), { code: 'EXDEV' });
+    };
+    expect(
+      await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      ),
+    ).toBe('root:changed');
+    expect(await readFile(`${w.homePath('f1')}/projects/a`, 'utf8')).toBe('source');
+    expect(await exists(`${w.poolPath}/projects/a`)).toBe(false);
+  });
+
+  for (const swapped of ['home', 'parent'] as const)
+    test(`a ${swapped} swapped for a link after the check never moves the outside file`, async () => {
+      const w = await poolWorld();
+      await w.makeHome('f1');
+      await w.all.writeText(resolved(w.all, 'f1/projects/a'), 'inside');
+      const outside = `${w.parent}/outside`;
+      await mkdir(`${outside}/projects`, { recursive: true });
+      await writeFile(`${outside}/a`, 'outside parent');
+      await writeFile(`${outside}/projects/a`, 'outside home');
+      const from = swapped === 'home' ? w.homePath('f1') : `${w.homePath('f1')}/projects`;
+      hook.beforeRename = async () => {
+        hook.beforeRename = undefined;
+        await rename(from, `${from}-held`);
+        await symlink(outside, from);
+      };
+      const result = await refusalOf(
+        w.all.moveToHistoryPool(resolved(w.all, 'f1/projects/a'), w.pool, resolved(w.pool, 'projects/a')),
+      );
+      expect(['ok', 'root:changed', 'root:link_escape']).toContain(result);
+      expect(await readFile(`${outside}/a`, 'utf8')).toBe('outside parent');
+      expect(await readFile(`${outside}/projects/a`, 'utf8')).toBe('outside home');
+      const landed = await readFile(`${w.poolPath}/projects/a`, 'utf8').catch(() => undefined);
+      if (landed !== undefined) expect(landed).toBe('inside');
+    });
+});
 
 describe('RootHandle.linkHistory: the link', () => {
   test('1: a folder entry is a symlink to the real path of the pool entry, made 0700 on first use', async () => {

@@ -41,6 +41,10 @@ export class MemoryHistoryRoots implements RootsPort {
     throw new Error('the history roots fixture has no harness file');
   }
 
+  historyPool(): never {
+    throw new Error('the history roots fixture has no pool');
+  }
+
   share(): Promise<SharedTree> {
     return Promise.reject(new Error('the history roots share nothing'));
   }
@@ -113,9 +117,10 @@ export class MemoryHistoryRoots implements RootsPort {
         const names = new Set<string>();
         for (const key of files.keys())
           if (key.startsWith(prefix)) names.add(key.slice(prefix.length).split('/')[0] ?? '');
-        return [...names].map(
-          (entryName): RootEntry => ({ name: entryName, ...(stat(`${prefix}${entryName}`) as RootStat) }),
-        );
+        return [...names].map((entryName): RootEntry => ({
+          name: entryName,
+          ...(stat(`${prefix}${entryName}`) as RootStat),
+        }));
       },
     };
     return handle as RootHandle;

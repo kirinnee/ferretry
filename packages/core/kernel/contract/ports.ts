@@ -749,8 +749,7 @@ export interface RootPublishOptions {
 
 /** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
 export type RootPublished =
-  | { readonly outcome: 'published'; readonly identity: RootIdentity }
-  | { readonly outcome: 'exists' };
+  { readonly outcome: 'published'; readonly identity: RootIdentity } | { readonly outcome: 'exists' };
 
 /**
  * One regular file opened ONCE and held (`RootHandle.openBytes`): every read and stat goes through that descriptor
@@ -923,7 +922,8 @@ export interface RootHandle {
   /**
    * THE HISTORY-POOL DOOR. Makes `<home>/<entry>` a symlink to the REAL path of `<pool>/<entry>`, where `<pool>` is the
    * caller's OWN declared history pool (`permissions.historyPool`: an opaque `state/<plugin>/history-pool/*` tree, outside
-   * every root) and the kernel, not the caller, names the target. Only on `agent-homes` (any other root: `not_internal`).
+   * the ferret-home tree) and the kernel, not the caller, names the target. Only on `agent-homes`
+   * (any other root: `not_internal`).
    * It exists so every ferret on a harness reads and continues any other ferret's conversations (v4's behaviour): the one
    * thing it adds is exactly that, and nothing else in a home is shared by it.
    *
@@ -935,11 +935,11 @@ export interface RootHandle {
    * is legal but not in the manifest's closed list (`not_listed`); `home` is not exactly one ferret home folder at the top
    * of `agent-homes` (`not_home`); the pool is not the caller's own opaque, non-private state tree (`not_own`); anything
    * is already at `<home>/<entry>` (`exists`: never an overwrite — the caller moves a real folder aside first with
-   * `rename`). The home must already exist and be reached with no link on the way (`link_escape`); this call never makes
-   * one. A host that reaches an open folder by no descriptor path (macOS today) refuses `no_descriptor_reach`: the link is
-   * made only through the held, checked folder, never by a path a swapped parent could redirect.
+   * `moveToHistoryPool`). The home must already exist and be reached with no link on the way (`link_escape`); this call
+   * never makes one. A host that reaches an open folder by no descriptor path (macOS today) refuses
+   * `no_descriptor_reach`: the link is made only through the held, checked folder, never by a path a swapped parent could redirect.
    *
-   * The pool folder and the entry in it are made on first use, by the kernel, through checked no-follow descriptors: a
+   * The pool base is made at boot; the entry in it is made on first use, by the kernel, through checked no-follow descriptors: a
    * `0700` folder (`kind: 'folder'`) or an empty `0600` file (`kind: 'file'`), and an entry already in the pool must be that
    * kind: a link at the pool folder or at the entry is `link_escape` (nothing is followed), the wrong kind `changed`, a file
    * with a second name `hard_link`. The pool is reached by a no-follow descent from the checked plugin state folder, each
@@ -947,9 +947,19 @@ export interface RootHandle {
    * substituted folder. A link made is proved before it stays: it lands on the pool entry's real path AND the entry is
    * judged again (no link on the way, its kind, its hard-link count, the private-place fence) and is the very file or
    * folder held when it was made; otherwise only the link THIS call made is taken back and refused. A link made stays until its holder removes it (`unlink`):
+
    * revoking `permissions.historyPool` stops new links only (a declared GAP, `docs/secrets.md`).
    */
   linkHistory(home: FencedPath, entry: string): Promise<void>;
+  /**
+   * Moves one listed history entry (or a leaf below it) out of ONE ferret home into this plugin's minted pool view.
+   * `to` is `<same entry>/...` or `.conflicts/<same ferret>/<same entry>/...`. Parents are made `0700` only in the pool.
+   * No overwrite (`outside`), copy fallback (`changed` across devices), hard-linked file (`hard_link`), placed
+   * credential link (`link_escape`), or followed link. A leaf link moves as a link. Only an `agent-homes` home handle
+   * has this door (`not_internal`); another plugin's or a forged pool view is `not_own`. No descriptor reach refuses
+   * `no_descriptor_reach`. The look-then-rename window is the same declared GAP as `rename` (docs/secrets.md).
+   */
+  moveToHistoryPool(from: FencedPath, pool: RootHandle, to: FencedPath): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   /**
@@ -1042,6 +1052,13 @@ export interface RootHandle {
 }
 
 export interface RootsPort {
+  /**
+   * A synchronous, internal writable view of ONLY this plugin's own opaque, non-private history pool, made `0700` at
+   * boot. Requires `permissions.historyPool` (`not_permitted`), own non-private state (`not_own`), and the declared
+   * `agent-homes` root (`not_declared`), checked in that order. Uses the regular fenced, no-follow RootHandle reads,
+   * windowed reads, opens and writes. It cannot place/source links or itself link/move history into a home.
+   */
+  historyPool(): RootHandle;
   /** Only roots the manifest declared in `permissions.roots`; anything else throws at build. */
   root(
     name: RootName,
@@ -1197,8 +1214,7 @@ export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; read
  * `subfolder` / `ferret` stays on the main thread; the worker only ever names the root). One grant per root name.
  */
 export type WorkerRootGrant =
-  | RootName
-  | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
+  RootName | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
 
 export interface WorkerStartOptions {
   readonly name?: string;
@@ -1721,9 +1737,7 @@ export type CommandLocation =
  * (a foreign handle and a secret-derived PATH answer alike).
  */
 export type HandleCommandLookup =
-  | { readonly kind: 'found'; readonly path: string }
-  | { readonly kind: 'absent' }
-  | { readonly kind: 'unprovable' };
+  { readonly kind: 'found'; readonly path: string } | { readonly kind: 'absent' } | { readonly kind: 'unprovable' };
 
 /** {@link PathsPort.checkDirectory} accepted: the canonical path. */
 export interface CheckedDirectory {
