@@ -60,7 +60,7 @@ const AbsolutePathSchema = z
   .min(1)
   .refine(value => isAbsolute(value), 'must be an absolute path');
 
-export const SessionLifecycleConfigSchema = z.object({
+const SessionLifecycleConfigSchema = z.object({
   id: SessionIdSchema,
   name: z.string().min(1).max(MAX_SESSION_TITLE_LENGTH),
   /** Who chose `name`: the daemon (`auto`, retitlable) or a person (`owner`, final). */
