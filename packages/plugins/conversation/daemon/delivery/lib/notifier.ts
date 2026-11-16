@@ -1,7 +1,7 @@
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendMessageRequest } from './service.ts';
 import type { SendFailureNotifier } from './tracker.ts';
-import { sendFailureNotice } from './tracking.ts';
+import { sendFailureNotice, sendStuckNotice } from './tracking.ts';
 import type { SendRecord, SendRepository } from './types.ts';
 
 /**
@@ -28,6 +28,23 @@ export class AgentSendFailureNotifier implements SendFailureNotifier {
       id: from.id,
       sendId: `send-failed:${recipient}:${record.sendId}`,
       message: sendFailureNotice(to?.teammate ?? recipient, record, this.clientName),
+      origin: 'daemon',
+      by: { kind: 'ferretry', feature: 'Delivery' },
+    });
+  }
+
+  /**
+   * Tells the agent that sent `record` it is STUCK (`sendStuckNotice`), once: keyed `send-stuck:<recipient>:<send id>`,
+   * so the same send is never announced twice, and sent as the daemon, which nothing retries.
+   */
+  async notifyStuck(sender: string, recipient: SessionId, record: SendRecord, waitedMs: number): Promise<void> {
+    const from = await this.repository.resolveSender(sender);
+    if (from === undefined) return;
+    const to = await this.repository.read(recipient);
+    await this.sends.send({
+      id: from.id,
+      sendId: `send-stuck:${recipient}:${record.sendId}`,
+      message: sendStuckNotice(to?.teammate ?? recipient, record, waitedMs),
       origin: 'daemon',
       by: { kind: 'ferretry', feature: 'Delivery' },
     });

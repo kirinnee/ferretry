@@ -11,10 +11,19 @@
  *   in v4's older rate spelling are converted with v4's own transform (`src/v4/usage.ts`); the result must pass v5's
  *   `PricingFileSchema` or the step fails naming the row, because a booted v4 held only a catalog it accepted.
  *
+ * - `compaction-history.json` (`{version: 1, entries}`, at the v4 home's top) → `state/usage/compaction-history.json`
+ *   `{entries}`: each entry must pass v5's `CompactionRecordSchema` (one that does not is dropped and counted), and
+ *   the newest `KEPT_COMPACTION_ENTRIES` are kept, as Usage itself keeps them. A garbled file is carried as an empty
+ *   history and said so. v5's Usage reads only its own file: there is no legacy reader in the product.
+ *
  * Every v5 schema here describes the body without `format`; `V5Writer.stamped` writes `"format": 1` first, as the
  * kernel does. Nothing here holds a runtime uuid, so M7 has nothing to re-key (the analytics index is a cache).
  */
+import { CompactionRecordSchema } from '@ferretry/core-ferrets/contract';
 import {
+  COMPACTION_HISTORY_STATE,
+  CompactionHistoryFileSchema,
+  KEPT_COMPACTION_ENTRIES,
   PAUSE_TOLD_STATE,
   PAUSES_STATE,
   PauseSchema,
@@ -34,9 +43,11 @@ import {
   V4_ANALYTICS_INDEX,
   V4_BUDGET_HOLDS,
   V4_BUDGET_TOLD,
+  V4_COMPACTION_HISTORY,
   V4_DAEMON_CONFIG,
   V4BudgetHolds,
   V4BudgetTold,
+  V4CompactionHistory,
   V4PricingKeys,
 } from '../v4/usage.ts';
 import type { Step } from './index.ts';
@@ -45,6 +56,7 @@ const V5_DIR = 'state/usage';
 export const V5_USAGE_PAUSES = join(V5_DIR, PAUSES_STATE.path);
 export const V5_USAGE_PAUSE_TOLD = join(V5_DIR, PAUSE_TOLD_STATE.path);
 export const V5_USAGE_PRICING = join(V5_DIR, PRICING_STATE.path);
+export const V5_USAGE_COMPACTION_HISTORY = join(V5_DIR, COMPACTION_HISTORY_STATE.path);
 
 /** A v4 document v4 itself read as empty when garbled: `undefined` for absent, `'damaged'` for anything unreadable. */
 async function lenient(home: string, path: string): Promise<unknown> {
@@ -88,6 +100,7 @@ export const usageStep: Step = {
     V4_BUDGET_HOLDS,
     V4_BUDGET_TOLD,
     `${V4_DAEMON_CONFIG} (analyticsPricing, analyticsPricingSources)`,
+    V4_COMPACTION_HISTORY,
     `${V4_CREDENTIALS}/<login>/${V4_PASSIVE_USAGE} (lstat only, never opened; a login folder that is a link is not looked inside)`,
   ],
   sealed: [],
@@ -150,6 +163,26 @@ export const usageStep: Step = {
           { told: keys },
         );
         kept.push({ what: 'budget notices already told', count: keys.length });
+      }
+
+      const history = await lenient(home, V4_COMPACTION_HISTORY);
+      if (history !== undefined) {
+        const v4 = V4CompactionHistory.safeParse(history);
+        const records = v4.success ? v4.data.entries.map(entry => CompactionRecordSchema.safeParse(entry)) : [];
+        const valid = records.flatMap(record => (record.success ? [record.data] : []));
+        const entries = valid.slice(-KEPT_COMPACTION_ENTRIES);
+        if (!v4.success) notes.push(`${V4_COMPACTION_HISTORY} is garbled: carried as no compaction history`);
+        else if (valid.length < records.length)
+          notes.push(`${String(records.length - valid.length)} compaction history entr(ies) v5 refuses dropped`);
+        await ctx.v5.stamped(
+          {
+            path: V5_USAGE_COMPACTION_HISTORY,
+            format: COMPACTION_HISTORY_STATE.format,
+            schema: CompactionHistoryFileSchema,
+          },
+          { entries },
+        );
+        kept.push({ what: 'compaction durations', count: entries.length });
       }
 
       // daemon.json is the daemon's own document: a booted v4 refused a damaged one, so damage here is a failure.

@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "pending": ["projects"],
+  "pendingReasons": {
+    "projects": [
+      "[cross: ferrets] GAP(projects): app/hooks/use-project-scope.ts is not reached yet: it is reached by the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)",
+      "[cross: ferrets] GAP(projects): app/lib/project-scope.ts is reached only through app/hooks/use-project-scope.ts: the Sessions page when rebuild/port-ferrets-b lands (today: packages/pwa/src/components/sessions-page.tsx:36) (owner: gustavo, ferrets port)"
+    ]
+  }
+}

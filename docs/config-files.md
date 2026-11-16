@@ -878,16 +878,22 @@ The tools reach the files that now hold what they always reached, and no more:
 | `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                        |
 | `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                       |
 | `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`        |
+| `machine.yaml`: the agent permission mode        | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)            |
 | `components/modelSets/`                          | `model-sets/`                                                           |
 
 Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
 check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
-included — is never shown, and an agent's text that holds one is refused. Not reached yet, each a declared GAP:
+included — is never shown, and an agent's text that holds one is refused.
+
+`harness-claude-code.yaml` and `harness-codex.yaml` are reached by owner decision: they also hold the harness
+`binary` and `searchPaths`, which before 5.0 lived in `daemon.json`, out of an agent's reach. A path names the
+program every new ferret launches, so **any change** to either (added, changed, reordered or removed), and a
+looser permission mode, is **written and held** for the owner like every other loosening; the earlier version
+stays in effect until the owner confirms or discards it. An owner's own edit is not held. Not reached yet, each
+a declared GAP:
 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
-- `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
-  binary and search paths, which no agent reached before, and only the permission mode is judged.
 - `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
   not reach) and `presets/` (no successor declared yet).
 
