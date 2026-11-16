@@ -895,14 +895,23 @@ export class FleetCatalogService {
     return Object.fromEntries(Object.entries(ids?.runtimes ?? {}).map(([name, entry]) => [name, entry.id]));
   }
 
-  /** Each credential's status word, from the credentials surface. A list that fails shows no words. */
-  /** Each login's organisation type, by id, from what Logins names for a launch; none on a machine wired without it. */
+  /**
+   * Each login's organisation type, by id, from what Logins names for a launch; none on a machine wired without it. A READ
+   * never fails over it (unlike a publish, which needs the stores): Logins unable to name them shows the channel as off.
+   */
   async #organizationTypes(): Promise<Readonly<Record<string, string>>> {
-    const stores = (await this.#loginStores()).loginStores ?? [];
+    let stores: readonly LoginLaunchStore[];
+    try {
+      stores = (await this.#loginStores()).loginStores ?? [];
+    } catch {
+      return {};
+    }
     return Object.fromEntries(
       stores.flatMap(store => (store.organizationType === undefined ? [] : [[store.id, store.organizationType]])),
     );
   }
+
+  /** Each credential's status word, from the credentials surface. A list that fails shows no words. */
 
   async #credentialStatus(): Promise<CatalogFacts['credentialStatus']> {
     try {
