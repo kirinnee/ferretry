@@ -212,6 +212,58 @@ describe('a journal that cannot be taken as the one the index describes', () => 
     should([row?.lastSequence, row?.journalLine, row?.journal?.size]).eql([3, 4, 3]);
   });
 
+  describe('another path that read only part of the journal and indexed it', () => {
+    /** A 3-event journal whose read dies after two events while `fault.on`: a synthetic damaged line stands in for the rest. */
+    async function halfRead() {
+      const fault = { on: false };
+      const world = await indexed(3, port => ({
+        ...port,
+        lines: (file, name) => {
+          if (!fault.on) return port.lines(file, name);
+          return (async function* () {
+            let seen = 0;
+            for await (const record of port.lines(file, name)) {
+              if (seen++ === 2) throw new Error('EIO');
+              yield record;
+            }
+          })();
+        },
+      }));
+      return { ...world, fault };
+    }
+    const healthy = (storage: {
+      findSession: (
+        id: typeof ID,
+      ) => { lastSequence: number; journalLine: number; journal?: { size: number } | null } | undefined;
+    }) => {
+      const row = storage.findSession(ID);
+      return [row?.lastSequence, row?.journalLine, row?.journal?.size];
+    };
+
+    for (const [path, run] of [
+      ['rebuildIndex', (s: Awaited<ReturnType<typeof halfRead>>['storage']) => s.rebuildIndex()],
+      ['reconcile', (s: Awaited<ReturnType<typeof halfRead>>['storage']) => s.reconcile()],
+      ['replay', (s: Awaited<ReturnType<typeof halfRead>>['storage']) => s.replay(ID)],
+    ] as const) {
+      it(`should not let a ${path} that hit EIO mid-read leave a proof that the row is whole`, async () => {
+        // Arrange — the path re-indexes the session from two events and a damaged line, then the fault clears.
+        const { storage, calls, fault } = await halfRead();
+        fault.on = true;
+        await run(storage);
+        should(storage.findSession(ID)?.lastSequence).equal(2);
+        fault.on = false;
+        calls.length = 0;
+
+        // Act
+        await storage.writeState(ID, sessionState(ID, { status: 'waiting' }));
+
+        // Assert — the half-read row is not trusted: a full sync makes it what a healthy read gives.
+        should(calls).eql(['replaceSession']);
+        should(healthy(storage)).eql([3, 4, 3]);
+      });
+    }
+  });
+
   it('should index in full when the journal identity is not settled (a coarse or too recent stamp)', async () => {
     // Arrange
     const unsettled = { on: false };

@@ -187,6 +187,14 @@ export interface ArchiveVerdict {
   readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
 }
 
+/** What a complete read of a session's journal made its row: see {@link DaemonStorage.indexedJournals}. */
+interface JournalProof {
+  readonly etag: string;
+  readonly lastSequence: number;
+  readonly journalLine: number;
+  readonly journal: JournalFingerprint;
+}
+
 export class DaemonStorage {
   private closed = false;
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
@@ -211,15 +219,13 @@ export class DaemonStorage {
   /** Registry writes, one after another: an archive pass and a revive never interleave their documents. */
   private registryWrites: Promise<void> = Promise.resolve();
   /**
-   * The journal each indexed session's row was last brought level with: its file identity (one `lstat`) and the
-   * fingerprint the index holds for it. A document write may skip re-reading a journal this still describes (&F4319).
-   * Only a full sync or an append records it; anything else that moves the row or the file makes it stale, and a stale
-   * entry never matches.
+   * The proof that a session's row describes its whole journal (&F4319): the journal's file identity (one `lstat`) and
+   * the journal-derived fields of the row that a COMPLETE read of that journal produced. A document write may skip
+   * re-reading a journal while the file is still that identity AND the row still equals that proof exactly, so any
+   * other writer of the row (a reconcile, a rebuild, a replay that read part of the journal) breaks the match by
+   * itself and nothing has to remember to clear this. Only a full sync that read to the end, or an append, records it.
    */
-  private readonly indexedJournals = new Map<
-    SessionId,
-    { readonly etag: string; readonly journal: JournalFingerprint }
-  >();
+  private readonly indexedJournals = new Map<SessionId, JournalProof>();
   /** Config writes and archive commits share root lanes, always taken before document lanes. */
   private readonly lineages = new KeyedSerialExecutor();
   /** A keep published during verification or registry IO cancels that finite archive commit. */
@@ -273,7 +279,13 @@ export class DaemonStorage {
   /** Notes the journal `session`'s row now describes, or forgets it when there is none to note. */
   private rememberJournal(id: SessionId, etag: string | undefined, session: IndexedSession | undefined): void {
     if (etag === undefined || session?.journal == null) this.indexedJournals.delete(id);
-    else this.indexedJournals.set(id, { etag, journal: session.journal });
+    else
+      this.indexedJournals.set(id, {
+        etag,
+        lastSequence: session.lastSequence,
+        journalLine: session.journalLine,
+        journal: session.journal,
+      });
   }
 
   /** Whether the journal on disk is exactly the one `indexed` was last brought level with. */
@@ -281,6 +293,8 @@ export class DaemonStorage {
     const remembered = this.indexedJournals.get(id);
     return (
       remembered !== undefined &&
+      indexed.lastSequence === remembered.lastSequence &&
+      indexed.journalLine === remembered.journalLine &&
       sameFingerprint(indexed.journal, remembered.journal) &&
       (await this.journalEtag(id)) === remembered.etag
     );
