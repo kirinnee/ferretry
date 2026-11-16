@@ -136,6 +136,11 @@ export const CodexRolloutBindingSchema = z.strictObject({
   baseline: z.array(z.string()),
   /** Whether the baseline saw every rollout already there (absent in a binding written before it was recorded). */
   baselineComplete: z.boolean().optional(),
+  /** A pooled launch of a NEW conversation: the first day (`YYYY-MM-DD`) its rollout can be filed under; older days are never read. */
+  since: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
   native: z.string().optional(),
 });
 export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;

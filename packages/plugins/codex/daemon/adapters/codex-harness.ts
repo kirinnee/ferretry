@@ -23,12 +23,19 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
-import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
 import { settingsDocument } from '../lib/settings.ts';
-import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
+import {
+  CODEX_HISTORY_ENTRIES,
+  CODEX_LAUNCH_SETTINGS,
+  CODEX_POOL_SQLITE,
+  CODEX_SETTINGS,
+  type HarnessConfig,
+  type SettingsItem,
+} from '../../contract/index.ts';
 import { codexFixedArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
@@ -131,29 +138,58 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   };
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
-  /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
-  const command = async (
+  /**
+   * `CODEX_HOME` (and, for a pooled ferret, `CODEX_SQLITE_HOME`) is set by an `env` prefix: the Vault's environment is an
+   * opaque handle this code cannot add to.
+   */
+  const command = (
     spec: LaunchSpec,
+    executable: string,
     permissionMode: HarnessConfig['permissionMode'],
+    sqliteHome: string | undefined,
     resume?: string,
-  ): Promise<Result<readonly string[], StartRefusal>> => {
-    const location = await locate();
-    if (location.outcome !== 'located') return err('unavailable');
-    return ok([
-      'env',
-      `CODEX_HOME=${spec.home}`,
-      ...buildCodexLaunchArgv({
-        executable: location.path,
-        harnessFlags: [
-          ...codexFixedArguments(permissionMode, spec.folder),
-          ...codexCorrelationArguments(spec.home),
-          ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
-        ],
-        ...(resume === undefined ? {} : { resume }),
-        ...(spec.model === undefined ? {} : { model: spec.model }),
-        ...(spec.effort === undefined ? {} : { effort: spec.effort }),
-      }),
-    ]);
+  ): readonly string[] => [
+    'env',
+    `CODEX_HOME=${spec.home}`,
+    ...(sqliteHome === undefined ? [] : [`CODEX_SQLITE_HOME=${sqliteHome}`]),
+    ...buildCodexLaunchArgv({
+      executable,
+      harnessFlags: [
+        ...codexFixedArguments(permissionMode, spec.folder),
+        ...codexCorrelationArguments(spec.home),
+        ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
+      ],
+      ...(resume === undefined ? {} : { resume }),
+      ...(spec.model === undefined ? {} : { model: spec.model }),
+      ...(spec.effort === undefined ? {} : { effort: spec.effort }),
+    }),
+  ];
+
+  /**
+   * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
+   * the plugin's one pool, an entry that was a real folder is moved in first, and the answer is the pool's `sqlite` folder
+   * (Codex's database of conversations, `CODEX_SQLITE_HOME`) when `sessions` is pooled too. Never a reason to refuse a
+   * launch: whatever stays the ferret's own is said in one sentence and the launch goes on.
+   */
+  const poolHistory = async (ferret: FerretId): Promise<string | undefined> => {
+    const pooled = await poolHomeHistory({ roots: kernel.roots, ferret, entries: CODEX_HISTORY_ENTRIES });
+    if (pooled.conflicts.length > 0)
+      kernel.log.warn(
+        `Ferret ${ferret}: ${pooled.conflicts.length} file(s) it already had were kept in the pool's .conflicts folder because the shared pool already held a file of that name.`,
+      );
+    if (pooled.sentence !== undefined) kernel.log.warn(pooled.sentence);
+    // The database indexes the rollouts: shared only with the rollouts it indexes.
+    if (!pooled.linked.includes('sessions')) return undefined;
+    try {
+      const pool = kernel.roots.historyPool();
+      const sqlite = pool.resolve(CODEX_POOL_SQLITE);
+      if (!sqlite.ok) return undefined;
+      await pool.makeDirectory(sqlite.value, { mode: 0o700 });
+      return sqlite.value;
+    } catch {
+      kernel.log.warn('This ferret goes on with its own Codex database because the shared one could not be made.');
+      return undefined;
+    }
   };
 
   const launch = async (
@@ -164,15 +200,17 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   ): Promise<Result<Started, StartRefusal>> => {
     // ONE read of the permission mode per launch: the argv and the record describe the same setting.
     const permissionMode = permissionModeNow();
-    const argv = await command(spec, permissionMode, harnessConversation);
-    if (!argv.ok) return argv;
+    const location = await locate();
+    if (location.outcome !== 'located') return err('unavailable');
     await ensureHome(spec);
+    const sqliteHome = await poolHistory(spec.ferret);
+    const argv = command(spec, location.path, permissionMode, sqliteHome, harnessConversation);
     await rollouts.launched(spec, harnessConversation);
     await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =
       harnessConversation === undefined
-        ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
-        : await runner.resume({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env }, harnessConversation);
+        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env })
+        : await runner.resume({ ferret: spec.ferret, command: argv, cwd: spec.folder, env }, harnessConversation);
     if (!running.ok) return running;
     // Codex mints its own conversation id after launch; Conversation finds it, so none is claimed here.
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });
@@ -297,6 +335,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
+      await poolHistory(spec.ferret);
       await placeCredential(root, spec);
       // The selected skills: Skills' shared folders linked into `skills/`, the rest swept; Codex's own `.system` stays.
       await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);

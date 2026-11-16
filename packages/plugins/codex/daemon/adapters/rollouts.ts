@@ -93,6 +93,25 @@ function metadata(text: string): { id: string; cwd: string } | undefined {
 }
 
 /**
+ * What a walk of the SHARED pool reads (a pool holds every ferret's rollouts, thousands of them): rollouts under day
+ * folders from `since` on (Codex files them `sessions/YYYY/MM/DD/`), or the one file for `id`. Neither makes a walk
+ * incomplete: a rollout it never opens is one that cannot matter to the question asked.
+ */
+interface WalkFilter {
+  readonly since?: string | undefined;
+  readonly id?: string | undefined;
+}
+
+/** Whether a folder below `sessions` (`2026`, `2026/11`, `2026/11/16`) can hold a day on or after `since` (`YYYY-MM-DD`). */
+function dayWanted(below: string, since: string | undefined): boolean {
+  if (since === undefined) return true;
+  const parts = below.split('/');
+  if (parts.length > 3 || !parts.every(part => /^\d+$/u.test(part))) return true;
+  const key = parts.join('-');
+  return key >= since.slice(0, key.length);
+}
+
+/**
  * Today's sessions walk (`node-codex-rollout-index.ts`): only real folders and real `.jsonl` files, each named entry
  * taken as it IS (`RootHandle.entries`, never followed), so a symbolic link — `rollout-alias.jsonl -> auth.json`, or a
  * folder link back up the home — is skipped and never opened. Every path is checked again by the root port on read.
@@ -109,6 +128,7 @@ async function walkRollouts(
   root: RootHandle,
   directory: string,
   absent?: () => Promise<boolean>,
+  only?: WalkFilter,
 ): Promise<{ readonly found: readonly Rollout[]; readonly complete: boolean }> {
   const pending = [directory];
   const found: Rollout[] = [];
@@ -134,11 +154,15 @@ async function walkRollouts(
       if (name.includes('/') || name === '.' || name === '..') continue;
       const childRelative = relative === '' ? name : `${relative}/${name}`;
       if (entry.kind === 'directory') {
+        if (!dayWanted(childRelative.slice(directory === '' ? 0 : directory.length + 1), only?.since)) continue;
         pending.push(childRelative);
         continue;
       }
       // A link, a device or anything else is not a rollout: only a plain file is ever opened.
       if (entry.kind !== 'file' || !name.endsWith('.jsonl')) continue;
+      // Codex names a rollout `rollout-<time>-<id>.jsonl`: a walk for ONE conversation opens only the files that say it.
+      // (The header is still what proves it; a name is never identity.)
+      if (only?.id !== undefined && !name.endsWith(`-${only.id}.jsonl`)) continue;
       const child = root.resolve(childRelative);
       if (!child.ok) {
         complete = false;
@@ -168,6 +192,25 @@ export class CodexRollouts {
   }
 
   /**
+   * Where this ferret's rollouts are read: the ferret's own `sessions` folder, or, when that name is the link to the
+   * shared pool (the root never follows a link out of a home), the pool's `sessions` through the pool's own handle. The
+   * relative paths are the same either way (`sessions/YYYY/MM/DD/rollout-….jsonl`).
+   */
+  private async sessions(
+    ferret: FerretId,
+  ): Promise<{ readonly root: RootHandle; readonly directory: string; readonly pooled: boolean }> {
+    const own = this.owner(ferret);
+    const at = own.resolve('sessions');
+    if (at.ok && (await own.lstat(at.value).catch(() => undefined))?.kind === 'symlink')
+      return { root: this.kernel.roots.historyPool(), directory: 'sessions', pooled: true };
+    return {
+      root: this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` }),
+      directory: '',
+      pooled: false,
+    };
+  }
+
+  /**
    * Whether this ferret's `sessions` folder is PROVED absent, from the listings above it: the ferret's home is not in the
    * agent homes, or `sessions` is not in the ferret's home. Any listing that fails is no proof (`false`).
    */
@@ -191,6 +234,11 @@ export class CodexRollouts {
     return read.value;
   }
 
+  /** The first day (`YYYY-MM-DD`) a rollout this launch writes can be filed under: two days back, whatever the zone. */
+  private sinceDay(): string {
+    return new Date(Date.parse(this.kernel.clock.now()) - 2 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  }
+
   /** Save the pre-launch baseline; after restart it is still excluded. Resume uses the supplied native id. */
   async launched(spec: LaunchSpec, native?: string): Promise<void> {
     const owner = this.owner(spec.ferret);
@@ -200,8 +248,19 @@ export class CodexRollouts {
       throw new Error('Codex rollout ownership could not be placed in the ferret home');
     // A new launch (a resume names its own conversation) may prove another rollout: forget the one remembered.
     this.forget(spec.ferret);
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${spec.ferret}/sessions` });
-    const existing = await walkRollouts(root, '', async () => await this.sessionsAbsent(spec.ferret));
+    const where = await this.sessions(spec.ferret);
+    // The shared pool holds every ferret's rollouts: a new conversation can only be among the last days' (a day or two of
+    // slack for the clock's zone), and a resume names its conversation, so neither reads the pool whole.
+    const since = where.pooled && native === undefined ? this.sinceDay() : undefined;
+    const existing =
+      where.pooled && native !== undefined
+        ? { found: [], complete: true }
+        : await walkRollouts(
+            where.root,
+            where.directory,
+            where.pooled ? async () => false : async () => await this.sessionsAbsent(spec.ferret),
+            { since },
+          );
     await this.kernel.state.write(
       CODEX_ROLLOUTS,
       {
@@ -211,6 +270,7 @@ export class CodexRollouts {
         // Whether that baseline saw EVERY rollout already there: one it missed (a folder or a header it could not read)
         // is not excluded, and the correlation marker is per HOME, so it could later pass for this launch's.
         baselineComplete: existing.complete,
+        ...(since === undefined ? {} : { since }),
         ...(native === undefined ? {} : { native }),
       },
       spec.ferret,
@@ -224,8 +284,15 @@ export class CodexRollouts {
    */
   async has(ferret: FerretId, native: string): Promise<boolean | undefined> {
     try {
-      const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
-      const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
+      const where = await this.sessions(ferret);
+      // A pooled ferret resumes a conversation any ferret on this harness wrote: it is looked for in the pool, by the one
+      // id (the file name narrows the walk; the header still proves it).
+      const walked = await walkRollouts(
+        where.root,
+        where.directory,
+        where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
+        where.pooled ? { id: native } : undefined,
+      );
       if (walked.found.some(rollout => rollout.id === native)) return true;
       return walked.complete ? false : undefined;
     } catch {
@@ -271,7 +338,7 @@ export class CodexRollouts {
     ferret: FerretId,
     remembered = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout } | undefined> {
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const root = (await this.sessions(ferret)).root;
     const known = remembered ? this.#proved.fresh(ferret, Date.parse(this.kernel.clock.now())) : undefined;
     if (known !== undefined) {
       const stat = await root.stat(known.file).catch(() => undefined);
@@ -286,7 +353,8 @@ export class CodexRollouts {
     ferret: FerretId,
     strict = false,
   ): Promise<{ readonly root: RootHandle; readonly rollout: Rollout; readonly binding: Binding } | undefined> {
-    const root = this.kernel.roots.root('agent-homes', { subfolder: `${ferret}/sessions` });
+    const where = await this.sessions(ferret);
+    const root = where.root;
     this.#proved.forget(ferret);
     const binding = await this.binding(ferret);
     if (binding === undefined) return undefined;
@@ -296,7 +364,14 @@ export class CodexRollouts {
     // everything, and only by a walk now that sees everything, so a rollout either one missed cannot be passed over or
     // taken for this launch's. The transcript reader keeps its own (unrecorded) proof.
     if (strict && binding.native === undefined && binding.baselineComplete !== true) return undefined;
-    const walked = await walkRollouts(root, '', async () => await this.sessionsAbsent(ferret));
+    // In the shared pool a conversation this launch named is looked for by its id alone, and a new one only among the
+    // days since the launch: other ferrets' rollouts are never candidates (and the correlation marker is per HOME).
+    const walked = await walkRollouts(
+      root,
+      where.directory,
+      where.pooled ? async () => false : async () => await this.sessionsAbsent(ferret),
+      where.pooled ? { since: binding.since, id: binding.native } : undefined,
+    );
     if (strict && !walked.complete) return undefined;
     const candidates = walked.found;
     let chosen: Rollout | undefined;
@@ -437,28 +512,24 @@ export class CodexRollouts {
     read: async (ferret, after, limit) => {
       const rollout = await this.owned(ferret);
       if (rollout === undefined) return [];
-      const entries = this.events(rollout).map(
-        (event, index): TranscriptEntry => ({
-          id: `${rollout.id}:${event.line}:${event.blockIndex ?? index}:${event.kind}`,
-          at: (event.timestamp ?? rollout.modified) as Instant,
-          role: event.role === 'developer' ? 'system' : event.role,
-          ...('text' in event ? { text: event.text } : {}),
-          data: event as unknown as JsonValue,
-        }),
-      );
+      const entries = this.events(rollout).map((event, index): TranscriptEntry => ({
+        id: `${rollout.id}:${event.line}:${event.blockIndex ?? index}:${event.kind}`,
+        at: (event.timestamp ?? rollout.modified) as Instant,
+        role: event.role === 'developer' ? 'system' : event.role,
+        ...('text' in event ? { text: event.text } : {}),
+        data: event as unknown as JsonValue,
+      }));
       const start = after === undefined ? 0 : entries.findIndex(entry => entry.id === after) + 1;
       if (after !== undefined && start === 0) return [];
       const page = entries.slice(start, limit === undefined ? undefined : start + Math.max(0, limit));
       // Each string is masked ON ITS OWN, never the page's JSON: a secret holding a quote, a backslash, a newline or a
       // control character is ESCAPED by JSON.stringify and so would not match its own words (ports-pending, G162).
       return await this.kernel.redaction.read(scope =>
-        page.map(
-          (entry): TranscriptEntry => ({
-            ...entry,
-            ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
-            ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
-          }),
-        ),
+        page.map((entry): TranscriptEntry => ({
+          ...entry,
+          ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
+          ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
+        })),
       );
     },
     find: async (ferret, id) => (await this.transcript.read(ferret)).find(entry => entry.id === id),
