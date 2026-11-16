@@ -3,9 +3,10 @@
  *
  *   fleet.use       send, stop, resume, rename, signal, pin (the pin board and the sidebar pin)
  *   fleet.configure fork, move, handover (+ cancel, ask-to-stop-jobs), conversion-preview, POST /v1/ferrets,
- *                   revoke-credential, POST and DELETE /v1/restarts
+ *                   revoke-credential, POST and DELETE /v1/restarts, POST /v1/ferrets/:id/runtime, and every OTHER door
+ *                   that starts a ferret (board card start, lessons run and scan, pack routing clean-up; r1)
  *
- * Two halves, both read from the SHIPPED manifests (every plugin's, loaded as Gate's audited-route test loads them), so a
+ * Three halves, both read from the SHIPPED manifests (every plugin's, loaded as Gate's audited-route test loads them), so a
  * descriptor that loses its demand fails here:
  *
  *  1. every write the ruling names declares exactly its capability and axis;
@@ -13,11 +14,17 @@
  *     Ferrets manifest owns) declares SOME capability or is on the allowlist below with a reason. A write added without a
  *     capability fails the second half; a capability dropped from a route the ruling names fails the first.
  *
+ *  3. every ferret write OUTSIDE `/v1/ferrets` (a plugin route whose handler reaches `ferrets.start`, `fork`, `move`,
+ *     `handover`, `send` or `stop`) is on `OUTSIDE_FERRETS` with its capability, and a source scan fails any daemon file that
+ *     calls `ferrets.start|fork|move|handover` that `STARTERS` does not name — so a new alias of a start, with or without a
+ *     capability, fails RED until someone decides.
+ *
  * Admission itself (a remote device refused, a default and a `--limited` device served, a loopback caller never refused, a
  * relayed one remote) is `core/gate/tests/unit/daemon/ferret-writes-fleet-limit.test.ts`, which cannot live here because
  * Ferrets does not import Gate's daemon.
  */
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { loadManifests, loadWorkspace } from '../../../../../scripts/gen/lib/workspace.ts';
 
@@ -54,6 +61,44 @@ const RULING: Readonly<Record<string, 'use' | 'configure'>> = {
   'POST /v1/ferrets/:ferretId/revoke-credential': 'configure',
   'POST /v1/restarts': 'configure',
   'DELETE /v1/restarts': 'configure',
+  // the runtime switch relaunches the ferret on another model or effort, as a move does
+  'POST /v1/ferrets/:id/runtime': 'configure',
+};
+
+/**
+ * c58-sec3 r1, FERRET WRITES OUTSIDE /v1/ferrets: every route whose handler reaches `ferrets.start` / `fork` / `move` /
+ * `handover` / `send` / `stop`, by `METHOD path`, with the capability and axis it must declare. A route that loses its
+ * capability fails the first test below; a new route that reaches a ferret write is found by the `STARTERS` source scan.
+ */
+const OUTSIDE_FERRETS: Readonly<Record<string, { readonly capability: string; readonly axis: 'use' | 'configure' }>> = {
+  // starts a ferret (the card text is its prompt)
+  'POST /v1/board/cards/:cardId/start': { capability: 'fleet', axis: 'configure' },
+  // start a miner ferret (one per batch for a scan)
+  'POST /v1/lessons/run': { capability: 'fleet', axis: 'configure' },
+  'POST /v1/lessons/scan': { capability: 'fleet', axis: 'configure' },
+  // starts the ferret that rewrites the routing prompt
+  'POST /v1/pack/routing/clean-up': { capability: 'fleet', axis: 'configure' },
+  // the runtime switch (also on RULING; listed so this list is the whole outside picture)
+  'POST /v1/ferrets/:id/runtime': { capability: 'fleet', axis: 'configure' },
+  // send: a card act and a skip message a ferret
+  'POST /v1/board/cards/:cardId': { capability: 'fleet', axis: 'use' },
+  'POST /v1/board/skip': { capability: 'fleet', axis: 'use' },
+  // the Warden starts an investigator and moves or stops ferrets: its own capability, which a --limited device never holds
+  'POST /v1/warden/run': { capability: 'warden', axis: 'use' },
+  'POST /v1/warden/investigate': { capability: 'warden', axis: 'use' },
+};
+
+/**
+ * Daemon files that call `ferrets.start|fork|move|handover`, and the routes that reach each. The scan below fails a file this
+ * table does not name (a new door) and an entry whose file no longer calls one (so the table cannot rot).
+ */
+const STARTERS: Readonly<Record<string, readonly string[]>> = {
+  'packages/plugins/board/daemon/wiring.ts': ['POST /v1/board/cards/:cardId/start'],
+  'packages/plugins/lessons/daemon/adapters/miner.ts': ['POST /v1/lessons/run', 'POST /v1/lessons/scan'],
+  'packages/plugins/packs/daemon/adapters/ferrets.ts': ['POST /v1/pack/routing/clean-up'],
+  'packages/plugins/warden/daemon/remedies.ts': ['POST /v1/warden/run'],
+  'packages/plugins/warden/daemon/spawner.ts': ['POST /v1/warden/investigate'],
+  'packages/plugins/warden/daemon/subsystem.ts': ['POST /v1/warden/run'],
 };
 
 const AGENDA = 'agenda actions are gated by who acts (the human or a ferret), never by a capability (docs/grants.md)';
@@ -75,7 +120,6 @@ const UNGOVERNED: Readonly<Record<string, string>> = {
   'DELETE /v1/ferrets/:ferretId/attachments/:attachmentId/unlock': GAP('fleet.use'),
   'PATCH /v1/ferrets/:ferretId/lessons': GAP('fleet.use'),
   'PATCH /v1/ferrets/:ferretId/pack': GAP('fleet.use'),
-  'POST /v1/ferrets/:id/runtime': GAP('fleet.configure (it changes the runtime a ferret runs on, as a move does)'),
 };
 
 interface Declared {
@@ -114,6 +158,31 @@ describe('c58-sec3 the ruling: each named write asks its fleet axis', () => {
       expect(declared.capability).toMatchObject({ capability: 'fleet', axis });
     });
   }
+});
+
+describe('c58-sec3 r1 ferret writes outside /v1/ferrets: each declares its capability', () => {
+  for (const [key, want] of Object.entries(OUTSIDE_FERRETS)) {
+    test(`${key} declares ${want.capability}.${want.axis}`, () => {
+      const declared = byKey.get(key);
+      if (declared === undefined) throw new Error(`no manifest declares ${key}`);
+      expect(declared.capability).toMatchObject(want);
+    });
+  }
+
+  test('every route a STARTERS file reaches is on the list above', () => {
+    for (const [file, routes] of Object.entries(STARTERS))
+      for (const key of routes) expect(OUTSIDE_FERRETS[key], `${file} reaches ${key}`).toBeDefined();
+  });
+
+  test('a daemon file that calls ferrets.start, fork, move or handover is named by STARTERS, and each entry still does', () => {
+    const CALL = /\bferrets\??\.(start|fork|move|handover)\(/u;
+    const found: string[] = [];
+    for (const file of new Bun.Glob('packages/plugins/*/daemon/**/*.ts').scanSync({ cwd: ROOT })) {
+      if (file.includes('/node_modules/') || file.includes('/tests/') || file.includes('/generated/')) continue;
+      if (CALL.test(readFileSync(resolve(ROOT, file), 'utf8'))) found.push(file);
+    }
+    expect(found.toSorted()).toEqual(Object.keys(STARTERS).toSorted());
+  });
 });
 
 describe('c58-sec3 the route table: every ferret write is governed or listed', () => {

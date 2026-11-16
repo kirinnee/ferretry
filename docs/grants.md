@@ -318,34 +318,50 @@ grew to cover every route would be a second copy of the route table, and a secon
 nothing, so a device the owner narrowed to `--limited` (fleet use only) could still start, fork, move, hand over and
 restart ferrets, and a device narrowed off fleet use could still send to one. The limit is now real on every one:
 
-| axis        | the writes                                                                                                                                                                              |
-| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `use`       | send, stop, resume, rename, signal, and pin (the pin board `POST …/pins`, the sidebar `…/pin` and `…/unpin`)                                                                            |
-| `configure` | fork, move (+ `…/move/ask-to-stop-jobs`), handover (+ `…/handover/cancel`), `…/conversion-preview`, `POST /v1/ferrets` (start), `…/revoke-credential`, `POST` and `DELETE /v1/restarts` |
+| axis        | the writes                                                                                                                                                                                                                                                                                           |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `use`       | send, stop, resume, rename, signal, and pin (the pin board `POST …/pins`, the sidebar `…/pin` and `…/unpin`)                                                                                                                                                                                         |
+| `configure` | fork, move (+ `…/move/ask-to-stop-jobs`), handover (+ `…/handover/cancel`), `…/conversion-preview`, `POST /v1/ferrets` (start), `…/revoke-credential`, `POST` and `DELETE /v1/restarts`, `POST /v1/ferrets/:id/runtime` (the model/effort switch), and every other door that starts a ferret (below) |
 
 - **`use` is the everyday act, `configure` changes what the host runs.** Every default device holds both; a `--limited`
   device holds `use` only, so it still sends, stops, resumes, renames, signals and pins, and can no longer start, fork,
   move, hand over, revoke or restart a ferret. A governed caller needs the live step-up for every `configure` write, which
-  an unlock holds (the ordinary rule); a `use` write needs nothing beyond the grant.
+  an unlock holds (the ordinary rule); a `use` write needs nothing beyond the grant and the unlock.
 - **One act, every path.** Where an act is reached by more than one route the same demand is on all of them: the send path
   is the send, an interrupt, a retry, an Enter and a cancel on the send ledger, and an edit or a cancel in the queue (its
-  reads were `fleet.use` already); a move's preview and its ask-to-stop-jobs ask what the move asks. The CLI verbs call these
-  same routes, so there is no second door.
+  reads were `fleet.use` already); a move's preview and its ask-to-stop-jobs ask what the move asks. **Every route that
+  STARTS a ferret asks what `POST /v1/ferrets` asks, wherever it lives:** a board card's Start
+  (`POST /v1/board/cards/:cardId/start`, which starts a ferret with the card text as its prompt), `POST /v1/lessons/run`
+  (with `spawn`) and `POST /v1/lessons/scan` (a miner ferret per batch), `POST /v1/pack/routing/clean-up`, and the runtime
+  switch `POST /v1/ferrets/:id/runtime` are all `fleet.configure`, so a `--limited` device is refused at each (before r1 the
+  card Start asked only `fleet.use` and was a second door: `POST /v1/ferrets` answered 403 and the card Start admitted).
+  The CLI verbs call these same routes, so there is no second door there either.
 - **Who is not governed.** The host's admin token over loopback is ungoverned and is never refused; a ferret's own
   credential is never grant-governed, so an agent keeps what it had (a `caller: 'person'` route still refuses it). A
   relayed request is **remote** whatever address it appears to carry: the carrier decides, never the address.
 - **What it does not change.** `POST /v1/ferrets` still asks `terminal.use` itself for a start with flags or outside every
   project (`consultsGrants`); the new `fleet.configure` is asked first, and both must hold.
+- **Two known consequences, accepted.** (1) **An agenda answer puts words into a ferret by who acts, not by capability.**
+  The agenda writes are gated by the human-or-ferret rule (a person's answer is delivered to the ferret as an owner
+  message), so a device holding no `fleet.use` at all that the agenda lets answer can still cause a message to reach a
+  ferret; it is the same act as a send and is listed with the agenda allowlist below, not hidden. (2) **`terminal.use` can
+  still type into the pane.** A device that holds `terminal.use` may type into a ferret's terminal pane whatever it holds
+  on `fleet`; `terminal.use` is its own, stronger demand (arbitrary code on the host, step-up) and is not narrowed by the
+  fleet axis.
 - **Pinned by tests, from the shipped manifests.** `packages/core/ferrets/tests/unit/fleet-write-capability.test.ts` holds
   the route table: every non-GET under `/v1/ferrets`, `/v1/restarts` and `/v1/worktrees`, and every write the Ferrets
   manifest owns, declares a capability or is on a commented allowlist with a reason; adding a write without either fails it,
-  and so does removing one declaration the ruling names. `packages/core/gate/tests/unit/daemon/ferret-writes-fleet-limit.test.ts`
+  and so does removing one declaration the ruling names. The same file holds the explicit list of **ferret writes outside
+  `/v1/ferrets`** (every route whose handler reaches `ferrets.start`, `fork`, `move`, `handover`, `send` or `stop`: board
+  card start, card act and skip, lessons run and scan, pack clean-up, the runtime switch, the Warden's run and investigate,
+  each with the capability it declares) and a source scan that fails any plugin daemon file calling
+  `ferrets.start|fork|move|handover` that the list does not name, so a new alias of a start fails RED until it is decided. `packages/core/gate/tests/unit/daemon/ferret-writes-fleet-limit.test.ts`
   asks the real admission of each route: an axis-off device is refused (`grant_device_not_granted`) before the body is read,
-  the default and a `--limited` device still do every `use` write, loopback is never refused and a relayed one is remote.
+  the default and a `--limited` device still do every `use` write, loopback is never refused, and a relayed admin token is remote:
+  served on a `use` write, and answered exactly `403 grant_step_up_required` on a `configure` one.
 - **Declared GAP — ferret writes the ruling does not name.** These stay ungoverned and are on the allowlist, each with the
   capability proposed for it: `PATCH …/compact-at`, `PATCH …/hypermedia`, `POST …/attachments` and `…/attachments/:id/unlock`
-  (POST and DELETE), `PATCH …/lessons` and `PATCH …/pack` (proposed `fleet.use`), and `POST /v1/ferrets/:id/runtime`
-  (proposed `fleet.configure`: it changes the runtime a ferret runs on, as a move does). The agenda writes (`agenda`,
+  (POST and DELETE), `PATCH …/lessons` and `PATCH …/pack` (proposed `fleet.use`). The agenda writes (`agenda`,
   `agenda-mode`, `agenda/replies`, `agenda/:id/seen`) are gated by who acts and stay that way on purpose.
 
 **Shared drafts follow sends, and sends are `fleet.use`.** `GET`/`POST /v1/ferrets/:ferretId/shared-draft` and its live

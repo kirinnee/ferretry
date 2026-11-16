@@ -174,6 +174,18 @@ describe('the cards of a notice', () => {
     expect(list.q('B1', '[data-agenda-card-start]')).not.toBeNull();
   });
 
+  it('says in words that this device may not start a ferret (fleet.configure), instead of failing blank', async () => {
+    const sentence =
+      'this device has not been given permission to change the settings for the fleet. Grant it at the machine with `fy device grant <device> fleet --configure`, or from a device that holds it and may manage devices.';
+    const list = await draw(ONE, { start: async () => ({ ok: false, message: sentence }) });
+
+    await click(list.q('B1', '[data-agenda-card-start]'));
+    await settle();
+
+    expect(list.q('B1', '[data-agenda-card-problem]')?.textContent).toBe(sentence);
+    expect(list.q('B1', '[data-agenda-card-start]')).not.toBeNull();
+  });
+
   it('asks before closing, and closes nothing when the owner keeps the card', async () => {
     const list = await draw(ONE);
 

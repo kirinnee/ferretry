@@ -125,6 +125,8 @@ export default definePlugin({
       route('POST /v1/lessons/run', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec3 r1: `{spawn: true}` starts a miner ferret, so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },
@@ -177,6 +179,8 @@ export default definePlugin({
       route('POST /v1/lessons/scan', {
         minimum: 'operator',
         caller: 'person',
+        // c58-sec3 r1: a scan starts a miner ferret per batch, so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: NOT_RECORDED,
         guard: { none: 'counts and a sentence' },

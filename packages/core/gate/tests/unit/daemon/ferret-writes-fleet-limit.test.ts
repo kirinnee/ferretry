@@ -48,6 +48,13 @@ const CONFIGURE_WRITES = [
   'POST /v1/ferrets/:ferretId/revoke-credential',
   'POST /v1/restarts',
   'DELETE /v1/restarts',
+  // r1: every OTHER door that starts a ferret asks what `POST /v1/ferrets` asks (the explicit list is
+  // `core/ferrets/tests/unit/fleet-write-capability.test.ts`, OUTSIDE_FERRETS).
+  'POST /v1/ferrets/:id/runtime',
+  'POST /v1/board/cards/:cardId/start',
+  'POST /v1/lessons/run',
+  'POST /v1/lessons/scan',
+  'POST /v1/pack/routing/clean-up',
 ] as const;
 
 const NO_FLEET_USE: CapabilityGrants = {
@@ -89,9 +96,10 @@ for (const key of USE_WRITES) {
     const w = world();
     expect(admit(w, route, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
     const relayed = admit(w, route, { bearer: ADMIN, arrival: carried('relay') });
-    if (relayed.decision.outcome === 'admitted')
-      expect(relayed.decision.standing.presentation).toMatchObject({ local: false });
-    else expect(relayed.outcome).not.toBe('admitted');
+    // A `use` act is served to the relayed admin token as a REMOTE caller (never as the host).
+    expect(relayed.outcome).toBe('admitted');
+    if (relayed.decision.outcome !== 'admitted') throw new Error('unreachable: asserted admitted above');
+    expect(relayed.decision.standing.presentation).toMatchObject({ local: false });
   });
 }
 
@@ -127,10 +135,8 @@ for (const key of CONFIGURE_WRITES) {
     const route = await declaredRoute(key);
     const w = world();
     expect(admit(w, route, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
-    const relayed = admit(w, route, { bearer: ADMIN, arrival: carried('relay') });
-    if (relayed.decision.outcome === 'admitted')
-      expect(relayed.decision.standing.presentation).toMatchObject({ local: false });
-    else expect(relayed.outcome).not.toBe('admitted');
+    // A `configure` act over a relay is a remote one: the admin token alone is not the host, so it asks the step-up.
+    expect(admit(w, route, { bearer: ADMIN, arrival: carried('relay') }).outcome).toBe('403 grant_step_up_required');
   });
 }
 
