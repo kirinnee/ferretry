@@ -15,7 +15,7 @@ import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
 import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
-import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
+import { type HarnessGate, HARNESS_OPEN } from '@ferretry/core-mailbox/contract';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { addressedByCallsign } from './seams/ferret-address.ts';

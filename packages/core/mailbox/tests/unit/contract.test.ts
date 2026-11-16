@@ -10,11 +10,11 @@ import {
 import manifest from '../../manifest.ts';
 
 describe('the Mailbox package', () => {
-  test('is a core piece that offers one slot and serves nothing yet', () => {
+  test('is a core piece that offers one slot and serves the send path: twelve routes, no screen of its own', () => {
     expect(manifest.id).toBe('mailbox');
     expect(manifest.core).toBe(true);
     expect(manifest.hooks?.offers?.map(offer => offer.hook)).toEqual([MailboxHosts]);
-    expect(Object.keys(manifest)).not.toContain('actions');
+    expect(manifest.actions.routes).toHaveLength(12);
     expect(MailboxPort.name).toBe('mailbox');
   });
 

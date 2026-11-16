@@ -8,7 +8,7 @@ import {
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
-} from '../../../daemon/harness-seam.ts';
+} from '@ferretry/core-mailbox/contract';
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
 

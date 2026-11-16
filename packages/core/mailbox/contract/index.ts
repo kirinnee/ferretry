@@ -85,5 +85,6 @@ export {
 } from './lib/queue/requests.ts';
 export type { ClockPort, SerialExecutor, YieldingSerialExecutor } from './serial-ports.ts';
 export { KeyedSerialExecutor } from './serial.ts';
-export * from './lib/queue/service.ts';
 export { SessionSendError, type SessionSendFailure } from './lib/send/errors.ts';
+export * from './lib/send/harness-seam.ts';
+export * from './lib/send/interrupt.ts';

@@ -19,7 +19,7 @@ import {
   sharedDraftOrigin,
 } from '../index.ts';
 
-import type { SentDraftClearer } from '../../../delivery/lib/mounts/session-send.ts';
+import type { SentDraftClearer } from '@ferretry/core-mailbox/contract';
 
 /**
  * The shared draft's surface: one session's unsent composer, read and edited by the owner's devices.

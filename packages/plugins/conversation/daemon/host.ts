@@ -1,28 +1,24 @@
 import { ApiError, type KernelPorts, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
 import { type AskAnswer, type AskId, AskIdSchema, type AskOwnerChat, type AsksApi } from '@ferretry/core-asks/contract';
-import {
-  AGENT_ORIGIN,
-  type FerretsApi,
-  type LaunchOrigin,
-  PERSON_ORIGIN,
-  type SitrepLineSource,
-} from '@ferretry/core-ferrets/contract';
+import { type FerretsApi, type SitrepLineSource } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant, Result } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
+  type AttachmentSource,
   harnessFamily,
+  type MailboxApi,
   type MailboxHost,
-  type MailboxQueueApi,
   type MailboxRefusal,
   type QueueRefusal,
   QueueRefused,
   type QueuedMessage,
+  type SessionId,
+  statusOf,
   type SessionQueue,
 } from '@ferretry/core-mailbox/contract';
 import {
   type ConversationApi,
-  type ConversationCaller,
   QuestionAnswered,
   QuestionAsked,
   QUESTION_ANSWERED_STATE,
@@ -35,9 +31,7 @@ import {
   TurnEnded,
 } from '../contract/index.ts';
 import { EntriesSendEvidence, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
-import { sendRecordFor, sendRecordView } from '@ferretry/core-mailbox/contract';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
-import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
 import { StateDraftRepository } from './drafts/adapters/index.ts';
 import {
   buildQuestionAnswering,
@@ -63,40 +57,17 @@ import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts
 import { SessionCompactAtError, SessionCompactAtService } from './turns/compact-at/lib/service.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
-import { type HarnessGate } from './harness-seam.ts';
-import { messageWithAttachments } from './attachments/lib/delivery.ts';
+import { type HarnessGate } from '@ferretry/core-mailbox/contract';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
 import { type MountRoute, routeTable, socketTable } from './seams/api.ts';
 import { parseSessionId, tryParseSessionId } from './seams/ferret-id.ts';
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionView } from '@ferretry/core-mailbox/contract';
-import {
-  actRefusal,
-  type AttachmentSource,
-  buildSendHalf,
-  refusalCode,
-  sendActRefusal,
-  statusOf,
-  type UnwiredSend,
-} from './send-half.ts';
-
-export type { AttachmentSource };
 /** A ferret nobody knows has no setting to read (the port answers `undefined`); anything else is a real failure. */
 const compactAtAbsent = (error: unknown): undefined => {
   if (error instanceof SessionCompactAtError && error.reason === 'not-found') return undefined;
   throw error;
 };
-
-/**
- * Who a send on the PORT is for: the owner is a person; a ferret, and the Warden speaking, are agents (the Warden has no
- * ferret behind it). The caller the kernel bound the port to is the only source: a request field names nothing here.
- */
-const originOfCaller = (caller: ConversationCaller): LaunchOrigin =>
-  caller.kind === 'owner'
-    ? PERSON_ORIGIN
-    : caller.kind === 'ferret'
-      ? { kind: 'agent', ferret: caller.ferret }
-      : AGENT_ORIGIN;
 
 /** What part a builds: its routes, its sockets, the half of the port it owns and its sitrep lines. */
 export interface ConversationAHalf {
@@ -169,7 +140,7 @@ export function buildConversationA(deps: {
   /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
   readonly gate: HarnessGate;
   /** The Mailbox's port: the queue lives there. */
-  readonly mailbox: MailboxQueueApi;
+  readonly mailbox: MailboxApi;
   /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
   readonly attachments?: AttachmentSource;
   /** A Codex ferret's parsed transcript tail (part b's reader), for the question watch. Absent: Codex is not watched. */
@@ -237,6 +208,8 @@ export function buildConversationA(deps: {
     await questionAsks.reconcile(stored);
   };
   let questionAsksReconciled = false;
+  /** Set by {@link ConversationAHalf.stop}: the question watch looks no more once it has. */
+  let stopped = false;
 
   const queueStore = new StateQueueStore(kernel.state, undefined, failure =>
     kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
@@ -279,63 +252,7 @@ export function buildConversationA(deps: {
       endedAt: boundary.endedAt as Instant,
     });
   });
-  const send = buildSendHalf({
-    kernel,
-    ferrets,
-    gate,
-    clock,
-    queue,
-    ledger,
-    channel,
-    boundaries,
-    transformMessage: async input => await hooks.transform(MessageBeforeSend, input),
-    evidence: new EntriesSendEvidence(async ferret => {
-      const id = tryParseSessionId(ferret);
-      const summary = id === undefined ? undefined : await ferrets.get(id);
-      const harness = id === undefined ? undefined : await ferrets.harness?.(id);
-      const family = summary === undefined ? undefined : harnessFamily(summary.harness);
-      // A harness this build does not know has no transcript reading: unreadable, so nothing is typed again on a guess.
-      return family === undefined || harness === undefined
-        ? undefined
-        : { harness: family, reader: harness.transcript };
-    }),
-    keepFrame: async (ferret, frame) => {
-      const [newest, middle, oldest] = STUCK_FRAME_STATES;
-      for (const [from, to] of [
-        [middle, oldest],
-        [newest, middle],
-      ] as const) {
-        const kept = await kernel.state.read(from, ferret);
-        if (kept.ok && kept.value !== undefined) await kernel.state.write(to, kept.value, ferret);
-      }
-      await kernel.state.write(newest, new TextEncoder().encode(frame), ferret);
-      return kernel.state.pathOf(newest, ferret);
-    },
-    stamp: async (log, ferret) =>
-      (await kernel.state.version(log === 'sends' ? SENDS_STATE : QUEUE_STATE, ferret))?.etag ?? 'absent',
-    askedQuestion: async ferret => await askedQuestion(ferret),
-    ...(deps.attachments === undefined ? {} : { attachments: deps.attachments }),
-  });
-  const {
-    prepared,
-    turnStates,
-    handoffOf,
-    tracker,
-    sendActs,
-    interruptFerret,
-    mayGo,
-    deliverAttachments,
-    typeMessage,
-    keptSend,
-    turnsOf,
-    sendsStamp,
-    queueStamp,
-    queueMessages,
-    queueFailure,
-    lookFirst,
-    records,
-    awaitStatus,
-  } = send;
+  const turnsOf = async (ferret: SessionId) => await ferrets.turns?.(ferret).catch(() => undefined);
   /** What the owner said to a ferret: the queue, the send ledger and its turn documents (Ferrets reads them back). */
   const ownerWords = new OwnerWordsReader({
     queue,
@@ -429,7 +346,7 @@ export function buildConversationA(deps: {
   });
   let cancelQuestionWatch: (() => void) | undefined;
   const watchQuestions = (): void => {
-    if (send.isStopped()) return;
+    if (stopped) return;
     cancelQuestionWatch = kernel.clock.after(milliseconds(QUESTION_WATCH_MS), () => {
       void (async () => {
         // The Agenda first (once after boot, then only what failed before is retried), so a card never waits on a look.
@@ -503,51 +420,6 @@ export function buildConversationA(deps: {
   });
 
   const mounts: MountRoute[] = [
-    ...sessionSendRoutes(
-      {
-        send: async (
-          id: string,
-          request: UnwiredSend & {
-            readonly message: string;
-            readonly sendId: string;
-            readonly senderSessionId?: string | undefined;
-          },
-        ) => {
-          const kept = await keptSend(parseSessionId(id), request.sendId);
-          if (kept !== undefined) return kept;
-          // Asked before the text is prepared: a refused send runs no `message.before-send` transform.
-          mayGo(request);
-          const delivered = await deliverAttachments(parseSessionId(id), request.attachmentIds);
-          return await typeMessage(parseSessionId(id), {
-            ...request,
-            message: messageWithAttachments(await prepared(id, request.message), delivered),
-          });
-        },
-        interrupt: async (id: string) => await interruptFerret(id),
-        sends: records,
-        sendsStamp,
-        sendStatus: async (id, sendId, options) => await awaitStatus(parseSessionId(id), sendId, options),
-        queue: queueMessages,
-        queueStamp,
-        editQueued: async (id, messageId, text) =>
-          await queue.edit(parseSessionId(id), messageId, text).catch(queueFailure),
-        cancelQueued: async (id, messageId) => await queue.cancel(parseSessionId(id), messageId).catch(queueFailure),
-        retry: async (id, sendId, force) =>
-          sendRecordView(
-            await sendActs.reattempt(parseSessionId(id), sendId, { by: 'person', force }).catch(sendActRefusal),
-          ),
-        cancel: async (id, sendId) =>
-          sendRecordView(await sendActs.cancel(parseSessionId(id), sendId).catch(sendActRefusal)),
-        submit: async (id, sendId) =>
-          sendRecordView(await sendActs.submit(parseSessionId(id), sendId).catch(sendActRefusal)),
-        composer: async (id, request) => ({
-          action: request.action,
-          outcome: await sendActs.resolveDraft(parseSessionId(id), request.action, request.draft).catch(sendActRefusal),
-        }),
-        handoff: handoffOf,
-      },
-      sentDraftClearer(drafts),
-    ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
     ...sessionCompactAtRoutes({
       get: async (ferret, caller) => await compactAtSetting.get(ferret, caller),
@@ -568,42 +440,7 @@ export function buildConversationA(deps: {
 
   const api: ConversationAHalf['api'] = {
     currentTurn: async ferret => boundaries.current(ferret),
-    send: async (ferret, caller, request) => {
-      try {
-        const kept = await keptSend(ferret, request.sendId);
-        if (kept !== undefined) return ok(kept);
-        // Asked before an id is minted or the text is prepared: a refused send runs no transform and spends nothing.
-        mayGo(request);
-        const delivered = await deliverAttachments(ferret, request.attachmentIds);
-        return ok(
-          await typeMessage(ferret, {
-            sendId: request.sendId ?? String(kernel.ids.mint('send')),
-            message: messageWithAttachments(await prepared(ferret, request.message), delivered),
-            ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-            ...(request.label === undefined ? {} : { label: request.label }),
-            ...(request.now === undefined ? {} : { now: request.now }),
-            ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-            // Who the send is for follows the caller the port was given: the owner is a person; a ferret and the Warden are agents.
-            origin: originOfCaller(caller),
-            // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
-            ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
-            ...(caller.kind === 'warden' ? { warden: true as const } : {}),
-            ...(caller.kind === 'agenda' ? { agenda: true as const } : {}),
-          }),
-        );
-      } catch (error) {
-        // An unconfirmed send names its id in the words: the refusal has no field for it, and a caller that let the id
-        // be minted could not otherwise ask about, or avoid repeating, exactly that send.
-        const unconfirmed =
-          error instanceof SessionSendError && error.failure === 'unconfirmed' && error.sendId !== undefined
-            ? ` (send ${error.sendId})`
-            : '';
-        return err({
-          code: refusalCode(error),
-          message: `${error instanceof Error ? error.message : String(error)}${unconfirmed}`,
-        });
-      }
-    },
+    send: async (ferret, caller, request) => await mailbox.send(ferret, caller, request),
     ownerWords: async (ferret, options) => {
       try {
         return ok({ v: 1, ferret, words: await ownerWords.said(ferret, { strict: options?.strict === true }) });
@@ -611,88 +448,20 @@ export function buildConversationA(deps: {
         return err({ code: 'unreadable', message: error instanceof Error ? error.message : String(error) });
       }
     },
-    interrupt: async (ferret, request) => {
-      try {
-        // As the route refuses it: a plain turn-stop answered `ok` would report an abandon that never happened.
-        if (request.toolUseId !== undefined)
-          throw new ApiError(
-            501,
-            `abandoning structured question ${request.toolUseId} is not served: a plain stop cannot tell the question you named from one that appeared afterwards`,
-            'question_abandon_unsupported',
-          );
-        await interruptFerret(ferret);
-        return ok(undefined);
-      } catch (error) {
-        return err({ code: refusalCode(error), message: error instanceof Error ? error.message : String(error) });
-      }
-    },
-    queue: async ferret => ({ messages: [...(await queue.list(ferret))] }),
-    editQueued: async (ferret, message, request) => {
-      try {
-        return ok(await queue.edit(ferret, message, request.text));
-      } catch (error) {
-        if (error instanceof QueueRefused) return err({ code: error.refusal, message: error.message });
-        throw error;
-      }
-    },
-    cancelQueued: async (ferret, message) => {
-      try {
-        return ok(await queue.cancel(ferret, message));
-      } catch (error) {
-        if (error instanceof QueueRefused) return err({ code: error.refusal, message: error.message });
-        throw error;
-      }
-    },
-    sends: async ferret => ({ sends: [...(await records(ferret))] }),
-    sendRecord: async (ferret, sendId) => {
-      await lookFirst(ferret);
-      return sendRecordFor(await ledger.list(ferret), await queue.list(ferret), sendId);
-    },
-    retrySend: async (ferret, sendId, force) => {
-      try {
-        return ok(
-          sendRecordView(
-            await sendActs.reattempt(ferret, sendId, { by: 'person', force: force === true }).catch(sendActRefusal),
-          ),
-        );
-      } catch (error) {
-        return err(actRefusal(error));
-      }
-    },
-    cancelSend: async (ferret, sendId) => {
-      try {
-        return ok(sendRecordView(await sendActs.cancel(ferret, sendId).catch(sendActRefusal)));
-      } catch (error) {
-        return err(actRefusal(error));
-      }
-    },
-    enterSend: async (ferret, sendId) => {
-      try {
-        return ok(sendRecordView(await sendActs.submit(ferret, sendId).catch(sendActRefusal)));
-      } catch (error) {
-        return err(actRefusal(error));
-      }
-    },
-    resubmitStuck: async (ferret, caller, sendId) => {
-      // Only the Warden presses a stuck send's Enter: nobody else is the daemon, and a ferret or the owner has the
-      // ordinary send, cancel and Enter above. Checked before a pane is read.
-      if (caller.kind !== 'warden')
-        return err({ code: 'forbidden', message: "only the Warden re-submits a stuck send of Ferretry's own" });
-      try {
-        return ok(await sendActs.resubmitStuck(ferret, sendId).catch(sendActRefusal));
-      } catch (error) {
-        return err(actRefusal(error));
-      }
-    },
-    retractedDraft: async ferret => await sendActs.retractedDraft(ferret).catch(() => undefined),
-    composer: async (ferret, action, draft) => {
-      try {
-        const outcome = await sendActs.resolveDraft(ferret, action, draft).catch(sendActRefusal);
-        return ok({ action, outcome });
-      } catch (error) {
-        return err(actRefusal(error));
-      }
-    },
+    interrupt: async (ferret, request) => await mailbox.interrupt(ferret, request),
+    queue: async ferret => await mailbox.queue(ferret),
+    editQueued: async (ferret, message, request) => await mailbox.editQueued(ferret, message, request),
+    cancelQueued: async (ferret, message) => await mailbox.cancelQueued(ferret, message),
+    sends: async (ferret, cursor) => await mailbox.sends(ferret, cursor),
+    sendRecord: async (ferret, sendId) => await mailbox.sendRecord(ferret, sendId),
+    retrySend: async (ferret, sendId, force) => await mailbox.retrySend(ferret, sendId, force),
+    cancelSend: async (ferret, sendId) => await mailbox.cancelSend(ferret, sendId),
+    enterSend: async (ferret, sendId) => await mailbox.enterSend(ferret, sendId),
+    resubmitStuck: async (ferret, caller, sendId) =>
+      (await mailbox.resubmitStuck?.(ferret, caller, sendId)) ??
+      err({ code: 'unavailable', message: 'the Mailbox cannot re-submit a stuck send' }),
+    retractedDraft: async ferret => await mailbox.retractedDraft?.(ferret),
+    composer: async (ferret, action, draft) => await mailbox.composer(ferret, action, draft),
     question: async ferret => await askedQuestion(ferret),
     answer: async (ferret, request) => {
       try {
@@ -756,13 +525,49 @@ export function buildConversationA(deps: {
     },
   };
 
+  /** What the Mailbox needs of the files and terminals this plugin keeps (it never opens them itself). */
+  const mailboxHost: MailboxHost = {
+    queue: queueStore,
+    ledger,
+    channel,
+    gate,
+    boundaries,
+    askedQuestion: async ferret => await askedQuestion(ferret),
+    transformMessage: async input => await hooks.transform(MessageBeforeSend, input),
+    evidence: new EntriesSendEvidence(async ferret => {
+      const id = tryParseSessionId(ferret);
+      const summary = id === undefined ? undefined : await ferrets.get(id);
+      const harness = id === undefined ? undefined : await ferrets.harness?.(id);
+      const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+      // A harness this build does not know has no transcript reading: unreadable, so nothing is typed again on a guess.
+      return family === undefined || harness === undefined
+        ? undefined
+        : { harness: family, reader: harness.transcript };
+    }),
+    keepFrame: async (ferret, frame) => {
+      const [newest, middle, oldest] = STUCK_FRAME_STATES;
+      for (const [from, to] of [
+        [middle, oldest],
+        [newest, middle],
+      ] as const) {
+        const kept = await kernel.state.read(from, ferret);
+        if (kept.ok && kept.value !== undefined) await kernel.state.write(to, kept.value, ferret);
+      }
+      await kernel.state.write(newest, new TextEncoder().encode(frame), ferret);
+      return kernel.state.pathOf(newest, ferret);
+    },
+    stamp: async (log, ferret) =>
+      (await kernel.state.version(log === 'sends' ? SENDS_STATE : QUEUE_STATE, ferret))?.etag ?? 'absent',
+    ...(deps.attachments === undefined ? {} : { attachments: deps.attachments }),
+    clearSentDraft: sentDraftClearer(drafts),
+  };
   return {
     routes: routeTable(mounts),
     sockets: socketTable(sockets),
     api,
     sitrep,
     ownerChat: new SessionOwnerChat(queue, ledger),
-    mailboxHost: { queue: queueStore, ledger },
+    mailboxHost,
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => {
       questionWatch.forget(ferret);
@@ -816,30 +621,14 @@ export function buildConversationA(deps: {
     turns: {
       look: (ferret, phase) => {
         boundaries.look(ferret, phase, kernel.clock.now());
-        const id = tryParseSessionId(ferret);
-        if (id !== undefined) {
-          // Only a CHANGE moves the stamp: the guard compares it with when a send was typed.
-          const state = phase === 'working' ? 'working' : 'idle';
-          if (turnStates.get(id)?.state !== state) turnStates.set(id, { state, at: kernel.clock.now() });
-        }
-        // A turn boundary is when a held or queued send is read or dropped: one tracker look, only for a ferret with sends open.
-        if (id === undefined || phase === 'working') return;
-        void tracker
-          .watching(id)
-          .then(async watching => {
-            if (watching) await tracker.check(id);
-          })
-          .catch(() => undefined);
       },
       forget: ferret => {
         boundaries.forget(ferret);
-        const id = tryParseSessionId(ferret);
-        if (id !== undefined) turnStates.delete(id);
       },
     },
     stop: () => {
       cancelQuestionWatch?.();
-      send.stop();
+      stopped = true;
     },
   };
 }

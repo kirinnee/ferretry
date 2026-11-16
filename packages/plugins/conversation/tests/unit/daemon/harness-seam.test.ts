@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
@@ -38,7 +38,7 @@ import {
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
-} from '../../../daemon/harness-seam.ts';
+} from '@ferretry/core-mailbox/contract';
 import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-asked-question.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { fixtureTexts } from '../../support/fixtures.ts';
@@ -252,17 +252,28 @@ async function conversation(
       return await base.append(...args);
     },
   };
+  const guardedAct = () =>
+    (async (target: unknown) => {
+      acted.push(String(JSON.stringify(target)));
+      throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
+    }) as never;
   const served = conversationDaemon(gate);
   const implementation = {
     ...served,
     build: (ctx: Parameters<NonNullable<typeof served.build>>[0]) => {
       const build = served.build;
       if (build === undefined) throw new Error('the conversation daemon half has no build');
-      const act = (async (target: unknown) => {
-        acted.push(String(JSON.stringify(target)));
-        throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
-      }) as typeof ctx.kernel.act;
-      const built = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
+      const built = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct(), state } });
+      return built;
+    },
+  } as typeof served;
+  /** The send routes are the Mailbox's now: a test that stamps a standing on one wraps the Mailbox's half. */
+  const mailbox = {
+    ...mailboxDaemon,
+    build: (ctx: Parameters<NonNullable<typeof mailboxDaemon.build>>[0]) => {
+      const build = mailboxDaemon.build;
+      if (build === undefined) throw new Error('the mailbox daemon half has no build');
+      const built = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct() } });
       const stamped = [
         [SEND_ROUTE, options.sendStanding],
         [ENTER_ROUTE, options.enterStanding],
@@ -273,17 +284,17 @@ async function conversation(
       for (const [key, standing] of stamped) {
         if (standing === undefined) continue;
         const handler = routes[key];
-        if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+        if (handler === undefined) throw new Error(`the mailbox daemon half serves no ${key} route`);
         const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
         wrapped = { ...wrapped, [key]: peer };
       }
       return { ...built, routes: wrapped } as typeof built;
     },
-  } as typeof served;
+  } as typeof mailboxDaemon;
   const clock = fixedClock('2026-11-08T09:00:00Z');
   const host = await testHost({
-    plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
-    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+    plugins: [mailbox, implementation, ...(options.consumers ?? []).map(consumerPlugin)],
+    fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
   const asking = async () =>
