@@ -180,6 +180,21 @@ describe('ports-pending split across files', () => {
     expect(pendingFilePaths(dir)).toEqual(['.other/ports-pending.json', 'ports-pending.json']);
   });
 
+  test('the gen tests’ own fixture folder is skipped by its path, and no other folder of that name is', () => {
+    const dir = tree({
+      'ports-pending.json': doc({ unwired: [] }),
+      'scripts/gen/tests/.tmp/w1/packages/plugins/alpha/ports-pending.json': doc({}),
+      'scripts/gen/tests/.tmp/w2/packages/plugins/alpha/ports-pending.json': doc({}),
+      'scripts/other/.tmp/ports-pending.json': doc({}),
+      'scripts/gen/tests/ports-pending.json': doc({}),
+    });
+    expect(pendingFilePaths(dir)).toEqual([
+      'ports-pending.json',
+      'scripts/gen/tests/ports-pending.json',
+      'scripts/other/.tmp/ports-pending.json',
+    ]);
+  });
+
   test('a git ref lists every pending filename, so an out-of-rule file reaches the checks', () => {
     const dir = tree({
       'ports-pending.json': doc({ unwired: [] }),

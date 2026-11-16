@@ -4,6 +4,7 @@ import { StoredRenderMetaSchema } from './wire-media.ts';
 import { FinderFileSchema, LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
 import { PromptWaitRecordSchema } from './wire-prompt.ts';
+import { SegmentMessageSchema } from './lines.ts';
 
 /** An opaque or secret file is bytes the kernel never parses: the schema types the port, it checks nothing. */
 const BYTES = z.instanceof(Uint8Array);
@@ -16,6 +17,46 @@ const BYTES = z.instanceof(Uint8Array);
  */
 /** Lines are the queue's own events (`QueueEventSchema`), parsed at the boundary; the fold is `QueuedMessageSchema`. */
 export const QUEUE_STATE = defineState({ name: 'queue', path: '*/queue.jsonl', store: 'jsonl', format: 1 });
+/**
+ * A queue SHARD: the FINAL messages (`read`, `cancelled`, `failed`) of one rotated-away stretch of a ferret's queue,
+ * sealed and never written again. `queue-shards/<ferret>~<through>.json`, `through` the position the rotation reached
+ * (the next live segment's `base`), zero-padded to twelve digits so names sort. A shard is written BEFORE the live file
+ * is replaced, so a reader uses only shards whose `through` is not past the live `base`: one that is past it is a rotation
+ * that did not finish, and the next rotation rewrites or removes it.
+ */
+export const QueueShardSchema = z.strictObject({
+  format: z.literal(1),
+  through: z.number().int().positive(),
+  messages: z.array(SegmentMessageSchema),
+});
+export type QueueShard = z.infer<typeof QueueShardSchema>;
+export const QUEUE_SHARD_STATE = defineState({
+  name: 'queue-shard',
+  path: 'queue-shards/*.json',
+  store: 'json',
+  format: 1,
+  schema: QueueShardSchema,
+});
+/**
+ * The OPEN messages a rotation carried into a live segment: `queue-carry/<ferret>~<base>.json`, `base` the live
+ * segment's header `base` and the only carry file it reads. A document rather than records of `queue.jsonl` because a
+ * record is capped (1 MiB) and the open messages together — or one long one that later gained a wait reason — can pass
+ * it, which would make every rotation fail. It is written before the live file is replaced, as a shard is; one whose base
+ * is not the live file's is a rotation that did not finish (or one that has been replaced) and is ignored, then removed.
+ */
+export const QueueCarrySchema = z.strictObject({
+  format: z.literal(1),
+  base: z.number().int().positive(),
+  messages: z.array(SegmentMessageSchema),
+});
+export type QueueCarry = z.infer<typeof QueueCarrySchema>;
+export const QUEUE_CARRY_STATE = defineState({
+  name: 'queue-carry',
+  path: 'queue-carry/*.json',
+  store: 'json',
+  format: 1,
+  schema: QueueCarrySchema,
+});
 /** Lines are the ledger's own records (`SendLineSchema`), last write per send id wins; `SendRecordSchema` is the wire view of one. */
 export const SENDS_STATE = defineState({ name: 'sends', path: '*/sends.jsonl', store: 'jsonl', format: 1 });
 /** What reached a ferret (`InboxLineSchema`), and what it sent (`OutboxLineSchema`). */
@@ -176,6 +217,8 @@ export const MESSAGE_TOKEN_KEY_STATE = defineState({
 
 export const CONVERSATION_STATE = [
   QUEUE_STATE,
+  QUEUE_SHARD_STATE,
+  QUEUE_CARRY_STATE,
   SENDS_STATE,
   INBOX_STATE,
   OUTBOX_STATE,

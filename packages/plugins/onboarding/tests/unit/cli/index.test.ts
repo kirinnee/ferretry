@@ -55,9 +55,14 @@ const half = (answers: Record<string, unknown>, terminal: TerminalIo, calls: Cal
 };
 
 describe('onboarding cli half', () => {
-  test('declares exactly the three verbs of the manifest', () => {
+  test('declares exactly the verbs of the manifest', () => {
     const { terminal } = io();
-    expect(Object.keys(half({}, terminal)).sort()).toEqual(['onboard', 'onboard reset', 'onboard status']);
+    expect(Object.keys(half({}, terminal)).sort()).toEqual([
+      'daemon setup',
+      'onboard',
+      'onboard reset',
+      'onboard status',
+    ]);
   });
 
   test('onboard runs the checks through the client and records through the daemon route', async () => {

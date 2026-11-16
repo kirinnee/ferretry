@@ -125,5 +125,5 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/agenda/replies', { ...read, caller: 'person' }),
     ],
   },
-  instructions: [{ id: 'asks', text: 'instructions/asks.md', when: { role: 'any' } }],
+  instructions: [{ id: 'asks', text: 'instructions/asks.md', when: { role: 'lead' } }],
 });

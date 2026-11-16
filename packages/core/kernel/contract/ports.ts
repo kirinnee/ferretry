@@ -130,6 +130,14 @@ export interface SqliteHandle {
 export interface StateVersion {
   readonly size: number;
   readonly etag: string;
+  /**
+   * Whether equal etags can be taken to mean the same BYTES, not merely "nothing the filesystem stamped has moved". It
+   * is true only when the etag carries the file's device and nanosecond status-change time (which no caller can set
+   * back) and that time is neither a whole millisecond (a coarse clock) nor within a few ticks of now (a later write in
+   * the same tick would leave it as it is). A reader that skips a re-read on an equal etag must require it; absent or
+   * false, the file is simply read again.
+   */
+  readonly settled?: boolean;
 }
 
 /** A JSONL file read line by line: every record that checked, and how many lines did not (never their text). */
@@ -148,6 +156,10 @@ export const MAX_STATE_TAIL_BYTES = 64 * 1024 * 1024;
  */
 export interface StatePort {
   read<Shape>(file: StateFileDef<string, Shape>, name?: string): Promise<StateRead<Shape>>;
+  /**
+   * Replaces a file whole, atomically. A `jsonl` file takes an ARRAY of records (one line each, as `append` writes them)
+   * and is swapped in on the same chain as its appends, so a log can be compacted without a reader seeing half of it.
+   */
   write<Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void>;
   /**
    * Read-modify-write on one serialization chain per file. `fn` may be async (it runs inside the chain). Returning

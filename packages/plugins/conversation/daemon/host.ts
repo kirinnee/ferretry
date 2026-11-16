@@ -126,7 +126,7 @@ import type { ClockPort } from './seams/ports.ts';
 import type { SessionHandoff, SessionView } from './seams/protocol.ts';
 
 /**
- * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off
+ * The note Ferrets ended every revive's turn document with before it stopped writing one (its old `turnProtocolReminder` default); older documents still carry it. Taken off the words a hand-off
  * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
  * mirrored here; a changed Ferrets setting would show the note until that read exists (end-list).
  */
@@ -408,11 +408,21 @@ export function buildConversationA(deps: {
   let questionAsksReconciled = false;
 
   const queue = new SessionQueueService({
-    store: new NotifyingSessionQueueStore(new StateQueueStore(kernel.state), {
-      publish: async (id, _type, data) => {
-        await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+    store: new NotifyingSessionQueueStore(
+      new StateQueueStore(kernel.state, undefined, failure =>
+        kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
+          ferret: failure.ferret,
+          events: failure.events,
+          bytes: failure.bytes,
+          error: String(failure.error),
+        }),
+      ),
+      {
+        publish: async (id, _type, data) => {
+          await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+        },
       },
-    }),
+    ),
     clock,
     serial: queueSerial,
   });

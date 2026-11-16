@@ -4,7 +4,7 @@
  */
 import { skeletonSentence } from '@ferretry/kernel/contract';
 import type { VerbHandler } from '@ferretry/kernel/manifest';
-import { parseArgs } from './argv.ts';
+import { declaredSwitches, parseArgs } from './argv.ts';
 import { type ClientDeps, type Surfaces, surfacesOf } from './client.ts';
 import { AS_OWNER_NOTE, inPane } from './credential.ts';
 import { askVerb } from './commands/ask.ts';
@@ -259,7 +259,7 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     io.out(`${renderVerbHelp(identity.binary, entry, table)}\n`);
     return EXIT.ok;
   }
-  const invocation = parseArgs(resolved.rest);
+  const invocation = parseArgs(resolved.rest, declaredSwitches(entry.options));
   const lacking = missingRequiredOption(entry, invocation);
   if (lacking !== undefined) {
     io.err(`error: required option '${lacking.flag}' not specified\n${usageLine(identity.binary, entry)}\n`);
