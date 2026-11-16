@@ -98,6 +98,7 @@ const harness = (
       return options.resume?.(id) ?? { ok: true };
     },
     tmuxReady: async () => options.tmux?.(++probes) ?? true,
+    autoResume: async () => true,
     sleep: async ms => {
       sleeps.push(ms);
     },

@@ -521,8 +521,16 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
+      // The "Auto-resume after restart" switch, as the `auto-resume.decide` answer and `autoResume()` both read it.
+      const autoResumeOn = (): boolean | undefined =>
+        readAutoResume(assembly.autoResume, () =>
+          autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
+        );
+
       // What is published, read as `GET /v1/runtimes` and `GET /v1/runtimes/machine` read it (no caller: the machine's own view).
       const facts: RuntimeFactsApi = {
+        // The machine's one switch for unattended resumes: the Warden's auto-revive reads it (no per-ferret one exists).
+        autoResume: async () => autoResumeOn(),
         catalog: async () => (await assembly.catalog.runtimes()).runtimes,
         tools: async () => (await assembly.catalog.machine(undefined)).tools,
         // Two settings only, never the rest of the machine view: Browsers' loopback firewall and Logins' shared-ports fact.
@@ -604,10 +612,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
-            switchOn: () =>
-              readAutoResume(assembly.autoResume, () =>
-                autoResumeSwitch(config.fileState(runtimesFile).state, config.file(runtimesFile)),
-              ),
+            switchOn: autoResumeOn,
             resolve: async id => await api.resolve(id),
           }),
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
