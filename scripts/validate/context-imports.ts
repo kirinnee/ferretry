@@ -42,6 +42,8 @@ export function refusal(edge: ImportEdge): string | undefined {
     // Its own fragments' list (`manifest/generated/actions.ts`, written by the generator from `manifest/actions/`).
     if (from === 'manifest' && to === 'generated' && same && edge.specifier === './manifest/generated/actions.ts')
       return undefined;
+    // Its own fragments and kit (`manifest/actions/*.ts`, `manifest/kit.ts`): the same manifest, split across files.
+    if (from === 'manifest' && to === 'manifest' && same) return undefined;
     if (to === 'kernel-manifest' || to === 'kernel-contract' || to === 'contract' || toStd) return undefined;
     return `a manifest imports only @ferretry/kernel/manifest, @ferretry/kernel/contract and contracts, not ${name}`;
   }
