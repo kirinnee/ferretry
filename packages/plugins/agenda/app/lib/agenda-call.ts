@@ -11,10 +11,10 @@
  */
 
 import { AGENDA_CHANNEL_HEADER, AGENDA_CHANNEL_VERSION } from '@ferretry/core-asks/contract';
-import type { PluginCallHeaders, PluginClient } from '@ferretry/kernel/manifest';
+import { heldRead, type HeldReadInit, type PluginCallHeaders, type PluginClient } from '@ferretry/kernel/manifest';
 
-/** The slice of the client this half calls through. */
-export type AgendaCall = Pick<PluginClient, 'call'>;
+/** The slice of the client this half calls through. `conditional` is the shell's, where it offers one (a poll then costs a `304`). */
+export type AgendaCall = Pick<PluginClient, 'call' | 'conditional'>;
 
 /** A refusal the daemon gave (or a call that never got an answer: status 0). */
 export class DaemonResponseError extends Error {
@@ -68,8 +68,29 @@ export const agendaCall = async (client: AgendaCall, route: string, init: Agenda
   try {
     return await client.call(route, init);
   } catch (failure) {
-    if (typeof failure !== 'object' || failure === null) throw failure;
-    if (!(failure instanceof DaemonResponseError) && typeof (failure as CallFailure).status !== 'number') throw failure;
-    throw responseError(failure);
+    return refused(failure);
+  }
+};
+
+const refused = (failure: unknown): never => {
+  if (typeof failure !== 'object' || failure === null) throw failure;
+  if (!(failure instanceof DaemonResponseError) && typeof (failure as CallFailure).status !== 'number') throw failure;
+  throw responseError(failure);
+};
+
+/**
+ * A READ THAT COSTS A `304` WHEN NOTHING MOVED (`heldRead`): the body the daemon last answered for this route and
+ * parameters, or the new one. The same refusals as {@link agendaCall}. `unchanged` says the body is the very object the
+ * last read returned, so a caller can keep what it already made of it.
+ */
+export const agendaHeldRead = async (
+  client: AgendaCall,
+  route: string,
+  init: HeldReadInit = {},
+): Promise<{ readonly body: unknown; readonly unchanged: boolean }> => {
+  try {
+    return await heldRead(client, route, init);
+  } catch (failure) {
+    return refused(failure);
   }
 };

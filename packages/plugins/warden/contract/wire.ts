@@ -90,8 +90,13 @@ export const WardenAutoMoveConfigSchema = z.strictObject({
   maxMovesPerHour: z.number().int().min(1).max(6),
   minHeadroomPercent: z.number().int().min(0).max(90),
 });
+/**
+ * ON by default (owner ruling 2026-11-15, !A527; v4 shipped it off): a ferret that runs out of tokens goes to a login with
+ * room, or waits and resumes at the reset. An explicit `autoMove.enabled: false` in `warden.yaml` is kept as written, and
+ * `targets` is a hard list: a non-empty one is the only place a ferret may be moved to.
+ */
 export const DEFAULT_WARDEN_AUTO_MOVE = {
-  enabled: false,
+  enabled: true,
   when: ['rate_limited', 'budget_exceeded'],
   targets: [],
   forceStopBackground: false,

@@ -148,8 +148,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),
     // Today's failover: the same ferret relaunched on another login with its conversation, through Ferrets' move (the
     // moves module's flow and its refusals). Today's failover moved with `movedBy: 'warden'` only; `actor: 'warden'`
-    // was only on the auto-move path, which is not built. A move Ferrets refuses throws with its reason, which the
-    // sweep records as a failed act.
+    // is only on the auto-move path (`auto-move-service.ts`, wired in `subsystem.ts`), which chooses its own login. A
+    // move Ferrets refuses throws with its reason, which the sweep records as a failed act.
     failover: async (ferret, agent) =>
       await act(ferret, 'failover', async () => {
         if (ferrets.move === undefined) throw new Error('Moving a ferret to another account is not available here.');

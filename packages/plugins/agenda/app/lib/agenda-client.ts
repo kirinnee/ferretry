@@ -23,6 +23,7 @@ import {
   type AgendaCall,
   type AgendaCallInit,
   agendaCall,
+  agendaHeldRead,
   DaemonResponseError,
   requestIdHeaders,
 } from './agenda-call.ts';
@@ -74,18 +75,32 @@ const callAgenda = async (
   return await agendaCall(client, route, { ...init, headers: { ...AGENDA_READ_HEADERS, ...init.headers } });
 };
 
-/** Reads the complete agenda board from exactly the daemon that owns the scope. */
+/** What each held board body was made into, so a `304` hands back the snapshot it already made (same object, no re-parse). */
+const parsedBoards = new WeakMap<object, AgendaSnapshot>();
+
+/**
+ * Reads the complete agenda board from exactly the daemon that owns the scope. A ferret's board is read conditionally:
+ * the app polls it, and a lead's board is over a megabyte, so a board nobody touched is a bodyless `304` and the
+ * snapshot already held. The machine board is small and its store has no cheap version, so it is read whole.
+ */
 export const fetchAgendaSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   client: AgendaCall,
-): Promise<AgendaSnapshot> =>
-  parseSnapshot(
-    scope,
-    await (isMachineAgendaId(scope.sessionId)
-      ? callAgenda(daemon, scope, MACHINE_AGENDA_READ, {}, client)
-      : callAgenda(daemon, scope, SESSION_AGENDA_READ, { params: ferretParams(scope) }, client)),
-  );
+): Promise<AgendaSnapshot> => {
+  if (isMachineAgendaId(scope.sessionId))
+    return parseSnapshot(scope, await callAgenda(daemon, scope, MACHINE_AGENDA_READ, {}, client));
+  assertScopeDaemon(daemon, scope);
+  const read = await agendaHeldRead(client, SESSION_AGENDA_READ, {
+    params: ferretParams(scope),
+    headers: AGENDA_READ_HEADERS,
+  });
+  const held = typeof read.body === 'object' && read.body !== null ? parsedBoards.get(read.body) : undefined;
+  if (read.unchanged && held !== undefined) return held;
+  const snapshot = parseSnapshot(scope, read.body);
+  if (typeof read.body === 'object' && read.body !== null) parsedBoards.set(read.body, snapshot);
+  return snapshot;
+};
 
 /**
  * Reads the mounted full snapshot route and derives its count for a badge
