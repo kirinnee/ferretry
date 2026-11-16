@@ -37,6 +37,11 @@ export interface FolderRegistrySpec {
   readonly glob: string;
   /** The generated file, relative to the package root. */
   readonly out: string;
+  /**
+   * A second glob, one folder deeper, for a file that lives in its own folder (`alpha/alpha.feature.ts`). It shares the first
+   * glob's suffix; `accept` says which of its matches count (the file named for its folder, not any file in a subfolder).
+   */
+  readonly nested?: { readonly glob: string; readonly accept: (file: string) => boolean };
   /** Prefix of each entry's identifier (`feature`); the rest is the file name without what the glob's `*` left out. */
   readonly prefix: string;
   /** What the generated file says; return the whole text, header included. */
@@ -82,7 +87,11 @@ export function folderRegistries(
   for (const pkg of packages) {
     const dir = join(pkg.dir, spec.dir);
     if (!existsSync(dir)) continue;
-    const files = [...new Bun.Glob(spec.glob).scanSync({ cwd: dir, onlyFiles: true })].sort(byName);
+    const scan = (glob: string): string[] => [...new Bun.Glob(glob).scanSync({ cwd: dir, onlyFiles: true })];
+    const files = [
+      ...scan(spec.glob),
+      ...(spec.nested === undefined ? [] : scan(spec.nested.glob).filter(spec.nested.accept)),
+    ].sort(byName);
     if (files.length === 0) continue;
     const target = join(pkg.dir, spec.out);
     const entries = files.map(file => ({
