@@ -20,6 +20,7 @@ import { defineState } from '@ferretry/kernel/contract';
 import { CHANNEL_LAUNCH_ENV } from '@ferretry/plugin-runtimes/contract';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
+import { CLAUDE_RUNTIME_SWITCH } from '../../daemon/lib/harness/runtime-switch.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
 import { ClaudeProjectApprovals } from '../../daemon/lib/project-approvals.ts';
 import { HarnessUpdateRefusal } from '../../daemon/lib/update/service.ts';
@@ -1029,6 +1030,12 @@ describe('ClaudeHarness', () => {
     if (tail.kind !== 'read') throw new Error('the tail reads');
     expect(tail.records.map(record => record.kind)).toEqual(['message', 'message', 'usage', 'turn']);
     expect(JSON.stringify(tail)).not.toContain('SECRET');
+  });
+
+  test('the live runtime switch is the one Claude switch, handed to every ferret and held per none', () => {
+    const { harness } = build();
+    expect(harness.runtimeSwitch()).toBe(CLAUDE_RUNTIME_SWITCH);
+    expect(harness.runtimeSwitch()).toBe(build().harness.runtimeSwitch());
   });
 
   test('U5 a newest record larger than the tail window reads as a turn at work, with no wider read', async () => {
