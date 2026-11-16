@@ -100,39 +100,61 @@ export function journalFingerprint(lines: number): JournalFingerprint | null {
   return lines === 0 ? null : { device: 'state', inode: 'history', size: lines, modifiedAtMs: 0 };
 }
 
-/** Today's `scanJournal`, over lines instead of bytes: every damaged or out-of-order line is a problem, never fatal. */
-export function scanJournal(lines: readonly JournalLine[], options: JournalScanOptions): JournalScan {
-  const events: SessionEvent[] = [];
-  const pointers: EventPointer[] = [];
-  const problems: JournalProblem[] = [];
-  const baseOffset = options.baseOffset ?? 0;
-  let line = options.firstLine ?? 1;
-  let lastSequence = options.previousSequence ?? 0;
+/**
+ * Today's `scanJournal` as it takes lines: one at a time, in file order, so a journal of any size costs its pointers
+ * and not its lines. Every damaged or out-of-order line is a problem, never fatal. `keepEvents` also keeps each parsed
+ * event (the array form below wants them; the index only ever needs the pointers).
+ */
+export class JournalScanner {
+  readonly #options: JournalScanOptions;
+  readonly #keepEvents: boolean;
+  readonly #events: SessionEvent[] = [];
+  readonly #pointers: EventPointer[] = [];
+  readonly #problems: JournalProblem[] = [];
+  readonly #baseOffset: number;
+  #count = 0;
+  #line: number;
+  #lastSequence: number;
 
-  lines.forEach((entry, index) => {
-    const byteOffset = baseOffset + index;
-    const at = line;
-    line += 1;
+  constructor(options: JournalScanOptions, keepEvents = false) {
+    this.#options = options;
+    this.#keepEvents = keepEvents;
+    this.#baseOffset = options.baseOffset ?? 0;
+    this.#line = options.firstLine ?? 1;
+    this.#lastSequence = options.previousSequence ?? 0;
+  }
+
+  /** How many lines were taken: what the journal's fingerprint counts. */
+  get count(): number {
+    return this.#count;
+  }
+
+  push(entry: JournalLine): void {
+    const options = this.#options;
+    const byteOffset = this.#baseOffset + this.#count;
+    this.#count += 1;
+    const at = this.#line;
+    this.#line += 1;
     if ('damaged' in entry) {
-      problems.push({ file: options.file, line: at, byteOffset, message: entry.damaged });
+      this.#problems.push({ file: options.file, line: at, byteOffset, message: entry.damaged });
       return;
     }
     const event = parseSessionEvent(entry.value, options.sessionId);
     if (event === undefined) {
-      problems.push({ file: options.file, line: at, byteOffset, message: 'invalid event schema or session id' });
+      this.#problems.push({ file: options.file, line: at, byteOffset, message: 'invalid event schema or session id' });
       return;
     }
-    if (event.sequence <= lastSequence) {
-      problems.push({
+    if (event.sequence <= this.#lastSequence) {
+      this.#problems.push({
         file: options.file,
         line: at,
         byteOffset,
-        message: `event sequence ${event.sequence} is not greater than ${lastSequence}`,
+        message: `event sequence ${event.sequence} is not greater than ${this.#lastSequence}`,
       });
       return;
     }
-    events.push(event);
-    pointers.push({
+    if (this.#keepEvents) this.#events.push(event);
+    this.#pointers.push({
       sessionId: options.sessionId,
       sequence: event.sequence,
       time: event.time,
@@ -140,15 +162,24 @@ export function scanJournal(lines: readonly JournalLine[], options: JournalScanO
       byteOffset,
       byteLength: 1,
     });
-    lastSequence = event.sequence;
-  });
+    this.#lastSequence = event.sequence;
+  }
 
-  return {
-    events,
-    pointers,
-    problems,
-    scannedTo: baseOffset + lines.length,
-    lastSequence,
-    lineAtOffset: line,
-  };
+  scan(): JournalScan {
+    return {
+      events: this.#events,
+      pointers: this.#pointers,
+      problems: this.#problems,
+      scannedTo: this.#baseOffset + this.#count,
+      lastSequence: this.#lastSequence,
+      lineAtOffset: this.#line,
+    };
+  }
+}
+
+/** {@link JournalScanner} over lines already in hand. */
+export function scanJournal(lines: readonly JournalLine[], options: JournalScanOptions): JournalScan {
+  const scanner = new JournalScanner(options, true);
+  for (const entry of lines) scanner.push(entry);
+  return scanner.scan();
 }

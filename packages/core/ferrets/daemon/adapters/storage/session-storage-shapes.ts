@@ -1,5 +1,5 @@
 import type { SessionId } from '../../lib/session-id.ts';
-import type { JournalLine } from '../../lib/storage/journal.ts';
+import type { JournalScan } from '../../lib/storage/journal.ts';
 import type { SessionSource } from '../../lib/storage/rebuild.ts';
 import type { IndexedSession, JournalProblem } from '../../lib/storage-types.ts';
 
@@ -26,9 +26,14 @@ export type SessionInspection =
   | { readonly kind: 'current'; readonly session?: IndexedSession }
   | { readonly kind: 'repair'; readonly source: SessionSource | null; readonly session?: IndexedSession };
 
-/** A session's journal as read: its lines, and whether the read reached the end of the file. */
+/**
+ * A session's journal as read: what its lines add up to (each folded into the scan as it was read, never held as a
+ * list), how many there were, and whether the read reached the end of the file.
+ */
 export interface JournalRead {
-  readonly lines: readonly JournalLine[];
+  readonly scan: JournalScan;
+  /** Lines read: the position the next append lands at. */
+  readonly count: number;
   readonly complete: boolean;
 }
 

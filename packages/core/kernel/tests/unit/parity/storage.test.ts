@@ -259,6 +259,8 @@ describe('the generated schemas: FY_HOME/config/.schema', () => {
     schemaIsWrittenFromItsKind('accounts.json', 'sites'));
   test('F-0133 today .schema/component-hooks.json is now .schema/claude-code--hooks--item.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('claude-code--hooks--item.json', 'hooks'));
+  test("F-0134 today .schema/component-instructions.json is now .schema/instructions--item.json (a declared collection's item schema, Runtimes' INSTRUCTION_ITEMS), written from the schema the daemon checks with", () =>
+    schemaIsWrittenFromItsKind('instructions--item.json', 'text'));
   test('F-0135 today .schema/component-mcp.json is now .schema/mcp--item.json, written from the schema the daemon checks with', () =>
     schemaIsWrittenFromItsKind('mcp--item.json', 'command'));
   test('F-0136 today .schema/component-modelSets.json is now .schema/model-sets--item.json, written from the schema the daemon checks with', () =>

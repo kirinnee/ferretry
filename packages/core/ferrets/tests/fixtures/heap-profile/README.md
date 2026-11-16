@@ -68,3 +68,21 @@ What this does NOT show: the owner's real home (the preview copy). The 875 MB fi
 fits it (by the 15x rule a 236k-event journal alone is roughly 3 GB at the peak, an extrapolation, and the allocator can
 leave hundreds of MB of that resident) but a snapshot of the
 real home's `VmHWM` would confirm it, and no such snapshot was available to this run.
+
+## After streaming the journal (c58 u2-03)
+
+`state.lines` now reads the file in pieces and `readJournal` folds each record into its scan as it comes (items 1 and 3
+above are done; item 2, the persisted etag, was done earlier). Same fixture, same machine and Bun, one run each, sampled
+every 2 s for 90 s from source, `VmHWM` is the peak:
+
+| Home                                          | Peak (VmHWM) | Against the empty home |
+| --------------------------------------------- | -----------: | ---------------------: |
+| empty (`generate-home.ts <home> 0 0`)         |       307 MB |                   1.0x |
+| 760 sessions, g0 holds 200,000 events, BEFORE |     1,458 MB |                   4.7x |
+| 760 sessions, g0 holds 200,000 events, AFTER  |       466 MB |                   1.5x |
+
+The boot's peak with a 200,000-event journal is within twice the empty home's. The absolute numbers are lower than the
+table above (a different host); the ratio is what this run proves. Tests that keep it so:
+`tests/integration/daemon/session-journal-stream.test.ts` (the journal read holds pointers and a count, never lines or
+events; a replay takes only the lines it names) and the kernel's `tests/unit/host-state/lines-stream.test.ts`
+(`lines` yields before the whole file is read and never reads it whole).

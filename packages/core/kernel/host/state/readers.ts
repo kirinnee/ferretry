@@ -3,6 +3,7 @@ import type { JsonlRecords, StateDamage, StateFileDef } from '../../contract/ind
 import { damageOf, decodeJson, describeFault, openDocument, shapeOf } from './format.ts';
 import type { HostFs } from './host-fs.ts';
 import { JsonlScanner, scanJsonl } from './jsonl-scan.ts';
+import { JSONL_CHUNK_BYTES } from './stream-lines.ts';
 import { checkSqlite, type SqliteFiles } from './sqlite-store.ts';
 
 /**
@@ -114,9 +115,6 @@ export async function readBytesFile(
   }
 }
 
-/** A boot check reads this much of a journal at a time; one record can span several. */
-const JSONL_CHECK_CHUNK_BYTES = 256 * 1024;
-
 /**
  * What {@link readJsonlRecords} would say about a JSONL file, without holding it: the file streams through the line
  * scan and each record is checked and dropped, so a journal of any size costs one chunk and one record. The verdict
@@ -144,7 +142,7 @@ async function inspectJsonlFile(
     tornTail: () => undefined,
   });
   try {
-    const found = await fs.streamBytes(path, JSONL_CHECK_CHUNK_BYTES, chunk => scanner.push(chunk));
+    const found = await fs.streamBytes(path, JSONL_CHUNK_BYTES, chunk => scanner.push(chunk));
     if (!found) return def.required === true ? damageOf(label, 'missing') : undefined;
   } catch (error) {
     return damageOf(label, 'io', describeFault(error));

@@ -21,10 +21,9 @@ import { archiveRegistryValue, parseArchiveRegistryValue } from '../../lib/stora
 import {
   createSessionEvent,
   encodeSessionEvent,
-  type JournalLine,
   journalFingerprint,
+  JournalScanner,
   parseSessionEvent,
-  scanJournal,
 } from '../../lib/storage/journal.ts';
 import { planIndexRebuild, type DocumentSource, type SessionSource } from '../../lib/storage/rebuild.ts';
 import { planReconciliation } from '../../lib/storage/reconciliation.ts';
@@ -195,17 +194,22 @@ export class DaemonStorage {
     await this.serial.run(id, async () => {});
   }
 
+  /**
+   * The journal read once, each record folded into the scan as the state port hands it out: a journal of any size
+   * costs its pointers, never its lines. A read that fails part way ends with a damaged line, as it always did.
+   */
   private async readJournal(id: SessionId): Promise<JournalRead> {
-    const lines: JournalLine[] = [];
+    const scanner = new JournalScanner({ file: fileOf(FerretHistoryFiles, id), sessionId: id });
+    let complete = true;
     try {
-      for await (const value of this.state.lines(FerretHistoryFiles, id)) lines.push({ value });
-      return { lines, complete: true };
+      for await (const value of this.state.lines(FerretHistoryFiles, id)) scanner.push({ value });
     } catch (error) {
-      lines.push({
+      scanner.push({
         damaged: `event record could not be read: ${error instanceof Error ? error.message : String(error)}`,
       });
-      return { lines, complete: false };
+      complete = false;
     }
+    return { scan: scanner.scan(), count: scanner.count, complete };
   }
 
   private async readDocumentSource(
@@ -229,11 +233,10 @@ export class DaemonStorage {
       this.readDocumentSource(FerretStateFile, id),
       this.readJournal(id),
     ]);
-    if (config === undefined && state === undefined && journal.lines.length === 0)
-      return { source: undefined, journal };
+    if (config === undefined && state === undefined && journal.count === 0) return { source: undefined, journal };
     const file = fileOf(FerretHistoryFiles, id);
-    const scan = scanJournal(journal.lines, { file, sessionId: id });
-    const fingerprint = journalFingerprint(journal.lines.length);
+    const { scan } = journal;
+    const fingerprint = journalFingerprint(journal.count);
     // Only a journal read to its end is one the row can be said to describe: a read cut short by an io fault indexed
     // what it got, and must be read again.
     return {
@@ -937,7 +940,7 @@ export class DaemonStorage {
       const entry = encodeSessionEvent(event);
       if (inspection.kind === 'repair' && inspection.source === null) this.index.removeSession(id);
       const current = this.applySessionInspection(inspection);
-      const position = read.journal.lines.length;
+      const position = read.journal.count;
       await this.state.append(FerretHistoryFiles, entry, id);
       // No journal version is recorded here: another writer can append to this journal (another queue) between our
       // append and a version read, and the row would then vouch for N lines while the file holds N+1. The next full
@@ -1020,19 +1023,38 @@ export class DaemonStorage {
     return () => this.stateListeners.delete(listener);
   }
 
+  /**
+   * The journal lines at the given positions, in one pass that keeps only those: the journal itself is never held. A
+   * position the read never reached (the journal is shorter, or the read failed first) is absent from the answer.
+   */
+  private async journalLinesAt(id: SessionId, positions: ReadonlySet<number>): Promise<Map<number, unknown>> {
+    const found = new Map<number, unknown>();
+    if (positions.size === 0) return found;
+    const last = Math.max(...positions);
+    let position = 0;
+    try {
+      for await (const value of this.state.lines(FerretHistoryFiles, id)) {
+        if (positions.has(position)) found.set(position, value);
+        position += 1;
+        if (position > last) break;
+      }
+    } catch {
+      // What was read before the fault stands; the positions past it are absent, so the caller refuses them.
+    }
+    return found;
+  }
+
   /** The events the pointers name, proved against the journal line each points at. */
   private async resolvePointers(
     id: SessionId,
     pointers: readonly EventPointer[],
-    lines?: readonly JournalLine[],
   ): Promise<readonly SessionEvent[] | undefined> {
     if (pointers.length === 0) return [];
-    const journal = lines ?? (await this.readJournal(id)).lines;
+    const journal = await this.journalLinesAt(id, new Set(pointers.map(pointer => pointer.byteOffset)));
     const events: SessionEvent[] = [];
     for (const pointer of pointers) {
-      const entry = journal[pointer.byteOffset];
-      if (entry === undefined || 'damaged' in entry) return undefined;
-      const event = parseSessionEvent(entry.value, id);
+      if (!journal.has(pointer.byteOffset)) return undefined;
+      const event = parseSessionEvent(journal.get(pointer.byteOffset), id);
       if (
         event === undefined ||
         event.sequence !== pointer.sequence ||
@@ -1467,7 +1489,7 @@ export class DaemonStorage {
     if (read.source === undefined) throw new Error(`archived session ${id} has no readable journal`);
     const pointers = planIndexRebuild([read.source]).events.filter(pointer => pointer.sequence > afterSequence);
     const selected = pointers.slice(0, limit);
-    const events = await this.resolvePointers(id, selected, read.journal.lines);
+    const events = await this.resolvePointers(id, selected);
     if (events === undefined) throw new Error(`journal of archived session ${id} is inconsistent`);
     return {
       events,
