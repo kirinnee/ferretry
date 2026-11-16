@@ -57,6 +57,7 @@ cancel a running set.
 | Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)    | machine budgets on a quiet dedicated VM                     |
 | Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
 | Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
+| Proof Reuse                                              | GitHub              | GitHub                                | a few API calls, no Nix                                     |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -368,25 +369,28 @@ vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
 
 The fast E2E jobs now live in `ci.yaml`; there is no separate `e2e.yaml`.
 Realworld and Slow remain advisory and outside the Full CI verdict. Release still
-waits on the entire CI workflow on `main`, where Quick and Full both always run.
+waits on the entire CI workflow on `main`, where Quick and Full both run — or, when the merged pull
+request already proved the identical tree, are replaced by that proof ([Proof reuse on
+main](#proof-reuse-on-main)).
 
 ## CI jobs
 
-| Job              | Check name                           | Work                                                                                                                                                |
-| ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                  |
-| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
-| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |
-| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                          |
-| `compile`        | Compile Binaries + SIT               | compile, list and upload the binaries, then check `dist/bin` against its manifest and run SIT against those very files                              |
-| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                  |
-| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                              |
-| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                              |
-| `pwa-screenshot` | PWA Settings Geometry / Full Gallery | `needs: pwa-relevance`; skipped (and accepted by the verdict) only when it succeeded with `run == false`; existing geometry assertions and evidence |
-| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                                                      |
-| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                          |
-| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                 |
-| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                  |
+| Job              | Check name                           | Work                                                                                                                                                                   |
+| ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
+| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                                     |
+| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
+| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
+| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                                             |
+| `compile`        | Compile Binaries + SIT               | compile, list and upload the binaries, then check `dist/bin` against its manifest and run SIT against those very files                                                 |
+| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                                     |
+| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                                                 |
+| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                                                 |
+| `pwa-screenshot` | PWA Settings Geometry / Full Gallery | `needs: pwa-relevance`; skipped (and accepted by the verdict) only when it succeeded with `run == false`; existing geometry assertions and evidence                    |
+| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                                                                         |
+| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                                             |
+| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                                    |
+| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                                     |
 
 **The merge gate is the commit status `Full CI` on the exact PR head SHA.** Quick
 posts pending with `full set not run on this commit: add the full-ci label`. Full's
@@ -567,6 +571,61 @@ code, run where a failure cannot hold anything up.
   days, each on a 4x8), and a run that has started is never cancelled. Nothing is lost: the tier only
   files issues, and the newer run proves every commit the older one held (the `main` group now holds only the macOS and tmux 3.8 proofs). The nightly and a manual
   dispatch keep a group of their own run id, so neither is ever superseded or supersedes a `main` run.
+
+## Proof reuse on main
+
+`main`'s push run used to re-run the identical full suite the merged pull request had just passed: for the last
+ten merges (#1590-#1598, #1673) the merge commit's **tree was byte-identical** to the tree the PR's own run
+had tested, and `Release` waited ~6.5 minutes (the E2E shards are the pole) for the second proof of it. The
+rule below skips that repeat **only when it can show the first proof**, and **fails closed**: any doubt is
+"run everything", exactly as before. A wrong filter here silently skips tests on `main`, so the burden is
+on proving, never on ruling out.
+
+**What the PR records.** A `pull_request` verdict that is success appends the tree it tested to the
+`Full CI` status description: `quick checks and the full set passed on this commit; tree <40-hex>`
+(`scripts/ci/full-status.sh`). That tree is `git rev-parse HEAD^{tree}` of the `full` job's checkout, which
+for a pull request is GitHub's merge commit `github.sha` — exactly the tree every job tested, **not** the PR
+head's own tree. Failure and pending descriptions are unchanged; a tree that cannot be read leaves a
+success without one, which `main` will never reuse.
+
+**What `main` checks.** The `proof` job (`Proof Reuse`, `ubuntu-latest`, 5 minutes, read-only
+`contents`/`statuses`/`pull-requests`/`actions`) runs on every event that runs anything and `scripts/ci/proof-reuse.sh` sets
+`proved=true` only when **all** of these hold, printing every check to the log and the job summary:
+
+| Rule | Must hold                                                                                                                                                              |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a    | the event is a `push` to `refs/heads/main`                                                                                                                             |
+| b    | `vars.MACOS_SMOKE` is `skip`: a PR's darwin smoke is advisory but `main`'s is required, so with darwin on the PR proof never covered what `main` requires              |
+| c    | T = the tree of this push's `github.sha` is readable                                                                                                                   |
+| d    | the commit belongs to **exactly one** pull request with `merged_at` set and `base.ref == main`; H = its head SHA                                                       |
+| e    | the newest (greatest id) `Full CI` status on H is `success`, posted by `github-actions[bot]`, and its description names tree T                                         |
+| f    | its `target_url` is a run of **this** repository whose `path` is `.github/workflows/ci.yaml`, `event` is `pull_request`, `head_sha` is H and `conclusion` is `success` |
+
+A status is only a claim; rule f reads the run behind it. The decision is
+`Proof reuse: YES - tree <T> passed the full set in <run url> (PR #N head <H>)` or
+`Proof reuse: NO - <reason>. Every job runs.`
+
+**What a yes skips.** Every expensive job — `quick`, `int`, `strict-guarantees`, `full-gates`, `compile`, `smoke`, `smoke-darwin` — has
+`proof` in its `needs` and `!(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')` in its `if` — **reuse only a SEALED yes**. `full-pending` is untouched (already
+pull-request only). `proof` itself carries `quick`'s event guard, so an unrelated label or a retitle still runs no job.
+**A failed proof job must not skip tests**, so a job that had no status function now starts with
+`!cancelled() &&`: a `proof` that died before sealing leaves `decided` empty, the condition is true, and the job runs. Where the
+job had an implicit `success()` over another need (`smoke`, `smoke-darwin`) it also keeps
+`needs.compile.result == 'success'`, so a failed `compile` still skips it as before.
+`scripts/test/ci-sets.ts` compares every job's start condition, with the proof failed or cancelled (even with `proved=true` written), unsealed, empty or `false`,
+against the pre-proof graph written out in the test, across events and need results.
+
+**The verdict.** `full` needs `proof` and gets `PROOF_DECIDED`/`PROOF_REUSED`/`PROOF_URL`. With a sealed, reused proof `full-status.sh`
+succeeds on a **push** that has a URL (no job failed or was cancelled), writing the proof line to the
+summary; a pull request or dispatch never reuses a proof, and with no sealed `proved=true` the verdict judges the jobs
+exactly as before. `proof` itself is never a gate: its failure changes no verdict.
+
+**Why `decided`, and why `continue-on-error`.** A job's outputs are read whatever its result, so a crash, post-step failure or timeout after `proved=true` was written would still look like a yes. The `proof` job therefore ends with a `seal` step (`if: success()`) that alone writes `decided=true`; an earlier failure or a timeout leaves it empty and every job runs. Separately the job is `continue-on-error: true`, so a failed proof cannot turn the CI workflow red and stop `Release`, which listens to the workflow conclusion ([GitHub: `jobs.<job_id>.continue-on-error`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error)). That setting makes the job's `needs.proof.result` read `success` even when it failed, which is why consumers read `decided` and never `result`. `ci-sets.ts` pins both: the flag and the last-step seal, and a model of the workflow conclusion. `Release` is unchanged — it
+fires on CI `completed` + `success`, which a reused proof produces.
+
+**Known cost.** A reused push does not run `quick`, the job that refreshes the Namespace Nix/tsc cache from
+`main`. Those caches change only when inputs do (`flake.lock`, dependencies), and the next push whose tree
+was not proved by a PR (a conflict-resolved merge, a direct commit, the darwin switch off) refreshes them.
 
 ## Release gating
 
