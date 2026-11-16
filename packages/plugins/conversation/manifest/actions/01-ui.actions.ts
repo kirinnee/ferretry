@@ -36,9 +36,11 @@ export default fragment({
       // the conversation width, as v4 draws it.
       panel('device.settings', { id: 'message-marks', order: 30 }),
       // Contributions to other plugins' slots (§5.2), each by the offerer's slot name: Ferrets' file browser gets the
-      // current-ferret search, its Actions ▾ menu gets Interrupt, and Agenda's ask page gets the ferret's conversation.
+      // current-ferret search, its Actions ▾ menu gets Interrupt and the stuck-message and Queue rows, and Agenda's ask page gets the ferret's conversation.
       panel(FILES_SEARCH_SLOT, { id: 'files-search', order: 10 }),
       panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
+      // Clear stuck messages, Dismiss all cancelled and Queue… (`app/slots/stuck-messages-row-panel.tsx`).
+      panel(ACTIONS_ROW_SLOT, { id: 'stuck-messages-row', order: 20 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
     settings: [settingsTab('conversation', { group: 'behaviour', label: 'Conversation', order: 20 })],

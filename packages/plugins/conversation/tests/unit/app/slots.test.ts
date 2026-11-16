@@ -15,6 +15,7 @@ describe('the slot Conversation offers above its composer and Claude Code, Agend
 describe('the slots Conversation fills in Ferrets', () => {
   test('Conversation puts its Interrupt row in the Actions ▾ menu and its file search in Ferrets’ search, through the names Ferrets owns', () => {
     expect(panelsInSlot(ACTIONS_ROW_SLOT)).toContain('conversation.interrupt-row');
+    expect(panelsInSlot(ACTIONS_ROW_SLOT)).toContain('conversation.stuck-messages-row');
     expect(panelsInSlot(FILES_SEARCH_SLOT)).toContain('conversation.files-search');
   });
 });

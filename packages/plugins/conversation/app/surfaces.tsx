@@ -30,6 +30,7 @@ import { QueuePanel } from './queue/queue-page.tsx';
 import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
 import { FilesSearchPanel } from './slots/files-search-panel.tsx';
 import { InterruptRowPanel } from './slots/interrupt-row-panel.tsx';
+import { StuckMessagesRowPanel } from './slots/stuck-messages-row-panel.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
 import { TurnPanel } from './toolbar/turn-panel.tsx';
 
@@ -56,6 +57,7 @@ export interface ConversationSurfaces {
     readonly turn: AppComponent<PanelProps>;
     readonly 'files-search': AppComponent<PanelProps>;
     readonly 'interrupt-row': AppComponent<PanelProps>;
+    readonly 'stuck-messages-row': AppComponent<PanelProps>;
     readonly 'agenda-conversation': AppComponent<PanelProps>;
   };
   readonly settings: { readonly conversation: AppComponent<SettingsProps> };
@@ -92,6 +94,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     turn: scoped<PanelProps>(client, TurnPanel),
     'files-search': scoped<PanelProps>(client, FilesSearchPanel),
     'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
+    'stuck-messages-row': scoped<PanelProps>(client, StuckMessagesRowPanel),
     'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),
   },
   settings: { conversation: scoped<SettingsProps>(client, ConversationSettings) },
