@@ -1,8 +1,8 @@
 /**
  * THE ONE READ A LIST OF ROWS SHARES. Every skill (or MCP) row says where its item stands in catalogs, and that is the same
  * two lists for all of them: the installs this machine recorded and this machine's own catalogs. A row that read them
- * itself would ask the daemon twice per row; a store is read once, when its first row appears, again on `reload` (a
- * Publish or an Uninstall on any row), and handed to every row that subscribes.
+ * itself would ask the daemon twice per row; a store is read once, when its first row appears (again each time a list
+ * is mounted afresh), again on `reload` (a Publish or an Uninstall on any row), and handed to every row that subscribes.
  *
  * A read that fails shows nothing: the row is still right, so each list falls back to empty on its own.
  */
@@ -48,10 +48,14 @@ export interface CatalogRowsStore {
   readonly reload: () => void;
 }
 
-/** A store that reads when its first subscriber arrives. A late answer to an older read is dropped. */
+/**
+ * A store that reads each time a list of rows is MOUNTED, when its first subscriber arrives (the rows that follow in
+ * the same list share that read), and forgets what it read when the last one leaves: the store outlives the Skills
+ * panel, and a list opened again must not show what an install or an uninstall made untrue while it was away. A late
+ * answer to an older read is dropped, including one that comes back after the list left.
+ */
 export function createCatalogRowsStore(read: () => Promise<CatalogRowsSnapshot>): CatalogRowsStore {
   let snapshot = NOTHING_READ;
-  let started = false;
   let generation = 0;
   const listeners = new Set<() => void>();
   const reload = (): void => {
@@ -65,13 +69,14 @@ export function createCatalogRowsStore(read: () => Promise<CatalogRowsSnapshot>)
   };
   return {
     subscribe: listener => {
+      const first = listeners.size === 0;
       listeners.add(listener);
-      if (!started) {
-        started = true;
-        reload();
-      }
+      if (first) reload();
       return () => {
         listeners.delete(listener);
+        if (listeners.size > 0) return;
+        generation += 1;
+        snapshot = NOTHING_READ;
       };
     },
     get: () => snapshot,

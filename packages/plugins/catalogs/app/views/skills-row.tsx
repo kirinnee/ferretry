@@ -44,6 +44,7 @@ function SkillsRow({
         read={read}
         kind="skill"
         itemName={skill.name}
+        location={{ path: skill.path, scope: skill.scope, runtimes: skill.runtimes }}
         label={skill.invocation}
         source={{ kind: 'skill', skill: skill.path }}
       />

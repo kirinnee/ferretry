@@ -15,8 +15,17 @@ describe('the slots Skills offers', () => {
   });
 
   it('a row panel accepts the one skill the row hands it and refuses anything short of it', () => {
-    const props = { ferret: 'f1', name: 'review', invocation: '/review', path: '/s/review/SKILL.md', scope: 'user' };
+    const props = {
+      ferret: 'f1',
+      name: 'review',
+      invocation: '/review',
+      path: '/s/review/SKILL.md',
+      scope: 'user',
+      runtimes: ['claude-default'],
+    };
     expect(isSkillsRowSlotProps(props)).toBe(true);
+    expect(isSkillsRowSlotProps({ ...props, runtimes: [] })).toBe(true);
+    expect(isSkillsRowSlotProps({ ...props, runtimes: [1] })).toBe(false);
     for (const key of Object.keys(props)) expect(isSkillsRowSlotProps({ ...props, [key]: 3 })).toBe(false);
     expect(isSkillsRowSlotProps({ ferret: 'f1' })).toBe(false);
     expect(isSkillsRowSlotProps(null)).toBe(false);

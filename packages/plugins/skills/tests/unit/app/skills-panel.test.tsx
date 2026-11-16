@@ -160,6 +160,8 @@ describe('DOM tests: the Skills panel of a ferret', () => {
     ]);
     expect(rows.every(row => isSkillsRowSlotProps(row))).toBe(true);
     expect(rows[2]?.path).toBe('/fy/summary/SKILL.md');
+    // The copy's own runtimes ride along, so a contributing panel can tell which copy of a name the row is.
+    expect(rows.map(row => row.runtimes)).toEqual([['claude-default'], ['claude-default'], ['claude-default']]);
     // The slot sits on the row's first line, beside Open, not under the description.
     expect(q('[data-context-skill-scope="project"] > div [data-test-row]')).not.toBeNull();
   });

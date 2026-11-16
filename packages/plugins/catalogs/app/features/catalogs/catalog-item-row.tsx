@@ -29,7 +29,7 @@ import { useDaemonClient } from '../../lib/client-context.tsx';
 import { AddToCatalogSheet, type AddToCatalogSheetProps } from './add-to-catalog-sheet.tsx';
 import { CatalogAddToast, type CatalogToast } from './catalog-add-toast.tsx';
 import { removeCatalogInstall } from './catalog-installs-api.ts';
-import { installRefusal, installsFor, REMOVE_NOTE } from './catalog-install-model.ts';
+import { installIsAt, installRefusal, installsFor, REMOVE_NOTE, type SkillLocation } from './catalog-install-model.ts';
 import { FailureLine } from './catalog-parts.tsx';
 import type { CatalogRowsHost, CatalogRowsRead } from './catalog-row-tools.tsx';
 import { canAdd, ownedMatches, removeLabel, rowChips, sharedItemFor } from './catalog-row-model.ts';
@@ -63,6 +63,12 @@ export interface CatalogItemRowProps {
   readonly kind: 'skill' | 'mcp';
   /** The skill or server name, which installs are matched by. */
   readonly itemName: string;
+  /**
+   * Which copy this row is, when one machine can hold several of the name (a runtime's and a project's): only an install
+   * that wrote THAT copy is the row's, so its chip, Uninstall and the loss of Publish follow it alone. Without it, a row
+   * is every install of its kind and name.
+   */
+  readonly location?: SkillLocation;
   /** What the row shows in mono: the invocation, or the server's name. */
   readonly label: string;
   /** What Publish points at, and what a catalog's items are matched against. */
@@ -99,6 +105,7 @@ export function CatalogItemRow({
   read,
   kind,
   itemName,
+  location,
   label,
   source,
   scope,
@@ -124,7 +131,12 @@ export function CatalogItemRow({
   const [toast, setToast] = useState<ToastState | null>(null);
   const [sheetStart, setSheetStart] = useState<SheetStart>({});
 
-  const installs = read === undefined ? [] : installsFor(read.installs, kind, itemName);
+  const installs =
+    read === undefined
+      ? []
+      : installsFor(read.installs, kind, itemName).filter(
+          install => location === undefined || installIsAt(install, location),
+        );
   const matches = read === undefined ? [] : ownedMatches(read.catalogs, source);
   const chips = rowChips(installs, matches);
   const addable = host !== undefined && canAdd(installs);

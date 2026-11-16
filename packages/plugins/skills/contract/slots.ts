@@ -49,6 +49,8 @@ export interface SkillsRowSlotProps {
   readonly path: string;
   /** Where it comes from ('project', 'user', 'ferretry'). */
   readonly scope: string;
+  /** The runtimes that read this copy: with `path` and `scope`, which installed copy of the name this row is. */
+  readonly runtimes: readonly string[];
 }
 
 /** A narrowing for the row slot's panels, as {@link isSkillsAddSlotProps} is for the header's. */
@@ -60,7 +62,9 @@ export function isSkillsRowSlotProps(props: unknown): props is SkillsRowSlotProp
     typeof candidate.name === 'string' &&
     typeof candidate.invocation === 'string' &&
     typeof candidate.path === 'string' &&
-    typeof candidate.scope === 'string'
+    typeof candidate.scope === 'string' &&
+    Array.isArray(candidate.runtimes) &&
+    candidate.runtimes.every(runtime => typeof runtime === 'string')
   );
 }
 

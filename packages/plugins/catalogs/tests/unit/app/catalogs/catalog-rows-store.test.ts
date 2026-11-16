@@ -98,6 +98,51 @@ describe('createCatalogRowsStore: one read for every row', () => {
     stopStayed();
   });
 
+  it('reads again when a list is mounted afresh, and shows nothing it read for the list that left', async () => {
+    let name = 'a';
+    let reads = 0;
+    const store = createCatalogRowsStore(async () => {
+      reads += 1;
+      return snapshotOf(name);
+    });
+    const stopFirst = store.subscribe(() => undefined);
+    await settled();
+    expect(store.get().installs[0]?.provenance.name).toBe('a');
+    stopFirst();
+    // The list is gone: what it read is not shown to the next one, which asks the daemon again.
+    expect(store.get()).toEqual({ installs: [], catalogs: [] });
+    name = 'b';
+    const stopSecond = store.subscribe(() => undefined);
+    await settled();
+    expect(reads).toBe(2);
+    expect(store.get().installs[0]?.provenance.name).toBe('b');
+    stopSecond();
+  });
+
+  it('drops the answer to a read that comes back after its list left', async () => {
+    const answers: ((value: CatalogRowsSnapshot) => void)[] = [];
+    const store = createCatalogRowsStore(() => new Promise<CatalogRowsSnapshot>(resolve => answers.push(resolve)));
+    const stop = store.subscribe(() => undefined);
+    stop();
+    const stopAgain = store.subscribe(() => undefined);
+    answers[1]?.(snapshotOf('new'));
+    await settled();
+    answers[0]?.(snapshotOf('old'));
+    await settled();
+    expect(store.get().installs[0]?.provenance.name).toBe('new');
+    stopAgain();
+  });
+
+  it('keeps what it read while any row of the list is still there', async () => {
+    const store = createCatalogRowsStore(async () => snapshotOf('a'));
+    const stopStayed = store.subscribe(() => undefined);
+    const stopLeft = store.subscribe(() => undefined);
+    await settled();
+    stopLeft();
+    expect(store.get().installs[0]?.provenance.name).toBe('a');
+    stopStayed();
+  });
+
   it('drops the answer to an older read when a newer one was asked for', async () => {
     const answers: ((value: CatalogRowsSnapshot) => void)[] = [];
     const store = createCatalogRowsStore(() => new Promise<CatalogRowsSnapshot>(resolve => answers.push(resolve)));

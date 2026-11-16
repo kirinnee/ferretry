@@ -14,8 +14,10 @@ const skillProps = (name: string, extra: Record<string, unknown> = {}) => ({
   ferret: 'f1',
   name,
   invocation: `/${name}`,
-  path: `/home/k/.claude/skills/${name}/SKILL.md`,
-  scope: 'user',
+  // The runtime-installed skill the default install fixture wrote: Ferretry's own, read by that install's runtime.
+  path: `/fixtures/fleet/assets/skills/${name}/SKILL.md`,
+  scope: 'ferretry',
+  runtimes: ['box'],
   ...extra,
 });
 

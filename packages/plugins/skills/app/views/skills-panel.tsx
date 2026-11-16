@@ -259,6 +259,7 @@ function FerretSkills({
                 invocation,
                 path: skill.path,
                 scope: skill.scope,
+                runtimes: skill.runtimes,
               } satisfies SkillsRowSlotProps
             }
           />
