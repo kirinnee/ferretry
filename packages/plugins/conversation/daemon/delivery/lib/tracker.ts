@@ -95,6 +95,15 @@ export interface SendFailureNotifier {
   notify(sender: string, recipient: SessionId, record: SendRecord): Promise<void>;
 }
 
+/**
+ * Says, out loud and once, that a send has been stuck past the limit (`stuckAlarmMs`): nothing could be typed for it,
+ * because every try met a composer that could not be proven empty. The composition root decides how loud — the daemon's
+ * log at warning level, and whatever reaches the person who sent it. The send itself is still tried after this.
+ */
+interface SendStuckAlarm {
+  stuck(id: SessionId, record: SendRecord, waitedMs: number): Promise<void>;
+}
+
 /** Every session this daemon holds, for the re-derivation a restart owes its in-flight sends. */
 interface SendRoster {
   sessions(): readonly SessionId[];
@@ -107,6 +116,8 @@ export interface SendTrackerPorts {
   readonly repository: Pick<SendRepository, 'read' | 'journal'>;
   readonly attempts: SendReattempter;
   readonly notifier: SendFailureNotifier;
+  /** Told once when a send has been stuck past `stuckAlarmMs` (see {@link SendStuckAlarm}). */
+  readonly alarm: SendStuckAlarm;
   readonly scheduler: SendScheduler;
   readonly roster: SendRoster;
   /** Its own queue: a look reads a whole transcript and must not hold the send lock while it does. */
@@ -686,7 +697,44 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
       return await this.settle(id, record, 'timed_out', 'ferret_ended');
     const typed = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
-    return typed === undefined || typed.untyped === true ? await this.holdOff(id, record, now) : typed;
+    if (typed !== undefined && typed.untyped !== true) return await this.unstuck(id, typed, now);
+    return await this.holdOff(id, await this.raiseStuck(id, typed ?? record, now), now);
+  }
+
+  /**
+   * SAYS A SEND IS STUCK, ONCE, instead of retrying it in silence.
+   *
+   * An idle harness draws nothing by itself, so a screen the composer reader refused is the SAME screen at every try:
+   * every five seconds, a capture, a refusal, nothing typed, and nobody told. In v4 that was 2,773 tries over six and a
+   * half hours for one ferret's message, and ten minutes for the owner's own, each ended only by the owner touching the
+   * pane. Past `stuckAlarmMs` the row is marked `stuckAt` (the app says "not delivered yet" and what to do), the
+   * journal says `control.send_stuck`, and the alarm is raised. The tries go on: a redraw lets the message through.
+   */
+  private async raiseStuck(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    const waited = now - Date.parse(record.acceptedAt);
+    if (record.stuckAt !== undefined || waited < this.settings.stuckAlarmMs) return record;
+    const marked =
+      (await this.ports.ledger.settle(id, record.sendId, { stuckAt: new Date(now).toISOString() })) ?? record;
+    await this.ports.repository.journal(id, 'control.send_stuck', {
+      sendId: record.sendId,
+      outcome: 'untyped',
+      waitedMs: waited,
+    });
+    // A failing alarm never fails the look: the mark and the journal already say it.
+    await this.ports.alarm.stuck(id, marked, waited).catch(() => undefined);
+    return marked;
+  }
+
+  /** A stuck send that a try finally typed: the mark comes off, and the journal says how long it waited. */
+  private async unstuck(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    if (record.stuckAt === undefined) return record;
+    const cleared = (await this.ports.ledger.settle(id, record.sendId, { stuckAt: undefined })) ?? record;
+    await this.ports.repository.journal(id, 'control.send_unstuck', {
+      sendId: record.sendId,
+      outcome: 'typed',
+      waitedMs: now - Date.parse(record.acceptedAt),
+    });
+    return cleared;
   }
 
   /**
@@ -735,6 +783,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         // Only a send proven absent from a session that can still take input may be retried as-is.
         retryable: fate === 'timed_out' && reason !== 'ferret_ended',
         deadlineAt: undefined,
+        stuckAt: undefined,
         noticesOwed: audience.length > 0 ? audience : undefined,
       })) ?? record;
     await this.ports.repository.journal(
