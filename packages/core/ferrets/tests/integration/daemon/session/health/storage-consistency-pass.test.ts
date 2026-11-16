@@ -326,3 +326,22 @@ describe('storage consistency pass', () => {
     should(actual.zombies).deepEqual([]);
   });
 });
+
+describe('when a session journal last grew', () => {
+  it('should be the stamp of the NEWEST of two events, not the first', async () => {
+    // Arrange — two events, a minute apart by the storage's own clock.
+    const { storage, at } = await fleet();
+    const id = parseSessionId('two-events');
+    await storage.writeState(id, sessionState('two-events'));
+    at(NOW_MS);
+    await storage.append(id, 'session.first', {});
+    at(NOW_MS + 60_000);
+    await storage.append(id, 'session.second', {});
+
+    // Act
+    const actual = storage.lastEventAt(id);
+
+    // Assert
+    should(actual).equal(new Date(NOW_MS + 60_000).toISOString());
+  });
+});

@@ -3,6 +3,7 @@ import { state as hostState } from '@ferretry/kernel/host';
 import should from 'should';
 import { HealthEventsFile, SelfRestartFile } from '../../../../../contract/index.ts';
 import {
+  HEALTH_EVENTS_MAX_BYTES,
   StateSelfRestartStampStore,
   StateSessionHealthEventSink,
   SystemMonotonicClock,
@@ -107,6 +108,80 @@ describe('health event sink', () => {
       { at: NOW, type: 'fleet.daemon_wedge', data: { gapSeconds: 200 } },
       { at: NOW, type: 'fleet.index_incoherent', data: { consecutive: 1 } },
     ]);
+  });
+});
+
+describe('health event journal cap', () => {
+  const big = 'x'.repeat(100 * 1024);
+  /** The persistent fault, numbered: the same event every check, so its order is told by `n`. */
+  const fault = (n: number) => ({ type: 'fleet.index_incoherent' as const, data: { n, big } });
+  const numbersOf = async (state: ReturnType<typeof world>['state']): Promise<unknown[]> => {
+    const numbers: unknown[] = [];
+    for await (const line of state.lines(HealthEventsFile)) numbers.push(line.data.n);
+    return numbers;
+  };
+
+  it('should compact to the newest events once a persistent fault has grown the file past its cap', async () => {
+    // Arrange — a fault that writes a 100 KiB line (far above a real one) every check.
+    const { state, fs, at } = world();
+    const sink = new StateSessionHealthEventSink(state, { now: () => NOW });
+
+    // Act
+    for (let n = 0; n < 12; n += 1) await sink.emit(fault(n));
+
+    // Assert — bounded, newest kept, oldest gone, every line still whole.
+    const size = (await fs.readText(at('health.jsonl')))?.length ?? 0;
+    const numbers = await numbersOf(state);
+    should(size).be.belowOrEqual(HEALTH_EVENTS_MAX_BYTES);
+    should(numbers.at(-1)).equal(11);
+    should(numbers).not.containEql(0);
+    should(numbers.length).be.greaterThan(0);
+  });
+
+  it('should lose no event that is emitted while a compaction is between reading the tail and swapping it in', async () => {
+    // Arrange — the persistent fault again, but the events are emitted together (the check's own events and a skip's).
+    const { state } = world();
+    const sink = new StateSessionHealthEventSink(state, { now: () => NOW });
+
+    // Act
+    await Promise.all(Array.from({ length: 12 }, async (_, n) => await sink.emit(fault(n))));
+
+    // Assert — what is kept is a whole run of the newest events: none vanished from the middle, the newest is there.
+    const numbers = (await numbersOf(state)) as number[];
+    should(numbers.at(-1)).equal(11);
+    should(numbers).deepEqual(Array.from({ length: numbers.length }, (_, i) => 11 - numbers.length + 1 + i));
+  });
+
+  it('should leave the journal alone below its cap', async () => {
+    // Arrange
+    const { state } = world();
+    const sink = new StateSessionHealthEventSink(state, { now: () => NOW });
+
+    // Act
+    for (let n = 0; n < 5; n += 1) await sink.emit(fault(n));
+
+    // Assert
+    should(await numbersOf(state)).deepEqual([0, 1, 2, 3, 4]);
+  });
+
+  it('should still have written the event when the compaction itself fails', async () => {
+    // Arrange
+    const { state } = world();
+    const failing = {
+      append: state.append.bind(state),
+      version: state.version.bind(state),
+      write: state.write.bind(state),
+      tail: async () => {
+        throw new Error('the disk is full');
+      },
+    };
+    const sink = new StateSessionHealthEventSink(failing as never, { now: () => NOW });
+
+    // Act
+    for (let n = 0; n < 8; n += 1) await sink.emit(fault(n));
+
+    // Assert — nothing was compacted and nothing was lost.
+    should((await numbersOf(state)).length).equal(8);
   });
 });
 

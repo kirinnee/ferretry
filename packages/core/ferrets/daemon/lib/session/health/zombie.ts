@@ -18,8 +18,9 @@ export interface TerminalSessionActivity {
  * that from the ordinary trailing writes of a session that has only just finished.
  *
  * Every unusable observation answers false. This is the one place in the slice where suspicion is
- * the WRONG default: a zombie verdict re-adopts the session under a fresh monitor, and re-adopting
- * on a garbled timestamp would restart monitors over dead panes on every pass.
+ * the WRONG default: a zombie verdict is REPORT-ONLY (the consistency pass names it in the
+ * `fleet.index_incoherent` event; nothing re-adopts, restarts or touches the session), but a false
+ * verdict on a garbled timestamp would still raise that event on every pass.
  */
 export function journalOutlivedTerminal(activity: TerminalSessionActivity, settings: SessionHealthSettings): boolean {
   const finishedMs = instantMs(activity.finishedAt);
