@@ -17,16 +17,18 @@
 import { FerretSummarySchema } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
-  AskedQuestionViewSchema,
   type HandoffDocument,
   HandoffDocumentSchema,
   HandoffNameSchema,
+  type SendRecord,
+  SendRecordSchema,
+} from '@ferretry/core-mailbox/contract';
+import {
+  AskedQuestionViewSchema,
   type LogPage,
   type LogPageOptions,
   LogPageSchema,
   type Question,
-  type SendRecord,
-  SendRecordSchema,
 } from '../../contract/index.ts';
 import { readFerretQueue } from '../queue/send-queue.ts';
 import { readChatPrompt } from './chat-prompt.ts';

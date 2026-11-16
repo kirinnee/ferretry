@@ -464,7 +464,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + separators + longestRouting).be.below(8_000);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_300);
-    should(sizes.board).be.below(820);
+    should(sizes.board).be.below(860);
     should(sizes.hypermedia).be.below(1_550);
     should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);

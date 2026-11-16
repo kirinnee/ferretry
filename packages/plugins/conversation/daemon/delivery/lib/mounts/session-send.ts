@@ -18,20 +18,20 @@ import {
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
-  type SharedDraftSent,
-} from '../../../seams/protocol.ts';
+} from '@ferretry/core-mailbox/contract';
+import { type SharedDraftSent } from '../../../seams/protocol.ts';
 import { DraftSentSchema } from '../../../../contract/index.ts';
 import { callerIsAgent, ferretOf, isFerretCall, OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
 import { type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { createHash } from 'node:crypto';
-import { isUpdateUnconfirmed } from '../types.ts';
+import { isUpdateUnconfirmed } from '@ferretry/core-mailbox/contract';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { answerWhenChanged, type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
 import { jsonResponse } from '../../../seams/api.ts';
 import type { MountRoute, RouteContext } from '../../../seams/api.ts';
-import { queuePage } from '../../../queue/lib/page.ts';
-import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../page.ts';
+import { queuePage } from '@ferretry/core-mailbox/contract';
+import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '@ferretry/core-mailbox/contract';
 
 /**
  * Talking to a session that is already running: `POST /v1/ferrets/:ferretId/send` and

@@ -1,4 +1,5 @@
-import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 
 /**
  * Reading a harness's native question form off a captured pane.

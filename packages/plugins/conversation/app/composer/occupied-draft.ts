@@ -6,7 +6,7 @@
  * for exactly that text.
  */
 
-import { type ComposerResult, composerOccupiedDraft } from '../../contract/index.ts';
+import { type ComposerResult, composerOccupiedDraft } from '@ferretry/core-mailbox/contract';
 import { DaemonCallError } from './seam.ts';
 
 /** What pressing Enter on, or erasing, the person's own draft in the agent's composer came to. */

@@ -244,7 +244,7 @@ export class WardenAutoMoveService {
       try {
         await this.ports.resume(
           subject.id,
-          `Ferretry's Warden: the usage limit on ${subject.agent} has reset (${pacificOf(resetAt)}). Carry on with what you were doing.`,
+          `Ferretry's Warden: the usage limit on ${subject.agent} has reset (${pacificOf(resetAt)}). Re-read your last turn, then continue from where you stopped.`,
         );
       } catch (error) {
         // Counted either way: a resume Ferrets refused is not asked again every sweep, and the flag stays for Jev.

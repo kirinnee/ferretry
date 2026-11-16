@@ -2,7 +2,7 @@
 // "No reply needed…" footer on the front or back of what the agent is typed, because the agent has no other way to
 // know who spoke. A person reads none of it: the words are the bubble, and who said them is a small sender chip.
 
-import { parseFerretryNotice, parsePeerEnvelope } from '../../contract/index.ts';
+import { parseFerretryNotice, parsePeerEnvelope } from '@ferretry/core-mailbox/contract';
 
 /** A leading producer tag: `[ferretry]`, `[board]`, `[agenda]`, `[warden]`, `[re !A12 …]`, `[answer to !A3 …]`. */
 const LEADING_TAG = /^\s*\[(ferretry|board|agenda|warden|learning|re\s[^\]\n]*|answer to\s[^\]\n]*)\]\s*/iu;

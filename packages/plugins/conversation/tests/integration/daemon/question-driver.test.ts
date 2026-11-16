@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PendingQuestion, StructuredQuestionAnswer } from '../../../daemon/seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../../daemon/seams/protocol.ts';
 import should from 'should';
 import {
   StructuredQuestionDriveError,
