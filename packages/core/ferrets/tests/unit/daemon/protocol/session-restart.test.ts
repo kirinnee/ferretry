@@ -17,6 +17,7 @@ describe('the restart contract', () => {
   it('should round-trip every shape and cover every schema', () => {
     const cases: SchemaCase[] = [
       { name: 'scope', schema: restart.RestartScopeSchema, value: 'outdated' },
+      { name: 'when', schema: restart.RestartWhenSchema, value: 'idle' },
       { name: 'queue reason', schema: restart.RestartQueueReasonSchema, value: 'own-session' },
       { name: 'skip reason', schema: restart.RestartSkipReasonSchema, value: 'not-found' },
       { name: 'outdated request', schema: restart.RestartRequestSchema, value: { scope: 'outdated' } },
@@ -24,6 +25,11 @@ describe('the restart contract', () => {
         name: 'request naming ids, called by a ferret',
         schema: restart.RestartRequestSchema,
         value: { scope: 'ids', ids: ['ses-1'], caller: 'ses-9' },
+      },
+      {
+        name: 'request restarting now',
+        schema: restart.RestartRequestSchema,
+        value: { scope: 'ids', ids: ['ses-1'], when: 'now' },
       },
       { name: 'queued', schema: restart.RestartQueuedSchema, value: result.queued[0] },
       { name: 'result', schema: restart.RestartResultSchema, value: result },
@@ -62,6 +68,7 @@ describe('the restart contract', () => {
       { name: 'empty ids', schema: restart.RestartRequestSchema, value: { scope: 'ids', ids: [] } },
       { name: 'unknown field', schema: restart.RestartRequestSchema, value: { scope: 'all', force: true } },
       { name: 'unknown scope', schema: restart.RestartRequestSchema, value: { scope: 'everything' } },
+      { name: 'unknown when', schema: restart.RestartRequestSchema, value: { scope: 'all', when: 'later' } },
       { name: 'empty outdated sections', schema: SessionOutdatedSchema, value: { sections: [] } },
       { name: 'an unknown section', schema: SessionOutdatedSchema, value: { sections: ['voice'] } },
     ]);

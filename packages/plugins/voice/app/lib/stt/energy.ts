@@ -1,9 +1,8 @@
 /**
  * LOUDNESS MATH shared by everything that decides "is anyone talking?" from raw audio.
  *
- * `near-live.ts` uses it to find the pauses a Parakeet window may start in; `lib/voice-chat/turn-
- * endpointer.ts` uses it to find the pause that ends a spoken turn. One definition of "quiet" means
- * the two can never disagree about the same audio.
+ * `near-live.ts` uses it to find the pauses a Parakeet window may start in. One definition of "quiet"
+ * keeps every caller agreeing about the same audio.
  *
  * Pure and total: no clock, no IO, and every input — empty, reversed bounds, non-finite — has an
  * answer.

@@ -16,15 +16,25 @@ import { LaunchInstructionSectionIdSchema } from './view/ferret-view.ts';
 export const RestartScopeSchema = z.enum(['outdated', 'all', 'ids']);
 
 /**
+ * When a restart happens for a ferret that is working:
+ *
+ *   idle   queued for its next idle moment (the default, so every existing caller is unchanged)
+ *   now    restarted at once, even in the middle of its turn: the turn is interrupted (the conversation resumes)
+ */
+export const RestartWhenSchema = z.enum(['idle', 'now']);
+export type RestartWhen = z.infer<typeof RestartWhenSchema>;
+
+/**
  * `POST /v1/restarts`. `ids` is required for `ids` and refused for the other scopes. `caller` is the
  * ferret that typed the command, when it was a ferret: that ferret is queued rather than restarted in the
- * middle of its own turn.
+ * middle of its own turn, whatever `when` says. `when` defaults to `idle`.
  */
 export const RestartRequestSchema = z
   .strictObject({
     scope: RestartScopeSchema,
     ids: z.array(z.string().min(1)).min(1).max(500).optional(),
     caller: z.string().min(1).optional(),
+    when: RestartWhenSchema.optional(),
   })
   .superRefine((request, context) => {
     if (request.scope === 'ids' && request.ids === undefined)
