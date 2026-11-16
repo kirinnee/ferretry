@@ -57,6 +57,8 @@ export const QueueWaitReasonSchema = z.enum([
   'draft',
   'unreadable',
   'stopped',
+  /** The harness is compacting its context: nothing is typed until it is done (a wait, not "busy"). */
+  'compacting',
 ]);
 export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;
 
@@ -180,6 +182,18 @@ export type QueuedMessageState = z.infer<typeof QueuedMessageStateSchema>;
 export const QueuedMessageIdSchema = z.string().min(1).max(128);
 
 /**
+ * A message's LANE (docs/design/mailbox.md §2.2): decided once, when it is accepted, from its sender, `--kind`,
+ * `--ask`/`--expect-reply` and `--now`, and stored on the `enqueued` line. Delivery order is owner, urgent,
+ * ferretry, action, fyi.
+ */
+export const QueueLaneSchema = z.enum(['owner', 'urgent', 'ferretry', 'action', 'fyi']);
+export type QueueLane = z.infer<typeof QueueLaneSchema>;
+
+/** The lane a message was promoted to once it turned out to answer what its receiver waits on. */
+export const QueuePromotionSchema = z.literal('urgent');
+export type QueuePromotion = z.infer<typeof QueuePromotionSchema>;
+
+/**
  * One queued message, as the FOLD of `queue.jsonl` describes it (the wire view). A line of that file is not this: it is
  * one event that moves a message (`QueueEventSchema`), and the first of them (`enqueued`) carries this whole.
  */
@@ -196,6 +210,10 @@ export const QueuedMessageSchema = z.strictObject({
   interrupt: z.boolean().optional(),
   label: MessageLabelSchema.optional(),
   holdUntil: InstantSchema.optional(),
+  /** Stored at accept and never recomputed; absent only on a line written before lanes (derived once at read). */
+  lane: QueueLaneSchema.optional(),
+  /** Set when an action or fyi answered what the receiver waits on and went as urgent; the row keeps its `lane`. */
+  promoted: QueuePromotionSchema.optional(),
   deliveredAs: z.string().min(1).optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
@@ -252,4 +270,4 @@ export const HypermediaResultSchema = z.strictObject({
 export type HypermediaResult = z.infer<typeof HypermediaResultSchema>;
 
 /** The queue-changed wake-up's data (today's `QUEUE_CHANGED_EVENT`, `control.queue_changed`). */
-export const QueueChangeSchema = z.enum(['enqueued', 'edited', 'moved', 'waiting']);
+export const QueueChangeSchema = z.enum(['enqueued', 'edited', 'moved', 'waiting', 'promoted']);

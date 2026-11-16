@@ -6,6 +6,7 @@ import {
   canMove,
   foldQueue,
   isFinal,
+  laneOf,
   UNROTATED_SEGMENT,
   type QueueEvent,
   QueueEventSchema,
@@ -20,7 +21,14 @@ import {
 const at = (seconds: number): Instant =>
   new Date(Date.UTC(2026, 9, 30, 13, 0, seconds)).toISOString() as Instant as Instant;
 
+/** A message as the FOLD answers it: with the lane its fields decide (a line without one is derived once at read). */
 function message(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
+  const base = messageLine(overrides);
+  return { ...base, lane: base.lane ?? laneOf(base) };
+}
+
+/** A message as a line is written. */
+function messageLine(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
     v: 1,
     id: 'm1',
@@ -39,7 +47,7 @@ const enqueued = (overrides: Partial<QueuedMessage> = {}): QueueEvent => ({
   v: 1,
   kind: 'enqueued',
   at: overrides.enqueuedAt ?? at(0),
-  message: message(overrides),
+  message: messageLine(overrides),
 });
 const moved = (id: string, state: QueuedMessage['state'], seconds: number, failure?: string): QueueEvent => ({
   v: 1,
@@ -299,5 +307,59 @@ describe('a segment of a rotated log', () => {
 
     should(fold.messages.map(held => held.message)).eql(foldQueue(events));
     should(UNROTATED_SEGMENT).eql({ v: 1, kind: 'segment', base: 0, accepted: 0, carried: 0 });
+  });
+});
+
+describe('lanes in the fold', () => {
+  it('should keep the lane a line was written with, whatever its other fields now say', () => {
+    const folded = foldQueue([enqueued({ id: 'a', sender: 'agent', label: 'blocker', lane: 'fyi' })]);
+
+    should(folded[0]?.lane).equal('fyi');
+  });
+
+  it('should derive a lane once for an old line that has none, and fold it as any other', () => {
+    const old = messageLine({ id: 'old', sender: 'agent', label: 'fyi' });
+    should(old).not.have.property('lane');
+
+    const folded = foldQueue([
+      { v: 1, kind: 'enqueued', at: at(0), message: old },
+      { v: 1, kind: 'enqueued', at: at(1), message: messageLine({ id: 'ask', sender: 'agent', replyExpected: true }) },
+      { v: 1, kind: 'enqueued', at: at(2), message: messageLine({ id: 'warden', sender: 'daemon' }) },
+    ]);
+
+    should(folded.map(entry => entry.lane)).eql(['fyi', 'urgent', 'ferretry']);
+    should(QueueEventSchema.parse({ v: 1, kind: 'enqueued', at: at(0), message: old })).have.property(
+      'kind',
+      'enqueued',
+    );
+  });
+
+  it('should derive the lane of an old message carried into a segment', () => {
+    const fold = new SegmentFold({ v: 1, kind: 'segment', base: 10, accepted: 1, carried: 1 }, [
+      { order: 0, message: { ...messageLine({ id: 'c', sender: 'human' }), version: 3 } },
+    ]);
+
+    should(fold.messages[0]?.message.lane).equal('owner');
+  });
+
+  it('should mark a waiting message promoted, once, keeping its lane, and ignore it after it left the queue', () => {
+    const promote = (seconds: number): QueueEvent => ({
+      v: 1,
+      kind: 'promoted',
+      at: at(seconds),
+      id: 'a',
+      to: 'urgent',
+    });
+    const folded = foldQueue([
+      enqueued({ id: 'a', sender: 'agent', label: 'action' }),
+      promote(1),
+      promote(2),
+      enqueued({ id: 'b', sender: 'agent', label: 'fyi' }),
+      moved('b', 'typing', 3),
+      { v: 1, kind: 'promoted', at: at(4), id: 'b', to: 'urgent' },
+    ]);
+
+    should(folded[0]).containEql({ lane: 'action', promoted: 'urgent', version: 2 });
+    should(folded[1]?.promoted).equal(undefined);
   });
 });

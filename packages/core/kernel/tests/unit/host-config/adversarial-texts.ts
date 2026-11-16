@@ -129,15 +129,18 @@ export function adversarialTexts(cap: number): readonly (readonly [label: string
  */
 export const REFUSED_AT_THE_CAP: ReadonlyMap<string, { readonly message: string; readonly crossesAt: number }> =
   new Map([
+    // Nesting is refused by a FIXED depth bound (MAX_NESTING_DEPTH, 256) measured before anything is composed, so each
+    // nesting shape is past it at 8 KiB (thousands deep) and is refused the same way there on every machine: the answer
+    // no longer depends on how much stack the library had left.
     [
       'block lists nested on one line',
-      { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 },
+      { message: 'the file is too deeply nested or too large to read', crossesAt: 8_192 },
     ],
-    ['flow lists nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 }],
-    ['flow mappings nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 32_768 }],
+    ['flow lists nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 8_192 }],
+    ['flow mappings nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 8_192 }],
     ['mappings and lists as keys, beside many anchors', { message: 'a key is not a plain string', crossesAt: 65_536 }],
     ['a !!set of many keys', { message: 'a key is written twice in the same mapping', crossesAt: 16_384 }],
-    ['many unclosed flows', { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 }],
+    ['many unclosed flows', { message: 'the file is too deeply nested or too large to read', crossesAt: 8_192 }],
   ]);
 
 /**

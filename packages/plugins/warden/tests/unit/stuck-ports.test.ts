@@ -97,6 +97,52 @@ describe('B187 the input_stuck port over Conversation', () => {
     should(journal).eql(['fleet.warden_input_stalled', 'fleet.warden_input_unstalled']);
   });
 
+  it('c58-55 the stalled mark is put on the ferret through Ferrets, and taken off again', async () => {
+    const marks: [string, boolean][] = [];
+    const journal: string[] = [];
+    const port = conversationStuckInput(
+      conversation([]).api,
+      noList,
+      { record: type => void journal.push(type) },
+      {
+        markStalled: async (ferret, stalled) => {
+          marks.push([ferret, stalled]);
+          return true;
+        },
+      },
+    );
+
+    await port.markStalled('nelly', 'a message sits unsent');
+    await port.clearStalled('nelly');
+
+    should(marks).eql([
+      ['nelly', true],
+      ['nelly', false],
+    ]);
+    should(journal).eql(['fleet.warden_input_stalled', 'fleet.warden_input_unstalled']);
+  });
+
+  it('c58-55 a refused mark throws to the sweep (which carries on), after the journal said it', async () => {
+    const journal: string[] = [];
+    const port = conversationStuckInput(
+      conversation([]).api,
+      noList,
+      { record: type => void journal.push(type) },
+      {
+        markStalled: async () => {
+          throw new Error('only the Warden marks a ferret stalled');
+        },
+      },
+    );
+
+    const refused = await port.markStalled('nelly', 'r').then(
+      () => undefined,
+      (error: Error) => error,
+    );
+    should(refused?.message).containEql('only the Warden');
+    should(journal).eql(['fleet.warden_input_stalled']);
+  });
+
   it('B187 a refused or unavailable press is refused, and a Conversation without the acts offers no retraction', async () => {
     const refused = conversationStuckInput(
       conversation([], { ok: false, error: { code: 'forbidden', message: 'no' } }).api,

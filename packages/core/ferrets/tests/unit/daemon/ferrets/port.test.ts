@@ -15,12 +15,13 @@ test('through the port, a live ferret keeps its pane and runtime even when a plu
     replaceLiveTerminal: true,
     target: { runtime: 'codex-two', harness: 'codex' },
   };
-  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean }>)(
+  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean; error?: unknown }>)(
     f.id,
     undefined,
     sneaky,
   );
-  expect(answer.ok).toBe(true);
+  // Only the Warden replaces a live pane: for any other consumer it is a refusal, and nothing is resumed.
+  expect(answer).toEqual({ ok: false, error: { code: 'refused', reason: 'only the Warden replaces a live pane' } });
   expect(await f.service.handle(f.id)).toBe(before);
   expect(await f.runner.alive(before)).toBe(true);
   expect(f.runner.starts).toBe(1);
@@ -115,6 +116,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'lastSnapshot',
       'list',
       'managedWorktrees',
+      'markStalled',
       'mayTouch',
       'move',
       'prompt',
