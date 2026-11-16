@@ -42,6 +42,7 @@ function limitOf(
  */
 export function promptOf(
   state: Pick<SessionState, 'turnState' | 'turnPrompt' | 'permissionRequest' | 'harnessDialog'> &
+    Partial<Pick<SessionState, 'turnStateAt'>> &
     Partial<Pick<SessionState, 'status' | 'quota'>>,
   mask: (text: string) => string,
 ): FerretPrompt {
@@ -49,6 +50,7 @@ export function promptOf(
   return {
     ...(limit === undefined ? {} : { limit }),
     ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
+    ...(state.turnStateAt === undefined ? {} : { turnStateAt: state.turnStateAt }),
     ...(state.turnPrompt === undefined ? {} : { prompt: mask(state.turnPrompt) }),
     ...(state.permissionRequest === undefined
       ? {}

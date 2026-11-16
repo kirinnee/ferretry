@@ -54,7 +54,8 @@ export interface PromptRoster {
  *
  * Each wait is an OCCURRENCE: the same prompt asked again after the wait was positively seen to end is a new card,
  * because Asks keeps `(source, entry)` for life. Only a positive reading ends a wait: an empty or failed read is no
- * evidence, so a transient `{}` never closes a card.
+ * evidence, so a transient `{}` never closes a card. Nor does it settle a ferret that was reported changed: its read is
+ * asked again (one per sweep) until a positive reading comes back, or the one event that said it moved is lost.
  */
 export class PromptAsks {
   readonly #failing = new Set<string>();
@@ -92,12 +93,17 @@ export class PromptAsks {
       ...[...this.#failing].filter(id => live.get(id) === 'idle'),
     ]);
     for (const id of this.#failing) if (!candidates.has(id)) this.#failing.delete(id);
+    const reportedIds = new Set(reported);
     for (const id of candidates) {
       try {
         const state = live.get(id);
+        let known = true;
         if (state === undefined || state === 'stopped') await this.#ended(id, state === undefined);
-        else await this.#look(id);
-        this.#failing.delete(id);
+        else known = await this.#look(id);
+        // An unknown reading (`{}`, no turn state) of a ferret that was reported changed or is already owed a retry is no
+        // evidence: it stays eligible, one read per sweep, until a POSITIVE reading settles it. Unsaid: it is not a failure.
+        if (known || !(reportedIds.has(id) || this.#failing.has(id))) this.#failing.delete(id);
+        else this.#failing.add(id);
       } catch (error) {
         this.#fail(id, `conversation could not follow the prompt of ${id}: ${String(error)}`);
       }
@@ -127,10 +133,14 @@ export class PromptAsks {
     this.#failing.add(key);
   }
 
-  async #look(id: string): Promise<void> {
+  /** Reads the pane once: `false` when the reading was unknown (no evidence), `true` when it settled the ferret. */
+  async #look(id: string): Promise<boolean> {
     const reading = readPrompt(await this.read(id));
-    if (reading.kind === 'unknown') return;
-    if (reading.kind === 'ended') return await this.#ended(id, false);
+    if (reading.kind === 'unknown') return false;
+    if (reading.kind === 'ended') {
+      await this.#ended(id, false);
+      return true;
+    }
     const { ref, words } = reading.wait;
     const key = promptKey(ref);
     let record = this.#records?.get(id);
@@ -140,7 +150,7 @@ export class PromptAsks {
       record = { format: 1, key, occurrence: (record?.occurrence ?? 0) + 1, waiting: true };
       await this.#save(id, record);
     }
-    if (record.ask !== undefined) return;
+    if (record.ask !== undefined) return true;
     const entry = EntryIdSchema.parse(promptEntry(id, ref, record.occurrence));
     const raised = await this.asks.raise({
       source: PROMPT_SOURCE,
@@ -156,6 +166,7 @@ export class PromptAsks {
       blocking: true,
     });
     await this.#save(id, { ...record, ask: { ferret: raised.ferret, id: raised.id, entry } });
+    return true;
   }
 
   /** A positive reading that the wait is over (or the ferret is gone): its card is closed by the ref it was raised with. */

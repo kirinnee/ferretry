@@ -6,7 +6,7 @@
  * than importing them; the receipt claims only what the item knows (`historyReceipt`).
  */
 
-import { Check, CheckCheck, Clock } from 'lucide-react';
+import { Ban, Check, CheckCheck, CircleHelp, Clock, Pencil } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { clockOfInstant } from '../../shell.ts';
 import type { LedgerSendRecord } from '../../lib/transcript.ts';
@@ -19,7 +19,17 @@ export interface OwnerWordsReach {
 }
 
 export interface HistoryReceipt {
-  readonly kind: 'read' | 'queued' | 'delivered' | 'answered' | 'sending' | 'failed';
+  readonly kind:
+    | 'read'
+    | 'queued'
+    | 'delivered'
+    | 'answered'
+    | 'sending'
+    | 'failed'
+    | 'cancelled'
+    | 'unconfirmed'
+    | 'typed'
+    | 'held';
   readonly name: string;
   readonly detail: string;
 }
@@ -32,9 +42,18 @@ const historyReceipt = (reached: OwnerWordsReach | undefined): HistoryReceipt =>
       return reached?.answered === true
         ? { kind: 'answered', name: 'Answered', detail: 'typed into the agent; the agent has replied since' }
         : { kind: 'delivered', name: 'Delivered', detail: 'typed into the agent and submitted' };
-    if (send.fate === 'queued') return { kind: 'queued', name: 'Queued', detail: 'on the machine’s queue' };
-    if (send.fate === 'timed_out' || send.fate === 'cancelled')
+    if (send.fate === 'cancelled')
+      return { kind: 'cancelled', name: 'Cancelled', detail: 'taken back before the agent took it' };
+    if (send.fate === 'timed_out')
       return { kind: 'failed', name: 'Not delivered', detail: 'the machine did not deliver it' };
+    if (send.fate === 'unaccounted')
+      return { kind: 'unconfirmed', name: 'Unconfirmed', detail: 'it could not be proven either way' };
+    // A fate still open: what the ledger says of where the words sit, then the queue, then on its way.
+    if (send.typedNotSent === true)
+      return { kind: 'typed', name: 'Typed, not sent', detail: 'sitting in the agent’s composer, not submitted' };
+    if (send.held === true)
+      return { kind: 'held', name: 'Held for revive', detail: 'kept until the session is revived' };
+    if (send.fate === 'queued') return { kind: 'queued', name: 'Queued', detail: 'on the machine’s queue' };
     return { kind: 'sending', name: 'Sending', detail: 'on its way' };
   }
   if (reached?.via === 'transcript')
@@ -45,7 +64,14 @@ const historyReceipt = (reached: OwnerWordsReach | undefined): HistoryReceipt =>
 };
 
 function ReceiptMark({ kind }: { readonly kind: HistoryReceipt['kind'] }) {
-  if (kind === 'sending') return <Clock aria-hidden="true" className="fy-receipt-mark" size={12} />;
+  if (kind === 'sending' || kind === 'held')
+    return <Clock aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
+  if (kind === 'typed')
+    return <Pencil aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
+  if (kind === 'cancelled')
+    return <Ban aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
+  if (kind === 'unconfirmed')
+    return <CircleHelp aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
   if (kind === 'queued') return <Check aria-hidden="true" className="fy-receipt-mark" size={12} />;
   return <CheckCheck aria-hidden="true" className="fy-receipt-mark" data-receipt-mark={kind} size={12} />;
 }

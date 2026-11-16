@@ -783,7 +783,7 @@ animation to turn off); the settings carry no autofocus.
 ### Where it lives
 
 `lib/voice-chat/` — `reply-picker.ts`, `auto-read.ts`, `live-settings.ts`. `hooks/use-auto-read.ts` is the composition point (one timer and a few
-document events), used by the chat page, which hands its `beginSend` / `sent` / `failed` to the composer's `onSending` / `onSent` / `onSendFailed` and the daemon's send ledger (`sends`, never the browser's outbox) as the source of each send's accepted time; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
+document events). In 5.0 it is mounted by Voice's `auto-read` panel in Conversation's `conversation.above-composer` slot (`surfaces.tsx`), which is handed the rows, the turn (`live` = the daemon's own word), what the ferret waits on and the daemon's send ledger (ids and accepted times, never the browser's outbox or a send's words). The slot carries no send callbacks, so `beginSend` / `sent` / `failed` are not called from it: a reply to a message typed in this chat is read as a watched turn (cut by the turn's dated start), and a tap or key still stops a reading. The turn's date is the ferret summary's `stateAt` (`chatSessionOf`); `hooks/use-live-voice-settings.ts` binds the store; `hooks/use-live-voice-settings.ts` binds the store; `components/auto-read-chip.tsx` is the chip;
 `features/settings/auto-read-settings.tsx` is the settings section inside Settings › Voice, `voice-picker.tsx` its voice list, and the styles are in `components/read-aloud.css` (`.fy-auto-read*`, `.fy-ar*`).
 
 ## Pause detection (the end of a spoken turn)
