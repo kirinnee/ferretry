@@ -4,6 +4,7 @@ import {
   type ClockPort,
   defaultQueueCoalesceSettings,
   type Enqueued,
+  laneOf,
   type PeerMessageLabel,
   type QueueCoalesceSettings,
   QueueRefused,
@@ -68,6 +69,13 @@ export class SessionQueueService implements SessionQueue {
         ...(request.replyExpected === true ? { replyExpected: true } : {}),
         ...(request.interrupt === true ? { interrupt: true } : {}),
         ...(label === undefined ? {} : { label }),
+        // Decided here, once, from what the sender said; delivery reads it and never works it out again.
+        lane: laneOf({
+          sender: request.sender,
+          label,
+          replyExpected: request.replyExpected,
+          interrupt: request.interrupt,
+        }),
         ...(holdUntil === undefined ? {} : { holdUntil }),
         enqueuedAt: at,
         state: 'queued',
