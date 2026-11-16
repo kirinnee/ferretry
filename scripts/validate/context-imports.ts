@@ -74,6 +74,8 @@ export function refusal(edge: ImportEdge): string | undefined {
     // The half's own feature list (`daemon/generated/features.ts`, written by the generator from `daemon/features/`).
     if (from === 'daemon' && to === 'generated' && /^\.\/generated\/features\.ts$/.test(edge.specifier))
       return undefined;
+    // The half's own verb list (`cli/generated/verbs.ts`, written by the generator from `cli/verbs/`).
+    if (from === 'cli' && to === 'generated' && /^\.\/generated\/verbs\.ts$/.test(edge.specifier)) return undefined;
     if (from === 'app' && (to === 'kernel-plugin' || to === 'kernel-manifest' || to === 'kernel-contract'))
       return undefined;
     return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
