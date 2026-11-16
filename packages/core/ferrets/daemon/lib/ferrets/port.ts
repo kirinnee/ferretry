@@ -15,6 +15,8 @@ import type { FerretsService } from './service.ts';
 
 /** The plugin that may speak as Ferretry's Warden through this port. */
 const WARDEN_PLUGIN = 'warden';
+/** The plugin that owns runtimes, and so the only one that tells Ferrets one was renamed. */
+const RUNTIMES_PLUGIN = 'runtimes';
 
 /**
  * Which `systemCallsign` prefix each plugin may draw from, by its manifest id: the Warden's investigators, the Learning
@@ -188,6 +190,15 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     compactAt: (ferret, caller) => service.compactAt(ferret, caller),
     setCompactAt: (ferret, value, caller) => service.setCompactAt(ferret, value, caller),
     lastSnapshot: (ferret, caller) => service.lastSnapshot(ferret, caller),
+    runtimeRecords: () => service.runtimeRecords(),
+    repointRuntime: async rename => {
+      // Rewrites ferrets' records: Runtimes' alone, as the rename it is told of is its own.
+      if (consumer !== RUNTIMES_PLUGIN)
+        throw new ApiError(403, 'only the Runtimes plugin re-points ferrets after a runtime rename', 'forbidden');
+      // Read once into a fresh object: only the four names the rename is made of reach the service.
+      const { from, to, fromWrapper, toWrapper } = rename;
+      return await service.repointRuntime({ from, to, fromWrapper, toWrapper });
+    },
     move: async (ferret, runtime, asked, caller): Promise<Result<FerretSummary, MoveFailure>> => {
       const options = { ...asked };
       const stated = LaunchOriginSchema.safeParse(options.origin);

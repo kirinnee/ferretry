@@ -48,6 +48,7 @@ import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 import { SessionConfigSchema } from '../lib/protocol/session.ts';
+import { repointedSessionConfig, sessionRuntimeFacts } from '../lib/ferrets/runtime-repoint.ts';
 
 /** The id a lineage question about a ferret that does not exist yet carries; it names no real session. */
 const UNSTARTED_FERRET = '(not started)';
@@ -248,6 +249,15 @@ export class SessionFiles {
           const { compactAt: _previous, ...kept } = current as Readonly<Record<string, unknown>>;
           return value === undefined ? kept : { ...kept, compactAt: value };
         });
+      },
+      runtimeFacts: async ferret => sessionRuntimeFacts(await this.deps.storage.readConfig(parseSessionId(ferret))),
+      // A rename's re-point (v4's `renameSessions`): read first, outside the lock, so a config that does not name the old
+      // runtime is never rewritten; the write is the storage's locked read-modify-write and re-checks what it reads.
+      repointRuntime: async (ferret, rename) => {
+        const id = parseSessionId(ferret);
+        if (repointedSessionConfig(await this.deps.storage.readConfig(id), rename) === undefined) return false;
+        await this.deps.storage.updateConfig(id, current => repointedSessionConfig(current, rename) ?? current);
+        return true;
       },
       askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
       // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
