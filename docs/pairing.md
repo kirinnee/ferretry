@@ -114,8 +114,9 @@ machine's unlock period (8 hours unless the owner changed it), for every page of
 ends it at once.
 
 **`fy pair --limited`** mints a code whose redemption gives the device `fleet.use` only: it can read the
-fleet and chat with sessions, and terminals, files, the browser, secrets, the warden, pairing and every
-`configure` axis start off. A limited device is widened one capability at a time: by the owner with
+fleet and work with sessions (send, stop, resume, rename, signal, pin), and terminals, files, the browser, secrets,
+the warden, pairing and every `configure` axis start off — so it cannot start, fork, move, hand over, revoke or restart a ferret
+([grants](grants.md#the-ferret-writes-are-fleet-c58-sec3)). A limited device is widened one capability at a time: by the owner with
 `fy device grant <device> <capability> --use` (the admin token, the only ungoverned caller — B4), or from
 any browser's Settings → Devices toggles by a device that holds `pairing.configure` and the capability
 it is giving.

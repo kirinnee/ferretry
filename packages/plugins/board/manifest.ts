@@ -170,7 +170,8 @@ export default definePlugin({
       route('POST /v1/board/cards/:cardId/start', {
         minimum: 'operator',
         caller: 'person',
-        capability: fleetUse,
+        // c58-sec3 r1: starting a card starts a ferret (the card text is its prompt), so it asks what `POST /v1/ferrets` asks.
+        capability: fleetConfigure,
         noStore: true,
         audit: { record: CARD_STARTED_AUDIT },
         guard: cardText,

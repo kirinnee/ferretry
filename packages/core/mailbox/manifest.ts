@@ -19,7 +19,11 @@ const PERSON = { minimum: 'operator', caller: 'person', noStore: true } as const
 /** The body can show a ferret's words, a transcript, a pane or a draft: built inside one `Redaction.read` (§7.3). */
 const SECRETS = { guard: 'secrets' } as const;
 const READ = { audit: { skip: 'read' } } as const;
-/** Reading a ferret's words (its send ledger, queue, handoffs) is `fleet.use` (c58-sec1). */
+/**
+ * Reading a ferret's words (its send ledger, queue, handoffs) is `fleet.use` (c58-sec1), and so is every write on the same
+ * path: a send, an interrupt, a retry, an Enter and a cancel on the ledger, an edit or a cancel in the queue (c58-sec3).
+ * A device that may not send may not reach the send path by another route.
+ */
 const FLEET_USE = { capability: cap('fleet', 'use') } as const;
 const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault text' } } as const;
 
@@ -53,6 +57,7 @@ export default definePlugin({
       // ── send, queue, ledger (session-send) ────────────────────────────────────────────────────
       route('POST /v1/ferrets/:ferretId/send', {
         ...FERRET,
+        ...FLEET_USE,
         audit: { record: MESSAGE_SENT_AUDIT },
         // The one carve-out (today's): a composer_occupied refusal returns the composer's text from the pane (the person's
         // own draft, or a peer's message a queue left stranded there).
@@ -60,16 +65,23 @@ export default definePlugin({
           none: "answers an acknowledgement; no page or vault text, and no pane text except the composer's text a composer_occupied refusal returns, as today",
         },
       }),
-      route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
+      route('POST /v1/ferrets/:ferretId/interrupt', {
+        ...FERRET,
+        ...FLEET_USE,
+        audit: { record: TURN_INTERRUPTED_AUDIT },
+        ...ACK,
+      }),
       route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('PATCH /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
+        ...FLEET_USE,
         audit: { record: QUEUE_EDITED_AUDIT },
         ...SECRETS,
       }),
       route('DELETE /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
+        ...FLEET_USE,
         audit: { record: QUEUE_CANCELLED_AUDIT },
         ...SECRETS,
       }),
@@ -78,16 +90,19 @@ export default definePlugin({
       // A person's alone: a retry is the one act that clears an update-unconfirmed send's mark and types it again.
       route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
         ...PERSON,
+        ...FLEET_USE,
         audit: { record: SEND_RETRIED_AUDIT },
         ...ACK,
       }),
       route('POST /v1/ferrets/:ferretId/sends/:sendId/cancel', {
         ...FERRET,
+        ...FLEET_USE,
         audit: { record: SEND_CANCELLED_AUDIT },
         ...ACK,
       }),
       route('POST /v1/ferrets/:ferretId/sends/:sendId/enter', {
         ...FERRET,
+        ...FLEET_USE,
         audit: { record: SEND_ENTERED_AUDIT },
         ...ACK,
       }),

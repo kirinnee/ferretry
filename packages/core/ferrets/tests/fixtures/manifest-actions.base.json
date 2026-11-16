@@ -1224,6 +1224,10 @@
         "record": "session.opened"
       },
       "caller": "person",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "the fresh ferret summary and the public plan projection; no transcript text"
       },
@@ -1238,6 +1242,10 @@
         "skip": "drives an existing session; its journal records it"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "the handover receipt: ids, phases and accounts, no transcript text"
       },
@@ -1270,6 +1278,10 @@
         "skip": "drives an existing session; its journal records it"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "the handover receipt: ids, phases and accounts, no transcript text"
       },
@@ -1302,6 +1314,10 @@
         "skip": "a read with a body: previews a cross-harness conversion and writes nothing; the move it precedes is audited"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "conversion counts and versions; no transcript text"
       },
@@ -1316,6 +1332,10 @@
         "skip": "drives an existing session; its journal records it"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "the moved ferret view, or the in-flight inventory as titles and trimmed commands"
       },
@@ -1330,6 +1350,10 @@
         "record": "agent.prompted"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "the queued message id and the jobs as pid and trimmed command"
       },
@@ -1433,6 +1457,10 @@
         "record": "session.opened"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "consultsGrants": true,
       "guard": {
         "none": "answers the new ferret id only"
@@ -1538,6 +1566,10 @@
         "skip": "a stop is recorded in the ferret history, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "answers the new state only"
       },
@@ -1552,6 +1584,10 @@
         "skip": "a resume is recorded in the ferret history, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "fleet"
+      },
       "consultsGrants": true,
       "guard": {
         "none": "answers the ferret id only"
@@ -1567,6 +1603,10 @@
         "skip": "a rename records nothing, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "one ferret identity record"
       },
@@ -1581,6 +1621,10 @@
         "record": "ferret.credential-revoked"
       },
       "caller": "person",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "answers whether a token was live, never a token or digest"
       },
@@ -1689,6 +1733,10 @@
         "skip": "a lifecycle signal is recorded in the ferret history, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "answers the ferret state"
       },
@@ -1703,6 +1751,10 @@
         "skip": "a restart is recorded in each ferret history, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "ferret ids and what was restarted or queued"
       },
@@ -1735,6 +1787,10 @@
         "skip": "clearing the restart queue records nothing, as today"
       },
       "caller": "any",
+      "capability": {
+        "axis": "configure",
+        "capability": "fleet"
+      },
       "guard": {
         "none": "how many waiting restarts were cleared"
       },

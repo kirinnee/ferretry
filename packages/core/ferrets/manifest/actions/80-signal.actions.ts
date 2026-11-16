@@ -1,6 +1,6 @@
 /** Lifecycle signals: the signal route, `fy signal` and `fy wait`. */
 import { route, verb } from '@ferretry/kernel/manifest';
-import { fragment } from '../kit.ts';
+import { FLEET_USE, fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
@@ -8,6 +8,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/signal', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_USE,
       noStore: true,
       audit: { skip: 'a lifecycle signal is recorded in the ferret history, as today' },
       guard: { none: 'answers the ferret state' },

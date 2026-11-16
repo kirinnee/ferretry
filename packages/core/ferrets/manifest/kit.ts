@@ -20,6 +20,13 @@ import { route } from '@ferretry/kernel/manifest';
  */
 export const FLEET_USE = { capability: CAPABILITIES.fleet, axis: 'use' } as const;
 
+/**
+ * What a ferret write that changes how the HOST behaves asks of a REMOTE caller (c58-sec3): `fleet.configure`, so a device
+ * the owner narrowed to `--limited` (fleet use only) cannot start, fork, move, hand over, revoke or restart a ferret, and a
+ * governed caller needs the live step-up like every other `configure` act. Like `FLEET_USE` it is a device's gate only.
+ */
+export const FLEET_CONFIGURE = { capability: CAPABILITIES.fleet, axis: 'configure' } as const;
+
 type Descriptor = Parameters<typeof route>[1];
 
 /** What a read route still says: its audit and guard declarations, and a `minimum` or `caller` that differs from the default. */

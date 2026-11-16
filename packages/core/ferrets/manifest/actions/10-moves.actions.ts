@@ -1,7 +1,7 @@
 /** Moves and forks (ferrets-c): fork, handover, conversion preview, move. */
 import { audit } from '@ferretry/core-gate/contract';
 import { route, verb } from '@ferretry/kernel/manifest';
-import { ferretRead, fragment } from '../kit.ts';
+import { ferretRead, FLEET_CONFIGURE, fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
@@ -11,6 +11,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/fork', {
       minimum: 'operator',
       caller: 'person',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: audit('session.opened'),
       guard: { none: 'the fresh ferret summary and the public plan projection; no transcript text' },
@@ -19,6 +20,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/handover', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { skip: 'drives an existing session; its journal records it' },
       guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
@@ -33,6 +35,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/handover/cancel', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { skip: 'drives an existing session; its journal records it' },
       guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
@@ -46,6 +49,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/conversion-preview', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: {
         skip: 'a read with a body: previews a cross-harness conversion and writes nothing; the move it precedes is audited',
@@ -56,6 +60,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/move', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { skip: 'drives an existing session; its journal records it' },
       guard: { none: 'the moved ferret view, or the in-flight inventory as titles and trimmed commands' },
@@ -64,6 +69,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: audit('agent.prompted'),
       guard: { none: 'the queued message id and the jobs as pid and trimmed command' },
