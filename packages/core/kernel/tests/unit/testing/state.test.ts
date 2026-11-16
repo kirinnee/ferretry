@@ -78,6 +78,32 @@ describe('the test host state port: records() and tail() as the real one', () =>
   });
 });
 
+describe('the test host state port: write() replaces a jsonl file whole, as the real one', () => {
+  const Log = defineState({
+    name: 'log',
+    path: 'log.jsonl',
+    store: 'jsonl',
+    format: 1,
+    schema: z.strictObject({ n: z.number() }),
+  });
+  test('the records become the whole file, appends go on after it, and a non-array is refused', async () => {
+    const folder = new MemoryStateFolder();
+    const port = folder.port([Log]);
+    await port.append(Log, { n: 1 });
+    await port.append(Log, { n: 2 });
+    const before = await port.version(Log);
+
+    await port.write(Log, [{ n: 7 }] as never);
+    await port.append(Log, { n: 8 });
+
+    const seen: unknown[] = [];
+    for await (const record of port.lines(Log)) seen.push(record);
+    expect(seen).toEqual([{ n: 7 }, { n: 8 }]);
+    expect((await port.version(Log))?.etag).not.toBe(before?.etag);
+    await expect(port.write(Log, { n: 1 } as never)).rejects.toBeInstanceOf(TypeError);
+  });
+});
+
 describe('the test host state port: lines() skips, update() declines, version()', () => {
   const Log = defineState({
     name: 'log',
