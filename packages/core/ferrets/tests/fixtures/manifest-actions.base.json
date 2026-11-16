@@ -1414,6 +1414,22 @@
     },
     {
       "audit": {
+        "skip": "a read of the journal records nothing"
+      },
+      "caller": "any",
+      "capability": {
+        "axis": "use",
+        "capability": "fleet"
+      },
+      "guard": "secrets",
+      "key": "GET /v1/ferrets/:ferretId/events",
+      "method": "GET",
+      "minimum": "operator",
+      "noStore": true,
+      "path": "/v1/ferrets/:ferretId/events"
+    },
+    {
+      "audit": {
         "record": "session.opened"
       },
       "caller": "any",
