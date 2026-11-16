@@ -18,7 +18,9 @@ import {
   type NewTabChoice,
   newTabChoices,
   panelKey,
+  panelPlaced,
   phoneTabs,
+  revealPanel,
   tabOrChat,
 } from './ferret-workspace-model.ts';
 import { phoneChipId, PhoneTabRow } from './phone-tab-row.tsx';
@@ -36,19 +38,19 @@ export interface FerretWorkspaceProps {
   readonly canControl?: boolean;
 }
 
-/** Beside the chat every panel is already on screen: asking for one changes nothing. */
-const ALREADY_SHOWN = (): void => undefined;
-
 export function FerretWorkspace({ daemon, subject, chat, canControl = true }: FerretWorkspaceProps) {
   const panels = useSlotPanels(SIDE);
   const phone = useLayoutMode() === 'drawer';
+  const reveal = useCallback((panelId: string): void => revealPanel(panels, panelId), [panels]);
+  const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
   if (!phone || panels.length === 0)
     return (
       <FerretWorkspaceActionsProvider
         canControl={canControl}
         daemon={daemon}
         ferret={subject}
-        showPanel={ALREADY_SHOWN}
+        showPanel={reveal}
+        shows={shows}
       >
         <div className="flex min-h-0 min-w-0 flex-1">
           {chat}
@@ -83,9 +85,16 @@ function PhoneWorkspace({ daemon, subject, chat, canControl = true }: FerretWork
     },
     [panels],
   );
+  const shows = useCallback((panelId: string): boolean => panelPlaced(panels, panelId), [panels]);
 
   return (
-    <FerretWorkspaceActionsProvider canControl={canControl} daemon={daemon} ferret={subject} showPanel={showPanel}>
+    <FerretWorkspaceActionsProvider
+      canControl={canControl}
+      daemon={daemon}
+      ferret={subject}
+      showPanel={showPanel}
+      shows={shows}
+    >
       <PhoneTabRow
         active={active}
         choices={newTabChoices(panels)}

@@ -173,7 +173,12 @@ const settle = async (): Promise<void> => {
 };
 
 /** d1 runs Asker; d2 (the locked one) runs it too; d3 has Asker turned off. */
-function setup(made: PasskeyProvision) {
+function setup(
+  made: PasskeyProvision,
+  down: readonly string[] = [],
+  slow: readonly string[] = [],
+  bad: { readonly unreadable?: readonly string[]; readonly refused?: readonly string[] } = {},
+) {
   const accessApp = provideToShell(implementApp(accessManifest, { build: () => ({}) }), { passkey: () => made });
   const surfaces: SurfaceEntry[] = [...CORE, entry(askManifest, askerApp), entry(accessManifest, accessApp)];
   const transports = new Map<string, FakeTransport>();
@@ -182,6 +187,11 @@ function setup(made: PasskeyProvision) {
     if (known !== undefined) return known;
     let previews = 0;
     const made = new FakeTransport((request: TransportRequest) => {
+      // A machine whose plugin list cannot be read (connected, inventory unreadable), or that refused this device (4403).
+      if (request.path === '/v1/plugins' && bad.refused?.includes(daemon) === true)
+        throw Object.assign(new Error('device refused'), { name: 'RelaySessionError', code: 4403 });
+      if (request.path === '/v1/plugins' && bad.unreadable?.includes(daemon) === true)
+        return json({ error: 'broken', code: 'internal' }, 500);
       if (request.path === '/v1/plugins')
         return json(inventoryOf(surfaces, daemon === 'd3' ? { asker: { on: false } } : {}));
       if (request.path === '/v1/health') return json({ protocol: 1, version: '5.0.0' });
@@ -214,7 +224,12 @@ function setup(made: PasskeyProvision) {
     appVersion: '5.0.0',
     surfaces,
     daemons,
-    connect: async paired => transportOf(paired.daemon),
+    connect: async paired => {
+      if (down.includes(paired.daemon)) throw new Error('unreachable');
+      // Never answers: the machine stays "connecting".
+      if (slow.includes(paired.daemon)) await new Promise<never>(() => undefined);
+      return transportOf(paired.daemon);
+    },
     passkey: () => registered.passkey,
     daemonless: { views: views.views, location: () => '' },
   });
@@ -498,6 +513,215 @@ describe('S10 a daemon-less screen may ask for a machine', () => {
     await settle();
     await click(view, '[data-chooser-cancel]');
     expect(answers.chosen).toEqual([undefined]);
+    await view.unmount();
+  });
+});
+
+describe('S10 answerAloneWhenOne: the shell answers alone only when exactly one machine qualifies', () => {
+  const ALONE = { answerAloneWhenOne: true } as const;
+  const pairOnly = (daemons: DaemonList, keep: readonly string[]): void => {
+    for (const paired of daemons.snapshot().daemons) if (!keep.includes(paired.daemon)) daemons.remove(paired.daemon);
+  };
+  /** Asks, lets the shell settle, and reports what the question holds NOW: `'pending'` while it waits on a click. */
+  const ask = async (options: Parameters<NonNullable<typeof chooseFn>>[1]) => {
+    const state: { value: ChosenDaemon | undefined | 'pending' } = { value: 'pending' };
+    await interact(() => {
+      void chooseFn?.('Install on which machine?', options).then(answer => {
+        state.value = answer;
+      });
+    });
+    await settle();
+    return state;
+  };
+
+  /** Opens every machine's connection (a first look does) and lets each answer, as a page that has been up a while. */
+  const warm = async (view: { container: HTMLElement }): Promise<void> => {
+    await ask(undefined);
+    await click(view, '[data-chooser-cancel]');
+  };
+
+  test('ONE machine paired at all, and it qualifies, is answered at once, with no picker', async () => {
+    go('/ask');
+    const { app, daemons, transportOf, runtime } = setup(provision().made);
+    pairOnly(daemons, ['d1']);
+    const view = await mount(app);
+    await settle();
+    await warm(view);
+    const chosen = (await ask(ALONE)).value as ChosenDaemon;
+    expect(view.container.querySelector('[data-chooser]')).toBeNull();
+    expect(chosen.daemon).toBe('d1');
+    expect(chosen.machine).toBe('laptop');
+    // The answer carries THAT machine's own client, and it is the machine on screen.
+    await chosen.client.call('GET /v1/asker/preview');
+    expect(transportOf('d1').paths()).toContain('GET /v1/asker/preview');
+    expect(runtime.passkeyOnScreen.chosen()).toBe('d1');
+    await view.unmount();
+  });
+
+  test('the one paired machine need not be the first, nor the one the page started on', async () => {
+    go('/ask');
+    const { app, daemons, transportOf } = setup(provision().made);
+    pairOnly(daemons, ['d2']);
+    const view = await mount(app);
+    await settle();
+    await warm(view);
+    const chosen = (await ask(ALONE)).value as ChosenDaemon;
+    expect(chosen.daemon).toBe('d2');
+    await chosen.client.call('GET /v1/asker/preview');
+    expect(transportOf('d2').paths()).toContain('GET /v1/asker/preview');
+    expect(transportOf('d1').paths()).not.toContain('GET /v1/asker/preview');
+    await view.unmount();
+  });
+
+  /** Two machines paired, the second in a state that is not "qualifying": the person is still ASKED (v4 counted both). */
+  const pairedPair = async (
+    options: Parameters<typeof setup>[1],
+    slow: Parameters<typeof setup>[2],
+    bad: Parameters<typeof setup>[3],
+    keep: readonly string[],
+  ) => {
+    go('/ask');
+    const parts = setup(provision().made, options, slow, bad);
+    pairOnly(parts.daemons, keep);
+    const view = await mount(parts.app);
+    await settle();
+    await warm(view);
+    const asked = await ask(ALONE);
+    return { view, asked };
+  };
+
+  test('two paired and the second UNREADABLE (plugin list failed): the picker, not the first machine alone', async () => {
+    const { view, asked } = await pairedPair([], [], { unreadable: ['d2'] }, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-chooser-machine="d2"]')).toBeNull();
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('two paired and the second UNREACHABLE: the picker', async () => {
+    const { view, asked } = await pairedPair(['d2'], [], {}, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('two paired and the second REFUSED this device: the picker', async () => {
+    const { view, asked } = await pairedPair([], [], { refused: ['d2'] }, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('two paired and the second has the plugin OFF (a read verdict): the picker', async () => {
+    const { view, asked } = await pairedPair([], [], {}, ['d1', 'd3']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-chooser-machine="d3"]')).toBeNull();
+    await click(view, '[data-chooser-machine="d1"]');
+    expect((asked.value as ChosenDaemon).daemon).toBe('d1');
+    await view.unmount();
+  });
+
+  test('two paired and the second still CONNECTING: the picker', async () => {
+    const { view, asked } = await pairedPair([], ['d2'], {}, ['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    await click(view, '[data-chooser-machine="d1"]');
+    expect((asked.value as ChosenDaemon).daemon).toBe('d1');
+    await view.unmount();
+  });
+
+  test('one paired machine that does not qualify (down, plugin off, connecting, unreadable) is never the one', async () => {
+    const lone = async (
+      options: Parameters<typeof setup>[1],
+      slow: Parameters<typeof setup>[2],
+      bad: Parameters<typeof setup>[3],
+      keep: string,
+    ) => {
+      go('/ask');
+      const parts = setup(provision().made, options, slow, bad);
+      pairOnly(parts.daemons, [keep]);
+      const view = await mount(parts.app);
+      await settle();
+      await warm(view);
+      const asked = await ask(ALONE);
+      expect(asked.value).toBe('pending');
+      expect(view.container.querySelector('[data-chooser-none]')).not.toBeNull();
+      await click(view, '[data-chooser-cancel]');
+      expect(asked.value).toBeUndefined();
+      await view.unmount();
+    };
+    await lone(['d1'], [], {}, 'd1');
+    await lone([], [], {}, 'd3');
+    await lone([], ['d1'], {}, 'd1');
+    await lone([], [], { unreadable: ['d1'] }, 'd1');
+    await lone([], [], { refused: ['d1'] }, 'd1');
+  });
+
+  test('two qualifying machines still ask', async () => {
+    go('/ask');
+    const { app } = setup(provision().made);
+    const view = await mount(app);
+    await settle();
+    await warm(view);
+    const asked = await ask(ALONE);
+    const listed = [...view.container.querySelectorAll('[data-chooser-machine]')].map(node =>
+      node.getAttribute('data-chooser-machine'),
+    );
+    expect(listed.toSorted()).toEqual(['d1', 'd2']);
+    expect(asked.value).toBe('pending');
+    await click(view, '[data-chooser-machine="d2"]');
+    expect((asked.value as ChosenDaemon).daemon).toBe('d2');
+    await view.unmount();
+  });
+
+  test('without the option, even one qualifying machine asks (every other caller is unchanged)', async () => {
+    go('/ask');
+    const { app, daemons } = setup(provision().made);
+    pairOnly(daemons, ['d1']);
+    const view = await mount(app);
+    await settle();
+    await warm(view);
+    const asked = await ask(undefined);
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(asked.value).toBe('pending');
+    // An explicit false is the same as absent.
+    await click(view, '[data-chooser-cancel]');
+    const explicit = await ask({ answerAloneWhenOne: false });
+    expect(view.container.querySelector('[data-chooser-machine="d1"]')).not.toBeNull();
+    expect(explicit.value).toBe('pending');
+    await click(view, '[data-chooser-cancel]');
+    await view.unmount();
+  });
+
+  test('an alone answer cancels a question still open, and its override goes with the screen', async () => {
+    go('/ask');
+    const { app, daemons, runtime } = setup(provision().made);
+    pairOnly(daemons, ['d1', 'd2']);
+    const view = await mount(app);
+    await settle();
+    await warm(view);
+    let first: Promise<unknown> | undefined;
+    await interact(() => {
+      first = chooseFn?.('First?');
+    });
+    await settle();
+    await interact(() => {
+      daemons.remove('d2');
+    });
+    const chosen = (await ask(ALONE)).value as ChosenDaemon;
+    expect(await first).toBeUndefined();
+    expect(chosen.daemon).toBe('d1');
+    expect(view.container.querySelector('[data-chooser]')).toBeNull();
+    await interact(() => {
+      window.history.pushState({}, '', '/other');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await settle();
+    expect(runtime.passkeyOnScreen.chosen()).toBeUndefined();
     await view.unmount();
   });
 });
