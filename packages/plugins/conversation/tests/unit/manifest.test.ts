@@ -46,7 +46,7 @@ describe('conversation manifest', () => {
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
     }
   });
-  test('takes the question and prompt sources, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments, ask.delivery, ask.owner-chat and reference.catalog for the : and @ menus; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
+  test('takes the question and prompt sources, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments, ask.delivery, ask.owner-chat, reference.catalog for the : and @ menus and mailbox.host; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
       'ask.sources',
       'ask.sources',
@@ -59,7 +59,9 @@ describe('conversation manifest', () => {
       'ask.owner-chat',
       'reference.catalog',
       'reference.catalog',
+      'mailbox.host',
     ]);
+    expect(manifest.hooks.takes[11]?.key).toBe('ferret');
     expect(manifest.hooks.takes[9]?.key).toBe(':');
     expect(manifest.hooks.takes[10]?.key).toBe('@');
     expect(manifest.hooks.takes[0]?.key).toBe('question');

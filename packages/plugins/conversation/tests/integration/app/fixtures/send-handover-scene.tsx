@@ -30,7 +30,7 @@
  * a tree that renders both copies.
  */
 
-import { queuedMessageInstruction, turnFileInstruction } from '../../../../contract/index.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { HandoffSourceProvider } from '../../../../app/chat/handoff-message.tsx';

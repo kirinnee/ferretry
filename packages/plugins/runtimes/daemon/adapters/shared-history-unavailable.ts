@@ -1,14 +1,15 @@
 /**
- * The shared-history pooling this host does not have yet.
+ * A Runtimes apply does not pool history.
  *
- * The pooling is Conversation's. Until it is wired, every host that applies a plan carrying history requests supplies
- * THIS pooling: a preview leaves the request out of the plan and an apply skips it and says why. A provisioner given no
- * pooling at all refuses such a plan, so a host never silently plans a move it cannot make.
+ * The shared history pool is each harness plugin's own (docs/design/shared-history.md): Claude Code and Codex link every
+ * history entry of a ferret's home to their one pool when the ferret starts. So a plan carrying a history request has it
+ * left out of a preview and skipped, with the reason, by an apply; nothing a Runtimes apply writes is the pool. A
+ * provisioner given no pooling at all refuses such a plan, so a host never silently plans a move it cannot make.
  */
 import type { SharedHistoryPooling } from './ports.ts';
 
 const SHARED_HISTORY_UNAVAILABLE =
-  'pooling conversation history across runtimes is not available from the Runtimes plugin yet, so it was skipped';
+  'shared history is linked by each harness when a ferret starts, not by a Runtimes apply, so this request was skipped';
 
 export const unavailableSharedHistory: SharedHistoryPooling = {
   preview: async () => await Promise.reject(new Error(SHARED_HISTORY_UNAVAILABLE)),

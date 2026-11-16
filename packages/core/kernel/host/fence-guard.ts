@@ -12,7 +12,7 @@ import {
   type TruncationWatcher,
 } from './fence-index.ts';
 import { IDENTITY_FILE } from './identity.ts';
-import { INTERNAL_ROOT_FOLDERS } from './internal-roots.ts';
+import { INTERNAL_ROOT_FOLDERS } from '../contract/internal-roots.ts';
 
 /**
  * The fence's own guard (§7.7, §9.3, S40–S49), copied from today's state-home guard

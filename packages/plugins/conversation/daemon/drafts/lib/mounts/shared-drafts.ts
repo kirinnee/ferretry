@@ -1,9 +1,5 @@
-import {
-  type AgendaId,
-  AgendaIdSchema,
-  SHARED_DRAFT_ERROR_CODES,
-  SharedDraftEditSchema,
-} from '../../../seams/protocol.ts';
+import { type AgendaId, AgendaIdSchema } from '@ferretry/core-mailbox/contract';
+import { SHARED_DRAFT_ERROR_CODES, SharedDraftEditSchema } from '../../../seams/protocol.ts';
 import { type ApiActor, parseActor } from '../../../seams/api.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';

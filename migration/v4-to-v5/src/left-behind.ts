@@ -11,7 +11,7 @@ export const LEFT_BEHIND: readonly string[] = text
   .map(line => line.trim())
   .filter(line => line !== '');
 
-/** The plain-language block: the six items, then where v4's home stays and how to look back at it. */
+/** The plain-language block: the items, then where v4's home stays and how to look back at it. */
 export function leftBehindLines(v4Home: string): readonly string[] {
   return [
     'Left behind (not carried to v5, by the owner’s choice):',

@@ -1,4 +1,4 @@
-import type { PeerEnvelope } from '../../contract/index.ts';
+import type { PeerEnvelope } from '@ferretry/core-mailbox/contract';
 import { readUserMessage, unwrapPastedContent } from './user-message.ts';
 
 /**

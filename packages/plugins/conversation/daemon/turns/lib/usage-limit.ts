@@ -1,4 +1,4 @@
-import type { HarnessDialog, SessionState, SessionTurnState } from '../../seams/protocol.ts';
+import type { HarnessDialog, SessionState, SessionTurnState } from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent } from '../../seams/transcript-types.ts';
 
 /**

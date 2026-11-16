@@ -4,7 +4,7 @@ import {
   peerEnvelopePreamble,
   queuedMessageInstruction,
   turnFileInstruction,
-} from '../../../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 import { peerFrom } from '../../../../app/chat/peer-message.ts';
 import { readUserMessage, unwrapPastedContent } from '../../../../app/chat/user-message.ts';
 

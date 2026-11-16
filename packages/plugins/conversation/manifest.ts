@@ -26,6 +26,8 @@ import {
   HYPERMEDIA_CHANGED_AUDIT,
   LINKS_ADOPTED_AUDIT,
   LinkKept,
+  MAILBOX_HOST_KEY,
+  MailboxHosts,
   MESSAGE_SENT_AUDIT,
   MessageBeforeSend,
   MessageSent,
@@ -556,13 +558,16 @@ export default definePlugin({
       // take a plugin's hook, so Ferrets cannot provide them).
       { hook: ReferenceCatalog, key: ':' },
       { hook: ReferenceCatalog, key: '@' },
+      // The queue log and send ledger the Mailbox runs over: the files stay in this plugin's folder (the one provider of this
+      // security-path hook, `takers: ['conversation']`).
+      { hook: MailboxHosts, key: MAILBOX_HOST_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },
 
-  // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
-  // names for an attachment, once (§7.7). Transcripts are read only through the harness's `TranscriptReader`.
+  // Conversation reads the owner's history through `harness-history` (links); copy-on-link is the harness plugin's own act
+  // (`FerretsApi.importConversation`). Transcripts are read only through the harness's `TranscriptReader`.
   doctor: ['conversation-store', 'conversation-search-index'],
   workers: ['pdf-decrypt'],
-  permissions: { roots: ['harness-history', 'imports'] },
+  permissions: { roots: ['harness-history'] },
 });

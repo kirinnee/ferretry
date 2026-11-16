@@ -6,7 +6,7 @@
  * command (`Authorization: Bearer v`, one word to the write rule's boundary) was shown in full by the Resolved line
  * once it split the command at its blanks. Fake values only.
  *
- * Per-test limits (testing standard): each test builds a tiny model, about 20 ms; the 256 KiB test names its own.
+ * How it grows at 256 KiB is tests/perf/daemon/net-command-value.test.ts.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -15,7 +15,6 @@ import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { type CatalogFacts, componentCatalog } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { ratioOf } from '@ferretry/std/testing/linear-time';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const FACTS: CatalogFacts = {
@@ -145,28 +144,4 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     should(seen.resolved).equal('npx -y @scope/pkg');
     should(WITHHELD).equal('withheld');
   });
-
-  // One test per shape. The timeout is the shape's local time (words 1.5 s, pointers 3.6 s, header pairs 1.8 s) with at
-  // least four times the headroom; it is a margin for a loaded runner, not a speed claim.
-  const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
-    ['a long command of words', size => `srv ${'ab '.repeat(size / 3)}`, 15_000],
-    ['a long command of pointers', size => `env ${'K=$K '.repeat(size / 5)}srv`, 20_000],
-    ['a long command of header pairs', size => `curl ${`-H "X: ${V}" `.repeat(size / 24)}`, 15_000],
-  ];
-  for (const [name, make, timeoutMs] of shapes) {
-    it(
-      `should stay linear to 256 KiB on a long command of blanks and words and of pointers: ${name}`,
-      () => {
-        // Act: the ratio of 256 to 128 KiB stays under 3 (a quadratic rule would give about 4).
-        const ratio = ratioOf(
-          () => commandWithheld(make(256 * 1024)),
-          () => commandWithheld(make(128 * 1024)),
-        );
-
-        // Assert
-        should(ratio).be.below(3, name);
-      },
-      timeoutMs,
-    );
-  }
 });

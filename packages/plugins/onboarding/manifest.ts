@@ -67,6 +67,16 @@ export default definePlugin({
           { flag: '--json', help: 'print the answer as JSON' },
         ],
       }),
+      // The question-by-question machine setup, as v4's `daemon setup`: it drives the routes Runtimes serves to the app.
+      verb('daemon setup', {
+        summary: 'set this machine up: install the tools, then choose whether to use your Claude Code and Codex',
+        args: [],
+        options: [
+          { flag: '--dry-run', help: 'show what would change and change nothing' },
+          { flag: '-y, --yes', help: 'accepted for scripts; setup still asks its questions, so it needs a terminal' },
+          { flag: '--json', help: 'print the change and its outcome as JSON' },
+        ],
+      }),
       verb('onboard status', {
         summary: 'the first-run steps and where each stands',
         args: [],

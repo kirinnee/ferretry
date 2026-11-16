@@ -1,7 +1,7 @@
 // This import MUST come first: it captures Bun's WebSocket and WebCrypto before happy-dom replaces the globals.
 import { NativeResponse, nativeSetTimeout } from './native-socket.ts';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import type { EventDef } from '@ferretry/kernel/contract';
+import { CORE_IDS as KERNEL_CORE_IDS, type EventDef } from '@ferretry/kernel/contract';
 import { type StartedDaemon, startDaemon } from '../../../../../scripts/test/two-release/daemon.ts';
 import { builds, hits, hitTotal, resetCounters } from '../../../../../scripts/test/two-release/hits.ts';
 import { buildReleases, type Release } from '../../../../../scripts/test/two-release/releases.ts';
@@ -35,7 +35,7 @@ import { type AppSession, openApp, turnUnlockOffAtTheMachine } from './session.t
  */
 
 /** The packages every release carries unchanged: the core pieces, Access, and Connections (its direct carrier serves the paired session). */
-const CORE_IDS = ['kernel', 'gate', 'asks', 'vault', 'ferrets', 'access', 'connections'] as const;
+const CORE_IDS = [...KERNEL_CORE_IDS, 'access', 'connections'] as const;
 const FIXTURE_IDS = ['alpha', 'beta', 'gamma', 'delta'] as const;
 const OLDER = '4.9.0';
 const NEWER = '5.1.0';

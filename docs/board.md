@@ -154,7 +154,7 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other card rules. Card only if the project's board is on (`fy board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`). Public=the owner's asks ("everything I asked?"): top-level, never `--private`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: `fy card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy card patch <id> --file f`. `fy card move <id> <lane> --reason "<why>"`. Blocked: `fy card depend`/`block`. Owner's bug: `fy card reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
@@ -237,11 +237,11 @@ sub-ferret, it never locks one out it cannot find.
 
 A sub-ferret's system prompt drops the Board rules above and the Notify rule and the Agenda mode section, and
 carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` launch section; the daemon writes
-`FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
+`FY_SUB_FERRET=1` from the session's `role` (a helper) at every launch, so a stored value cannot switch it off):
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
-With a card: each step, `fy task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy task claim <id>`, don't ask. No card? Make none.
+With a card: each step, `fy card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy card patch <id> --file f`; `fy card note` adds history. Link your PR `fy card link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy card claim <id>`, don't ask. No card? Make none.
 ```
 
 Nudges about a sub-ferret's card — the turn that closes without a PR, a reopen, a go-ahead — go to its **lead** instead
@@ -1469,7 +1469,7 @@ on** ([The board is opt-in](#the-board-is-opt-in)). If the turn did **mutating w
 card in an open lane**, the ferret gets one queued message:
 
 ```text
-You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"
+You changed code this turn without a card. Create one (fy card new …) or record why not: fy card skip "<why>"
 ```
 
 - **Mutating work** is the turn's own tool calls: an edit tool (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`,
@@ -1504,7 +1504,7 @@ agenda carries that card's open ask, the ferret gets one queued message per item
   start time is unknown sends no message.
 - Each nudge is journalled on the session as `board.gate-nudged`, with the items it named and their cards.
 
-## `fy task skip "<why>"`
+## `fy card skip "<why>"`
 
 Records that this session's work needs no card — chit-chat, or the owner said not to track it — as
 `config.boardSkip` (`{ reason, at }`) on the calling session, through `POST /v1/board/skip`. Only a ferret records

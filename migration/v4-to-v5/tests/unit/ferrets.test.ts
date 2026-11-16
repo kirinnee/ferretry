@@ -79,9 +79,7 @@ test('keeps live and archived ids, parent, runtime, resume id and D15 pane handl
   expect(child.projectId).toBe(RUNTIME);
   const lead = await record('lead');
   expect(lead.transcript?.home).toBe(join(f.to, 'state/claude-code/agent-homes', RUNTIME));
-  expect(lead.transcript?.file).toBe(
-    join(f.to, 'state/claude-code/agent-homes/_shared/projects/project/resume1.jsonl'),
-  );
+  expect(lead.transcript?.file).toBe(join(f.to, 'state/claude-code/history-pool/projects/project/resume1.jsonl'));
   const tokens = FerretTokensSchema.parse(JSON.parse(await readFile(join(f.to, 'state/ferrets/tokens.json'), 'utf8')));
   expect(tokens.tokens).toHaveLength(1);
   expect(String(tokens.tokens[0]?.ferret)).toBe('lead');
@@ -153,7 +151,7 @@ test('rewrites Codex home and pooled rollout paths to files the opaque copy crea
   expect((await harnessHomesStep.run(f.ctx())).status).toBe('converted');
   const rewritten = (await record('f1')).transcript;
   expect(rewritten?.home).toBe(join(f.to, 'state/codex/agent-homes', RUNTIME));
-  expect(rewritten?.file).toBe(join(f.to, 'state/codex/agent-homes/_shared/sessions/year/rollout.jsonl'));
+  expect(rewritten?.file).toBe(join(f.to, 'state/codex/history-pool/sessions/year/rollout.jsonl'));
   expect(rewritten?.baseline).toEqual(['existing-conversation']);
   expect(rewritten?.correlationToken).toBe('FAKE-CORRELATION');
   expect(await stat(rewritten!.home)).toBeDefined();

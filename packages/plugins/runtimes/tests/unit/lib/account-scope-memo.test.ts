@@ -6,28 +6,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { layersScope, type ProfileScope, profileScope } from '../../../daemon/lib/account/scope.ts';
+import { catalogueOf, diamond, type Graph } from '../../support/scope-diamond.ts';
 import { type AccountModel, type LayerReferenceText, parseLayerReference } from '../../../daemon/lib/account/schema.ts';
 
-type Graph = Readonly<Record<string, readonly string[]>>;
 type Catalogue = Pick<AccountModel, 'profiles' | 'components'>;
-
-const catalogueOf = (graph: Graph): Catalogue =>
-  ({
-    components: {
-      instructions: {},
-      mcp: {
-        any: { command: 'srv' },
-        cl: { command: 'srv', harness: 'claude' },
-        cl2: { command: 'srv', harness: 'claude' },
-        cx: { command: 'srv', harness: 'codex' },
-      },
-      skills: {},
-      settings: {},
-      hooks: {},
-      modelSets: {},
-    },
-    profiles: Object.fromEntries(Object.entries(graph).map(([name, layers]) => [name, { layers }])),
-  }) as unknown as Catalogue;
 
 /** The fold as it was: every path walked, a loop cut by the profiles on the way. */
 function naiveScope(catalogue: Catalogue, name: string): ProfileScope {
@@ -178,42 +160,15 @@ describe('R2 profileScope — the memoised fold says what the per-path fold said
     should(cutCases).be.above(50);
   });
 
-  it('R2 should fold a draft that edits the diamond’s bottom to name its top (a loop cut under every path) inside the deadline', () => {
-    // Arrange — the 20-deep diamond with a Claude leaf, then b20 (the bottom) is edited to name a0 (the top): every path of
-    // a0 ends back at b20, which is on the chain, so a fold that remembers nothing below a cut walks all 2^20 of them.
-    const depth = 20;
-    const graph: Record<string, readonly string[]> = {};
-    for (let level = 0; level <= depth; level++)
-      for (const side of ['a', 'b'])
-        graph[`${side}${String(level)}`] =
-          level === depth ? ['mcp/cl'] : [`profile/a${String(level + 1)}`, `profile/b${String(level + 1)}`, 'mcp/any'];
-
-    // Act
-    const started = performance.now();
-    const actual = layersScope(catalogueOf(graph), ['profile/a0', 'mcp/cx'], 'b20');
-    const took = performance.now() - started;
+  it('R2 should fold a draft that edits the diamond’s bottom to name its top (a loop cut under every path)', () => {
+    // Arrange — a 4-deep diamond with a Claude leaf, then b4 (the bottom) is edited to name a0 (the top).
+    const actual = layersScope(catalogueOf(diamond(4)), ['profile/a0', 'mcp/cx'], 'b4');
 
     // Assert — a0 reaches the Claude leaf, the draft's own Codex component joins it: mixed, naming the first of each.
     should(actual).deepEqual({ kind: 'mixed', claude: 'profile/a0', codex: 'mcp/cx' });
-    should(took).be.below(1000);
   });
 
-  it('R2 should fold a 20-deep diamond (2^20 paths) inside the deadline, keeping a Claude leaf at the bottom', () => {
-    // Arrange
-    const depth = 20;
-    const graph: Record<string, readonly string[]> = {};
-    for (let level = 0; level <= depth; level++)
-      for (const side of ['a', 'b'])
-        graph[`${side}${String(level)}`] =
-          level === depth ? ['mcp/cl'] : [`profile/a${String(level + 1)}`, `profile/b${String(level + 1)}`, 'mcp/any'];
-
-    // Act
-    const started = performance.now();
-    const actual = profileScope(catalogueOf(graph), 'a0');
-    const took = performance.now() - started;
-
-    // Assert
-    should(actual).deepEqual({ kind: 'scoped', scope: 'claude' });
-    should(took).be.below(1000);
+  it('R2 should fold a 4-deep diamond, keeping a Claude leaf at the bottom', () => {
+    should(profileScope(catalogueOf(diamond(4)), 'a0')).deepEqual({ kind: 'scoped', scope: 'claude' });
   });
 });

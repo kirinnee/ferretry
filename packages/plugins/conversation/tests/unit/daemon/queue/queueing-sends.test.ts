@@ -1,15 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { type QueueRequest } from '../../../../daemon/queue/lib/service.ts';
 import { QueueingSends } from '../../../../daemon/queue/lib/queueing-sends.ts';
 import { type SendMessageRequest, type SendOutcome } from '../../../../daemon/delivery/lib/service.ts';
-import {
-  type SendRecord,
-  SendRefused,
-  type SendTarget,
-  SendUnavailable,
-} from '../../../../daemon/delivery/lib/types.ts';
+import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
+import { SendRefused, type SendTarget, SendUnavailable } from '@ferretry/core-mailbox/contract';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 import { at } from '../../../support/instant.ts';
 

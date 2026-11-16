@@ -1,6 +1,7 @@
 import { ferretOf } from '@ferretry/core-gate/contract';
 import type { Question } from '../../../../contract/index.ts';
-import { AnswerSessionRequestSchema, FY_REQUEST_ID_HEADER, type SessionView } from '../../../seams/protocol.ts';
+import { FY_REQUEST_ID_HEADER, type SessionView } from '@ferretry/core-mailbox/contract';
+import { AnswerSessionRequestSchema } from '../../../seams/protocol.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
 import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';

@@ -27,6 +27,7 @@ import type {
   RunnerHandle,
   SitrepLine,
   BoundTranscriptReader,
+  ConversationImport,
   HarnessTranscriptBytes,
   TurnUsage,
 } from './kinds.ts';
@@ -654,6 +655,15 @@ export interface FerretsApi {
   children(ferret: FerretId): readonly FerretId[];
   /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
   harnesses(): readonly HarnessKey[];
+  /**
+   * Additive (shared history): asks the harness `harness` to copy one conversation of the owner's own history into its
+   * shared pool (`Harness.importConversation`). Conversation's alone (it writes no other plugin's state: the harness does);
+   * any other plugin is refused 403 `forbidden`. A harness that is off, or offers none, answers a refusal sentence.
+   */
+  importConversation?(
+    harness: HarnessKey,
+    input: ConversationImport,
+  ): Promise<Result<void, { readonly reason: string }>>;
   /**
    * The past conversations each provided harness holds, as read-only trees (additive, the conversation index): one entry per
    * harness that offers any, in no particular order. A harness that fails offers nothing. Reads nothing itself.

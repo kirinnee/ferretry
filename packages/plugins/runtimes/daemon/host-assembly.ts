@@ -14,7 +14,7 @@
  *  - a command's location, looked up ahead through `kernel.paths.which` (`adapters/command-cache.ts`).
  *
  * What is NOT here is what another plugin owns: its components and a login's templates stand in (and an apply is refused
- * while one does), the tool installer, the secret store's list and put and the shared-history pooling; each is a declared
+ * while one does), the tool installer, the secret store's list and put; each is a declared
  * GAP in `ports-pending.json`. The machine's name and id are the kernel's `identity`.
  */
 import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
