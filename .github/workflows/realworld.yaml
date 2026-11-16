@@ -48,7 +48,7 @@ jobs:
     runs-on: >-
       ${{
         vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-8x16-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-8x16-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0

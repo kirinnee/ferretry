@@ -84,7 +84,7 @@ push, with runner queues and repeated pushes dominating the bill. The consolidat
 Quick and label-triggered Full sets replace that shape; PR CI runs supply the new timings.
 
 - **One shared Nix cache.** Every Namespace job retains `-with-cache`, tag
-  `ferretry-nix-d`, `nscloud-cache-size-10gb` and
+  `ferretry-nix`, `nscloud-cache-size-10gb` and
   `nscloud-cache-allow-commit-from-main`. The setup action (`install-nix`) mounts `/nix`
   as its first step. Only `main` commits the volume; Quick Checks now owns
   its prune step (`scripts/ci/nix-store-hygiene.sh`), preserving both the dev shell
@@ -980,10 +980,20 @@ tags, the hook pointing at the vendored copy; `install-nix` calls it as `./.gith
 source, commit, date, the edited lines and the exact re-vendoring steps. Review a re-vendor as a diff against the
 upstream commit, not as new code. Cost: a copy to keep current.
 
-**The cache tag changed to `ferretry-nix-d`.** A volume written by this action is **not** readable by the old
-installer: `cachix/install-nix-action` over it stops with `directory /nix exists, but is not writable by you`
-(measured, 63 s lost to the retry, then red). The tag is shared by every branch that commits it, so the new layout gets
-a tag of its own and a branch still running the old action keeps working on `ferretry-nix` until it is retired.
+**The cache tag stays `ferretry-nix` (measured 2026-11-16: a tag of its own made the perf tier slower).** A volume
+written by this action is **not** readable by the old installer: `cachix/install-nix-action` over it stops with
+`directory /nix exists, but is not writable by you` (measured, 63 s lost to the retry, then red). The reverse is fine:
+this action over a volume the old installer wrote takes the installer path (15 to 22 s, then a warm store). A first
+version of this change gave the new layout its own tag, `ferretry-nix-d`. Only `main` commits a volume, so every pull
+request job on that tag started from an EMPTY volume (28 to 38 s of downloads in `install-nix`), and its Performance
+Tests ran 202, 251, 269 and 219 s (three red on the 1,500 ms bounds) against 125 to 270 s, median about 190 s, for
+twenty pull requests on `ferretry-nix`; the same job on `ferretry-nix` with this action took 192 s and passed. The cold
+volume is the only difference the sampler found (no background process: `determinate-nixd` used 2 to 11% of one core,
+steal was zero), and the tier is also noisy without it (a pull request with no CI change failed the same
+`!!omap` and boot bounds at 298 s on `ferretry-nix`), so a tag of its own would put every pull request on a cold volume
+until `main` first runs this action. **When `main` first runs this action, give the tag a new name in that same
+change** (every `nscloud-cache-tag-` label in `ci.yaml` and `realworld.yaml`, and `nix-store-hygiene.sh`): `main` then
+commits the new layout to a tag a branch on the old action does not read.
 
 ## Action pins
 
