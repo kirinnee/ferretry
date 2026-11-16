@@ -16,7 +16,9 @@ verdict | judge)
   # Full CI red. Once the switch is 'true' it must succeed like every other job.
   proof_reused=false
   # The perf tier is REPORT-ONLY on a pull request (scripts/ci/perf-tier.sh): its job shows its result and never
-  # counts here, whatever that job ended as. On a push (main) it is blocking like every other job.
+  # counts here, whatever that job ended as. On a push (main) it is blocking like every other job, and a reused proof
+  # never covers it: an advisory PR run is no proof of main's perf, so the perf job runs on every push (ci.yaml) and
+  # the reused verdict below requires its success.
   # Proof reuse on main (scripts/ci/proof-reuse.sh): a push whose tree the merged pull request already
   # proved with the whole set. Only a `push` may say so, and it is honoured only with a URL to show for it.
   if [[ ${PROOF_REUSED:-} == true ]]; then
@@ -29,10 +31,13 @@ verdict | judge)
     fi
   fi
   if [[ ${proof_reused} == true ]]; then
-    # Belt and braces: the jobs were skipped on purpose, so a failed or cancelled one is something else.
-    if jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' <<<"${NEEDS:?job results required}" >/dev/null; then
+    # Belt and braces: the jobs were skipped on purpose, so a failed or cancelled one is something else. The perf
+    # job is the one job that was NOT skipped on purpose: it must have run, and passed (skipped = zero attempts).
+    if jq -e '.perf.result == "success" and all(.[]; .result != "failure" and .result != "cancelled")' <<<"${NEEDS:?job results required}" >/dev/null; then
       state=success
-      description="proof reused: this tree already passed the full set in ${PROOF_URL}"
+      description="proof reused: this tree already passed the full set in ${PROOF_URL}; perf ran on main and passed"
+    else
+      description="perf did not pass on main (a reused proof never covers perf), or another job failed"
     fi
   elif jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |

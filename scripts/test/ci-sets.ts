@@ -112,10 +112,10 @@ const event = (eventName: string, action = '', labels: string[] = [], label = ''
 const fullJobs = Object.keys(ci.jobs).filter(
   name => !['quick', 'static', 'perf', 'full-pending', 'full', 'proof'].includes(name),
 );
-// Static Checks is half of the quick set (`quick.sh --static`) and the perf tier is blocking: both run on EXACTLY
-// Quick's events, never scoped, and are skipped by a sealed proof exactly when Quick is.
+// Static Checks is half of the quick set (`quick.sh --static`): it runs on EXACTLY Quick's events, never scoped, and is
+// skipped by a sealed proof exactly when Quick is. The perf tier runs on Quick's events too but is NEVER skipped by a
+// proof (see "Perf is never reused" below).
 assert.equal(conditionOf(ci, 'static'), conditionOf(ci, 'quick'), 'Static Checks must run whenever Quick runs');
-assert.equal(conditionOf(ci, 'perf'), conditionOf(ci, 'quick'), 'Performance Tests must run whenever Quick runs');
 const successful = Object.fromEntries(
   Object.keys(ci.jobs).map(name => [name, { result: 'success', outputs: { run: 'true' } }]),
 );
@@ -478,6 +478,8 @@ const proofUrl = 'https://github.com/fixture/repo/actions/runs/77';
 const skippedAll = Object.fromEntries(Object.keys(ci.jobs).map(name => [name, { result: 'skipped', outputs: {} }]));
 const reusedNeeds = {
   ...skippedAll,
+  // The perf job is never skipped by a proof: it ran on this push, and the verdict needs its success.
+  perf: { result: 'success', outputs: {} },
   proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: proofUrl } },
 };
 const judgeProof = (needs: object, env: Record<string, string>, eventName = 'push') => {
@@ -540,6 +542,23 @@ const judgeProof = (needs: object, env: Record<string, string>, eventName = 'pus
       0,
       `a ${result} job beside a reused proof is a failure`,
     );
+  // A reused proof never covers perf: the perf job runs on every push to main and its success is required. Skipped
+  // means ZERO attempts ran (a pass by omission), failed or cancelled means the budget was missed.
+  for (const result of ['failure', 'cancelled', 'skipped'])
+    assert.notEqual(
+      judgeProof(
+        { ...reusedNeeds, perf: { result, outputs: {} } },
+        { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl },
+      ).code,
+      0,
+      `a ${result} perf job beside a reused proof must fail main`,
+    );
+  const { perf: _noPerf, ...reusedWithoutPerf } = reusedNeeds;
+  assert.notEqual(
+    judgeProof(reusedWithoutPerf, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl }).code,
+    0,
+    'a reused proof with no perf result at all is no proof',
+  );
   // Without a reused proof the ordinary full graph still passes on a push.
   assert.equal(judgeProof(successful, { PROOF_REUSED: 'false' }).code, 0);
   assert.equal(
@@ -547,6 +566,43 @@ const judgeProof = (needs: object, env: Record<string, string>, eventName = 'pus
       .code,
     0,
   );
+}
+
+// ─── Perf is never reused ─────────────────────────────────────────────────────────────────────────
+// Lead ruling 2026-11-16: perf is report-only on a PR and BLOCKING on main. An advisory PR run is no proof of main's
+// perf, so a sealed proof must neither skip the perf job nor excuse its result. The case this pins: a full-ci PR goes
+// over a perf budget (reported, exit 0, Full CI green and stamped with its tree), merges, and the identical-tree push
+// to main reuses that proof - the perf job still runs there and its failure fails main.
+{
+  const reuse = { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl };
+  const sealed = { result: 'success', outputs: { decided: 'true', proved: 'true', proof: proofUrl } };
+  const perfJob = jobOf(ci, 'perf');
+  assert.ok(!needsList(perfJob).includes('proof'), 'perf must not depend on the proof job');
+  assert.ok(!/needs\.proof/.test(conditionOf(ci, 'perf')), 'perf must not read the proof decision');
+  for (const [label, github] of events)
+    for (const proof of [
+      sealed,
+      { result: 'success', outputs: { proved: 'false' } },
+      { result: 'failure', outputs: {} },
+    ])
+      assert.equal(
+        starts(conditionOf(ci, 'perf'), needsList(perfJob), github, { proof }, {}),
+        evaluate(legacy.quick!.if, github) === true,
+        `perf must start on ${label} exactly when Quick's event guard says so, whatever the proof (${proof.result})`,
+      );
+  // 1. The pull request: the over-budget perf job is advisory, Full CI passes and records the tree.
+  assert.equal(
+    judge({ ...successful, perf: { result: 'failure' } }),
+    0,
+    'advisory PR perf failure must not fail Full CI',
+  );
+  // 2. The identical-tree push to main: perf runs (above) beside the reused proof, and its failure fails main.
+  assert.equal(
+    judgeProof({ ...reusedNeeds, perf: { result: 'failure', outputs: {} } }, reuse).code,
+    1,
+    'advisory PR perf failure, identical-tree push with proof reuse: the perf failure must fail main',
+  );
+  assert.equal(judgeProof(reusedNeeds, reuse).code, 0, 'the same push with a passing perf job reuses the proof');
 }
 
 // ─── The proof job is an optimisation, never a gate ───────────────────────────────────────────────

@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 // Behaviour by file name: `ok` always passes, `flaky` fails its FIRST run only, `bad` always fails, `crash` dies with
-// no report. A run's tests take 0.5 s when they pass and 2.5 s when they fail, so the times are visible in the output.
+// no report, `noload` fails to load (no case in the report, the process fails). A run's tests take 0.5 s when they pass and 2.5 s when they fail, so the times are visible in the output.
 const FAKE = `#!/usr/bin/env bash
 out="$1"; shift; mkdir -p "$out"
 status=0; crash=false
@@ -27,6 +27,8 @@ for f in "$@"; do
     flaky*) [[ $count -eq 1 ]] && failed=true ;;
     bad*) failed=true ;;
     crash*) crash=true ;;
+    noload*) # a file that fails to load: no test case at all, the process fails
+      status=1; continue ;;
   esac
   # A passing test AFTER the file's verdict test: a report whose last case passed must not end the script (errexit).
   echo "  <testcase name=\\"$base first\\" classname=\\"s\\" time=\\"0.1\\" file=\\"$f\\" line=\\"0\\" />" >>"$out/junit.xml"
@@ -120,6 +122,16 @@ test('main, a process that dies with no report fails its whole share, never a pa
   expect(r.status).toBe(1);
   expect(r.summary).toContain('perf-failed: packages/x/tests/perf/crash.test.ts');
   expect(r.runs('crash.test.ts')).toBe(2);
+});
+
+test('main, a file that failed to load beside a file that named its failure: both are retried, never a pass by omission', () => {
+  const r = tier(['packages/x/tests/perf/bad.test.ts', 'packages/x/tests/perf/noload.test.ts'], {
+    FY_CI_PERF_PARALLEL: '1',
+  });
+  expect(r.status).toBe(1);
+  expect(r.runs('noload.test.ts')).toBe(2);
+  expect(r.runs('bad.test.ts')).toBe(2);
+  expect(r.summary).toContain('perf-failed: packages/x/tests/perf/bad.test.ts packages/x/tests/perf/noload.test.ts');
 });
 
 test('pull request: report-only exits 0, shows the over-budget line, the files and the times, re-runs nothing', () => {

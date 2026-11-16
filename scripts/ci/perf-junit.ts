@@ -4,6 +4,7 @@
  *
  *   failed  <junit>...            file <TAB> milliseconds <TAB> test name        one line per FAILED test
  *   slowest <n> <junit>...        milliseconds <TAB> file <TAB> test name        the n slowest tests, slowest first
+ *   reported <junit>...           file                                           each file that reported at least one test
  *   times   <file> <junit>...     milliseconds <TAB> pass|FAIL|skip <TAB> name   every test of one file
  *
  * A report that does not exist or does not parse contributes nothing: the caller treats "the process failed and
@@ -68,11 +69,15 @@ if (import.meta.main) {
     const limit = Number(count);
     if (!Number.isInteger(limit) || limit < 1) throw new Error('slowest needs a positive count');
     for (const c of [...load(paths)].sort((a, b) => b.ms - a.ms).slice(0, limit)) line(c.ms, c.file, c.name);
+  } else if (command === 'reported') {
+    for (const file of new Set(load(rest).map(c => c.file))) line(file);
   } else if (command === 'times') {
     const [file, ...paths] = rest;
     for (const c of load(paths).filter(c => c.file === file)) line(c.ms, c.verdict, c.name);
   } else {
-    console.error('usage: perf-junit.ts failed <junit>... | slowest <n> <junit>... | times <file> <junit>...');
+    console.error(
+      'usage: perf-junit.ts failed <junit>... | slowest <n> <junit>... | reported <junit>... | times <file> <junit>...',
+    );
     process.exit(2);
   }
 }

@@ -263,13 +263,13 @@ jobs:
   # tests 618-2273 ms on identical code (52 perf jobs, suite wall 121-327 s), so a budget cannot gate a PR. On a PR the
   # job shows what went over budget and exits 0 (and Full CI does not count it, scripts/ci/full-status.sh); on main a
   # failing file is re-run ONCE and fails the job only if it fails again (scripts/ci/perf-tier.sh). Not a required
-  # check. ONE job with its processes inside (owner: one unit job, one perf job, parallel inside). Two processes
+  # check. NEVER skipped by a proof reuse (it does not `need` `proof`): an advisory PR run is no proof of main's perf, so
+  # every push to main runs it and the verdict requires its success (scripts/ci/full-status.sh). ONE job with its processes inside (owner: one unit job, one perf job, parallel inside). Two processes
   # on a 4x8: half the vCPUs, so each keeps a spare core for its GC/JIT threads and a budget measures the code, not a
   # neighbour. The 4x8 also starts within seconds where an 8x16 queued a median ~5 minutes.
   perf:
     name: Performance Tests
-    needs: proof
-    if: ${{ !cancelled() && !(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true') && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
+    if: ${{ !cancelled() && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read

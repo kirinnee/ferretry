@@ -61,6 +61,16 @@ for ((index = 0; index < processes; index++)); do
   if [[ -n ${named} ]]; then
     failed_tests=$((failed_tests + $(wc -l <<<"${named}")))
     while IFS= read -r name; do failed_files+=("${name}"); done < <(cut -f1 <<<"${named}" | sort -u)
+    # A file of this share that reported no test at all (it failed to load) is named by no failed test: without this
+    # it would pass by omission beside a file that did name itself. Retry it with the rest.
+    reported="$(junit reported "${dir}/junit.xml")" || reported=""
+    while IFS= read -r name; do
+      name="${name#./}"
+      if ! grep -qxF -- "${name}" <<<"${reported}"; then
+        failed_files+=("${name}")
+        failed_tests=$((failed_tests + 1))
+      fi
+    done <"${dir}/files.txt"
   else
     failed_tests=$((failed_tests + $(wc -l <"${dir}/files.txt")))
     while IFS= read -r name; do failed_files+=("${name#./}"); done <"${dir}/files.txt"
