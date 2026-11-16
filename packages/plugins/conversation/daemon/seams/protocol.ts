@@ -55,7 +55,6 @@ export type SendSenderKind = SenderKind;
 
 export type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
 export type SendDisposition = z.infer<typeof SendDispositionSchema>;
-export type SendQueueProof = 'transcript' | 'pane';
 
 export type SessionCompactAt = FerretCompactAt;
 export const SessionCompactAtPatchSchema = CompactAtPatchSchema;
