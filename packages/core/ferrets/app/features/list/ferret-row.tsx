@@ -116,7 +116,13 @@ export function FerretRow({ ferret, daemon, active, needsYou, onNavigate, overla
             <span className="fy-sbar__marks" data-sbar-marks="">
               <PanelSlot
                 daemon={daemon}
-                props={{ ferret: ferret.id, runtime: ferret.runtime } satisfies FerretListRowMarkSlotProps}
+                props={
+                  {
+                    ferret: ferret.id,
+                    runtime: ferret.runtime,
+                    ...(ferret.login === undefined ? {} : { login: ferret.login }),
+                  } satisfies FerretListRowMarkSlotProps
+                }
                 slot={FERRET_LIST_ROW_MARK_SLOT}
                 subject={ferret.id}
               />

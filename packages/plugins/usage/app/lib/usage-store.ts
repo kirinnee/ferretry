@@ -115,6 +115,8 @@ export class DaemonUsageStore {
   readonly #entries = new Map<DaemonId, UsageEntry>();
   readonly #slices = new Map<DaemonId, DaemonUsageSlice>();
   readonly #watches = new Map<DaemonId, UsageWatch>();
+  /** The newest read of each daemon still in flight: a new watcher joins it rather than issuing its own. */
+  readonly #reading = new Map<DaemonId, Promise<boolean>>();
   readonly #listeners = new Set<() => void>();
   #snapshot: UsageSnapshot = { daemons: new Map() };
 
@@ -151,7 +153,18 @@ export class DaemonUsageStore {
    * Reads one daemon's feed. Never rejects: a poll failure is a slice status,
    * not an exception a timer callback would drop on the floor anyway.
    */
-  async refresh(daemon: DaemonConnection): Promise<boolean> {
+  refresh(daemon: DaemonConnection): Promise<boolean> {
+    const id = daemon.daemonId;
+    const read = this.#read(daemon);
+    this.#reading.set(id, read);
+    // `#read` never rejects, so this only clears the mark: the newest read of a daemon is the one that stays marked.
+    void read.finally(() => {
+      if (this.#reading.get(id) === read) this.#reading.delete(id);
+    });
+    return read;
+  }
+
+  async #read(daemon: DaemonConnection): Promise<boolean> {
     const entry = this.#entryFor(daemon);
     this.#patch(daemon.daemonId, { status: 'loading' });
     try {
@@ -181,20 +194,22 @@ export class DaemonUsageStore {
    * Registers one consumer of this daemon's feed and returns its release.
    *
    * The first consumer reads immediately and starts the shared timer; every
-   * later one joins that timer and only refreshes the connection it polls
-   * with, so a re-paired connection takes over rather than leaving a stale one
+   * later one joins that timer AND the read already made or in flight, so N
+   * rows cost one `GET /v1/usage`, not N. Only a changed connection reads
+   * again: a re-paired connection takes over rather than leaving a stale one
    * in the closure. The timer stops when the last consumer releases; the
    * release is idempotent so a double unmount cannot free another consumer's
    * hold.
    */
   watch(daemon: DaemonConnection): () => void {
     const id = daemon.daemonId;
-    void this.refresh(daemon);
     const existing = this.#watches.get(id);
     if (existing !== undefined) {
+      if (existing.daemon !== daemon) void this.refresh(daemon);
       existing.count += 1;
       existing.daemon = daemon;
     } else {
+      if (!this.#reading.has(id)) void this.refresh(daemon);
       // biome-ignore lint/suspicious/useIterableCallbackReturn: `browserClock.every` is a repeating timer, not `Array.prototype.every`
       const stop = browserClock.every(() => {
         if (this.#isHidden()) return;

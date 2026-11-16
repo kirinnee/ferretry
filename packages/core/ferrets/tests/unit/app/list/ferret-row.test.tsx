@@ -98,7 +98,9 @@ describe('the marks other plugins draw on a row', () => {
           {
             plugin: 'usage',
             id: 'quota',
-            view: props => <b data-test-mark={`${String(props.ferret)}:${String(props.runtime)}`}>quota</b>,
+            view: props => (
+              <b data-test-mark={`${String(props.ferret)}:${String(props.runtime)}:${String(props.login)}`}>quota</b>
+            ),
           },
         ],
       }}
@@ -109,11 +111,18 @@ describe('the marks other plugins draw on a row', () => {
     </WithSlotPanels>
   );
 
-  it('hands the ferret and its runtime to what a plugin contributes to the row-mark slot', async () => {
-    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main' })));
+  it('hands the ferret, its runtime and its login to what a plugin contributes to the row-mark slot', async () => {
+    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main', login: 'work-login' })));
     const marks = must(mounted.container.querySelector('[data-sbar-marks]'), 'the marks line');
-    expect(marks.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe('a:claude-main');
+    expect(marks.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe('a:claude-main:work-login');
     expect(marks.textContent).toBe('quota');
+  });
+
+  it('hands no login for a ferret whose record names none, never the runtime in its place', async () => {
+    mounted = await mount(place(ferretSummary('a', { runtime: 'claude-main' })));
+    expect(mounted.container.querySelector('[data-test-mark]')?.getAttribute('data-test-mark')).toBe(
+      'a:claude-main:undefined',
+    );
   });
 
   it('draws no marks line for a ferret that names no runtime, so nothing is asked for an unknown account', async () => {

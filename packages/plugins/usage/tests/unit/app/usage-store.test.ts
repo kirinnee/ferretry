@@ -277,12 +277,12 @@ describe('DaemonUsageStore.watch', () => {
     const first = store.watch(laptop);
     const second = store.watch(laptop);
     await settled();
-    // Two consumers, two immediate reads — but only one interval behind them.
-    expect(reads).toBe(2);
+    // Two consumers share ONE immediate read — and only one interval behind it.
+    expect(reads).toBe(1);
 
     await new Promise(resolve => setTimeout(resolve, 26));
     const polled = reads;
-    expect(polled).toBeGreaterThan(2);
+    expect(polled).toBeGreaterThan(1);
 
     first();
     // The timer belongs to the pair, so releasing one keeps it running.
@@ -294,6 +294,71 @@ describe('DaemonUsageStore.watch', () => {
     const stopped = reads;
     await new Promise(resolve => setTimeout(resolve, 16));
     expect(reads).toBe(stopped);
+  });
+
+  it('reads once for a whole list of rows watching one daemon, not once per row', async () => {
+    let reads = 0;
+    const store = new DaemonUsageStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              reads += 1;
+              return feed(40);
+            },
+          ],
+        ]),
+      ),
+      { isHidden: () => false },
+    );
+    const releases = Array.from({ length: 25 }, () => store.watch(laptop));
+    await settled();
+    expect(reads).toBe(1);
+    expect(store.usage(laptop.daemonId).status).toBe('ready');
+    // A row that mounts later joins the answer already held: no new read.
+    releases.push(store.watch(laptop));
+    await settled();
+    expect(reads).toBe(1);
+    for (const release of releases) release();
+  });
+
+  it('joins a read still in flight when the rows remount, and reads again for a changed connection', async () => {
+    let reads = 0;
+    const finishers: (() => void)[] = [];
+    const store = new DaemonUsageStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              reads += 1;
+              await new Promise<void>(done => {
+                finishers.push(done);
+              });
+              return feed(40);
+            },
+          ],
+        ]),
+      ),
+      { isHidden: () => false },
+    );
+    store.watch(laptop)(); // the rows unmount mid-read ...
+    store.watch(laptop)(); // ... and mount again: the same read
+    expect(reads).toBe(1);
+    const held = store.watch(laptop);
+    const repaired = daemonConnection({ daemonId: laptop.daemonId, baseUrl: 'https://laptop-2.example.test' });
+    const next = store.watch(repaired); // a re-paired connection reads again
+    expect(reads).toBe(2);
+    // The newer read answers first; the older one settling after it must not clear anything of the newer.
+    expect(finishers).toHaveLength(2);
+    finishers[1]?.();
+    await settled();
+    finishers[0]?.();
+    await settled();
+    expect(store.usage(laptop.daemonId).status).toBe('ready');
+    held();
+    next();
   });
 
   it('does not poll while the tab is hidden', async () => {

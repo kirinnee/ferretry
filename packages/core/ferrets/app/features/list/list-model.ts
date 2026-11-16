@@ -26,7 +26,7 @@
  *
  * FOLDER MODE. While the focus names a group, only that group's ferrets are drawn (Pinned and Needs you included: a
  * focus is the reader's word that nothing else matters now). A focus on a folder no project covers and no ferret is in
- * is STALE (`scopeIsStale`) and the list asks Projects to drop it.
+ * is STALE (`scopeIsStale`) and the list asks Projects to drop it, once the registry has been read (`known`).
  */
 
 import type { ModeFilter } from '@ferretry/app';
@@ -237,6 +237,7 @@ export const ferretDirectory = (ferret: FerretSummary): string => ferret.folder.
  * folder that is known but has no ferrets right now is NOT stale (the list says it is empty); a deleted one is.
  */
 export const scopeIsStale = (ferrets: readonly FerretSummary[], scoped: FerretListScopeSnapshot): boolean =>
+  scoped.known &&
   scoped.scope !== null &&
   scoped.groupOf(scoped.scope) === null &&
   !ferrets.some(ferret => groupOf(ferret, scoped.groupOf).key === scoped.scope);

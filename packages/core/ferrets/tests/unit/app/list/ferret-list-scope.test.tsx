@@ -25,25 +25,33 @@ const FERRETS = [
 /** A provider over one registered project ("App", at `/work/app`) that records what the list asked of it. */
 const provider = (
   first: string | null,
+  options: { readonly unread?: boolean } = {},
 ): {
   readonly hook: FerretsListScope;
   readonly asked: string[];
   readonly watching: () => number;
   readonly set: (scope: string | null) => void;
+  /** The registry answers: from now on the project is known (an unread registry covers no folder). */
+  readonly learn: () => void;
 } => {
   const listeners = new Set<() => void>();
   const asked: string[] = [];
   let watching = 0;
+  let known = options.unread !== true;
   const groupOf: FerretListScopeSnapshot['groupOf'] = folder =>
-    folder === '/work/app' || folder.startsWith('/work/app/') ? { key: '/work/app', name: 'App' } : null;
-  let held: FerretListScopeSnapshot = { scope: first, groupOf };
+    known && (folder === '/work/app' || folder.startsWith('/work/app/')) ? { key: '/work/app', name: 'App' } : null;
+  let held: FerretListScopeSnapshot = { scope: first, known, groupOf };
   const set = (scope: string | null): void => {
-    held = { scope, groupOf };
+    held = { scope, known, groupOf };
     for (const listener of listeners) listener();
   };
   return {
     asked,
     set,
+    learn: () => {
+      known = true;
+      set(held.scope);
+    },
     watching: () => watching,
     hook: {
       subscribe: listener => {
@@ -138,6 +146,36 @@ describe('folder mode in the ferret list', () => {
   it('drops a focus on a folder that is gone, and draws every folder again', async () => {
     const live = provider('/work/deleted');
     const root = await draw(live.hook);
+    expect(live.asked).toEqual(['recover']);
+    expect(groups(root)).toEqual(['App', 'solo']);
+  });
+
+  it('waits for the registry before it drops a focus: a worktree-only ferret under a valid project keeps it', async () => {
+    const live = provider('/work/app', { unread: true });
+    deviceControls().setDeviceControls({ sessionsMode: 'all' });
+    window.history.pushState(null, '', '/d/alpha/ferrets');
+    mounted = await mount(
+      <WithAppHooks provided={{ [FERRETS_LIST_SCOPE_HOOK]: live.hook }}>
+        <RouterProvider screens={SCREENS}>
+          <FerretList client={listDaemon([FERRETS[1] as (typeof FERRETS)[number]]).client} />
+        </RouterProvider>
+      </WithAppHooks>,
+    );
+    await interact(async () => {
+      for (let turn = 0; turn < 8; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    expect(live.asked).toEqual([]);
+    await interact(() => live.learn());
+    expect(live.asked).toEqual([]);
+    expect(groups(mounted.container)).toEqual(['App']);
+    expect(mounted.container.querySelector('[data-sbar-scope]')?.textContent).toContain('App');
+  });
+
+  it('still drops a focus on a deleted project once the registry has answered', async () => {
+    const live = provider('/work/deleted', { unread: true });
+    const root = await draw(live.hook);
+    expect(live.asked).toEqual([]);
+    await interact(() => live.learn());
     expect(live.asked).toEqual(['recover']);
     expect(groups(root)).toEqual(['App', 'solo']);
   });

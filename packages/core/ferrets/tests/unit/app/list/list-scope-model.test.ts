@@ -19,6 +19,7 @@ const ALL = { ...DEFAULT_LIST_FILTER, mode: 'all' } as const;
 /** Projects registers `/work/app` as "App": a worktree under it files there too. */
 const registered = (scope: string | null): FerretListScopeSnapshot => ({
   scope,
+  known: true,
   groupOf: folder =>
     folder === '/work/app' || folder.startsWith('/work/app/') ? { key: '/work/app', name: 'App' } : null,
 });
@@ -89,6 +90,11 @@ describe('a focus on a folder that is gone', () => {
 
   test('is stale when no project covers it and no ferret files under it', () => {
     expect(scopeIsStale(ferrets, registered('/work/deleted'))).toBe(true);
+  });
+
+  test('is never stale before the registry is known: an unread registry covers no folder and proves nothing', () => {
+    expect(scopeIsStale(ferrets, { ...registered('/work/deleted'), known: false })).toBe(false);
+    expect(scopeIsStale([], { ...registered('/work/app'), known: false, groupOf: () => null })).toBe(false);
   });
 
   test('is not stale with no focus, under a registered project with no ferrets, or under a folder a ferret is in', () => {

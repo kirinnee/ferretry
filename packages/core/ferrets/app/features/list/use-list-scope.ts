@@ -6,7 +6,7 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { FerretListScopeSnapshot, FerretsListScope } from '../../../contract/index.ts';
 
-const NO_SCOPE: FerretListScopeSnapshot = { scope: null, groupOf: () => null };
+const NO_SCOPE: FerretListScopeSnapshot = { scope: null, known: true, groupOf: () => null };
 const noSubscription = (): (() => void) => () => undefined;
 const noScope = (): FerretListScopeSnapshot => NO_SCOPE;
 

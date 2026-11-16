@@ -63,10 +63,12 @@ export const createListScope = ({
   const read = (): FerretListScopeSnapshot => {
     const scope = controls.projectScope(daemonId);
     const projects = store.projects();
-    if (held !== undefined && held.scope === scope && heldProjects === projects) return held;
+    const known = store.known();
+    if (held !== undefined && held.scope === scope && held.known === known && heldProjects === projects) return held;
     heldProjects = projects;
     held = {
       scope,
+      known,
       groupOf: folder => {
         const project = coveringProject(folder, projects);
         return project === undefined ? null : { key: normalizeProjectPath(project.path), name: project.name };

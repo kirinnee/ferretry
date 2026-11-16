@@ -47,7 +47,7 @@ const half = implementApp(manifest, {
         quota: (props: PanelProps & Partial<FerretListRowMarkSlotProps>) =>
           createElement(QuotaPanel, {
             store: usage,
-            ...(typeof props.runtime === 'string' ? { runtime: props.runtime } : {}),
+            ...(typeof props.login === 'string' ? { login: props.login } : {}),
           }),
         'composer-quota': (props: PanelProps & Partial<ComposerToolsProps>) =>
           createElement(ComposerQuotaPanel, {

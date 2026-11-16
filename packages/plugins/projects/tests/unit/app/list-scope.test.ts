@@ -132,6 +132,28 @@ describe('ferrets.list-scope, provided by Projects', () => {
     expect(scope.snapshot()).not.toBe(afterRegistry);
   });
 
+  test('says the registry is unknown until a read settles, and keeps it unknown when the read fails', async () => {
+    const { scope, store } = setup();
+    expect(scope.snapshot().known).toBe(false);
+    await store.hydrate();
+    expect(scope.snapshot().known).toBe(true);
+
+    const failing = new ProjectsStore({
+      projects: async () => {
+        throw new Error('offline');
+      },
+    });
+    const failed = createListScope({
+      daemonId: DAEMON,
+      store: failing,
+      controls: fakeControls(),
+      routes,
+      navigation: fakeNavigation().navigation,
+    });
+    await failing.hydrate().catch(() => undefined);
+    expect(failed.snapshot().known).toBe(false);
+  });
+
   test('focusing a folder writes the store first, then one history entry, and tells the list', () => {
     const { scope, controls, nav } = setup();
     let told = 0;

@@ -60,6 +60,11 @@ export interface FerretListGroupKey {
 export interface FerretListScopeSnapshot {
   /** The group key the list is focused on, or `null` for every folder. */
   readonly scope: string | null;
+  /**
+   * Whether the registry has answered. An unread registry covers no folder, so until it is known "no project covers
+   * this focus" proves nothing: the list must not drop a focus (or rewrite the address) before then.
+   */
+  readonly known: boolean;
   /** The registered project a folder files under, or `null` when none covers it (the list groups by folder). */
   readonly groupOf: (folder: string) => FerretListGroupKey | null;
 }

@@ -50,15 +50,16 @@ export function FerretInsightsPanel({ client, subject }: { readonly client: Usag
 
 /**
  * `ferrets.list-row-mark:quota`: the quota of the account a listed ferret runs on, on its row, from the daemon's cached
- * account feed (`GET /v1/usage`). Ferrets names the runtime (`runtime`); a runtime the feed does not carry draws
- * nothing, never the account nearest its limit and never a confident 0% (unknown is not zero, and a "quota —" on every
- * API-key row would be noise).
+ * account feed (`GET /v1/usage`). The feed is keyed by LOGIN id, so Ferrets names the ferret's login (`login`) and
+ * only that is looked up: never its runtime name (another login may carry the same word), a login the feed does not
+ * carry draws nothing, never the account nearest its limit and never a confident 0% (unknown is not zero, and a
+ * "quota —" on every API-key row would be noise).
  */
-export function QuotaPanel({ store, runtime }: { readonly store: DaemonUsageStore; readonly runtime?: string }) {
+export function QuotaPanel({ store, login }: { readonly store: DaemonUsageStore; readonly login?: string }) {
   const connection = useDaemonConnection();
   useUsage(store, connection);
   const quota =
-    runtime === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: runtime } });
+    login === undefined ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: login } });
   return createElement(QuotaReadout, { quota, className: 'text-meta' });
 }
 

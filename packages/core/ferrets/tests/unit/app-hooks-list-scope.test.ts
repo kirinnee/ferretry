@@ -9,7 +9,7 @@ import {
 const scope = (): FerretsListScope => ({
   subscribe: () => () => undefined,
   watch: () => () => undefined,
-  snapshot: () => ({ scope: null, groupOf: () => null }),
+  snapshot: () => ({ scope: null, known: true, groupOf: () => null }),
   enter: () => undefined,
   exit: () => undefined,
   recover: () => undefined,
