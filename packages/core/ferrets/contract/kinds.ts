@@ -506,6 +506,13 @@ export interface RunnerFormCapture {
    * form whatever text it shares with one. A closed code, never the prompt's words. Absent when neither reader claims it.
    */
   readonly blocking?: 'permission' | 'dialog' | undefined;
+  /**
+   * Additive (stuck-send snapshot): where tmux put the cursor on the VISIBLE frame, zero-based, when it said. The
+   * cursor is what tells a composer's placeholder from typed input, so a frame kept to explain a send that could not be
+   * typed is unreadable without it. Absent when tmux did not answer.
+   */
+  readonly cursorX?: number | undefined;
+  readonly cursorY?: number | undefined;
 }
 
 /** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */
