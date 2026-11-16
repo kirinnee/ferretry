@@ -41,11 +41,83 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
   const found = [...findFlagSecrets({ args }), ...findRawSecrets({ args })];
   const refused = new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
   args.forEach((word, index) => {
-    if (valueOfNonPointerCredentialFlag(args[index - 1], word)) refused.add(index);
+    if (
+      valueOfNonPointerCredentialFlag(args[index - 1], word) ||
+      valueOfCredentialHeader(args[index - 2], args[index - 1], word, args[index - 3])
+    )
+      refused.add(index);
   });
   return refused;
 }
 
+/** A header whose value is a credential by its name, though the name may not say so to a flag test. */
+const CREDENTIAL_HEADER = /^(?:proxy-)?authorization$|^(?:set-)?cookie$/iu;
+
+/** A header's name, and nothing else (`Authorization`, `X-Auth-Token`). */
+const HEADER_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/u;
+
+/** A header glued to its value in one word: `Authorization:/V`, `Cookie:session=v`, `Authorization:Bearer`. */
+const GLUED_HEADER = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(\S[\s\S]*)$/u;
+
+/**
+ * What the write rule accepts as a "place" under a credential name: a path, or a URL. Used only for a header glued to its
+ * value in ONE word, where a value that is no place is left to the cutter (a pointer with a low-entropy part is shown).
+ */
+const ANY_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+
+/** The word that says how a credential header's value is meant: it is followed by the value. */
+const SCHEME_WORD = /^(?:bearer|basic|token)$/iu;
+
+/** A word without the quote marks around it: `"Authorization:` is `Authorization:`. */
+const unquoted = (word: string): string => word.replace(/^["'`]+|["'`]+$/gu, '');
+
+const isCredentialHeader = (name: string): boolean => CREDENTIAL_HEADER.test(name) || SHOWN_TESTS.namesSecret(name);
+
+/** A word as a header test reads it: unquoted, and with the flag it is glued to by `=` taken off (`--header=Cookie:`). */
+const headerWord = (word: string | undefined): string => unquoted(word ?? '').replace(/^-{1,2}[A-Za-z][\w-]*=/u, '');
+
+/**
+ * Whether `word` is the value of a credential header, or of a scheme word (`Bearer`, `Basic`, `Token`) that follows one:
+ * what follows is a value whatever it looks like (a path, a URL, quoted, in parentheses, after `=` or `@`), because a header
+ * names no place and no scheme is followed by one. The header is read in the three ways a line holds it: the word before is
+ * `Header:`, the two before are `Header` and `:`, or the word itself holds the pair (`Authorization:/V`, `Authorization`
+ * then `:/V`). A scheme word counts ONLY right after such a header (`Header: Bearer`, `Header : Bearer`, `Header:Bearer`):
+ * a bare `token` or `Bearer` elsewhere is an ordinary word. A flag glued to the header by `=` is taken off first
+ * (`--header=Cookie:`). `before` is the word before `word`, `beforeThat` the one before it, `beforeThatThat` the one
+ * before that. The same rule as the one-string form's: it fails closed.
+ */
+function valueOfCredentialHeader(
+  beforeThat: string | undefined,
+  before: string | undefined,
+  word: string,
+  beforeThatThat?: string,
+): boolean {
+  const previous = headerWord(before);
+  const earlier = headerWord(beforeThat);
+  const previousName = previous.endsWith(':') ? previous.slice(0, -1) : '';
+  const gluedBefore = GLUED_HEADER.exec(previous);
+  const gluedWord = GLUED_HEADER.exec(unquoted(word));
+  const header = (name: string): boolean => HEADER_NAME.test(name) && isCredentialHeader(name);
+  // the word before a scheme word must be the header: `Header:`, `Header` `:`, or the scheme glued to it (`Header:Scheme`)
+  const schemeAfterHeader =
+    SCHEME_WORD.test(previous) &&
+    ((earlier.endsWith(':') && header(earlier.slice(0, -1))) ||
+      (earlier === ':' && header(headerWord(beforeThatThat))));
+  const gluedScheme = gluedBefore !== null && header(gluedBefore[1] ?? '') && SCHEME_WORD.test(gluedBefore[2] ?? '');
+  return (
+    // `Header:` then the value
+    header(previousName) ||
+    // `Header`, `:`, then the value
+    (previous === ':' && header(earlier)) ||
+    // `Header` then `:value`
+    (/^:[ \t]*\S/u.test(unquoted(word)) && header(previous)) ||
+    // the pair in the word itself, its value a path or a URL
+    (gluedWord !== null && header(gluedWord[1] ?? '') && ANY_PLACE.test(unquoted(gluedWord[2] ?? ''))) ||
+    // a scheme word, only right after the header that it belongs to, then the value
+    schemeAfterHeader ||
+    gluedScheme
+  );
+}
 /**
  * Whether `word` is a path-looking value given to a credential-named flag that is NOT a pointer flag (`--token ./V`,
  * `--password /a/b`, `--api-key /tmp/V`, `--auth-token=./V`): the write rule accepts a path under a credential name, but
@@ -205,9 +277,46 @@ export const commandWithheld = (command: string): boolean => {
     refusedIndexes(words.map(word => ({ text: word, hidden: false }))).size > 0 ||
     cutsAValue(command) ||
     // Read word by word too, as a list of arguments is: each word with the one before it.
-    words.some((word, index) => cutsAValue(word, words[index - 1]))
+    words.some((word, index) => cutsAValue(word, words[index - 1])) ||
+    // And a JSON document as ONE piece, from the word that starts it: it holds blanks, so word by word never reads it
+    // whole (`--settings {"API_KEY": "v"}`), as the args form, where it is one argument, does.
+    documentsWithheld(command)
   );
 };
+
+/** The most places a document may start in one command before it is withheld whole: each is read to the command's end. */
+const MAX_DOCUMENT_STARTS = 16;
+
+/** Whether any JSON document in `command`, read as one piece, has a cut that is a value. Many starts: withheld (bounded). */
+function documentsWithheld(command: string): boolean {
+  const documents = documentsIn(command);
+  return documents.length > MAX_DOCUMENT_STARTS || documents.some(([document, before]) => cutsAValue(document, before));
+}
+
+/** A word that starts a JSON document: `{`, `[`, a quote and `{`, or a flag glued to either (`--settings={`). */
+const DOCUMENT_START = /^(?:[^\s=]*=)?(["']?)[{[]/u;
+
+/**
+ * Each place a JSON document starts in `command`: the text from the word that starts it to the end of the command (and,
+ * when a quote opens it, to that quote's last mark too), with the word before it.
+ */
+function documentsIn(command: string): readonly (readonly [string, string | undefined])[] {
+  const found: (readonly [string, string | undefined])[] = [];
+  let before: string | undefined;
+  for (const word of command.matchAll(/\S+/gu)) {
+    if (found.length > MAX_DOCUMENT_STARTS) break;
+    const start = DOCUMENT_START.exec(word[0]);
+    if (start !== null) {
+      const rest = command.slice(word.index);
+      found.push([rest, before]);
+      const quote = start[1] ?? '';
+      const quoted = quote === '' ? -1 : rest.lastIndexOf(quote);
+      if (quoted > start[0].length) found.push([rest.slice(0, quoted + 1), before]);
+    }
+    before = word[0];
+  }
+  return found;
+}
 
 /** A command line as it may be shown: the cutter's words, and whether the net withheld the whole list. */
 export interface ShownLine {

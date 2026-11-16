@@ -15,6 +15,7 @@ describe('CFG-LEAK (ii) fix 3 (I): the command rule is linear', () => {
   const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
     ['a long command of words', size => `srv ${'ab '.repeat(size / 3)}`, 15_000],
     ['a long command of pointers', size => `env ${'K=$K '.repeat(size / 5)}srv`, 20_000],
+    ['a long command of words that each open a document', size => `srv ${'{a '.repeat(size / 3)}`, 15_000],
     ['a long command of header pairs', size => `curl ${`-H "X: ${V}" `.repeat(size / 24)}`, 15_000],
   ];
   for (const [name, make, timeoutMs] of shapes) {
