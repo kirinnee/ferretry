@@ -25,7 +25,12 @@ const DRAWING = (n: number): TurnPaneEvidence => ({
 });
 
 /** A fleet in memory: facts per session, the pane each shows, a clock the test moves, and what was looked at. */
-function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', turn: 1, turnState: 'your-turn' }) {
+function fleet(
+  ids: readonly string[],
+  facts: TurnFacts = { status: 'running', turn: 1, turnState: 'your-turn' },
+  /** Whether the host answers the `turn.question-open` probe at all (a host with no Conversation does not). */
+  withProbe = false,
+) {
   let nowMs = T0;
   const state = new Map<SessionId, TurnFacts>(ids.map(id => [parseSessionId(id), facts]));
   const panes = new Map<SessionId, TurnPaneEvidence | undefined>();
@@ -33,6 +38,10 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
   const looked: SessionId[] = [];
   const recorded: { readonly id: SessionId; readonly change: TurnStateChange }[] = [];
   const failed: SessionId[] = [];
+  /** The sessions whose owner stores an open question, the ones the probe throws for, and each time it was asked. */
+  const open = new Set<SessionId>();
+  const unreadable = new Set<SessionId>();
+  const asked: SessionId[] = [];
   let yields = 0;
   const broken = new Set<SessionId>();
   /** A session whose writer throws a failure carrying this key (a damaged document, named by its damage). */
@@ -58,6 +67,15 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
       return true;
     },
     clock: { now: () => new Date(nowMs).toISOString() },
+    ...(withProbe
+      ? {
+          questionOpen: async (id: SessionId) => {
+            asked.push(id);
+            if (unreadable.has(id)) throw new Error('the question could not be read');
+            return open.has(id);
+          },
+        }
+      : {}),
     yieldToLoop: async () => {
       yields += 1;
     },
@@ -79,6 +97,9 @@ function fleet(ids: readonly string[], facts: TurnFacts = { status: 'running', t
     looked,
     recorded,
     failed,
+    open,
+    unreadable,
+    asked,
     broken,
     damaged,
     /** Holds the next look open until the answer is called. */
@@ -112,6 +133,54 @@ describe('nextLookDelayMs (RULING #44 idle back-off)', () => {
 });
 
 describe('PacedTurnWatcher', () => {
+  it('should record needs-input while the host says a question is open, and working again once it is answered', async () => {
+    // Arrange: the pane draws and the transcript says mid-turn, which alone reads as working (the question form is no permission prompt).
+    const subject = fleet(['asks-1'], { status: 'running', turn: 1, turnState: 'working' }, true);
+    const id = subject.id('asks-1');
+    subject.transcripts.set(id, MID_TURN);
+    subject.panes.set(id, DRAWING(1));
+
+    // Act
+    subject.open.add(id);
+    const opened = await subject.tick();
+    subject.open.delete(id);
+    const answered = await subject.tick();
+
+    // Assert
+    should(opened.changed.get(id)).containEql({ from: 'working', to: 'needs-input' });
+    should(answered.changed.get(id)).containEql({ from: 'needs-input', to: 'working' });
+  });
+
+  it('should ask the probe once per look, and not at all for a session that is not live', async () => {
+    // Arrange
+    const live = fleet(['live-1'], { status: 'running', turn: 1, turnState: 'working' }, true);
+    const gone = fleet(['gone-1'], { status: 'stopped', turn: 1 }, true);
+
+    // Act
+    await live.tick();
+    await gone.tick();
+
+    // Assert
+    should(live.asked).deepEqual([live.id('live-1')]);
+    should(gone.asked).deepEqual([]);
+  });
+
+  it('should decide as before when the probe throws, and when the host has no probe', async () => {
+    // Arrange
+    const throwing = fleet(['broken-1'], { status: 'running', turn: 1, turnState: 'your-turn' }, true);
+    throwing.unreadable.add(throwing.id('broken-1'));
+    const absent = fleet(['bare-1'], { status: 'running', turn: 1, turnState: 'your-turn' });
+
+    // Act
+    const first = await throwing.tick();
+    const second = await absent.tick();
+
+    // Assert: an idle pane is still an idle turn, and the look did not fail.
+    should(first.failures.size).equal(0);
+    should(first.changed.size).equal(0);
+    should(second.changed.size).equal(0);
+  });
+
   it('J-0260 should look at a quiet pane less often, at most every 10 s', async () => {
     // Arrange
     const subject = fleet(['quiet-1']);

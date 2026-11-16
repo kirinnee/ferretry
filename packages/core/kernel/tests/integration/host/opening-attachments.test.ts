@@ -57,7 +57,7 @@ async function boot(conversation: boolean, runner: FakeRunner): Promise<TestHost
     everyDirectory: true,
     plugins: [
       real('ferrets'),
-      ...(conversation ? [real('conversation')] : []),
+      ...(conversation ? [real('mailbox'), real('conversation')] : []),
       harnessPlugin(new FakeHarness()),
       runnerPlugin(runner),
     ],

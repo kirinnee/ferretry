@@ -226,11 +226,18 @@ test('G12 a Warden resume of a child goes through the same admission (Packs abse
   const warden = { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' } as const;
 
   // Act
-  const refused = absent.provided(FerretsPort, 'warden').resume(ferretId('child'), 'carry on', warden);
+  // Caught at once: the other host's resume takes real time (its conversation lease), and an unattended rejection is an error.
+  const refused = absent
+    .provided(FerretsPort, 'warden')
+    .resume(ferretId('child'), 'carry on', warden)
+    .then(
+      () => undefined,
+      (error: unknown) => error,
+    );
   const resumed = await present.provided(FerretsPort, 'warden').resume(ferretId('child'), 'carry on', warden);
 
   // Assert
-  await expect(refused).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
+  expect(await refused).toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
   expect(absentRunner.starts).toBe(0);
   expect(resumed.ok).toBe(true);
   expect(packs.asked).toHaveLength(1);

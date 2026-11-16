@@ -1,5 +1,5 @@
 import { milliseconds } from '@ferretry/std';
-import { Runners } from '../../contract/index.ts';
+import { QUESTION_OPEN_KEY, QuestionOpen, Runners } from '../../contract/index.ts';
 import { buildTurnWatch } from '../modules/turn-watch.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
@@ -24,6 +24,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     },
     turnObserved: async (ferret, turn) => await service.turnObserved(ferret, turn),
     clock: { now: () => kernel.clock.now() },
+    // The owner of the stored question says whether one is open (Conversation's `question.json`); with none, it is "no".
+    questionOpen: async ferret => {
+      const found = hooks.provider(QuestionOpen, QUESTION_OPEN_KEY);
+      return found === 'unavailable' ? false : await found.isOpen(ferret);
+    },
     every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
     yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     log,

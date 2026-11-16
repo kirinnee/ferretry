@@ -42,6 +42,8 @@ export function refusal(edge: ImportEdge): string | undefined {
     // Its own fragments' list (`manifest/generated/actions.ts`, written by the generator from `manifest/actions/`).
     if (from === 'manifest' && to === 'generated' && same && edge.specifier === './manifest/generated/actions.ts')
       return undefined;
+    // Its own fragments and kit (`manifest/actions/*.ts`, `manifest/kit.ts`): the same manifest, split across files.
+    if (from === 'manifest' && to === 'manifest' && same) return undefined;
     if (to === 'kernel-manifest' || to === 'kernel-contract' || to === 'contract' || toStd) return undefined;
     return `a manifest imports only @ferretry/kernel/manifest, @ferretry/kernel/contract and contracts, not ${name}`;
   }
@@ -72,6 +74,8 @@ export function refusal(edge: ImportEdge): string | undefined {
     // The half's own feature list (`daemon/generated/features.ts`, written by the generator from `daemon/features/`).
     if (from === 'daemon' && to === 'generated' && /^\.\/generated\/features\.ts$/.test(edge.specifier))
       return undefined;
+    // The half's own verb list (`cli/generated/verbs.ts`, written by the generator from `cli/verbs/`).
+    if (from === 'cli' && to === 'generated' && /^\.\/generated\/verbs\.ts$/.test(edge.specifier)) return undefined;
     if (from === 'app' && (to === 'kernel-plugin' || to === 'kernel-manifest' || to === 'kernel-contract'))
       return undefined;
     return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
