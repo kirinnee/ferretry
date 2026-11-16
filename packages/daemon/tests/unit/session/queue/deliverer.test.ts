@@ -462,6 +462,87 @@ describe('handing over a queue', () => {
     should(world.handed).eql(['a', 'a']);
   });
 
+  it('should back off a screen that keeps refusing as unreadable, writing nothing while it waits (&F4319)', async () => {
+    // Arrange — the screen refuses three hand-overs in a row, then takes the fourth.
+    const world = new World(message('a', 'human'));
+    const lookMs = defaultQueueDeliverySettings.lookMs;
+    for (let n = 0; n < 3; n++) world.answers.push({ kind: 'refused', reason: 'unreadable' });
+
+    // Act + Assert — the first refusal is tried again at once, as before.
+    await world.deliverer.enqueued(ID);
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a', 'a']);
+
+    // After the second, the next try waits one look; nothing is written while it does.
+    const lines = world.log.length;
+    await world.deliverer.changed(ID);
+    world.nowMs += lookMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a', 'a']);
+    should(world.log.length).equal(lines);
+    should(world.state('a')?.waitReason).equal('unreadable');
+
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a', 'a', 'a']);
+
+    // After the third the wait doubles.
+    world.nowMs += lookMs;
+    await world.deliverer.changed(ID);
+    should(world.handed).eql(['a', 'a', 'a']);
+    world.nowMs += lookMs;
+    await world.deliverer.changed(ID);
+
+    should(world.handed).eql(['a', 'a', 'a', 'a']);
+    should(world.state('a')?.state).equal('delivered');
+  });
+
+  it('should cap the unreadable back-off at `recheckMs` and forget it once a hand-over lands', async () => {
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    const { lookMs, recheckMs } = defaultQueueDeliverySettings;
+    for (let n = 0; n < 12; n++) world.answers.push({ kind: 'refused', reason: 'unreadable' });
+
+    await world.deliverer.enqueued(ID);
+    while (world.handed.length < 12) {
+      world.nowMs += recheckMs;
+      await world.deliverer.changed(ID);
+    }
+    // Twelve in a row: lookMs doubled ten times is far past the cap, so recheckMs - 1 still waits and recheckMs does not.
+    should(lookMs * 2 ** 10).be.above(recheckMs);
+    world.nowMs += recheckMs - 1;
+    await world.deliverer.changed(ID);
+    should(world.handed).have.length(12);
+    world.nowMs += 1;
+    await world.deliverer.changed(ID);
+
+    // The thirteenth lands, and b — behind it — goes on the same look with no back-off left over.
+    should(world.handed.slice(12)).eql(['a', 'b']);
+  });
+
+  it('should not write a cleared wait for a message it is about to mark typing (&F4319)', async () => {
+    const world = new World(message('a', 'human'));
+    world.answers.push({ kind: 'refused', reason: 'unreadable' });
+
+    await world.deliverer.enqueued(ID);
+    await world.deliverer.changed(ID);
+
+    const kinds = world.log.map(event =>
+      event.kind === 'enqueued'
+        ? 'enqueued'
+        : event.kind === 'waiting'
+          ? `waiting:${event.reason ?? '-'}`
+          : `${event.kind}:${'state' in event ? event.state : ''}`,
+    );
+    should(kinds).eql([
+      'enqueued',
+      'moved:typing',
+      'moved:queued',
+      'waiting:unreadable',
+      'moved:typing',
+      'moved:delivered',
+    ]);
+  });
+
   it('should start no tracker look once the daemon is stopping', async () => {
     const world = new World(message('a', 'human'));
     world.answers.push(new Error('tmux went away'));
