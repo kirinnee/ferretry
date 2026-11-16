@@ -2,6 +2,7 @@ import { err, ok } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import type { RouteHandler } from '@ferretry/kernel/contract';
 import {
+  DeliveryWays,
   KeyedSerialExecutor,
   MailboxHosts,
   type MailboxApi,
@@ -12,6 +13,8 @@ import {
 } from '../contract/index.ts';
 import { SessionQueueService } from './lib/queue/service.ts';
 import manifest from '../manifest.ts';
+import { paneWayContributions } from './ways/pane-way.ts';
+import { waysDoctor } from './ways/registry.ts';
 import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from './lib/host-slot.ts';
 import { NotifyingSessionQueueStore } from './lib/queue/index.ts';
 import { routeTable } from './lib/api.ts';
@@ -154,8 +157,12 @@ export default implementDaemon(manifest, {
         }),
       ) as never,
       provides: { mailbox: api },
-      hooks: { 'ferret.changed': follow },
+      hooks: {
+        'ferret.changed': follow,
+        'mailbox.delivery-way': () => paneWayContributions(needs.ferrets),
+      },
       doctor: {
+        'mailbox-ways': async () => waysDoctor(() => hooks.contributions(DeliveryWays)),
         'mailbox-host': async () => {
           try {
             requireMailboxHost(source);

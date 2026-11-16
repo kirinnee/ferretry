@@ -1,6 +1,6 @@
 import { definePlugin, route } from '@ferretry/kernel/manifest';
 import { FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
-import { MailboxHosts, MailboxPort, QueueChanged } from './contract/index.ts';
+import { DeliveryWays, MailboxHosts, MailboxPort, QueueChanged } from './contract/index.ts';
 import {
   cap,
   COMPOSER_ACTED_AUDIT,
@@ -42,7 +42,11 @@ export default definePlugin({
   needs: { ferrets: FerretsPort },
   provides: { mailbox: MailboxPort },
   data: { publishes: [QueueChanged] },
-  hooks: { offers: [{ hook: MailboxHosts }], takes: [{ hook: FerretChanged }] },
+  // The Mailbox offers the delivery-way slot and contributes the first way itself (the ferret's terminal, through Ferrets).
+  hooks: {
+    offers: [{ hook: MailboxHosts }, { hook: DeliveryWays }],
+    takes: [{ hook: FerretChanged }, { hook: DeliveryWays }],
+  },
   actions: {
     routes: [
       // ── send, queue, ledger (session-send) ────────────────────────────────────────────────────
@@ -98,5 +102,5 @@ export default definePlugin({
       }),
     ],
   },
-  doctor: ['mailbox-host'],
+  doctor: ['mailbox-host', 'mailbox-ways'],
 });
