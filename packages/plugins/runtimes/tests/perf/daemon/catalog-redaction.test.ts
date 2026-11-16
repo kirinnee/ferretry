@@ -6,6 +6,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { interleavedBest } from '@ferretry/std/testing/linear-time';
+import { s25Shapes } from '../../support/s25-shapes.ts';
 import { shownFor } from '../../unit/daemon/redact-support.ts';
 
 describe('S25 the catalogue redaction is linear', () => {
@@ -17,15 +18,6 @@ describe('S25 the catalogue redaction is linear', () => {
   // the linearity proof; each shape's timeout is a margin for a loaded runner, not a speed claim.
   // One test per shape (the timeout is the shape's local time with at least four times the headroom: 'a=' repeated
   // 2.2 s, the others 0.1-1.7 s). The warm-up, the sizes, the nine rounds and both assertions are the same for each.
-  const s25Shapes: readonly (readonly [string, (n: number) => string, number])[] = [
-    ['a repeated', n => 'a'.repeat(n), 10_000],
-    ['sk- repeated', n => 'sk-'.repeat(n / 3), 10_000],
-    ['a= repeated', n => 'a='.repeat(n / 2), 15_000],
-    ['a long password block', n => `password: |\n${'  x\n'.repeat(n / 4)}`, 10_000],
-    ['repeated expansion heads', n => '${A-'.repeat(n / 4), 10_000],
-    ['password and newline repeated', n => 'password\n'.repeat(n / 9), 10_000],
-    ['a long separator then =x', n => `${'-'.repeat(n)}=x`, 10_000],
-  ];
   for (const [label, shape, timeoutMs] of s25Shapes) {
     it(
       `S25 every shape rule is linear: a long run of any shape costs the same per character as a short one: ${label}`,

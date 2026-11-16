@@ -8,6 +8,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { AFTER_KEY, KEY_BODY_MARK, privateKeyShapes } from './redact-private-keys.ts';
+import { s25Shapes } from '../../support/s25-shapes.ts';
 import { HIDDEN, shownFor } from './redact-support.ts';
 
 describe('component text redaction', () => {
@@ -1399,4 +1400,13 @@ describe('the redaction guarantees', () => {
       });
     }
   });
+
+  // S25 every shape rule is linear: how it grows at 100 KB is tests/perf/daemon/catalog-redaction.test.ts. Here each
+  // shape is read once, small, and the answer is the same text again when read twice.
+  for (const [label, shape] of s25Shapes) {
+    it(`S25 every shape rule reads a long run of any shape the same way each time: ${label}`, () => {
+      const text = shape(3_000);
+      should(shownFor(text)).deepEqual(shownFor(text));
+    });
+  }
 });
