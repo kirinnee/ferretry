@@ -30,7 +30,7 @@ function renderOlderHidden(olderHidden: number | undefined, retry: string): stri
 
 /** What an empty answer says, naming the kind the person asked about. */
 function renderNoMatch(query: string, kind: WorkKind | undefined): string {
-  const subject = kind === 'card' ? 'cards' : kind === 'ask' ? 'asks' : 'cards or asks';
+  const subject = kind === 'card' ? 'tasks' : kind === 'ask' ? 'asks' : 'tasks or asks';
   return `No ${subject} match “${query}”.`;
 }
 

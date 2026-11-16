@@ -181,12 +181,12 @@ export type FyRenderBlock =
   | FyRenderMediaBlock;
 
 /**
- * A `card` or `board` block: not an illustration but a pointer at something that lives on the board.
+ * A `task` or `board` block (an older message's `card` block reads as `task`): not an illustration but a pointer at something that lives on the board.
  * `embed` is the payload read into references (`fy-render-embed.ts`); the block carries no title, lane or
  * status, because what it shows is read from the board when it is drawn. It is drawn by
  * `fy-render-card-embed.tsx`, never by `FyRenderBlock`, which is why it is a separate type.
  */
-export type FyRenderEmbedBlock = (FyRenderBaseBlock<'card'> | FyRenderBaseBlock<'board'>) & {
+export type FyRenderEmbedBlock = (FyRenderBaseBlock<'task'> | FyRenderBaseBlock<'board'>) & {
   readonly embed: FyRenderEmbedSpec;
 };
 
@@ -828,7 +828,7 @@ export function parseFyRender(source: string): FyRenderParseResult {
       if (payload.trim() === '') return fail('A chart block needs a payload describing it');
       return { ok: true, block: { type: kind, alt, payload, source } };
     }
-    case 'card':
+    case 'task':
     case 'board': {
       const parsed = parseFyRenderEmbed(kind, payload);
       return parsed.ok

@@ -405,10 +405,10 @@ describe("the ferret's cards", () => {
       await settle();
 
       const drawn = JSON.stringify(view.toJSON());
-      expect(drawn).toContain('Cards unavailable');
+      expect(drawn).toContain('Tasks unavailable');
       expect(drawn).toContain('board refused');
       expect(drawn).not.toContain('Files unavailable');
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
       expect(view.root.findAll(node => node.props['data-result-kind'] === 'file')).toHaveLength(1);
     } finally {
       run(() => view.unmount());
@@ -506,7 +506,7 @@ describe('honest coverage of the file index', () => {
       );
       const drawn = JSON.stringify(view.toJSON());
       expect(drawn).not.toContain('Files unavailable');
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
 
       await pastAnnounceDebounce();
       expect(view.root.findByProps({ 'aria-live': 'polite' }).children.join('')).toBe('');
@@ -529,7 +529,7 @@ describe('honest coverage of the file index', () => {
 
       const drawn = JSON.stringify(view.toJSON());
       expect(drawn).toContain('No match in the indexed portion of this ferret.');
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
       expect(view.root.findByProps({ 'data-search-skips': '' }).children.join('')).toContain('3 unreadable');
 
       await pastAnnounceDebounce();
@@ -544,7 +544,7 @@ describe('honest coverage of the file index', () => {
     try {
       await type(view, 'absent');
 
-      expect(JSON.stringify(view.toJSON())).toContain('No files or cards of this ferret match');
+      expect(JSON.stringify(view.toJSON())).toContain('No files or tasks of this ferret match');
       await pastAnnounceDebounce();
       expect(view.root.findByProps({ 'aria-live': 'polite' }).children.join('')).toBe('No results');
     } finally {
@@ -578,7 +578,7 @@ describe('honest coverage of the file index', () => {
 
         const drawn = JSON.stringify(view.toJSON());
         expect(drawn).toContain('Files unavailable');
-        expect(drawn).not.toContain('No files or cards of this ferret match');
+        expect(drawn).not.toContain('No files or tasks of this ferret match');
       } finally {
         run(() => view.unmount());
       }
@@ -938,7 +938,7 @@ describe('current-ferret search control', () => {
       run(() => taskRow?.props.onMouseEnter());
       const chosenId = view.root.findByType('input').props['aria-activedescendant'];
       expect(JSON.stringify(view.toJSON())).toContain("Indexing this ferret's files…");
-      expect(JSON.stringify(view.toJSON())).not.toContain("Indexing this ferret's cards…");
+      expect(JSON.stringify(view.toJSON())).not.toContain("Indexing this ferret's tasks…");
       await pastAnnounceDebounce();
       expect(view.root.findByProps({ 'aria-live': 'polite' }).children.join('')).toBe('');
 
@@ -1078,12 +1078,12 @@ describe('current-ferret search control', () => {
       run(() => indexing.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
       const drawn = JSON.stringify(indexing.toJSON());
 
-      expect(drawn).toContain("Indexing this ferret's files and cards…");
+      expect(drawn).toContain("Indexing this ferret's files and tasks…");
       expect(
         indexing.root.findAll(node => node.type === 'svg' && node.props['data-search-indexing'] !== undefined),
       ).toHaveLength(1);
       expect(indexing.root.findAll(node => node.props['data-search-shortcut'] !== undefined)).toHaveLength(0);
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
     } finally {
       run(() => indexing.unmount());
     }
@@ -1097,9 +1097,9 @@ describe('current-ferret search control', () => {
       await settle();
       const drawn = JSON.stringify(broken.toJSON());
 
-      expect(drawn).toContain('Cards unavailable: board refused.');
+      expect(drawn).toContain('Tasks unavailable: board refused.');
       expect(drawn).toContain('Files unavailable');
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
     } finally {
       run(() => broken.unmount());
     }
@@ -1111,7 +1111,7 @@ describe('current-ferret search control', () => {
     try {
       run(() => refused.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
       expect(JSON.stringify(refused.toJSON())).toContain(
-        'Cards unavailable: Failed to fetch. Files unavailable: Failed to fetch.',
+        'Tasks unavailable: Failed to fetch. Files unavailable: Failed to fetch.',
       );
     } finally {
       run(() => refused.unmount());
@@ -1126,7 +1126,7 @@ describe('current-ferret search control', () => {
     try {
       run(() => cardsMoving.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
       const drawn = JSON.stringify(cardsMoving.toJSON());
-      expect(drawn).toContain("Indexing this ferret's cards…");
+      expect(drawn).toContain("Indexing this ferret's tasks…");
       expect(drawn).not.toContain("Indexing this ferret's files…");
     } finally {
       run(() => cardsMoving.unmount());
@@ -1139,10 +1139,10 @@ describe('current-ferret search control', () => {
     try {
       run(() => failedCards.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
       const drawn = JSON.stringify(failedCards.toJSON());
-      expect(drawn).toContain('Cards unavailable: task read refused.');
+      expect(drawn).toContain('Tasks unavailable: task read refused.');
       expect(drawn).toContain("Indexing this ferret's files…");
       expect(drawn.match(/Indexing/g)).toHaveLength(1);
-      expect(drawn).not.toContain('No files or cards of this ferret match');
+      expect(drawn).not.toContain('No files or tasks of this ferret match');
     } finally {
       run(() => failedCards.unmount());
     }
@@ -1190,7 +1190,7 @@ describe('current-ferret search control', () => {
       expect(input.props.role).toBe('combobox');
       expect(input.props['aria-autocomplete']).toBe('list');
       expect(view.root.findAll(node => String(node.props.className).includes('z-[80]'))).toHaveLength(1);
-      expect(JSON.stringify(view.toJSON())).toContain("Type to search this ferret's files and cards.");
+      expect(JSON.stringify(view.toJSON())).toContain("Type to search this ferret's files and tasks.");
 
       const escapeKey = keyEvent('Escape');
       run(() => input.props.onKeyDown(escapeKey));

@@ -29,7 +29,7 @@ mock.module('@ferretry/app', () => ({
 const { FyRenderCardEmbed } = await import('../../../../app/render/fy-render-card-embed.tsx');
 const { isFyRenderEmbedBlock, parseFyRender } = await import('../../../../app/render/fy-render.ts');
 
-const blockOf = (type: 'card' | 'board', payload: string) => {
+const blockOf = (type: 'task' | 'board', payload: string) => {
   const result = parseFyRender([`type: ${type}`, 'alt: Live work', '---', payload].join('\n'));
   const block = result.ok ? result.block : undefined;
   if (block === undefined || !isFyRenderEmbedBlock(block)) throw new Error('fixture is not an embed block');
@@ -39,14 +39,14 @@ const blockOf = (type: 'card' | 'board', payload: string) => {
 const host = { daemon: 'daemon-a' };
 
 describe('FyRenderCardEmbed: the Board draws the mini board', () => {
-  it('hands a card block to the Board renderer as the card it names, inside the labelled group', () => {
+  it('hands a task block to the Board renderer as the task it names, inside the labelled group', () => {
     asked.length = 0;
     owned = true;
-    const tree = render(<FyRenderCardEmbed block={blockOf('card', '&F12')} host={host} />);
+    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
     expect(asked).toEqual([
       { daemon: 'daemon-a', rendererKey: 'reference:&board', value: { kind: 'card', id: 'F12' } },
     ]);
-    expect(tree.root.findByProps({ 'data-fy-card-embed': 'card' }).props['aria-label']).toBe('Live work');
+    expect(tree.root.findByProps({ 'data-fy-card-embed': 'task' }).props['aria-label']).toBe('Live work');
     expect(tree.root.findAllByProps({ 'data-board-drew': 'reference:&board' })).toHaveLength(1);
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-card': 'F12' })).toHaveLength(0);
   });
