@@ -24,7 +24,7 @@ one did (the integration tests build a second service over the same folder to pr
 | File         | Written by | Holds                                                                             |
 | ------------ | ---------- | --------------------------------------------------------------------------------- |
 | `job.json`   | daemon     | `{id, name, command, cwd, startedAt, startedBy}`, once, before the command starts |
-| `output.log` | wrapper    | stdout and stderr of the job, appended                                            |
+| `output.log` | wrapper    | stdout and stderr of the job, appended, **capped at 64 MiB** (below)              |
 | `exit.json`  | wrapper    | `{code, signal?, endedAt}`, atomic (temp file + `mv`)                             |
 | `stop`       | daemon     | an empty file: "stop this job". The wrapper's watcher turns it into SIGTERM       |
 
@@ -34,12 +34,19 @@ rebooted or tmux was killed under it).
 ## Semantics
 
 - The command runs as `<login shell> -l -c '<command>'` (the shell terminals use), in the caller's folder (the CLI sends its cwd),
-  with stdin closed.
+  with stdin closed. The folder is never handed to tmux (tmux expands `#(…)` formats in `new-session -c`, so a folder named
+  `#(cmd)` would run `cmd`): the session starts in `/` and the wrapper does `cd -- "$cwd"`, the folder arriving as a plain argv
+  value. If the `cd` fails the job does not run; the error is in the log and the exit is recorded.
+- **The log is capped at 64 MiB per job** (`JOB_LOG_CAP_BYTES`). stdout and stderr go through a bounded writer in the wrapper; once
+  the log reaches the cap it appends ONE marker line (`[fy: output log reached N bytes; further output is dropped]`) and drops
+  everything after, still draining the pipe so **the job keeps running and is never blocked**. The cap can be passed by at most
+  one 64 KiB read. Retention (below) bounds the number of finished jobs; the cap bounds each one, so a runaway `yes` cannot fill
+  the disk.
 - After it exits the pane closes. The files stay (retention below).
 - **A job is never idle-reaped.** The terminal idle deadline is not applied to jobs at all; a job ends when it ends, is stopped, or its
   ferret is removed from the machine's point of view (files age out).
 - **Stopping** (`fy job stop`): the daemon writes `stop`; within a second the wrapper sends SIGTERM to the job's whole **process
-  tree** (children found with `pgrep -P`), then SIGKILL to the same pids after 5 s. A job that ignores TERM ends with code 137 /
+  tree** (children found with `pgrep -P`), then, after 5 s, SIGKILL to the tree walked again from the job's pid at that moment (plus earlier finds that were orphaned to init), so a pid that was reused meanwhile is not hit. A job that ignores TERM ends with code 137 /
   signal KILL. If the wrapper itself does not finish in time the pane is taken down and a KILL exit is recorded by the daemon.
   A process that detached itself (setsid, double fork) before the stop is out of reach.
 - A signal death is recorded as the shell reports it: **128 + the signal's number**, and `exit.json` also names the signal
@@ -79,7 +86,7 @@ an argv and each is quoted so it arrives as typed.
 | Code           | Meaning                                                                                                                     |
 | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
 | the job's code | `run` / `attach` / `wait` after the job ended (a signal death is already `128 + n`)                                         |
-| **75**         | **detached**: the attachment broke, the job is untouched (a signal, the daemon asking it to let go, or no daemon for ~30 s) |
+| **75**         | **detached**: the attachment broke, the job is untouched (a signal, the daemon asking it to let go, or no daemon for ~75 s) |
 | 124            | `wait --timeout` ran out                                                                                                    |
 | 70             | the job ended without an exit record (`lost`)                                                                               |
 | 2              | the command line was wrong                                                                                                  |
@@ -87,12 +94,16 @@ an argv and each is quoted so it arrives as typed.
 
 **Detach semantics.** On SIGTERM, SIGHUP or SIGINT an attachment **only detaches**: it prints
 `detached from job <id> (<name>); it is still running — re-attach with: fy job attach <id>` to stderr and exits 75. It never forwards
-the signal. It must finish inside about a second (Claude Code 2.1 follows its TERM with a KILL about 1.5 s later), so the in-flight
-poll is raced against the signal and the registry cleanup is fire-and-forget: **no network call stands between a signal and the
-message.** The daemon can ask attachments to let go too (`detach` flag on the next poll; the move gate will use it).
+the signal. It must finish inside about a second (Claude Code 2.1 follows its TERM with a KILL about 1.5 s later), so every
+call carries the signal's abort, the in-flight poll is raced against it, the registry cleanup gets a 300 ms deadline, and the
+process then ends itself with `process.exit(75)` (a request left open must not keep it alive): **no network call stands between a
+signal and the message, and none keeps the process past 1 s.** A TERM that lands while `fy job run`'s start request is in flight
+detaches the same way (the job may or may not have started; `fy job ls` shows it). Giving up on a silent daemon takes 40 failed
+polls with a growing pause (about 75 s). The daemon can ask attachments to let go too (`detach` flag on the next poll; the move gate will use it).
 
 ## Attachment registry
 
+The registry holds one entry per (ferret, job, pid) — registering again replaces it — and at most 16 per job (the oldest is pushed out).
 Each live attachment registers `{jobId, pid, claudeTaskId?}`. The daemon records the pid's **start** at registration; an entry is
 proved dead by pid + start (a reused pid reads as a different start), and a reading the host cannot take never prunes. The Claude
 Code task id is read from `/proc/self/fd/1` when stdout is `…/tasks/<id>.output` (Linux only; skipped on macOS), parsed by

@@ -10,6 +10,11 @@ export interface IJobProcess {
   cwd(): string;
   /** Where this process's stdout points when that is a file (Linux: `/proc/self/fd/1`); undefined otherwise. */
   stdoutFile(): string | undefined;
+  /**
+   * Ends this process NOW with `code`. A detach on a signal ends here rather than by returning: a request the detach left
+   * open (the daemon not answering) would otherwise keep the process alive past the 1 s Claude gives a TERM.
+   */
+  exit(code: number): void;
 }
 
 /** SIGTERM, SIGHUP and SIGINT, as the attachment hears them. Returns how to stop listening. */
@@ -21,4 +26,6 @@ export interface IJobTimers {
   nowMs(): number;
   /** Waits; resolves early (never rejects) when `signal` aborts. */
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
+  /** A signal that aborts after `ms`: the bound on a call this process will not wait out. */
+  deadline(ms: number): AbortSignal;
 }

@@ -65,9 +65,10 @@ function verbs(one: Keeper, signals = new Signals(), pid = process.pid) {
     io,
     signals,
     sut: new JobVerbs(gatewayOver(one.service()), io, {
-      self: { pid, cwd: () => one.home, stdoutFile: () => undefined },
+      self: { pid, cwd: () => one.home, stdoutFile: () => undefined, exit: () => undefined },
       signals,
       timers: {
+        deadline: ms => AbortSignal.timeout(ms),
         nowMs: () => Date.now(),
         sleep: async (ms, signal) =>
           await new Promise<void>(resolve => {

@@ -114,7 +114,7 @@ describe('the tmux job runtime', () => {
       '-s',
       `fy-job-f1-${ID}`,
       '-c',
-      '/work',
+      '/',
       '-e',
       'FY_X=1',
       '/bin/sh',
@@ -129,7 +129,7 @@ describe('the tmux job runtime', () => {
     const tmux = new ScriptedTmux([fail('no space'), ok()]);
     const sut = new TmuxJobRuntime(tmux, plainShell);
     await should(sut.start(input)).be.rejectedWith(/could not start the job: no space/u);
-    should(tmux.received[1]?.[0]).equal('kill-session');
+    should(tmux.received[1]).deepEqual(['kill-session', '-t', `=fy-job-f1-${ID}`]);
     const empty = new TmuxJobRuntime(new ScriptedTmux([fail('')]), plainShell);
     await should(empty.start(input)).be.rejectedWith(/tmux command failed/u);
   });

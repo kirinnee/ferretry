@@ -11,6 +11,7 @@ import {
   jobCapacityRefusal,
   defaultJobName,
   findJob,
+  JOB_LOG_CAP_BYTES,
   JOB_WRAPPER_SCRIPT,
   jobPaneArgv,
   jobsToDelete,
@@ -119,8 +120,10 @@ describe('the pane wrapper', () => {
     should(JOB_WRAPPER_SCRIPT.trimEnd().endsWith(';')).be.false();
   });
 
-  it("should pass the folder, the login shell and the command as the shell's own positional words", () => {
-    should(jobPaneArgv({ dir: '/state/j', shell: '/bin/zsh', command: 'echo "$HOME"; ls' })).deepEqual([
+  it("should pass the folder, the login shell, the command, the cwd and the cap as the shell's own positional words", () => {
+    should(
+      jobPaneArgv({ dir: '/state/j', shell: '/bin/zsh', command: 'echo "$HOME"; ls', cwd: '/work/#(x)' }),
+    ).deepEqual([
       '/bin/sh',
       '-c',
       JOB_WRAPPER_SCRIPT,
@@ -128,7 +131,16 @@ describe('the pane wrapper', () => {
       '/state/j',
       '/bin/zsh',
       'echo "$HOME"; ls',
+      '/work/#(x)',
+      '67108864',
     ]);
+  });
+
+  it('should hold a log cap of 64 MiB, state it in the marker, and re-walk the tree before the KILL', () => {
+    should(JOB_LOG_CAP_BYTES).equal(64 * 1024 * 1024);
+    should(jobPaneArgv({ dir: 'd', shell: 's', command: 'c', cwd: '/', logCapBytes: 5 }).at(-1)).equal('5');
+    should(JOB_WRAPPER_SCRIPT).containEql('further output is dropped');
+    should(JOB_WRAPPER_SCRIPT).containEql('now=$(tree "$pid")');
   });
 
   it('should record the exit atomically, from the pane, and never forward a signal as the attachment would', () => {

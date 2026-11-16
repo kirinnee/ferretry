@@ -42,15 +42,28 @@ function harness(answer: (call: RecordedCall) => unknown, stdout: string | undef
   const { calls, client } = recordingClient(answer);
   const io = capturedIo();
   const signals = new FakeSignals();
-  const process: IJobProcess = { pid: 4321, cwd: () => '/work', stdoutFile: () => stdout };
+  const exits: number[] = [];
+  const process: IJobProcess = {
+    pid: 4321,
+    cwd: () => '/work',
+    stdoutFile: () => stdout,
+    exit: code => void exits.push(code),
+  };
   let now = Date.parse('2026-11-16T00:10:00.000Z');
   const timers: IJobTimers = {
     nowMs: () => now,
     sleep: async ms => {
       now += ms;
     },
+    deadline: ms => AbortSignal.timeout(ms),
   };
-  return { calls, io, signals, sut: new JobVerbs(client, io, { self: process, signals, timers, sessionId: 's1' }) };
+  return {
+    calls,
+    io,
+    signals,
+    exits,
+    sut: new JobVerbs(client, io, { self: process, signals, timers, sessionId: 's1' }),
+  };
 }
 
 const register = {
@@ -180,9 +193,9 @@ describe('fy job attach', () => {
     const { calls, client } = recordingClient(() => ({}));
     const io = capturedIo();
     const sut = new JobVerbs(client, io, {
-      self: { pid: 1, cwd: () => '/', stdoutFile: () => undefined },
+      self: { pid: 1, cwd: () => '/', stdoutFile: () => undefined, exit: () => undefined },
       signals: new FakeSignals(),
-      timers: { nowMs: () => 0, sleep: async () => undefined },
+      timers: { nowMs: () => 0, sleep: async () => undefined, deadline: () => AbortSignal.abort() },
       sessionId: undefined,
     });
 
@@ -336,5 +349,108 @@ describe('fy job: the edges', () => {
     });
     should(await sut.attach(invocation(['build']))).equal(0);
     should(io.printed.join('')).equal('ok\n');
+  });
+});
+
+describe('fy job: the signal deadline', () => {
+  const hang = (): Promise<never> => new Promise(() => undefined);
+  const answers = (stuck: (call: RecordedCall) => boolean) => (call: RecordedCall) => {
+    if (stuck(call)) return hang();
+    if (call.route.endsWith('/output')) return chunk('x\n', 2);
+    if (call.route.endsWith('/jobs/:jobId')) return job();
+    if (call.route.startsWith('POST') && call.route.endsWith('job-attachments')) return register;
+    return { ok: true };
+  };
+
+  it('should detach and END the process when a signal lands while the daemon is not answering a poll', async () => {
+    // Arrange
+    const h = harness(answers(call => call.route.endsWith('/output')));
+    const running = h.sut.attach(invocation(['build']));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Act
+    h.signals.handler?.('SIGTERM');
+
+    // Assert
+    should(await running).equal(75);
+    should(h.exits).deepEqual([75]);
+    should(h.io.errors.join('')).containEql('detached from job aaaaaaaaaaa1');
+  });
+
+  it('should carry the abort into every call and give the goodbye a deadline of its own', async () => {
+    // Arrange
+    const h = harness(answers(() => false));
+    const out = h.io.out;
+    h.io.out = text => {
+      out(text);
+      h.signals.handler?.('SIGTERM');
+    };
+
+    // Act
+    await h.sut.attach(invocation(['build']));
+
+    // Assert
+    const unregister = h.calls.find(call => call.route.startsWith('DELETE'));
+    should(unregister?.signal).not.be.undefined();
+    should(unregister?.signal).not.equal(h.calls.find(call => call.route.endsWith('/output'))?.signal);
+    for (const call of h.calls.filter(call => !call.route.startsWith('DELETE'))) should(call.signal).not.be.undefined();
+  });
+
+  it('should not wait on an unregister the daemon never answers', async () => {
+    // Arrange
+    const h = harness(answers(call => call.route.startsWith('DELETE')));
+    const out = h.io.out;
+    h.io.out = text => {
+      out(text);
+      h.signals.handler?.('SIGTERM');
+    };
+
+    // Act + Assert
+    should(await h.sut.attach(invocation(['build']))).equal(75);
+    should(h.exits).deepEqual([75]);
+  });
+
+  it('should detach cleanly (75) when the signal lands during the start request of fy job run', async () => {
+    // Arrange
+    const h = harness(answers(call => call.route === 'POST /v1/ferrets/:ferretId/jobs'));
+    const running = h.sut.run(invocation(['sleep 60'], {}));
+    await Promise.resolve();
+
+    // Act
+    h.signals.handler?.('SIGTERM');
+
+    // Assert
+    should(await running).equal(75);
+    should(h.exits).deepEqual([75]);
+    should(h.io.errors.join('')).containEql('detached before the daemon confirmed');
+  });
+
+  it('should detach and end when the signal lands while wait is parked on the daemon', async () => {
+    // Arrange
+    const h = harness(answers(call => call.route.endsWith('/jobs/:jobId')));
+    const waiting = h.sut.wait(invocation(['build']));
+    await Promise.resolve();
+
+    // Act
+    h.signals.handler?.('SIGTERM');
+
+    // Assert
+    should(await waiting).equal(75);
+    should(h.exits).deepEqual([75]);
+  });
+
+  it('should leave the process to end by itself when no signal was heard', async () => {
+    // Arrange
+    const h = harness(call => {
+      if (call.route.endsWith('/output'))
+        return chunk('', 0, { ended: true, job: job({ state: 'exited', exitCode: 0 }) });
+      if (call.route.endsWith('/jobs/:jobId')) return job();
+      return register;
+    });
+
+    // Act + Assert
+    should(await h.sut.attach(invocation(['build']))).equal(0);
+    should(h.exits).deepEqual([]);
   });
 });

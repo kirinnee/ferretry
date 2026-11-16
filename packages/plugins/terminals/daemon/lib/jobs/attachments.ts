@@ -11,10 +11,28 @@ export type { AttachmentEntry, AttachmentsState };
 
 export const EMPTY_ATTACHMENTS: AttachmentsState = { entries: [] };
 
-export const withEntry = (state: AttachmentsState, entry: AttachmentEntry): AttachmentsState => ({
-  ...state,
-  entries: [...state.entries.filter(existing => existing.id !== entry.id), entry],
-});
+/** The most attachments one job keeps; a newer one pushes out the oldest. A registry must not grow with every request. */
+export const JOB_MAX_ATTACHMENTS_PER_JOB = 16;
+
+/**
+ * Adds `entry`, replacing any earlier one for the same (ferret, job, pid) — one process attached once — and keeping only the
+ * newest {@link JOB_MAX_ATTACHMENTS_PER_JOB} of that job.
+ */
+export function withEntry(state: AttachmentsState, entry: AttachmentEntry): AttachmentsState {
+  const others = state.entries.filter(
+    existing =>
+      existing.id !== entry.id &&
+      !(existing.sessionId === entry.sessionId && existing.jobId === entry.jobId && existing.pid === entry.pid),
+  );
+  const ofJob = others.filter(existing => existing.sessionId === entry.sessionId && existing.jobId === entry.jobId);
+  const evicted = new Set(
+    ofJob
+      .toSorted((x, y) => x.registeredAt.localeCompare(y.registeredAt))
+      .slice(0, Math.max(0, ofJob.length + 1 - JOB_MAX_ATTACHMENTS_PER_JOB))
+      .map(old => old.id),
+  );
+  return { ...state, entries: [...others.filter(existing => !evicted.has(existing.id)), entry] };
+}
 
 export const withoutEntry = (state: AttachmentsState, id: string): AttachmentsState => ({
   ...state,

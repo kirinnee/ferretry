@@ -114,18 +114,28 @@ export function attachExitCode(state: JobState, exit: JobExit | undefined, lostC
 
 // ─── the wrapper the pane runs ────────────────────────────────────────────────────────────────────────────────────
 
+/**
+ * The most a job's `output.log` may hold: 64 MiB. Past it the wrapper drops the output, writes ONE marker line and keeps the
+ * job running (a chatty watcher or `yes` must not fill the disk, and retention only removes FINISHED jobs).
+ */
+export const JOB_LOG_CAP_BYTES = 64 * 1024 * 1024;
+
 /** How long the job's tree gets after SIGTERM before SIGKILL, in seconds (the wrapper's own timer). */
 export const JOB_STOP_GRACE_SECONDS = 5;
 
 /**
- * The POSIX `sh` program the pane runs: `sh -c <this> fy-job <dir> <shell> <command>`.
+ * The POSIX `sh` program the pane runs: `sh -c <this> fy-job <dir> <shell> <command> <cwd> <cap>`.
  *
- * - runs `<shell> -l -c <command>` (the same login shell terminals use) with stdin closed and stdout+stderr APPENDED to
- *   `<dir>/output.log`;
+ * - runs `<shell> -l -c <command>` (the same login shell terminals use) in `<cwd>` with stdin closed and stdout+stderr
+ *   written through a BOUNDED writer to `<dir>/output.log`: past `<cap>` bytes the writer drops the rest, adds one marker line
+ *   and keeps draining, so a job is never blocked on a full pipe and the log never outgrows the cap. The cwd is a plain argv
+ *   value the wrapper `cd`s to — it never goes through a tmux argument, because tmux expands `#(…)` formats in `-c`;
  * - on SIGINT/SIGTERM/SIGHUP (the pane closing, a stop) it signals the job's whole process TREE, found by walking children with
  *   `pgrep -P` (TERM to every one, then KILL to those same pids after the grace), and still waits for the job, so the exit
  *   is recorded either way. A tree walk rather than a process group: job control needs a terminal and its pgid arithmetic
- *   differed between shells; a process that detaches itself (setsid, a double fork) before the stop is out of reach;
+ *   differed between shells; a process that detaches itself (setsid, a double fork) before the stop is out of reach. The KILL
+ *   after the grace walks the tree again from the job's pid (plus earlier finds that were orphaned to init), never trusting
+ *   a pid found five seconds before;
  * - a watcher in the wrapper turns the daemon's `<dir>/stop` file into SIGTERM on the wrapper itself (within a second). A stop is
  *   a FILE, never a signal typed into the pane: a tty interrupt reaches the job directly as SIGINT and races the wrapper, and
  *   the file works however early or late it is written;
@@ -137,13 +147,29 @@ export const JOB_STOP_GRACE_SECONDS = 5;
 export const JOB_WRAPPER_SCRIPT = `dir=$1
 shell=$2
 cmd=$3
+cwd=$4
+cap=$5
 log="$dir/output.log"
+fifo="$dir/output.fifo"
 pid=
 gpid=
+writer=
 stopping=
 tree() {
   for child in $(pgrep -P "$1" 2>/dev/null); do tree "$child"; done
   echo "$1"
+}
+capped() {
+  while :; do
+    size=$(wc -c <"$log" 2>/dev/null || echo 0)
+    [ "$size" -lt "$cap" ] || break
+    dd bs=65536 count=1 >>"$log" 2>/dev/null
+    [ "$(wc -c <"$log" 2>/dev/null || echo 0)" -gt "$size" ] || return 0
+  done
+  if [ "$(dd bs=1 count=1 2>/dev/null | wc -c)" -gt 0 ]; then
+    printf '[fy: output log reached %s bytes; further output is dropped]\n' "$cap" >>"$log"
+  fi
+  cat >/dev/null
 }
 term() {
   stopping=1
@@ -151,12 +177,25 @@ term() {
   all=$(tree "$pid")
   for one in $all; do kill -s TERM "$one" 2>/dev/null; done
   if [ -z "$gpid" ]; then
-    ( sleep ${JOB_STOP_GRACE_SECONDS}; for one in $all; do kill -s KILL "$one" 2>/dev/null; done ) >/dev/null 2>&1 &
+    (
+      sleep ${JOB_STOP_GRACE_SECONDS}
+      now=$(tree "$pid")
+      for one in $all; do
+        kill -0 "$one" 2>/dev/null || continue
+        case " $now " in *" $one "*) continue ;; esac
+        [ "$(ps -o ppid= -p "$one" 2>/dev/null | tr -d ' ')" = 1 ] && now="$now $one"
+      done
+      for one in $now; do kill -s KILL "$one" 2>/dev/null; done
+    ) >/dev/null 2>&1 &
     gpid=$!
   fi
 }
 trap term INT TERM HUP
-"$shell" -l -c "$cmd" >>"$log" 2>&1 </dev/null &
+rm -f "$fifo"
+mkfifo "$fifo"
+capped <"$fifo" &
+writer=$!
+( cd -- "$cwd" && exec "$shell" -l -c "$cmd" ) >"$fifo" 2>&1 </dev/null &
 pid=$!
 ( while [ ! -e "$dir/stop" ]; do sleep 1; done; kill -TERM $$ ) >/dev/null 2>&1 &
 watcher=$!
@@ -168,6 +207,12 @@ while kill -0 "$pid" 2>/dev/null; do
   code=$?
 done
 kill "$watcher" 2>/dev/null
+tries=0
+while kill -0 "$writer" 2>/dev/null && [ "$tries" -lt 20 ]; do
+  sleep 0.1
+  tries=$((tries + 1))
+done
+rm -f "$fifo"
 [ -z "$gpid" ] || kill "$gpid" 2>/dev/null
 signal=
 if [ "$code" -gt 128 ] && [ "$code" -le 192 ]; then
@@ -187,11 +232,25 @@ mv "$dir/exit.json.tmp" "$dir/exit.json"
 exit 0
 `;
 
-/** The argv a pane runs for a job: the wrapper, then the job's folder, the login shell and the command. */
+/** The argv a pane runs for a job: the wrapper, then the job's folder, the login shell, the command, its cwd and the log cap. */
 export function jobPaneArgv(input: {
   readonly dir: string;
   readonly shell: string;
   readonly command: string;
+  /** The folder the job runs in. */
+  readonly cwd: string;
+  /** The log cap in bytes; the policy's own unless a test needs a small one. */
+  readonly logCapBytes?: number;
 }): readonly string[] {
-  return ['/bin/sh', '-c', JOB_WRAPPER_SCRIPT, 'fy-job', input.dir, input.shell, input.command];
+  return [
+    '/bin/sh',
+    '-c',
+    JOB_WRAPPER_SCRIPT,
+    'fy-job',
+    input.dir,
+    input.shell,
+    input.command,
+    input.cwd,
+    String(input.logCapBytes ?? JOB_LOG_CAP_BYTES),
+  ];
 }

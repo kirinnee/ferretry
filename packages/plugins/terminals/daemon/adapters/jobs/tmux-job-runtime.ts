@@ -39,8 +39,9 @@ export class TmuxJobRuntime implements JobRuntimePort {
 
   async start(input: Parameters<JobRuntimePort['start']>[0]): Promise<RunningJob> {
     const tmuxSession = jobTmuxSessionName(input.owner, input.id);
+    const exact = `=${tmuxSession}`;
     const shell = await this.loginShell.shell();
-    const wrapper = jobPaneArgv({ dir: input.dir, shell, command: input.command });
+    const wrapper = jobPaneArgv({ dir: input.dir, shell, command: input.command, cwd: input.cwd });
     const argv =
       input.limited && this.limits !== undefined
         ? await this.limits.command(input.owner, wrapper, { terminal: true })
@@ -50,8 +51,9 @@ export class TmuxJobRuntime implements JobRuntimePort {
       '-d',
       '-s',
       tmuxSession,
+      // Never the person's folder: tmux expands `#(…)` in -c, so a folder named `#(cmd)` would run cmd. The wrapper cds.
       '-c',
-      input.cwd,
+      '/',
       '-x',
       '200',
       '-y',
@@ -72,7 +74,7 @@ export class TmuxJobRuntime implements JobRuntimePort {
       input.id,
     ]);
     if (result.code !== 0) {
-      await this.tmux.execute(['kill-session', '-t', tmuxSession]).catch(() => undefined);
+      await this.tmux.execute(['kill-session', '-t', exact]).catch(() => undefined);
       throw new JobRuntimeError(`could not start the job: ${result.stderr.trim() || 'tmux command failed'}`);
     }
     return { owner: input.owner, id: input.id, tmuxSession };
@@ -112,7 +114,7 @@ export class TmuxJobRuntime implements JobRuntimePort {
   }
 
   async kill(job: RunningJob): Promise<void> {
-    const result = await this.tmux.execute(['kill-session', '-t', job.tmuxSession]);
+    const result = await this.tmux.execute(['kill-session', '-t', `=${job.tmuxSession}`]);
     if (result.code !== 0 && !/can't find session/iu.test(result.stderr) && !isTmuxServerAbsent(result.stderr))
       throw new JobRuntimeError(`could not close the job: ${result.stderr.trim()}`);
   }

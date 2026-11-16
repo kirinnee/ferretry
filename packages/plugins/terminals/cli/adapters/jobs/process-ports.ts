@@ -13,6 +13,10 @@ export class RealJobProcess implements IJobProcess {
     return process.cwd();
   }
 
+  exit(code: number): void {
+    process.exit(code);
+  }
+
   /** Linux names a descriptor's target under /proc; macOS has no such file, so nothing is learned there. */
   stdoutFile(): string | undefined {
     try {
@@ -44,6 +48,10 @@ export class RealJobSignals implements IJobSignals {
 }
 
 export class RealJobTimers implements IJobTimers {
+  deadline(ms: number): AbortSignal {
+    return AbortSignal.timeout(ms);
+  }
+
   nowMs(): number {
     return Date.now();
   }
