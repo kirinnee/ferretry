@@ -876,19 +876,20 @@ that key is new in 5.0, and no agent had it before.
 
 The tools reach the files that now hold what they always reached, and no more:
 
-| Before 5.0                                       | The file the tools reach                                                |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| `warden.yaml`, `voice.yaml`, `limits.yaml`       | the same files (`limits.yaml` also holds the agent-control switches)    |
-| `learning.yaml`                                  | `lessons.yaml`                                                          |
-| `pack.yaml`, `models-guide.yaml`                 | `packs.yaml` (the routing prompt is its `routing` block)                |
-| `account-defaults.yaml`                          | `accounts.yaml`                                                         |
-| `machine.yaml`: the default runtime, agenda mode | `runtimes.yaml`, `agenda.yaml`                                          |
-| `machine.yaml`: keep conversations in sync       | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`) |
-| `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                        |
-| `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                       |
-| `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`        |
-| `machine.yaml`: the agent permission mode        | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)            |
-| `components/modelSets/`                          | `model-sets/`                                                           |
+| Before 5.0                                                        | The file the tools reach                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `warden.yaml`, `voice.yaml`, `limits.yaml`                        | the same files (`limits.yaml` also holds the agent-control switches)                                                     |
+| `learning.yaml`                                                   | `lessons.yaml`                                                                                                           |
+| `pack.yaml`, `models-guide.yaml`                                  | `packs.yaml` (the routing prompt is its `routing` block)                                                                 |
+| `account-defaults.yaml`                                           | `accounts.yaml`                                                                                                          |
+| `machine.yaml`: the default runtime, agenda mode                  | `runtimes.yaml`, `agenda.yaml`                                                                                           |
+| `machine.yaml`: keep conversations in sync                        | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`)                                                  |
+| `logins/`, `profiles/`, `runtimes/`, `models/`                    | the same folders                                                                                                         |
+| `components/mcp/`, `components/skills/`                           | `mcp/`, `skills/`                                                                                                        |
+| `components/settings/`, `components/hooks/`                       | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`                                                         |
+| `machine.yaml`: browser mode and proxy, time zone and public feed | `browsers.yaml` (a new or re-aimed proxy is held), `usage.yaml` (any time-zone change, and the public feed on, are held) |
+| `machine.yaml`: the agent permission mode                         | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)                                                             |
+| `components/modelSets/`                                           | `model-sets/`                                                                                                            |
 
 Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
 check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
@@ -913,8 +914,6 @@ bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGER
 dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
 mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
 
-- `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
-- `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
 - `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
   not reach) and `presets/` (no successor declared yet).
 
