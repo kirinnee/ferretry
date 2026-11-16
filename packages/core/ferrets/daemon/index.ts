@@ -99,6 +99,7 @@ import { lifecycleStatus, withLifecycleStatus } from './lib/ferrets/session-docu
 import features from './generated/features.ts';
 import { callerFerret, NOT_OWN_FERRET_CODE } from './features/caller.ts';
 import { registerFeatures } from './features/compose.ts';
+import { LaunchStepRegistry } from './lib/ferrets/launch-steps.ts';
 import { TURN_WATCH_JOB } from './features/turn-watch.feature.ts';
 import type { FerretsContext, LateBindings } from './features/types.ts';
 
@@ -422,6 +423,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return err(`the login ${login} could not be read, so the ferret was not started`);
     }
   };
+  // What features add to a launch (a pane variable each); sealed once they have registered, below.
+  const launch = new LaunchStepRegistry();
   const servicePorts = {
     launchEnvironment,
     launchSections: {
@@ -429,6 +432,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       forget: async ferret => await kernel.state.remove(FerretLaunchSectionsFiles, ferret),
     },
     ready,
+    launchSteps: launch,
     session: sessionFiles.port,
     claims,
     systemCallsign: async prefix => await systemCallsigns.next(prefix),
@@ -818,6 +822,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     service,
     sessionStore,
     sessionFiles,
+    launch,
     ready,
     storeLoaded,
     archiveRead,
@@ -849,6 +854,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     late,
   };
   const served = registerFeatures(features, context);
+  // No launch runs on a half-filled list: a feature that registers a store after this throws at boot.
+  launch.seal();
 
   return {
     provides: {
