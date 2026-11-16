@@ -24,6 +24,8 @@ export function WithAppHooks({
       subscribe: () => () => undefined,
       version: () => 0,
     },
+    // No plugin contributes a panel here, so a slot a view draws is empty (`PanelSlot` asks the plan).
+    plan: { panels: () => [] },
     // No plugin declares a screen here, so an address a view asks the route table for is `undefined`, as in a bare shell.
     views: { screens: new Map() },
     routes: {

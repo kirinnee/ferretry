@@ -84,3 +84,40 @@ export function ambiguousAgentAddressMessage(name: string, candidates: readonly 
   const listed = candidates.map(candidate => `${candidate.id} (${candidate.status ?? 'status unknown'})`).join(', ');
   return `the name ${name} is held by ${candidates.length} sessions on this machine: ${listed}; address one by its session id`;
 }
+
+/** A callsign a reference may spell, and the id shape a reference may carry. Anything else proves nothing. */
+const REFERENCE_NAME = /^[a-z][a-z0-9-]{0,31}$/iu;
+const REFERENCE_SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+
+/** What a `:agent` reference was proved to address: the ferret and the name it is shown by. */
+export interface ProvedAgent {
+  readonly id: string;
+  readonly name: string;
+}
+
+/**
+ * PROOF FOR A `:agent` REFERENCE against ONE daemon's fleet (docs/reference-standard.md: syntax is never proof).
+ *
+ * A ferret takes part only with a well-formed callsign and a safe id. An exact id proves that ferret; a name follows
+ * {@link resolveAgentAddress} — the rule the daemon applies to `fy send <name>` — so a name two ferrets hold on the same
+ * footing proves NOTHING and stays prose. The caller stamps its daemon on the answer: this knows no daemon.
+ */
+export const provedAgentReference = (
+  lookup: { readonly sessionId?: string | undefined; readonly name?: string | undefined },
+  fleet: readonly AgentAddressCandidate[],
+): ProvedAgent | null => {
+  const named = new Map<string, ProvedAgent>();
+  const candidates: AgentAddressCandidate[] = [];
+  for (const candidate of fleet) {
+    const name = candidate.name?.trim().toLowerCase();
+    if (name === undefined || !REFERENCE_NAME.test(name) || !REFERENCE_SESSION_ID.test(candidate.id)) continue;
+    if (candidate.id === '.' || candidate.id === '..') continue;
+    named.set(candidate.id, { id: candidate.id, name });
+    candidates.push({ ...candidate, name });
+  }
+  if (lookup.sessionId !== undefined) return named.get(lookup.sessionId) ?? null;
+  const name = lookup.name?.trim().toLowerCase();
+  if (name === undefined || !REFERENCE_NAME.test(name)) return null;
+  const resolution = resolveAgentAddress(name, candidates);
+  return resolution.kind === 'session' ? (named.get(resolution.id) ?? null) : null;
+};
