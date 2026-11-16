@@ -143,7 +143,7 @@ describe('runtime link', () => {
   it('should refuse a tool that is not installed, naming how to get it, and stage nothing', async () => {
     const world = fakeWorld({ interactive: false });
     await should(runVerb(world, 'runtime link', ['codex'])).be.rejectedWith(
-      'Codex is not installed on studio. Install it with `fz onboard`, then link it.',
+      'Codex is not installed on studio. Install it with `fz machine install codex`, then link it.',
     );
     should(world.gateway.called('stage')).be.empty();
   });

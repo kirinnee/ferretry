@@ -78,7 +78,7 @@ import type { ClockPort } from './seams/ports.ts';
 import type { SessionHandoff, SessionView } from '@ferretry/core-mailbox/contract';
 
 /**
- * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off
+ * The note Ferrets ended every revive's turn document with before it stopped writing one (its old `turnProtocolReminder` default); older documents still carry it. Taken off the words a hand-off
  * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
  * mirrored here; a changed Ferrets setting would show the note until that read exists (end-list).
  */

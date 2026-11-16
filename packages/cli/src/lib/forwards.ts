@@ -5,7 +5,7 @@
  * the person meant. It adds no behaviour of its own: exit codes, sentences and the request are `fy link`'s.
  * Pure: words in, words out.
  */
-import { parseArgs } from './argv.ts';
+import { declaredSwitches, parseArgs } from './argv.ts';
 import type { VerbEntry } from './verbs.ts';
 
 /** The options of `fy new` that mean something to `fy link`; any other typed option has nowhere to go. */
@@ -24,7 +24,7 @@ const isContinue = (token: string): boolean => token === '--continue' || token.s
  */
 export function forwardNewToLink(entry: VerbEntry, rest: readonly string[], binary: string): Forward | undefined {
   if (entry.owner !== 'ferrets' || entry.words.join(' ') !== 'new') return undefined;
-  const { options } = parseArgs(rest);
+  const { options } = parseArgs(rest, declaredSwitches(entry.options));
   if (options.continue === undefined && options.since === undefined) return undefined;
   const lost = Object.keys(options)
     .filter(name => !LINK_OPTIONS.has(name))

@@ -16,6 +16,14 @@ const CODEX_HIDDEN_NOTICES = [
 ] as const;
 
 /**
+ * Top-level `config.toml` keys of the ferret's OWN home that a setting of the person's (a settings item) may still
+ * override: written only when no selected item says otherwise. O11b, Codex 0.166.0 binary strings:
+ * `check_for_update_on_startup = false` is the "Update available" screen, which a ferret must never stop on (Ferretry
+ * applies updates). It sits outside the launch fingerprint, which is the arguments above.
+ */
+export const CODEX_CONFIG_DEFAULTS = { check_for_update_on_startup: false } as const;
+
+/**
  * The launch's permission as EXPLICIT flags, attached so no word before them can take either as its value. Codex refuses a
  * repeated `--ask-for-approval` or `--sandbox` (and `--full-auto` / `--yolo` / the bypass switch beside them), so a
  * settings item that slipped one past `launchFlagsKept` makes the start fail instead of loosening it, and an explicit
