@@ -161,6 +161,28 @@ describe('ConversationLeases.claim', () => {
     should(disk.holder('claude', C)?.session).equal(S);
   });
 
+  it('should refuse a second ferret on ANOTHER login resuming a conversation of the shared history pool, naming the first', async () => {
+    // Arrange — the pool is per harness, so the lease is too: two runtimes (two logins) reach one pooled conversation
+    const { disk, sessions, leases, launching } = built();
+    launching(S);
+    sessions.launches.set(T, { harness: 'claude', runtime: 'claude-personal' });
+    sessions.states.set(T, { id: T, status: 'running' });
+    await leases.claim(S, resume(C));
+
+    // Act
+    const claiming = leases.claim(T, resume(C));
+
+    // Assert — refused with the holder named (its session and its runtime), and the first lease stands
+    await should(claiming).rejectedWith(ConversationLeaseHeldError);
+    await claiming.catch((error: ConversationLeaseHeldError) => {
+      should(error.message).containEql(`being written by session ${S} on claude-review`);
+    });
+    should(disk.holder('claude', C)?.session).equal(S);
+    // and a different conversation of the same pool is not in its way
+    await leases.claim(T, resume(D));
+    should(disk.holder('claude', D)?.session).equal(T);
+  });
+
   it('should take the conversation over once the holding session is over, whichever way it ended', async () => {
     // Arrange
     for (const status of ['stopped', 'failed', 'completed']) {

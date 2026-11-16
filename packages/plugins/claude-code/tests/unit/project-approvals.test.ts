@@ -53,6 +53,7 @@ function home(files: Readonly<Record<string, Entry>>, refused: readonly string[]
     copyShared: () => Promise.reject(new Error('the approval read never copies')),
     linkCredential: () => Promise.reject(new Error('the approval read never links')),
     linkHistory: () => Promise.reject(new Error('the approval read never links')),
+    moveToHistoryPool: () => Promise.reject(new Error('the approval read never links')),
     ensurePrivateDirectory: () => Promise.reject(new Error('the approval read never makes a folder')),
     entries: () => Promise.reject(new Error('the approval read never lists')),
     lstat: () => Promise.reject(new Error('the approval read never asks lstat')),

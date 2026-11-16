@@ -4,7 +4,7 @@ import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contr
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import { VoicePort } from '@ferretry/plugin-voice/contract';
-import { appAction, definePlugin, panel, route, screen, settingsTab } from '@ferretry/kernel/manifest';
+import { appAction, definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { ACTIONS_ROW_SLOT, FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
@@ -20,6 +20,8 @@ import {
   WardenFlagged,
   WardenPort,
   WARDEN_CONFIG,
+  WARDEN_DIALOG_FRAMES,
+  WARDEN_DIALOG_RULES,
   WARDEN_JEV_CHECKS,
   WARDEN_REMEMBERED,
   WARDEN_REPORTS,
@@ -138,6 +140,22 @@ export default definePlugin({
         audit: { record: WARDEN_LEFT_ALONE_AUDIT },
         guard: { none: 'answers a blessing and a sentence' },
       }),
+      route('GET /v1/warden/dialog/rules', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: warden,
+        noStore: true,
+        audit: { skip: 'a read of the screens Ferretry clears' },
+        guard: { none: 'rule names and sentences the owner taught: no pane text' },
+      }),
+      route('POST /v1/warden/dialog/learn', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: wardenConfigure,
+        noStore: true,
+        audit: { record: WARDEN_CONFIGURED_AUDIT },
+        guard: 'secrets',
+      }),
       route('GET /v1/warden/config', {
         minimum: 'operator',
         caller: 'any',
@@ -161,6 +179,22 @@ export default definePlugin({
         noStore: true,
         audit: { record: WARDEN_CONFIGURED_AUDIT },
         guard: { none: 'names a reference, never a value' },
+      }),
+    ],
+    // `fy warden dialog learn`: teach Ferretry the way out of a screen it does not know (docs/harness-dialogs.md).
+    cli: [
+      verb('warden dialog learn', {
+        summary:
+          'teach Ferretry a harness screen a ferret is parked on: read its proposed rule, then save it with --confirm',
+        args: [{ name: 'ferret', help: 'the ferret parked on the screen (callsign or id)' }],
+        options: [
+          { flag: '--confirm', help: 'save the rule the last learn of this ferret proposed (your yes)' },
+          {
+            flag: '--row <number>',
+            help: 'press this row instead of the one proposed (a row that grants is held, never saved)',
+          },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
     ],
     // Today's ferret Actions menu row ("Ask the Warden to investigate now…"), contributed rather than written in.
@@ -190,11 +224,14 @@ export default definePlugin({
   },
 
   data: {
-    state: [WARDEN_STATE, WARDEN_REPORTS, WARDEN_JEV_CHECKS, WARDEN_REMEMBERED],
-    config: [WARDEN_CONFIG],
+    state: [WARDEN_STATE, WARDEN_REPORTS, WARDEN_JEV_CHECKS, WARDEN_REMEMBERED, WARDEN_DIALOG_FRAMES],
+    config: [WARDEN_CONFIG, WARDEN_DIALOG_RULES],
     readModels: ['flags', 'verdicts', 'agenda', 'config'],
     publishes: [WardenFlagged, WardenActed, WardenConfigChanged],
   },
+
+  // A screen a person taught Ferretry is a screen of their work: its frame is owner-only and pinned by identity.
+  privacy: { private: ['dialog-frames'] },
 
   hooks: { takes: [{ hook: FerretChanged }, { hook: TurnEnded }] },
 

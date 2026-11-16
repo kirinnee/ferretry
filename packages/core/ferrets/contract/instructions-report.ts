@@ -9,6 +9,8 @@
 
 /** The variables a launch hands the pane (the wire contract with the wrappers; Ferrets reads, never sets, them here). */
 const SESSION_MODE_ENV = 'FY_SESSION_MODE';
+/** `1` for a helper (a sub-ferret), else `0`: the one switch Ferrets itself sets that the wrappers read for the Sub-ferret section. */
+export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 const SECTIONS = [
   { id: 'hypermedia', label: 'Hypermedia', env: 'FY_HYPERMEDIA', action: 'Hypermedia', also: '' },
   {
@@ -23,10 +25,14 @@ const SECTIONS = [
 ] as const;
 
 /**
- * The launch variables `instructions` answers from: the mode and the four section switches (never a secret). The ONE
+ * The launch variables `instructions` answers from: the mode, the sub-ferret limit and the four section switches (never a secret). The ONE
  * list of what a launch records of its environment (`FerretLaunchEnvironmentFiles`) and of what the tool reads back.
  */
-export const LAUNCH_SWITCH_VARIABLES = [SESSION_MODE_ENV, ...SECTIONS.map(section => section.env)] as const;
+export const LAUNCH_SWITCH_VARIABLES = [
+  SESSION_MODE_ENV,
+  SUB_FERRET_ENV,
+  ...SECTIONS.map(section => section.env),
+] as const;
 
 /** One per-ferret section, in the order the wrapper appends them. */
 interface InstructionSection {

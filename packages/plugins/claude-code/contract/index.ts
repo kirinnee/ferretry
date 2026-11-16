@@ -102,6 +102,32 @@ export const CLAUDE_CODE_AGENT_HOMES = defineState({
   format: 1,
 });
 
+/**
+ * The ONE history pool every Claude ferret shares (docs/design/shared-history.md): a plain folder of this plugin's
+ * state, never inside `agent-homes`, so it is never a credential home. Each ferret home links the entries below to it
+ * (`RootHandle.linkHistory`); a sign-in, a setting and an instruction file stay the ferret's own.
+ */
+export const CLAUDE_CODE_HISTORY_POOL = defineState({
+  name: 'historyPool',
+  path: 'history-pool/*',
+  store: 'opaque',
+  format: 1,
+});
+
+/** The entries of a Claude home that are history (v4's list), each linked to the same name in the pool. */
+export const CLAUDE_CODE_HISTORY_ENTRIES = [
+  { name: 'projects', kind: 'folder' },
+  { name: 'sessions', kind: 'folder' },
+  { name: 'session-env', kind: 'folder' },
+  { name: 'file-history', kind: 'folder' },
+  { name: 'plans', kind: 'folder' },
+  { name: 'tasks', kind: 'folder' },
+  { name: 'todos', kind: 'folder' },
+  { name: 'shell-snapshots', kind: 'folder' },
+  { name: 'paste-cache', kind: 'folder' },
+  { name: 'history.jsonl', kind: 'file' },
+] as const;
+
 export const CLAUDE_CODE_DISCOVERY = defineState({
   name: 'discovery',
   path: 'discovery.json',
