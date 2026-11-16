@@ -115,6 +115,12 @@ describe('which deaths are revivable', () => {
     should(classifyEnd('failed', [event('session.stopped', ago(300)), exited({ pane: 'gone' })]).kind).equal('revive');
   });
 
+  it('should leave a session whose wrapper exited 75 (conversation held), so a refused revive is not a revive loop', () => {
+    // Act / Assert — exit 75 is `fy history claim` refusing: another writer holds the conversation, nothing crashed
+    should(classifyEnd('failed', [exited({ exitCode: 75 })])).deepEqual({ kind: 'leave', why: 'lease_held' });
+    should(classifyEnd('failed', [exited({ exitCode: 74 })]).kind).equal('revive');
+  });
+
   it('should leave a session that is not failed now, or has no terminal event', () => {
     // Act / Assert
     should(classifyEnd('running', [exited({ pane: 'gone' })])).deepEqual({ kind: 'leave', why: 'not_failed' });

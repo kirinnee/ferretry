@@ -51,6 +51,7 @@ type ReviveLeaveReason =
   | 'completed'
   | 'start_failed'
   | 'clean_exit'
+  | 'lease_held'
   | 'unrecorded_exit'
   | 'no_terminal_event';
 
@@ -109,6 +110,12 @@ const SHELL_SIGNAL_BASE = 128;
 const SHELL_SIGNAL_LAST = 159;
 
 /**
+ * The status a runtime wrapper exits when it refuses a launch because another live writer holds the conversation
+ * (`fy history claim`, 75 = `EX_TEMPFAIL`; the runtimes plugin's `HISTORY_CLAIM_HELD_EXIT_CODE` names the same number).
+ */
+const LEASE_HELD_EXIT_CODE = 75;
+
+/**
  * Whether the session's last terminal event is an abnormal death, and which.
  *
  * `status` is the session's status NOW: only a `failed` session is a candidate, so a session someone has
@@ -125,6 +132,9 @@ export function classifyEnd(status: string, events: readonly ReviveEvent[]): End
   if (data.status !== 'failed') return { kind: 'leave', why: 'clean_exit' };
   const exitCode = typeof data.exitCode === 'number' && Number.isInteger(data.exitCode) ? data.exitCode : undefined;
   if (exitCode === 0) return { kind: 'leave', why: 'clean_exit' };
+  // The wrapper refusing a launch (`fy history claim`: another writer holds the conversation) is not a crash, and a
+  // revive would only be refused again.
+  if (exitCode === LEASE_HELD_EXIT_CODE) return { kind: 'leave', why: 'lease_held' };
   const signal = positiveInteger(data.signal);
   if (signal !== undefined) return { kind: 'revive', cause: { kind: 'signal', signal }, diedAt: last.time };
   if (exitCode !== undefined) {

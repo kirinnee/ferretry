@@ -1,4 +1,4 @@
-import type { FerretId, FerretRecord, HarnessKey } from '../../../../contract/index.ts';
+import type { FerretId, FerretRecord, FerretState, HarnessKey } from '../../../../contract/index.ts';
 import {
   type ConversationHolderStanding,
   ConversationLeaseHeldError,
@@ -17,7 +17,16 @@ export interface ConversationLeaseSessions {
    * `undefined` for a session that has none, or one this daemon does not know: it launches nothing that can be leased.
    */
   launchOf(id: SessionId): { readonly harness: HistoryHarness; readonly runtime?: string } | undefined;
-  /** The session's state document as stored, or a rejection when it cannot be read. */
+  /**
+   * What the ferret registry says of the session NOW: the one live fact, written by the same call that launches or
+   * stops it. `undefined` when the registry does not hold it.
+   */
+  registryState(id: SessionId): FerretState | undefined;
+  /**
+   * The session's state document as stored, or a rejection when it cannot be read. It FOLLOWS the registry
+   * asynchronously (and a reconcile start never moves it to `starting`), so it only answers for a session the registry
+   * does not hold.
+   */
   readState(id: SessionId): Promise<unknown>;
 }
 
@@ -29,7 +38,7 @@ const POOL_OF: Readonly<Record<HarnessKey, HistoryHarness>> = { 'claude-code': '
  * session store (whether it is still writing). A session the registry does not hold launches nothing the daemon can name.
  */
 export function registryLeaseSessions(
-  registry: { get(id: FerretId): Pick<FerretRecord, 'harness' | 'runtime'> | undefined },
+  registry: { get(id: FerretId): Pick<FerretRecord, 'harness' | 'runtime' | 'state'> | undefined },
   readState: ConversationLeaseSessions['readState'],
 ): ConversationLeaseSessions {
   return {
@@ -39,6 +48,7 @@ export function registryLeaseSessions(
         ? undefined
         : { harness: POOL_OF[held.harness], ...(held.runtime === undefined ? {} : { runtime: held.runtime }) };
     },
+    registryState: id => registry.get(id as unknown as FerretId)?.state,
     readState,
   };
 }
@@ -97,13 +107,17 @@ export class ConversationLeases implements SessionConversationLeases {
   }
 
   /**
-   * Whether a session is still writing. Over means its record is gone or terminal; anything else — running, starting,
-   * waiting between panes — still owns its conversation. A record that cannot be READ is not a record that is gone: the
-   * pid then decides, which keeps a live holder held while this daemon runs.
+   * Whether a session is still writing. The registry decides when it holds the session (a ferret it runs — started by a
+   * lifecycle OR a reconcile — is live, whatever its document has not yet followed to; one it says stopped is over).
+   * Otherwise the document: over means its record is gone or terminal; anything else — running, starting, waiting between
+   * panes — still owns its conversation. A record that cannot be READ is not a record that is gone: the pid then decides,
+   * which keeps a live holder held while this daemon runs.
    */
   private async standing(session: string): Promise<ConversationHolderStanding> {
     const id = tryParseSessionId(session);
     if (id === undefined) return 'unknown';
+    const registered = this.sessions.registryState(id);
+    if (registered !== undefined) return registered === 'stopped' ? 'over' : 'live';
     const document = await this.sessions.readState(id).then(
       value => ({ value }),
       () => undefined,

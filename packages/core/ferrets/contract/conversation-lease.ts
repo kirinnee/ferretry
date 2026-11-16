@@ -17,7 +17,9 @@ import { z } from 'zod';
 /**
  * The exit status `fy history claim` answers when another session is writing the conversation: the ONE status a wrapper
  * turns into not launching (75, `EX_TEMPFAIL`). Every other failure of `fy` launches anyway, because a lease bug must
- * never stop a person's own CLI from starting.
+ * never stop a person's own CLI from starting — except a wrapper the daemon launched (`FY_SESSION_ID` set), whose claim
+ * is what moves the daemon's lease onto the harness's own pid: it cannot do that, so it exits 75 too (the Warden leaves a
+ * 75 alone, so it is never revived into the same refusal).
  */
 export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
 
