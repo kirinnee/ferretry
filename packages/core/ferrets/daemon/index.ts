@@ -33,6 +33,8 @@ import {
   LimitsConfigFile,
   ArchiveConfigFile,
   ArchiveKeeps,
+  COMPACTION_HISTORY_KEY,
+  CompactionHistoryHook,
   FerretLaunchSectionsFiles,
   Harnesses,
   LAUNCH_ROOTS_KEY,
@@ -1340,6 +1342,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     clock: { now: () => kernel.clock.now() },
     every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
     redaction: kernel.redaction,
+    history: () => {
+      const found = hooks.provider(CompactionHistoryHook, COMPACTION_HISTORY_KEY);
+      return found === 'unavailable' ? undefined : found;
+    },
   });
   const eventsAccept = fleetEventsAccept(
     eventSource,
