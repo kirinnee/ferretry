@@ -14,7 +14,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { milliseconds } from '@ferretry/std';
 import { systemClock } from '../../../host/adapters/clock.ts';
-import { configTreeEvents, type FileEvents, nodeFileEvents } from '../../../host/adapters/file-events.ts';
+import {
+  configTreeEvents,
+  type FileEvents,
+  NO_FILE_EVENTS,
+  nodeFileEvents,
+  polledOnly,
+  undeclaredFileEvents,
+} from '../../../host/adapters/file-events.ts';
 import { configService } from '../../../host/wiring.ts';
 import { createNodeHostFs } from '../../../host/state/host-fs.ts';
 import { captureLog, updatesDef } from '../../unit/host-config/support.ts';
@@ -195,6 +202,22 @@ describe('configService over real file events', () => {
     stops.push(() => stop?.());
     await writeFile(join(home, 'config', 'updates.yaml'), 'limit: 2\n');
     await until(() => (config.port('updates').file(updatesDef) as { limit: number }).limit === 2, 'the polled reload');
+  });
+});
+
+describe('what a plugin is handed of the file events', () => {
+  const polled = [{ directory: '/h/a', reason: 'EMFILE', everyMs: 1_000 }];
+
+  test('only the list: the port polledOnly builds has no watch to call', () => {
+    const real = nodeFileEvents(systemClock());
+    const port = polledOnly({ ...real, polled: () => polled });
+    expect(port.polled()).toEqual(polled);
+    expect(Object.keys(port)).toEqual(['polled']);
+  });
+
+  test('a plugin that did not declare it is refused by name, and a host with no adapter lists nothing', () => {
+    expect(() => undeclaredFileEvents('other').polled()).toThrow('other did not declare permissions.fileEvents');
+    expect(NO_FILE_EVENTS.polled()).toEqual([]);
   });
 });
 

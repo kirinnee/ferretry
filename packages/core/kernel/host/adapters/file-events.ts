@@ -66,30 +66,31 @@ export function nodeFileEvents(
     polled: () => [...polled],
     watchDirectory: (directory, listener) => {
       let closed = false;
-      let stop: () => void = () => undefined;
+      let stop: () => void;
       const notify = (): void => {
         if (!closed) listener();
       };
-      const poll = (error: unknown): void => {
+      /** Poll from now on; answers the stop that ends it. */
+      const poll = (error: unknown): (() => void) => {
         const entry: PolledDirectory = { directory, reason: reasonOf(error), everyMs: pollMs };
         polled.add(entry);
         const cancel = clock.every(pollMs, notify);
-        stop = () => {
+        // The change the dead watch could not report may already have happened: look once now.
+        notify();
+        return () => {
           cancel();
           polled.delete(entry);
         };
-        // The change the dead watch could not report may already have happened: look once now.
-        notify();
       };
       try {
         const watcher = arm(directory, notify, error => {
           if (closed) return;
           watcher.close();
-          poll(error);
+          stop = poll(error);
         });
         stop = () => watcher.close();
       } catch (error) {
-        poll(error);
+        stop = poll(error);
       }
       return {
         close: () => {
