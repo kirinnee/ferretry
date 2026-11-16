@@ -4,7 +4,7 @@ import { MemoryStateFolder, SimulatedCrash } from '@ferretry/kernel/testing';
 import should from 'should';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { SessionTransferPlanSchema } from '../../../../contract/transfer.ts';
-import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/state/transfer-plan.state.ts';
 import {
   FileSessionTransferTargetPlanStore,
   SessionTransferPlanConflictError,

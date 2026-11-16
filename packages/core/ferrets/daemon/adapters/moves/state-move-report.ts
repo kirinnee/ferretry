@@ -1,5 +1,5 @@
 import type { StatePort } from '@ferretry/kernel/contract';
-import { MoveInflightFiles } from '../../../contract/move-state.ts';
+import { MoveInflightFiles } from '../../../contract/state/moves.state.ts';
 import type { MoveReportStore } from '../../lib/moves/report-store.ts';
 import type { SessionId } from '../../lib/session-id.ts';
 

@@ -18,3 +18,5 @@ export const MoveInflightFiles = defineState<'move-inflight', Uint8Array>({
   format: 1,
   mode: 0o600,
 });
+
+export const MoveFiles = defineState({ name: 'moves', path: 'moves/*.json', store: 'json', format: 1 });

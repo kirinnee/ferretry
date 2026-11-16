@@ -1,5 +1,5 @@
 import { MemoryStateFolder, fixedClock } from '@ferretry/kernel/testing';
-import { MoveInflightFiles } from '../../../../../contract/move-state.ts';
+import { MoveInflightFiles } from '../../../../../contract/state/moves.state.ts';
 import type { SessionMoveNeeds } from '../../../../../daemon/modules/session-move.ts';
 
 /**

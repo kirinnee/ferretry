@@ -1,11 +1,11 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { InstantSchema } from '@ferretry/std';
-import { FerretTitleSchema, FerretWaitingSchema } from './ids.ts';
-import { StartOptionsSchema } from './port.ts';
-import { AgentPinsDocumentSchema, FerretPinsDocumentSchema } from './pins.ts';
-import { LAUNCH_SWITCH_VARIABLES } from './instructions-report.ts';
-import { SessionConfigSchema, SessionStateSchema } from './view/ferret-view.ts';
+import { FerretTitleSchema, FerretWaitingSchema } from '../ids.ts';
+import { StartOptionsSchema } from '../port.ts';
+import { AgentPinsDocumentSchema, FerretPinsDocumentSchema } from '../pins.ts';
+import { LAUNCH_SWITCH_VARIABLES } from '../instructions-report.ts';
+import { SessionConfigSchema, SessionStateSchema } from '../view/ferret-view.ts';
 
 /**
  * The per-ferret documents Ferrets keeps under `state/ferrets/` (§9.2), declared in the contract so the daemon that
