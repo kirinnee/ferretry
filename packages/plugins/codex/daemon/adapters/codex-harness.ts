@@ -12,6 +12,7 @@ import { seconds } from '@ferretry/std';
 import type {
   Delivery,
   Harness,
+  HarnessHistorySource,
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
@@ -23,7 +24,7 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
-import { materializeSkills } from '@ferretry/core-ferrets/contract';
+import { historyFilesOver, materializeSkills } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
@@ -65,6 +66,8 @@ export interface CodexHarnessOptions {
    */
   readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
   readonly historyDirectory?: () => Promise<string | undefined>;
+  /** The owner's own Codex home (`~/.codex`), which holds `sessions` and `session_index.jsonl`; the conversation index reads it in place. */
+  readonly historyHome?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;
   readonly probe: HarnessProbe;
   readonly update: HarnessUpdateSubsystem & { settled(): Promise<void> };
@@ -432,6 +435,30 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       } catch {
         return UNKNOWN_LAUNCH;
       }
+    },
+
+    /**
+     * The past conversations Codex holds, as read-only trees for Conversation's index: the owner's own `~/.codex` (read in
+     * place through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never
+     * followed, so a home whose history is a link into a pool lists nothing here. Nothing is written.
+     */
+    async historySources(): Promise<readonly HarnessHistorySource[]> {
+      const sources: HarnessHistorySource[] = [];
+      const historyHome = await (options.historyHome?.() ?? Promise.resolve(undefined)).catch(() => undefined);
+      if (historyHome?.startsWith('/') === true)
+        sources.push({
+          kind: 'computer',
+          label: 'owner',
+          files: historyFilesOver(kernel.roots.root('harness-history', { subfolder: historyHome })),
+        });
+      const homes = kernel.roots.root('agent-homes');
+      const top = homes.resolve('');
+      if (!top.ok) return sources;
+      for (const entry of await homes.entries(top.value).catch(() => [])) {
+        if (entry.kind !== 'directory') continue;
+        sources.push({ kind: 'ferret-home', label: entry.name, files: historyFilesOver(homes, entry.name) });
+      }
+      return sources;
     },
 
     transcript: rollouts.transcript,

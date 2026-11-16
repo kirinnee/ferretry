@@ -51,6 +51,9 @@ import {
   StuckInputList,
   ownerHoldReason,
   WARDEN_SWEEP_ORIGIN,
+  EMPTY_AUTO_MOVE_MEMORY,
+  parseAutoMoveMemory,
+  waitingFerrets,
   WardenAutoMoveService,
   WardenDialogWatch,
   type WardenAgentInventory,
@@ -260,6 +263,15 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
     async () => (await ferrets.paneLimits?.()) ?? [],
     () => kernel.clock.now() as string,
   );
+  const moveLedger = new StateAutoMoveLedger(kernel.state);
+  /** The ferrets the mover remembers waiting for a limit to reset: read again once Ferrets stops showing the limit. */
+  const waitingForReset = async (): Promise<readonly string[]> => {
+    try {
+      return waitingFerrets(parseAutoMoveMemory(await moveLedger.read()) ?? EMPTY_AUTO_MOVE_MEMORY);
+    } catch {
+      return [];
+    }
+  };
   const autoMove = new WardenAutoMoveService({
     facts: async () => await facts.facts(),
     // ONE yes or no from Accounts (an input card, a sign-in waiting on their phone, a plan card or a copied secret all
@@ -310,11 +322,15 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       });
       if (!moved.ok) throw new Error(moved.error.reason);
     },
+    // The same guarded resume every Warden act makes (`remedies.resume`: it refuses where today's authorizeResume does).
+    resume: async (sessionId, message) => {
+      await remedies.resume(sessionId, message, WARDEN_SWEEP_ORIGIN);
+    },
     agentOf: async sessionId => {
       const ferret = await ferrets.get(sessionId as FerretId).catch(() => undefined);
       return ferret === undefined ? undefined : (ferret.runtime ?? ferret.harness);
     },
-    ledger: new StateAutoMoveLedger(kernel.state),
+    ledger: moveLedger,
     notifyOwner: async notice => {
       await agenda.notice(notice.sessionId, {
         sourceRef: 'warden-auto-move',
@@ -359,7 +375,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       fleet: {
         fleet: async () => {
           const fleet = await fleetNow();
-          const limited = await limitedFerrets(ferrets);
+          const limited = await limitedFerrets(ferrets, await waitingForReset());
           if (!monitorOn()) return withRateLimited(fleet, limited);
           const now = isoFromMs(nowMs());
           const leftovers = browsers() !== undefined;

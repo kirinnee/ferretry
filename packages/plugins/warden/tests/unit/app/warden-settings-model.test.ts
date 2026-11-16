@@ -17,13 +17,17 @@ import {
 import type { PickerAccount } from '../../../app/lib/account-picker.ts';
 import { wardenConfig } from '../../support/app/warden.ts';
 
+/** Moving a ferret by rule is ON by default; these tests are about the layers, so they switch it off to read them alone. */
+const movesOff = (): Pick<WardenConfig, 'autoMove'> => ({
+  autoMove: { ...wardenConfig().autoMove, enabled: false },
+});
 /** Both layers: Jev in front of an investigation. */
 const jev = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
-  wardenConfig({ layers: { jev: true, llm: true }, ...overrides });
+  wardenConfig({ ...movesOff(), layers: { jev: true, llm: true }, ...overrides });
 const jevOnly = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
-  wardenConfig({ layers: { jev: true, llm: false }, ...overrides });
+  wardenConfig({ ...movesOff(), layers: { jev: true, llm: false }, ...overrides });
 const llm = (overrides: Partial<WardenConfig> = {}): WardenConfig =>
-  wardenConfig({ layers: { jev: false, llm: true }, ...overrides });
+  wardenConfig({ ...movesOff(), layers: { jev: false, llm: true }, ...overrides });
 
 describe('wardenFormErrors', () => {
   it('should check nothing with both layers off, which spends nothing', () => {
@@ -104,7 +108,7 @@ describe('wardenSummary', () => {
 
   it('should say rules alone spend nothing', () => {
     // Arrange / Act / Assert
-    expect(wardenSummary(wardenConfig({ intervalMinutes: 5 }), false)).toBe(
+    expect(wardenSummary(wardenConfig({ ...movesOff(), intervalMinutes: 5 }), false)).toBe(
       'Every 5 min the rules flag trouble and show it to you. No AI runs and nothing is spent.',
     );
   });
@@ -318,12 +322,20 @@ describe('moving a ferret that hit a limit', () => {
 
   it('should say nothing about it while it is off, or while nothing can trigger it', () => {
     // Act
-    const off = autoMoveSummary(wardenConfig());
+    const off = autoMoveSummary(wardenConfig(movesOff()));
     const triggerless = autoMoveSummary(moving({ when: [] }));
 
     // Assert
     expect(off).toBe('');
     expect(triggerless).toBe('');
+  });
+
+  it('should describe moving in the summary by default, since nothing switched it off', () => {
+    // Act
+    const summary = wardenSummary(wardenConfig(), false);
+
+    // Assert
+    expect(summary).toContain('a ferret is moved to another ready login of the same kind and provider');
   });
 
   it('should end the summary with when, where, how often and what happens to background jobs', () => {
@@ -349,7 +361,9 @@ describe('moving a ferret that hit a limit', () => {
     // Act
     const bad = wardenFormErrors(moving({ waitMinutes: 0, maxMovesPerHour: 7, minHeadroomPercent: 95 }));
     const forced = wardenFormErrors(moving({ waitMinutes: 0, forceStopBackground: true }));
-    const off = wardenFormErrors(wardenConfig({ autoMove: { ...wardenConfig().autoMove, waitMinutes: 0 } }));
+    const off = wardenFormErrors(
+      wardenConfig({ autoMove: { ...wardenConfig().autoMove, enabled: false, waitMinutes: 0 } }),
+    );
 
     // Assert
     expect(bad).toEqual({

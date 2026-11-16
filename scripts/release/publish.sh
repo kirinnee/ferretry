@@ -4,6 +4,10 @@ set -euo pipefail
 # Release orchestration:
 #   publish.sh            → real release: GoReleaser publishes the GitHub release + in-repo cask
 #   publish.sh --snapshot → dry-run: build everything into dist/ with NO publish
+#
+# The Gemfury push is NOT here: it is the `fury` job of cd.yaml (scripts/release/fury.sh), which runs after
+# this one on the packages the GitHub release now holds, so a slow or failed push blocks neither the
+# release nor its signature.
 SNAPSHOT=0
 [ "${1:-}" = "--snapshot" ] && SNAPSHOT=1
 
@@ -41,12 +45,5 @@ fi
 
 echo "📦 GoReleaser release (creates the GitHub release, commits the in-repo cask) ..."
 goreleaser release --clean --release-notes ./IncrementalChangelog.md
-
-if [ -n "${FURY_PUSH_TOKEN:-}" ]; then
-  echo "📤 Pushing Linux packages (deb/rpm) to Gemfury ..."
-  ./scripts/release/fury.sh
-else
-  echo "⏭️ Skipping Gemfury push — 'FURY_PUSH_TOKEN' not set."
-fi
 
 echo "✅ Release complete."

@@ -237,7 +237,8 @@ installation-parity)
   # keep naming ONE account — an installer pointed at a repository the release never publishes to is
   # the same defect wearing different clothes.
   rg -qF 'endpoint="push.fury.io/kirinnee97"' scripts/release/fury.sh
-  rg -qF './scripts/release/fury.sh' scripts/release/publish.sh
+  # The push is its own CD job, after goreleaser and off the critical path of the release and its signature.
+  rg -qF './scripts/release/fury.sh' .github/workflows/cd.yaml
   rg -qF 'deb [trusted=yes] https://apt.fury.io/kirinnee97/ /' INSTALLATION.md
   rg -qF 'https://yum.fury.io/kirinnee97/' INSTALLATION.md
   rg -qF "apt install ${name}" INSTALLATION.md
