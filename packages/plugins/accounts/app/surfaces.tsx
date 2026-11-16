@@ -2,6 +2,7 @@ import type { RendererProps } from '@ferretry/kernel/manifest';
 import { AskOnScreenSchema } from '@ferretry/core-asks/contract';
 import { SignInApprovalRefSchema } from '../contract/wire.ts';
 import { AccountsSurface } from './features/accounts/accounts-surface.tsx';
+import { DeviceRuleNote } from './features/secure-copy/device-rule-note.tsx';
 import { CopyRulesSurface } from './features/secure-copy/copy-rules-surface.tsx';
 import { SignInRuleSuggestionHost } from './features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { SignInRulesSurface } from './features/secure-copy/sign-in-rules-surface.tsx';
@@ -46,6 +47,16 @@ export function secureCopyTab(client: AccountsClient, ruleLink?: RuleLinkHold) {
         />
       </div>
     );
+  };
+}
+
+/**
+ * `access.device-note`: under a paired device's Revoke, the count of standing rules its passkey approved. The shell hands
+ * the device's id as `subject`; a panel without one (nothing to count) draws nothing.
+ */
+export function deviceRuleNotePanel(client: AccountsClient) {
+  return function DeviceRuleNotePanel({ subject }: { readonly subject?: string }) {
+    return subject === undefined ? null : <DeviceRuleNote client={client} deviceId={subject} />;
   };
 }
 

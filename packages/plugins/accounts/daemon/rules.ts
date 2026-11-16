@@ -15,7 +15,7 @@
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';
-import { workFolderOf } from './adapters/pending-reads.ts';
+import { stampedProjectOfFerret, workFolderOf } from './adapters/pending-reads.ts';
 import { machineName } from './adapters/host.ts';
 import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
 import { AsksPhoneApprovalNotifier } from './adapters/phone-approval/notifier.ts';
@@ -181,9 +181,9 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   });
   // WHAT THE OWNER APPROVED IN ADVANCE, as the Vault's fill path reads it (docs/input-requests.md): the ticked plan lines and
   // the standing rules through ONE matcher and ONE ledger (so the hourly rate counts both). The Vault gets it only through
-  // `input.saved`; no route or tool holds it. A rule scoped to a project fills for none yet: the project a rule covers
-  // is the session's STAMPED board, and Board answers only the one it resolves from the folder when a ferret was not
-  // stamped, which a rule must never read (GAP(board), ports-pending), so the stamped project is unknown here.
+  // `input.saved`; no route or tool holds it. The project a rule scoped to a project covers is the session's STAMPED
+  // board: the one on the ferret's record from its start (Ferrets' `get`), never one resolved from the folder by the
+  // Board, which a rule must never read. Unfiled, unknown or unreadable is no project, so such a rule does not fill.
   const ledger = new SignInGrantLedger();
   const grants = new CombinedSignInGrants(
     new PlanSignInGrants(plans, keyOf, ledger),
@@ -192,7 +192,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
       ledger,
       keys: keyOf,
       terminal: terminalRules,
-      stampedProject: async () => undefined,
+      stampedProject: async sessionId => await stampedProjectOfFerret(ctx.uses.ferrets, sessionId),
       clock,
       warn: message => kernel.log.warn(`sign-in rules: ${message}`),
     }),

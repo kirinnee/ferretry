@@ -16,10 +16,11 @@ import {
 } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { AgentControlPort, type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
-import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
   AccountsConfigSchema,
+  ACCESS_DEVICE_NOTE_SLOT,
   AccountsPort,
   AUDIT,
   CONFIGURE,
@@ -1042,6 +1043,9 @@ export default definePlugin({
       settingsTab('secure-copy', { group: 'sites', label: 'Secure copy', order: 41 }),
     ],
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
+    // Access's Add device page offers this slot under each paired device's Revoke (its app half's device-note-slot.ts):
+    // how many standing sign-in rules the device's passkey approved, because revoking it suspends them.
+    panels: [panel(ACCESS_DEVICE_NOTE_SLOT, { id: 'device-rule-note', order: 10 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed login secrets and the account records (`PrivacyDecl`). */

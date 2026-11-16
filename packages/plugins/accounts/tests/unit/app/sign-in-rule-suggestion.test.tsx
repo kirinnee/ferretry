@@ -4,7 +4,7 @@ import { describe, expect, it } from 'bun:test';
 import { SIGN_IN_RULE_REFUSAL_WORDS } from '../../../contract/routes/index.ts';
 import { SignInRuleSuggestionHost } from '../../../app/features/secure-copy/sign-in-rule-suggestion-host.tsx';
 import { RULE_NO_ACCOUNTS_DEVICE_WORDS, RULE_REPLACED_UNREADABLE_WORDS } from '../../../app/lib/sign-in-rules.ts';
-import { mount, must } from '../../support/app/dom.ts';
+import { interact, mount, must } from '../../support/app/dom.ts';
 import { click, settle } from '../../support/app/dom-form.ts';
 import { type RuleWorld, refused, ruleClient } from '../../support/app/sign-in-rule-client.ts';
 import {
@@ -328,6 +328,81 @@ describe('a ferret’s suggestion', () => {
       await click(q(mounted.container, '[data-rule-suggestion-review]'));
       await settle();
       expect(q<HTMLButtonElement>(mounted.container, '[data-rule-approve]').disabled).toBe(true);
+    } finally {
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('who a suggested rule may fill for', () => {
+  const PROJECT = '7f1c1a1e-6d0c-4f6e-9a8e-0d3f1f7d2a11';
+  const FERRET = 'ses_abcdefghijklmnop';
+
+  const scopeOptions = async (world: RuleWorld) => {
+    const { fake, element } = host(world, { ferret: FERRET });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      return {
+        fake,
+        values: [...q<HTMLSelectElement>(mounted.container, '[data-rule-scope]').options].map(option => option.value),
+      };
+    } finally {
+      await mounted.unmount();
+    }
+  };
+
+  it('offers the ferret’s project, read from its own record, beside any and this ferret (input 129)', async () => {
+    const { fake, values } = await scopeOptions({ ferret: { projectId: PROJECT } });
+    expect(values).toEqual(['any', `session:${FERRET}`, `project:${PROJECT}`]);
+    expect(fake.keys()).toContain('GET /v1/ferrets/ses_abcdefghijklmnop');
+  });
+
+  it('stages a rule limited to that project when the owner picks it', async () => {
+    const { fake, element } = host({ ferret: { projectId: PROJECT } }, { ferret: FERRET });
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      await interact(() => {
+        const select = q<HTMLSelectElement>(mounted.container, '[data-rule-scope]');
+        select.value = `project:${PROJECT}`;
+        select.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await click(q(mounted.container, '[data-rule-tick="password"]'));
+      await click(q(mounted.container, '[data-rule-approve]'));
+      await settle();
+      expect(fake.calls.find(call => call.key === 'POST /v1/sign-in-rules/stages')?.body).toMatchObject({
+        scope: { kind: 'project', project: PROJECT },
+      });
+    } finally {
+      await mounted.unmount();
+    }
+  });
+
+  it('offers no project for an unfiled ferret, and never widens the choice', async () => {
+    expect((await scopeOptions({ ferret: { projectId: 'unfiled' } })).values).toEqual(['any', `session:${FERRET}`]);
+  });
+
+  it('offers no project when the ferret record cannot be read', async () => {
+    const { values } = await scopeOptions({
+      fail: key => (key.startsWith('GET /v1/ferrets/') ? refused('offline') : undefined),
+    });
+    expect(values).toEqual(['any', `session:${FERRET}`]);
+  });
+
+  it('reads no ferret when none asked, and offers only any', async () => {
+    const { fake, element } = host({});
+    const mounted = await mount(element);
+    try {
+      await settle();
+      await click(q(mounted.container, '[data-rule-suggestion-review]'));
+      await settle();
+      expect(mounted.container.querySelector('[data-rule-scope]')).toBeNull();
+      expect(fake.keys().some(key => key.startsWith('GET /v1/ferrets/'))).toBe(false);
     } finally {
       await mounted.unmount();
     }
