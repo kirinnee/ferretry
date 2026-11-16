@@ -22,6 +22,16 @@ export { WithViewPlace } from '../shell/view-place.tsx';
 /** A plugin's device view drawn as the shell draws it, over the real fragment taker (shell contract S3). */
 export { type DeviceViewHarness, deviceViewHarness, fakeReachRow } from './device-view.tsx';
 export { manualScheduler } from './live-scheduler.ts';
+/** The real compiled manifests' slot wiring and dependency graph, read-only, for a plugin's own slot suite. */
+export {
+  consumesOf,
+  contributedSlots,
+  dependenciesOf,
+  panelsInSlot,
+  pluginIds,
+  reachFrom,
+  slotsPlacedBy,
+} from './slot-wiring.ts';
 /** The pill the shell draws on a nav entry over a plugin's `navBadges`, and the context it reads the runtime from: a plugin suite reads the real count. */
 export { ShellContext } from '../shell/context.tsx';
 export { NavCount } from '../shell/device-panels.tsx';
