@@ -140,17 +140,33 @@ function leaseSince(since: string): string {
   return `${since.slice(0, 10)} ${since.slice(11, 16)} UTC`;
 }
 
-/** The refusal sentence, naming who holds the conversation and how to free it. It names a pid or a session, never a path. */
+/**
+ * C0, DEL and C1 controls, the line and paragraph separators, and the bidirectional marks and isolates. A lease file is
+ * written by whoever claims, so a holder's session or runtime can carry them, and a sentence printed to a person's
+ * terminal (or into a log) must never redraw the line or reorder the text around them.
+ */
+const TERMINAL_CONTROLS = /[\p{Cc}\p{Bidi_Control}\p{Zl}\p{Zp}]/gu;
+
+/** `text` as a person can safely read it on a terminal: the controls dropped. */
+function printable(text: string): string {
+  return text.replace(TERMINAL_CONTROLS, '');
+}
+
+/**
+ * The refusal sentence, naming who holds the conversation and how to free it. It names a pid or a session, never a path.
+ * The holder's session and runtime come from a file, so they are printed without their control characters.
+ */
 export function conversationLeaseRefusal(record: ConversationLeaseRecord): string {
   const holder = record.holder;
+  const session = holder.session === undefined ? undefined : printable(holder.session);
   const who =
-    holder.session === undefined
+    session === undefined
       ? `another ${record.harness} running as process ${holder.pid}`
-      : `session ${holder.session}${holder.runtime === undefined ? '' : ` on ${holder.runtime}`}`;
+      : `session ${session}${holder.runtime === undefined ? '' : ` on ${printable(holder.runtime)}`}`;
   const remedy =
-    holder.session === undefined
+    session === undefined
       ? 'close that one first; only one writer may hold a conversation at a time'
-      : `stop or resume session ${holder.session} instead; only one writer may hold a conversation at a time`;
+      : `stop or resume session ${session} instead; only one writer may hold a conversation at a time`;
   return `conversation ${record.conversation} is being written by ${who} since ${leaseSince(record.since)}: ${remedy}`;
 }
 
