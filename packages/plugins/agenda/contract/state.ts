@@ -1,5 +1,12 @@
 import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
-import { AgendaConfigSchema, BuzzRecordSchema, ModesFileSchema, NudgesFileSchema, SeenFileSchema } from './wire.ts';
+import {
+  AgendaConfigSchema,
+  BuzzRecordSchema,
+  ModesFileSchema,
+  NudgesFileSchema,
+  RestNudgesFileSchema,
+  SeenFileSchema,
+} from './wire.ts';
 
 /** `state/agenda/seen.json`: when the owner last saw each ask, so an unread badge can clear. */
 export const SEEN = defineState({ name: 'seen', path: 'seen.json', store: 'json', format: 1, schema: SeenFileSchema });
@@ -27,6 +34,15 @@ export const NUDGES = defineState({
   store: 'json',
   format: 1,
   schema: NudgesFileSchema,
+});
+
+/** The rest nudge's counters per ferret and item: what keeps a silent ferret from being nudged past its cap, across a restart. */
+export const REST_NUDGES = defineState({
+  name: 'rest-nudges',
+  path: 'rest-nudges.json',
+  store: 'json',
+  format: 1,
+  schema: RestNudgesFileSchema,
 });
 
 /** `config/agenda.yaml`: nothing here widens authority or spend. */

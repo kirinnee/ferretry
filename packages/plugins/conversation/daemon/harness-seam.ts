@@ -168,6 +168,17 @@ export function refusalAnswer(refusal: HarnessRefusal, noPane: string): Error {
 }
 
 /**
+ * The agent's composer could not be read to prove it empty, so NOTHING was typed (Ferrets' `composer_unreadable`).
+ * Still the route's 409 `send_refused` wherever it is thrown on, but its own class, because a send must not be DROPPED
+ * for it: the typing send keeps such a message open for the tracker, which types it once the box reads clear.
+ */
+export class UnreadableComposer extends SessionSendError {
+  constructor() {
+    super('refused', composerUnreadableRefusal().message);
+  }
+}
+
+/**
  * Every delivery failure Ferrets can answer, as the send routes answer it (today's `sendRefusal` over the classes these
  * replace): typed and not proven is {@link Unconfirmed} (409 `send_unconfirmed`, record kept); a pane that never came
  * to a prompt or a composer that could not be read is 409 `send_refused` (nothing typed); a composer that held the
@@ -184,7 +195,7 @@ export function deliveryAnswer(ferret: string, failure: HarnessDeliveryFailure):
       return new SessionSendError('refused', refusal.message, refusal.draft);
     }
     case 'composer_unreadable':
-      return new SessionSendError('refused', composerUnreadableRefusal().message);
+      return new UnreadableComposer();
     default:
       return refusalAnswer(failure, `session ${ferret} has no live agent to type into; revive it first`);
   }

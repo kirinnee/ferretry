@@ -494,6 +494,14 @@ export class SessionSendService {
       const routing = routeSend(ready, pane);
       if (routing === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
+      // A send NOTHING was ever typed for goes in at an idle prompt only, never into the harness's queue: the queue
+      // types a long body as a pointer to a fresh file the ledger does not name, so the tracker could not prove that
+      // copy and would type the body again. It waits out the turn instead (the tracker looks again within seconds).
+      if (current.untyped === true && routing !== 'idle')
+        throw new SendRetypeWithheld(
+          `send ${sendId} was never typed and the agent is mid-turn, so it is typed when the turn ends`,
+          'busy',
+        );
       // The hard guard (`typedIntoBusyPane`): never a second copy behind a running turn unless forced.
       const midTurn = paneMidTurn(ready, pane);
       if (midTurn && typedIntoBusyPane(current) && options.force !== true)

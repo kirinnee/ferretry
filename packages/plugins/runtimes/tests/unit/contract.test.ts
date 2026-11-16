@@ -29,11 +29,10 @@ import manifest from '../../manifest.ts';
 
 describe('runtimes contract', () => {
   test('keeps runtimes and onboarding pending until real assembly and screens are ported', () => {
-    const pending = JSON.parse(
-      readFileSync(new URL('../../../../../ports-pending.json', import.meta.url), 'utf8'),
-    ).pending;
-    expect(pending).toContain('runtimes');
-    expect(pending).toContain('onboarding');
+    const listed = (plugin: string): string[] =>
+      JSON.parse(readFileSync(new URL(`../../../${plugin}/ports-pending.json`, import.meta.url), 'utf8')).pending;
+    expect(listed('runtimes')).toContain('runtimes');
+    expect(listed('onboarding')).toContain('onboarding');
   });
 
   test('every Runtimes collection names its items by the one shared item-name pattern, never a copy of it', () => {

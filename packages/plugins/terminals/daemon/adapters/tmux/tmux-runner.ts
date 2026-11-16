@@ -213,6 +213,12 @@ function sameBinding(current: PaneFacts, original: PaneFacts): boolean {
   );
 }
 
+/** `#{cursor_x}|#{cursor_y}` as two whole numbers, or nothing when tmux answered something else. */
+function cursorOf(stdout: string): readonly [number, number] | readonly [] {
+  const match = /^(\d+)\|(\d+)\s*$/u.exec(stdout);
+  return match === null ? [] : [Number(match[1]), Number(match[2])];
+}
+
 /** Whether a tmux session is a ferret's: `fy-…`, and not one of Terminals' own shells (`fy-webterm-…`). */
 function isFerretSession(session: string): boolean {
   return session.startsWith(FERRET_TMUX_PREFIX) && !session.startsWith(TERMINAL_TMUX_PREFIX);
@@ -531,10 +537,12 @@ export class TmuxRunner implements Runner {
             kind: 'content' as const,
             data: { alive: true, dead: true, promptReady: false, activeWork: false, visible: '', history: '' } as never,
           };
-        const [visible, history] = await Promise.all([
+        const [visible, history, cursor] = await Promise.all([
           tmux.execute(['capture-pane', '-p', '-t', handle]),
           tmux.execute(['capture-pane', '-p', '-S', '-', '-t', handle]),
+          tmux.execute(['display-message', '-p', '-t', handle, '#{cursor_x}|#{cursor_y}']),
         ]);
+        const [cursorX, cursorY] = cursor.code === 0 ? cursorOf(cursor.stdout) : [];
         if (visible.code !== 0) return { kind: 'content' as const };
         const earlier = history.code === 0 ? tailAtLine(history.stdout, FORM_HISTORY_CHARS) : '';
         return await watch.redaction.read(async scope => {
@@ -554,6 +562,7 @@ export class TmuxRunner implements Runner {
               visible: state.visible,
               history: state.history,
               ...(blockingOf(shown) === undefined ? {} : { blocking: blockingOf(shown) }),
+              ...(cursorX === undefined || cursorY === undefined ? {} : { cursorX, cursorY }),
             } satisfies RunnerFormCapture as never,
           };
         });
