@@ -233,11 +233,18 @@ describe('NewFerretPage', () => {
   it('resubmits the SAME draft after a lost answer with the same request id, and a changed draft with a new one', async () => {
     const harness = page({ start: new TypeError('fetch failed') });
     fill(harness.view);
-    const submit = () =>
-      runAsync(async () => {
+    // A lost answer ends in a SHA-256 of the body, which WebCrypto computes on a thread pool: no count of microtask turns
+    // bounds when it lands. So wait for what the person sees instead (the form actionable again), one `act` at a time.
+    const actionable = (): boolean =>
+      harness.view.root
+        .findAll(node => node.type === 'button' && node.children.join('') === 'Create ferret')
+        .some(node => node.props.disabled === false);
+    const submit = async (): Promise<void> => {
+      await runAsync(async () => {
         button(harness.view, 'Create ferret').props.onClick();
-        for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
       });
+      while (!actionable()) await runAsync(() => new Promise<void>(resolve => setTimeout(resolve, 0)));
+    };
     const requestIds = () =>
       harness.calls
         .filter(call => call.route === 'POST /v1/ferrets')

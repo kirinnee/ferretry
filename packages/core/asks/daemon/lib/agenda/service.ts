@@ -212,7 +212,7 @@ const carriedBy = (
 ): string =>
   asking.sessionId === from
     ? `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id}, which carries the card; put yours on it: fy agenda edit ${asking.id} --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`
-    : `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy task note ${task.id} "<text>"`;
+    : `${formatTaskRef(task)} already asks the owner on ${ASK_REFERENCE_SIGIL}${asking.id} (${asking.sessionId}'s agenda), which carries the card; add what the card needs to it: fy card note ${task.id} "<text>"`;
 
 /**
  * An agent's ask that NAMES a card whose ask is open already is refused: two asks about one card are two things in the
@@ -350,7 +350,7 @@ export class AgendaService {
     const ref = formatTaskRef(focused.task);
     const warning =
       asking === UNREADABLE
-        ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy task note ${focused.task.id} "<text>"`
+        ? `${ref}'s gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy card note ${focused.task.id} "<text>"`
         : `this was raised without the card: ${carriedBy(focused.task, asking, home)}`;
     return { ...mutation, notes: [...(mutation.notes ?? []), warning] };
   }

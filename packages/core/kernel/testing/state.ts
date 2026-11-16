@@ -35,6 +35,8 @@ export class MemoryStateFolder {
   readonly directories = new Map<string, { readonly mode: number; readonly modifiedMs: number }>();
   /** Planted links are metadata only; the test store never follows one. */
   readonly symlinks = new Map<string, string>();
+  /** Files planted with a second name; a roots view refuses them just as the real disk does. */
+  readonly hardLinks = new Set<string>();
   readonly modified = new Map<string, number>();
   private crashArmed = false;
   crashed = false;

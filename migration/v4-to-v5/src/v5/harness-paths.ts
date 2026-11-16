@@ -1,5 +1,5 @@
-import { CLAUDE_CODE_AGENT_HOMES } from '@ferretry/plugin-claude-code/contract';
-import { CODEX_AGENT_HOMES } from '@ferretry/plugin-codex/contract';
+import { CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL } from '@ferretry/plugin-claude-code/contract';
+import { CODEX_AGENT_HOMES, CODEX_HISTORY_POOL } from '@ferretry/plugin-codex/contract';
 import type { TranscriptProvenance } from '@ferretry/core-ferrets/contract';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
@@ -9,6 +9,15 @@ import { rebaseV4Path } from '../v4/rebase.ts';
 
 export function agentHomesRoot(harness: 'claude' | 'codex') {
   const declaration = harness === 'claude' ? CLAUDE_CODE_AGENT_HOMES : CODEX_AGENT_HOMES;
+  return join('state', harness === 'claude' ? 'claude-code' : 'codex', declaration.path.replace(/\/\*$/u, ''));
+}
+
+/**
+ * The one history pool a harness shares (docs/design/shared-history.md §3.1), a plain folder of the plugin's state
+ * beside `agent-homes`. The folder name comes from the contract's state definition, never written by hand.
+ */
+export function historyPoolRoot(harness: 'claude' | 'codex') {
+  const declaration = harness === 'claude' ? CLAUDE_CODE_HISTORY_POOL : CODEX_HISTORY_POOL;
   return join('state', harness === 'claude' ? 'claude-code' : 'codex', declaration.path.replace(/\/\*$/u, ''));
 }
 
@@ -66,11 +75,15 @@ export function rewriteTranscript(
   if (transcript.file === undefined) return { ...transcript, home };
   const pooled = inside(join(ctx.v4.fleet, 'shared', harness), transcript.file);
   if (pooled !== undefined && pooled.length > 0)
-    return { ...transcript, home, file: ctx.v5.resolve(join(root, '_shared', pooled)) };
+    return { ...transcript, home, file: ctx.v5.resolve(join(historyPoolRoot(harness), pooled)) };
   const inHome = inside(transcript.home, transcript.file);
   if (inHome === undefined || inHome.length === 0) return undefined;
   // v4 pools these transcript paths. The old home held symlinks; metadata points straight at the copied pool.
   const first = inHome.split(sep)[0];
   const isPooled = harness === 'claude' ? first === 'projects' : first === 'sessions' || first === 'archived_sessions';
-  return { ...transcript, home, file: ctx.v5.resolve(join(root, isPooled ? '_shared' : id, inHome)) };
+  return {
+    ...transcript,
+    home,
+    file: ctx.v5.resolve(join(isPooled ? historyPoolRoot(harness) : join(root, id), inHome)),
+  };
 }

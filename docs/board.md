@@ -237,7 +237,7 @@ sub-ferret, it never locks one out it cannot find.
 
 A sub-ferret's system prompt drops the Board rules above and the Notify rule and the Agenda mode section, and
 carries these two lines instead (`SUB_FERRET_INSTRUCTION`, the `sub-ferret` launch section; the daemon writes
-`FY_SUB_FERRET=1` from the session's `parent` at every launch, so a stored value cannot switch it off):
+`FY_SUB_FERRET=1` from the session's `role` (a helper) at every launch, so a stored value cannot switch it off):
 
 ```text
 Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (`fy send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make. Label every send: `--kind blocker` (stuck until answered; at once), `--kind action` (default; to do; batched a minute), `--kind fyi` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.
@@ -1469,7 +1469,7 @@ on** ([The board is opt-in](#the-board-is-opt-in)). If the turn did **mutating w
 card in an open lane**, the ferret gets one queued message:
 
 ```text
-You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"
+You changed code this turn without a card. Create one (fy card new …) or record why not: fy card skip "<why>"
 ```
 
 - **Mutating work** is the turn's own tool calls: an edit tool (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`,
@@ -1504,7 +1504,7 @@ agenda carries that card's open ask, the ferret gets one queued message per item
   start time is unknown sends no message.
 - Each nudge is journalled on the session as `board.gate-nudged`, with the items it named and their cards.
 
-## `fy task skip "<why>"`
+## `fy card skip "<why>"`
 
 Records that this session's work needs no card — chit-chat, or the owner said not to track it — as
 `config.boardSkip` (`{ reason, at }`) on the calling session, through `POST /v1/board/skip`. Only a ferret records
