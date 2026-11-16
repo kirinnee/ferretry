@@ -68,6 +68,8 @@ import type {
   AutoResumeReport,
   FerretIngestEvidence,
   FerretPaneLimit,
+  FerretRuntimeRecord,
+  FerretRuntimeRename,
   FerretPrompt,
   FerretAddress,
   FerretsApi,
@@ -923,6 +925,30 @@ export class FakeFerrets implements FerretsApi {
   }
   async lastAutoResume(): Promise<AutoResumeReport | null> {
     return this.#autoResume;
+  }
+  #runtimeRecords: readonly FerretRuntimeRecord[] = [];
+  /** Every re-point asked of `repointRuntime`, in order. */
+  readonly repoints: FerretRuntimeRename[] = [];
+  /** TEST ONLY: the ferrets `runtimeRecords()` answers (none until set). */
+  setRuntimeRecords(records: readonly FerretRuntimeRecord[]): void {
+    this.#runtimeRecords = [...records];
+  }
+  async runtimeRecords(): Promise<readonly FerretRuntimeRecord[]> {
+    return this.#runtimeRecords;
+  }
+  /** Moves the planted records that name the old runtime (by name or wrapper), as Ferrets does; answers how many. */
+  async repointRuntime(rename: FerretRuntimeRename): Promise<number> {
+    this.repoints.push(rename);
+    let moved = 0;
+    this.#runtimeRecords = this.#runtimeRecords.map(record => {
+      const agent =
+        record.agent === rename.from ? rename.to : record.agent === rename.fromWrapper ? rename.toWrapper : undefined;
+      const executable = record.executable === rename.fromWrapper ? rename.toWrapper : undefined;
+      if (agent === undefined && executable === undefined) return record;
+      moved += 1;
+      return { ...record, agent: agent ?? record.agent, ...(executable === undefined ? {} : { executable }) };
+    });
+    return moved;
   }
   readonly #turns = new Map<FerretId, readonly TurnUsage[]>();
   /** TEST ONLY: the turns one ferret's harness reports; a ferret with none planted reads as spending nothing. */

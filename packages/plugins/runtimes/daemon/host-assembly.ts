@@ -46,7 +46,8 @@ import type { FleetCatalogServiceDeps } from './lib/service/catalog-service.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import type { FleetSetupServiceDeps } from './lib/service/setup-service.ts';
 import { ToolInstallService } from './lib/service/tool-install.ts';
-import type { HarnessLocation, SessionStatus } from './lib/service/foreign.ts';
+import type { HarnessLocation } from './lib/service/foreign.ts';
+import { RuntimeSessionRecords, SESSION_STATUS_OF } from './adapters/runtime-session-records.ts';
 import type { RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
 
 /** The published manifest's name in the fleet folder. */
@@ -55,13 +56,19 @@ const MANIFEST_FILE = 'manifest.json';
 /** What a person types to run this binary: the wrapper's history claim and the statusLine run it. */
 const CLIENT_NAME = 'fy';
 
-/** A ferret's state as the catalogue counts a session (it counts the ones still going). */
-const SESSION_STATUS_OF: Readonly<Record<FerretState, SessionStatus>> = {
-  starting: 'starting',
-  working: 'running',
-  idle: 'waiting',
-  stopped: 'stopped',
-};
+/** The thin adapter over Ferrets' two session-record members, or `undefined` when this Ferrets offers neither. */
+function sessionRecordsOver(ferrets: Pick<FerretsApi, 'runtimeRecords' | 'repointRuntime'>): {
+  readonly sessionRecords?: RuntimeSessionRecords;
+} {
+  // Called through the port, never detached from it: a port may be an object whose members read their own state.
+  if (ferrets.runtimeRecords === undefined || ferrets.repointRuntime === undefined) return {};
+  return {
+    sessionRecords: new RuntimeSessionRecords({
+      runtimeRecords: async () => (await ferrets.runtimeRecords?.()) ?? [],
+      repointRuntime: async rename => (await ferrets.repointRuntime?.(rename)) ?? 0,
+    }),
+  };
+}
 
 /**
  * The fleet folder's absolute path, as the `fleet` root names it (the manifest's absolute paths are spelled with it).
@@ -336,7 +343,7 @@ export function fileAssembly(
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
         Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
-      readonly ferrets: Pick<FerretsApi, 'lastAutoResume'> & {
+      readonly ferrets: Pick<FerretsApi, 'lastAutoResume' | 'runtimeRecords' | 'repointRuntime'> & {
         list(): Promise<readonly { readonly state: FerretState }[]>;
       };
     };
@@ -373,6 +380,9 @@ export function fileAssembly(
     paths: { home, fleet: directory, fleetManifest: `${directory}/${MANIFEST_FILE}` },
     userHome: ctx.kernel.paths.home(),
     sessionStatuses: async () => (await ctx.needs.ferrets.list()).map(ferret => SESSION_STATUS_OF[ferret.state]),
+    // The session records a runtime removal reads and a rename re-points: Ferrets owns them, so both go through its port.
+    // A Ferrets that does not offer them leaves the confirm card saying only what it knows.
+    ...sessionRecordsOver(ctx.needs.ferrets),
     credentials: ctx.needs.logins,
     loginChanges: ctx.needs.loginChanges,
     // The catalogs Logins owns, read live: what each runtime offers, and what an apply pins its tier slots to.
