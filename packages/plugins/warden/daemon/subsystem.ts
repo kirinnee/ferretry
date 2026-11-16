@@ -42,8 +42,14 @@ import { createWardenRemedies } from './remedies.ts';
 import { ferretsWardenSpawner } from './spawner.ts';
 import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
 import { agendaDialogNotices, ferretDialogs } from './dialogs.ts';
+import { dialogRulesInEffect, ferretClearPane } from './dialog-clear.ts';
+import { dialogLearnService, dialogRulesView } from './dialog-learn.ts';
+import type { DialogLearnAnswer, DialogLearnRequest, DialogRulesView } from '../contract/dialog-rules.ts';
 import {
+  DIALOG_CLEAR_REF,
+  DIALOG_PROPOSALS_REF,
   DIALOG_WATCH_REF,
+  DialogLearnRefused,
   INBOX_STUCK_REF,
   INPUT_STUCK_REF,
   type LivenessSample,
@@ -52,6 +58,7 @@ import {
   ownerHoldReason,
   WARDEN_SWEEP_ORIGIN,
   WardenAutoMoveService,
+  WardenDialogClear,
   WardenDialogWatch,
   type WardenAgentInventory,
   WardenLivenessMonitor,
@@ -127,10 +134,21 @@ const stopwatch = { monotonicMs: (): number => performance.now() };
 /** How often the liveness monitor looks at every working ferret: kteam's own tick (today's). */
 export const WARDEN_LIVENESS_TICK_SECONDS = 30;
 
+/** How often the dialog look runs: a screen a rule can leave should not wait half a minute. */
+const WARDEN_DIALOG_TICK_SECONDS = 10;
+
 /** The binary's name, for sentences that name a command a ferret types; the other halves quote it the same way. */
 const BINARY = 'fy';
 
-export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
+/** Teaching Ferretry a screen it does not know (`dialog-learn.ts`): what it clears, and the propose-then-save flow. */
+export interface WardenDialogs {
+  /** What Ferretry clears by itself, what the owner taught it and what waits for a yes. */
+  rules(): Promise<DialogRulesView>;
+  /** Propose a rule from a ferret's dialog, or save the one proposed (the owner's yes). */
+  learn(request: DialogLearnRequest): Promise<DialogLearnAnswer>;
+}
+
+export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { readonly dialogs: WardenDialogs } {
   const { kernel, ferrets, conversation, asks } = host;
   const nowMs = (): number => kernel.clock.nowMs();
   const turns = new TurnOrdinals();
@@ -421,10 +439,30 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
 
   // ── dialog watch: a ferret parked on a harness screen nothing pre-answered is told to the owner ONCE per episode ───
   // Not a flag and not a sweep step: a rule over the dialog Ferrets already recorded (`dialog-watch.ts`).
+  // A screen a rule knows how to leave is left in the same look, before the owner is told of anything (`dialog-clear.ts`).
+  const dialogClear = new WardenDialogClear({
+    rules: dialogRulesInEffect(kernel.config),
+    ...ferretClearPane(ferrets),
+    sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
+    memory: new StateMachineMembers(kernel.state, DIALOG_CLEAR_REF),
+    record: (type, data) => kernel.log.info(type, data),
+  });
   const dialogWatch = new WardenDialogWatch({
     dialogs: async () => await ferretDialogs(ferrets, fleetNow),
     memory: new StateMachineMembers(kernel.state, DIALOG_WATCH_REF),
     notices: agendaDialogNotices(agenda),
+    clear: dialogClear,
+    record: (type, data) => kernel.log.info(type, data),
+  });
+
+  // ── teaching Ferretry a screen it does not know: a proposal the owner reads, then saves ──
+  const dialogProposals = new StateMachineMembers(kernel.state, DIALOG_PROPOSALS_REF);
+  const dialogLearn = dialogLearnService({
+    ferrets,
+    config: kernel.config,
+    state: kernel.state,
+    mask: async text => await kernel.redaction.read(async scope => scope.text(text)),
+    proposals: dialogProposals,
     record: (type, data) => kernel.log.info(type, data),
   });
 
@@ -474,6 +512,17 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       return held.length === 0 ? view : { ...view, held: [...held] };
     },
     agenda: async scope => await service.agenda(scope),
+    dialogs: {
+      rules: async () => await dialogRulesView(kernel.config, dialogProposals),
+      learn: async request => {
+        const address = await ferrets.resolve(request.ferret);
+        if (address.kind !== 'ferret')
+          throw new DialogLearnRefused(address.kind === 'ambiguous' ? address.message : `no ferret ${request.ferret}.`);
+        return request.confirm === true
+          ? await dialogLearn.confirm(address.id)
+          : await dialogLearn.learn(address.id, request.row);
+      },
+    },
     // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation starts now.
     investigate: async (ferret, note) => {
       const queued = await loop.exclusive(async () => await service.requestInvestigation(ferret, note));
@@ -530,7 +579,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         }
       };
       const stopDialogs = kernel.clock.every(
-        milliseconds(WARDEN_LIVENESS_TICK_SECONDS * 1000),
+        milliseconds(WARDEN_DIALOG_TICK_SECONDS * 1000),
         () => void lookForDialogs(),
       );
       void loop.arm().then(

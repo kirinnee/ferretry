@@ -1,6 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { owner } from '@ferretry/kernel/testing';
-import { WARDEN_CONFIG, WARDEN_JEV_CHECKS, WARDEN_REPORTS, WARDEN_STATE } from '../../../contract/index.ts';
+import {
+  WARDEN_CONFIG,
+  WARDEN_DIALOG_RULES,
+  WARDEN_JEV_CHECKS,
+  WARDEN_REPORTS,
+  WARDEN_STATE,
+} from '../../../contract/index.ts';
 import { StateAutoMoveLedger } from '../../../daemon/adapters/state-store.ts';
 import { FileWardenArtifacts } from '../../../daemon/adapters/artifacts.ts';
 import { StateWardenReportFiles } from '../../../daemon/adapters/report-files.ts';
@@ -36,7 +42,7 @@ describe('storage parity', () => {
   });
 
   test('F-0177 F-0421 the settings are config/warden.yaml: the file under the defaults, a loosening held for the owner', async () => {
-    expect(manifest.data.config).toEqual([WARDEN_CONFIG]);
+    expect(manifest.data.config).toEqual([WARDEN_CONFIG, WARDEN_DIALOG_RULES]);
     expect(WARDEN_CONFIG.file).toBe('warden.yaml');
     expect(WARDEN_CONFIG.axis).toBe('configure');
     const { host } = await wardenHost({ config: { enabled: false } });

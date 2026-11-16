@@ -193,6 +193,8 @@ export interface DialogWatchPorts {
   dialogs(): Promise<readonly WatchedDialog[]>;
   readonly memory: MachineMembersStore;
   readonly notices: DialogNoticePort;
+  /** Leaves the screens a rule knows how to leave, before the owner is told of anything (`dialog-clear.ts`). Absent: none is. */
+  readonly clear?: { clear(dialogs: readonly WatchedDialog[]): Promise<{ readonly toTell: readonly WatchedDialog[] }> };
   record(type: string, data: Readonly<Record<string, string>>): void;
 }
 
@@ -213,6 +215,14 @@ export class WardenDialogWatch {
         // An unreadable fleet proves nothing: no episode starts or ends on it.
         this.ports.record('fleet.warden_dialog_unreadable', { reason: String(error).slice(0, 200) });
         return undefined;
+      }
+      // A screen a rule cleared is not the owner's to hear about; one whose keys failed, or no rule fits, still is.
+      if (enabled && this.ports.clear !== undefined) {
+        try {
+          dialogs = (await this.ports.clear.clear(dialogs)).toTell;
+        } catch (error) {
+          this.ports.record('fleet.warden_dialog_clear_unavailable', { reason: String(error).slice(0, 200) });
+        }
       }
       const plan = planDialogNotices({ dialogs, memory });
       const next: Record<string, readonly string[]> = { ...plan.next };

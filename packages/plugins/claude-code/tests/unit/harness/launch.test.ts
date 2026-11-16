@@ -19,7 +19,7 @@ import {
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
 import {
   CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
+  CLAUDE_OVERLAY_HOOKS,
   CLAUDE_PROMPTS_SEEN,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
 import pending from '../../../ports-pending.json';
@@ -140,8 +140,15 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: CLAUDE_OVERLAY_HOOKS,
       });
+      // The ferret's overlay denies a dangerous rm up front, and never through a permission rule or hook of the wrong kind.
+      should(overlay.hooks.PreToolUse.map((entry: { matcher: string }) => entry.matcher)).eql([
+        'AskUserQuestion',
+        'Bash',
+      ]);
+      should(overlay.hooks).not.have.property('PermissionRequest');
+      should(JSON.stringify(overlay.permissions)).not.containEql('Bash(');
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
         hasCompletedClaudeInChromeOnboarding: true,
