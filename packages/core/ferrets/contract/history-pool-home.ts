@@ -184,6 +184,12 @@ async function moveIn(
   };
   const top = await home.lstat(fenced(home, entry.name));
   if (top?.kind !== (entry.kind === 'folder' ? 'directory' : 'file')) throw new PreflightRefusal('not_file');
+  const targetEntry = await pool.lstat(fenced(pool, entry.name));
+  if (targetEntry !== undefined) {
+    if (targetEntry.kind === 'symlink') throw new PreflightRefusal('link_escape');
+    if (targetEntry.kind !== top.kind) throw new PreflightRefusal('changed');
+    if (targetEntry.kind === 'file' && targetEntry.links !== 1) throw new PreflightRefusal('hard_link');
+  }
   await scan(entry.name, 0);
   // A zero-byte read applies the kernel's private-place and hard-link guards without buffering any transcript.
   for (const relative of files) await home.readBytes(fenced(home, relative), { offset: 0, length: 0 });

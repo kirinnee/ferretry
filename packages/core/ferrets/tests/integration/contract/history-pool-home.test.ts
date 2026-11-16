@@ -239,6 +239,19 @@ for (const backend of ['real', 'testing'] as const) {
         expect(await w.home.lstat(path(w.home, `.history-pool-pending-${entry}`))).toBeUndefined();
       });
 
+      test('an existing pool entry of the wrong kind refuses before any local transcript moves', async () => {
+        const w = await world();
+        await w.pool.remove(path(w.pool, entry));
+        await w.pool.writeText(path(w.pool, entry), 'wrong pool entry kind');
+        const result = await poolHomeHistory({ roots: w.roots, ferret, entries });
+        expect(result.moved).toBe(0);
+        expect(result.linked).toEqual([]);
+        expect(result.sentence).toContain('changed');
+        expect(await w.home.readText(path(w.home, `${entry}/slug/a.jsonl`))).toBe('keep my conversation');
+        expect(await w.pool.readText(path(w.pool, entry))).toBe('wrong pool entry kind');
+        expect(await w.home.lstat(path(w.home, `.history-pool-pending-${entry}`))).toBeUndefined();
+      });
+
       test('the move limit is checked for the complete entry before the first transcript moves', async () => {
         const w = await world();
         const original = await w.home.lstat(path(w.home, `${entry}/slug/a.jsonl`));
