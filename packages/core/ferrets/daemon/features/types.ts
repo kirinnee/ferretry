@@ -12,6 +12,7 @@ import type { BuiltWorktrees } from '../modules/worktrees.ts';
 import type { SessionFiles } from '../modules/session-files.ts';
 import type { AgentPinService } from '../lib/agent-pins/index.ts';
 import type { OutdatedMark } from '../lib/fleet-list/outdated-mark.ts';
+import type { LaunchStepRegistrar } from '../lib/ferrets/launch-steps.ts';
 import type { FerretsService } from '../lib/ferrets/service.ts';
 import type { LaunchInstructionSectionId } from '../lib/protocol/session.ts';
 import type { FerretRegistry } from '../lib/registry/registry.ts';
@@ -71,6 +72,8 @@ export interface FerretsContext {
   /** The session store (documents, config, state, archive) and the ferret's private session files. */
   readonly sessionStore: DaemonStorage;
   readonly sessionFiles: SessionFiles;
+  /** Adds to what every launch asks (a pane variable each), at registration only: sealed once the features have run. */
+  readonly launch: LaunchStepRegistrar;
   /** Resolves once the held records and tokens are loaded. */
   readonly ready: () => Promise<void>;
   /** Settles once the session store's archive is loaded (it may reject: a load that failed). */

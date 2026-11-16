@@ -7,7 +7,7 @@ const tools = manifest.actions.agentTools;
 
 describe('terminals manifest', () => {
   test("declares today's terminal, process, console, snapshot, attach and surface routes and the viewer stream", () => {
-    expect(routes).toHaveLength(17);
+    expect(routes).toHaveLength(26);
     expect(routes.map(route => route.key)).toContain('GET /v1/ferrets/:ferretId/snapshot');
     expect(manifest.actions.sockets.map(socket => socket.key)).toEqual([
       'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream',

@@ -143,3 +143,45 @@ describe('runtimeStartAnswer › whether a login may be spent', () => {
     expect(viaOver.ok ? '' : viaOver.sentence).toContain('login oauth is over its daily budget');
   });
 });
+
+describe('runtimeStartAnswer › what a runtime serves (catalog)', () => {
+  const published = (...names: string[]) =>
+    names.map(name => ({
+      id: `id-${name}`,
+      name,
+      harness: 'claude-code',
+      models: {
+        catalog: { id: 'a', label: 'A', origin: 'built-in', customIds: false, docs: 'd' },
+        choices: [{ id: `${name}-model`, label: 'M', efforts: [], available: true }],
+        default: `${name}-model`,
+      },
+    })) as never;
+
+  test('is absent when no published view is offered, so a move onto another runtime reads "not built yet"', () => {
+    expect(runtimeStartAnswer({ ...resolving(READY), logins: listing(OK) }).catalog).toBeUndefined();
+  });
+
+  test('answers the runtime NAMED, by name or by id, and nothing for one that is not published', async () => {
+    const source = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: listing(OK),
+      catalog: async () => published('one', 'two'),
+    });
+
+    expect((await source.catalog?.('two'))?.choices.map(choice => choice.value)).toEqual(['two-model']);
+    expect(await source.catalog?.('id-one')).toEqual(await source.catalog?.('one'));
+    expect(await source.catalog?.('ghost')).toBeUndefined();
+  });
+
+  test('says nothing, never throws, when the publication cannot be read', async () => {
+    const source = runtimeStartAnswer({
+      ...resolving(READY),
+      logins: listing(OK),
+      catalog: async () => {
+        throw new Error('manifest being rebuilt');
+      },
+    });
+
+    expect(await source.catalog?.('one')).toBeUndefined();
+  });
+});

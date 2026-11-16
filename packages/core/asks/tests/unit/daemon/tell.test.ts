@@ -6,6 +6,7 @@ import {
   AGENDA_REPLY_SETTLE_MS,
 } from '../../../daemon/lib/agenda/index.ts';
 import { AskNotTypedError, type AskComposerState } from '../../../contract/index.ts';
+import type { StatePort } from '@ferretry/kernel/contract';
 import { asksHalf } from '../../support/daemon/asks-half.ts';
 
 /**
@@ -35,16 +36,36 @@ function ferretWorld() {
   return { typed, composer, delivery };
 }
 
-async function world() {
+/** A state port whose every call takes real time to answer, as a busy disk's does. */
+const slowState = (delayMs: number) => (state: StatePort) =>
+  new Proxy(state, {
+    get(target, key) {
+      const value = Reflect.get(target, key);
+      if (typeof value !== 'function') return value;
+      return async (...args: unknown[]) => {
+        await Bun.sleep(delayMs);
+        return await Reflect.apply(value, target, args);
+      };
+    },
+  });
+
+async function world(options: { stateDelayMs?: number } = {}) {
   const ferrets = ferretWorld();
-  const half = await asksHalf({ 'ask.delivery:ferret': ferrets.delivery });
+  const half = await asksHalf(
+    { 'ask.delivery:ferret': ferrets.delivery },
+    options.stateDelayMs === undefined ? {} : { wrapState: slowState(options.stateDelayMs) },
+  );
   halves.push(half);
   await half.start();
-  /** Moves the clock in the batch's own recheck steps, letting each detached step finish. */
+  /**
+   * Moves the clock in the batch's own recheck steps, and after each waits for the detached step it started (its state
+   * reads and writes, however long they take) rather than for any stretch of real time: the next recheck is only
+   * scheduled once that step ends, so a step cut short would be a recheck the clock steps over.
+   */
   const run = async (ms: number): Promise<void> => {
     for (let spent = 0; spent < ms; spent += AGENDA_REPLY_RECHECK_MS) {
       await half.clock.advance(AGENDA_REPLY_RECHECK_MS);
-      for (let turn = 0; turn < 5; turn += 1) await Bun.sleep(1);
+      await half.settle();
     }
   };
   return { half, run, ...ferrets };
@@ -108,6 +129,17 @@ describe('telling a ferret through the Vault’s view', () => {
 
   it('holds a tell for an unreadable composer exactly as it holds an answer, then types it when it empties', async () => {
     const { half, run, typed, composer } = await world();
+    composer.state = 'unreadable';
+    await half.asksFor('vault').tell?.(FERRET, ENDED, 'input-ended-f-A3');
+    await run(AGENDA_REPLY_SETTLE_MS + 30_000);
+    expect(typed).toEqual([]);
+    composer.state = 'empty';
+    await run(2 * AGENDA_REPLY_RECHECK_MS);
+    expect(typed.map(each => each.message)).toEqual([ENDED]);
+  });
+
+  it('holds and then types that tell however slowly the state answers', async () => {
+    const { half, run, typed, composer } = await world({ stateDelayMs: 8 });
     composer.state = 'unreadable';
     await half.asksFor('vault').tell?.(FERRET, ENDED, 'input-ended-f-A3');
     await run(AGENDA_REPLY_SETTLE_MS + 30_000);

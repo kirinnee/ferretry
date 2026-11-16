@@ -30,9 +30,10 @@ import type {
   RuntimeModelChoice,
   SessionView,
 } from '../../protocol/session.ts';
+import type { RuntimeSwitchAccount } from '../../../../contract/kinds/runtime-switch.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
 import { documentRefusal, needsFastFacts, needsLiveCatalog, paneRefusal, switchRequest } from './policy.ts';
-import { type AccountInventoryPort, type CoreAccount, findAccountByAgent, servableModels } from '../peers/core.ts';
+import { findAccountByAgent, servableModels } from '../peers/core.ts';
 import { type FrozenJsonValue, jsonObject } from '@ferretry/std';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
@@ -94,7 +95,8 @@ export interface SessionRuntimeControlPorts {
    * `codexSwitchContext`, `fastModeFacts`, `new CodexModelPickerDriver`), injected because Ferrets cannot import them.
    */
   readonly catalogs: HarnessRuntimeCatalogs;
-  readonly accounts: AccountInventoryPort;
+  /** The accounts this service may read, as a switch reads them (a published row satisfies it). */
+  readonly accounts: { accounts(): Promise<readonly RuntimeSwitchAccount[]> };
   /** One held catalog per account, so opening the model sheet twice does not spawn two probes. */
   readonly catalog: CodexRuntimeCatalogCache;
   /** Serializes controls per session: two drives into one modal is the failure this prevents. */
@@ -158,7 +160,7 @@ export class SessionRuntimeControlService implements SessionRuntimeSubsystem, Se
   }
 
   /** The published account this session runs on, by the executable NAME its record carries. */
-  async #accountFor(agent: string): Promise<CoreAccount> {
+  async #accountFor(agent: string): Promise<RuntimeSwitchAccount> {
     const published = await this.ports.accounts.accounts().catch((error: unknown) => {
       throw new SessionRuntimeError('catalog_unavailable', failureMessage(error));
     });
