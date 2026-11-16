@@ -32,7 +32,12 @@ sections below still describe the 4.x pipeline in places; on the 5.0 tree the di
 - **Static Checks** on exactly the same events, BESIDE Quick (`quick.sh --static`): treefmt, every
   pre-commit hook (typecheck of every workspace package and `scripts/`, the 5.0 checks through
   `scripts/validate/rebuild-checks.sh`), and the build part (Nix `fy` + `fyd`, the Worker rehearsals once
-  ported, the app bundle once it has a build script). Never scoped.
+  ported, the app bundle once it has a build script), and the `guards` part: the repository-tooling tests that open
+  the real tree's TypeScript program (`config/static-tests.txt`, today `scripts/gen/tests/fleet-link-callers.test.ts`).
+  That guard takes ~25 s alone but hit its 180 s timeout beside the six unit groups in Quick (PR 1715 run
+  43840838787 and two more); Quick's `scripts` part runs every other scripts test, and
+  `scripts/ci/static-tests.test.ts` proves the two parts cover every scripts test exactly once. `guards` starts
+  when the light `format` part ends, so Static still runs three heavy parts at once. Never scoped.
 - **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
   Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
   Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the
@@ -404,7 +409,7 @@ main](#proof-reuse-on-main)).
 | ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
 | `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                     |
-| `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build                                                                                |
+| `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, whole-tree guards                                                             |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
 | `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                                             |

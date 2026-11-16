@@ -43,7 +43,8 @@ limit=${FY_CI_QUICK_PARALLEL:-2}
 # tree whatever the scope, and none of them reads a test result. CI runs them as their own job (`Static Checks`,
 # `quick.sh --static`) BESIDE the unit tier instead of after it: on one runner they waited ~13 min for the tests and
 # then added ~105 s. Unscoped, on every event Quick runs. `quick.sh` alone (a local run) runs both halves in turn.
-static_parts=(format gates build)
+# `guards` (config/static-tests.txt) starts when the light `format` part ends, so Static keeps three heavy parts at once.
+static_parts=(format gates build guards)
 run_static() {
   ./scripts/ci/parallel.sh coverage/ci/quick/static "${limit}" ./scripts/ci/quick.sh --part -- "${static_parts[@]}"
 }

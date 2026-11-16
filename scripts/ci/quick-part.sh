@@ -2,6 +2,22 @@
 set -euo pipefail
 
 part=${1:?quick part required}
+
+# The scripts tests Static runs instead of Quick (config/static-tests.txt), and every scripts test Bun would collect.
+# FY_QUICK_PART_LIST=1 prints a part's files instead of running them (scripts/ci/static-tests.test.ts).
+static_tests() {
+  local listed=()
+  mapfile -t listed < <(grep -v -e '^#' -e '^[[:space:]]*$' config/static-tests.txt)
+  [[ ${#listed[@]} -gt 0 ]] || { echo "❌ config/static-tests.txt lists no test" >&2 && return 1; }
+  for file in "${listed[@]}"; do
+    [[ -f ${file} ]] || { echo "❌ config/static-tests.txt names ${file}, which does not exist" >&2 && return 1; }
+  done
+  printf '%s\n' "${listed[@]}"
+}
+scripts_tests() {
+  find scripts -path '*/node_modules' -prune -o -type f \( -name '*.test.*' -o -name '*_test.*' -o -name '*.spec.*' -o -name '*_spec.*' \) -print | sort
+}
+
 case "${part}" in
 format)
   # treefmt --fail-on-change still rewrites files before reporting red. Give it a copy, so it
@@ -40,8 +56,28 @@ build) ./scripts/ci/build-checks.sh ;;
 # (scripts/gen/tests, scripts/gen/today). They live outside packages/, so no unit group collects them.
 scripts)
   # The JUnit report is where `bun scripts/gen/check.ts guarantees` reads whether a guarantee test in scripts/ passed.
+  # Every scripts test except the whole-tree checkers Static runs (`guards`). Both lists are read status-checked:
+  # a failed find or a bad static list fails the part, never shrinks it.
+  static_list="$(mktemp)" && all_list="$(mktemp)"
+  trap 'rm -f "${static_list}" "${all_list}"' EXIT
+  static_tests >"${static_list}"
+  scripts_tests >"${all_list}"
+  mapfile -t files < <(grep -vxF -f "${static_list}" "${all_list}" | sed 's|^|./|')
+  [[ ${#files[@]} -gt 0 ]] || { echo "❌ no scripts test left to run" >&2 && exit 1; }
+  [[ ${FY_QUICK_PART_LIST:-} == 1 ]] && printf '%s\n' "${files[@]#./}" && exit 0
   mkdir -p coverage/scripts
-  ./scripts/test/swept.sh bun test ./scripts/ --reporter=junit --reporter-outfile=coverage/scripts/junit.xml
+  ./scripts/test/swept.sh bun test "${files[@]}" --reporter=junit --reporter-outfile=coverage/scripts/junit.xml
+  ;;
+# The whole-tree checkers among the scripts tests (config/static-tests.txt), run by Static Checks: they open the real
+# repository's TypeScript program, which starved beside the six unit groups in Quick.
+guards)
+  static_list="$(mktemp)"
+  trap 'rm -f "${static_list}"' EXIT
+  static_tests >"${static_list}"
+  mapfile -t files < <(sed 's|^|./|' "${static_list}")
+  [[ ${FY_QUICK_PART_LIST:-} == 1 ]] && printf '%s\n' "${files[@]#./}" && exit 0
+  mkdir -p coverage/static-guards
+  ./scripts/test/swept.sh bun test "${files[@]}" --reporter=junit --reporter-outfile=coverage/static-guards/junit.xml
   ;;
 unit-*) ./scripts/ci/test.sh unit "${part#unit-}" ;;
 *) echo "❌ Unknown quick part: ${part}" >&2 && exit 2 ;;
