@@ -486,6 +486,29 @@ describe('the sessions a runtime change reaches', () => {
     should(staged.consequences.join(' ')).match(/3 ferrets are running on it/u);
   });
 
+  it('should name the runtime a former name now answers to, and nothing else', async () => {
+    const { service } = world({ overrides: { ids: async () => ids } });
+
+    should(await service.currentRuntimeName('former-second')).equal('second');
+    should(await service.currentRuntimeName('second')).be.undefined();
+    should(await service.currentRuntimeName('id-second')).be.undefined();
+    should(await service.currentRuntimeName('nobody')).be.undefined();
+  });
+
+  it('should have no former name to resolve on a machine with no ids.json, and refuse when it cannot be read', async () => {
+    should(await world().service.currentRuntimeName('former-second')).be.undefined();
+    const unreadable = world({
+      overrides: {
+        ids: async () => {
+          throw new Error('ids.json could not be read');
+        },
+      },
+    });
+    await should(unreadable.service.currentRuntimeName('former-second')).be.rejectedWith(
+      /ids\.json could not be read/u,
+    );
+  });
+
   it('should say only what it knows when the session records cannot be read, or none run on it', async () => {
     const unreadable = world({
       overrides: {

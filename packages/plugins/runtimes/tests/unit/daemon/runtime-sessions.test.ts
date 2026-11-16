@@ -1,11 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  renamedSessionConfig,
   type RuntimeSessionRecord,
   runningSessionsOn,
   sessionRunning,
-  type SessionRuntimeRename,
 } from '../../../daemon/lib/service/runtime-sessions.ts';
 import { SESSION_STATUSES } from '../../../daemon/lib/service/foreign.ts';
 
@@ -86,52 +84,5 @@ describe('runningSessionsOn', () => {
 
     // Assert
     should(actual).deepEqual([]);
-  });
-});
-
-describe('renamedSessionConfig', () => {
-  const rename: SessionRuntimeRename = {
-    from: 'work',
-    to: 'play',
-    fromWrapper: WRAPPER,
-    toWrapper: '/fleet/bin/play',
-  };
-
-  it('should re-point a name and the wrapper at the head of the argv, keeping the rest', () => {
-    // Act
-    const actual = renamedSessionConfig({ agent: 'work', command: [WRAPPER, '--resume', 'x'], extra: 1 }, rename);
-
-    // Assert
-    should(actual).deepEqual({ agent: 'play', command: ['/fleet/bin/play', '--resume', 'x'], extra: 1 });
-  });
-
-  it('should turn a wrapper path into the new wrapper path', () => {
-    // Act
-    const actual = renamedSessionConfig({ agent: WRAPPER }, rename);
-
-    // Assert
-    should(actual).deepEqual({ agent: '/fleet/bin/play' });
-  });
-
-  it('should move only the argv when the agent names another runtime but the wrapper is the old one', () => {
-    // Act
-    const actual = renamedSessionConfig({ agent: 'else', command: [WRAPPER] }, rename);
-
-    // Assert
-    should(actual).deepEqual({ agent: 'else', command: ['/fleet/bin/play'] });
-  });
-
-  it('should return nothing for a session that names neither the old runtime nor its wrapper', () => {
-    // Assert
-    should(renamedSessionConfig({ agent: 'else', command: ['/fleet/bin/else'] }, rename)).be.undefined();
-    should(renamedSessionConfig({ agent: 'else', command: 'not-an-argv' }, rename)).be.undefined();
-  });
-
-  it('should return nothing for a configuration that is not an object', () => {
-    // Assert
-    should(renamedSessionConfig(undefined, rename)).be.undefined();
-    should(renamedSessionConfig(null, rename)).be.undefined();
-    should(renamedSessionConfig('work', rename)).be.undefined();
-    should(renamedSessionConfig([{ agent: 'work' }], rename)).be.undefined();
   });
 });

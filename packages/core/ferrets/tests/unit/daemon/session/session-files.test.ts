@@ -799,3 +799,71 @@ describe('c58-16 the ferret’s own compact-at is one field of its session confi
     expect(folder.raw(FerretConfigFile, FERRET)).toBe('["FIXTURE_SECRET"]');
   });
 });
+
+describe('c58-28b a runtime rename re-points one ferret’s session config under the storage lock', () => {
+  const rename = { from: 'work', to: 'play', fromWrapper: '/fleet/bin/work', toWrapper: '/fleet/bin/play' };
+  async function documented(fields: Record<string, unknown>) {
+    const kernel = await wired();
+    const { subject, storage } = await files(kernel.roots);
+    await storage.writeConfig(FERRET, sessionConfig(FERRET, fields));
+    return { subject, storage };
+  }
+  const configOf = async (storage: Awaited<ReturnType<typeof files>>['storage']) =>
+    (await storage.readConfig(FERRET)) as Record<string, unknown>;
+
+  test('the agent and the head of the argv move, and no other field is touched', async () => {
+    const { subject, storage } = await documented({
+      agent: 'work',
+      command: ['/fleet/bin/work', '--resume', 'x'],
+      label: 'team',
+      agenda: true,
+    });
+    const before = await configOf(storage);
+
+    expect(await subject.port.repointRuntime?.(ferretId(FERRET), rename)).toBe(true);
+
+    expect(await configOf(storage)).toEqual({
+      ...before,
+      agent: 'play',
+      command: ['/fleet/bin/play', '--resume', 'x'],
+    });
+  });
+
+  test('a config on another runtime is not written at all, and says it did not move', async () => {
+    const { subject, storage } = await documented({ agent: 'other', command: ['/fleet/bin/other'] });
+    const before = await configOf(storage);
+
+    expect(await subject.port.repointRuntime?.(ferretId(FERRET), rename)).toBe(false);
+
+    expect(await configOf(storage)).toEqual(before);
+  });
+
+  test('a write racing the re-point is not lost: both land, in either order', async () => {
+    const { subject, storage } = await documented({ agent: 'work', command: ['/fleet/bin/work'] });
+
+    await Promise.all([
+      subject.port.repointRuntime?.(ferretId(FERRET), rename),
+      subject.port.setCompactAt?.(ferretId(FERRET), 250_000),
+    ]);
+
+    expect(await configOf(storage)).toMatchObject({ agent: 'play', command: ['/fleet/bin/play'], compactAt: 250_000 });
+  });
+
+  test('a ferret with no session document has no facts and does not move, and none is made from nothing', async () => {
+    const kernel = await wired();
+    const { subject, storage } = await files(kernel.roots);
+
+    expect(await subject.port.runtimeFacts?.(ferretId(FERRET))).toBeUndefined();
+    expect(await subject.port.repointRuntime?.(ferretId(FERRET), rename)).toBe(false);
+
+    expect(await storage.readConfig(FERRET).catch(() => undefined)).toBeUndefined();
+  });
+
+  test('the runtime facts read the agent and the wrapper', async () => {
+    const { subject } = await documented({ agent: 'work', command: ['/fleet/bin/work', '-x'] });
+    expect(await subject.port.runtimeFacts?.(ferretId(FERRET))).toEqual({
+      agent: 'work',
+      executable: '/fleet/bin/work',
+    });
+  });
+});

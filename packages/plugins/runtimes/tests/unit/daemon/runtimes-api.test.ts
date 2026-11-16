@@ -28,6 +28,7 @@ interface Rig {
   profiles?: readonly string[];
   defaultSetting?: string;
   harnesses?: readonly HarnessKey[];
+  currentName?: RuntimesApiDeps['currentName'];
   logins?: readonly LoginView[] | 'throws';
 }
 
@@ -46,6 +47,7 @@ const api = (rig: Rig = {}) =>
       },
     },
     now: () => NOW,
+    ...(rig.currentName === undefined ? {} : { currentName: rig.currentName }),
   });
 
 describe('createRuntimesApi — list and get', () => {
@@ -197,6 +199,29 @@ describe('createRuntimesApi — resolve', () => {
       refusal: 'unknown',
       sentence: 'no runtime nope exists on this machine',
     });
+  });
+
+  it('should resolve a name a runtime was renamed from to the runtime it is now', async () => {
+    const actual = await api({
+      runtimes: { play: runtimeFile() },
+      currentName: async former => (former === 'work' ? 'play' : undefined),
+    }).resolve('work' as never);
+
+    should(actual.ok).be.true();
+    if (actual.ok) should(actual.runtime.id).equal('play');
+  });
+
+  it('should refuse a former name whose current runtime is no longer configured, or that cannot be read', async () => {
+    const gone = await api({ runtimes: {}, currentName: async () => 'play' }).resolve('work' as never);
+    const unreadable = await api({
+      runtimes: { play: runtimeFile() },
+      currentName: async () => {
+        throw new Error('ids.json could not be read');
+      },
+    }).resolve('work' as never);
+
+    should(gone).containDeep({ ok: false, refusal: 'unknown' });
+    should(unreadable).containDeep({ ok: false, refusal: 'unknown' });
   });
 
   it('should refuse with no_login when no harness can be named for the runtime', async () => {
