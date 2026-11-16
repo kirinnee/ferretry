@@ -56,6 +56,21 @@ export function searchDirectories(path: string | undefined, directories: readonl
   return found;
 }
 
+/**
+ * Whether {@link searchDirectories} would search EVERY entry of `path`: none dropped (an empty entry, which a shell reads
+ * as the working folder; a relative, `.`, `..` or NUL one) and no more than {@link MAX_SEARCH_DIRECTORIES} unique
+ * folders. `execvp` and `sh` search all of them, so a lookup that skipped some proves nothing about a miss.
+ */
+function searchedCompletely(path: string): boolean {
+  const unique = new Set<string>();
+  for (const entry of path.split(':')) {
+    const directory = searchable(entry);
+    if (directory === undefined) return false;
+    unique.add(directory);
+  }
+  return unique.size <= MAX_SEARCH_DIRECTORIES;
+}
+
 /** The first `<dir>/<name>` the probe accepts, or `undefined`. A probe that throws passes that candidate over. */
 export async function whichCommand(
   name: unknown,
@@ -159,9 +174,11 @@ export function handleReaders(
  * `kernel.paths.whichFor`: {@link whichCommand} on the PATH a Vault handle WILL set, and on nothing else (the daemon's
  * own PATH is not searched: a pane whose handle sets PATH sees that one). `searchPath` is the Vault's answer for this
  * plugin's readers; `undefined` (a foreign, forged, spent or secret-derived handle, or one that sets no PATH) is
- * `unprovable`, never `absent`, so a guard that must prove a negative fails closed. A PATH with no folder this lookup
- * may search is `unprovable` too, and so is a name that is not a bare command name (a `/`, an `@`, a space). The PATH
- * itself never leaves.
+ * `unprovable`, never `absent`, so a guard that must prove a negative fails closed. So is a PATH this lookup cannot
+ * search COMPLETELY — any entry it would drop (empty, relative, `.`, `..`, NUL) or more than
+ * {@link MAX_SEARCH_DIRECTORIES} unique folders — because a shell searches every entry, so a miss on part of the PATH
+ * is not a miss; and so is a name that is not a bare command name (a `/`, an `@`, a space). `which` and `locate` keep
+ * dropping such entries. The PATH itself never leaves.
  */
 export async function whichForCommand(
   name: unknown,
@@ -170,7 +187,8 @@ export async function whichForCommand(
 ): Promise<HandleLookup> {
   // A name this lookup never searches for (a `/`, an `@`, a space) proves nothing about this PATH: `unprovable`, never `absent`.
   if (!isCommandName(name)) return { kind: 'unprovable' };
-  if (typeof searchPath !== 'string' || searchDirectories(searchPath).length === 0) return { kind: 'unprovable' };
+  // A PATH this lookup cannot search to the end (an entry it drops, or past the bound) proves no negative: a shell would.
+  if (typeof searchPath !== 'string' || !searchedCompletely(searchPath)) return { kind: 'unprovable' };
   const found = await whichCommand(name, { path: searchPath }, probe);
   return found === undefined ? { kind: 'absent' } : { kind: 'found', path: found };
 }

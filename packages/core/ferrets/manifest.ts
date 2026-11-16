@@ -55,6 +55,8 @@ import {
   FerretSummaryFiles,
   FerretWaitFiles,
   MonitorTickFile,
+  HealthEventsFile,
+  SelfRestartFile,
 } from './contract/index.ts';
 import actions from './manifest/generated/actions.ts';
 
@@ -139,6 +141,8 @@ export default definePlugin({
       MoveInflightFiles,
       FerretWaitFiles,
       MonitorTickFile,
+      HealthEventsFile,
+      SelfRestartFile,
       FerretLaunchEnvironmentFiles,
       FerretLaunchSectionsFiles,
     ],

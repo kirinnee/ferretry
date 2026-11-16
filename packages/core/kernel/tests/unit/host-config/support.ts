@@ -1,9 +1,18 @@
 import { z } from 'zod';
 import { type Clock, defineConfig, type Log } from '../../../contract/index.ts';
+import { configEtagger } from '../../../host/config/etag.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 
 export const HOME = '/home/fy';
+
+/**
+ * The key of every etag a test service makes when the test compares one with another it computed (or one service with
+ * another: a restart, the two doors of one write): a fixed key, so two services agree as one daemon's restarts do.
+ */
+export const TEST_ETAG_KEY = new Uint8Array(32).fill(7);
+/** The etag of a text under {@link TEST_ETAG_KEY}: what a service given that key reads the text at. */
+export const testEtag = configEtagger(TEST_ETAG_KEY);
 
 /** Raising `limit` above what is in effect (10 when nothing is) loosens; lowering never does. */
 export const updatesDef = defineConfig({
@@ -93,6 +102,7 @@ export function configHarness(fs = createMemoryHostFs()) {
       clock,
       log,
       binary: 'fy',
+      etagKey: TEST_ETAG_KEY,
       defs: [
         { plugin: 'updates', def: updatesDef },
         { plugin: 'logins', def: loginsDef },

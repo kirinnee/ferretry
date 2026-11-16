@@ -102,6 +102,7 @@ export default implementDaemon(manifest, {
         stamp: host.stamp,
         transformMessage: host.transformMessage,
         ...(host.attachments === undefined ? {} : { attachments: host.attachments }),
+        ...(host.claudeChannel === undefined ? {} : { claude: host.claudeChannel }),
       });
       const base = { kernel, send, queue, ledger: host.ledger };
       made = {

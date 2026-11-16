@@ -217,6 +217,7 @@ export class QueueDeliverer {
     const polls = more || remaining.some(message => this.unsettled(message));
     const holdEndsIn = this.earliestHold(remaining, now);
     const lookMs = this.lookEvery(id, remaining, now);
+    if (this.stopped) return;
     if (polls || holdEndsIn !== undefined) {
       this.open.add(id);
       const delay = polls ? Math.min(lookMs, holdEndsIn ?? Infinity) : (holdEndsIn ?? lookMs);

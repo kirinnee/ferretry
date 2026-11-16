@@ -716,11 +716,13 @@ per-document plan (one refused document writes nothing of the set).
   (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
   (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
 
-- **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
-  reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
-  long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be
-  guessed offline when the rest of the file is known. Remedy, after merge: a keyed etag (an HMAC with a daemon-local
-  key), kernel-wide.
+- **The etag is keyed, not a digest oracle.** A file's etag goes to every `fleet.use` reader (`GET /v1/config/file`, the
+  `kernel.config-changed` frame, `GET /v1/config/status`). It is an HMAC-SHA256 of the disk text under a key derived
+  from the daemon's identity (an Ed25519 signature of a fixed purpose label, hashed: the same after every restart,
+  held by no file of its own), so a reader cannot test a guess at a short hidden value offline, as a plain sha256 let
+  them when the rest of the file was known. The stored accepted record's etag is recomputed on read, never trusted.
+  What stays: two etags still show that a file changed, and a reader who holds the identity's private key (the host
+  owner) can compute any etag, which gives them nothing the file does not.
 - **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
   holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
   flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
@@ -1666,8 +1668,13 @@ the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and
 Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
 refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
 same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
-account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
-one login in the same instant can race on its single-use refresh token (both declared gaps).
+account model. Codex takes the link back out of the ferret's home when the ferret stops or goes away, and out of every home
+it linked when its login is removed, signed out or switched off (it also removes a file Codex wrote in the link's place,
+which is a copy of the same sign-in). That ends the link; it does not hide it, because while the link is there the agent can
+read it, and a copy an agent made for itself is not Codex's to find. Two declared gaps remain. Which ferret holds which login
+is kept in memory, so after a daemon restart a revoked login clears nothing until each of its ferrets stops or is launched
+again (a stop clears the link whether or not this daemon placed it). And two ferrets refreshing one login in the same
+instant can race on its single-use refresh token.
 
 Every ferret on a login shares that ONE `auth.json`, and each runs as the same user, so **any ferret on a login can
 rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next

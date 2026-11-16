@@ -220,8 +220,9 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
 - **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
   normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
   returned byte for byte.
-- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
-  file a write must match (`If-Match`).
+- **The etag is a keyed digest (HMAC-SHA256) of the text on disk**, not of what is shown, so a read of a masked file
+  still names the file a write must match (`If-Match`). The key is the daemon's own and no reader holds it, so an
+  etag cannot be used to test a guess at a hidden value (`docs/secrets.md`).
 - **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
   holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
   from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
@@ -909,7 +910,14 @@ Both files also take `questionTool: true` (default `false`, owner !A527): by def
 question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
 **interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
 `--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
-so it is **never held**. `harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+so it is **never held**.
+
+`harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
+channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
+login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
+not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
+
+`harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
 bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
 dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
 mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:

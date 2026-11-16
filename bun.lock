@@ -352,6 +352,7 @@
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
+        "@ferretry/plugin-logins": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/std": "workspace:*",
         "react": "^19.0.0",

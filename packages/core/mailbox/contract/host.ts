@@ -17,6 +17,38 @@ export interface AttachmentSource {
   }>;
 }
 
+/**
+ * A Claude ferret's CHANNEL as the send path needs it: what waits to be pushed into the session by the MCP server it already
+ * runs, and whether that server is listening. Conversation owns it (the outbox and the two tools the server pumps it with);
+ * the send path routes a ferret's or the daemon's message through it instead of the composer, and the tracker proves the
+ * push from the transcript.
+ */
+export interface ClaudeChannel {
+  /** Whether this ferret's server is listening now and its channel has not been marked broken. */
+  connected(ferret: string): boolean;
+  /** Queues one message for the next poll. A send id already held is kept once. */
+  push(ferret: string, message: { readonly sendId: string; readonly text: string; readonly from?: string }): void;
+  /** When the server was granted the right to write this send (epoch ms); none when it was not (or the daemon forgot). */
+  claimedAt(ferret: string, sendId: string): number | undefined;
+  /** Takes a message back unless it was claimed; a claimed one may already be on its way to Claude. */
+  withdraw(ferret: string, sendId: string): 'withdrawn' | 'claimed';
+  /** A claimed message was never received: nothing more is routed through the channel until a new subscriber. */
+  markBroken(ferret: string): void;
+  /** The transcript showed Claude received this send. */
+  received(ferret: string, sendId: string): void;
+  /** Whether the channel was marked broken and has not had a new subscriber since. */
+  broken(ferret: string): boolean;
+  /** When this daemon began holding channel state (epoch ms). */
+  readonly bootedAt: number;
+  /** How long after sending its claim request the server may still write the message (the contract's write budget). */
+  readonly writeBudgetMs: number;
+  /** The sender as the channel tag names it, or none for neither a ferret nor the daemon. */
+  senderName(
+    speaker: { readonly senderSessionId?: string | undefined; readonly notice?: true; readonly agenda?: true },
+    fromName: string | undefined,
+  ): string | undefined;
+}
+
 /** The one key `mailbox.host` is provided under. */
 export const MAILBOX_HOST_KEY = 'ferret' as const;
 
@@ -54,6 +86,8 @@ export interface MailboxHost {
   >;
   /** Takes what a send carried out of the owner's shared draft. Absent: the field is ignored. */
   readonly clearSentDraft?: SentDraftClearer;
+  /** Claude's channel. Absent: every message is typed. */
+  readonly claudeChannel?: ClaudeChannel;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;

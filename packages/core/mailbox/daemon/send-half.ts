@@ -22,7 +22,7 @@ import {
 } from '../contract/index.ts';
 import type { SendMessageRequest } from './lib/delivery/service.ts';
 import { CancellableTimers } from './adapters/cancellable-timers.ts';
-import type { MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '../contract/index.ts';
+import type { ClaudeChannel, MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '../contract/index.ts';
 import { ClockSendScheduler } from './adapters/index.ts';
 import { type QueuedSend, SendPathDeliveryView, SendPathQueueTransport } from './adapters/send-path-delivery.ts';
 import { defaultQueueDeliverySettings, QueueDeliverer, QueueingSends } from './lib/queue/index.ts';
@@ -209,6 +209,8 @@ export interface SendHalfDeps {
   readonly ledger: SendLedger;
   readonly channel: SendChannel;
   readonly attachments?: AttachmentSource;
+  /** Claude's channel (the MCP server's push). Absent: every message is typed. */
+  readonly claude?: ClaudeChannel;
   /** `question.json` as the question watch reads it: a send refuses while the ferret waits on one. */
   readonly askedQuestion: (ferret: string) => Promise<{ readonly toolUseId: string } | undefined>;
 }
@@ -453,6 +455,19 @@ export function buildSendHalf(deps: SendHalfDeps) {
       evidence: deps.evidence,
       terminal: trackedPane,
       repository: sendRepository,
+      channel: {
+        claimedAt: (id, sendId) => deps.claude?.claimedAt(id, sendId),
+        writeBudgetMs: deps.claude?.writeBudgetMs ?? 0,
+        bootedAt: deps.claude?.bootedAt ?? 0,
+        received: (id, sendId) => {
+          deps.claude?.received(id, sendId);
+        },
+        broken: id => deps.claude?.broken(id) === true,
+        fallBackToTyping: async (id, record) => await fallBackToTyping(id, record),
+      },
+      warn: (message, fields) => {
+        kernel.log.warn(message, fields);
+      },
       attempts: {
         reattempt: async (id, sendId) => await sendActs.reattempt(id, sendId, { by: 'daemon' }),
         resubmit: async (id, sendId) => await sendActs.resubmit(id, sendId),
@@ -907,9 +922,100 @@ export function buildSendHalf(deps: SendHalfDeps) {
     });
     return { ferret, disposition: 'revived', sendId: request.sendId, fate: 'accepted' };
   };
+  /**
+   * Whether this send goes through the Claude channel: a ferret's message or the daemon's own (a failed-send notice, Agenda's
+   * check) to a CLAUDE ferret whose MCP server is listening. NEVER the owner's words, the Warden's or a send-now (those
+   * type, and a person's message is not a ferret's to route), and never one the channel already failed to carry.
+   */
+  const channelled = (ferret: SessionId, target: SendTarget, request: TypedSend): boolean =>
+    request.warden !== true &&
+    request.now !== true &&
+    target.harness === 'claude' &&
+    (request.senderSessionId !== undefined || request.notice === true || request.agenda === true) &&
+    deps.claude?.connected(ferret) === true;
+  /**
+   * A channel send the transcript never showed Claude receiving (the receipt window ran out; the tracker calls this once
+   * per look until it works). NO withdraw-then-new: under the ferret's send lane the SAME ledger row is moved from the
+   * channel to the typing path in ONE settle — `direct`, accepted and `untyped`, which the tracker types every second
+   * the pane reads safe — and only then is it typed. A crash, a failed bind or a question refusal anywhere after that
+   * settle leaves a row the tracker still retries; before it, a channel row it still falls back with.
+   *
+   * The outbox gives the message back first, but a CLAIMED one is never taken back: the window ran out on it, so the
+   * channel is marked broken (nothing more is routed through it until the ferret's server is relaunched) and the message
+   * is typed. A server that wakes up and pushes it late is refused: its claim is gone.
+   */
+  const fallBackToTyping = async (ferret: SessionId, record: { readonly sendId: string }): Promise<void> => {
+    const claude = deps.claude;
+    if (claude === undefined) return;
+    const moved = await lane.run(ferret, async () => {
+      const current = (await ledger.list(ferret)).find(entry => entry.sendId === record.sendId);
+      if (current?.path !== 'channel' || current.fate !== 'accepted') return false;
+      // A claim the server was granted a moment ago may still be written (it writes only within the budget of its own send,
+      // which is never after the grant): nothing is typed until that is over. The row stays a channel row; the next look waits.
+      const claimedAt = claude.claimedAt(ferret, record.sendId);
+      if (claimedAt !== undefined && kernel.clock.nowMs() < claimedAt + claude.writeBudgetMs) return false;
+      if (claude.withdraw(ferret, record.sendId) === 'claimed') claude.markBroken(ferret);
+      const now = kernel.clock.now();
+      const settled = await ledger.settle(ferret, record.sendId, {
+        path: 'direct',
+        untyped: true,
+        attempt: 1,
+        attemptAt: now,
+        deadlineAt: undefined,
+      });
+      if (settled === undefined)
+        throw new Error(`the ledger row of send ${record.sendId} could not be moved to typing`);
+      await sendRepository.journal(ferret, 'control.send_deferred', { sendId: record.sendId, outcome: 'untyped' });
+      return true;
+    });
+    if (!moved) return;
+    // The row is recoverable from here: a refusal now (the pane is busy, a question is open, the bind failed) is the
+    // tracker's next look, in a second. Said with ids, never swallowed.
+    await sendActs.reattempt(ferret, record.sendId, { by: 'daemon' }).catch((error: unknown) => {
+      kernel.log.warn('a channel send was moved to typing and will be typed on a later look', {
+        ferret,
+        sendId: record.sendId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+  /**
+   * A send NOTHING was typed for is kept open as `untyped`: the tracker types it the first time the pane reads safe, every
+   * second, and says so out loud once it has waited too long. `undefined` when the row could not be marked (the send then
+   * goes on as it would have), so a failing ledger never loses a message.
+   */
+  const keepUntyped = async (
+    ferret: SessionId,
+    sendId: string,
+    waitReason: 'unreadable' | 'busy' | 'dialog' | 'draft',
+  ): Promise<SendResult | undefined> => {
+    const kept = await ledger.settle(ferret, sendId, { untyped: true }).catch(() => undefined);
+    if (kept === undefined) return undefined;
+    await sendRepository.journal(ferret, 'control.send_deferred', { sendId, outcome: 'untyped' });
+    return { ferret, disposition: 'queued', sendId, fate: 'accepted', waitReason };
+  };
+  /**
+   * Why this pane must not be typed into right now, or `undefined` when it may. Compacting (the harness is busy summarising
+   * and an Enter would queue behind it), a dialog or consent prompt (a key is an answer to a question nobody read), and — for
+   * a ferret's message only — text already in the composer (a person's own draft is the person's to clear, so theirs is refused
+   * by the terminal with the Clear/Send choice instead). A pane that cannot be read says nothing here: the terminal's own
+   * checks decide.
+   */
+  const unsafePane = async (
+    bound: Awaited<ReturnType<typeof terminal.bind>>,
+    request: TypedSend,
+  ): Promise<'busy' | 'dialog' | 'draft' | undefined> => {
+    const pane = await bound.observe();
+    if (pane === undefined) return undefined;
+    if (pane.compacting === true) return 'busy';
+    if (pane.blockingPrompt !== undefined) return 'dialog';
+    if (request.senderSessionId !== undefined && pane.draft !== undefined && pane.draft.trim() !== '') return 'draft';
+    return undefined;
+  };
   const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
-    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) {
+    const first = await readTarget(ferret);
+    if (TERMINAL_SEND_STATUSES.has(first.status)) {
       // Agenda's own words never revive: a nudge is no reason to start a ferret the owner (or its own end) stopped. Refused
       // before any record, so nothing is typed, nothing is kept, and nothing is recorded under the owner's name.
       if (request.agenda === true)
@@ -930,6 +1036,14 @@ export function buildSendHalf(deps: SendHalfDeps) {
     // A repeat of a send that already has a live row types nothing and writes no document: no orphan for the owner's words.
     const repeated = await keptSend(ferret, request.sendId, request.queued === true);
     if (repeated !== undefined) return repeated;
+    // A Claude ferret whose MCP server is listening takes a ferret's or the daemon's own message through its channel: nothing is typed.
+    if (deps.claude !== undefined && channelled(ferret, first, request)) {
+      const sentThrough = await accepting(ferret, request, text, fromName, { path: 'channel', matchText: text });
+      if (!sentThrough.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
+      const from = deps.claude.senderName(request, fromName);
+      deps.claude.push(ferret, { sendId: request.sendId, text, ...(from === undefined ? {} : { from }) });
+      return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted', path: 'channel' };
+    }
     // The turn document first (today's order): a message that goes by file has its pointer, which the row must name.
     const sent = await turnDocument(
       ferret,
@@ -956,6 +1070,14 @@ export function buildSendHalf(deps: SendHalfDeps) {
       return (await keptSend(ferret, request.sendId, request.queued === true)) ?? { ferret, disposition: 'sent' };
     /** Set once the message went to the harness's own queue: the row's path is then today's busy path. */
     let viaQueue = false;
+    // THE PANE MUST BE SAFE BEFORE A KEY GOES (owner ruling 2026-11-15): not compacting, no dialog or consent waiting for an
+    // answer, and — for a ferret's message, which has nobody to press a button — nothing in the composer. A pane that is not
+    // keeps the send `untyped`, and the tracker looks again every second until it is.
+    const unsafe = request.warden === true || request.notice === true ? undefined : await unsafePane(bound, request);
+    if (unsafe !== undefined) {
+      const kept = await keepUntyped(ferret, request.sendId, unsafe);
+      if (kept !== undefined) return kept;
+    }
     let busyPath: { readonly path: SendPath; readonly busyTyped: true } = { path: 'native-inline', busyTyped: true };
     let queued: QueueOutcome | undefined;
     try {
@@ -990,11 +1112,8 @@ export function buildSendHalf(deps: SendHalfDeps) {
       // owner's message and a ferret's are KEPT open as `untyped`, and the tracker types them the first time the box
       // reads clear — saying so out loud past its stuck limit. The Warden re-plans its own and a daemon notice ends here.
       if (error instanceof UnreadableComposer && request.warden !== true && request.notice !== true) {
-        const kept = await ledger.settle(ferret, request.sendId, { untyped: true }).catch(() => undefined);
-        if (kept !== undefined) {
-          await sendRepository.journal(ferret, 'control.send_deferred', { sendId: request.sendId, outcome: 'untyped' });
-          return { ferret, disposition: 'queued', sendId: request.sendId, fate: 'accepted', waitReason: 'unreadable' };
-        }
+        const kept = await keepUntyped(ferret, request.sendId, 'unreadable');
+        if (kept !== undefined) return kept;
       }
       await ledger.withdraw(ferret, request.sendId, 'nothing was typed').catch(() => undefined);
       throw error;
@@ -1058,6 +1177,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
       ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
       ...(waiting?.label === undefined ? {} : { label: waiting.label }),
       ...(waiting?.holdUntil === undefined ? {} : { heldUntil: waiting.holdUntil }),
+      ...(row?.path === 'channel' ? { path: 'channel' as const } : {}),
     };
   };
   /**

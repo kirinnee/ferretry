@@ -159,12 +159,44 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
 }
 
 describe('B188 an idle ferret starts compacting', () => {
-  test('B188 a peer send accepted while an idle ferret compacts waits in the mailbox: nothing is typed or queued into the pane until the compaction is over', async () => {
+  test('B188 a peer send handed over while an idle ferret compacts is kept, typed nowhere, and typed once the compaction is over', async () => {
     const world = await rig();
     const { ferrets, advance } = world;
     ferrets.pane.compacting = true;
 
     // A peer's message arrives a few seconds into the compaction, and the compaction outlasts the tracker's looks.
+    await advance(4_000, 2_000);
+    // A blocker is not held to ride with others, so only the compaction keeps it.
+    await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: PEER, sendId: 's-peer', label: 'blocker' });
+    await advance(5 * MINUTE);
+
+    // Owner ruling 2026-11-15: nothing is typed into a compacting pane — not through the idle path, not into the harness's
+    // own queue — however long the compaction runs. The send is kept untyped.
+    // (The 2-minute stuck notice to the SENDER is its own message, typed to its own pane; only the peer's words count here.)
+    const aboutPeer = (texts: readonly string[]) => texts.filter(text => text.includes(PEER));
+    expect(aboutPeer(ferrets.pane.queued)).toEqual([]);
+    expect(aboutPeer(ferrets.pane.typed)).toEqual([]);
+    // No turn document was written for it: a compacting pane is not somewhere a turn starts (the idle route writes one).
+    expect(ferrets.stored).toEqual([]);
+    // The mailbox is what keeps it: the message waits in the ferret's queue and no ledger row says it was typed.
+    expect(await world.stored('s-peer')).toBeUndefined();
+    expect((await world.api().queue(F1)).messages.map(entry => [entry.id, entry.state])).toEqual([
+      ['s-peer', 'queued'],
+    ]);
+
+    // The compaction ends: the mailbox's very next look types it, once, at the idle prompt (its looks back off while a message waits).
+    ferrets.pane.compacting = false;
+    await advance(2 * MINUTE);
+    expect(aboutPeer(ferrets.pane.queued)).toEqual([]);
+    expect(aboutPeer(ferrets.pane.typed)).toHaveLength(1);
+    await world.host.stop();
+  });
+
+  test('B188 a peer send accepted while an idle ferret compacts is told it is queued, and typed once through the idle path when the compaction is over', async () => {
+    const world = await rig();
+    const { ferrets, advance } = world;
+    ferrets.pane.compacting = true;
+
     await advance(4_000, 2_000);
     const sent = await world
       .api()

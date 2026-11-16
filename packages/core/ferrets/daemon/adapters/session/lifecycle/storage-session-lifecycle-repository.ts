@@ -55,7 +55,7 @@ function fields(document: unknown): Readonly<Record<string, unknown>> | undefine
  * manifest is listed under and every surface displays. The executable is recovered from the argv
  * rather than stored twice — `command[0]` IS the agent, which that same authorization guarantees.
  */
-export function lifecycleConfigDocument(document: unknown): unknown {
+function lifecycleConfigDocument(document: unknown): unknown {
   const bag = fields(document);
   if (bag === undefined) return document;
   const command = bag.command;

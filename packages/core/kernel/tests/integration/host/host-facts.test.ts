@@ -107,7 +107,8 @@ describe('TT nodeHostFacts on a fixture tree', () => {
 
   test('process reads', async () => {
     const facts = await tree();
-    expect(await facts.pids()).toEqual([42, 43]);
+    // `readdir` order is the filesystem's, not a contract: `pids()` is "the numeric entries of /proc", so compare as a set.
+    expect([...(await facts.pids())].sort((a, b) => a - b)).toEqual([42, 43]);
     expect(await facts.procFile(42, 'stat')).toStartWith('42 (sh)');
     expect(await facts.procFile('self', 'cgroup')).toBe('0::/user.slice\n');
     expect(await facts.procTasks(42)).toEqual(['42']);

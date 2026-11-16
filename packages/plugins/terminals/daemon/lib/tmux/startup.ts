@@ -24,6 +24,7 @@ export interface StartupDialogAction {
     | 'onboarding'
     | 'resume-menu'
     | 'auto-default-nudge'
+    | 'dev-channels'
     | 'codex-update';
   readonly keys: readonly string[];
 }
@@ -89,6 +90,61 @@ export function resumeMenuAction(pane: string, choice: 'full' | 'summary'): Star
     ),
   );
   return keys.length === 0 ? undefined : { kind: 'resume-menu', keys };
+}
+
+/** The exact title of the warning; matched as a whole trimmed line, never as a phrase inside prose. */
+const DEV_CHANNELS_TITLE = 'WARNING: Loading development channels';
+/**
+ * The body of the 2.1.317 warning, as one line of single-spaced words: its measured paragraphs in order. The pane wraps it
+ * to its own width, so the lines under the title are compared joined, never one by one.
+ */
+const DEV_CHANNELS_BODY =
+  '--dangerously-load-development-channels is for local channel development only. Do not use this option to run ' +
+  'channels you have downloaded off the internet. Please use --channels to run a list of approved channels. ' +
+  'Channels: server:ferretry';
+const DEV_CHANNELS_OPTIONS = ['I am using this for local development', 'Exit'] as const;
+/** The hint under the options. */
+const DEV_CHANNELS_FOOTER = /^Enter to confirm\s*[·•|-]\s*Esc to cancel$/u;
+/** A line that is only a box edge: drawing characters and spaces. */
+const BOX_EDGE = /^[\s─━│┃┌┐└┘├┤┬┴┼╭╮╰╯═║╔╗╚╝|+-]*$/u;
+/** A content line inside a box: its edge characters come off. */
+const BOX_SIDES = /^[\s│┃║|]+|[\s│┃║|]+$/gu;
+
+/**
+ * Claude Code's "WARNING: Loading development channels" screen, which every launch with
+ * `--dangerously-load-development-channels` shows (the fixed layer's flag for Ferretry's own channel):
+ * `❯ 1. I am using this for local development` over `2. Exit`. Answered with the FIRST row only, and ONLY when this
+ * dialog IS the bottom of the screen: from the LAST title line to the last non-blank line of the pane, every line must be
+ * one of the dialog's own — its known body (compared joined, the pane wraps it), the two numbered rows, its hint and box
+ * edges — with the selection marker on row 1 alone. Anything else after the title (an unnumbered consent menu, a prompt,
+ * another dialog, a second marker) means this is not the dialog in front of the person, whatever is quoted above it, and
+ * answers nothing — a key pressed on the wrong dialog is an answer to a question nobody read. Exit is never chosen.
+ */
+export function devChannelsAction(pane: string): StartupDialogAction | undefined {
+  const lines = pane
+    .trimEnd()
+    .split('\n')
+    .map(line => line.replace(BOX_SIDES, ''));
+  const title = lines.findLastIndex(line => line === DEV_CHANNELS_TITLE);
+  if (title === -1) return undefined;
+  const rest = lines.slice(title + 1).filter(line => line !== '' && !BOX_EDGE.test(line));
+  const firstOption = rest.findIndex(line => NUMBERED_ROW.test(line));
+  if (firstOption === -1) return undefined;
+  if (rest.slice(0, firstOption).join(' ').replace(/\s+/gu, ' ') !== DEV_CHANNELS_BODY) return undefined;
+  const rows = rest.slice(firstOption, firstOption + DEV_CHANNELS_OPTIONS.length);
+  const options = rows.flatMap(line => {
+    const match = NUMBERED_ROW.exec(line);
+    return match === null
+      ? []
+      : [{ selected: match[1] !== undefined, number: Number(match[2]), label: (match[3] ?? '').trim() }];
+  });
+  const complete =
+    options.length === DEV_CHANNELS_OPTIONS.length &&
+    options.every((option, index) => option.number === index + 1 && option.label === DEV_CHANNELS_OPTIONS[index]);
+  if (!complete || options[0]?.selected !== true || options[1]?.selected === true) return undefined;
+  const after = rest.slice(firstOption + DEV_CHANNELS_OPTIONS.length);
+  if (!after.every(line => DEV_CHANNELS_FOOTER.test(line))) return undefined;
+  return { kind: 'dev-channels', keys: ['Enter'] };
 }
 
 /** `❯ No, keep bypass permissions` — the auto-default nudge draws its rows with no numbers. */
@@ -198,6 +254,8 @@ export function startupDialogAction(pane: string, options: StartupDialogOptions 
   if (nudge !== undefined) return nudge;
   const update = codexUpdateAction(pane);
   if (update !== undefined) return update;
+  const channels = devChannelsAction(pane);
+  if (channels !== undefined) return channels;
   const lower = pane.toLowerCase();
   // The theme picker has no wrong answer: every row is a text style, and the harness proceeds on any
   // of them. It is the one dialog that needs no row search.
