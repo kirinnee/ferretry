@@ -252,8 +252,6 @@ describe('the ferrets cli half', () => {
     expect(err.at(-1)).toContain('--auto picks the runtime');
     expect(await verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
     expect(err.at(-1)).toContain('name a --runtime, or pass --auto');
-    expect(await verb('new [words...]', ['look'], { runtime: 'codex-beta', continue: true })).toBe(2);
-    expect(err.at(-1)).toContain('--continue');
     expect(calls).toHaveLength(before);
   });
 

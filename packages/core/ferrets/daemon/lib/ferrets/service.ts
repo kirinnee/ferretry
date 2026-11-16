@@ -474,6 +474,8 @@ export interface OpeningFile {
 export interface BoundLaunchFolder {
   /** The folder is (or is reached through a link into) the daemon's state home: an agent never starts there. */
   readonly insideStateHome: boolean;
+  /** The directory the launch will really be in, every link resolved (what `start.decide` judges WHERE by). */
+  readonly realPath?: string | undefined;
   /** Ok while it is still the folder that was checked (same directory, same side of the state home); never throws. */
   verify(): Promise<Result<void, string>>;
 }
@@ -1022,6 +1024,7 @@ export class FerretsService implements FerretsApi {
       ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
       ...(login === undefined ? {} : { login }),
       folder: folder.value,
+      ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
       by: request.by,
       ...(request.options?.model === undefined ? {} : { model: request.options.model }),
       ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),

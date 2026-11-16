@@ -89,26 +89,11 @@ const SESSION_USAGE = [
 const NEW_FLAGS_ELSEWHERE = ['request-id', 'file', 'f'];
 
 /**
- * Continuing an existing conversation is Conversation's (`fy link`); Ferrets, a core plugin, cannot call it, and no
- * plugin may add an option to another's verb. So `--continue` and `--since` are refused, and the sentence says where it went.
- */
-const CONTINUE_FLAGS = ['continue', 'since'];
-
-/**
  * How a refused flag is named back to the caller: a flag with a short spelling is named by both (`-f/--file`), whichever
  * the caller typed (the shell's parser hands `-f` over under the key `f`, so both keys must be refused, or `new -f a.png`
  * would be accepted and the file silently dropped); any other by its long spelling.
  */
 const REFUSED_SPELLING: Readonly<Record<string, string>> = { file: '-f/--file', f: '-f/--file' };
-
-/** Refuses `fy new --continue` / `--since`, naming the verbs that now do that. */
-function refuseContinue(invocation: VerbInvocation): void {
-  const found = CONTINUE_FLAGS.filter(name => typed(invocation, name)).map(name => `--${name}`);
-  if (found.length > 0)
-    throw new SessionCommandError(
-      `${found.join(', ')}: \`${BINARY} new\` no longer continues a conversation; list them with \`${BINARY} link [words] [--harness h] [--since 7d]\`, then \`${BINARY} link keep <harness> <runtime> <conversation-id> --start\``,
-    );
-}
 
 /** Refuses, by name, a typed flag whose value has no field in Ferrets' routes. */
 function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], verb: string): void {
@@ -176,7 +161,6 @@ export default implementCli(manifest, {
 
     const start = (role: 'start' | 'new') =>
       verb(async (invocation, presenter) => {
-        if (role === 'new') refuseContinue(invocation);
         refuseElsewhere(invocation, role === 'start' ? START_FLAGS_ELSEWHERE : NEW_FLAGS_ELSEWHERE, role);
         // v4 declared `--compact-at <tokens|auto>` with a REQUIRED argument. The shell's parser reads a bare flag as a
         // switch (`true`), which `text()` drops: say so here, before anything is read or sent, instead of starting without it.

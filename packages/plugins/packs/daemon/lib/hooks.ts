@@ -18,13 +18,23 @@ export function limitedParent(input: {
 /**
  * The temporary-folder refusal (`fy new` without `--allow-scratch`): only a start that ASKED the check (`allowScratch`
  * false — `fy start` sends none) and is not a relaunch is held to it. `undefined` means this check has no objection.
+ *
+ * It judges the directory the start will REALLY be in (`realFolder`, the kernel's bound identity, every link resolved),
+ * never the spelling: a link spelled in /tmp to a project is allowed, a link in a project into /tmp is refused. `roots`
+ * are resolved the same way ({@link resolveScratchRoots}). With no bound directory the spelling is all there is.
  */
 export function scratchDecision(
-  input: { readonly folder: string; readonly by: string; readonly allowScratch?: boolean | undefined },
+  input: {
+    readonly folder: string;
+    readonly realFolder?: string | undefined;
+    readonly by: string;
+    readonly allowScratch?: boolean | undefined;
+  },
   roots: readonly string[],
 ): HookDecision | undefined {
-  if (input.allowScratch !== false || input.by === 'resume' || !isScratchPath(input.folder, roots)) return undefined;
-  return { allow: false, reason: scratchRefusal(input.folder) };
+  const where = input.realFolder ?? input.folder;
+  if (input.allowScratch !== false || input.by === 'resume' || !isScratchPath(where, roots)) return undefined;
+  return { allow: false, reason: scratchRefusal(where) };
 }
 
 /**

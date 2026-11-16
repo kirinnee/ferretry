@@ -17,6 +17,19 @@ export const COMMON_SCRATCH_ROOTS: readonly string[] = [
   '/private/var/folders',
 ];
 
+/**
+ * The roots as they REALLY are: each root with every link resolved (`/tmp` is `/private/tmp` on a Mac), kept beside its
+ * spelling. A folder is judged by its resolved directory, so a root left as spelled would miss it (v4 realpathed both
+ * sides). A root that cannot be resolved (it does not exist here) stays as spelled.
+ */
+export async function resolveScratchRoots(
+  roots: readonly string[],
+  realpath: (path: string) => Promise<string>,
+): Promise<readonly string[]> {
+  const resolved = await Promise.all(roots.map(async root => await realpath(root).catch(() => root)));
+  return [...new Set([...roots, ...resolved])];
+}
+
 const trimmed = (path: string): string => (path.length > 1 ? path.replace(/\/+$/u, '') : path);
 
 /** Whether `path` is one of `roots` or inside one. */

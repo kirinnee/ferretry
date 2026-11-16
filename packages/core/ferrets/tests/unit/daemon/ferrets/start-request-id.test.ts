@@ -31,3 +31,15 @@ test('V-start-no-folder a start that names no folder is refused with today’s s
   expect(JSON.stringify(answer.json())).toContain('a start must name the absolute working directory to run in');
   expect(runner.starts).toBe(0);
 });
+
+test('a replay of one request id with `allowScratch` flipped answers the ferret already created, never a 409', async () => {
+  const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+  const headers = { 'x-fy-request-id': 'scratch-flip-1' };
+  const first = await h.request('POST', '/v1/ferrets', { headers, body: { folder: '/work/a', allowScratch: false } });
+  expect(first.status).toBe(201);
+  const replay = await h.request('POST', '/v1/ferrets', { headers, body: { folder: '/work/a', allowScratch: true } });
+  expect(replay.status).toBe(200);
+  expect(replay.json<{ id: string }>().id).toBe(first.json<{ id: string }>().id);
+  const other = await h.request('POST', '/v1/ferrets', { headers, body: { folder: '/work/b', allowScratch: true } });
+  expect(other.status).toBe(409);
+});

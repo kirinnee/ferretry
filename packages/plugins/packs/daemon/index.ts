@@ -35,7 +35,7 @@ import { readFerretResult, ResultUncheckedError } from './lib/result.ts';
 import { packRoutes } from './lib/routes.ts';
 import { PackService } from './lib/service.ts';
 import { packSwitchOutcome } from './lib/switch.ts';
-import { COMMON_SCRATCH_ROOTS } from './lib/scratch.ts';
+import { COMMON_SCRATCH_ROOTS, resolveScratchRoots } from './lib/scratch.ts';
 import { readPackTable } from './lib/table.ts';
 
 /** The shipped command name every printed command uses. */
@@ -58,6 +58,12 @@ export default implementDaemon(manifest, {
   build: ({ needs, uses, kernel }) => {
     const file = (): PacksFile => kernel.config.file(PACKS_CONFIG) ?? {};
     const config = (): PackConfig => packConfigFromFile(file());
+    // A directory with every link resolved (the kernel's read-only check); one that is not here throws, and stays as spelled.
+    const realPathOf = async (path: string): Promise<string> => {
+      const checked = await kernel.paths.checkDirectory(path);
+      if (!checked.ok) throw new Error(checked.error.message);
+      return checked.value.realPath;
+    };
     const switches = new StatePackSwitches(kernel.state);
     const ferrets = (): FerretsApi => needs.ferrets;
     const packFerrets = new PackFerrets(ferrets);
@@ -257,7 +263,11 @@ export default implementDaemon(manifest, {
         // Packs did not answer for. A started child's depth and how many its parent may have, whichever command started
         // it; a resume is answered yes without the limits, as today.
         'start.decide': async input => {
-          const scratch = scratchDecision(input, SCRATCH_ROOTS);
+          // The roots are resolved through their links, as the folder is (`realFolder`), only for a start that asked.
+          const scratch = scratchDecision(
+            input,
+            input.allowScratch === false ? await resolveScratchRoots(SCRATCH_ROOTS, realPathOf) : SCRATCH_ROOTS,
+          );
           if (scratch !== undefined) return scratch;
           const parent = limitedParent(input);
           return startDecision(parent === undefined ? undefined : await packFerrets.parent(parent), config().limits);

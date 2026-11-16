@@ -1,6 +1,15 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { scratchDecision } from '../../../daemon/lib/hooks.ts';
-import { COMMON_SCRATCH_ROOTS, isScratchPath, scratchRefusal } from '../../../daemon/lib/scratch.ts';
+import {
+  COMMON_SCRATCH_ROOTS,
+  isScratchPath,
+  resolveScratchRoots,
+  scratchRefusal,
+} from '../../../daemon/lib/scratch.ts';
 
 const ROOTS = [...COMMON_SCRATCH_ROOTS, '/var/tmp/own'];
 
@@ -42,5 +51,43 @@ describe('start.decide’s temporary-folder check', () => {
     expect(scratchDecision(scratch, ROOTS)).toBeUndefined();
     expect(scratchDecision({ ...scratch, by: 'resume', allowScratch: false }, ROOTS)).toBeUndefined();
     expect(scratchDecision({ folder: '/home/me/work', by: 'owner', allowScratch: false }, ROOTS)).toBeUndefined();
+  });
+});
+
+describe('the check judges the directory the start will REALLY be in, not its spelling (v4 realpathed both sides)', () => {
+  const base = mkdtempSync(join(tmpdir(), 'packs-scratch-'));
+  const scratch = join(base, 'scratch');
+  const project = join(base, 'project');
+  mkdirSync(scratch);
+  mkdirSync(project);
+  // A link spelled inside the temporary root that leads to a normal project; a link inside the project that leads out to it.
+  symlinkSync(project, join(scratch, 'project-link'));
+  symlinkSync(scratch, join(project, 'to-scratch'));
+  // The temporary root itself spelled through a link (`/tmp` -> `/private/tmp` on a Mac).
+  symlinkSync(scratch, join(base, 'root-link'));
+  afterAll(() => rmSync(base, { recursive: true, force: true }));
+  const asked = (spelled: string) =>
+    ({ folder: spelled, realFolder: realpathSync(spelled), by: 'ferret', allowScratch: false }) as const;
+
+  test('a link spelled in the temporary root, leading to a normal project, is allowed', async () => {
+    const roots = await resolveScratchRoots([scratch], realpath);
+    expect(scratchDecision(asked(join(scratch, 'project-link')), roots)).toBeUndefined();
+  });
+
+  test('a link in the project, leading into the temporary root, is refused (naming the real folder)', async () => {
+    const roots = await resolveScratchRoots([scratch], realpath);
+    const decision = scratchDecision(asked(join(project, 'to-scratch')), roots);
+    expect(decision).toEqual({ allow: false, reason: scratchRefusal(realpathSync(scratch)) });
+  });
+
+  test('a root that is itself spelled through a link still holds what is really inside it', async () => {
+    const roots = await resolveScratchRoots([join(base, 'root-link')], realpath);
+    mkdirSync(join(scratch, 'inside'));
+    expect(scratchDecision(asked(join(scratch, 'inside')), roots)).toMatchObject({ allow: false });
+  });
+
+  test('a root that cannot be resolved stays as spelled; nothing throws', async () => {
+    const roots = await resolveScratchRoots(['/no/such/root-xyz'], realpath);
+    expect(roots).toEqual(['/no/such/root-xyz']);
   });
 });
