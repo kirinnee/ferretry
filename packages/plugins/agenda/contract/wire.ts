@@ -194,6 +194,26 @@ export const NudgesFileSchema = z.strictObject({
 });
 export type NudgesFile = z.infer<typeof NudgesFileSchema>;
 
+// ─── the rest nudge's counters ──────────────────────────────────────────────────────────────────────────────────
+/**
+ * `state/agenda/rest-nudges.json`: for each ferret, each item resting on it that has been nudged: the rest it was nudged
+ * in (`since`, when the item began resting), how many nudges that rest has had, when the last went, and its send id. A
+ * count is written BEFORE its send, so a restart never nudges an item more often than its cap allows.
+ */
+export const AGENDA_REST_NUDGES_FORMAT = 1;
+export const RestNudgeRecordSchema = z.strictObject({
+  since: InstantSchema,
+  nudges: z.number().int().positive(),
+  at: InstantSchema,
+  sendId: z.string().min(1),
+});
+export type RestNudgeRecord = z.infer<typeof RestNudgeRecordSchema>;
+export const RestNudgesFileSchema = z.strictObject({
+  format: z.literal(AGENDA_REST_NUDGES_FORMAT),
+  ferrets: z.record(z.string(), z.record(z.string(), RestNudgeRecordSchema)),
+});
+export type RestNudgesFile = z.infer<typeof RestNudgesFileSchema>;
+
 /** The push text limits (a lock screen shows little): title and body are clipped at a word. */
 export const AGENDA_PUSH_TITLE_LENGTH = 40;
 export const AGENDA_PUSH_BODY_LENGTH = 120;
