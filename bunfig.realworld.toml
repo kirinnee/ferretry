@@ -4,7 +4,7 @@
 # workflow, and a failure files an issue instead of failing a pull request or a release.
 # Every tier runs offline (scripts/ci/test.sh exports the switches).
 root = "packages"
-pathIgnorePatterns = ["**/tests/unit/**", "**/tests/integration/**", "**/tests/sit/**"]
+pathIgnorePatterns = ["**/tests/unit/**", "**/tests/integration/**", "**/tests/sit/**", "**/tests/perf/**"]
 # THE PER-TEST TIMEOUT IS NOT SET HERE: `timeout` under `[test]` is ignored by Bun 1.3.13, so
 # `scripts/ci/test.sh realworld` passes `--timeout` on the command line (see bunfig.int.toml).
 #

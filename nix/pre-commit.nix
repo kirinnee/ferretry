@@ -123,11 +123,22 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # No speed or size budget in the unit tier (owner, 2026-11-16): a budget is the perf tier's, run alone; the unit
+    # tier proves behaviour (docs/standards/testing, "Performance Tests"). config/perf-pending.txt only shrinks.
+    a-unit-budgets = {
+      enable = true;
+      name = "Unit tier holds no speed or size budget";
+      entry = validator "scripts/validate/unit-budgets.sh";
+      files = "^(packages/(.*/)?tests/.*\\.tsx?|config/perf-pending\\.txt|scripts/validate/unit-budgets\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-test-tiers = {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
-      files = "^(packages/(.*/)?tests/.*\\.test\\.tsx?|config/test-groups\\.json|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld)\\.yaml)$";
+      files = "^(packages/(.*/)?tests/.*\\.(test\\.)?tsx?|config/test-groups\\.json|bunfig\\.[a-z]+\\.toml|nix/fmt\\.nix|scripts/(validate/test-tiers\\.sh|test/ci-sets\\.ts|ci/((quick|quick-part|parallel|integration|full-status|e2e-summary|pre-commit|gate-hook|full-gates)\\.sh|(unit-timings|gate-hooks)\\.ts))|\\.github/workflows/(ci|realworld)\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };

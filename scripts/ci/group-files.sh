@@ -28,7 +28,7 @@ stray="$(find packages -path '*/node_modules' -prune -o -type f \( -name '*.spec
 [[ -n ${stray} ]] && echo "❌ test groups only collect *.test.ts(x) files, and Bun would also run ${stray}" >&2 && exit 1
 mapfile -t files < <(
   find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) \
-    -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -print | sort |
+    -not -path "*/tests/${other_tier}/*" -not -path '*/tests/sit/*' -not -path '*/tests/realworld/*' -not -path '*/tests/perf/*' -print | sort |
     jq -R -r --slurpfile groups "${groups}" --arg mode "${mode}" --arg group "${group}" '
       . as $file
       | [$groups[0][$mode][] | select(any(.prefixes[]; . as $prefix | $file | startswith($prefix)))][0].name

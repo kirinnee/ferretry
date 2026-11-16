@@ -526,6 +526,31 @@ behaviour — exit codes, stdout/stderr content, and journeys completing — not
 
 ---
 
+## Performance Tests (the perf tier)
+
+**Owner, 2026-11-16: "split those out as performance test. dont mix performance and correctness test together."**
+A test whose claim is a SPEED or SIZE budget - no synchronous slice of 100 ms while a tick writes 3,600 cards,
+linear time on adversarial input, a reload within a CPU bound, a memory ceiling - lives in `<package>/tests/perf/`,
+never in `tests/unit/`.
+
+- **Blocking, on its own runner.** `scripts/ci/test.sh perf` runs the tier (`bunfig.perf.toml`) in
+  `FY_CI_PERF_PARALLEL` processes (default 1; CI: 2 on a 4x8, half its vCPUs), and the ONE `Performance Tests` CI
+  job runs it on a runner with nothing else, on exactly Quick's events, beside Quick and in the Full CI
+  verdict. A budget measured next to other test processes measures the neighbours: on the first run of the parallel
+  unit groups a slice budget read 128-164 ms against 100 because of where the test sat, not what the code did.
+  `task test:perf` runs it locally - on a quiet machine, or the numbers mean nothing.
+- **The correctness half stays in unit at a small size.** A file that proved both "the answer is right" and "it came
+  fast" splits: the answer is checked in unit on an input small enough to be instant, the budget moves to perf at the
+  size that makes it meaningful. The unit coverage ledger must stay green without the perf tier - perf has no ledger.
+- **The gate.** `scripts/validate/unit-budgets.sh` (hook `a-unit-budgets`, tested by `unit-budgets.test.ts`) refuses
+  a unit file that reads a real clock, CPU or memory counter (`performance.now`, `Bun.nanoseconds`, `process.hrtime`,
+  `process.cpuUsage` / `threadCpuUsage` / `resourceUsage` / `memoryUsage`), uses the `linear-time` helper, or feeds a
+  `Date.now()` difference or a named duration to an upper bound. A fake that REPLACES a clock marks its line
+  `// not-a-budget: <reason>`, printed for the reviewer. `config/perf-pending.txt` lists the files not moved yet; it
+  only shrinks, and a listed file with nothing left to move fails too. Empty list = no timing claim in the unit tier.
+- GAP: a helper OUTSIDE `tests/unit/` that measures time on a unit test's behalf is seen only through the
+  `linear-time` name; give any new timing helper a name the gate matches, or put it under `tests/perf/`.
+
 ## What Ferretry Does Not Test (Yet)
 
 **No required E2E gate yet.** The E2E tier exists (`tests/e2e/`, [its README](../../../tests/e2e/README.md)):

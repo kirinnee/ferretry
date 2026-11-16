@@ -10,8 +10,8 @@ export FY_UPDATE_CHECK="${FY_UPDATE_CHECK:-off}"
 
 mode="${1:-}"
 group="${2:-}"
-[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" && ${mode} != "realworld" ]] && echo "❌ usage: $0 <unit|int|sit|realworld> [group]" >&2 && exit 2
-[[ ${mode} == "realworld" && -n ${group} ]] && echo "❌ the realworld tier has no groups" >&2 && exit 2
+[[ ${mode} != "unit" && ${mode} != "int" && ${mode} != "sit" && ${mode} != "realworld" && ${mode} != "perf" ]] && echo "❌ usage: $0 <unit|int|sit|realworld|perf> [group]" >&2 && exit 2
+[[ (${mode} == "realworld" || ${mode} == "perf") && -n ${group} ]] && echo "❌ the ${mode} tier has no groups" >&2 && exit 2
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -44,6 +44,42 @@ if [[ ${mode} == "realworld" ]]; then
   set -e
   [[ ${realworld_status} -ne 0 ]] && echo "❌ realworld tests failed (exit ${realworld_status})" >&2 && exit "${realworld_status}"
   echo "✅ realworld tests passed"
+  exit 0
+fi
+if [[ ${mode} == "perf" ]]; then
+  # THE PERF TIER (bunfig.perf.toml): every speed or size budget, BLOCKING, in its own CI job (`perf`) with nothing
+  # but perf tests on the runner. FY_CI_PERF_PARALLEL bun processes (default 1; CI sets it to HALF the runner's vCPUs,
+  # so every process keeps a spare core for its GC and JIT threads and a budget measures the code, not a neighbour).
+  # No ledger, so the files are dealt one by one, round robin in path order: the same split on every run. Each
+  # process is swept on its own (TMPDIR, HOME, leak sweep) like the unit groups'. A budget keeps the generous per-test
+  # timeout of the other non-unit tiers.
+  [[ "$(tier_file_count perf)" -eq 0 ]] && empty_tier perf perf
+  perf_processes=${FY_CI_PERF_PARALLEL:-1}
+  [[ ${perf_processes} =~ ^[1-9][0-9]*$ ]] || { echo "❌ FY_CI_PERF_PARALLEL must be a positive integer" >&2 && exit 2; }
+  mapfile -t perf_files < <(find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path '*/tests/perf/*' -print | sort)
+  [[ ${perf_processes} -gt ${#perf_files[@]} ]] && perf_processes=${#perf_files[@]}
+  rm -rf coverage/perf
+  echo "🧪 Running ${#perf_files[@]} perf test files in ${perf_processes} process(es)..."
+  perf_pids=()
+  for ((index = 0; index < perf_processes; index++)); do
+    perf_dir="coverage/perf/process-${index}"
+    mkdir -p "${perf_dir}"
+    share=()
+    for ((file = index; file < ${#perf_files[@]}; file += perf_processes)); do share+=("./${perf_files[file]}"); done
+    (
+      set +e
+      ./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config=bunfig.perf.toml --timeout 120000 --reporter=junit --reporter-outfile="${perf_dir}/junit.xml" "${share[@]}" >"${perf_dir}/console.log" 2>&1
+    ) &
+    perf_pids+=("$!")
+  done
+  perf_status=0
+  for ((index = 0; index < perf_processes; index++)); do
+    wait "${perf_pids[index]}" || perf_status=1
+    echo "──── perf process ${index} ────"
+    cat "coverage/perf/process-${index}/console.log"
+  done
+  [[ ${perf_status} -ne 0 ]] && echo "❌ perf tests failed" >&2 && exit 1
+  echo "✅ perf tests passed"
   exit 0
 fi
 # THE REPOSITORY CONTRACTS ARE NOT CHECKED HERE. Pages config, the hosted relay config, macOS relevance and

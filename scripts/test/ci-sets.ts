@@ -95,9 +95,13 @@ const event = (eventName: string, action = '', labels: string[] = [], label = ''
     pull_request: { number: 42, labels: labels.map(name => ({ name })) },
   },
 });
-const fullJobs = Object.keys(ci.jobs).filter(name => !['quick', 'static', 'full-pending', 'full'].includes(name));
+const fullJobs = Object.keys(ci.jobs).filter(
+  name => !['quick', 'static', 'perf', 'full-pending', 'full'].includes(name),
+);
 // Static Checks is half of the quick set (`quick.sh --static`): it runs on EXACTLY Quick's events, never scoped.
 assert.equal(conditionOf(ci, 'static'), conditionOf(ci, 'quick'), 'Static Checks must run whenever Quick runs');
+// The perf tier is blocking and never scoped: it runs on exactly Quick's events too.
+assert.equal(conditionOf(ci, 'perf'), conditionOf(ci, 'quick'), 'Performance Tests must run whenever Quick runs');
 const successful = Object.fromEntries(
   Object.keys(ci.jobs).map(name => [name, { result: 'success', outputs: { run: 'true' } }]),
 );
@@ -105,6 +109,7 @@ for (const action of ['opened', 'synchronize', 'reopened']) {
   const quick = event('pull_request', action);
   assert.equal(evaluate(conditionOf(ci, 'quick'), quick), true);
   assert.equal(evaluate(conditionOf(ci, 'static'), quick), true);
+  assert.equal(evaluate(conditionOf(ci, 'perf'), quick), true);
   assert.equal(evaluate(conditionOf(ci, 'full-pending'), quick), true);
   for (const name of [...fullJobs, 'full'])
     assert.equal(evaluate(conditionOf(ci, name), quick, successful), false, `${name} ran without full-ci`);
@@ -249,8 +254,8 @@ assert.equal(ci.jobs.sit, undefined, 'SIT is a step of compile, not a job of its
 }
 assert.equal(evaluate(runsOnExpression('full-gates'), event('push'), {}, {}), 'ubuntu-latest');
 assert.ok(
-  jobOf(ci, 'full').permissions?.['pull-requests'] === 'read',
-  'the verdict reads the PR head and labels: it needs pull-requests: read',
+  jobOf(ci, 'full').permissions?.['pull-requests'] === 'write',
+  'the verdict reads the PR head and removes the full-ci label from a pull request: it needs pull-requests: write',
 );
 
 const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwitch = '') =>
