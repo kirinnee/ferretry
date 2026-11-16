@@ -10,7 +10,7 @@ import {
   type SessionSendSubsystem,
   sessionSendRoutes,
 } from '../../../../daemon/delivery/lib/mounts/session-send.ts';
-import { answerOf, refusalOf } from '../../../support/mount-call.ts';
+import { answerOf, callOf, refusalOf } from '../../../support/mount-call.ts';
 
 const SEND = '/v1/ferrets/:ferretId/send';
 const ID = { ferretId: 'f1' };
@@ -374,5 +374,111 @@ describe('the send ledger and the queue', () => {
     });
     expect(refused.status).toBe(400);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('the ledger and the queue are conditional reads', () => {
+  const SENDS = '/v1/ferrets/:ferretId/sends';
+  const QUEUE = '/v1/ferrets/:ferretId/queue';
+
+  /** A subsystem whose logs move when `appended` does: a stamp is the count, as a file's identity moves with each line. */
+  const stamped = () => {
+    const state = { appended: 0, reads: 0, stamps: 0, missing: false };
+    const subsystem = {
+      sends: async () => {
+        state.reads += 1;
+        return [];
+      },
+      queue: async () => {
+        state.reads += 1;
+        return [];
+      },
+      sendsStamp: async () => {
+        state.stamps += 1;
+        if (state.missing) throw new SessionSendError('not_found', 'gone');
+        return `n${String(state.appended)}`;
+      },
+      queueStamp: async () => `q${String(state.appended)}`,
+    } as unknown as SessionSendSubsystem;
+    return { state, routes: sessionSendRoutes(subsystem) };
+  };
+
+  const get = async (
+    routes: ReturnType<typeof sessionSendRoutes>,
+    path: string,
+    headers: Record<string, string> = {},
+    query: Record<string, string> = {},
+  ) => {
+    const route = routes.find(each => each.method === 'GET' && each.path === path);
+    if (route === undefined) throw new Error(`no route ${path}`);
+    return await route.handle(callOf({ params: ID, headers, query }));
+  };
+
+  for (const [name, path] of [
+    ['sends', SENDS],
+    ['queue', QUEUE],
+  ] as const) {
+    describe(name, () => {
+      it('answers 200 with an etag, then 304 with no body and no read of the log for a repeat that names it', async () => {
+        const { state, routes } = stamped();
+        const first = await get(routes, path);
+        expect(first.status).toBe(200);
+        const tag = first.headers.get('etag');
+        expect(tag).toMatch(/^"[A-Za-z0-9_-]{43}"$/u);
+        const readsBefore = state.reads;
+
+        const again = await get(routes, path, { 'if-none-match': tag as string });
+
+        expect(again.status).toBe(304);
+        expect(again.body).toBe('');
+        expect(again.headers.get('etag')).toBe(tag);
+        expect(state.reads).toBe(readsBefore);
+      });
+
+      it('answers 200 with a NEW etag once a line has been appended', async () => {
+        const { state, routes } = stamped();
+        const tag = (await get(routes, path)).headers.get('etag') as string;
+        state.appended += 1;
+
+        const changed = await get(routes, path, { 'if-none-match': tag });
+
+        expect(changed.status).toBe(200);
+        expect(changed.headers.get('etag')).not.toBe(tag);
+      });
+
+      it('gives another page of the same log its own tag, so a page never answers for another', async () => {
+        const { routes } = stamped();
+        const newest = (await get(routes, path)).headers.get('etag') as string;
+        const smaller = await get(routes, path, { 'if-none-match': newest }, { limit: '1' });
+        expect(smaller.status).toBe(200);
+        expect(smaller.headers.get('etag')).not.toBe(newest);
+      });
+
+      it('names weak validators and lists too, as a GET does', async () => {
+        const { routes } = stamped();
+        const tag = (await get(routes, path)).headers.get('etag') as string;
+        expect((await get(routes, path, { 'if-none-match': `"other", W/${tag}` })).status).toBe(304);
+      });
+    });
+  }
+
+  it('refuses before it can say 304: a stamp that fails is the refusal, not "unchanged"', async () => {
+    const { state, routes } = stamped();
+    state.missing = true;
+    const route = routes.find(each => each.method === 'GET' && each.path === SENDS);
+    const refusal = await route
+      ?.handle(callOf({ params: ID, headers: { 'if-none-match': '*' } }))
+      .catch(error => error);
+    expect(refusal).toMatchObject({ status: 404 });
+  });
+
+  it('reads whole, with no etag, from a subsystem that cannot stamp', async () => {
+    const { subsystem } = build({ value: [] });
+    const routes = sessionSendRoutes(subsystem);
+    for (const path of [SENDS, QUEUE]) {
+      const answered = await get(routes, path, { 'if-none-match': '*' });
+      expect(answered.status).toBe(200);
+      expect(answered.headers.has('etag')).toBe(false);
+    }
   });
 });

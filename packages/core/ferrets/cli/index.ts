@@ -6,10 +6,15 @@ import { hostLeaseStore } from './adapters/history/host-lease-store.ts';
 import { HistoryController } from './lib/history/controller.ts';
 import { historyClaimRequest } from './lib/history/request.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
+import { EventsController } from './lib/events/controller.ts';
+import { FsController } from './lib/fs/controller.ts';
+import { ClientFsGateway } from './lib/fs/gateway.ts';
 import { instructionsReport, renderInstructionsReport } from '../contract/instructions-report.ts';
 import { moveOptions } from './lib/move/commands.ts';
 import { MoveController } from './lib/move/controller.ts';
 import { ClientMoveGateway } from './lib/move/gateway.ts';
+import { PinController, type PinOptions } from './lib/pins/controller.ts';
+import { ClientPinGateway } from './lib/pins/gateway.ts';
 import { NO_PROGRESS, PlainProgress } from './lib/progress/index.ts';
 import { RestartController } from './lib/restart/controller.ts';
 import { SessionCommandError } from './lib/session/errors.ts';
@@ -73,6 +78,14 @@ const HISTORY_USAGE = [
   'the conversations every runtime of a harness shares:',
   `  ${BINARY} history claim --harness <claude|codex> --pid <pid> [--from-arguments --] <conversation or harness arguments>`,
   `      claim a conversation for one writer; refused (exit ${HISTORY_CLAIM_HELD_EXIT_CODE}) while another is writing it`,
+];
+const FS_USAGE = [
+  "read a ferret's working tree, never writing it:",
+  `  ${BINARY} fs ls <ferret> [path]       list a directory`,
+  `  ${BINARY} fs index <ferret>           every searchable file, with what the walk left out (--query <text>)`,
+  `  ${BINARY} fs cat <ferret> <path>      one file (--head reads Git HEAD)`,
+  `  ${BINARY} fs changes <ferret>         the Git working-tree changes`,
+  `  ${BINARY} fs diff <ferret> <path>     the unified diff of one changed path`,
 ];
 const SESSION_USAGE = [
   "act on a ferret's own standing with this daemon:",
@@ -451,6 +464,64 @@ export default implementCli(manifest, {
       });
     });
 
+    // `fy events <id>` (V-0258): one ferret's journal after a cursor, read through the stream's socket.
+    const events = verb(async (invocation, _presenter, io) => {
+      const after = count(invocation, 'after');
+      const limit = count(invocation, 'limit');
+      await new EventsController(new ClientEventStream(client), io).read(first(invocation, 'ferret id'), {
+        ...(after === undefined ? {} : { after }),
+        ...(limit === undefined ? {} : { limit }),
+        ...json(invocation),
+      });
+    });
+
+    // `fy fs ls|index|cat|changes|diff <id>` (V-0262…): read-only, over the file browser's routes.
+    const fsVerb = (work: (controller: FsController, invocation: VerbInvocation, ferret: string) => Promise<void>) =>
+      verb(async (invocation, _presenter, io) => {
+        await work(new FsController(new ClientFsGateway(client), io), invocation, first(invocation, 'ferret id'));
+      });
+    const fsList = fsVerb(async (fs, invocation, ferret) => {
+      await fs.list(ferret, invocation.args[1], json(invocation));
+    });
+    const fsIndex = fsVerb(async (fs, invocation, ferret) => {
+      const query = text(invocation, 'query');
+      await fs.index(ferret, { ...(query === undefined ? {} : { query }), ...json(invocation) });
+    });
+    const fsCat = fsVerb(async (fs, invocation, ferret) => {
+      await fs.file(ferret, invocation.args[1] ?? '', {
+        ...(on(invocation, 'head') ? { head: true } : {}),
+        ...json(invocation),
+      });
+    });
+    const fsChanges = fsVerb(async (fs, invocation, ferret) => {
+      await fs.changes(ferret, json(invocation));
+    });
+    const fsDiff = fsVerb(async (fs, invocation, ferret) => {
+      await fs.diff(ferret, invocation.args[1] ?? '', json(invocation));
+    });
+
+    // `fy pin [add] <text...>|ls|edit|rm` (V-0341…): a ferret's pin board, the ferret this runs inside unless `-s` names one.
+    const pinBoard = (
+      work: (controller: PinController, invocation: VerbInvocation, options: PinOptions) => Promise<void>,
+    ) =>
+      verb(async (invocation, _presenter, io) => {
+        const session = text(invocation, 'session', 's');
+        const options: PinOptions = { ...(session === undefined ? {} : { session }), ...json(invocation) };
+        await work(new PinController(new ClientPinGateway(client), io, env?.FY_SESSION_ID), invocation, options);
+      });
+    const pinAdd = pinBoard(async (pins, invocation, options) => {
+      await pins.add(invocation.args, options);
+    });
+    const pinList = pinBoard(async (pins, _invocation, options) => {
+      await pins.list(options);
+    });
+    const pinEdit = pinBoard(async (pins, invocation, options) => {
+      await pins.edit(first(invocation, 'pin id'), invocation.args.slice(1), options);
+    });
+    const pinRemove = pinBoard(async (pins, invocation, options) => {
+      await pins.remove(first(invocation, 'pin id'), options);
+    });
+
     // `fy history claim` (V-0283): the wrapper's claim before it `exec`s a resumed harness. It reads and writes the lease
     // files itself and asks the daemon nothing, so a person's own terminal is covered with no daemon running; a failure
     // of any kind answers 1 (or 2 for words it cannot read), never the held status, so a wrapper launches anyway.
@@ -491,6 +562,17 @@ export default implementCli(manifest, {
         'resume <id> [message...]': resume,
         'restart [ids...]': restart,
         'stream [id]': stream,
+        'events <id>': events,
+        fs: usage(FS_USAGE),
+        'fs ls <id> [path]': fsList,
+        'fs index <id>': fsIndex,
+        'fs cat <id> <path>': fsCat,
+        'fs changes <id>': fsChanges,
+        'fs diff <id> <path>': fsDiff,
+        'pin add <text...>': pinAdd,
+        'pin ls': pinList,
+        'pin edit <id> <text...>': pinEdit,
+        'pin rm <id>': pinRemove,
         'wait <id>': wait,
         instructions,
         'signal <kind> [message...]': signal,

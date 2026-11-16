@@ -344,6 +344,8 @@ export interface PluginCallHeaders {
 /** `PluginClient.conditional`'s request: the etag the caller holds, and the same allow-listed headers as `call`. */
 export interface PluginConditionalInit {
   readonly ifNoneMatch?: string;
+  /** The read's query string (a page's `limit` and `before`): part of what the held etag names. */
+  readonly query?: Readonly<Record<string, string>>;
   readonly headers?: PluginCallHeaders;
 }
 
@@ -399,7 +401,8 @@ export interface PluginClient {
   feed?: PluginFeed;
   /**
    * A conditional GET (today's per-connection etag/304 list read, the held fleet list R502): sends `If-None-Match`
-   * and answers `304` without a body when it still matches. Optional until the app shell and the CLI fill it in.
+   * and answers `304` without a body when it still matches. The app shell offers it; a poller goes through
+   * `heldRead`, which keeps the body each read last answered. Optional until the CLI fills it in.
    */
   conditional?(
     key: string,
