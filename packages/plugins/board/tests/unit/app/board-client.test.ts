@@ -122,6 +122,25 @@ describe('the board writes', () => {
     expect(!started.ok && started.error).toEqual({ status: 0, message: 'offline', boardCode: null });
   });
 
+  it('hands the gate’s refusal of a card Start back in its own words (a device without fleet.configure, or a declined passkey)', async () => {
+    // c58-sec3 r1: starting a card asks `fleet.configure`, so a `--limited` device is refused in words, never a blank failure.
+    const NOT_GIVEN =
+      'this device has not been given permission to change the settings for the fleet. Grant it at the machine with `fy device grant <device> fleet --configure`, or from a device that holds it and may manage devices.';
+    const PASSKEY = 'changing the settings for the fleet needs a passkey confirmation from this device.';
+    for (const [code, message] of [
+      ['grant_device_not_granted', NOT_GIVEN],
+      ['grant_step_up_required', PASSKEY],
+    ] as const) {
+      const refused = clientOf({
+        'POST /v1/board/cards/:cardId/start': () => {
+          throw refusal(403, message, code);
+        },
+      });
+      const started = await clientBoardPort(refused).start(laptop, 'F1');
+      expect(!started.ok && started.error).toEqual({ status: 403, message, boardCode: null });
+    }
+  });
+
   it('sends an action key so a retried click is safe', async () => {
     const client = clientOf({ 'POST /v1/board/cards/:cardId/start': { ok: true } });
     await clientBoardPort(client).start(laptop, 'F1', 'key-1');

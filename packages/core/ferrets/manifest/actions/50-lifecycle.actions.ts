@@ -1,7 +1,7 @@
 /** Stop, resume, rename and revoke a ferret; `fy stop`, `rename`, `resume` and `session`. */
 import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
 import { route, verb } from '@ferretry/kernel/manifest';
-import { fragment } from '../kit.ts';
+import { FLEET_CONFIGURE, FLEET_USE, fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
@@ -9,6 +9,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/stop', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_USE,
       noStore: true,
       audit: { skip: 'a stop is recorded in the ferret history, as today' },
       guard: { none: 'answers the new state only' },
@@ -17,6 +18,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/resume', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_USE,
       noStore: true,
       consultsGrants: true,
       audit: { skip: 'a resume is recorded in the ferret history, as today' },
@@ -26,6 +28,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/rename', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_USE,
       noStore: true,
       audit: { skip: 'a rename records nothing, as today' },
       guard: { none: 'one ferret identity record' },
@@ -34,6 +37,7 @@ export default fragment({
     route('POST /v1/ferrets/:ferretId/revoke-credential', {
       minimum: 'operator',
       caller: 'person',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { record: AUDIT_KINDS['ferret.credential-revoked'] },
       guard: { none: 'answers whether a token was live, never a token or digest' },

@@ -47,7 +47,7 @@ describe('contract registries', () => {
       'contract/slots/alpha.slot.ts': 'export default { slot: "a" } as const;\n',
     }).get(out('slots'));
     expect(text).toContain(
-      'export const FERRET_SLOTS = [...FERRET_ACCOUNT_SLOTS, contract_alpha_slot.slot, contract_zeta_slot.slot] as const;',
+      'export const FERRET_SLOTS = [\n  ...FERRET_ACCOUNT_SLOTS,\n  contract_alpha_slot.slot,\n  contract_zeta_slot.slot,\n] as const;',
     );
     expect(text).toContain('export type FerretSlot = (typeof FERRET_SLOTS)[number];');
   });

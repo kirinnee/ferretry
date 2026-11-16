@@ -3,7 +3,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
 import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { FerretHistoryFiles, FerretConfigFile, FerretStateFile } from '../../../../contract/index.ts';
-import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/state/transfer-plan.state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import { SessionConfigSchema, SessionStateSchema, type SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import type { JsonValue } from '@ferretry/std';

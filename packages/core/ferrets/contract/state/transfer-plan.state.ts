@@ -1,5 +1,5 @@
 import { defineState } from '@ferretry/kernel/contract';
-import { SessionTransferPlanSchema } from './transfer.ts';
+import { SessionTransferPlanSchema } from '../transfer.ts';
 
 /**
  * The file a transfer leaves beneath the NEW ferret on Ferrets' state port (§9.2), private to Ferrets. Its first-turn

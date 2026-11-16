@@ -42,8 +42,7 @@ export function sendApi({
   queue,
   ledger,
 }: MailboxParts): Omit<MailboxApi, 'queue' | 'editQueued' | 'cancelQueued'> {
-  const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, typeMessage, keptSend, records, lookFirst } =
-    send;
+  const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, submit, keptSend, records, lookFirst } = send;
   return {
     send: async (ferret, caller, request) => {
       try {
@@ -53,7 +52,7 @@ export function sendApi({
         mayGo(request);
         const delivered = await deliverAttachments(ferret, request.attachmentIds);
         return ok(
-          await typeMessage(ferret, {
+          await submit(ferret, {
             sendId: request.sendId ?? String(kernel.ids.mint('send')),
             message: messageWithAttachments(await prepared(ferret, request.message), delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
@@ -154,7 +153,7 @@ export function sendRoutes(
   { send, queue }: Pick<MailboxParts, 'send' | 'queue'>,
   clearer: SentDraftClearer | undefined,
 ): readonly MountRoute[] {
-  const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, typeMessage, keptSend, records } = send;
+  const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, submit, keptSend, records } = send;
   const { sendsStamp, awaitStatus, queueMessages, queueStamp, queueFailure, handoffOf } = send;
   return sessionSendRoutes(
     {
@@ -171,7 +170,7 @@ export function sendRoutes(
         // Asked before the text is prepared: a refused send runs no `message.before-send` transform.
         mayGo(request);
         const delivered = await deliverAttachments(parseSessionId(id), request.attachmentIds);
-        return await typeMessage(parseSessionId(id), {
+        return await submit(parseSessionId(id), {
           ...request,
           message: messageWithAttachments(await prepared(id, request.message), delivered),
         });

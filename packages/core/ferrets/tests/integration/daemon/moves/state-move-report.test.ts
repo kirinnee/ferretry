@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { MoveInflightFiles } from '../../../../contract/move-state.ts';
+import { MoveInflightFiles } from '../../../../contract/state/moves.state.ts';
 import { StateMoveReportStore } from '../../../../daemon/adapters/moves/state-move-report.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 

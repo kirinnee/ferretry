@@ -12,13 +12,20 @@ import { milliseconds } from '@ferretry/std';
 import {
   parseMessageAttachments,
   PEER_MESSAGE_LABELS,
+  combinedDelivery,
+  peerSender,
   type PeerMessageLabel,
   type QueuedMessage,
+  type QueueAuthor,
   type SendRecord,
   type SendResult,
 } from '../contract/index.ts';
+import type { SendMessageRequest } from './lib/delivery/service.ts';
+import { CancellableTimers } from './adapters/cancellable-timers.ts';
 import type { ClaudeChannel, MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '../contract/index.ts';
 import { ClockSendScheduler } from './adapters/index.ts';
+import { type QueuedSend, SendPathDeliveryView, SendPathQueueTransport } from './adapters/send-path-delivery.ts';
+import { defaultQueueDeliverySettings, QueueDeliverer, QueueingSends } from './lib/queue/index.ts';
 import { type LedgerPath as SendPath } from '../contract/index.ts';
 import {
   defaultSendTrackerSettings,
@@ -55,7 +62,7 @@ import {
 } from './lib/delivery/index.ts';
 import { SessionSendError } from './lib/delivery/mounts/session-send.ts';
 import { answerOf } from '../contract/index.ts';
-import { QueueRefused, type SessionQueue } from '../contract/index.ts';
+import { QueueRefused, type SessionQueue, type SessionQueueStore } from '../contract/index.ts';
 import {
   type HarnessGate,
   INTERRUPT_UNAVAILABLE,
@@ -147,8 +154,8 @@ const JOURNAL_LOG_KEYS = ['sendId', 'outcome', 'effect', 'from', 'by', 'turn', '
 
 /**
  * What a send can carry beyond its text. `attachmentIds` are handed to the agent as files ({@link deliverAttachments}).
- * `label` is typed under its banner whatever it is: `fyi` too, as v4 did with its queue off (holding an fyi to the
- * receiver's turn end waits on the queue deliverer, which this host does not wire).
+ * `label` is the sender's own (`blocker`, `action`, `fyi`): the queue holds and batches by it, and the banner it is typed under
+ * names it.
  */
 export interface UnwiredSend {
   /**
@@ -196,7 +203,9 @@ export interface SendHalfDeps {
   /** A cheap token for the log of `queue` or `sends` that moves with every line appended; `absent` when there is none. */
   readonly stamp: (log: 'queue' | 'sends', ferret: SessionId) => Promise<string>;
   readonly clock: ClockPort;
-  readonly queue: Pick<SessionQueue, 'list' | 'edit' | 'cancel'>;
+  readonly queue: Pick<SessionQueue, 'list' | 'edit' | 'cancel' | 'enqueue'>;
+  /** The queue's log, as the deliverer reads and writes it (the one that announces a change). */
+  readonly queueStore: SessionQueueStore;
   readonly ledger: SendLedger;
   readonly channel: SendChannel;
   readonly attachments?: AttachmentSource;
@@ -422,7 +431,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const failureNotifier = new AgentSendFailureNotifier(
     {
       send: async request =>
-        await typeMessage(request.id, {
+        await submit(request.id, {
           sendId: request.sendId,
           message: request.message,
           origin: AGENT_ORIGIN,
@@ -517,7 +526,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
    */
   let stopped = false;
   let disarm: (() => void) | undefined;
-  void (async () => {
+  const rostered = (async () => {
     const all = await ferrets.list();
     if (stopped) return;
     for (const summary of all) roster.add(parseSessionId(summary.id));
@@ -616,13 +625,39 @@ export function buildSendHalf(deps: SendHalfDeps) {
    * to the owner's voice. The recipient is read only to tell a REPLY it is parked on from a new message; one that
    * cannot be read degrades to the plainer kind rather than failing the send. A ferret sending to itself gets none.
    */
+  /** Several ferrets' messages as ONE turn, each under its own banner (today's `combinedDelivery`), oldest first. */
+  const combinedText = async (
+    ferret: SessionId,
+    parts: NonNullable<QueuedSend['parts']>,
+  ): Promise<{ readonly text: string; readonly fromName?: string }> => {
+    const recipient = await ferrets.get(ferret).catch(() => undefined);
+    const senders = await Promise.all(
+      parts.map(async part => {
+        const id = tryParseSessionId(part.senderReference);
+        return id === undefined ? undefined : await ferrets.get(id).catch(() => undefined);
+      }),
+    );
+    const text = combinedDelivery(
+      parts.map((part, at) => {
+        // A sender that can no longer be found is still named by the reference it sent under.
+        const from = { id: (senders[at]?.id ?? part.senderReference) as SessionId, teammate: senders[at]?.name };
+        const kind = peerMessageKind(recipient, from.id, part.replyExpected);
+        return { sender: peerSender(from, kind, bannerLabel(part.label)), body: payloadOf(part.text) };
+      }),
+      defaultSessionSendSettings.clientName,
+    );
+    const first = senders[0]?.name;
+    return { text, ...(first === undefined ? {} : { fromName: first }) };
+  };
   const typedText = async (
     ferret: SessionId,
     request: Pick<UnwiredSend, 'label' | 'replyExpected'> & {
       readonly message: string;
       readonly senderSessionId?: string | undefined;
+      readonly parts?: QueuedSend['parts'];
     },
   ): Promise<{ readonly text: string; readonly fromName?: string }> => {
+    if (request.parts !== undefined && request.parts.length > 1) return await combinedText(ferret, request.parts);
     const message = payloadOf(request.message);
     const senderId = request.senderSessionId;
     if (senderId === undefined || senderId === ferret) return { text: message };
@@ -717,6 +752,12 @@ export function buildSendHalf(deps: SendHalfDeps) {
      * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
      */
     readonly notice?: true;
+    /** The queue's own entry under `sendId` is what is delivered, so it is not an earlier send of that id. */
+    readonly queued?: true;
+    /** Who the daemon is, when it is the sender: the sender chip, in place of the one a flag names. */
+    readonly by?: QueueAuthor | undefined;
+    /** Two or more ferret messages delivered as one turn (the queue's combined delivery). */
+    readonly parts?: QueuedSend['parts'];
   };
   /** One typed send on the ferret's one lane ({@link lane}): nothing else presses a key on this ferret meanwhile. */
   const typeMessage = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
@@ -825,6 +866,11 @@ export function buildSendHalf(deps: SendHalfDeps) {
       ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
       ...(request.agenda === true ? { by: { kind: 'ferretry' as const, feature: 'Agenda' } } : {}),
       ...(request.notice === true ? { by: { kind: 'ferretry' as const, feature: 'Delivery' } } : {}),
+      // What the queue knew of its sender wins over the flag: a Board notice is the Board's, not "Delivery".
+      ...(request.by === undefined ? {} : { by: request.by }),
+      ...(request.parts === undefined || request.parts.length < 2
+        ? {}
+        : { batch: request.parts.map(part => ({ queueId: part.queueId, from: part.senderReference })) }),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
     });
@@ -842,7 +888,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
    */
   const reviveLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     const { text, fromName } = await typedText(ferret, request);
-    const repeated = await keptSend(ferret, request.sendId);
+    const repeated = await keptSend(ferret, request.sendId, request.queued === true);
     if (repeated !== undefined) return repeated;
     const accepted = await accepting(ferret, request, text, fromName, { path: 'revive' });
     if (!accepted.created) return { ferret, disposition: 'sent' };
@@ -988,7 +1034,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
     // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
     if (request.now === true) await stopForNow(ferret, bound);
     // A repeat of a send that already has a live row types nothing and writes no document: no orphan for the owner's words.
-    const repeated = await keptSend(ferret, request.sendId);
+    const repeated = await keptSend(ferret, request.sendId, request.queued === true);
     if (repeated !== undefined) return repeated;
     // A Claude ferret whose MCP server is listening takes a ferret's or the daemon's own message through its channel: nothing is typed.
     if (deps.claude !== undefined && channelled(ferret, first, request)) {
@@ -1007,7 +1053,9 @@ export function buildSendHalf(deps: SendHalfDeps) {
         : request.agenda === true
           ? { kind: 'ferretry', feature: 'Agenda' }
           : request.notice === true
-            ? { kind: 'ferretry', feature: 'Delivery' }
+            ? request.by?.kind === 'ferretry' && request.by.feature !== undefined
+              ? { kind: 'ferretry', feature: request.by.feature }
+              : { kind: 'ferretry', feature: 'Delivery' }
             : request.senderSessionId === undefined
               ? undefined
               : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
@@ -1018,7 +1066,8 @@ export function buildSendHalf(deps: SendHalfDeps) {
       matchText: sent.typed,
       ...(sent.turn === undefined ? {} : { turn: sent.turn }),
     });
-    if (!accepted.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
+    if (!accepted.created)
+      return (await keptSend(ferret, request.sendId, request.queued === true)) ?? { ferret, disposition: 'sent' };
     /** Set once the message went to the harness's own queue: the row's path is then today's busy path. */
     let viaQueue = false;
     // THE PANE MUST BE SAFE BEFORE A KEY GOES (owner ruling 2026-11-15): not compacting, no dialog or consent waiting for an
@@ -1102,10 +1151,15 @@ export function buildSendHalf(deps: SendHalfDeps) {
    * across daemon runs, because the queue keeps it as the message's id and the send ledger as its `sendId`. A message
    * delivered inside a combined turn has no row of its own and is answered from the turn's, as its own id.
    */
-  const keptSend = async (ferret: SessionId, sendId: string | undefined): Promise<SendResult | undefined> => {
+  const keptSend = async (
+    ferret: SessionId,
+    sendId: string | undefined,
+    /** The queue's own entry is the message being delivered: only the ledger says whether it was typed already. */
+    delivering = false,
+  ): Promise<SendResult | undefined> => {
     if (sendId === undefined) return undefined;
     const [rows, queued] = await Promise.all([ledger.list(ferret), queue.list(ferret)]);
-    const waiting = queued.find(message => message.id === sendId);
+    const waiting = delivering ? undefined : queued.find(message => message.id === sendId);
     // A withdrawn row typed nothing, so its id may start over: only the queue still holding the message keeps it answered.
     const row =
       rows.find(entry => entry.sendId === sendId && (entry.fate !== 'withdrawn' || waiting !== undefined)) ??
@@ -1250,6 +1304,152 @@ export function buildSendHalf(deps: SendHalfDeps) {
     return found;
   };
 
+  /**
+   * THE MAILBOX IS ON. Every send is written to the ferret's queue and answered once it is on disk; the deliverer, the one
+   * owner of delivery, hands each to `typeMessage` (below, as the transport's `type`) on its own turn. Armed at boot (a
+   * message accepted before a restart is delivered after it), told when a ferret's state changes, stopped with the daemon.
+   */
+  const timers = new CancellableTimers(kernel.clock);
+  /**
+   * WHAT THE FIRST LOOK ANSWERED, for the send still waiting on it. A send into a free box is typed within that look and is
+   * answered as the direct path answered (its disposition, or the refusal it threw); a message the look held back, or one
+   * that goes later, is answered `queued`. Only the sends being awaited are recorded, so nothing here grows.
+   */
+  const awaiting = new Set<string>();
+  const answers = new Map<string, SendResult>();
+  const failures = new Map<string, unknown>();
+  const deliverer = new QueueDeliverer(
+    {
+      store: deps.queueStore,
+      // The queue's own lock, never the ferret's send lane: the hand-over takes that one.
+      serial: new KeyedSerialExecutor(),
+      clock,
+      // One pending look per ferret, on its own scheduler: the tracker's keeps its own one pending look per ferret.
+      scheduler: new ClockSendScheduler(kernel.clock),
+      view: async id => await new SendPathDeliveryView(sendRepository, lookAtPane, { launching: () => false }).view(id),
+      transport: new SendPathQueueTransport(
+        {
+          type: async (id, request) => {
+            try {
+              const typed = await typeMessage(id, request);
+              if (awaiting.has(request.sendId)) answers.set(request.sendId, typed);
+              return typed;
+            } catch (error) {
+              if (awaiting.has(request.sendId)) failures.set(request.sendId, error);
+              throw error;
+            }
+          },
+          finishOwnDraft: async id => await sendActs.finishOwnDraft(id),
+        },
+        ledger,
+        tracker,
+      ),
+      sessions: () => [...roster],
+      sleep: async milliseconds => await timers.after(milliseconds).done,
+    },
+    { ...defaultQueueDeliverySettings },
+  );
+  void rostered.then(async () => {
+    if (!stopped) await deliverer.arm();
+  });
+  /** The ferret's session as the send path reads it, which a message to an unknown ferret is refused on (404). */
+  const queueingPorts = {
+    queue,
+    deliverer,
+    direct: {
+      send: async (request: SendMessageRequest) =>
+        await typeMessage(request.id, {
+          sendId: request.sendId,
+          message: request.message,
+          origin: AGENT_ORIGIN,
+          ...(request.by === undefined ? {} : { by: request.by }),
+          ...(request.by?.kind === 'ferretry' && request.by.feature === 'Warden'
+            ? { warden: true as const }
+            : request.by?.kind === 'ferretry' && request.by.feature === 'Agenda'
+              ? { agenda: true as const }
+              : { notice: true as const }),
+        }),
+      // A message waiting on a person is refused here, as it always was: it is not carried to wait behind a question.
+      authorize: async (id: SessionId) => await refuseWhileAsking(id),
+    },
+    target: async (id: SessionId) => await readTarget(id),
+    timer: (milliseconds: number) => timers.after(milliseconds),
+  };
+  const ownerSends = new QueueingSends(queueingPorts, 'human');
+  const wardenSends = new QueueingSends(queueingPorts, 'daemon', 'Warden');
+  const agendaSends = new QueueingSends(queueingPorts, 'daemon', 'Agenda');
+  const noticeSends = new QueueingSends(queueingPorts, 'daemon', 'Delivery');
+  /**
+   * An agent's credential that names no ferret (the Warden's or Agenda's token over the route, which carries no flag): it is
+   * the daemon's, never a person's, so it never takes the owner's lane.
+   */
+  const unnamedAgentSends = new QueueingSends(queueingPorts, 'daemon');
+  /**
+   * EVERY SEND PATH goes in here: the owner, a ferret, the Warden, Agenda and the daemon's own notices. The message is
+   * written to the queue, answered as the queue and the ledger say it stands (the same words a repeat of its id gets), and
+   * typed by the deliverer on its turn. A daemon notice to an interactive chat keeps the direct path (R3).
+   */
+  const submit = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
+    const stopped = TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status);
+    // Agenda's own words never revive a stopped ferret: refused before anything is kept, as the typing send refuses it.
+    if (request.agenda === true && stopped)
+      throw new SessionSendError(
+        'refused',
+        'the ferret is stopped and an Agenda message never revives it, so nothing was typed',
+      );
+    // The ferret's terminal is opened first, as the typing send opens it: a ferret with no terminal to reach, or one
+    // Ferrets will not let this caller touch, is refused here in plain words, before anything is kept or queued.
+    if (!stopped) await terminal.bind(ferret);
+    const unnamedAgent = request.origin.kind === 'agent' && request.senderSessionId === undefined;
+    const daemon = request.warden === true || request.agenda === true || request.notice === true || unnamedAgent;
+    const sends =
+      request.warden === true
+        ? wardenSends
+        : request.agenda === true
+          ? agendaSends
+          : request.notice === true
+            ? noticeSends
+            : unnamedAgent
+              ? unnamedAgentSends
+              : ownerSends;
+    // Refused before anything is kept, as the typing send refuses it: a message with nothing in it is no message.
+    const message = payloadOf(request.message);
+    const label = bannerLabel(request.label);
+    awaiting.add(request.sendId);
+    try {
+      const direct = await sends.send({
+        id: ferret,
+        sendId: request.sendId,
+        message,
+        ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+        ...(request.now === true ? { now: true } : {}),
+        ...(request.replyExpected === true ? { replyExpected: true } : {}),
+        ...(label === undefined ? {} : { label }),
+        ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
+        ...(daemon ? { origin: 'daemon' as const } : {}),
+      });
+      if (direct !== undefined) return direct;
+      // The look's own refusal reaches the sender only when it ended the message (failed, or typed and uncertain): one
+      // that only made it wait (a draft, a dialog) is the queue's to retry, so the sender is not told to send it again.
+      const failure = failures.get(request.sendId);
+      const state = (await queue.list(ferret)).find(entry => entry.id === request.sendId)?.state;
+      if (failure !== undefined && (state === 'failed' || state === 'typing')) throw failure;
+      return (
+        answers.get(request.sendId) ??
+        (await keptSend(ferret, request.sendId)) ?? {
+          ferret,
+          disposition: 'queued',
+          sendId: request.sendId,
+          fate: 'accepted',
+        }
+      );
+    } finally {
+      awaiting.delete(request.sendId);
+      answers.delete(request.sendId);
+      failures.delete(request.sendId);
+    }
+  };
+
   return {
     scheduler,
     prepared,
@@ -1262,7 +1462,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
     interruptFerret,
     mayGo,
     deliverAttachments,
-    typeMessage,
+    submit,
     keptSend,
     turnsOf,
     sendsStamp,
@@ -1281,6 +1481,8 @@ export function buildSendHalf(deps: SendHalfDeps) {
       // Only a CHANGE moves the stamp: the guard compares it with when a send was typed.
       const state = phase === 'working' ? 'working' : 'idle';
       if (turnStates.get(id)?.state !== state) turnStates.set(id, { state, at: kernel.clock.now() });
+      // A ferret's state moved (a turn ended, a dialog opened): what waits for it in the queue is looked at, if anything does.
+      void deliverer.changed(id).catch(() => undefined);
       // A turn boundary is when a held or queued send is read or dropped: one tracker look, only for a ferret with sends open.
       if (phase === 'working') return;
       void tracker
@@ -1296,12 +1498,17 @@ export function buildSendHalf(deps: SendHalfDeps) {
       if (id !== undefined) turnStates.delete(id);
     },
     isStopped: () => stopped,
-    /** Disarms the tracker, ends every parked waiter and cancels the scheduler's pending looks. */
-    stop: (): void => {
+    /**
+     * Disarms the tracker, ends every parked waiter and cancels the scheduler's pending looks; the deliverer finishes the
+     * hand-over it is in the middle of (never half a typing) and starts no other, then no timer of the queue is left.
+     */
+    stop: async (): Promise<void> => {
       stopped = true;
       disarm?.();
       for (const waiter of [...waiters.values()]) waiter.end();
       scheduler.cancelAll();
+      await deliverer.stop();
+      timers.cancelAll();
     },
   };
 }

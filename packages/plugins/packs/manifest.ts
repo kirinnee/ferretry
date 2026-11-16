@@ -70,7 +70,8 @@ export default definePlugin({
       route('POST /v1/pack/routing/clean-up', {
         minimum: 'operator',
         caller: 'person',
-        capability: packUse,
+        // c58-sec3 r1: a clean-up starts a ferret, so it asks what `POST /v1/ferrets` asks.
+        capability: cap('fleet', 'configure'),
         noStore: true,
         audit: { record: AUDIT_KINDS['session.opened'] },
         guard: { none: 'answers a run id and a sentence' },

@@ -6,7 +6,7 @@
  *
  * Order is the file names sorted as plain strings (not by locale), so the output is the same on every OS.
  */
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 
 /** One file of the folder, with the pieces an `emit` needs to name it. */
@@ -26,6 +26,8 @@ export interface FolderEmitInput {
   readonly dir: string;
   /** The generated file, relative to the package. */
   readonly out: string;
+  /** The text of one entry's file, for an `emit` that lists what a file declares (`read(entry.file)`). */
+  readonly read: (file: string) => string;
 }
 
 export interface FolderRegistrySpec {
@@ -88,7 +90,10 @@ export function folderRegistries(
       name: ident(spec.prefix, suffix !== '' && file.endsWith(suffix) ? file.slice(0, -suffix.length) : file),
       importPath: importPath(target, join(dir, file)),
     }));
-    out.set(`${pkg.rel}/${spec.out}`, spec.emit({ entries, dir: spec.dir, out: spec.out }));
+    out.set(
+      `${pkg.rel}/${spec.out}`,
+      spec.emit({ entries, dir: spec.dir, out: spec.out, read: file => readFileSync(join(dir, file), 'utf8') }),
+    );
   }
   return out;
 }
