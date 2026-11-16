@@ -12,7 +12,7 @@
  *   hook's stdout becomes context the ferret reads.
  *
  * The verbs are the ones the 5.0 CLI manifests declare (a CLI test reads the registry and fails on a verb that is not
- * there): `card show`, `board status`, `agenda ls`, `agenda show`, `logs --turn`, `transcript --tail`, `reply`. The only
+ * there): `task show`, `board status`, `agenda ls`, `agenda show`, `logs --turn`, `transcript --tail`, `reply`. The only
  * ferret-specific value is `FY_SESSION_ID`, which every launch hands the pane; nothing secret is read or printed.
  */
 
@@ -27,10 +27,10 @@ export const CLAUDE_REABSORB_LINES = [
   'You were just compacted, so part of your earlier context is gone. This is session %s.',
   'Before you continue, take back in everything you still owe:',
   '1. Your assigned task: read your first turn again with `fy logs %s --turn 1`; it names the turn file to read and follow.',
-  '2. Your card, if you have one: `fy card show <card id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
+  '2. Your board task, if you have one: `fy task show <task id>` (add --yaml for the editable form); if you do not know the id, `fy board status` says whether the board is on.',
   '3. Your open agenda items: `fy agenda ls`, then `fy agenda show <id>` for each.',
   '4. Messages you still owe a reply to: `fy transcript %s --tail`, then answer with `fy reply <id> <text>`.',
-  'Then carry on with your next step. Do not ask the owner for what your card or agenda already says.',
+  'Then carry on with your next step. Do not ask the owner for what your task or agenda already says.',
 ] as const;
 
 /** What the summary must keep, printed before the compaction. */
