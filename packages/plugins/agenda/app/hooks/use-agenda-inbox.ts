@@ -69,6 +69,9 @@ import { useEveryDaemon } from '@ferretry/app';
 import type { AgendaLaneEditor as LaneEditor } from '../../contract/app-hooks.ts';
 import { type BoardReadFailure, InboxBoardReads } from '../lib/inbox-board-reads.ts';
 
+/** Board's lane editor for the machine a card is on: the inbox is every machine's, and each has its own Board. */
+export type InboxLaneEditor = (daemonId: DaemonId, ...ask: Parameters<LaneEditor>) => ReturnType<LaneEditor>;
+
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AgendaInboxMachine {
   readonly connection: DaemonConnection;
@@ -122,8 +125,8 @@ export interface AgendaInbox {
   readonly boardOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaItem[];
   /** The resolved records one conversation's board holds: where the title of an agenda merged away is read. */
   readonly recordsOf?: (daemonId: DaemonId, sessionId: string) => readonly AgendaListRecord[];
-  /** Where Edit on a lane-proposal card goes: Board's lane editor (its `agenda.lane-proposal` hook). Absent: Edit only answers. */
-  readonly laneEditor?: LaneEditor;
+  /** Where Edit on a lane-proposal card goes: its machine's Board lane editor (`agenda.lane-proposal`). Absent: Edit only answers. */
+  readonly laneEditor?: InboxLaneEditor;
   /** Every machine's ferrets have been read and no board is on its first read: a card not listed now is not open. */
   readonly settled?: boolean;
   /** Paired machines this device has not unlocked: their items are not read, and each says so with an Unlock. */
@@ -524,7 +527,7 @@ export function useAgendaInboxModel(
 
 /**
  * The inbox of the half's one machine, over its runtime: its ferrets (read as soon as something draws them) and the
- * model above. `laneEditor` is Board's lane editor, from its `agenda.lane-proposal` hook.
+ * model above. `laneEditor` is each machine's Board lane editor, from its `agenda.lane-proposal` hook.
  */
 /**
  * The Inbox a view of this half draws. With the device's `fleet` and a shell that lists the machines
@@ -532,7 +535,11 @@ export function useAgendaInboxModel(
  * through the fleet's one agenda client, and a locked machine as a line that says so with an Unlock (it is not read).
  * Without them (a harness, a shell that lists none) it is this half's one machine.
  */
-export const useRuntimeInbox = (runtime: AgendaRuntime, laneEditor?: LaneEditor, fleet?: AgendaFleet): AgendaInbox => {
+export const useRuntimeInbox = (
+  runtime: AgendaRuntime,
+  laneEditor?: InboxLaneEditor,
+  fleet?: AgendaFleet,
+): AgendaInbox => {
   const rows = useEveryDaemon();
   const reach = useMemo(() => {
     if (fleet === undefined || rows.length === 0)

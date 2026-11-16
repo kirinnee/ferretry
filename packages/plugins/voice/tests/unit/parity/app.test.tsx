@@ -110,7 +110,13 @@ describe('the Voice app half', () => {
     ]);
     const half = halfOver();
     expect(Object.keys(half.settings)).toEqual(['voice', 'speedups']);
-    expect(Object.keys(half.panels)).toEqual(['dictation', 'read-aloud', 'onboarding-speedups', 'onboarding-voice']);
+    expect(Object.keys(half.panels)).toEqual([
+      'dictation',
+      'read-aloud',
+      'auto-read',
+      'onboarding-speedups',
+      'onboarding-voice',
+    ]);
   });
 
   test('S-0096 S-0472 S-0558 S-0572 the Voice tab mounts dictation, speed-up keys, transcription log and debug', async () => {

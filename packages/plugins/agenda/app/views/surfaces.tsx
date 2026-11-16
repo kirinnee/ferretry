@@ -5,6 +5,7 @@
 
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { AgendaFleet, fleetIn } from '../lib/agenda-fleet.ts';
+import { createAgendaMessagePanel } from './agenda-message-panel.tsx';
 import { createAgendaAskScreen } from './agenda-ask-screen.tsx';
 import { createAgendaLinePanel } from './agenda-line-panel.tsx';
 import { createAgendaModePanel } from './agenda-mode-panel.tsx';
@@ -19,6 +20,7 @@ export interface AgendaSurfaces {
     readonly 'ferret-agenda': AppComponent<PanelProps>;
     readonly 'ferret-agenda-line': AppComponent<PanelProps>;
     readonly 'ferret-agenda-mode': AppComponent<PanelProps>;
+    readonly 'agenda-message': AppComponent<PanelProps>;
   };
   readonly settings: { readonly agenda: AppComponent<SettingsProps> };
 }
@@ -36,6 +38,7 @@ export const createSurfaces = (client: PluginClient, holder?: object): AgendaSur
       'ferret-agenda': createAgendaPanel(runtime),
       'ferret-agenda-line': createAgendaLinePanel(runtime),
       'ferret-agenda-mode': createAgendaModePanel(runtime),
+      'agenda-message': createAgendaMessagePanel(runtime),
     },
     settings: { agenda: createAgendaSettings(runtime) },
   };

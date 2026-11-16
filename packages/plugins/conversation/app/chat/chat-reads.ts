@@ -29,6 +29,7 @@ import {
   SendRecordSchema,
 } from '../../contract/index.ts';
 import { readFerretQueue } from '../queue/send-queue.ts';
+import { readChatPrompt } from './chat-prompt.ts';
 import type { ChatReadApi } from './chat-refresh.ts';
 import { type ChatSession, chatSessionOf } from './chat-session.ts';
 import { readLedgerSends } from './send-ledger.ts';
@@ -129,8 +130,14 @@ export const readLogPage = async (
  * The ferret, as the chat draws it; the refresh checks it is the ferret it asked for. Parsed with the schema of what
  * Ferrets' route SERVES (its summary), never today's whole session view, which no 5.0 route answers (`chat-session.ts`).
  */
-const readChatSession = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<ChatSession> =>
-  chatSessionOf(FerretSummarySchema.parse(await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } })));
+const readChatSession = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<ChatSession> => {
+  // The observer's own word on the turn rides beside the summary; a prompt read that fails is "not live" (no turn is dated).
+  const [summary, prompt] = await Promise.all([
+    client.call('GET /v1/ferrets/:ferretId', { params: { ferretId } }),
+    readChatPrompt(client, ferretId),
+  ]);
+  return chatSessionOf(FerretSummarySchema.parse(summary), prompt);
+};
 
 /** The question the ferret is waiting on, as Conversation proved it against the transcript, or null. */
 export const readQuestion = async (client: Pick<PluginClient, 'call'>, ferretId: string): Promise<Question | null> =>

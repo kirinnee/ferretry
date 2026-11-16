@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { StoredRenderMetaSchema } from './wire-media.ts';
 import { FinderFileSchema, LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
+import { PromptWaitRecordSchema } from './wire-prompt.ts';
 
 /** An opaque or secret file is bytes the kernel never parses: the schema types the port, it checks nothing. */
 const BYTES = z.instanceof(Uint8Array);
@@ -47,6 +48,14 @@ export const QUESTION_ANSWERED_STATE = defineState({
   store: 'json',
   format: 1,
   schema: QuestionAnsweredSchema,
+});
+/** Where a ferret is in its waits on a permission prompt or a dialog, and the card held for it (`PromptWaitRecordSchema`). */
+export const PROMPT_WAIT_STATE = defineState({
+  name: 'prompt-wait',
+  path: '*/prompt-wait.json',
+  store: 'json',
+  format: 1,
+  schema: PromptWaitRecordSchema,
 });
 /** The hypermedia switch the owner set for one ferret; none means the mode's default (docs/hypermedia.md). */
 export const HypermediaSwitchSchema = z.strictObject({
@@ -145,6 +154,7 @@ export const CONVERSATION_STATE = [
   TURNS_STATE,
   QUESTION_STATE,
   QUESTION_ANSWERED_STATE,
+  PROMPT_WAIT_STATE,
   HYPERMEDIA_STATE,
   DRAFTS_STATE,
   ATTACHMENT_ORIGINAL_STATE,

@@ -188,7 +188,7 @@ const answerCard = (
   action: InboxAction,
 ): void => {
   inbox.deferred.schedule(card, action);
-  const editor = inbox.laneEditor?.(card.item, action);
+  const editor = inbox.laneEditor?.(card.daemonId, card.item, action);
   if (editor !== undefined) onNavigate(editor);
 };
 
@@ -1134,6 +1134,12 @@ export interface AgendaInboxPageProps {
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
+  /**
+   * Draws `children` (an open card, or its composer) over Board's hooks for THE CARD'S machine, not the page's: the
+   * Inbox is every machine's, so Done · closes, a notice's Start and Close and `&F12` are read per card's daemon.
+   * Absent: the card draws without Board.
+   */
+  readonly cardBoard?: (daemonId: DaemonId, children: ReactNode) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
   /** How a "Not good" takes files (`AnswerFilePorts`). Absent: its box is words alone. */
@@ -1501,6 +1507,7 @@ export function AgendaInboxPage({
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
+  cardBoard,
   clearPort,
   answerPorts,
   onItemOpened,
@@ -1626,6 +1633,7 @@ export function AgendaInboxPage({
       ? inbox.reading && !empty
       : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readConversation };
+  const boarded = (card: InboxCard, node: ReactNode): ReactNode => cardBoard?.(card.daemonId, node) ?? node;
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -2009,7 +2017,7 @@ export function AgendaInboxPage({
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);
                 const previous = index > 0 ? order[index - 1] : undefined;
-                return (
+                const opened = (
                   <OpenItem
                     act={act}
                     key={card.key}
@@ -2027,6 +2035,7 @@ export function AgendaInboxPage({
                     skip={skipCard}
                   />
                 );
+                return boarded(card, opened);
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
@@ -2074,9 +2083,12 @@ export function AgendaInboxPage({
                   ref={composerRoot}
                 >
                   <FocusHandoff key={deck[0].key} flag={composerHandoff} root={composerRoot} />
-                  {renderComposer(
+                  {boarded(
                     deck[0],
-                    deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    renderComposer(
+                      deck[0],
+                      deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    ),
                   )}
                 </div>
               )}
