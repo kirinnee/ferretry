@@ -705,15 +705,13 @@ describe('ClaudeHarness', () => {
 
     expect(result.ok && result.value.harnessConversation).toBe('conv-1');
     expect(started.cwd).toBe('/work');
-    expect(started.command?.slice(0, 13)).toEqual([
+    expect(started.command?.slice(0, 11)).toEqual([
       'env',
       '-u',
       'CLAUDE_CODE_CHILD_SESSION',
       `CLAUDE_CONFIG_DIR=${HOME}`,
       'DISABLE_AUTOUPDATER=1',
       'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
-      'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
-      'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,

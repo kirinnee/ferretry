@@ -51,17 +51,16 @@ export const CLAUDE_HOME_ENV = { DISABLE_AUTOUPDATER: '1' } as const;
 
 /**
  * O11b (Claude Code 2.1.317 binary strings), set in the launch's process environment like {@link CLAUDE_HOME_ENV} but
- * deliberately OUTSIDE the launch-settings fingerprint: none of them changes what an agent may do, so a ferret already
- * running never reads as outdated for them.
+ * deliberately OUTSIDE the launch-settings fingerprint: it changes what an agent may do in no way, so a ferret already
+ * running never reads as outdated for it.
  *
  * - `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`: the "How is Claude doing this session?" survey.
- * - `CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT`: the dangerous-rm confirmation for `rm` inside `bash -c` / `sh -c`.
- * - `CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT`: the same for a path on a mounted drive.
+ *
+ * The two dangerous-rm switches are NOT here: they skip the check rather than answer a prompt, so they are part of
+ * {@link CLAUDE_RM_WAIVER_ENV}.
  */
 export const CLAUDE_PROMPT_ENV = {
   CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: '1',
-  CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT: '1',
-  CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT: '1',
 } as const;
 
 /**
@@ -73,11 +72,24 @@ export const CLAUDE_UNSET_ENV = ['CLAUDE_CODE_CHILD_SESSION'] as const;
 /**
  * The full dangerous-rm waiver. A LOOSENING: it is set only when the `dangerousRmWaiver` setting
  * (`config/harness-claude-code.yaml`, default off, held for the owner when an agent turns it on) is true AND the ferret
- * runs in bypass mode, where the owner has already waived permission prompts.
+ * runs in bypass mode, where the owner has already waived permission prompts. Without it a dangerous `rm` is always
+ * denied (owner ruling 2026-11-15).
+ *
+ * All three variables belong together. Claude Code 2.1.317 treats the last two as SKIPS of the dangerous-rm check, not
+ * answers to its prompt: on a mounted drive the "Dangerous rm operation detected … requires explicit approval" check
+ * does not run, and inside `bash -c` / `sh -c` no check runs at all.
+ *
+ * - `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`: the full waiver.
+ * - `CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT`: no rm check for `rm` inside `bash -c` / `sh -c`.
+ * - `CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT`: no rm check for a path on a mounted drive.
  */
-export const CLAUDE_RM_WAIVER_ENV = { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } as const;
+export const CLAUDE_RM_WAIVER_ENV = {
+  CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1',
+  CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT: '1',
+  CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT: '1',
+} as const;
 
-/** Whether a launch sets {@link CLAUDE_RM_WAIVER_ENV}: the setting on and bypass mode, never either alone. */
+/** Whether a launch sets {@link CLAUDE_RM_WAIVER_ENV} (all three variables): the setting on and bypass mode, never either alone. */
 export const rmWaiverApplies = (dangerousRmWaiver: boolean, permissionMode: HarnessConfig['permissionMode']): boolean =>
   dangerousRmWaiver && permissionMode === 'skip';
 

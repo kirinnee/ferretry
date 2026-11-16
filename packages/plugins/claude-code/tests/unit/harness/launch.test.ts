@@ -283,8 +283,6 @@ describe('launchCommand', () => {
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
       'DISABLE_AUTOUPDATER=1',
       'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
-      'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
-      'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,

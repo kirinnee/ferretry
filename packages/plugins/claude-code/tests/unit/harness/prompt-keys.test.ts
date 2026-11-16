@@ -99,22 +99,43 @@ describe('the launch environment (O11b)', () => {
     should(assignments(argv())).containEql('CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1');
   });
 
-  it('6. should disable the inline-shell rm prompt (rm inside bash -c / sh -c)', () => {
-    should(assignments(argv())).containEql('CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1');
-  });
-
-  it('7. should disable the mounted-drive rm prompt', () => {
-    should(assignments(argv())).containEql('CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1');
-  });
-
-  it('5-7. should set them in both permission modes', () => {
+  it('5. should set the survey switch in both permission modes, waiver or not', () => {
     for (const permissionMode of ['auto', 'skip'] as const)
-      for (const name of [
-        'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
-        'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
-        'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
-      ])
-        should(assignments(argv({ permissionMode }))).containEql(name);
+      for (const dangerousRmWaiver of [false, true])
+        should(assignments(argv({ permissionMode, dangerousRmWaiver }))).containEql(
+          'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
+        );
+  });
+
+  // The two switches SKIP the dangerous-rm check (they do not deny it): they are part of the waiver, never a default.
+  const RM_SKIPS = [
+    'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
+    'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
+  ] as const;
+
+  it('6-7. should not set the inline-shell or mounted-drive rm switches by default', () => {
+    for (const name of RM_SKIPS) should(assignments(argv())).not.containEql(name);
+  });
+
+  it('6-7. should not set the rm switches in any non-bypass mode, with or without the waiver', () => {
+    for (const dangerousRmWaiver of [undefined, false, true])
+      for (const name of RM_SKIPS)
+        should(
+          assignments(
+            argv({ permissionMode: 'auto', ...(dangerousRmWaiver === undefined ? {} : { dangerousRmWaiver }) }),
+          ),
+        ).not.containEql(name);
+  });
+
+  it('6-7. should not set the rm switches in bypass mode without the waiver', () => {
+    for (const options of [{}, { dangerousRmWaiver: false }])
+      for (const name of RM_SKIPS)
+        should(assignments(argv({ permissionMode: 'skip', ...options }))).not.containEql(name);
+  });
+
+  it('6-7. should set the rm switches only with the waiver AND bypass mode', () => {
+    for (const name of RM_SKIPS)
+      should(assignments(argv({ permissionMode: 'skip', dangerousRmWaiver: true }))).containEql(name);
   });
 
   it('8. should unset CLAUDE_CODE_CHILD_SESSION for the launched Claude, before any assignment', () => {
@@ -240,20 +261,32 @@ describe('the process Claude is exec’d as (O11b, keys 5-9 end to end)', () => 
     }
   };
 
-  it('should remove CLAUDE_CODE_CHILD_SESSION even when the parent environment has it, and set 5-7', async () => {
+  it('should remove CLAUDE_CODE_CHILD_SESSION even when the parent environment has it, and set only the survey switch', async () => {
     const seen = await run({ CLAUDE_CODE_CHILD_SESSION: '1' }, {});
     should(seen.CLAUDE_CODE_CHILD_SESSION).equal('unset');
     should(seen.CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY).equal('1');
-    should(seen.CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT).equal('1');
-    should(seen.CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT).equal('1');
+    should(seen.CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT).equal('unset');
+    should(seen.CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT).equal('unset');
     should(seen.CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS).equal('unset');
   });
 
-  it('should give the full waiver only with the setting on and bypass mode', async () => {
-    const waiver = 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS';
-    should((await run({}, { dangerousRmWaiver: true }))[waiver]).equal('1');
-    should((await run({}, { dangerousRmWaiver: true, permissionMode: 'auto' }))[waiver]).equal('unset');
-    should((await run({}, { dangerousRmWaiver: false }))[waiver]).equal('unset');
+  it('should give the full waiver and both rm switches only with the setting on and bypass mode', async () => {
+    const names = [
+      'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS',
+      'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT',
+      'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT',
+    ] as const;
+    const on = await run({}, { dangerousRmWaiver: true });
+    for (const name of names) should(on[name]).equal('1');
+    for (const options of [
+      { dangerousRmWaiver: true, permissionMode: 'auto' as const },
+      { dangerousRmWaiver: false },
+      {},
+      { permissionMode: 'auto' as const },
+    ]) {
+      const seen = await run({}, options);
+      for (const name of names) should(seen[name]).equal('unset');
+    }
   });
 });
 

@@ -90,15 +90,13 @@ describe('the launch argv', () => {
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
-    expect(argv.slice(0, 13)).toEqual([
+    expect(argv.slice(0, 11)).toEqual([
       'env',
       '-u',
       'CLAUDE_CODE_CHILD_SESSION',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
       'DISABLE_AUTOUPDATER=1',
       'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
-      'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
-      'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
