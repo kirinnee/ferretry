@@ -547,6 +547,8 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
 
   test('R-0073 today’s reach in 5.0’s names, path by path: each of today’s 14 entries where its file holds loosenings', () => {
     for (const path of [
+      'browsers.yaml',
+      'usage.yaml',
       'warden.yaml',
       'voice.yaml',
       'limits.yaml',
@@ -581,9 +583,7 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'presets/x.yaml',
       'components/mcp/github.yaml',
       'components/modelSets/fast.yaml',
-      // Not mapped until their loosenings are ported, or holding what today's agent never reached (GAP lines).
-      'browsers.yaml',
-      'usage.yaml',
+      // Holding what today's agent never reached (GAP lines).
       // Only the two exact harness files are reached: no other `harness-*` name, no folder, no path around them.
       'harness-gemini.yaml',
       'harness-claude-code.yml',
