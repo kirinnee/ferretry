@@ -30,6 +30,8 @@ export interface MoveTargetView {
   readonly status: SessionStatus;
   /** Whose turn it is (the turn watch's answer); only `working` means a turn is in progress. See {@link InflightReport.midTurn}. */
   readonly turnState?: SessionTurnState;
+  /** The session is stopped on a tool-permission prompt; see `AssembleInflightReportInput.awaitingPermission`. */
+  readonly awaitingPermission?: boolean;
   readonly turn: number;
   readonly openTools: readonly string[];
   readonly subprocessSince?: string;
@@ -101,6 +103,7 @@ export class MovePreflight {
     const report = assembleInflightReport({
       status: view.status,
       ...(view.turnState === undefined ? {} : { turnState: view.turnState }),
+      ...(view.awaitingPermission === true ? { awaitingPermission: true } : {}),
       turn: view.turn,
       openTools,
       processes,

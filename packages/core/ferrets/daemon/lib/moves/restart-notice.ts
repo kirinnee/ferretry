@@ -65,8 +65,11 @@ function headline(interrupted: number): string {
   return `Ferretry restarted you mid-turn, and ${interrupted} ${interrupted === 1 ? 'command was' : 'commands were'} interrupted.`;
 }
 
-/** What was stopped, in words: `2 read-only commands were stopped (fy wait mwxx…, rg foo); re-run …`. */
-function stoppedSentence(stopped: readonly string[]): string {
+/**
+ * What was stopped, in words: `2 commands were stopped (fy wait mwxx…, rg foo); re-run …`. A session that was at its
+ * prompt had no turn to continue, so what it had running was a background command.
+ */
+function stoppedSentence(stopped: readonly string[], background = false): string {
   const named = stopped.slice(0, NAMED_LIMIT).map(shortened);
   const more = stopped.length - named.length;
   const list = `${named.join(', ')}${more > 0 ? `, and ${more} more` : ''}`;
@@ -75,7 +78,31 @@ function stoppedSentence(stopped: readonly string[]): string {
     waits.length === 0
       ? ''
       : ` Wait again for ${waits.map(id => `\`${id}\``).join(', ')} (\`fy wait ${waits[0]}\`): it was not answered.`;
-  return `${stopped.length} ${stopped.length === 1 ? 'command was' : 'commands were'} stopped (${list}); re-run ${stopped.length === 1 ? 'it' : 'them'} if you still need the output.${again}`;
+  const noun = background ? 'background command' : 'command';
+  const need = background ? 'you still need it' : 'you still need the output';
+  const subject = stopped.length === 1 ? `1 ${noun} was` : `${stopped.length} ${noun}s were`;
+  return `${subject} stopped (${list}); re-run ${stopped.length === 1 ? 'it' : 'them'} if ${need}.${again}`;
+}
+
+function atPromptNotice(
+  report: InflightReport,
+  reportPath: string,
+  mode: 'auto' | 'interactive',
+  interrupted: number,
+  stopped: readonly string[],
+): string | undefined {
+  const unchecked = report.blindSpots.length > 0;
+  if (interrupted === 0 && !unchecked && stopped.length === 0) return mode === 'auto' ? quietNotice() : undefined;
+  const opening =
+    interrupted === 0 && !unchecked
+      ? 'Ferretry restarted you.'
+      : `Ferretry restarted you, and ${unchecked ? 'what was running could not be checked' : `${interrupted} ${interrupted === 1 ? 'command was' : 'commands were'} interrupted`}.`;
+  const what = stopped.length === 0 ? '' : ` ${stoppedSentence(stopped, true)}`;
+  const pointer =
+    interrupted === 0 && !unchecked
+      ? ''
+      : ` Before re-running anything, read ${reportPath}: it lists what was running and what to check.`;
+  return `${opening}${what}${pointer}`;
 }
 
 /**
@@ -88,6 +115,10 @@ function stoppedSentence(stopped: readonly string[]): string {
  * lost output, and telling it "nothing was interrupted" would leave it never waiting again. It is
  * Ferretry's own sentence — Ferretry is its subject, with no tag or footer — and the turn it rides carries
  * who it is from as metadata, so the app draws it as Ferretry's, never as the owner's words.
+ *
+ * A session that was NOT working ({@link InflightReport.working}: 5.0's `running` also covers one sitting at its prompt)
+ * is never told its turn was interrupted: with background commands stopped it is told so, without "continue"; with
+ * nothing stopped it gets the quiet notice (auto) or nothing (interactive), as on base.
  *
  * A session that was mid-turn with nothing open ({@link InflightReport.midTurn}) is told its turn was interrupted and
  * to re-read where it stopped; that is the whole of what it needs, so no report is pointed at.
@@ -104,6 +135,10 @@ export function restartNotice(
 ): string | undefined {
   const interrupted = interruptedCount(report);
   const stopped = isBusyStatus(report.status) ? stoppedCommands(report) : [];
+  // Not working (5.0 `running` at its prompt): there is no turn to continue, so neither "mid-turn" nor the pick-up
+  // sentence is true. What it had running in the background is named; with nothing stopped it is the quiet notice.
+  if (isBusyStatus(report.status) && !report.working)
+    return atPromptNotice(report, reportPath, mode, interrupted, stopped);
   if (!isBusyStatus(report.status) || (interrupted === 0 && report.blindSpots.length === 0 && stopped.length === 0))
     return report.midTurn ? midTurnNotice() : mode === 'auto' ? quietNotice() : undefined;
   const opening =

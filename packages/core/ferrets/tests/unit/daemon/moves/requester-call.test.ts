@@ -9,7 +9,7 @@ import { inventoryProcesses, type ProcRow } from '../../../../daemon/lib/moves/p
 import { requesterCall } from '../../../../daemon/lib/moves/requester-call.ts';
 
 const PIPELINE =
-  "fy migrate gustavo --agent claude-llm3 2>&1 | grep -v direnv | grep -v '\\[safe\\]' | grep -E '✖|refused'";
+  "fy ferret move gustavo --agent claude-llm3 2>&1 | grep -v direnv | grep -v '\\[safe\\]' | grep -E '✖|refused'";
 const wrap = (payload: string): string =>
   "/usr/bin/zsh -c source /home/kirin/.ferretry/fleet/homes/h/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '" +
   payload.replaceAll("'", `'"'"'`) +
@@ -30,12 +30,12 @@ const row = (pid: number, ppid: number, argv: string, startedSecondsAgo = 12): P
   startedSecondsAgo,
 });
 
-/** The real false positive: the tool shell, `fy migrate`, and three `ugrep` consumers, all 12 s old. */
+/** The real false positive: the tool shell, `fy ferret move`, and three `ugrep` consumers, all 12 s old. */
 const selfMoveRows: readonly ProcRow[] = [
   row(200, PANE, 'claude --resume x', 5000),
   row(300, 200, wrap(PIPELINE)),
   row(310, 300, wrap(PIPELINE)), // the pipeline's subshell: same argv, a fork of the tool shell
-  row(320, 310, 'fy migrate gustavo --agent claude-llm3'),
+  row(320, 310, 'fy ferret move gustavo --agent claude-llm3'),
   row(321, 310, 'ugrep -v direnv'),
   row(322, 310, 'ugrep -v \\[safe\\]'),
   row(323, 310, 'ugrep -E ✖|refused'),
@@ -79,15 +79,15 @@ describe('requesterCall', () => {
   });
 
   it('should exclude nothing when the requester is not under a harness tool shell', () => {
-    // A human typed `fy migrate` into the pane's own shell: its parent is the pane, not a harness.
-    const rows = [row(300, PANE, 'zsh'), row(320, 300, 'fy migrate x --agent y')];
+    // A human typed `fy ferret move` into the pane's own shell: its parent is the pane, not a harness.
+    const rows = [row(300, PANE, 'zsh'), row(320, 300, 'fy ferret move x --agent y')];
     const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
     should(requesterCall(processes, 320)).deepEqual([]);
   });
 });
 
 describe('a ferret moving itself', () => {
-  it('should not be refused for its own tool shell, `fy migrate` and three ugrep consumers', async () => {
+  it('should not be refused for its own tool shell, `fy ferret move` and three ugrep consumers', async () => {
     const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)), panes);
     const tool = {
       type: 'tool.use',
@@ -140,13 +140,13 @@ describe('what may stand between the `fy` process and its tool shell', () => {
     return { preflight, report: await preflight.inspect(view(), [], { requesterPid: 320 }) };
   };
 
-  it('should NOT exclude a long-running script that calls `fy migrate me` (a slot-watch loop)', async () => {
-    // Arrange — tool shell → `bash slot-watch.sh` (loops, retrying the migrate) → `fy migrate me`.
+  it('should NOT exclude a long-running script that calls `fy ferret move me` (a slot-watch loop)', async () => {
+    // Arrange — tool shell → `bash slot-watch.sh` (loops, retrying the migrate) → `fy ferret move me`.
     const rows = [
       row(200, PANE, 'claude --resume x', 5000),
       row(300, 200, wrap('bash slot-watch.sh')),
       row(310, 300, 'bash slot-watch.sh', 900),
-      row(320, 310, 'fy migrate me --agent claude-llm3'),
+      row(320, 310, 'fy ferret move me --agent claude-llm3'),
     ];
     const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
 
@@ -161,12 +161,17 @@ describe('what may stand between the `fy` process and its tool shell', () => {
   });
 
   it('should NOT exclude an interpreter, `watch` or `timeout` between them either', () => {
-    for (const between of ['node loop.js', 'python3 retry.py', 'watch -n 5 fy migrate me', 'bun run try-advance.ts']) {
+    for (const between of [
+      'node loop.js',
+      'python3 retry.py',
+      'watch -n 5 fy ferret move me',
+      'bun run try-advance.ts',
+    ]) {
       const rows = [
         row(200, PANE, 'claude --resume x', 5000),
         row(300, 200, wrap('x')),
         row(310, 300, between, 900),
-        row(320, 310, 'fy migrate me --agent claude-llm3'),
+        row(320, 310, 'fy ferret move me --agent claude-llm3'),
       ];
       const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
       should(requesterCall(processes, 320)).deepEqual([]);
@@ -176,15 +181,15 @@ describe('what may stand between the `fy` process and its tool shell', () => {
   it('should still exclude a pipeline subshell (the tool shell’s own command line) and a `sh -c` between them', () => {
     const forked = [
       row(200, PANE, 'claude --resume x', 5000),
-      row(300, 200, wrap('fy migrate me | tail')),
-      row(310, 300, wrap('fy migrate me | tail')),
-      row(320, 310, 'fy migrate me --agent claude-llm3'),
+      row(300, 200, wrap('fy ferret move me | tail')),
+      row(310, 300, wrap('fy ferret move me | tail')),
+      row(320, 310, 'fy ferret move me --agent claude-llm3'),
     ];
     const dashC = [
       row(200, PANE, 'claude --resume x', 5000),
-      row(300, 200, wrap('sh -c "fy migrate me"')),
-      row(310, 300, 'sh -c fy migrate me'),
-      row(320, 310, 'fy migrate me --agent claude-llm3'),
+      row(300, 200, wrap('sh -c "fy ferret move me"')),
+      row(310, 300, 'sh -c fy ferret move me'),
+      row(320, 310, 'fy ferret move me --agent claude-llm3'),
     ];
     for (const rows of [forked, dashC]) {
       const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
@@ -214,5 +219,40 @@ describe('the report carries whose turn it is to the gate', () => {
 
     should(working.midTurn).be.true();
     should(prompt.midTurn).be.false();
+  });
+});
+
+describe('requesterCall — what else the chain shells were doing', () => {
+  const chain = (payload: string, call = 'fy ferret move me --agent claude-llm3'): readonly ProcRow[] => [
+    row(200, PANE, 'claude --resume x', 5000),
+    row(300, 200, wrap(payload)),
+    row(320, 300, call),
+  ];
+  const excluded = (rows: readonly ProcRow[]) =>
+    requesterCall((observe(rows) as { processes: readonly ProcessInfo[] }).processes, 320);
+
+  it('should exclude a shell that only ran the move, with a safe `cd`, `ls` or `echo` around it', () => {
+    for (const payload of ['fy ferret move me', 'cd /tmp && fy ferret move me', 'echo hi; fy ferret move me --agent x'])
+      should(excluded(chain(payload))).deepEqual([320, 300]);
+  });
+
+  it('should keep a shell visible that did other work around the move', () => {
+    for (const payload of [
+      'git stash && fy ferret move me && git stash pop',
+      'while true; do ./advance.sh; fy ferret move me; sleep 60; done',
+      'bun run deploy.ts; fy ferret move me',
+      "bash -c 'git stash && fy ferret move me && git stash pop'",
+    ])
+      should(excluded(chain(payload))).deepEqual([]);
+  });
+
+  it('should exclude nothing when the requester is not a move request', () => {
+    for (const call of ['git push origin main', 'fy wait me', 'fy send me hi', 'fy ferret move me $(rm -rf x)'])
+      should(excluded(chain('fy ferret move me', call))).deepEqual([]);
+  });
+
+  it('should accept the fy5 preview and `fy ferret move`', () => {
+    should(excluded(chain('fy ferret move me', 'fy ferret move me --agent x'))).deepEqual([320, 300]);
+    should(excluded(chain('fy5 ferret move me', 'fy5 ferret move me'))).deepEqual([320, 300]);
   });
 });

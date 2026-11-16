@@ -55,6 +55,13 @@ export interface InflightReport {
    * any inspection failed — that is a blind spot.
    */
   readonly midTurn: boolean;
+  /**
+   * The session was WORKING when it was inspected: busy and not at its prompt, waiting on a tool-permission prompt, or
+   * reporting a subprocess. It is the one fact the restart notice keys on for "your turn was interrupted — continue":
+   * 5.0's status `running` also covers a session at its prompt (`your-turn`), which has no turn to continue. Both the
+   * turn state and this read are up to one observer tick (~2 s) behind the pane — a declared GAP, see the module doc.
+   */
+  readonly working: boolean;
   /** The call that asked for this move, left out of {@link processes}: see `requesterCall`. */
   readonly requesterCall?: readonly ProcessInfo[];
   /** Everything the inspection could not rule out, in the order it was discovered. */
@@ -70,6 +77,11 @@ export interface AssembleInflightReportInput {
    * as one mid-turn, so ONLY `working` means a turn is in progress. Absent when the watch has no answer yet.
    */
   readonly turnState?: SessionTurnState;
+  /**
+   * The session is stopped on a tool-permission prompt (`permissionRequest` is set on its state): the tool call it
+   * asked to make is pending and a move loses it, so it counts as mid-turn even though 5.0 reports `needs-input`.
+   */
+  readonly awaitingPermission?: boolean;
   readonly turn: number;
   readonly openTools: readonly OpenToolInfo[];
   readonly processes: ProcessObservation;
@@ -95,6 +107,11 @@ export function isBusyStatus(status: SessionStatus): boolean {
 /**
  * Combines observable signals into a fail-closed move safety report.
  *
+ * DECLARED GAP — `turnState` lags the pane by up to one observer tick (~2 s): a turn that has only just started can
+ * still read `your-turn`, so a move in that window is judged idle and the new session gets the quiet notice (or the
+ * background-commands one) rather than the pick-up wording. Accepted: the window is small, the conversation is resumed
+ * as it was either way, and closing it would need a synchronous pane read the gate does not otherwise make.
+ *
  * A blind spot — an inspection that failed, or a session that reports a subprocess the inspection cannot
  * find — contributes an `unknown` verdict, because the gate must refuse what it cannot see. A session that
  * is merely mid-turn with nothing open is {@link InflightReport.midTurn}, `re_armable`, and does not block.
@@ -106,7 +123,12 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   const blindSpots: string[] = [...(input.blindSpots ?? [])];
   if (inspection.kind === 'unobservable') blindSpots.push(inspection.reason);
   // A session at its prompt is not working: `running` is also what 5.0 reports while waiting for the owner.
-  const atPrompt = input.status === 'running' && (input.turnState === 'your-turn' || input.turnState === 'needs-input');
+  // ...unless it is stopped on a tool-permission prompt, which is a pending tool call and so work in progress.
+  const awaitingPermission = input.awaitingPermission === true;
+  const atPrompt =
+    input.status === 'running' &&
+    !awaitingPermission &&
+    (input.turnState === 'your-turn' || input.turnState === 'needs-input');
   const claimsWork = (busyStatuses.has(input.status) && !atPrompt) || input.subprocessSince !== undefined;
   // What was really there: the harness's own helpers (`fy mcp serve`, the statusline) are in every ferret's pane and say
   // nothing about what the turn was doing, so they are not counted — only what the agent itself started is.
@@ -117,7 +139,7 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   // and a harness-reported subprocess the walk cannot find is a real discrepancy, so both stay blind spots.
   const midTurn =
     inspection.kind === 'observed' &&
-    input.turnState === 'working' &&
+    (input.turnState === 'working' || awaitingPermission) &&
     busyStatuses.has(input.status) &&
     input.subprocessSince === undefined &&
     blindSpots.length === 0 &&
@@ -145,6 +167,7 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
     codexBackgroundTerminals: discrepancy,
     discrepancy,
     midTurn,
+    working: claimsWork,
     blindSpots,
     worstVerdict: verdicts.length === 0 ? 'safe_to_kill' : worstVerdict(verdicts),
     subprocessSince: input.subprocessSince,

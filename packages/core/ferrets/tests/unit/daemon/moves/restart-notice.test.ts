@@ -195,3 +195,70 @@ describe('restartNotice', () => {
     );
   });
 });
+
+describe('restartNotice — a session at its prompt is never told to continue', () => {
+  const stray = (argv: string): ProcessInfo => ({ pid: 910, argv, verdict: 'safe_to_kill' });
+  const MID_TURN_WORDS = /mid-turn|mid-way|continue from there/u;
+  const atPrompt = (processes: readonly ProcessInfo[]) =>
+    report({ status: 'running', turnState: 'your-turn', processes: { kind: 'observed', processes } });
+
+  it('should say only that background commands were stopped for running + your-turn + a stray safe process', () => {
+    for (const argv of ['eza --icons auto --git -la', 'sleep 30', 'fy wait mwxx1234']) {
+      const idle = atPrompt([stray(argv)]);
+      should(idle.working).be.false();
+      for (const mode of ['interactive', 'auto'] as const) {
+        const notice = restartNotice(idle, REPORT, mode) ?? '';
+        should(notice).match(/1 background command was stopped/u);
+        should(notice).match(/re-run it if you still need it/u);
+        should(notice).not.match(MID_TURN_WORDS);
+        should(notice).not.match(/nothing was interrupted/u);
+      }
+    }
+  });
+
+  it('should still ask the agent to wait again for a stopped fy wait, without the pick-up sentence', () => {
+    const notice = restartNotice(atPrompt([stray('fy wait mwxx1234')]), REPORT, 'auto') ?? '';
+    should(notice).match(/Wait again for `mwxx1234`/u);
+    should(notice).not.match(MID_TURN_WORDS);
+  });
+
+  it('should say only that for an idle session with a re-armable background job', () => {
+    const idle = atPrompt([{ pid: 911, argv: 'bun test', verdict: 're_armable' }]);
+    const notice = restartNotice(idle, REPORT, 'interactive') ?? '';
+    should(notice).match(/background command was stopped \(bun test\)/u);
+    should(notice).not.match(MID_TURN_WORDS);
+  });
+
+  it('should give the quiet notice (auto) or nothing (interactive) for an idle session with nothing stopped', () => {
+    const idle = atPrompt([]);
+    should(restartNotice(idle, REPORT, 'auto')).startWith('Ferretry restarted you, and nothing was interrupted.');
+    should(restartNotice(idle, REPORT, 'interactive')).be.undefined();
+  });
+
+  it('should still use the mid-turn wording for running + working + a stopped fy wait', () => {
+    const working = report({
+      status: 'running',
+      turnState: 'working',
+      processes: { kind: 'observed', processes: [stray('fy wait mwxx1234')] },
+    });
+    should(working.working).be.true();
+    const notice = restartNotice(working, REPORT, 'auto') ?? '';
+    should(notice).match(/mid-turn/u);
+    should(notice).match(/continue from there/u);
+    should(notice).match(/Wait again for `mwxx1234`/u);
+  });
+
+  it('should treat a session waiting on a tool-permission prompt as mid-turn, losing a pending tool call', () => {
+    const waiting = report({
+      status: 'running',
+      turnState: 'needs-input',
+      awaitingPermission: true,
+      processes: { kind: 'observed', processes: [] },
+    });
+    should(waiting.midTurn).be.true();
+    should(waiting.working).be.true();
+    should(restartNotice(waiting, REPORT, 'auto')).match(/mid-turn/u);
+    // needs-input WITHOUT a pending permission stays at its prompt.
+    should(report({ status: 'running', turnState: 'needs-input' }).working).be.false();
+  });
+});

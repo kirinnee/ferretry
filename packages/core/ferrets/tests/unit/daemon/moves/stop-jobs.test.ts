@@ -55,6 +55,7 @@ const report = (processes: readonly ProcessInfo[]): InflightReport => ({
   discrepancy: 0,
   blindSpots: [],
   midTurn: false,
+  working: false,
   worstVerdict: 'unknown',
 });
 

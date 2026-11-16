@@ -32,6 +32,7 @@ import {
   tmuxValueFlags,
   writingGitConfigFlags,
 } from './command-tables.ts';
+import { namesLongOption, normalizeLongOptions } from './long-options.ts';
 import { worstVerdict, type InflightVerdict } from './verdict.ts';
 
 /**
@@ -83,15 +84,21 @@ function headIndex(values: readonly string[], head: string): number {
   return values.findIndex(value => basename(unquote(value)) === head);
 }
 
+/** The long options of `git config` that write; each also reads as any prefix of it. */
+const gitConfigWritingLong: readonly string[] = [...writingGitConfigFlags].filter(flag => flag.startsWith('--'));
+
 /**
  * `git config a b` writes the value `b`; `git config a` reads it. Operand counting is the only way
  * to tell them apart, and an unrecognised shape counts as a write.
  */
-function classifyGitConfig(values: readonly string[], from: number): InflightVerdict {
+function classifyGitConfig(raw: readonly string[], from: number): InflightVerdict {
+  // git accepts any unambiguous prefix of a long option and `--opt=value`: a writing flag is looked for in the whole
+  // command first, in its normalised spelling, so no reading flag before it can hide it.
+  const values = [...raw.slice(0, from), ...normalizeLongOptions(raw.slice(from), gitConfigWritingLong)];
+  if (values.slice(from).some(value => writingGitConfigFlags.has(value))) return 'destructive_to_interrupt';
   let operands = 0;
   for (let position = from; position < values.length; position++) {
     const value = values[position] ?? '';
-    if (writingGitConfigFlags.has(value)) return 'destructive_to_interrupt';
     if (readingGitConfigFlags.has(value)) return 'safe_to_kill';
     if (!value.startsWith('-')) operands++;
   }
@@ -176,21 +183,21 @@ const guardedHeads: ReadonlyMap<string, (rest: readonly string[], lossy: boolean
   [
     'yq',
     rest =>
-      rest.some(value => hasShortFlag(value, 'i') || hasShortFlag(value, 's') || /^--(inplace|split-exp)\b/.test(value))
+      rest.some(value => hasShortFlag(value, 'i') || hasShortFlag(value, 's')) || namesLongOption(rest, yqWriting)
         ? 'destructive_to_interrupt'
         : 'safe_to_kill',
   ],
   [
     'sort',
     rest =>
-      rest.some(value => hasShortFlag(value, 'o') || /^--(output|compress-program)\b/.test(value))
+      rest.some(value => hasShortFlag(value, 'o')) || namesLongOption(rest, sortWriting)
         ? 'destructive_to_interrupt'
         : 'safe_to_kill',
   ],
   [
     'tree',
     rest =>
-      rest.some(value => hasShortFlag(value, 'o') || /^--output\b/.test(value))
+      rest.some(value => hasShortFlag(value, 'o')) || namesLongOption(rest, treeWriting)
         ? 'destructive_to_interrupt'
         : 'safe_to_kill',
   ],
@@ -198,11 +205,23 @@ const guardedHeads: ReadonlyMap<string, (rest: readonly string[], lossy: boolean
   ['fd', (rest, lossy) => classifyFd(rest, lossy)],
   ['ugrep', rest => classifyUgrep(rest)],
   ['ug', rest => classifyUgrep(rest)],
-  ['rg', rest => (rest.some(value => /^--(pre|hostname-bin)(=|$)/.test(value)) ? 'unknown' : 'safe_to_kill')],
+  ['rg', rest => (namesLongOption(rest, rgRunning) ? 'unknown' : 'safe_to_kill')],
 ]);
 
+/** The long options that write a file or run a program, per tool; see {@link normalizeLongOptions}. */
+const yqWriting = ['--inplace', '--split-exp'];
+const sortWriting = ['--output', '--compress-program'];
+const treeWriting = ['--output'];
+const fdRunning = ['--exec', '--exec-batch'];
+const ugrepWriting = ['--save-config', '--filter'];
+const rgRunning = ['--pre', '--hostname-bin'];
+const streamEditorWriting = ['--in-place', '--include'];
+/** `uniq`'s options whose number is the next word, so it is not a file operand. */
+const uniqNumbered = ['--skip-fields', '--skip-chars', '--check-chars'];
+
 /** The files `uniq` is handed: its operands, past the options that take a number as their next word. */
-function uniqOperands(rest: readonly string[]): number {
+function uniqOperands(raw: readonly string[]): number {
+  const rest = normalizeLongOptions(raw, uniqNumbered);
   let operands = 0;
   for (let position = 0; position < rest.length; position++) {
     const value = rest[position] ?? '';
@@ -210,21 +229,23 @@ function uniqOperands(rest: readonly string[]): number {
       operands += rest.length - position - 1;
       break;
     }
-    if (value === '-f' || value === '-s' || value === '-w') position++;
+    if (value === '-f' || value === '-s' || value === '-w' || uniqNumbered.includes(value)) position++;
     else if (!value.startsWith('-') || value === '-') operands++;
   }
   return operands;
 }
 
-function classifyFd(rest: readonly string[], lossy: boolean): InflightVerdict {
+/** `--exec=rm {}` and `--exec rm {}` are the same payload, as is an abbreviated option; see {@link normalizeLongOptions}. */
+function classifyFd(raw: readonly string[], lossy: boolean): InflightVerdict {
+  const rest = normalizeLongOptions(raw, fdRunning);
   const position = rest.findIndex(
-    value => value === '--exec' || value === '--exec-batch' || hasShortFlag(value, 'x') || hasShortFlag(value, 'X'),
+    value => fdRunning.includes(value) || hasShortFlag(value, 'x') || hasShortFlag(value, 'X'),
   );
   return position === -1 ? 'safe_to_kill' : classifyFindExec(rest.slice(position + 1), lossy);
 }
 
 function classifyUgrep(rest: readonly string[]): InflightVerdict {
-  return rest.some(value => /^--(save-config|filter)(=|$)/.test(value)) ? 'destructive_to_interrupt' : 'safe_to_kill';
+  return namesLongOption(rest, ugrepWriting) ? 'destructive_to_interrupt' : 'safe_to_kill';
 }
 
 function classifyTmux(values: readonly string[]): InflightVerdict {
@@ -243,7 +264,10 @@ function classifyTmux(values: readonly string[]): InflightVerdict {
 
 /** Without an in-place flag a stream editor only writes to stdout, which the relaunch discards. */
 function classifyStreamEditor(values: readonly string[]): InflightVerdict {
-  return values.some(value => inPlaceFlag.test(value)) ? 'destructive_to_interrupt' : 'safe_to_kill';
+  const normalized = normalizeLongOptions(values, streamEditorWriting);
+  return normalized.some(value => inPlaceFlag.test(value) || value === '--include')
+    ? 'destructive_to_interrupt'
+    : 'safe_to_kill';
 }
 
 function classifyPackageManager(head: string, values: readonly string[]): InflightVerdict {
@@ -266,6 +290,26 @@ function classifyPackageManager(head: string, values: readonly string[]): Inflig
 }
 
 /**
+ * The option names the `fy` shell reads from the words after a verb, spelt as the shell's own `parseArgs` reads them
+ * (the shell is the CLI package, which the daemon does not import, so the rule is restated here and a test pins it):
+ * a word that starts with `-` and is not a negative number is an option; ONE or TWO leading dashes are stripped
+ * (`-now` is `--now`); everything from the first `=` is the value (`--now=true` is `now`); a `--no-x` is also
+ * reported as `x`, which over-reports (it is an off switch) and so errs closed. `--` ends the options.
+ */
+function fyOptionNames(rest: readonly string[]): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const token of rest) {
+    if (token === '--') break;
+    if (!token.startsWith('-') || token === '-' || /^-\d/u.test(token)) continue;
+    const body = token.replace(/^-{1,2}/u, '');
+    const name = body.includes('=') ? body.slice(0, body.indexOf('=')) : body;
+    names.add(name);
+    if (name.startsWith('no-') && name.length > 3) names.add(name.slice(3));
+  }
+  return names;
+}
+
+/**
  * `fy <verb>`: safe only for the verbs {@link safeFyVerbs} names (and `task show|note`). The verb is the first word
  * after the binary, past the one global flag; anything else — another flag first, a verb not listed — is unknown.
  */
@@ -275,7 +319,8 @@ function classifyFy(values: readonly string[]): InflightVerdict {
   while (fyGlobalFlags.has(values[position] ?? '')) position++;
   const verb = values[position] ?? '';
   const rest = values.slice(position + 1);
-  if (verb === fySendVerb) return rest.some(value => fySendHoldingFlags.has(value)) ? 'unknown' : 're_armable';
+  if (verb === fySendVerb)
+    return [...fyOptionNames(rest)].some(name => fySendHoldingFlags.has(`--${name}`)) ? 'unknown' : 're_armable';
   if (!fyVerbsWithSubverbs.has(verb)) return safeFyVerbLines.includes(verb) ? 'safe_to_kill' : 'unknown';
   // `guide` / `card`: the first word that is not an option is the sub-verb, so `guide --json accept r` is `guide accept`.
   // No sub-verb is the bare verb, safe only where the bare verb is listed (`guide` is, `card` is not).
@@ -346,4 +391,71 @@ export function classifyProcessArgv(argv: string, reading: CommandReading = 'los
   const guard = guardedHeads.get(first);
   if (guard !== undefined) return guard(words.slice(1), reading === 'lossy');
   return safeHeads.has(first) ? 'safe_to_kill' : classifyCommand(argv, reading);
+}
+
+/** The `fy` verb that asks for a move: `fy ferret move <id>`. */
+const moveVerb: readonly string[] = ['ferret', 'move'];
+
+/**
+ * Whether ONE command (a single segment, or a process's argv) is a call of `fy` that asks for a move. Anything a shell
+ * would expand or redirect is not: it cannot be read as the call it looks like. The binary is `fy` (or the preview
+ * `fy5`), alone or behind a `bun`/`node` that runs it.
+ */
+export function isMoveRequest(command: string): boolean {
+  if (/[`]|\$\(|[<>]/.test(command.replace(harmlessRedirect, ''))) return false;
+  const values = tokens(command.replace(harmlessRedirect, '').trim());
+  let position = values.findIndex(value => !/^[A-Za-z_][A-Za-z0-9_]*=/.test(value));
+  if (position === -1) return false;
+  if (/^(bun|node)$/.test(basename(unquote(values[position] ?? '')))) position++;
+  if (!/^fy\d*$/.test(basename(unquote(values[position] ?? '')))) return false;
+  position++;
+  while (fyGlobalFlags.has(values[position] ?? '')) position++;
+  return moveVerb.every((word, index) => values[position + index] === word);
+}
+
+/** The program a shell was handed: a Claude tool shell's payload, or what follows `-c`; `undefined` for a script file. */
+function shellProgram(argv: string): string | undefined {
+  const payload = claudeToolShellPayload(argv);
+  if (payload !== undefined) return payload;
+  const values = tokens(argv.trim());
+  const head = basename(unquote(values[0] ?? ''));
+  if (!shellHeads.has(head)) return undefined;
+  const flag = values.findIndex(value => shellCommandFlags.has(value));
+  return flag === -1
+    ? undefined
+    : unquote(
+        values
+          .slice(flag + 1)
+          .join(' ')
+          .trim(),
+      );
+}
+
+/**
+ * What a shell that was running a move request would still be doing besides it: the shell's program with the `fy` call's
+ * segment taken out, classified as usual. `safe_to_kill` means nothing else is lost (`fy ferret move me`, `cd x && fy ferret move me`);
+ * `git stash && fy ferret move me && git stash pop` or a `while …; do …; fy ferret move me; done` loop is not.
+ * A shell whose program cannot be read (a script file, a lossy text with a possible newline) is `unknown`.
+ */
+export function classifyAroundMoveRequest(argv: string, reading: CommandReading = 'lossy'): InflightVerdict {
+  const program = shellProgram(argv);
+  if (program === undefined || program === '' || (reading === 'lossy' && program.includes(LOSSY_MARK)))
+    return 'unknown';
+  // A pipeline's stages are separate processes, each judged on its own by the gate, so a single `|` does not split here:
+  // only the commands strung together with `;`, `&&`, `||`, `&` or a newline are the shell's own work.
+  const rest = program
+    .replace(harmlessRedirect, '')
+    .split(/\|\||&&|[;&\n]/)
+    .map(segment => segment.trim())
+    .filter(segment => segment !== '' && !isMoveRequest(segment));
+  return rest.length === 0
+    ? 'safe_to_kill'
+    : worstVerdict(
+        rest.map(segment =>
+          // A nested `sh -c "fy ferret move me"` is the same question one shell deeper.
+          shellProgram(segment) === undefined
+            ? classifySegment(segment, reading === 'lossy')
+            : classifyAroundMoveRequest(segment, reading),
+        ),
+      );
 }

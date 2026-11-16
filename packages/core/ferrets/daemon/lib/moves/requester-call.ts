@@ -1,10 +1,11 @@
+import { classifyAroundMoveRequest, isMoveRequest } from './command-classifier.ts';
 import { shellCommandFlags, shellHeads } from './command-tables.ts';
 import type { ProcessInfo } from './inflight-report.ts';
 
 /**
  * THE CALL THAT ASKED FOR THE MOVE IS NOT A JOB THE MOVE INTERRUPTS.
  *
- * An agent that moves ITSELF (`fy migrate me --agent …` from its own tool shell) is, to the process table, a
+ * An agent that moves ITSELF (`fy ferret move me --agent …` from its own tool shell) is, to the process table, a
  * long-running unclassified command: the tool shell around the call and the `fy` process inside it. Refusing on
  * those would make a self-move impossible, and they are not lost work — the move is what ends that call, and the
  * agent is told on the other side what it asked for.
@@ -23,6 +24,10 @@ import type { ProcessInfo } from './inflight-report.ts';
  *    `zsh` handed `-c`, or a process carrying the tool shell's own command line (what a pipeline forks). Anything else
  *    — a script, an interpreter, `watch`, a `while` loop's program — is real work the call was running inside, so the
  *    walk stops there and nothing is excluded: the gate sees all of it and decides.
+ * 5. the requester really is a move request (`fy ferret move`), and every shell of the chain would do
+ *    NOTHING ELSE worth keeping: its program with the `fy` call taken out must classify `safe_to_kill`. A chain shell
+ *    that also ran `git stash && fy ferret move me && git stash pop`, or looped `./advance.sh; fy ferret move me; sleep 60`,
+ *    has real work around the call, so it stays visible to the gate.
  *
  * Only that ancestor CHAIN is excluded, never the tool shell's other children: a `sleep 900 &` the same shell
  * started is a sibling, still counted. A pipeline's other stages (`| grep …`) are not excluded either; each is
@@ -38,11 +43,16 @@ export function requesterCall(processes: readonly ProcessInfo[], requesterPid: n
   while (current !== undefined && walked.length <= processes.length) {
     if (current.known !== undefined) return [];
     walked.push(current);
-    if (current.toolShell === current.pid)
-      return withShellsBetween(walked, current) ? walked.map(entry => entry.pid) : [];
+    if (current.toolShell === current.pid) return isProvenCall(walked, current) ? walked.map(entry => entry.pid) : [];
     current = current.ppid === undefined ? undefined : byPid.get(current.ppid);
   }
   return [];
+}
+
+function isProvenCall(walked: readonly ProcessInfo[], toolShell: ProcessInfo): boolean {
+  const call = walked[0];
+  if (call === undefined || !isMoveRequest(call.argv) || !withShellsBetween(walked, toolShell)) return false;
+  return walked.slice(1).every(entry => classifyAroundMoveRequest(entry.argv) === 'safe_to_kill');
 }
 
 /** `walked` runs from the `fy` process up to the tool shell; everything strictly between them must be a shell. */

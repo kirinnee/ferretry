@@ -585,6 +585,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         tmuxSession,
         status: state.status,
         ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
+        ...(state.permissionRequest === undefined ? {} : { awaitingPermission: true }),
         turn: state.turn,
         // The state document's own record of the tool calls this session has open.
         openTools: state.openTools ?? [],

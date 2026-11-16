@@ -11,7 +11,7 @@ export const prefixes = words('sudo doas env time nice ionice nohup setsid comma
  * `sort -o`, `tree -o`, `uniq <in> <out>`, `fd -x`, `ugrep --save-config`): the classifier's `guardedHeads` judge those by their arguments.
  */
 export const safeHeads = words(
-  'grep egrep fgrep eza ag ack locate ls ll cat bat head tail jq wc echo printf pwd whoami date printenv stat file du df which type cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
+  'cd grep egrep fgrep eza ag ack locate ls ll cat bat head tail jq wc echo printf pwd whoami date printenv stat file du df which type cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
 );
 
 export const rearmableHeads = words(

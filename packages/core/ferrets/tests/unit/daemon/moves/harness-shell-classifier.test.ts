@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { classifyCommand, classifyProcessArgv } from '../../../../daemon/lib/moves/command-classifier.ts';
+import {
+  classifyAroundMoveRequest,
+  classifyCommand,
+  classifyProcessArgv,
+} from '../../../../daemon/lib/moves/command-classifier.ts';
 import { fySendHoldingFlags, fySendVerb, safeFyVerbLines } from '../../../../daemon/lib/moves/command-tables.ts';
 import { verdictBlocksMove } from '../../../../daemon/lib/moves/verdict.ts';
 import { join } from 'node:path';
@@ -325,5 +329,123 @@ describe('read-only programs that write or run something through one option', ()
       should(verdictBlocksMove(classifyProcessArgv(wrapper(argv), 'exact'))).be.true();
     should(classifyProcessArgv('sort -n in', 'exact')).equal('safe_to_kill');
     should(classifyProcessArgv('fd -x ls', 'exact')).equal('safe_to_kill');
+  });
+});
+
+describe('long options: the `=` form and GNU abbreviations', () => {
+  const blocks = (command: string) => should(verdictBlocksMove(classifyCommand(command))).be.true();
+  const safe = (command: string) => should(classifyCommand(command)).equal('safe_to_kill');
+
+  it('should classify fd --exec=X and --exec-batch=X by their payload, as --exec X', () => {
+    for (const command of [
+      'fd -e tmp --exec=rm',
+      'fd -e tmp --exec=rm {}',
+      'fd --exec-batch=git stash',
+      'fd --exe=rm',
+      'fd --exec-b=rm',
+    ])
+      blocks(command);
+    safe('fd --exec=ls {}');
+    safe('fd --exec-batch=wc -l');
+    safe('fd -e ts');
+    // Inside the Claude tool shell and as a directly exec'd process.
+    blocks(wrapper('fd -e tmp --exec=rm'));
+    should(verdictBlocksMove(classifyProcessArgv('fd -e tmp --exec=rm', 'exact'))).be.true();
+    should(classifyProcessArgv('fd --exec=ls {}', 'exact')).equal('safe_to_kill');
+  });
+
+  it('should refuse sort --out=FILE, --outp, --output=FILE and --com / --compress-program=sh', () => {
+    for (const command of [
+      'sort --out=FILE data',
+      'sort --outp FILE data',
+      'sort --output=FILE data',
+      'sort --o=FILE data',
+      'sort --compress-prog=sh data',
+      'sort --com=sh data',
+    ])
+      blocks(command);
+    safe('sort -n data');
+    safe('sort --reverse data');
+    safe('sort --key=2 data');
+    should(verdictBlocksMove(classifyProcessArgv('sort --out=FILE data', 'exact'))).be.true();
+  });
+
+  it('should refuse the `=` and abbreviated forms of yq, tree, ugrep and rg --pre', () => {
+    for (const command of [
+      'yq --inplace=true .a=1 f.yml',
+      'yq --inpl .a=1 f.yml',
+      'yq --split-exp=. f.yml',
+      'tree --output=out.txt',
+      'tree --out out.txt',
+      'ugrep --save-config=f',
+      'ugrep --save-c',
+      'ugrep --filter=sh',
+      'ug --filt=sh',
+    ])
+      blocks(command);
+    for (const command of ['rg --pre=cmd foo', 'rg --pre cmd foo', 'rg --hostname-bin=x foo'])
+      should(classifyCommand(command)).equal('unknown');
+    safe('rg --pre-glob=*.pdf foo');
+    safe('yq .a f.yml');
+    safe('tree -L 2');
+    safe('ugrep --color=always foo');
+  });
+
+  it('should treat the uniq --skip-fields=N form as an option, not a file operand', () => {
+    safe('uniq --skip-fields=1 in');
+    safe('uniq --skip-f 1 in');
+    blocks('uniq --skip-fields=1 in out');
+  });
+
+  it('should refuse sed/awk in-place in the `=` and abbreviated forms', () => {
+    for (const command of [
+      "sed --in-place=.bak 's/a/b/' f",
+      "sed --in 's/a/b/' f",
+      'awk --include=inplace 1 f',
+      "sed -i 's/a/b/' f",
+    ])
+      blocks(command);
+    safe("sed -n 's/a/b/p' f");
+    safe("sed --quiet 's/a/b/p' f");
+  });
+
+  it('should refuse git config writes spelled with an abbreviation, wherever the reading flag sits', () => {
+    for (const command of [
+      'git config --unset-a user.name',
+      'git config --uns user.name',
+      'git config --rem user',
+      'git config --replace-a a b',
+      'git config --list --unset-all a',
+      'git config a b',
+    ])
+      blocks(command);
+    safe('git config --get user.name');
+    safe('git config user.name');
+    safe('git config --list');
+  });
+});
+
+describe('fy send flags are read as the CLI reads them', () => {
+  it('should refuse -now, --now=true, -ask, --ask=1 and --wait=true as holding', () => {
+    for (const flag of ['-now', '--now=true', '-ask', '--ask=1', '-wait', '--wait=true', '-now=true', '--no-now'])
+      should(classifyCommand(`fy send peer ${flag} hello`)).equal('unknown');
+    should(classifyCommand('fy send peer hello')).equal('re_armable');
+    should(classifyCommand('fy send peer --kind=blocker hello')).equal('re_armable');
+  });
+});
+
+describe('option terminators and bare shells', () => {
+  it('should count every word after -- as a uniq operand, and treat words after -- as operands', () => {
+    should(classifyCommand('uniq -- in out')).equal('destructive_to_interrupt');
+    should(classifyCommand('uniq -- in')).equal('safe_to_kill');
+    should(classifyCommand('sort -- --out')).equal('safe_to_kill');
+    should(classifyCommand('sort --out=f -- x')).equal('destructive_to_interrupt');
+    should(classifyCommand('rg -- --pre')).equal('safe_to_kill');
+  });
+
+  it('should not read a shell handed no -c program as a move request’s shell', () => {
+    should(classifyAroundMoveRequest('bash script.sh')).equal('unknown');
+    should(classifyAroundMoveRequest('ls -la')).equal('unknown');
+    should(classifyAroundMoveRequest('bash -c')).equal('unknown');
   });
 });
