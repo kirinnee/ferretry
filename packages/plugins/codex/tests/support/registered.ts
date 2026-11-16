@@ -31,7 +31,7 @@ export function registeredCodex() {
   let nowMs = 0;
   let codexMissing = false;
   /** Every `env …` child the harness ran (`codex queue`), and what the next one answers. */
-  const queueRuns: { program: string; args: readonly string[]; timeout: unknown }[] = [];
+  const queueRuns: { program: string; args: readonly string[]; env: unknown; timeout: unknown }[] = [];
   let queueAnswer: { exitCode: number | null; signal?: string | null; stdout: string; throws?: boolean } = {
     exitCode: 0,
     stdout: '',
@@ -142,9 +142,9 @@ export function registeredCodex() {
     config: { file: () => ({ permissionMode, searchPaths: [] }), collection: () => new Map() },
     spawn: {
       start: childSpawn.start,
-      run: async (program: string, args: string[], options?: { timeout?: unknown }) => {
-        if (program === 'env') {
-          queueRuns.push({ program, args, timeout: options?.timeout });
+      run: async (program: string, args: string[], options?: { timeout?: unknown; env?: unknown }) => {
+        if (args[0] === 'queue') {
+          queueRuns.push({ program, args, env: options?.env, timeout: options?.timeout });
           if (queueAnswer.throws === true) throw new Error('spawn failed');
           return {
             exitCode: queueAnswer.exitCode,

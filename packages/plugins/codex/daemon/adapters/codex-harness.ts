@@ -358,11 +358,12 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         if (thread === undefined || !PLAIN_THREAD.test(thread)) return 'unavailable';
         const location = await locate();
         if (location.outcome !== 'located') return 'unavailable';
-        const result = await spawn.run(
-          'env',
-          [`CODEX_HOME=${homeOf(ferret)}`, location.path, 'queue', '--thread', thread, '--message', text],
-          { timeout: INJECT_TIMEOUT },
-        );
+        // The located codex itself, never `env` (which would let this plugin run any program): CODEX_HOME goes in the
+        // child's environment. `--message=<text>` keeps a message that starts with `-` from reading as an option.
+        const result = await spawn.run(location.path, ['queue', '--thread', thread, `--message=${text}`], {
+          env: { CODEX_HOME: homeOf(ferret) },
+          timeout: INJECT_TIMEOUT,
+        });
         const queued = new RegExp(`Queued message \\S+ for thread ${thread}`, 'u');
         if (result.exitCode === 0 && queued.test(result.stdout)) return 'handed';
         kernel.log.warn('codex queue did not hand a message over; it will be typed', {

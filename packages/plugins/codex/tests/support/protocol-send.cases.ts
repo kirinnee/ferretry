@@ -31,22 +31,15 @@ export function protocolSendCases(): void {
   const queued = 'Queued message 0197-aa for thread native-proved\n';
 
   describe('codex-protocol-send: inject hands a message to Codex’s own queue, typing nothing', () => {
-    test('the child is exactly `env CODEX_HOME=<home> <codex> queue --thread <id> --message <text>` (no --resume), under a ~10 s deadline', async () => {
+    test('the child is exactly `<codex> queue --thread <id> --message=<text>` with CODEX_HOME=<home> in its env (no `env` program, no --resume), under a ~10 s deadline', async () => {
       const { box, harness, spec } = await proved();
       box.answerQueue({ exitCode: 0, stdout: queued });
       expect(await harness.inject?.(spec.ferret, 'hello there')).toBe('handed');
       expect(box.queueRuns).toEqual([
         {
-          program: 'env',
-          args: [
-            `CODEX_HOME=${spec.home}`,
-            '/opt/bin/codex',
-            'queue',
-            '--thread',
-            'native-proved',
-            '--message',
-            'hello there',
-          ],
+          program: '/opt/bin/codex',
+          args: ['queue', '--thread', 'native-proved', '--message=hello there'],
+          env: { CODEX_HOME: spec.home },
           timeout: 10_000,
         },
       ]);
@@ -61,10 +54,19 @@ export function protocolSendCases(): void {
       const agent = `${banner}Review is done — three findings.`;
       expect(await harness.inject?.(spec.ferret, agent)).toBe('handed');
       expect(await harness.inject?.(spec.ferret, 'Please land it.')).toBe('handed');
-      const messages = box.queueRuns.map(run => run.args[run.args.indexOf('--message') + 1]);
+      const messages = box.queueRuns.map(run =>
+        run.args.find(arg => arg.startsWith('--message='))?.slice('--message='.length),
+      );
       expect(messages).toEqual([agent, 'Please land it.']);
       expect(messages[0]?.startsWith('[message · action from ferret torrey')).toBe(true);
       expect(messages[1]).not.toContain('not from the owner');
+    });
+
+    test('a message that starts with "-" travels as the value of --message=, never as an option of its own', async () => {
+      const { box, harness, spec } = await proved();
+      box.answerQueue({ exitCode: 0, stdout: queued });
+      expect(await harness.inject?.(spec.ferret, '--resume please')).toBe('handed');
+      expect(box.queueRuns[0]?.args).toEqual(['queue', '--thread', 'native-proved', '--message=--resume please']);
     });
 
     test('handed only on exit 0 AND Codex’s own "Queued message <id> for thread <thread>" line', async () => {
