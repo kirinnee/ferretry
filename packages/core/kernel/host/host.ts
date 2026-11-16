@@ -4,6 +4,7 @@ import type {
   BoundAddress,
   ContractSurface,
   HostFactsPort,
+  FileEventsPort,
   SelfCountersPort,
   UpdateHostPort,
 } from '../contract/ports.ts';
@@ -122,6 +123,7 @@ import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from './adapters/self-counters.ts';
+import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from './adapters/file-events.ts';
 import {
   createLoopMeter,
   describeLoopStall,
@@ -271,6 +273,8 @@ export interface HostAdapters {
   readonly loopHealth?: { readonly ioPressure?: IoPressureSource; readonly watchdog?: () => LoopWatchdogPort };
   /** `kernel.selfCounters` (this process's `/proc/self/{io,stat}`). Absent: every read refuses. */
   readonly selfCounters?: SelfCountersPort;
+  /** `kernel.fileEvents` (the directories the host polls instead of watching). Absent: none is polled. */
+  readonly fileEvents?: FileEventsPort;
   /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
   readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
@@ -1024,6 +1028,10 @@ async function bootLocked(
         manifest.permissions?.selfCounters === true
           ? (adapters.selfCounters ?? NO_SELF_COUNTERS)
           : undeclaredSelfCounters(manifest.id, (adapters.selfCounters ?? NO_SELF_COUNTERS).platform),
+      fileEvents:
+        manifest.permissions?.fileEvents === true
+          ? polledOnly(adapters.fileEvents ?? NO_FILE_EVENTS)
+          : undeclaredFileEvents(manifest.id),
       // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
       processes: processesPortFor(
         manifest.id,

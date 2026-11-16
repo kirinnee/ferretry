@@ -35,6 +35,7 @@ import { AnalyticsTranscriptSpend } from './adapters/usage/provider-quota/analyt
 import { endedStatus, type WatchedOutcome } from './lib/analytics/ended-status.ts';
 import { JscStackSampler } from './adapters/performance/jsc-stack-sampler.ts';
 import { ProcessGauges } from './adapters/performance/process-gauges.ts';
+import { polledDirectoryLimitations } from './lib/performance/fallbacks.ts';
 import { ProfileStackSampling } from './lib/performance/stack-sampling.ts';
 import { effectiveAnalyticsPricing, modelCatalogPricingRates } from './lib/analytics/model-catalog-rates.ts';
 import { AnalyticsIngestionService, type AnalyticsIngestCandidate } from './lib/analytics/ingestion.ts';
@@ -385,6 +386,11 @@ export default implementDaemon(manifest, {
           ...(stackSampling.available
             ? []
             : ['The runtime has no stack sampler, or it has not started, so the CPU profile is empty.']),
+          ...polledDirectoryLimitations(
+            kernel.fileEvents.polled(),
+            { home: kernel.paths.home() },
+            kernel.fileEvents.polled()[0]?.everyMs ?? 0,
+          ),
         ],
       },
       budgets: IDLE_DAEMON_BUDGETS,
