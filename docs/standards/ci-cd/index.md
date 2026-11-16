@@ -103,6 +103,34 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
   this ordering rather than a timeout increase. Its summary names each group's
   slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+- **Changed-plugin scope.** A pull request into exactly `rebuild/5.0-after` without the `full-ci` label runs only the
+  plugins it changes, the plugins that depend on them, and every platform package's tests (core, app, cli, std), because
+  the unit tier was 86% of Quick's median 14 minutes. Everything else - a push, `main`, `rebuild/5.0`, manual dispatch, any
+  other base, the label, a missing merge-base, any doubt - runs the whole set exactly as before. `scripts/ci/scope.ts`
+  decides (`scope.test.ts` and `quick-scope.test.ts` hold it); `scope-fetch.sh` deepens the checkout until the merge-base of
+  the PR's base and head exists; `quick.sh`, `group-files.sh` (which `test.sh` runs) and `coverage-ledger.sh` read the decision. **A wrong filter skips tests
+  silently, so the rules are an allowlist:**
+  - The changed set is `git diff --name-only --no-renames <base>...<head>` (both sides of a rename are listed).
+  - A file may be scoped only under `packages/plugins/<one>/` of a workspace package, and never that package's
+    `package.json`. Any other path (core, app, cli, std, scripts, nix, `.github`, docs, root manifests, `generated/`, a path nobody
+    has seen) makes the run FULL. A new top-level path is therefore FULL until someone allowlists it in `scope.ts`.
+  - The dependency graph is the UNION of workspace `package.json` dependencies (all four kinds), the manifests' `needs` /
+    `uses` / hook `takes` / `order` edges (consumer to provider), and every `@ferretry/<package>` or `plugins/<dir>/` mention in a
+    source file. Dependents are followed transitively **between plugins**. They are never followed through a platform package,
+    since every plugin depends on the kernel and the app; instead a plugin that a platform package depends on is a **hub**
+    (today `connections`, `runtimes`, `conversation`, ...) and a change that reaches one is FULL. Selecting every plugin is FULL too.
+  - Always run, scoped or not: all platform tests, format, every gate hook, the build part (whole-repo typecheck), the `scripts`
+    part (registry and contract tests), the `guarantees` / `parity-ticks` checks and ports-pending.
+  - **What a scoped run does NOT prove, and says so.** The unit coverage ledger judges the platform packages and the selected
+    plugins only and ends with `SCOPED coverage ledger ... NOT the complete unit production ledger`, never the complete-ledger
+    sentence. The guarantee proof is by test existence (`--existence-only`): a skipped plugin's tests did not run, so their PASS
+    is proved by the full set (the `full-ci` label, `main`). The per-file 100% rule applies to the touched plugin's files, which are
+    always selected.
+  - **The decision is printed at the top of the `Run the quick set` log and in the step summary**: `CI scope: SCOPED - n of m plugins
+run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <reason>. Every unit test runs.` `scope.ts decide`
+    never fails: any error is FULL, with the error as the reason.
+  - A pull request that changes `scripts/`, `.github/` or `docs/` (this machinery included) is FULL by the allowlist.
+  - `FY_CI_QUICK_DRY_RUN=1 ./scripts/ci/quick.sh` decides and prints what a run would do (unit files, parts, proofs) without testing.
 - **The guarantee proof reads the JUnit reports.** After its last part, Quick runs
   `bun scripts/gen/check.ts guarantees --strict --tier unit --results coverage/unit --results coverage/scripts`, and the
   Integration job ends with `bun scripts/validate/guarantees.ts --strict --tier int --results coverage/int`: every kept

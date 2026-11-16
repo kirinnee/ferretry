@@ -68,6 +68,15 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: read
+    # What the changed-plugin scope (scripts/ci/scope.ts, docs/standards/ci-cd "Changed-plugin scope") reads. Only a pull
+    # request into rebuild/5.0-after without the `full-ci` label is ever scoped; every other run is FULL, and
+    # these are empty or ignored there.
+    env:
+      FY_SCOPE_EVENT: ${{ github.event_name }}
+      FY_SCOPE_BASE_REF: ${{ github.event.pull_request.base.ref }}
+      FY_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      FY_SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      FY_SCOPE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
     # Main only refreshes the cache and waits for the full release gates; its smaller Quick
     # machine preserves tsc/Nix cache commits without paying 8 units on every main push.
     # A dispatch picks its own shape (`quick_shape`), so main's 4x8 can be measured on a branch before merge.
@@ -96,6 +105,9 @@ jobs:
           # Only a push's `before`: a pull request's own earlier head is never the base (check-base.sh says why).
           FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: ./scripts/ci/check-base.sh
+      # The merge-base the changed-plugin scope diffs against; best effort, a miss makes the scope FULL.
+      - name: Fetch the history the changed-plugin scope diffs
+        run: ./scripts/ci/scope-fetch.sh
       - name: Run the quick set
         env:
           FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}
