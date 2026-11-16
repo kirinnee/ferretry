@@ -1,0 +1,14 @@
+name: 'AtomiCloud Nix store guard (post hook)'
+description: 'End-of-job size check and idle-commit notice for a Namespace cache volume that holds /nix (runs scripts/store-guard.sh end on success).'
+inputs:
+  script:
+    description: 'Absolute path to scripts/store-guard.sh of the calling setup-nix action.'
+    required: true
+  idle-commit-notice-minutes:
+    description: 'Notice when the job changed nothing in /nix and ran at least this many minutes; off disables.'
+    required: true
+runs:
+  using: node24
+  main: noop.js
+  post: post.js
+  post-if: success()
