@@ -8,12 +8,11 @@ import { summarise } from '../../src/report.ts';
 import { advance, makeSandbox, type Sandbox } from './migrate-harness.ts';
 
 /**
- * Owner ruling !A516 ("Leave them"): six things are NOT carried to v5. The migration prompt (before the owner confirms)
+ * Owner ruling !A516 ("Leave them"): five things are NOT carried to v5 (harness chat history is carried, in the pool). The migration prompt (before the owner confirms)
  * and the final report must say so in short plain lines, and say where v4's home stays. Text and report only: the
  * converter carries nothing new. Fake homes only.
  */
-const SIX = [
-  'chat history',
+const FIVE = [
   'browser sign-ins',
   'named agent terminals',
   'Warden machine agenda item',
@@ -25,9 +24,9 @@ const lacks = (text: string, needle: string): boolean => !text.toLowerCase().inc
 const CLAIMS_CARRIED = /\b(carried over|converted|moved|kept(?!-bucket))\b/i;
 
 describe('the shared list', () => {
-  test('names exactly the six owner-ruled items, in plain words', () => {
-    expect(LEFT_BEHIND).toHaveLength(6);
-    for (const needle of SIX)
+  test('names exactly the five owner-ruled items, in plain words', () => {
+    expect(LEFT_BEHIND).toHaveLength(5);
+    for (const needle of FIVE)
       expect(LEFT_BEHIND.some(line => line.toLowerCase().includes(needle.toLowerCase()))).toBe(true);
   });
 
@@ -58,13 +57,13 @@ describe('the converter report', () => {
     });
     if (result.kind !== 'done') throw new Error('expected done');
     const printed = summarise(result.report);
-    for (const needle of SIX) expect(printed).toContain(needle);
+    for (const needle of FIVE) expect(printed).toContain(needle);
     expect(printed).toContain(`kept untouched at ${from}`);
     expect(printed).toContain('FY_HOME=<copy>');
     expect(result.report.leftBehind).toEqual([...LEFT_BEHIND]);
     // Every left-behind line is a "-" item; none of them says it was carried.
     const items = printed.split('\n').filter(line => line.startsWith('  - '));
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(5);
     for (const line of items) expect(line).not.toMatch(CLAIMS_CARRIED);
   });
 
@@ -110,18 +109,19 @@ describe('the converter report', () => {
       now: () => new Date('2026-11-14T01:00:00.000Z'),
     });
     if (result.kind !== 'done') throw new Error('expected done');
-    for (const needle of SIX) expect(summarise(result.report)).toContain(needle);
+    for (const needle of FIVE) expect(summarise(result.report)).toContain(needle);
   });
 });
 
 describe('the prompt document', () => {
-  test('lists every left-behind item and claims no harness conversation or security history is carried', async () => {
+  test('lists every left-behind item and claims no security history is carried and says harness conversations are', async () => {
     const doc = await readFile(
       join(import.meta.dir, '..', '..', '..', '..', 'docs', 'migration', 'v4-to-v5-prompt.md'),
       'utf8',
     );
     for (const line of LEFT_BEHIND) expect(doc).toContain(line);
-    expect(doc).not.toMatch(/Harness conversations[^|]*\|\s*\*\*Kept\*\*/);
+    expect(doc).toMatch(/Harness conversations[^|]*\|\s*\*\*Kept\*\*/);
+    expect(doc).not.toContain('chat history (old conversations and transcripts)');
     expect(doc).not.toMatch(/Security log[^|]*\|\s*\*\*Kept\*\*/);
   });
 });
