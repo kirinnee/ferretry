@@ -636,11 +636,53 @@ describe('commands parity', () => {
       expect(both.err.join('\n')).toContain('--auto picks the runtime');
       expect(await both.verb('new [words...]', ['look'], { cwd: '/abs' })).toBe(2);
       expect(both.err.join('\n')).toContain('name a --runtime, or pass --auto');
-      for (const flag of ['continue', 'since', 'allow-scratch', 'compact-at', 'request-id']) {
+      for (const flag of ['compact-at', 'request-id']) {
         expect(await both.verb('new [words...]', ['look'], { runtime: 'codex-beta', [flag]: 'x' })).toBe(2);
         expect(both.err.at(-1)).toContain(`--${flag}`);
       }
       expect(both.calls).toEqual([]);
+    });
+
+    test('V-0334 fy new --continue and --since are Conversation’s: refused by name, unsent, and the sentence says to use `fy link`', async () => {
+      const refused = run({ answers: startAnswers });
+      for (const [options, named] of [
+        [{ continue: true }, '--continue'],
+        [{ since: '7d' }, '--since'],
+        [{ continue: true, since: '7d' }, '--continue, --since'],
+      ] as const) {
+        expect(
+          await refused.verb('new [words...]', ['login'], { runtime: 'codex-beta', cwd: '/abs', ...options }),
+        ).toBe(2);
+        expect(refused.err.at(-1)).toStartWith(`${named}: \`fy new\` no longer continues a conversation;`);
+        expect(refused.err.at(-1)).toContain('`fy link [words] [--harness h] [--since 7d]`');
+        expect(refused.err.at(-1)).toContain('`fy link keep <harness> <runtime> <conversation-id> --start`');
+      }
+      expect(refused.calls).toEqual([]);
+    });
+
+    test('V-0334 fy new --allow-scratch is sent as true; without it the temporary-folder check is asked (false) for a named --cwd or a person’s start, and not for a ferret’s helper that names no folder', async () => {
+      const bodyOf = (world: ReturnType<typeof run>): object | undefined =>
+        (world.calls.find(call => call.route === 'POST /v1/ferrets')?.init as { body?: object } | undefined)?.body;
+      const allowed = run({ answers: startAnswers });
+      expect(
+        await allowed.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/tmp/w', 'allow-scratch': true }),
+      ).toBe(0);
+      expect(bodyOf(allowed)).toMatchObject({ folder: '/tmp/w', allowScratch: true });
+      const named = run({ answers: startAnswers, env: { FY_SESSION_ID: 'lead' } });
+      expect(await named.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/tmp/w' })).toBe(0);
+      expect(bodyOf(named)).toMatchObject({ allowScratch: false });
+      const person = run({ answers: startAnswers });
+      expect(await person.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/abs' })).toBe(0);
+      expect(bodyOf(person)).toMatchObject({ allowScratch: false });
+      const blank = run({ answers: startAnswers, env: { FY_SESSION_ID: '  ' } });
+      expect(await blank.verb('new [words...]', ['x'], { runtime: 'codex-beta', cwd: '/abs' })).toBe(0);
+      expect(bodyOf(blank)).toMatchObject({ allowScratch: false });
+      const helper = run({ answers: startAnswers, env: { FY_SESSION_ID: 'lead', PWD: '/work' } });
+      expect(await helper.verb('new [words...]', ['x'], { runtime: 'codex-beta' })).toBe(0);
+      expect(bodyOf(helper)).not.toHaveProperty('allowScratch');
+      const start = run({ answers: startAnswers });
+      expect(await start.verb('start [prompt...]', ['x'], { cwd: '/tmp/w' })).toBe(0);
+      expect(bodyOf(start)).not.toHaveProperty('allowScratch');
     });
   });
 

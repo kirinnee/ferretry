@@ -219,7 +219,7 @@ describe('the ferrets cli half', () => {
     expect(calls[0]).toEqual({
       route: 'POST /v1/ferrets',
       init: {
-        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto' },
+        body: { folder: '/abs', runtime: 'codex-beta', prompt: 'look', mode: 'auto', allowScratch: false },
         headers: { 'x-fy-request-id': expect.any(String) },
       },
     });
@@ -244,6 +244,7 @@ describe('the ferrets cli half', () => {
         model: 'opus',
         effort: 'high',
         auto: true,
+        allowScratch: false,
       },
     });
     const before = calls.length;

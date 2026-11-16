@@ -1,6 +1,7 @@
 import type { HookDecision } from '@ferretry/kernel/contract';
 import type { PackConfig } from '../../contract/index.ts';
 import { admitChild, type PackLaunchFacts, packLaunchDefault, type ParentFacts } from './admission.ts';
+import { isScratchPath, scratchRefusal } from './scratch.ts';
 
 /**
  * Whose limits a `start.decide` is judged against: the parent of a START. A resume relaunches a ferret that was
@@ -12,6 +13,18 @@ export function limitedParent(input: {
   readonly by: string;
 }): string | undefined {
   return input.by === 'resume' ? undefined : input.parent;
+}
+
+/**
+ * The temporary-folder refusal (`fy new` without `--allow-scratch`): only a start that ASKED the check (`allowScratch`
+ * false — `fy start` sends none) and is not a relaunch is held to it. `undefined` means this check has no objection.
+ */
+export function scratchDecision(
+  input: { readonly folder: string; readonly by: string; readonly allowScratch?: boolean | undefined },
+  roots: readonly string[],
+): HookDecision | undefined {
+  if (input.allowScratch !== false || input.by === 'resume' || !isScratchPath(input.folder, roots)) return undefined;
+  return { allow: false, reason: scratchRefusal(input.folder) };
 }
 
 /**

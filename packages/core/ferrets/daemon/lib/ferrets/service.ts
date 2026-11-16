@@ -1027,6 +1027,7 @@ export class FerretsService implements FerretsApi {
       ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
       // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
       ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+      ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
     });
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
@@ -1035,7 +1036,7 @@ export class FerretsService implements FerretsApi {
     if (!opening.ok) return opening;
     if (request.options !== undefined) {
       // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
-      const { title, initialAttachments: _attached, ...options } = request.options;
+      const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title }),

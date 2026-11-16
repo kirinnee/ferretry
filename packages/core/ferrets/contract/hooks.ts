@@ -83,6 +83,8 @@ export const StartDecideInputSchema = z.strictObject({
    * refuses a number larger than it before anything is written, as v4's start did.
    */
   compactAt: CompactAtSchema.optional(),
+  /** The start's `options.allowScratch` ({@link StartOptionsSchema}); absent on a resume and on a start that asked no check. */
+  allowScratch: z.boolean().optional(),
 });
 export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
 

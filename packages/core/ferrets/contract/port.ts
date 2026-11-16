@@ -118,6 +118,12 @@ export const StartOptionsSchema = z.strictObject({
    * the most headroom. Never together with a named runtime.
    */
   auto: z.boolean().optional(),
+  /**
+   * `fy new --allow-scratch`, a request fact (never stored). Absent: nobody asked for the temporary-folder check (a plain
+   * `fy start`). `false`: `fy new` asks for it — a helper may not start in a temporary folder the caller NAMED. `true`: the
+   * caller says a temporary folder is meant. The check itself is a `start.decide` taker's (Packs).
+   */
+  allowScratch: z.boolean().optional(),
   intervalSeconds: PositiveIntegerSchema.optional(),
   timeoutSeconds: NonNegativeIntegerSchema.optional(),
   nudgeAfterSeconds: NonNegativeIntegerSchema.optional(),
