@@ -1,3 +1,4 @@
+import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { SessionId } from '../../session-id.ts';
 import type { SendRecord } from '../../stores.ts';
 
@@ -69,5 +70,50 @@ export class TranscriptRetractionProof implements SendRetractionProof {
       return false;
     const tail = await this.transcript.tail(id, this.bytes).catch(() => undefined);
     return tail !== undefined && replyProofInTail(tail, evidence.key) === 'unanswered';
+  }
+}
+
+/** What the proof needs of one parsed transcript entry (the harness plugin's reader yields these, never raw records). */
+export interface RetractionEntry {
+  readonly id: string;
+  readonly role: 'user' | 'assistant' | 'tool' | 'system';
+}
+
+/**
+ * {@link replyProofInTail} over the parsed entries a harness plugin's reader yields, oldest first: `unanswered` when the
+ * user entry `key` is there and no assistant entry follows it (an assistant entry after it is a reply, or a reply to a
+ * later prompt — both are `answered`, the conservative side); `unknown` when the entry is not there or the key is not a
+ * record id. A run of entries the reader cut at its start is `unknown` for the same reason a tail cut mid-record is.
+ */
+export function replyProofInEntries(entries: readonly RetractionEntry[], key: string): ReplyProof {
+  if (!RECORD_KEY.test(key)) return 'unknown';
+  const at = entries.findIndex(entry => entry.role === 'user' && entry.id.toLowerCase() === key.toLowerCase());
+  if (at < 0) return 'unknown';
+  return entries.slice(at + 1).some(entry => entry.role === 'assistant') ? 'answered' : 'unanswered';
+}
+
+/** Reads a session's parsed transcript entries, oldest first; `undefined` when they cannot be read. */
+export interface SendTranscriptEntries {
+  entries(id: SessionId): Promise<readonly RetractionEntry[] | undefined>;
+}
+
+/**
+ * The entries of a ferret's own conversation, read through the harness seam Ferrets hands out for it (&B153): the same
+ * reader the send tracker proves a send by. A ferret with no seam, or no entries to read, answers `undefined`.
+ */
+export const harnessEntries = (ferrets: Pick<FerretsApi, 'harness'>): SendTranscriptEntries => ({
+  entries: async id => await (await ferrets.harness?.(id))?.transcript.read(),
+});
+
+/** {@link TranscriptRetractionProof}'s rule over parsed entries: the same gate, the same `false` for every failure. */
+export class EntriesRetractionProof implements SendRetractionProof {
+  constructor(private readonly transcript: SendTranscriptEntries) {}
+
+  async unanswered(id: SessionId, record: SendRecord): Promise<boolean> {
+    const evidence = record.evidence;
+    if (record.fate !== 'delivered' || evidence?.harness !== 'claude' || evidence.proof !== 'normal-user-record')
+      return false;
+    const entries = await this.transcript.entries(id).catch(() => undefined);
+    return entries !== undefined && replyProofInEntries(entries, evidence.key) === 'unanswered';
   }
 }

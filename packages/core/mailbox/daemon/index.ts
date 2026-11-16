@@ -148,6 +148,7 @@ export default implementDaemon(manifest, {
         'composer',
         'resubmitStuck',
         'retractedDraft',
+        'deliveryLook',
       ].map(key => [key, deferred(key as keyof MailboxApi, () => parts().api)]),
     ]) as unknown as MailboxApi;
     // Stopping lets the hand-over already begun finish (never half a typing), and leaves no timer of the queue running.

@@ -91,10 +91,8 @@ export function conversationStuckInput(
  * The Warden's `inbox_stuck` port over Conversation (B187 C1). A READ OF THE LEDGER IS A LOOK: Conversation's
  * `sends` asks the send tracker to look first (bounded), so `trackerLook` is that read. The verified finish of a draft
  * that is provably ours is the same single Enter `resubmitStuck` presses for the open send whose text the tracker saw
- * typed. The deliverer's own look is not on Conversation's port, so `deliveryLook` does nothing here: the queue's
- * deliverer already looks on its own schedule and at every turn boundary.
- *
- * GAP(warden): the deliverer's owner is core/mailbox (S2b, PR 1726, moves it there); the look becomes a member of that port when it lands.
+ * typed. `deliveryLook` is the Mailbox's own deliverer look, carried on Conversation's port (`deliveryLook`); a daemon
+ * whose port does not carry it looks at nothing, as the deliverer already looks on its own schedule and at every turn boundary.
  */
 export function conversationStuckInbox(
   conversation: ConversationApi,
@@ -127,7 +125,9 @@ export function conversationStuckInbox(
       const pressed = await conversation.resubmitStuck(sessionId as FerretId, { kind: 'warden' }, typed.sendId);
       return pressed.ok && pressed.value === 'submitted' ? 'clear' : 'stuck';
     },
-    deliveryLook: async () => undefined,
+    deliveryLook: async sessionId => {
+      await conversation.deliveryLook?.(sessionId as FerretId);
+    },
     add: async entry => await notice.add(entry),
     remove: async sessionId => await notice.remove(sessionId),
   };

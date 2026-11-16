@@ -1,6 +1,6 @@
 import { basename, dirname } from 'node:path';
 import { ApiError, type KernelPorts } from '@ferretry/kernel/contract';
-import { type AttachmentSource, statusOf } from '../contract/index.ts';
+import { type AttachmentSource, EntriesRetractionProof, harnessEntries, statusOf } from '../contract/index.ts';
 import {
   AGENT_ORIGIN,
   type FerretsApi,
@@ -546,6 +546,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
       serial: lane,
       clock,
       tracking: tracker,
+      retraction: new EntriesRetractionProof(harnessEntries(ferrets)),
     },
     defaultSessionSendSettings,
   );
@@ -1451,7 +1452,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   };
 
   return {
-    scheduler,
+    deliverer,
     prepared,
     terminal,
     turnStates,
@@ -1473,7 +1474,6 @@ export function buildSendHalf(deps: SendHalfDeps) {
     records,
     waiters,
     awaitStatus,
-    /** Whether {@link SendHalf.stop} has run: the question watch looks no more once it has. */
     /** A ferret's phase was looked at: it feeds the tracker's "a turn started after this send" guard, and a turn that ended is one look at what waits. */
     turnLooked: (ferret: string, phase: string): void => {
       const id = tryParseSessionId(ferret);

@@ -32,6 +32,7 @@ import {
   type SendSettlement,
   type SendTarget,
   type SendTerminal,
+  EntriesRetractionProof,
   type SendRetractionProof,
   type SendTracking,
   type SendTransition,
@@ -2515,6 +2516,28 @@ describe('B144: a ferret idle with text of ours unsubmitted in its box', () => {
       should(await built.service.retractedDraft(ID)).equal('send-0');
       should(proof.asked).eql(['send-0']);
       should(built.terminal.calls).not.containEql('submitComposer');
+    });
+
+    it('flags a retracted pointer through the parsed-entries proof the send path is built with (&F4744)', async () => {
+      const key = delivered().evidence!.key;
+      const over = (entries: ReadonlyArray<{ id: string; role: 'user' | 'assistant' }> | undefined) =>
+        new EntriesRetractionProof({ entries: async () => entries });
+      const flagged = taken([pane({ draft: POINTER })], over([{ id: key, role: 'user' }]), delivered());
+      should(await flagged.service.retractedDraft(ID)).equal('send-0');
+
+      // Answered (an assistant entry follows it), cut away (the record is not in what was read) and unreadable: never flagged.
+      for (const entries of [
+        [
+          { id: key, role: 'user' as const },
+          { id: 'b446a203-0000-4000-8000-000000000000', role: 'assistant' as const },
+        ],
+        [{ id: '11111111-1111-4111-8111-111111111111', role: 'user' as const }],
+        undefined,
+      ]) {
+        const built = taken([pane({ draft: POINTER })], over(entries), delivered());
+        should(await built.service.retractedDraft(ID)).be.undefined();
+        should(await built.service.resubmitStuck(ID, 'send-0')).equal('refused');
+      }
     });
 
     it('never claims a delivered pointer the transcript shows answered: a person recalled it (review blocker)', async () => {

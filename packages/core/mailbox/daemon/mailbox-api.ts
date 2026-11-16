@@ -43,6 +43,7 @@ export function sendApi({
   ledger,
 }: MailboxParts): Omit<MailboxApi, 'queue' | 'editQueued' | 'cancelQueued'> {
   const { prepared, sendActs, interruptFerret, mayGo, deliverAttachments, submit, keptSend, records, lookFirst } = send;
+  const { deliverer } = send;
   return {
     send: async (ferret, caller, request) => {
       try {
@@ -137,6 +138,7 @@ export function sendApi({
       }
     },
     retractedDraft: async ferret => await sendActs.retractedDraft(ferret).catch(() => undefined),
+    deliveryLook: async ferret => await deliverer.look(ferret).catch(() => undefined),
     composer: async (ferret, action, draft) => {
       try {
         const outcome = await sendActs.resolveDraft(ferret, action, draft).catch(sendActRefusal);
