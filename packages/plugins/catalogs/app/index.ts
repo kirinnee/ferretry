@@ -33,6 +33,16 @@ const skillsRowPanel = (client: PluginClient): AppComponent<PanelProps> =>
     ((await loadAddSkills()).createSkillsRowPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
   );
 
+const mcpRowPanel = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadAddSkills()).createMcpRowPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
+  );
+
+const mcpInstallPanel = (client: PluginClient): AppComponent<PanelProps> =>
+  lazyComponent<PanelProps>(async () =>
+    ((await loadAddSkills()).createMcpInstallPanel as (client: PluginClient) => AppComponent<PanelProps>)(client),
+  );
+
 const sharingScreen = (client: PluginClient): AppComponent<ScreenProps> =>
   lazyComponent<ScreenProps>(async () =>
     ((await loadViews()).createSharingScreen as (client: PluginClient) => AppComponent<ScreenProps>)(client),
@@ -78,6 +88,8 @@ export default provideToShell(
         'add-skills': addSkillsPanel(client),
         'add-skills-row': addSkillsRowPanel(client),
         'skills-row': skillsRowPanel(client),
+        'mcp-row': mcpRowPanel(client),
+        'mcp-install': mcpInstallPanel(client),
       },
       settings: {},
       renderers: {},
