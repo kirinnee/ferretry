@@ -213,6 +213,16 @@ export default definePlugin({
         audit: { skip: 'a ferret read records nothing' },
         guard: { none: 'one ferret identity record' },
       }),
+      // The ferret's turns and context as its state document stands now (`FerretLiveReadSchema`). It is a fleet read, so
+      // a governed (remote) device needs the `fleet` use grant; an agent keeps v4's reach, as the ferret reads do.
+      route('GET /v1/ferrets/:ferretId/live', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        capability: { capability: CAPABILITIES.fleet, axis: 'use' },
+        audit: { skip: 'a ferret read records nothing' },
+        guard: { none: 'a turn count and a context percentage; no text' },
+      }),
       // R-0332
       route('POST /v1/ferrets', {
         minimum: 'operator',

@@ -105,7 +105,13 @@ describe('mcp#0 the panel hides Add… from a caller who may not control the fer
     const surfaces = createSurfaces(scriptedClient({ 'GET /v1/ferrets/:ferretId/mcp/servers': MCP }) as never);
     const Panel = surfaces.panels['mcp-servers'] as unknown as FC<{ subject?: string }>;
     const inside = (canControl: boolean) => (
-      <FerretWorkspaceActionsProvider canControl={canControl} daemon="d1" ferret="f1" showPanel={() => undefined}>
+      <FerretWorkspaceActionsProvider
+        canControl={canControl}
+        daemon="d1"
+        ferret="f1"
+        showPanel={() => undefined}
+        shows={() => true}
+      >
         <Panel subject="f1" />
       </FerretWorkspaceActionsProvider>
     );

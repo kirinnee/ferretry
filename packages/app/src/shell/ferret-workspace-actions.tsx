@@ -21,6 +21,11 @@ export interface FerretWorkspaceActions {
   readonly canControl: boolean;
   /** Brings the panel with this id (`files`) on screen. A panel the layout does not place is ignored. */
   readonly showPanel: (panelId: string) => void;
+  /**
+   * Whether the layout places the panel with this id on THIS ferret's page. A panel that links to another panel asks first,
+   * so a layout that left it out keeps the link it had instead of a click that brings nothing on screen.
+   */
+  readonly shows: (panelId: string) => boolean;
 }
 
 const WorkspaceActions = createContext<FerretWorkspaceActions | null>(null);
@@ -30,9 +35,13 @@ export function FerretWorkspaceActionsProvider({
   ferret,
   canControl,
   showPanel,
+  shows,
   children,
 }: FerretWorkspaceActions & { readonly children: ReactNode }) {
-  const value = useMemo(() => ({ daemon, ferret, canControl, showPanel }), [daemon, ferret, canControl, showPanel]);
+  const value = useMemo(
+    () => ({ daemon, ferret, canControl, showPanel, shows }),
+    [daemon, ferret, canControl, showPanel, shows],
+  );
   return <WorkspaceActions.Provider value={value}>{children}</WorkspaceActions.Provider>;
 }
 

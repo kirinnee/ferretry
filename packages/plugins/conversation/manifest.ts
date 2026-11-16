@@ -500,6 +500,8 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
       // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
+      // Whose turn it is (working, your turn, needs you), beside Ferrets' status mark (order 20, which has no turn to say).
+      panel('ferret.toolbar', { id: 'turn', order: 21 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
       // Settings › Appearance › Message marks: the key to the clock, ticks and ! under a message (S-0509). Last, after
