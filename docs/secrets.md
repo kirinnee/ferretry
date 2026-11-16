@@ -656,15 +656,23 @@ per-document plan (one refused document writes nothing of the set).
 - **Residuals in a broken file.** A file that does not parse cannot be rebuilt around its cuts: it is withheld
   (`unparsed`) when its raw text holds a word the cutter would cut, and shown as it is when none does. What neither
   check recognises is shown.
-- **Not cut:** a JSON document inside a flag (its keys are quoted), a plain password stuck to a one-letter flag
-  (`-p<password>`), and the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
+- **A JSON document inside a word is read key by key, and `-p<password>` is a password.** A word that starts with `{`
+  or `[` (`--settings '{"env":{"API_KEY":"v"}}'`, also glued with `=` or inside one pair of quotes) has each string under a
+  secret-named key cut, wherever it sits, the nearest key above it naming it; the read is lexical, so a document that does not
+  parse is read as far as it goes. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
+  name when the value is stuck to it (`-pHunter2Hunter2` is `-p‹hidden›`; a value under 8 characters is no credential, as
+  everywhere); a longer flag glued to its value (`-password=$X`) is that flag's, and a `=` or blank inside a stuck value
+  (`-pabc=def12345`) is still shown: a counted gap.
+- **Not cut:** the other cases named in the header of `packages/std/src/credential-words/words.ts`. (A value glued to a
   pointer is cut, see above.)
 - **A flag's value in a file it was already in.** W is new-only, so a file that already holds such a value keeps
   working and is shown masked on every read; nothing removes it.
 - **E3: a `--token-file` path is cut on read.** The read mask reads `--token-file` as a secret-named flag, so the path
   after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
-  typed at the machine.
+  typed at the machine. Runtimes' MCP `command` shows such a path (`srv --token-file ~/.config/tool/token`, `srv --key
+/home/u/.ssh/id_ed25519`): a part the cutter cut that is one path or URL, which the cutter shows whole when it is
+  read alone, is no value, as W reads it.
 - **W and the mask agree by construction.** The cutter and W are one implementation, and each consumer runs W on what
   its cutter shows and withholds what W still refuses: the kernel doors withhold the file (`unmaskable`), and
   Runtimes' views withhold the item in words (the Resolved view's server line or flag, a component's whole args or flags
@@ -683,9 +691,11 @@ per-document plan (one refused document writes nothing of the set).
     warning: withheld whole when W refuses it (as one string or as the words it splits into, so `srv --token` beside the
     argument `v` is one pair) or when the word cutter, run on it as one string or word by word, cuts a VALUE
     (`curl -H "Authorization: Bearer v"`, `srv -H Cookie: session=v`). A part the cutter cuts that is a pointer (`$X`,
-    `${X}`, `${secret:X}`) is no value: `env API_KEY=$API_KEY srv` is shown as written. A **`url`** (`writtenWithheld`) is withheld
+    `${X}`, `${secret:X}`), quoted or not, is no value: `env API_KEY="$API_KEY" npx -y @scope/pkg` is shown as written, and so is
+    a path (above). A **`url`** (`writtenWithheld`) is withheld
     whole when W refuses it or the cutter would cut any part of it (a `?token=v` query is W-accepted but real); a Resolved url
-    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is.
+    whose path W refuses (`/mcp --token v`, shown %-encoded) is withheld as the detail's is: the path is judged with its
+    %-escapes read run by run, so a malformed one beside it (`https://h/%zz/mcp%20--token%20v`) does not keep the valid ones from being read.
   - **An environment or settings value shown under its name** (hidden when W refuses it, as when the name or shape says
     credential), including a list or a nested table (`{x: ['--token', v]}`, `{servers: [{token: v}]}`), in the detail and in the
     Resolved rows, and the Resolved model row.
@@ -699,11 +709,11 @@ per-document plan (one refused document writes nothing of the set).
     value under a credential key by the entropy of the whole value, so a long value that is mostly one repeated character is
     accepted at any length; the 4,096-character window only bounds each pattern's cost. Netted by W's VALUE rule too:
     instruction lines (an instruction Runtimes writes keeps its text in the component YAML, where a string with blanks is
-    read as words; a flag at the end of one line pairs with the value starting the next line (a blank or spaces-only
-    line between them breaks the pairing: a counted gap, `cfg-leak-d-residuals`)), and hooks by the parsed document
+    read as words; a flag at the end of one line pairs with the value starting the next non-blank line: blank and spaces-only
+    lines between them do not break the pairing, as W reads the string), and hooks by the parsed document
     (the lines of each path W refuses are withheld; a refused list item withholds its whole list, because `--token` and its
     value are two lines; a text that does not parse as JSON is netted by the lines alone, and a document nested past 200
-    levels is withheld whole).
+    levels is withheld whole, however deep the parser reads it: W's walkers are iterative).
   - **The "command not found" warning** names the command only when the detail shows it.
 
   The fields shown as written without a net are names and paths, not values: a component's `file` and `directory`, a skill's items,

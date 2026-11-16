@@ -434,7 +434,7 @@ function paddedCases(): NestedCase[] {
  * A secret-named flag's value, with a pointer on either side (review r4 B1): the flag in each form it is written in
  * (`--flag v` as two argv words or one, `--flag=v`), the value with base64 padding, `user:pass` and `Basic` before it,
  * the pointer before it, after it, between two parts of it or as a harmless key's value. The flag is read like a
- * secret-named key; a harmless flag, a one-letter one (the declared `-p<password>` GAP) and a value composed with
+ * secret-named key; a harmless flag, a one-letter one (`-k`: a single letter names no secret) and a value composed with
  * its pointer stay as written.
  */
 const SECRET_FLAGS = ['--token', '--client-secret', '--api-key', '--x-api-key', '--password', '--access-token'];

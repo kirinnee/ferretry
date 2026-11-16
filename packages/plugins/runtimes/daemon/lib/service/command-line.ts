@@ -79,8 +79,22 @@ export const writtenWithheld = (name: string, text: string): boolean =>
 /** A pointer to a value, not a value: `$NAME`, `${NAME}`, `${secret:NAME}`, with a pair of quotes around it or not. */
 const POINTER = /^(["']?)\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)\1$/u;
 
-/** A plain word of a command: lowercase letters, dots, slashes and hyphens (`srv`, `npx`, `--stdio`, `bin/run.js`). */
-const PLAIN_WORD = /^-{0,2}[a-z][a-z._/-]*$/u;
+/**
+ * A plain word of a command: lowercase letters, dots, slashes and hyphens (`srv`, `npx`, `--stdio`, `bin/run.js`),
+ * and a package's scope mark (`@scope/pkg`).
+ */
+const PLAIN_WORD = /^-{0,2}@?[a-z][a-z._/-]*$/u;
+
+/** A path or a URL as the write rule's value test knows one: a scheme and `://`, or a leading `/`, `~` or `.`. */
+const PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+
+/**
+ * Whether a part the cutter cut is one path or URL and nothing else (`--token-file ~/.config/tool/token`,
+ * `--key /home/u/.ssh/id_ed25519`): where a credential is kept, which the write rule accepts under a credential name.
+ * It must be a single word that the cutter, run on it alone, shows whole: a URL with a password, a query key or a
+ * token in it is a value.
+ */
+const isPlace = (part: string): boolean => PLACE.test(part) && !/\s/u.test(part) && !shownWord(part, undefined).hidden;
 
 /**
  * Whether a part the cutter cut is a pointer and nothing else: its first word is a pointer, and the words the cutter
@@ -113,7 +127,8 @@ function cutsAValue(text: string, before?: string): boolean {
     const last = index === pieces.length - 1;
     const end = last ? text.length - piece.length : text.indexOf(piece, at + 1);
     if (end < at + 1 || (last && !text.endsWith(piece))) return true;
-    if (!pointerThenPlainWords(text.slice(at, end))) return true;
+    const part = text.slice(at, end);
+    if (!pointerThenPlainWords(part) && !isPlace(part)) return true;
     at = end + piece.length;
   }
   return false;

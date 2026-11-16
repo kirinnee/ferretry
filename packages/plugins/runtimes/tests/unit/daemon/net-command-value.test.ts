@@ -136,6 +136,43 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     should(JSON.stringify(seen.detail)).not.containEql(V);
   });
 
+  for (const command of [
+    'srv --token-file ~/.config/tool/token',
+    'srv --key /home/u/.ssh/id_ed25519',
+    'srv --key ./keys/server.pem',
+    'srv --token-file file:///etc/tool/token',
+    'env API_KEY="$API_KEY" npx -y @scope/pkg',
+    'env API_KEY="${secret:X}" npx -y @scope/pkg',
+  ]) {
+    it(`should show a path flag or a quoted pointer as written, W accepts it: ${command}`, () => {
+      // Act
+      const seen = views(command);
+
+      // Assert
+      should(commandWithheld(command)).be.false();
+      should(seen.resolved).equal(command);
+      should(seen.held).be.false();
+    });
+  }
+
+  for (const command of [
+    `srv --key https://person:${V}@h.example/key`,
+    `srv --key ./keys?token=${V}`,
+    `srv --token-file /a/b --token ${V}`,
+    `env API_KEY="${V}" npx -y @scope/pkg`,
+    `env API_KEY="$API_KEY" ${V}`,
+  ]) {
+    it(`should still withhold a path flag that is a URL with a value in it, or any value beside it: ${command.slice(0, 30)}`, () => {
+      // Act
+      const seen = views(command);
+
+      // Assert
+      should(commandWithheld(command)).be.true();
+      should(seen.resolved).not.containEql(V);
+      should(seen.detail).not.containEql(V);
+    });
+  }
+
   it('should show a plain command and its arguments as before', () => {
     // Act
     const seen = views('npx', ['-y', '@scope/pkg']);
