@@ -411,6 +411,31 @@ describe('fy job: the signal deadline', () => {
     should(h.exits).deepEqual([75]);
   });
 
+  it('should keep hearing signals through the goodbye of a job that ended on its own, and exit 75', async () => {
+    // Arrange
+    let during: unknown;
+    const hold: { signals?: FakeSignals } = {};
+    const h = harness(call => {
+      if (call.route.endsWith('/output'))
+        return chunk('', 0, { ended: true, job: job({ state: 'exited', exitCode: 3 }) });
+      if (call.route.endsWith('/jobs/:jobId')) return job();
+      if (call.route.startsWith('POST')) return register;
+      if (call.route.startsWith('DELETE')) {
+        during = hold.signals?.handler;
+        hold.signals?.handler?.('SIGTERM');
+      }
+      return { ok: true };
+    });
+    hold.signals = h.signals;
+
+    // Act
+    await h.sut.attach(invocation(['build']));
+
+    // Assert
+    should(during).be.a.Function();
+    should(h.exits).deepEqual([75]);
+  });
+
   it('should detach cleanly (75) when the signal lands during the start request of fy job run', async () => {
     // Arrange
     const h = harness(answers(call => call.route === 'POST /v1/ferrets/:ferretId/jobs'));

@@ -133,9 +133,10 @@ export const JOB_STOP_GRACE_SECONDS = 5;
  * - on SIGINT/SIGTERM/SIGHUP (the pane closing, a stop) it signals the job's whole process TREE, found by walking children with
  *   `pgrep -P` (TERM to every one, then KILL to those same pids after the grace), and still waits for the job, so the exit
  *   is recorded either way. A tree walk rather than a process group: job control needs a terminal and its pgid arithmetic
- *   differed between shells; a process that detaches itself (setsid, a double fork) before the stop is out of reach. The KILL
- *   after the grace walks the tree again from the job's pid (plus earlier finds that were orphaned to init), never trusting
- *   a pid found five seconds before;
+ *   differed between shells; a process that detaches itself (setsid, a double fork) before the stop is out of reach. Every
+ *   process found is kept as an INCARNATION (pid + start time, `/proc/<pid>/stat` or `ps -o lstart=`): the KILL after the grace
+ *   goes only to those still the same process (plus what they started since), wherever they were reparented, and the wrapper
+ *   does not write `exit.json` until they are gone — the main shell dying first does not cancel the escalation;
  * - a watcher in the wrapper turns the daemon's `<dir>/stop` file into SIGTERM on the wrapper itself (within a second). A stop is
  *   a FILE, never a signal typed into the pane: a tty interrupt reaches the job directly as SIGINT and races the wrapper, and
  *   the file works however early or late it is written;
@@ -155,9 +156,34 @@ pid=
 gpid=
 writer=
 stopping=
+seen=
 tree() {
   for child in $(pgrep -P "$1" 2>/dev/null); do tree "$child"; done
   echo "$1"
+}
+ident() {
+  if [ -d /proc/self ]; then
+    sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | awk '$1 != "Z" && $1 != "X" { print $20 }'
+  else
+    ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' _
+  fi
+}
+snap() {
+  for one in $(tree "$1"); do
+    started=$(ident "$one")
+    [ -z "$started" ] || echo "$one=$started"
+  done
+}
+live() {
+  [ "$(ident "\${1%%=*}")" = "\${1#*=}" ]
+}
+signal_seen() {
+  more=$(for entry in $seen; do live "$entry" && snap "\${entry%%=*}"; done)
+  for entry in $seen $more; do live "$entry" && kill -s "$1" "\${entry%%=*}" 2>/dev/null; done
+}
+any_live() {
+  for entry in $seen; do live "$entry" && return 0; done
+  return 1
 }
 capped() {
   while :; do
@@ -174,18 +200,13 @@ capped() {
 term() {
   stopping=1
   [ -n "$pid" ] || return 0
-  all=$(tree "$pid")
-  for one in $all; do kill -s TERM "$one" 2>/dev/null; done
+  seen="$seen
+$(snap "$pid")"
+  signal_seen TERM
   if [ -z "$gpid" ]; then
     (
       sleep ${JOB_STOP_GRACE_SECONDS}
-      now=$(tree "$pid")
-      for one in $all; do
-        kill -0 "$one" 2>/dev/null || continue
-        case " $now " in *" $one "*) continue ;; esac
-        [ "$(ps -o ppid= -p "$one" 2>/dev/null | tr -d ' ')" = 1 ] && now="$now $one"
-      done
-      for one in $now; do kill -s KILL "$one" 2>/dev/null; done
+      signal_seen KILL
     ) >/dev/null 2>&1 &
     gpid=$!
   fi
@@ -207,6 +228,15 @@ while kill -0 "$pid" 2>/dev/null; do
   code=$?
 done
 kill "$watcher" 2>/dev/null
+if [ -n "$gpid" ]; then
+  while any_live && kill -0 "$gpid" 2>/dev/null; do sleep 0.2; done
+  tries=0
+  while any_live && [ "$tries" -lt 20 ]; do
+    sleep 0.1
+    tries=$((tries + 1))
+  done
+  kill "$gpid" 2>/dev/null
+fi
 tries=0
 while kill -0 "$writer" 2>/dev/null && [ "$tries" -lt 20 ]; do
   sleep 0.1

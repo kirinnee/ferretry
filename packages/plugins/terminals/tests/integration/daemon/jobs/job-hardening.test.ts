@@ -136,3 +136,38 @@ describe('tmux format expansion (a private tmux server)', () => {
     await jobs.stop('ferret-a', keep.id);
   }, 30_000);
 });
+
+describe('stopping a job whose parent exits first (a private tmux server)', () => {
+  /** Whether the process is a live one (a zombie waiting to be reaped is already dead). */
+  const running = async (pid: number): Promise<boolean> => {
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
+    return stat !== '' && !/\) [ZX] /u.test(stat);
+  };
+
+  it('should leave no ordinary descendant alive, and record the exit only after the cleanup', async () => {
+    // Arrange: the shell exits on TERM at once; its child ignores TERM and HUP and has not detached.
+    const one = await keeper();
+    kept.push(one);
+    const jobs = one.service();
+    const script = join(one.home, 'child.sh');
+    const pidFile = join(one.home, 'grandchild.pid');
+    await writeFile(script, `trap '' TERM HUP\necho $$ > ${pidFile}\nwhile :; do sleep 1; done\n`);
+    const job = await jobs.start('ferret-a', { command: `/bin/sh ${script} & wait` }, person);
+    const pid = Number(
+      await waitForValue(
+        async () => (await readFile(pidFile, 'utf8').catch(() => '')).trim() || undefined,
+        'the child',
+      ),
+    );
+    should(await running(pid)).be.true();
+
+    // Act
+    const stopped = await jobs.stop('ferret-a', job.id);
+    const survivedAt = await running(pid);
+
+    // Assert
+    should(stopped.state).equal('exited');
+    should(survivedAt).be.false();
+    if (await running(pid)) process.kill(pid, 'SIGKILL');
+  }, 40_000);
+});

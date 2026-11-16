@@ -172,6 +172,7 @@ export class JobVerbs {
       } finally {
         heard.release();
         if (heard.heard()) this.host.self.exit(JOB_EXIT_DETACHED);
+        heard.release();
       }
     });
   }
@@ -275,7 +276,7 @@ export class JobVerbs {
         await this.host.timers.sleep(JOB_POLL_MS, heard.signal);
       }
     } finally {
-      heard.release();
+      // Keep hearing signals through the unregister below: a TERM now still ends the verb as detached (75), never as 143.
       // Told, but only for a moment: the daemon may not be answering, and nothing may keep this process past its deadline.
       if (attachment !== undefined) {
         const told = this.gateway
@@ -288,6 +289,7 @@ export class JobVerbs {
         await Promise.race([told, this.host.timers.sleep(JOB_UNREGISTER_MS)]);
       }
       if (heard.heard()) this.host.self.exit(JOB_EXIT_DETACHED);
+      heard.release();
     }
   }
 

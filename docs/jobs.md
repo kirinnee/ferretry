@@ -46,9 +46,13 @@ rebooted or tmux was killed under it).
 - **A job is never idle-reaped.** The terminal idle deadline is not applied to jobs at all; a job ends when it ends, is stopped, or its
   ferret is removed from the machine's point of view (files age out).
 - **Stopping** (`fy job stop`): the daemon writes `stop`; within a second the wrapper sends SIGTERM to the job's whole **process
-  tree** (children found with `pgrep -P`), then, after 5 s, SIGKILL to the tree walked again from the job's pid at that moment (plus earlier finds that were orphaned to init), so a pid that was reused meanwhile is not hit. A job that ignores TERM ends with code 137 /
-  signal KILL. If the wrapper itself does not finish in time the pane is taken down and a KILL exit is recorded by the daemon.
-  A process that detached itself (setsid, double fork) before the stop is out of reach.
+  tree** (children found with `pgrep -P`), then, after 5 s, SIGKILL to every one of those processes (and whatever they started since) that is still the SAME process.
+  Each is tracked by its **incarnation** (pid plus start time: `/proc/<pid>/stat` on Linux, `ps -o lstart=` elsewhere), so a descendant reparented to
+  any subreaper (init, `systemd --user`) is still followed and a reused pid is never signalled. The wrapper does not record the exit until every
+  descendant it found has gone, so a shell that dies on TERM cannot leave a child that ignored TERM running behind a recorded exit. A job that
+  ignores TERM ends with code 137 / signal KILL. If the wrapper itself does not finish in time the pane is taken down and a KILL exit is
+  recorded by the daemon. A process that detached itself (setsid, double fork) before the stop is out of reach. Where the start time cannot be
+  read the process is not tracked (and so not signalled): a documented degrade, never a guess.
 - A signal death is recorded as the shell reports it: **128 + the signal's number**, and `exit.json` also names the signal
   (`"signal":"TERM"`). A command that itself exits 143 reads the same; the code is the fact, the name a convenience.
 - Redaction: a command line and a log are text a secret can ride in, so every route that returns either is built inside one
