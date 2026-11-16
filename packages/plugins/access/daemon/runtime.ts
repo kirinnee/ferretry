@@ -311,7 +311,12 @@ export class AccessRuntime {
     const routes = new Map<string, RouteHandler>();
     for (const route of [
       ...pairingRoutes(pairing, deviceGrants),
-      ...pairingRedirectRoutes(stateRedirectWriter(kernel.state)),
+      ...pairingRedirectRoutes(
+        stateRedirectWriter(kernel.state, {
+          nowMs: () => clock.nowMs(),
+          after: (ms, fn) => clock.after(milliseconds(ms), fn),
+        }),
+      ),
       ...pushRoutes(push, guard),
       ...this.#stepUpRoutes(stepUp),
     ])

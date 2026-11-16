@@ -298,9 +298,11 @@ describe('pairing routes as declared (the boundary Gate enforces)', () => {
         .filter(route => route.method === 'POST' && route.path.startsWith('/v1/pair'))
         .map(route => route.key),
     ).deepEqual(['POST /v1/pair/code', 'POST /v1/pair/redirect']);
-    // The second takes a page the host's own CLI renders (never a code, never a credential to redeem), host admin only.
+    // The second takes a page the host's own CLI renders. The page CARRIES the live code in its link, but it is not a
+    // redemption route: nothing in it, and no route here, accepts a code. Host admin only, and only on the host.
     should(declared('POST /v1/pair/redirect').capability).be.undefined();
     should(declared('POST /v1/pair/redirect').minimum).equal('admin-token');
+    should(declared('POST /v1/pair/redirect').privilegedOnly).equal(true);
   });
 });
 

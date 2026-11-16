@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { ApiError } from '@ferretry/kernel/contract';
 import should from 'should';
-import { PAIRING_REDIRECT_PAGE_MAX_BYTES } from '../../../../contract/index.ts';
+import { PAIRING_REDIRECT_PAGE_MAX_CHARS } from '../../../../contract/index.ts';
 import { type PairingRedirectWriter, pairingRedirectRoutes } from '../../../../daemon/lib/routes/pairing-redirect.ts';
 import manifest from '../../../../manifest.ts';
 import { jsonBody, respond } from '../../../support/daemon/call.ts';
@@ -31,6 +31,9 @@ describe('POST /v1/pair/redirect', () => {
     const [route] = pairingRedirectRoutes(writer('x').subject);
     should(route?.minimum).equal(declared?.minimum);
     should(route?.noStore).equal(true);
+    // The route table the kernel serves carries the same pin the manifest declares, so neither can drift.
+    should(declared?.privilegedOnly).equal(true);
+    should(route?.privilegedOnly).equal(true);
   });
 
   it('should have the writer make the page and answer only the directory it made', async () => {
@@ -47,7 +50,7 @@ describe('POST /v1/pair/redirect', () => {
     const refusals = [
       send(''),
       send(7),
-      send('x'.repeat(PAIRING_REDIRECT_PAGE_MAX_BYTES + 1)),
+      send('x'.repeat(PAIRING_REDIRECT_PAGE_MAX_CHARS + 1)),
       JSON.stringify({ page: 'ok', directory: '../escape' }),
       '{',
     ];
@@ -57,7 +60,7 @@ describe('POST /v1/pair/redirect', () => {
 
   it('should refuse a body larger than its bound without reading it all', async () => {
     const { subject, pages } = writer('pair-open-AbCdEf');
-    const big = send('x'.repeat(PAIRING_REDIRECT_PAGE_MAX_BYTES * 6 + 100));
+    const big = send('x'.repeat(PAIRING_REDIRECT_PAGE_MAX_CHARS * 6 + 100));
     should((await respond(pairingRedirectRoutes(subject), KEY, { host: true, body: big })).status).equal(413);
     should(pages).eql([]);
   });
