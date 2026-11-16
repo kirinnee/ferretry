@@ -58,3 +58,4 @@ export * from './dialog-rules.ts';
 export * from './dialog-rules-claude.ts';
 export * from './dialog-rules-codex.ts';
 export * from './dialog-learn.ts';
+export * from './dialog-teach.ts';

@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { FormKey } from '@ferretry/core-ferrets/contract';
+import { type FormKey, RecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { DialogRuleSchema, DialogRulesFileSchema, isGrantLabel } from '../../contract/dialog-rules.ts';
 import {
   CLAUDE_DIALOG_RULES,
@@ -42,7 +42,7 @@ interface Screen {
 const row = (number: number, label: string, grantsTrust = false) => ({ number, label, grantsTrust });
 const words = (over: Partial<WatchedDialogWords> & Pick<WatchedDialogWords, 'kind' | 'title'>): WatchedDialogWords => ({
   id: 'aaaaaaaaaaaaaaaa',
-  harness: 'claude-code',
+  harness: 'claude',
   options: [],
   ...over,
 });
@@ -264,6 +264,12 @@ describe('every known screen has a rule that leaves it', () => {
     });
   }
 
+  it('should spell its harness the way Ferrets records a ferret’s dialog, or no rule would ever match one', () => {
+    // Assert
+    for (const rule of BUILT_IN) should(RecordedHarnessSchema.safeParse(rule.harness).success).equal(true);
+    for (const screen of SCREENS) should(RecordedHarnessSchema.safeParse(screen.dialog.harness).success).equal(true);
+  });
+
   it('should have a screen under test for every built-in rule', () => {
     // Assert
     should(SCREENS.map(screen => screen.rule).sort()).eql(BUILT_IN.map(rule => rule.id).sort());
@@ -307,7 +313,7 @@ describe('a rule never grants', () => {
       const file = { rules: [{ id: 'x', harness: 'codex', kind: 'other', title: 'x', action: { choose } }] };
       should(DialogRulesFileSchema.safeParse(file).success).equal(false);
       const screen = SCREENS[1] as Screen;
-      const rule = { id: 'x', harness: 'claude-code', kind: 'mcp-servers', title: '.', action: { choose } } as const;
+      const rule = { id: 'x', harness: 'claude', kind: 'mcp-servers', title: '.', action: { choose } } as const;
       const dialog = { ...screen.dialog, options: [row(1, choose), row(2, 'Continue without using this MCP server')] };
       should(planKeys(rule, dialog, frameOf({ ...screen, dialog }, 1))).equal('grants');
     }
@@ -322,7 +328,7 @@ describe('a rule never grants', () => {
     };
     const rule = {
       id: 'x',
-      harness: 'claude-code',
+      harness: 'claude',
       kind: 'mcp-servers',
       title: '.',
       action: { choose: 'Carry on' },

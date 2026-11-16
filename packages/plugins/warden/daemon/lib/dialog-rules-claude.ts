@@ -15,7 +15,7 @@ export const CLAUDE_DIALOG_RULES: readonly DialogRule[] = [
     // "Dangerous rm operation detected" and its two siblings (an rm on a possibly-empty variable path, an rm inside a
     // `bash -c` script) all print this lead on their reason line. The owner never allows one: Esc declines at once.
     id: 'claude-dangerous-rm',
-    harness: 'claude-code',
+    harness: 'claude',
     kind: 'permission',
     body: '^Bash\\b',
     text: '^Dangerous rm(?:dir)? operation\\b',
@@ -23,14 +23,14 @@ export const CLAUDE_DIALOG_RULES: readonly DialogRule[] = [
   },
   {
     id: 'claude-mcp-servers',
-    harness: 'claude-code',
+    harness: 'claude',
     kind: 'mcp-servers',
     title: '^new mcp servers? found\\b',
     action: { choose: 'Continue without using this MCP server' },
   },
   {
     id: 'claude-settings-error',
-    harness: 'claude-code',
+    harness: 'claude',
     kind: 'settings-error',
     title: '^settings error$',
     action: { choose: 'Continue without these settings' },
@@ -38,7 +38,7 @@ export const CLAUDE_DIALOG_RULES: readonly DialogRule[] = [
   {
     // The LSP-plugin recommendation: a `lspRecommendation*` key in the ferret's home keeps it away; this is the backstop.
     id: 'claude-lsp-recommendation',
-    harness: 'claude-code',
+    harness: 'claude',
     kind: 'other',
     title: '^lsp plugin recommendation$',
     action: { choose: 'No, not now' },

@@ -32,7 +32,7 @@ const SECRET = 'abc123def456ghi789jkl012';
 const row = (number: number, label: string, grantsTrust = false) => ({ number, label, grantsTrust });
 const unknown = (over: Partial<WatchedDialogWords> = {}): WatchedDialogWords => ({
   id: 'bbbbbbbbbbbbbbbb',
-  harness: 'claude-code',
+  harness: 'claude',
   kind: 'other',
   title: 'Try the new fullscreen renderer? (beta)',
   options: [row(1, 'Yes, try it', true), row(2, 'No, keep the current one'), row(3, 'Never ask again')],
@@ -61,7 +61,7 @@ describe('proposing a rule', () => {
     should(proposal.held).equal(false);
     should(proposal.rule?.action).eql({ choose: 'No, keep the current one' });
     should(proposal.rows.filter(each => each.pressed).map(each => each.number)).eql([2]);
-    should(proposal.rule?.harness).equal('claude-code');
+    should(proposal.rule?.harness).equal('claude');
     should(proposal.rule?.kind).equal('other');
     should(new RegExp(proposal.rule?.title ?? '', 'iu').test('Try the new fullscreen renderer? (beta)')).equal(true);
     should(DialogLearnAnswerSchema.safeParse({ proposal, saved: false, heldFor: [] }).success).equal(true);
