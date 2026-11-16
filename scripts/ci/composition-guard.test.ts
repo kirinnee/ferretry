@@ -17,9 +17,11 @@ import {
   COMPOSITION_HEADER,
   type CompositionEntry,
   checkPaths,
+  guarded,
   parseComposition,
   readDeclared,
 } from './lib/composition.ts';
+import { packageRoots } from './one-folder.ts';
 
 const entry = (path: string, kind: CompositionEntry['kind'] = 'composition'): CompositionEntry => ({
   kind,
@@ -253,6 +255,35 @@ suite('parseDiff', () => {
       deleted: false,
     });
     expect(parsed.get('y.json')).toEqual({ added: [], removed: ['{', '}'], addedAt: 0, deleted: true });
+  });
+
+  test('`---` and `+++` are file headers only before the first hunk; inside a hunk they are content', () => {
+    const parsed = parseDiff(
+      [
+        'diff --git a/x/index.ts b/x/index.ts',
+        '--- a/x/index.ts',
+        '+++ b/x/index.ts',
+        '@@ -3,0 +4,2 @@',
+        '+  charlie,',
+        '+++x;',
+        '@@ -9 +11,0 @@',
+        '----gone',
+        'diff --git a/y.ts b/y.ts',
+        '--- a/y.ts',
+        '+++ b/y.ts',
+        '@@ -1 +1 @@',
+        '-a',
+        '+b',
+      ].join('\n'),
+    );
+    expect(parsed.get('x/index.ts')).toEqual({
+      added: ['  charlie,', '++x;'],
+      removed: ['---gone'],
+      addedAt: 4,
+      deleted: false,
+    });
+    // The next file's headers are headers again.
+    expect(parsed.get('y.ts')).toEqual({ added: ['b'], removed: ['a'], addedAt: 1, deleted: false });
   });
 });
 
@@ -494,6 +525,12 @@ suite('the job, end to end (real git, no network)', () => {
     two.commit('feat: add two parts');
     expect(guard(two, '').code).toBe(1);
 
+    // A sorted add plus an unindented `++x;` line is two added lines (`+++x;` in the diff, not a file header): RED.
+    const smuggled = fixture();
+    smuggled.write('packages/alpha/parts/index.ts', PARTS.replace('  delta,', '  charlie,\n  delta,\n++x;'));
+    smuggled.commit('feat: add a part and a line that looks like a diff header');
+    expect(guard(smuggled, '').code).toBe(1);
+
     const unsorted = fixture();
     unsorted.write('packages/alpha/parts/index.ts', PARTS.replace('  alpha,', '  alpha,\n  zulu,'));
     unsorted.commit('feat: add a part out of order');
@@ -550,5 +587,144 @@ suite('the job, end to end (real git, no network)', () => {
     });
     expect(unknown.code).toBe(1);
     expect(unknown.lines.join('\n')).toContain('no merge-base');
+  });
+});
+
+// ─── the repository's own declarations (read from the working tree) ──────────────────────────────────────────────────
+
+const REPO = join(import.meta.dir, '..', '..');
+const readRepo = (path: string): string | undefined => {
+  try {
+    return readFileSync(join(REPO, path), 'utf8');
+  } catch {
+    return undefined;
+  }
+};
+const real = readDeclared(packageRoots(REPO), readRepo);
+const realGuarded = guarded(real.entries);
+const PORTS = 'packages/core/kernel/contract/ports.ts';
+const PARTS_INDEXES = [
+  'packages/plugins/codex/daemon/harness/parts/index.ts',
+  'packages/plugins/claude-code/daemon/harness/parts/index.ts',
+];
+const lines = (path: string): string[] => (readRepo(path) ?? '').split('\n');
+/** The head of `path` with `added` inserted before 1-based line `at`: a FileChange that adds exactly those lines. */
+const inserting = (path: string, additions: readonly [at: number, line: string][]): FileChange => {
+  const head = lines(path);
+  let shift = 0;
+  for (const [at, text] of additions) {
+    head.splice(at - 1 + shift, 0, text);
+    shift++;
+  }
+  return {
+    added: additions.map(([, text]) => text),
+    removed: [],
+    addedAt: (additions[0]?.[0] ?? 1) as number,
+    head,
+  };
+};
+
+suite("the repository's declarations", () => {
+  test('every composition.tsv is well formed and names files that exist', () => {
+    expect(checkPaths(real, packageRoots(REPO), path => readRepo(path) !== undefined)).toEqual([]);
+  });
+
+  test('the root composition.tsv declares the guard itself, so a PR cannot weaken it without a Contract change', () => {
+    for (const file of [
+      'scripts/ci/composition-guard.ts',
+      'scripts/ci/lib/composition.ts',
+      '.github/workflows/one-folder.yaml',
+    ]) {
+      expect(realGuarded.get(file)?.kind).toBe('composition');
+      expect(realGuarded.get(file)?.owner).toBe('');
+      const result = evaluate({
+        declared: realGuarded,
+        changes: new Map([[file, edit(['x'], ['y'])]]),
+        body: '',
+      });
+      expect(result.ok).toBe(false);
+      expect(result.missing.map(item => item.file)).toEqual([file]);
+    }
+    // ...and the root composition.tsv itself: removing a declaration is not exempt.
+    const root = new Map([['composition.tsv', edit([], ['composition\tscripts/ci/composition-guard.ts\t-\t-\tx'], 0)]]);
+    expect(evaluate({ declared: realGuarded, changes: root, body: '' }).ok).toBe(false);
+  });
+
+  test('the kernel ports barrel is a registry: one sorted `export *` line is green', () => {
+    expect(realGuarded.get(PORTS)?.kind).toBe('registry');
+    const head = lines(PORTS);
+    const at = head.findIndex(row => row.includes("'./ports/clock.ts'")) + 2;
+    const change = inserting(PORTS, [[at, "export * from './ports/clock2.ts';"]]);
+    const result = evaluate({ declared: realGuarded, changes: new Map([[PORTS, change]]), body: '' });
+    expect(result.ok).toBe(true);
+    expect(result.exempt.map(item => item.why)).toEqual(['registry-add']);
+    // out of its sorted place: red
+    const unsorted = inserting(PORTS, [[at - 3, "export * from './ports/clock2.ts';"]]);
+    expect(evaluate({ declared: realGuarded, changes: new Map([[PORTS, unsorted]]), body: '' }).ok).toBe(false);
+  });
+
+  test.each(PARTS_INDEXES)(
+    'the harness parts registry %s: a new part (import + entry) is red until the PR names it under Contract change',
+    path => {
+      expect(realGuarded.get(path)?.kind).toBe('registry');
+      const head = lines(path);
+      const importAt = head.findIndex(row => row.startsWith("import { homePart } from './home.ts'")) + 2;
+      const entryAt = head.findIndex(row => row.trim() === 'homePart,') + 2;
+      // Two lines, so the second added line is inserted after the first: entryAt counts the import already added.
+      const change = inserting(path, [
+        [importAt, "import { homeAPart } from './home-a.ts';"],
+        [entryAt, '  homeAPart,'],
+      ]);
+      const changes = new Map([[path, change]]);
+      const red = evaluate({ declared: realGuarded, changes, body: '' });
+      expect(red.ok).toBe(false);
+      expect(red.missing.map(item => item.file)).toEqual([path]);
+      const green = evaluate({
+        declared: realGuarded,
+        changes,
+        body: body('## Contract change', `- ${path}: a new harness part`),
+      });
+      expect(green.ok).toBe(true);
+    },
+  );
+});
+
+suite('a root composition.tsv, end to end (real git, no network)', () => {
+  const ROOT_TSV = `${[
+    COMPOSITION_HEADER,
+    ['composition', 'scripts/ci/guard.ts', '-', '-', 'the guard itself'].join('\t'),
+  ].join('\n')}\n`;
+  const rootFixture = () => {
+    const r = repo();
+    r.git('init', '-q', '-b', 'base');
+    r.write('package.json', JSON.stringify({ name: 'x', workspaces: ['packages/*'] }));
+    r.write('packages/alpha/package.json', '{"name":"alpha"}');
+    r.write('composition.tsv', ROOT_TSV);
+    r.write('scripts/ci/guard.ts', 'export const guard = 1;\n');
+    const base = r.commit('base');
+    r.git('checkout', '-q', '-b', 'pr');
+    return { ...r, base };
+  };
+
+  test('weakening a file the root declares needs a Contract change section', () => {
+    const f = rootFixture();
+    f.write('scripts/ci/guard.ts', 'export const guard = 0;\n');
+    f.commit('feat: weaken the guard');
+    const failed = guard(f, '');
+    expect(failed.code).toBe(1);
+    expect(failed.lines.join('\n')).toContain('✗ scripts/ci/guard.ts  (composition of the repository root)');
+    expect(guard(f, body('## Contract change', '- scripts/ci/guard.ts: a reason')).code).toBe(0);
+  });
+
+  test('un-declaring it in the same PR does not help: the root file is read at the merge-base', () => {
+    const f = rootFixture();
+    f.write('scripts/ci/guard.ts', 'export const guard = 0;\n');
+    f.write('composition.tsv', `${COMPOSITION_HEADER}\n`);
+    f.commit('feat: quietly un-declare and weaken');
+    const result = guard(f, '');
+    expect(result.code).toBe(1);
+    const text = result.lines.join('\n');
+    expect(text).toContain('✗ scripts/ci/guard.ts');
+    expect(text).toContain('✗ composition.tsv');
   });
 });

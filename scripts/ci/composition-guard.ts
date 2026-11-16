@@ -240,20 +240,27 @@ export function parseDiff(
   const files = new Map<string, { added: string[]; removed: string[]; addedAt: number; deleted: boolean }>();
   let current: { added: string[]; removed: string[]; addedAt: number; deleted: boolean } | undefined;
   let cursor = 0;
+  // `--- a/x` and `+++ b/x` are file headers only BEFORE a file's first hunk; inside a hunk a line starting `++` or `--` is
+  // content (an added `++x;` is `+++x;`), so it counts as an added or removed line.
+  let inHunk = false;
   for (const line of text.split('\n')) {
     const header = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
     if (header !== null) {
       current = { added: [], removed: [], addedAt: 0, deleted: false };
       files.set(header[2] as string, current);
+      inHunk = false;
       continue;
     }
     if (current === undefined) continue;
-    if (line.startsWith('deleted file mode')) current.deleted = true;
-    else if (line.startsWith('@@')) cursor = hunkStart(line);
-    else if (line.startsWith('+') && !line.startsWith('+++')) {
+    if (line.startsWith('@@')) {
+      inHunk = true;
+      cursor = hunkStart(line);
+    } else if (!inHunk && line.startsWith('deleted file mode')) current.deleted = true;
+    else if (!inHunk && (line.startsWith('---') || line.startsWith('+++'))) continue;
+    else if (line.startsWith('+')) {
       if (current.added.length === 0) current.addedAt = cursor;
       current.added.push(line.slice(1));
-    } else if (line.startsWith('-') && !line.startsWith('---')) current.removed.push(line.slice(1));
+    } else if (line.startsWith('-')) current.removed.push(line.slice(1));
   }
   return files;
 }
