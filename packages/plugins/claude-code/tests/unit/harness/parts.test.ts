@@ -7,7 +7,7 @@ import type { Harness } from '@ferretry/core-ferrets/contract';
 import { ClaudeHarness } from '../../../daemon/adapters/claude-harness.ts';
 import { composeClaudeHarness } from '../../../daemon/harness/parts/compose.ts';
 import type { ClaudeCore } from '../../../daemon/harness/parts/core.ts';
-import { CLAUDE_PARTS } from '../../../daemon/harness/parts/index.ts';
+import { CLAUDE_PARTS } from '../../../daemon/harness/parts/list.ts';
 
 /**
  * Every member of `Harness` the Claude Code harness serves, and the ONE part that serves it. A member in two parts, a
@@ -112,9 +112,10 @@ describe('the parts registry takes two independent additions without a conflict'
     const registry = join(import.meta.dir, '../../../daemon/harness/parts/index.ts');
     const base = await readFile(registry, 'utf8');
     const add = (text: string, name: string, file: string, before: string): string =>
-      text
-        .replace(`import { ${before}Part }`, `import { ${name}Part } from './${file}.ts';\nimport { ${before}Part }`)
-        .replace(`  ${before}Part,\n`, `  ${name}Part,\n  ${before}Part,\n`);
+      text.replace(
+        `export * as ${before} from`,
+        `export * as ${name} from './${file}.ts';\nexport * as ${before} from`,
+      );
     const dir = await mkdtemp(join(tmpdir(), 'claude-parts-merge-'));
     try {
       await writeFile(join(dir, 'base.ts'), base);
@@ -129,8 +130,8 @@ describe('the parts registry takes two independent additions without a conflict'
       );
       const text = await new Response(merged.stdout).text();
       should(await merged.exited).equal(0);
-      should(text).containEql('  cachePart,\n  deliverPart,\n');
-      should(text).containEql('  memoryPart,\n  runtimeSwitchPart,\n');
+      should(text).containEql("export * as cache from './cache.ts';\nexport * as deliver from");
+      should(text).containEql("export * as memory from './memory.ts';\nexport * as runtimeSwitch from");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

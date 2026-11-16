@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { harnessContext, type CodexHarnessOptions } from '../../daemon/harness/parts/context.ts';
-import { CODEX_HARNESS_PARTS } from '../../daemon/harness/parts/index.ts';
+import { CODEX_HARNESS_PARTS } from '../../daemon/harness/parts/list.ts';
 
 /** Every member the harness has, from before it was split into parts: composing the parts must give exactly these. */
 const BASE_MEMBERS = [
@@ -84,24 +84,31 @@ describe('the Codex harness parts', () => {
     expect(Object.keys(codexHarness(withSwitch)).sort()).toEqual([...BASE_MEMBERS, 'runtimeSwitch'].sort());
   });
 
+  test('the registry is one sorted `export * as <name>` line per part and nothing else', async () => {
+    const registry = await readFile(join(import.meta.dir, '../../daemon/harness/parts/index.ts'), 'utf8');
+    const code = registry
+      .split('\n')
+      .filter(row => row.trim() !== '')
+      .filter(row => !/^(\/\*\*| \*)/u.test(row));
+    expect(code.every(row => /^export \* as [a-z][A-Za-z0-9]* from '\.\/[a-z-]+\.ts';$/u.test(row))).toBe(true);
+    expect(code).toEqual([...code].sort());
+    expect(code.length).toBe(CODEX_HARNESS_PARTS.length);
+  });
+
   test('two independent one-line adds to the registry merge cleanly', async () => {
     const registry = await readFile(join(import.meta.dir, '../../daemon/harness/parts/index.ts'), 'utf8');
     const dir = await mkdtemp(join(tmpdir(), 'codex-parts-registry-'));
     try {
-      // The first entry: its own line is added before it, so the opening `= [` is not touched.
-      const ours = registry
-        .replace(
-          "import { conversationPart } from './conversation.ts';\n",
-          "import { auditPart } from './audit.ts';\nimport { conversationPart } from './conversation.ts';\n",
-        )
-        .replace('  conversationPart,\n', '  auditPart,\n  conversationPart,\n');
-      // The last entry: its own line is added after it, so the closing `] as const;` is not touched.
-      const theirs = registry
-        .replace(
-          "import { transcriptPart } from './transcript.ts';\n",
-          "import { transcriptPart } from './transcript.ts';\nimport { zoomPart } from './zoom.ts';\n",
-        )
-        .replace('  transcriptPart,\n', '  transcriptPart,\n  zoomPart,\n');
+      // The first entry: its own line is added before it.
+      const ours = registry.replace(
+        "export * as conversation from './conversation.ts';\n",
+        "export * as audit from './audit.ts';\nexport * as conversation from './conversation.ts';\n",
+      );
+      // The last entry: its own line is added after it.
+      const theirs = registry.replace(
+        "export * as transcript from './transcript.ts';\n",
+        "export * as transcript from './transcript.ts';\nexport * as zoom from './zoom.ts';\n",
+      );
       await writeFile(join(dir, 'base.ts'), registry);
       await writeFile(join(dir, 'ours.ts'), ours);
       await writeFile(join(dir, 'theirs.ts'), theirs);
@@ -110,8 +117,8 @@ describe('the Codex harness parts', () => {
         encoding: 'utf8',
       });
       expect(merged.status).toBe(0);
-      expect(merged.stdout).toContain('  auditPart,\n  conversationPart,');
-      expect(merged.stdout).toContain('  transcriptPart,\n  zoomPart,\n]');
+      expect(merged.stdout).toContain("export * as audit from './audit.ts';\nexport * as conversation");
+      expect(merged.stdout).toContain("export * as transcript from './transcript.ts';\nexport * as zoom");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -1,6 +1,6 @@
 import type { Harness } from '@ferretry/core-ferrets/contract';
 import type { ClaudeCore } from './core.ts';
-import { CLAUDE_PARTS } from './index.ts';
+import { CLAUDE_PARTS } from './list.ts';
 
 type Intersection<U> = (U extends unknown ? (member: U) => void : never) extends (member: infer I) => void ? I : never;
 

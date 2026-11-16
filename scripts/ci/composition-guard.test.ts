@@ -664,27 +664,22 @@ suite("the repository's declarations", () => {
   });
 
   test.each(PARTS_INDEXES)(
-    'the harness parts registry %s: a new part (import + entry) is red until the PR names it under Contract change',
+    'the harness parts registry %s: a new part is ONE sorted line, GREEN with no Contract change; an unsorted one is red',
     path => {
       expect(realGuarded.get(path)?.kind).toBe('registry');
       const head = lines(path);
-      const importAt = head.findIndex(row => row.startsWith("import { homePart } from './home.ts'")) + 2;
-      const entryAt = head.findIndex(row => row.trim() === 'homePart,') + 2;
-      // Two lines, so the second added line is inserted after the first: entryAt counts the import already added.
-      const change = inserting(path, [
-        [importAt, "import { homeAPart } from './home-a.ts';"],
-        [entryAt, '  homeAPart,'],
-      ]);
-      const changes = new Map([[path, change]]);
-      const red = evaluate({ declared: realGuarded, changes, body: '' });
-      expect(red.ok).toBe(false);
-      expect(red.missing.map(item => item.file)).toEqual([path]);
+      const homeAt = head.findIndex(row => row.startsWith("export * as home from './home.ts'")) + 2;
       const green = evaluate({
         declared: realGuarded,
-        changes,
-        body: body('## Contract change', `- ${path}: a new harness part`),
+        changes: new Map([[path, inserting(path, [[homeAt, "export * as homeA from './home-a.ts';"]])]]),
+        body: '',
       });
       expect(green.ok).toBe(true);
+      expect(green.exempt).toEqual([{ file: path, why: 'registry-add' }]);
+      // Out of its sorted place (before `deliver`): not a pure registry add, so it needs the section.
+      const firstAt = head.findIndex(row => row.startsWith('export * as ')) + 1;
+      const unsorted = new Map([[path, inserting(path, [[firstAt, "export * as zzz from './zzz.ts';"]])]]);
+      expect(evaluate({ declared: realGuarded, changes: unsorted, body: '' }).ok).toBe(false);
     },
   );
 });
