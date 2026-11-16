@@ -492,6 +492,12 @@ export interface FerretTurnWritten {
 export interface FerretPrompt {
   /** The turn the observer last recorded; absent when none is recorded. */
   readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /**
+   * When the observer last CHANGED `turnState` (additive): the observer's own stored instant, ISO, on the daemon's clock.
+   * Never the registry's `stateAt`, which is stamped later by a separate write and cannot tell `needs-input` from
+   * `your-turn`. Absent whenever `turnState` is.
+   */
+  readonly turnStateAt?: string;
   /** The harness dialog's words behind a `needs-input`. */
   readonly prompt?: string;
   /** The tool-permission prompt behind a `needs-input`, as data. */
