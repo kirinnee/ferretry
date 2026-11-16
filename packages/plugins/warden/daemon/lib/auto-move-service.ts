@@ -17,6 +17,10 @@
  * - stop a background job the owner did not let it stop. Without `forceStopBackground` the ferret is ASKED, with
  *   the same message `fy move` sends, and given `waitMinutes`; then the owner is told.
  *
+ * WHERE NOTHING QUALIFIES the ferret waits where it is and is resumed by rule once its limit has reset
+ * ({@link WardenAutoMoveService.run}; once per reset, only where `mayActAlone.resume` allows, never under something of the
+ * owner's), with Jev and triage off. The owner is told once, with the reset time in Pacific.
+ *
  * Each reason a ferret is not moved is recorded ONCE per episode (the same trigger, login and reason), and the
  * owner is told once, so a standing refusal never refills Recent actions every sweep.
  */
@@ -45,7 +49,7 @@ import {
 } from './auto-move.ts';
 import type { WardenMoveCandidates } from './prompt.ts';
 import { fitOwnerNotice } from './owner-notice.ts';
-import { isoFromMs } from './time.ts';
+import { isoFromMs, pacificOf } from './time.ts';
 import type { WardenSessionView } from './types.ts';
 
 /** What stopping a ferret's own jobs did: what was stopped, and what is somehow still running. */
@@ -78,6 +82,12 @@ export interface WardenAutoMovePorts {
   /** Move the ferret — same session — to `agent`. `note` opens the turn it is handed. Throws when it did not move. */
   move(sessionId: string, request: { readonly agent: string; readonly note: string }): Promise<void>;
   /**
+   * Resume the ferret in place — the guarded resume every Warden act shares, as the Warden's own origin — when the
+   * limit it sat on has reset. `message` is the turn it is handed (a live ferret is told it by a send; a stopped one
+   * starts on it). Throws when Ferrets refused it, with the reason.
+   */
+  resume(sessionId: string, message: string): Promise<void>;
+  /**
    * The login the ferret is on NOW, read inside the mover's lock — a sweep and a budget stop may both have meant to
    * move it, and the second must see that the first already did. `undefined` when it cannot be read or is gone.
    */
@@ -104,6 +114,8 @@ export interface WardenAutoMoveResult {
   readonly actions: readonly WardenAction[];
   /** The ferrets moved this run, so the sweep does not flag them on the same pass. */
   readonly moved: ReadonlySet<string>;
+  /** The ferrets resumed at their reset this run, so the sweep does not flag `quota_reset_passed` for them. */
+  readonly resumed: ReadonlySet<string>;
 }
 
 interface Considered {
@@ -134,6 +146,15 @@ const jobFacts = (jobs: readonly AgentJob[]) => jobs.map(job => ({ pid: job.pid,
 const commandList = (jobs: readonly AgentJob[]): string =>
   jobs.map(job => `pid ${job.pid} (${job.command})`).join(', ');
 
+/** What happens to a ferret that has nowhere to go: it waits, and when it carries on by itself. */
+function stayPutWords(subject: AutoMoveSubject, config: WardenConfig, nowMs: number): string {
+  if (subject.resetAt === undefined || !config.mayActAlone.resume)
+    return 'It stays where it is; resume it yourself when the limit is over.';
+  return subject.resetAt > nowMs
+    ? `It stays where it is and resumes on its own at ${pacificOf(subject.resetAt)}.`
+    : 'It stays where it is and is being resumed now, its limit has reset.';
+}
+
 const sameMemory = (left: AutoMoveMemory, right: AutoMoveMemory): boolean =>
   JSON.stringify(left) === JSON.stringify(right);
 
@@ -160,16 +181,81 @@ export class WardenAutoMoveService {
       if (!sameMemory(memory, read)) await this.ports.ledger.write(memory);
       const actions: WardenAction[] = [];
       const moved = new Set<string>();
+      const resumed = new Set<string>();
       for (const subject of subjects) {
         const result = await this.guarded(subject, config, memory, nowMs, 'sweep');
         // Written after each ferret, not at the end: a daemon that dies mid-run has already counted the moves made.
         if (!sameMemory(result.memory, memory)) await this.ports.ledger.write(result.memory);
         memory = result.memory;
         if (result.action !== undefined) actions.push(result.action);
-        if (result.moved) moved.add(subject.id);
+        if (result.moved) {
+          moved.add(subject.id);
+          continue;
+        }
+        // Nowhere to go (or held): the ferret waits where it is, and carries on by itself once its limit has reset.
+        const wake = await this.resumeAtReset(subject, config, memory, nowMs);
+        if (!sameMemory(wake.memory, memory)) await this.ports.ledger.write(wake.memory);
+        memory = wake.memory;
+        if (wake.action !== undefined) actions.push(wake.action);
+        if (wake.resumed) resumed.add(subject.id);
       }
-      return { actions, moved };
+      return { actions, moved, resumed };
     });
+  }
+
+  /**
+   * A ferret whose limit has reset and that is still waiting is resumed — a rule, not a verdict, so it needs no Jev
+   * and spends nothing. Once per reset ({@link AutoMoveSessionMemory.resumed}), only where the owner lets the Warden
+   * resume alone, and never under something of the owner's.
+   */
+  private async resumeAtReset(
+    subject: AutoMoveSubject,
+    config: WardenConfig,
+    memory: AutoMoveMemory,
+    nowMs: number,
+  ): Promise<{ readonly memory: AutoMoveMemory; readonly action?: WardenAction; readonly resumed: boolean }> {
+    const { resetAt } = subject;
+    const none = { memory, resumed: false };
+    if (resetAt === undefined || !config.mayActAlone.resume) return none;
+    const reset = isoFromMs(resetAt);
+    if (resetAt > nowMs) {
+      // Still waiting: remember for which reset, so the ferret is found again when Ferrets stops showing its limit.
+      if (sessionMemory(memory, subject.id).waiting === reset) return none;
+      return { memory: withSession(memory, subject.id, entry => ({ ...entry, waiting: reset })), resumed: false };
+    }
+    if (sessionMemory(memory, subject.id).resumed === reset) return none;
+    try {
+      if ((await this.ports.agentOf(subject.id)) !== subject.agent) return none;
+      if ((await this.holdNow(subject.id)) !== undefined) return none;
+      const next = withSession(memory, subject.id, entry => ({ ...entry, resumed: reset }));
+      const base = {
+        at: isoFromMs(nowMs),
+        sessionId: subject.id,
+        action: 'resume' as const,
+        by: 'warden' as const,
+        actor: 'auto' as const,
+        fromAgent: subject.agent,
+      };
+      try {
+        await this.ports.resume(
+          subject.id,
+          `Ferretry's Warden: the usage limit on ${subject.agent} has reset (${pacificOf(resetAt)}). Carry on with what you were doing.`,
+        );
+      } catch (error) {
+        // Counted either way: a resume Ferrets refused is not asked again every sweep, and the flag stays for Jev.
+        const detail = `Tried to resume it because the ${subject.agent} limit reset at ${pacificOf(resetAt)}, and it did not start: ${failureMessage(error)}.`;
+        return { memory: next, action: { ...base, outcome: 'failed', detail }, resumed: false };
+      }
+      this.ports.journal.record('fleet.warden_auto_resumed', { sessionId: subject.id, agent: subject.agent });
+      const detail = `Resumed it on its own: the ${subject.agent} limit reset at ${pacificOf(resetAt)}.`;
+      return { memory: next, action: { ...base, outcome: 'done', detail }, resumed: true };
+    } catch (error) {
+      this.ports.journal.record('fleet.warden_auto_move_failed', {
+        sessionId: subject.id,
+        message: failureMessage(error),
+      });
+      return none;
+    }
   }
 
   /**
@@ -328,11 +414,29 @@ export class WardenAutoMoveService {
         session.held !== undefined &&
         subject !== undefined &&
         session.held.startsWith(`${subject.trigger}|${subject.agent}|`);
-      if (askedStill === (session.asked !== undefined) && heldStill === (session.held !== undefined)) continue;
+      // Its resume at that reset stands while it still sits on that same reset (a lagging read), and ends with it.
+      const resumedStill =
+        session.resumed !== undefined &&
+        subject?.resetAt !== undefined &&
+        isoFromMs(subject.resetAt) === session.resumed;
+      // Its wait is over when it is no longer parked on a limit, or on a later one.
+      const waitingStill =
+        session.waiting !== undefined &&
+        subject?.resetAt !== undefined &&
+        isoFromMs(subject.resetAt) === session.waiting;
+      if (
+        askedStill === (session.asked !== undefined) &&
+        heldStill === (session.held !== undefined) &&
+        resumedStill === (session.resumed !== undefined) &&
+        waitingStill === (session.waiting !== undefined)
+      )
+        continue;
       next = withSession(next, id, entry => ({
         moves: entry.moves,
         ...(askedStill && entry.asked !== undefined ? { asked: entry.asked } : {}),
         ...(heldStill && entry.held !== undefined ? { held: entry.held } : {}),
+        ...(resumedStill && entry.resumed !== undefined ? { resumed: entry.resumed } : {}),
+        ...(waitingStill && entry.waiting !== undefined ? { waiting: entry.waiting } : {}),
       }));
     }
     return next;
@@ -399,7 +503,7 @@ export class WardenAutoMoveService {
         memory,
         nowMs,
         'no_target',
-        `Not moved although ${because}: no login could take it. ${triedLine(choice.tried)}`,
+        `Not moved although ${because}: no login could take it. ${triedLine(choice.tried)} ${stayPutWords(subject, config, nowMs)}`,
       );
     const target = choice.runtime;
 

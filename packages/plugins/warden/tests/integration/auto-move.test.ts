@@ -36,18 +36,34 @@ class MovingFerrets extends FakeFerrets {
 const LIMITED = 'claude-a-wrapper';
 const RUNTIMES = [runtime('claude-a'), runtime('claude-b')];
 
-function world(options: { readonly held?: boolean | undefined; readonly accounts?: boolean } = {}) {
+function world(
+  options: {
+    readonly held?: boolean | undefined;
+    readonly accounts?: boolean;
+    /** The runtimes on the machine: the ferret's own, and by default one with room. */
+    readonly runtimes?: typeof RUNTIMES;
+    /** When the limit resets (epoch ms) as the pane shows it. */
+    readonly retryAt?: number;
+    readonly config?: Parameters<typeof wardenConfig>[0];
+  } = {},
+) {
   const fake = fakeKernel({
-    config: wardenConfig({ enabled: true, autoMove: { enabled: true, when: ['rate_limited'] } }),
+    config: wardenConfig(options.config ?? { enabled: true, autoMove: { enabled: true, when: ['rate_limited'] } }),
     start: '2026-11-07T12:00:00.000Z',
   });
   const ferrets = new MovingFerrets();
   ferrets.add({ id: ferretId('f1'), mode: 'auto', state: 'working', runtime: LIMITED });
   ferrets.setPaneLimits([
-    { ferret: ferretId('f1'), login: 'claude-a-login', notice: "You've hit your usage limit", spend: false },
+    {
+      ferret: ferretId('f1'),
+      login: 'claude-a-login',
+      notice: "You've hit your usage limit",
+      spend: false,
+      ...(options.retryAt === undefined ? {} : { retryAt: options.retryAt }),
+    },
   ]);
   const runtimes = {
-    catalog: async () => RUNTIMES,
+    catalog: async () => options.runtimes ?? RUNTIMES,
     tools: async () => [tool('claude', true)],
     resolve: async () => ({ ok: true }),
   } as unknown as RuntimesApi;
@@ -138,5 +154,101 @@ describe('the warden moving a ferret whose login hit its limit', () => {
     should(w.ferrets.moves.length).equal(1);
     should(w.ferrets.moves[0]?.options.forceInflight).be.undefined();
     should(first.actions.some(action => action.outcome === 'failed')).equal(true);
+  });
+
+  it('should move by default when warden.yaml writes nothing about moving, and not when it says false', async () => {
+    // Arrange: a warden.yaml that names neither autoMove nor anything else, and one that switches moving off.
+    const absent = world({ config: { enabled: true } });
+    const off = world({ config: { enabled: true, autoMove: { enabled: false } } });
+
+    // Act
+    await absent.sweep();
+    await off.sweep();
+
+    // Assert
+    should(absent.ferrets.moves.map(move => move.runtime)).eql(['claude-b-wrapper']);
+    should(off.ferrets.moves).eql([]);
+  });
+});
+
+describe('the warden waiting for a limit to reset, with nowhere to move to', () => {
+  const RESET = Date.parse('2026-11-07T13:00:00.000Z');
+  /** Only the ferret's own login: nothing has room. */
+  const alone = { runtimes: [runtime('claude-a')] };
+
+  it('should say when it will resume (Pacific), keep it where it is, and resume it once Ferrets stops showing the limit', async () => {
+    // Arrange: Jev and investigations are off (the defaults), so only the rule can act.
+    const w = world({ ...alone, retryAt: RESET, held: false });
+
+    // Act
+    const waiting = await w.sweep();
+    await w.clock.advance(2 * 3_600_000);
+    // The reset has passed: Ferrets stops publishing the row, and the prompt still carries the limit with its past reset.
+    w.ferrets.setPaneLimits([]);
+    w.ferrets.setPrompt(ferretId('f1'), {
+      limit: { notice: "You've hit your usage limit", spend: false, retryAt: RESET },
+    });
+    const resumed = await w.sweep();
+    const again = await w.sweep();
+
+    // Assert
+    should(w.ferrets.moves).eql([]);
+    should(waiting.actions.find(action => action.outcome === 'held')?.detail).match(
+      /resumes on its own at Nov 7, 5:00\sAM PST\.$/,
+    );
+    should(w.ferrets.resumes).have.length(1);
+    should(w.ferrets.resumes[0]?.ferret).equal('f1');
+    should(w.ferrets.resumes[0]?.message).match(/the usage limit on claude-a-wrapper has reset/);
+    should(resumed.actions.some(action => action.action === 'resume' && action.actor === 'auto')).equal(true);
+    should(again.actions.filter(action => action.action === 'resume')).have.length(1);
+  });
+
+  it('should not resume it while the limit is still published, and not at all once the ferret is off the limit', async () => {
+    // Arrange
+    const w = world({ ...alone, retryAt: RESET, held: false });
+
+    // Act
+    await w.sweep();
+    await w.clock.advance(30 * 60_000);
+    await w.sweep();
+    // It carried on by itself before the reset (no row, no limit on its prompt).
+    w.ferrets.setPaneLimits([]);
+    await w.clock.advance(2 * 3_600_000);
+    await w.sweep();
+
+    // Assert
+    should(w.ferrets.resumes).eql([]);
+  });
+
+  it('should see no limit, and move or resume nothing, when Ferrets cannot say what the panes show', async () => {
+    // Arrange
+    const w = world({ ...alone, retryAt: RESET, held: false });
+    w.ferrets.paneLimits = async () => {
+      throw new Error('the session documents are unreadable');
+    };
+
+    // Act
+    await w.sweep();
+
+    // Assert
+    should(w.ferrets.moves).eql([]);
+    should(w.ferrets.resumes).eql([]);
+  });
+
+  it('should leave a ferret waiting when its prompt cannot be read, and try nothing', async () => {
+    // Arrange
+    const w = world({ ...alone, retryAt: RESET, held: false });
+    w.ferrets.prompt = async () => {
+      throw new Error('the state document is unreadable');
+    };
+
+    // Act
+    await w.sweep();
+    await w.clock.advance(2 * 3_600_000);
+    w.ferrets.setPaneLimits([]);
+    await w.sweep();
+
+    // Assert
+    should(w.ferrets.resumes).eql([]);
   });
 });

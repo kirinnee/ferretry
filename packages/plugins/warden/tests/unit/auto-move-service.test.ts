@@ -7,6 +7,7 @@ import {
   type AutoMoveSubject,
   EMPTY_AUTO_MOVE_MEMORY,
   recordMove,
+  waitingFerrets,
 } from '../../daemon/lib/auto-move.ts';
 import { moveNote, type StoppedAgentJobs, WardenAutoMoveService } from '../../daemon/lib/auto-move-service.ts';
 import type { WardenSessionView } from '../../daemon/lib/types.ts';
@@ -20,10 +21,10 @@ const config = (changes: Partial<WardenConfig['autoMove']> = {}): WardenConfig =
   autoMove: { ...DEFAULT_WARDEN_CONFIG.autoMove, enabled: true, ...changes },
 });
 
-const limited = (id = 's1', status = 'rate_limited', agent = 'claude-a-wrapper'): WardenSessionView =>
+const limited = (id = 's1', status = 'rate_limited', agent = 'claude-a-wrapper', resetAt?: number): WardenSessionView =>
   ({
     config: { id, mode: 'auto', agent, harness: 'claude' },
-    state: { status },
+    state: { status, ...(resetAt === undefined ? {} : { quota: { resetAt } }) },
     hasLiveMonitor: true,
   }) as WardenSessionView;
 
@@ -46,6 +47,9 @@ const overBudget: AutoMoveSubject = {
 interface Recorded {
   readonly moves: Record<string, unknown>[];
   readonly asked: string[];
+  readonly resumed: string[];
+  /** The turn each resume handed the ferret. */
+  readonly resumeNotes: string[];
   readonly stoppedFor: string[];
   readonly notices: { sessionId: string; title: string; subject: string }[];
   readonly events: { sessionId: string; type: string; data: Readonly<Record<string, unknown>> }[];
@@ -66,11 +70,19 @@ function subject(
     readonly move?: () => Promise<void> | void;
     readonly facts?: () => Promise<typeof fleetFacts>;
     readonly ledger?: unknown;
+    readonly resume?: () => Promise<void> | void;
+    /** Throws from this call of `agentOf` on (1-based), for a read that fails mid-run. */
+    readonly agentOfThrowsFrom?: number;
+    /** From this call of `agentOf` on (1-based), the ferret reads as already on another login. */
+    readonly agentOfMovedFrom?: number;
   } = {},
 ) {
+  let agentReads = 0;
   const recorded: Recorded = {
     moves: [],
     asked: [],
+    resumed: [],
+    resumeNotes: [],
     stoppedFor: [],
     notices: [],
     events: [],
@@ -94,7 +106,18 @@ function subject(
       recorded.moves.push({ sessionId, ...request });
       recorded.agents.set(sessionId, request.agent);
     },
-    agentOf: async sessionId => recorded.agents.get(sessionId),
+    resume: async (sessionId, message) => {
+      await options.resume?.();
+      recorded.resumed.push(sessionId);
+      recorded.resumeNotes.push(message);
+    },
+    agentOf: async sessionId => {
+      agentReads += 1;
+      if (options.agentOfThrowsFrom !== undefined && agentReads >= options.agentOfThrowsFrom)
+        throw new Error('ferrets did not answer');
+      if (options.agentOfMovedFrom !== undefined && agentReads >= options.agentOfMovedFrom) return 'claude-c-wrapper';
+      return recorded.agents.get(sessionId);
+    },
     ledger: {
       read: async () => recorded.ledger,
       write: async memory => {
@@ -115,7 +138,10 @@ function subject(
     settings: WardenConfig = config(),
     fleet: readonly WardenSessionView[] = [limited('s1', 'rate_limited', recorded.agents.get('s1'))],
   ) => await service.run({ fleet, config: settings, nowMs });
-  return { service, recorded, ledger, sweep };
+  /** One sweep over a ferret on a limit that resets at `resetAt`. */
+  const sweepAt = async (resetAt: number | undefined, nowMs = NOW, settings: WardenConfig = config()) =>
+    await sweep(nowMs, settings, [limited('s1', 'rate_limited', recorded.agents.get('s1'), resetAt)]);
+  return { service, recorded, ledger, sweep, sweepAt };
 }
 
 describe('WardenAutoMoveService.run', () => {
@@ -247,7 +273,7 @@ describe('WardenAutoMoveService.run', () => {
     should(recorded.moves).deepEqual([]);
     should(recorded.notices).have.length(1);
     should(recorded.notices[0]?.subject).equal(
-      'Not moved although claude-a-wrapper hit its usage limit: no login could take it. Tried claude-b (claude-b cannot launch: it is disabled.).',
+      'Not moved although claude-a-wrapper hit its usage limit: no login could take it. Tried claude-b (claude-b cannot launch: it is disabled.). It stays where it is; resume it yourself when the limit is over.',
     );
     should(result.actions[0]?.outcome).equal('held');
   });
@@ -684,5 +710,312 @@ describe('WardenAutoMoveService.failover', () => {
     // Assert
     should((refusal as Error).message).equal('it is no longer on the login the verdict was about, so it was not moved');
     should(executed).deepEqual([]);
+  });
+});
+
+describe('WardenAutoMoveService: the owner’s targets are a hard list', () => {
+  const left = (usedPercent: number) => ({ usage: { fiveHour: { usedPercent }, weekly: {} } });
+  /** The ferret's own login, a personal login the owner listed, and a WORK login with far more room. */
+  const withWork = (personalUsed: number) =>
+    facts({
+      // The work login is listed FIRST: nothing but the owner's list keeps the ferret off it.
+      runtimes: [runtime('claude-a'), runtime('claude-liftoff'), runtime('personal-a')],
+      credentials: [
+        credential('claude-a-login'),
+        credential('claude-liftoff-login', left(1)),
+        credential('personal-a-login', left(personalUsed)),
+      ],
+      tools: [tool('claude', true)],
+    });
+
+  it('should move to the listed login, and only to it, though a work login has the most headroom', async () => {
+    // Arrange
+    const unlisted = subject({ facts: async () => withWork(40) });
+    const listed = subject({ facts: async () => withWork(40) });
+
+    // Act
+    await unlisted.sweep();
+    await listed.sweep(NOW, config({ targets: ['personal-a'] }));
+
+    // Assert: with no list the work login wins, which is exactly what the list forbids
+    should(unlisted.recorded.moves.map(move => move.agent)).deepEqual(['claude-liftoff-wrapper']);
+    should(listed.recorded.moves.map(move => move.agent)).deepEqual(['personal-a-wrapper']);
+  });
+
+  it('should NOT move to the work login when the listed one has no headroom: it stays, and the owner is told once', async () => {
+    // Arrange: personal-a is 95% used, under the 20% floor; claude-liftoff is nearly empty.
+    const { recorded, sweep } = subject({ facts: async () => withWork(95) });
+    const listed = config({ targets: ['personal-a'] });
+
+    // Act
+    const first = await sweep(NOW, listed);
+    const second = await sweep(NOW + MINUTE, listed);
+
+    // Assert
+    should(recorded.moves).deepEqual([]);
+    should(first.actions[0]?.outcome).equal('held');
+    should(first.actions[0]?.detail).containEql('personal-a (only 5% is left');
+    should(first.actions[0]?.detail).not.containEql('claude-liftoff');
+    should(second.actions).deepEqual([]);
+    should(recorded.notices).have.length(1);
+  });
+
+  it('should keep a ferret on a codex work login inside the list too', async () => {
+    // Arrange
+    const codex = facts({
+      runtimes: [
+        runtime('codex-a', { harness: 'codex' }),
+        runtime('codex-personal', { harness: 'codex' }),
+        runtime('codex-loai', { harness: 'codex' }),
+      ],
+      credentials: [
+        credential('codex-a-login', { harness: 'codex' }),
+        credential('codex-personal-login', { harness: 'codex', ...left(97) }),
+        credential('codex-loai-login', { harness: 'codex', ...left(1) }),
+      ],
+      tools: [tool('codex', true)],
+    });
+    const { recorded, sweep } = subject({ facts: async () => codex });
+    recorded.agents.set('s1', 'codex-a-wrapper');
+    const view = {
+      config: { id: 's1', mode: 'auto', agent: 'codex-a-wrapper', harness: 'codex' },
+      state: { status: 'rate_limited' },
+      hasLiveMonitor: true,
+    } as WardenSessionView;
+
+    // Act
+    await sweep(NOW, config({ targets: ['codex-personal'] }), [view]);
+
+    // Assert
+    should(recorded.moves).deepEqual([]);
+  });
+});
+
+describe('WardenAutoMoveService: nowhere to go, so wait and resume at the reset', () => {
+  /** Every other login is switched off: no headroom anywhere. */
+  const spent = facts({
+    runtimes: [runtime('claude-a'), runtime('claude-b', { disabled: { source: 'runtime' } })],
+    credentials: [credential('claude-a-login'), credential('claude-b-login')],
+    tools: [tool('claude', true)],
+  });
+  const RESET_PAST = NOW - 5 * MINUTE;
+
+  it('should resume the ferret by rule once its limit has reset, recording it as automatic and telling the owner once', async () => {
+    // Arrange
+    const { recorded, ledger, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    const result = await sweepAt(RESET_PAST);
+
+    // Assert
+    should(recorded.moves).deepEqual([]);
+    should(recorded.resumed).deepEqual(['s1']);
+    should([...result.resumed]).deepEqual(['s1']);
+    should([...result.moved]).deepEqual([]);
+    should(result.actions.map(action => [action.action, action.outcome, action.actor, action.by])).deepEqual([
+      ['failover', 'held', 'auto', 'warden'],
+      ['resume', 'done', 'auto', 'warden'],
+    ]);
+    should(result.actions[1]?.detail).match(/^Resumed it on its own: the claude-a-wrapper limit reset at /);
+    should(recorded.notices).have.length(1);
+    should(recorded.notices[0]?.subject).containEql('is being resumed now');
+    should(ledger().sessions.s1?.resumed).equal(new Date(RESET_PAST).toISOString());
+    should(recorded.journal).containEql('fleet.warden_auto_resumed');
+  });
+
+  it('should wait before the reset, say when it will resume in Pacific time, and resume once it has passed', async () => {
+    // Arrange: resets 2026-11-03 17:00Z = 9:00 AM PST.
+    const reset = Date.parse('2026-11-03T17:00:00.000Z');
+    const { recorded, ledger, sweepAt, sweep } = subject({ facts: async () => spent });
+
+    // Act
+    const before = await sweepAt(reset);
+    const remembered = ledger().sessions.s1?.waiting;
+    const during = await sweepAt(reset, reset - MINUTE);
+    const after = await sweepAt(reset, reset + MINUTE);
+    await sweep(reset + 2 * MINUTE, config(), [limited('s1', 'running')]);
+
+    // Assert
+    should(before.actions.map(action => action.action)).deepEqual(['failover']);
+    should(before.actions[0]?.detail).match(/It stays where it is and resumes on its own at Nov 3, 9:00\sAM PST\.$/);
+    should(recorded.notices).have.length(1);
+    // It is remembered as waiting for this reset, so it is found again when Ferrets stops showing the limit …
+    should(remembered).equal('2026-11-03T17:00:00.000Z');
+    should(during.actions).deepEqual([]);
+    should(after.actions.map(action => [action.action, action.outcome])).deepEqual([['resume', 'done']]);
+    should(recorded.resumed).deepEqual(['s1']);
+    should(recorded.resumeNotes[0]).match(
+      /^Ferretry's Warden: the usage limit on claude-a-wrapper has reset \(Nov 3, 9:00\sAM PST\)\. Carry on/,
+    );
+    // … and forgotten once it is off the limit.
+    should(ledger().sessions.s1).be.undefined();
+    should(waitingFerrets(ledger())).deepEqual([]);
+  });
+
+  it('should name the ferrets it is waiting for, so the sweep can look at them after Ferrets drops the limit', async () => {
+    // Arrange
+    const reset = Date.parse('2026-11-03T17:00:00.000Z');
+    const { ledger, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(reset);
+
+    // Assert
+    should(waitingFerrets(ledger())).deepEqual(['s1']);
+  });
+
+  it('should not wait on a later reset under the memory of an earlier one', async () => {
+    // Arrange
+    const first = Date.parse('2026-11-03T17:00:00.000Z');
+    const second = Date.parse('2026-11-03T22:00:00.000Z');
+    const { ledger, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(first);
+    await sweepAt(second, first - MINUTE);
+
+    // Assert
+    should(ledger().sessions.s1?.waiting).equal('2026-11-03T22:00:00.000Z');
+  });
+
+  it('should resume at most once for one reset, even while the ferret still reads as limited', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(RESET_PAST);
+    const again = await sweepAt(RESET_PAST, NOW + MINUTE);
+
+    // Assert
+    should(recorded.resumed).deepEqual(['s1']);
+    should(again.actions).deepEqual([]);
+    should([...again.resumed]).deepEqual([]);
+  });
+
+  it('should resume again for a later reset, once the earlier one is over', async () => {
+    // Arrange
+    const later = NOW + 6 * 60 * MINUTE;
+    const { recorded, ledger, sweepAt, sweep } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(RESET_PAST);
+    await sweep(NOW + MINUTE, config(), [limited('s1', 'running')]);
+    const settled = ledger().sessions.s1;
+    await sweepAt(later, later + MINUTE);
+
+    // Assert
+    should(settled).be.undefined();
+    should(recorded.resumed).deepEqual(['s1', 's1']);
+  });
+
+  it('should leave it alone when the owner does not let the Warden resume alone, and say so', async () => {
+    // Arrange
+    const noResume: WardenConfig = {
+      ...config(),
+      mayActAlone: { ...DEFAULT_WARDEN_CONFIG.mayActAlone, resume: false },
+    };
+    const { recorded, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    const result = await sweepAt(RESET_PAST, NOW, noResume);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+    should(result.actions.map(action => action.action)).deepEqual(['failover']);
+    should(recorded.notices[0]?.subject).endWith('It stays where it is; resume it yourself when the limit is over.');
+  });
+
+  it('should not resume a ferret whose limit shows no reset time, and tell the owner to', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(undefined);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+    should(recorded.notices[0]?.subject).endWith('resume it yourself when the limit is over.');
+  });
+
+  it('should not resume a ferret something of the owner’s is open on', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject({ facts: async () => spent, hold: 'it has an input card open' });
+
+    // Act
+    const result = await sweepAt(RESET_PAST);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+    should(result.actions.map(action => action.action)).deepEqual(['failover']);
+  });
+
+  it('should not resume a ferret that is no longer on the login whose limit it was', async () => {
+    // Arrange: a person moved it while the logins were being read.
+    const { recorded, sweepAt } = subject({ facts: async () => spent, agentOfMovedFrom: 2 });
+
+    // Act: the first read (the guard) still sees claude-a; the read before the resume sees claude-c
+    await sweepAt(RESET_PAST);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+  });
+
+  it('should record a resume Ferrets refused once as failed, and not ask again on the next sweep', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject({
+      facts: async () => spent,
+      resume: () => {
+        throw new Error('it was stopped on purpose');
+      },
+    });
+
+    // Act
+    const first = await sweepAt(RESET_PAST);
+    const second = await sweepAt(RESET_PAST, NOW + MINUTE);
+
+    // Assert
+    const failed = first.actions.find(action => action.action === 'resume');
+    should(failed?.outcome).equal('failed');
+    should(failed?.detail).containEql('it was stopped on purpose');
+    should([...first.resumed]).deepEqual([]);
+    should(recorded.resumed).deepEqual([]);
+    should(second.actions).deepEqual([]);
+  });
+
+  it('should journal a ferret it could not read at the reset and carry on', async () => {
+    // Arrange: the login reads fine at first (guard), and fail on the read before the resume.
+    const { recorded, sweepAt } = subject({ facts: async () => spent, agentOfThrowsFrom: 2 });
+
+    // Act
+    const result = await sweepAt(RESET_PAST);
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+    should(recorded.journal).containEql('fleet.warden_auto_move_failed');
+    should([...result.resumed]).deepEqual([]);
+  });
+
+  it('should resume nothing while moving is switched off', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject({ facts: async () => spent });
+
+    // Act
+    await sweepAt(RESET_PAST, NOW, config({ enabled: false }));
+
+    // Assert
+    should(recorded.resumed).deepEqual([]);
+  });
+
+  it('should not resume a ferret it just moved: the new login carries it on', async () => {
+    // Arrange
+    const { recorded, sweepAt } = subject();
+
+    // Act
+    const result = await sweepAt(RESET_PAST);
+
+    // Assert
+    should(recorded.moves).have.length(1);
+    should(recorded.resumed).deepEqual([]);
+    should([...result.resumed]).deepEqual([]);
   });
 });
