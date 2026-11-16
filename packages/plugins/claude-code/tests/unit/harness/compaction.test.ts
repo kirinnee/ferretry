@@ -29,7 +29,10 @@ const SECRET = 'sk-ant-secret-value-1234';
 async function declaredVerbs(): Promise<Set<string>> {
   const verbs = new Set<string>();
   for (const plugin of ['board', 'agenda', 'conversation']) {
-    const source = await Bun.file(join(import.meta.dir, '../../../..', plugin, 'manifest.ts')).text();
+    const root = join(import.meta.dir, '../../../..', plugin);
+    // The manifest shell and every feature fragment under manifest/actions/ (a plugin may keep its verbs in either).
+    const files = ['manifest.ts', ...(await Array.fromAsync(new Bun.Glob('manifest/actions/*.actions.ts').scan(root)))];
+    const source = (await Promise.all(files.map(file => Bun.file(join(root, file)).text()))).join('\n');
     for (const [, line] of source.matchAll(/verb\('([^']+)'/gu))
       verbs.add(
         (line ?? '')
