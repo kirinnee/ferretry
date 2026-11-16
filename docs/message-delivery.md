@@ -41,7 +41,7 @@ this page, which is still how a message reaches the pane.
   a Warden alert never waits behind a ferret's note — but never one that is due. A daemon notice to an interactive
   session is never in the delivery order (`boardOnly`): that session is the owner's own chat. Being out of the order
   does NOT keep it out of the pane — the queue hands it to the direct path, which types it — so a producer that must
-  not type into that chat holds it back itself. The board's alerts do: they go to the card's working ferret and its
+  not type into that chat holds it back itself. The board's alerts do: they go to the task's working ferret and its
   leads first, and one whose recipient is interactive is journalled on it, never typed
   ([board.md](board.md#who-a-board-alert-is-for)).
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
@@ -80,10 +80,10 @@ this page, which is still how a message reaches the pane.
 - **No board news and no board alert is typed into the owner's own chat** (an interactive session): board news
   is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)), and a board
   alert is journalled instead (below). The other daemon notices still are typed there; see **Every producer**.
-- **Board alerts reach the card's working ferret first.** A stale card, a red CI or a PR closed unmerged is addressed to
-  the card's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
+- **Board alerts reach the task's working ferret first.** A stale task, a red CI or a PR closed unmerged is addressed to
+  the task's assignee, else its nearest live lead. When the only one left is an interactive session, the alert is
   NOT sent: `BoardAlerts` (`lib/board/alert-sends.ts`) journals it on that session as `board.alert-withheld`
-  and a red CI or closed-unmerged PR on a private card is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
+  and a red CI or closed-unmerged PR on a private task is noted on its nearest public ancestor that is open on the default board (an archived one is skipped; with none, it is
   journalled only), so the board shows it ([board.md](board.md#who-a-board-alert-is-for)); a mode that cannot be read is sent to as before. Before this, a lead
   the owner chats with had 177 alerts typed into it as turns in three days (2026-10-31 to 2026-11-03) — 158 "CI is red",
   17 stale, 2 closed unmerged — 134 on the `direct` path and 43 on `native-inline`, every one `senderKind: daemon`.
@@ -96,7 +96,7 @@ this page, which is still how a message reaches the pane.
   words. Holding those back too is a declared GAP — each tells the session something about its own turn or the
   owner's own words, so it needs its own home before it can stop being typed. The
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
-  does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
+  does all three (&C38); their receipt and reopen-as-a-task still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.
 - **A page, not the log** — `GET …/queue` answers the same WINDOW `GET …/sends` does (`lib/session/queue/page.ts`
   over `windowPage` in `lib/session/send/page.ts`, one owner of the rule): the newest `limit` messages (default

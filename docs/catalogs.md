@@ -1230,7 +1230,7 @@ sheet calls it "New user ID" and the daemon's 409 is the only thing that stops a
 The warning "whoever opens this can read everything they can read" is shown before anything is made, for 15 minutes, 1 hour, 3 hours, 8 hours or 1 day, for one person or many (at most 200). It asks for a passkey
 (act `share-catalog`) and shows the link **once**: a QR drawn in the page, Copy link, a countdown and **End this code
 now**. The app keeps and logs nothing about the code. **People and codes** lists each person, titled by their
-**user ID** (the card's title is the ID itself, with no repeated "User ID" label), with their catalogs and browsers (remove one browser, take away a catalog,
+**user ID** (the row's title is the ID itself, with no repeated "User ID" label), with their catalogs and browsers (remove one browser, take away a catalog,
 revoke the member with the plain sentence of what stops) and the shares (live, used, expired).
 
 **They need a new passkey (D8).** For a person who is already here, on a **single-use** invite only, the sheet offers
@@ -1240,7 +1240,7 @@ unticked unless the person has no passkey on any browser, in which case it is pr
 left, so this invite lets them create one." and the owner can untick it. The app works that out from the people list,
 because the daemon only reports `noPasskeyLeft` on the mint answer, after the choice. A many-use invite never offers it (the daemon answers 400 `new_passkey_multi`).
 
-**Change user ID.** Each person's card has **Change user ID**. The form says "alice becomes alicia. They keep
+**Change user ID.** Each person's row has **Change user ID**. The form says "alice becomes alicia. They keep
 their browsers, passkeys and installs." It calls `PATCH /v1/catalog-members/:memberId` with `{ "label" }`. An ID
 someone holds answers 409 `member_exists` and the form stays open with "Someone here already has the user ID **sam**.
 Pick another." Any other failure closes the form with the plain failure line.

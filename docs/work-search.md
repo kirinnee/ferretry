@@ -1,6 +1,6 @@
 # Work search
 
-One search over every **board card** and every **agenda item**, across all projects and sessions. The PWA
+One search over every **board task** and every **agenda item**, across all projects and sessions. The PWA
 finder, `fy search`, the `search_work` agent tool and the related check that `fy task create` and
 `fy agenda add` run before filing all ask the same daemon index, so they agree on what matches and what
 counts as a duplicate.
@@ -23,8 +23,8 @@ nothing.
 
 `fy agenda add` uses the check to rank the caller's own open agendas, which it lists before it opens a new one
 ([agenda.md § One channel per topic](agenda.md#one-channel-per-topic)); `fy task create` lists the weaker related
-cards it finds ([board.md § One card, one outcome](board.md#one-card-one-outcome)). The daemon itself asks it when
-it raises an input card, to link the card to the open agenda it strongly matches.
+tasks it finds ([board.md § One task, one outcome](board.md#one-task-one-outcome)). The daemon itself asks it when
+it raises an input, to link it to the open agenda it strongly matches.
 
 Daemons that have these routes report `work.search.1` in `GET /v1/health` features. Against an older daemon,
 the app keeps searching only what it has already loaded, and the CLI files without the check.
@@ -36,24 +36,24 @@ A hit carries:
 - `state`: `open`, `closed` or `dropped`.
 - `standing`: the lane's name, or the item's `open` / `snoozed` / `replied` / `in discussion` / `needs info` /
   `addressed` / `dismissed`.
-- `projectId`, for cards only.
+- `projectId`, for tasks only.
 - `updatedAt`.
 - `match`: the field that matched and the one line it matched on.
 
-A hit never carries the whole card or item. Reading it is the job of that card's or item's own route.
+A hit never carries the whole task or item. Reading it is the job of that task's or item's own route.
 
 ## What is indexed
 
 The fields are a **whitelist**. A field added to a schema later is not searchable until
 `lib/work-search/documents.ts` names it.
 
-- **Card:** id, title, summary, ask and clarifications, premise, context, brief, how to test, and the text
+- **Task:** id, title, summary, ask and clarifications, premise, context, brief, how to test, and the text
   of its notes.
 - **Agenda item:** id, title, the ask line, premise, context, and its body. The body is made of why, how to
   resolve, decided, still open, impact, the recommendation and the questions. Also indexed: its history
   notes, and once it is addressed, the resolution note and the owner's worded answer.
 - **Plain notifications** (`fy notify`) are not agenda items and are not indexed.
-- **An input request's card** carries its label. Values are never stored anywhere.
+- **An input request** carries its label. Values are never stored anywhere.
 
 **Window:** all open work (snoozed and replied agenda items count as open), plus work closed, dropped or
 addressed within the last 30 days. Two things lift it:
@@ -72,8 +72,8 @@ flag to retry with.
 
 - **`fy search`, `search_work`, ⌘K:** the routes above.
 - **Inbox Find (app):** the Inbox is not a daemon search. With words typed, Find looks in **every tab at once** —
-  Open (including items on a ferret), Snoozed, Replied, Resolved and Cards to test (snoozed ones too) — and each
-  row carries a **state chip**: `Open`, `With <ferret>`, the card's lane, `Snoozed · tmrw 09:00` (full wording in the tooltip), `Replied` or
+  Open (including items on a ferret), Snoozed, Replied, Resolved and Tasks to test (snoozed ones too) — and each
+  row carries a **state chip**: `Open`, `With <ferret>`, the task's lane, `Snoozed · tmrw 09:00` (full wording in the tooltip), `Replied` or
   `Resolved`. An empty Find is not a search: each tab keeps its own list. The logic is
   `packages/pwa/src/lib/agenda-inbox-find.ts`; the rows are `features/agenda/inbox-find-results.tsx`.
 - **Composer `&` / `!` autocomplete:** asks with `open: true` and shows each hit's `standing` as its chip.
@@ -101,7 +101,7 @@ are ranked in this order:
 
 ## The related check
 
-The check scores a new title and ask against each card and item in two ways. Each shared word counts by how
+The check scores a new title and ask against each task and item in two ways. Each shared word counts by how
 rare it is across the index.
 
 - **Title similarity** is weighted Jaccard between the two titles: the share of both titles' words they have
@@ -118,7 +118,7 @@ Otherwise it is `weak` if title similarity is at least 0.3 or body similarity is
 
 Closed work is at most `weak`, because a near copy of finished work is more often a follow-up than a mistake.
 
-These thresholds were tuned on a real board of about 480 cards and 290 agenda items. On that board the check
+These thresholds were tuned on a real board of about 480 tasks and 290 agenda items. On that board the check
 flags pairs like "Agenda focus view" and "Agenda item focus view", or "Phone scroll and header" and "Phone
 Scroll Header Broken". A long ask that only mentions a short title's words stays `weak`.
 
@@ -129,20 +129,20 @@ after boot, away from the boot's own reads.
 
 | Change                          | How the index sees it                                                                                                                                                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A card written by the daemon    | On every search, the service checks each card in the board store's in-memory list. A card whose object changed is re-indexed. This is a pointer comparison with no I/O.                                                                                                                                                                             |
-| A card file edited by hand      | The board store watches `board/tasks/` and re-reads files whose identity moved. A file that no longer parses is quarantined, as at boot. A removed file leaves the board. Search then sees the new object. A daemon write checks the file first (one stat), so it is decided on a hand edit the watch has not reported yet and never overwrites it. |
+| A task written by the daemon    | On every search, the service checks each task in the board store's in-memory list. A task whose object changed is re-indexed. This is a pointer comparison with no I/O.                                                                                                                                                                             |
+| A task file edited by hand      | The board store watches `board/tasks/` and re-reads files whose identity moved. A file that no longer parses is quarantined, as at boot. A removed file leaves the board. Search then sees the new object. A daemon write checks the file first (one stat), so it is decided on a hand edit the watch has not reported yet and never overwrites it. |
 | An agenda change                | Committed changes reach the agenda change fan-out, and the next search re-reads that session's ledger first.                                                                                                                                                                                                                                        |
 | An agenda ledger edited by hand | Every 5 s, a search starts a background sweep of every ledger. The ledger repository answers it from its cache, which it checks against each file's identity. The edit is found within one sweep.                                                                                                                                                   |
-| A lane renamed or recategorized | The same sweep re-reads lane sets and re-indexes that board's cards.                                                                                                                                                                                                                                                                                |
+| A lane renamed or recategorized | The same sweep re-reads lane sets and re-indexes that board's tasks.                                                                                                                                                                                                                                                                                |
 | A new secret                    | The vault's identity changes. The next search rebuilds the whole index before it answers.                                                                                                                                                                                                                                                           |
 
 **Known limits.**
 
-- An editor that truncates a file and then writes it can be caught half-saved. The card is quarantined, and writes to it are refused, until the finished save is read moments later.
+- An editor that truncates a file and then writes it can be caught half-saved. The task is quarantined, and writes to it are refused, until the finished save is read moments later.
 - A sweep checks every session's ledger: one directory listing and at least one stat per session, every 5 s while anyone is searching. Past the ledger cache's 2,048 sessions, each sweep re-parses every ledger. At this machine's ~880 sessions that is well inside the budget. Sweeping only recently changed ledgers is the next step if it is not.
 
 ## Budget
 
-On a synthetic 2,000-card plus 500-item index, the p95 for a mixed search must stay under **30 ms**
-(`tests/unit/work-search/service.test.ts`). On this machine's real data (about 480 cards and 290 items), a full
+On a synthetic 2,000-task plus 500-item index, the p95 for a mixed search must stay under **30 ms**
+(`tests/unit/work-search/service.test.ts`). On this machine's real data (about 480 tasks and 290 items), a full
 build takes about 230 ms. A search takes about 7 ms at p95 and a related check about 9 ms.

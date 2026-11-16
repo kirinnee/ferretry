@@ -2,7 +2,7 @@
 
 A ferret saves an `svg` or `html` picture as a file the daemon keeps, and cites it with a short token,
 `%svg:7k2m9q` or `%html:4wd0hs`, instead of pasting the source into the conversation. This page is the
-contract of the **store and its routes**. It is slice 2 of the design in the card &F959: there is no CLI, no
+contract of the **store and its routes**. It is slice 2 of the design in the task &F959: there is no CLI, no
 MCP tool, no app rendering and no prompt teaching yet — those are slices 3 to 5, and until they ship
 nothing calls these routes. Read [fy-render.md](fy-render.md) for the grammar a picture is checked against
 and [grants.md](grants.md) for who may call a route.
@@ -10,7 +10,7 @@ and [grants.md](grants.md) for who may call a route.
 ## What is stored
 
 **Only two kinds: `svg` and `html`** (owner decision, !A377). Every other `fy-render` type — `mermaid`,
-`chart`, `map`, `lottie`, `card`, `board`, the media types — stays an inline fence exactly as today, with no
+`chart`, `map`, `lottie`, `task`, `board`, the media types — stays an inline fence exactly as today, with no
 store and no token.
 
 A render is **immutable**. It is saved once and never changed. An edit is a new save with a new id; the old
@@ -25,7 +25,7 @@ render and every message that cites it keep the old picture (see [Supersedes](#s
     abcdef.json        the meta (below)
 ```
 
-- It sits in the daemon's state home beside `state/sessions/`, **not under one session**: a card or the
+- It sits in the daemon's state home beside `state/sessions/`, **not under one session**: a task or the
   machine agenda cites a picture with no session behind it.
 - Both files are written atomically and owner-only, **payload first, meta second**. A crash can leave a
   payload nothing points at, never a meta that points at nothing. A later save of the same content writes
@@ -182,8 +182,8 @@ render that is on disk is never missing from the collision check or the quota to
 
 ## Garbage collection: not yet
 
-**Nothing deletes a render in this release.** The planned rule (card &F959, slice 7): a render stays while
-something can cite it — its author session, a card field, an agenda item or tab — and only a render whose author
+**Nothing deletes a render in this release.** The planned rule (task &F959, slice 7): a render stays while
+something can cite it — its author session, a task field, an agenda item or tab — and only a render whose author
 session is gone and that nothing else cites is deleted, after a 7-day grace period, with a dry run in
 `fy doctor` first. Until then the quotas above are the bound on growth.
 
