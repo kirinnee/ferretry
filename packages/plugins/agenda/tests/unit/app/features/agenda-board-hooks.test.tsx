@@ -228,8 +228,8 @@ describe('agenda.card-reference: `&F12` in an ask’s words', () => {
   });
 });
 
-describe('Agenda’s own references: `!A3`, `:agent` and `@file` in an ask’s words', () => {
-  const prose = agendaProse()('See !A3 and !A8, ask :aniya or :nobody, read @src/a.ts and @missing.ts.');
+describe('Agenda’s own references: `^A3`, `:agent` and `@file` in an ask’s words', () => {
+  const prose = agendaProse()('See ^A3 and ^A8, ask :aniya or :nobody, read @src/a.ts and @missing.ts.');
   const links = (): readonly HTMLAnchorElement[] => [...root().querySelectorAll<HTMLAnchorElement>('a')];
   const texts = () => links().map(link => link.textContent);
   const opened: Array<[string, string]> = [];
@@ -273,8 +273,8 @@ describe('Agenda’s own references: `!A3`, `:agent` and `@file` in an ask’s w
     const navigated: string[] = [];
     await draw(facts({ ferret: page({ openAsk: id => asks.push(id) }) }), to => navigated.push(to));
 
-    expect(texts()).toEqual(['!A3', ':aniya', '@src/a.ts']);
-    await interact(() => must(links()[0], 'the !A3 link').click());
+    expect(texts()).toEqual(['^A3', ':aniya', '@src/a.ts']);
+    await interact(() => must(links()[0], 'the ^A3 link').click());
     await interact(() => must(links()[1], 'the :aniya link').click());
     await interact(() => must(links()[2], 'the @src/a.ts link').click());
     expect(asks).toEqual(['A3']);
@@ -291,14 +291,14 @@ describe('Agenda’s own references: `!A3`, `:agent` and `@file` in an ask’s w
   test('proves no file without Ferrets’ opener, and no agent before the fleet is read', async () => {
     await draw(facts({ ferret: page(), fileOpen: undefined, fleet: null }));
 
-    expect(texts()).toEqual(['!A3']);
+    expect(texts()).toEqual(['^A3']);
   });
 
   test('stays prose with no facts at all', async () => {
     await draw(undefined);
 
     expect(links()).toEqual([]);
-    expect(root().textContent).toContain('See !A3 and !A8');
+    expect(root().textContent).toContain('See ^A3 and ^A8');
   });
 });
 

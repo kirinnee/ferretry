@@ -88,7 +88,7 @@ describe('the ferret-agenda panel', () => {
     });
   });
 
-  it('keeps the ids of every item on the ferret’s agenda, open and resolved, for `!A3` to be proved against', async () => {
+  it('keeps the ids of every item on the ferret’s agenda, open and resolved, for `^A3` to be proved against', async () => {
     const runtime = createAgendaRuntime(daemon(() => ({ ...projectionSnapshot(3, 2), sessionId: FERRET })));
     const seen: { current: ReturnType<typeof useFerretAgenda> } = { current: null };
     const Probe = () => {

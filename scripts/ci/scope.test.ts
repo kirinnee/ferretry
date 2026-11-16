@@ -642,7 +642,10 @@ test.each([
   const result = await realGraph;
   const decision = choose(result, [changed]);
   expect(filterFiles(decision, [MCP_LIMITS])).toEqual([MCP_LIMITS]);
-  expect(ran(decision)).toContain('mcp');
+  // MCP depends on this plugin, and Catalogs depends on MCP (its row slots), so the change travels on through
+  // Browsers, Logins, Runtimes and Claude Code to Conversation, a plugin the app depends on: FULL, which runs every
+  // test. Either way MCP's limits test runs; a SCOPED run must name MCP.
+  if (decision.mode === 'scoped') expect(ran(decision)).toContain('mcp');
 });
 
 // ─── tests that READ the source tree (scope-readers.ts): the graph sees imports only ────────────────────────────

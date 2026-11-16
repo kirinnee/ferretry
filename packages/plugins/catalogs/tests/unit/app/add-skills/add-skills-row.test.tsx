@@ -80,9 +80,17 @@ describe('catalogs: Actions › Add skills… row', () => {
       'skills.add/add-skills',
       'ferrets.actions-row/add-skills-row',
       'skills.row/skills-row',
+      'mcp.row/mcp-row',
+      'mcp.install/mcp-install',
     ]);
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row', 'skills-row']);
+    expect(Object.keys(built?.panels ?? {})).toEqual([
+      'add-skills',
+      'add-skills-row',
+      'skills-row',
+      'mcp-row',
+      'mcp-install',
+    ]);
   });
 
   it('offers one row to a caller who may control the ferret, and goes to the page with the ferret’s place from run', async () => {

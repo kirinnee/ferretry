@@ -246,7 +246,7 @@ describe('the secure copy settings and the rule warnings', () => {
   });
 });
 
-describe('a staged paste rule (!A244)', () => {
+describe('a staged paste rule (^A244)', () => {
   const RULE = { from: { kind: 'command', program: 'gh' }, to: { kind: 'terminal', program: 'vercel' } } as const;
 
   it("should word the daemon's rows from the request, in their fixed order", () => {

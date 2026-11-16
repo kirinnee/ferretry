@@ -1,6 +1,6 @@
 /**
  * A handled agenda item's alerts coming down (docs/notifications.md § When an alert is cleared). The owner: "when on 1
- * device is alr replied or resolved. then it should dismiss on other phones"; their decision !A324: an iPhone swaps in
+ * device is alr replied or resolved. then it should dismiss on other phones"; their decision ^A324: an iPhone swaps in
  * a quiet note. Moved with the code from Access's app half to the shell's worker (S6): the clear is the kernel's `clear`
  * kind, which names tags and nothing else.
  */
@@ -119,7 +119,7 @@ describe('the quiet note', () => {
   });
 });
 
-describe('planClear (owner decision !A324)', () => {
+describe('planClear (owner decision ^A324)', () => {
   const tagA = shownTag('attention-s:A1', WORK);
   const tagB = shownTag('attention-s', WORK);
 

@@ -135,7 +135,7 @@ describe('the last finished turn of a transcript tail', () => {
 
   test('an agenda form that is not a reply, and plain words, discuss nothing', () => {
     const answered = 'x';
-    expect(finishedTurn([said('user', 'what about !A5?'), said('assistant', answered)])?.discussed).toEqual([]);
+    expect(finishedTurn([said('user', 'what about ^A5?'), said('assistant', answered)])?.discussed).toEqual([]);
     expect(
       finishedTurn([said('user', agendaDoneMessage({ id: 'A5', quote: 'Region' })), said('assistant', answered)])
         ?.discussed,
@@ -180,18 +180,18 @@ describe('whether a finished turn gets a nudge', () => {
 
   test('an owner reply the ferret answered in chat only gets the discussed-item line, alone when the reply asks nothing', () => {
     const nudge = attentionNudge(turn({ reply: 'Sure, EU is Frankfurt.', discussed: ['A5'] }), subject, 'fy');
-    expect(nudge?.asks).toEqual(['discussed !A5']);
+    expect(nudge?.asks).toEqual(['discussed ^A5']);
     expect(nudge?.message).toBe(discussionNudgeMessage(['A5'], 'fy'));
     expect(nudge?.message.startsWith(AGENDA_NUDGE_MARK)).toBe(true);
-    expect(nudge?.message).toContain('Owner replied about !A5; it rests, waiting on you.');
+    expect(nudge?.message).toContain('Owner replied about ^A5; it rests, waiting on you.');
     expect(nudge?.message).toContain('fy agenda answer A5 "<text>"');
     expect(nudge?.message).toContain('fy agenda done A5');
   });
 
   test('several discussed items are named together, and the raise line follows in the same message', () => {
     const nudge = attentionNudge(turn({ discussed: ['A5', 'A7'], handled: [] }), subject, 'fy');
-    expect(nudge?.asks).toEqual(['discussed !A5', 'discussed !A7', 'Approve the deploy', 'Pick a region']);
-    expect(nudge?.message).toContain('Owner replied about !A5, !A7; they rest, waiting on you.');
+    expect(nudge?.asks).toEqual(['discussed ^A5', 'discussed ^A7', 'Approve the deploy', 'Pick a region']);
+    expect(nudge?.message).toContain('Owner replied about ^A5, ^A7; they rest, waiting on you.');
     expect(nudge?.message).toContain('Your last reply asked the owner to:');
     expect(nudge?.message.indexOf(AGENDA_NUDGE_MARK)).toBe(0);
     expect(nudge?.message.lastIndexOf(AGENDA_NUDGE_MARK)).toBe(0);
@@ -200,7 +200,7 @@ describe('whether a finished turn gets a nudge', () => {
   test('a discussed item the turn handled is not nudged, and one left is', () => {
     expect(attentionNudge(turn({ reply: 'ok', discussed: ['A5'], handled: ['A5'] }), subject, 'fy')).toBeUndefined();
     const nudge = attentionNudge(turn({ reply: 'ok', discussed: ['A5', 'A7'], handled: ['A5'] }), subject, 'fy');
-    expect(nudge?.asks).toEqual(['discussed !A7']);
+    expect(nudge?.asks).toEqual(['discussed ^A7']);
   });
 
   test('a helper is not nudged for a discussed item either', () => {

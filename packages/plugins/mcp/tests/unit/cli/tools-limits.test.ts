@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { askReference } from '../../../../../core/asks/contract/snapshot/ask-reference.ts';
 import { INPUT_MAX_EXPIRY_SECONDS, INPUT_PROMPT_MAX_LENGTH } from '../../../../../core/vault/contract/inputs.ts';
 import { INPUT_MAX_FIELDS } from '../../../../../core/vault/contract/targets.ts';
 import { LOGIN_RECIPE_MAX_LENGTH } from '../../../../accounts/contract/routes/login-recipes.ts';
@@ -57,5 +58,14 @@ describe('the tool schemas’ limits', () => {
     should(property('lessons_suggest', 'rule').maxLength).equal(LESSON_RULE_MAX_CHARS);
     // Accounts' propose tool is not listed (not built), but its literal is pinned the day it is.
     should(LOGIN_RECIPE_MAX_LENGTH).equal(4_000);
+  });
+
+  it('should cite the input card with core-asks’ attention sigil, never the shell-mode `!`', () => {
+    const wait = MCP_TOOLS.find(candidate => candidate.name === 'input_wait');
+    const request = MCP_TOOLS.find(candidate => candidate.name === 'terminal_request_input');
+    should(wait?.description).containEql(askReference('A<n>'));
+    should(request?.description).containEql(askReference('A<n>'));
+    should(property('input_wait', 'id').description).containEql(askReference('A7'));
+    should(JSON.stringify(MCP_TOOLS)).not.match(/!A/u);
   });
 });

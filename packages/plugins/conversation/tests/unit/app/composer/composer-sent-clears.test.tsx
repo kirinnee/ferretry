@@ -378,7 +378,7 @@ describe('the Inbox reply box after Send (B135)', () => {
       await settle();
       if (composing) await it.commit();
       await settle();
-      expect(sent).toEqual(['!A5 after lunch']);
+      expect(sent).toEqual(['^A5 after lunch']);
       expect(it.shown()).toBe('');
       await it.type('n');
       expect(it.shown()).toBe('n');

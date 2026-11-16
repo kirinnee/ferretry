@@ -588,7 +588,7 @@ describe('transcript', () => {
   });
 });
 
-describe('the question tool (!A527: withheld from every ferret unless the questionTool setting opts in)', () => {
+describe('the question tool (^A527: withheld from every ferret unless the questionTool setting opts in)', () => {
   const inputs = (mode?: 'interactive' | 'auto', questionTool = false) => ({
     binary: '/opt/bin/claude',
     home: '/fy/agent-homes/f1',

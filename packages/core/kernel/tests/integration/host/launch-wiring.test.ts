@@ -19,7 +19,7 @@ import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts'
  * generated registry builds them. Every start, restart/revive and adoption goes `FerretsService.launchAttempt` ->
  * `ClaudeHarness.launch` -> the runner; the table drives that and nothing else.
  *
- * A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, !A500), so:
+ * A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500), so:
  *
  *  (i)   a folder whose `.claude/settings*.json` sets a key the login leaves to the secret store is NOT refused, and no
  *        repository layout is read at all (a symlinked `.git`, an unprovable worktree back-link);

@@ -24,6 +24,7 @@
       "name": "@ferretry/app",
       "version": "5.0.0",
       "dependencies": {
+        "@ferretry/core-asks": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-conversation": "workspace:*",
         "@ferretry/plugin-layouts": "workspace:*",
@@ -303,6 +304,7 @@
         "@ferretry/kernel": "workspace:*",
         "@ferretry/plugin-access": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
+        "@ferretry/plugin-mcp": "workspace:*",
         "@ferretry/plugin-projects": "workspace:*",
         "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-skills": "workspace:*",
@@ -640,6 +642,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/app": "workspace:*",
+        "@ferretry/core-asks": "workspace:*",
         "@ferretry/core-ferrets": "workspace:*",
         "@ferretry/core-gate": "workspace:*",
         "@ferretry/core-vault": "workspace:*",

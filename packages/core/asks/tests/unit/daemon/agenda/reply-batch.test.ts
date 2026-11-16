@@ -102,7 +102,7 @@ function world() {
 describe('the attention outbox', () => {
   it('should take each item once, whether it is held, sending or delivered', () => {
     // Arrange
-    const reply = (id: string) => ({ id, message: `[answer to !${id}] yes`, at: AT });
+    const reply = (id: string) => ({ id, message: `[answer to ^${id}] yes`, at: AT });
     const held = withPendingReply(emptyAgendaOutbox(SESSION), reply('A1')) as AgendaOutbox;
     const begun = beginAgendaBatch(held);
     const sending = begun?.outbox as AgendaOutbox;
@@ -254,12 +254,12 @@ describe('the agenda reply batcher and needs-info requests', () => {
     const second = needsInfoReplyKey('A3', 2);
 
     // Act
-    await batcher.add(SESSION, 'A1', '[answer to !A1] yes');
-    await batcher.add(SESSION, first, '[needs more info !A3] one');
-    await batcher.add(SESSION, first, '[needs more info !A3] one');
+    await batcher.add(SESSION, 'A1', '[answer to ^A1] yes');
+    await batcher.add(SESSION, first, '[needs more info ^A3] one');
+    await batcher.add(SESSION, first, '[needs more info ^A3] one');
     await batcher.flush(SESSION);
-    await batcher.add(SESSION, first, '[needs more info !A3] one');
-    await batcher.add(SESSION, second, '[needs more info !A3] two');
+    await batcher.add(SESSION, first, '[needs more info ^A3] one');
+    await batcher.add(SESSION, second, '[needs more info ^A3] two');
     await batcher.flush(SESSION);
     await batcher.watch(SESSION);
 
@@ -267,10 +267,10 @@ describe('the agenda reply batcher and needs-info requests', () => {
     should(first).equal('A3~1');
     should(unstamped(sends.sent)).deepEqual([
       {
-        message: '[answer to !A1] yes\n\n[needs more info !A3] one',
+        message: '[answer to ^A1] yes\n\n[needs more info ^A3] one',
         sendId: 'agenda-session-1-A1-A3~1',
       },
-      { message: '[needs more info !A3] two', sendId: 'agenda-session-1-A3~2' },
+      { message: '[needs more info ^A3] two', sendId: 'agenda-session-1-A3~2' },
     ]);
     should(outboxes.files.get(SESSION)?.delivered).deepEqual(['A1', 'A3~1', 'A3~2']);
   });

@@ -24,7 +24,13 @@ describe('S-0388 Catalogs declares the Add skills screen and contributes the way
       { slot: SKILLS_ADD_SLOT, id: 'add-skills', order: 10 },
     ] as never);
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row', 'skills-row']);
+    expect(Object.keys(built?.panels ?? {})).toEqual([
+      'add-skills',
+      'add-skills-row',
+      'skills-row',
+      'mcp-row',
+      'mcp-install',
+    ]);
   });
 });
 

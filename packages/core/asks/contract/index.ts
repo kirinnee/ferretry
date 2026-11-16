@@ -32,6 +32,7 @@ export * from './snapshot/agenda-stage.ts';
 export * from './snapshot/agenda-state.ts';
 export * from './snapshot/agenda-tabs.ts';
 export * from './snapshot/agenda-versions.ts';
+export * from './snapshot/ask-reference.ts';
 export * from './snapshot/board-refs.ts';
 export * from './snapshot/plain-label.ts';
 export * from './snapshot/sha256.ts';

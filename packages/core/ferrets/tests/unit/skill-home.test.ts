@@ -1,5 +1,5 @@
 /**
- * The harness side of the one skill link rule (kernel batch #10, ruling #52 Q2 + Q5, owner decision !A466): a launch's
+ * The harness side of the one skill link rule (kernel batch #10, ruling #52 Q2 + Q5, owner decision ^A466): a launch's
  * selected skills reach the ferret home as ONE link each to the folder Skills shared, a deselected one leaves, and a
  * skill that was not shared (a project's) is neither copied nor linked. Real roots on a real disk, the minter and the
  * receiver two plugins of one home, as the host runs them.
