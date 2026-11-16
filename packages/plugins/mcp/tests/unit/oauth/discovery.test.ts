@@ -325,6 +325,9 @@ describe('MCP sign-in discovery — review hardening', () => {
     should(endpointAllowed('http://localhost../token', 'http://localhost../mcp')).be.true();
     should(endpointAllowed('https://10.0.0.1../token', SERVER)).be.false();
     should(endpointAllowed('https://auth.example.com../token', SERVER)).be.true();
+    // A host that is nothing but dots has no name left to judge: refused, whoever the server is.
+    for (const endpoint of ['https://../token', 'https://./token'])
+      for (const server of [SERVER, 'https://localhost/mcp']) should(endpointAllowed(endpoint, server)).be.false();
   });
 
   it('L2: matches a resource path by whole segments', () => {

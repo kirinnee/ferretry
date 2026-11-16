@@ -126,6 +126,7 @@ export function endpointAllowed(endpoint: string, serverUrl: string): boolean {
   const serverHost = withoutTrailingDot(server.hostname);
   const urlHost = withoutTrailingDot(url.hostname);
   const serverLocal = isLoopbackHost(serverHost);
+  if (urlHost === '') return false; // `https://../`: the parser keeps it, and no name is left to judge
   if (url.username !== '' || url.password !== '' || url.hash !== '') return false;
   if (url.protocol === 'http:') return serverLocal && isLoopbackHost(urlHost);
   if (url.protocol !== 'https:') return false;
