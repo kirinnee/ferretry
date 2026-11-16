@@ -13,10 +13,11 @@ import {
   ferretId,
   T0,
 } from '../../../../contract/testing/index.ts';
-import { FerretSessionLifecycleLauncher } from '../../../../daemon/adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
+import { heldLifecycleLauncher } from '../../../../daemon/adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
+import type { SessionConversationLeases } from '../../../../daemon/lib/session/peers/conversation-lease.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
 import { memoryStorage, sessionEnvelope } from '../../../support/daemon/storage.ts';
@@ -36,7 +37,22 @@ afterEach(async () => {
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
-async function wired() {
+/** Records every claim and release the lifecycle makes. */
+class RecordingLeases implements SessionConversationLeases {
+  readonly calls: string[] = [];
+  claimError: Error | undefined;
+  async claim(sessionId: string, command: readonly string[]): Promise<void> {
+    this.calls.push(`claim ${sessionId} ${command.join(' ')}`);
+    if (this.claimError !== undefined) throw this.claimError;
+  }
+  async release(sessionId: string): Promise<void> {
+    this.calls.push(`release ${sessionId}`);
+  }
+}
+
+async function wired(
+  options: { readonly leases?: SessionConversationLeases; readonly record?: Partial<FerretRecord> } = {},
+) {
   const parent = await mkdtemp(`${tmpdir()}/fy-lifecycle-through-ferrets-`);
   parents.push(parent);
   await mkdir(`${parent}/work`);
@@ -54,6 +70,7 @@ async function wired() {
     state: 'stopped',
     birth: 'person',
     createdAt: T0,
+    ...options.record,
     stateAt: T0,
   };
   const registry = new FerretRegistry([record]);
@@ -77,14 +94,13 @@ async function wired() {
       const held = registry.get(ferretId(id));
       return held === undefined ? undefined : { record: held, details: registry.detailsOf(held.id) };
     },
-    launcher: new FerretSessionLifecycleLauncher({
-      launch: async ferret => await live().launchHeld(ferret),
-      stop: async (ferret, how, reason, cause) => await live().stopHeld(ferret, how, reason, cause),
+    launcher: heldLifecycleLauncher(live, {
       handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
       runner: () => runner,
       sleep: async () => undefined,
       nowMs: () => 0,
     }),
+    ...(options.leases === undefined ? {} : { leases: options.leases }),
     log: { warn: () => undefined },
   });
   service = new FerretsService(registry, tokens, {
@@ -110,7 +126,7 @@ async function wired() {
   });
   const lifecycle = files.createLifecycle(FERRET, sessionEnvelope());
   await lifecycle.create({ agent: '/opt/fleet/bin/claude', cwd: `${parent}/work`, mode: 'auto', prompt: 'work' });
-  return { files, lifecycle, registry, runner, service };
+  return { files, lifecycle, registry, runner, service, storage };
 }
 
 describe('a lifecycle start of a ferret the registry holds', () => {
@@ -153,9 +169,76 @@ describe('a lifecycle start of a ferret the registry holds', () => {
     // Act
     const starting = f.lifecycle.start(FERRET);
 
-    // Assert — refused by the lifecycle's credential rotation, which reads the one cut-off fact, before any pane
-    await expect(starting).rejects.toThrow(`a person revoked ${FERRET}'s credential`);
+    // Assert — refused ahead, before the record, the credential or a lease is touched, on the one cut-off fact
+    await expect(starting).rejects.toThrow('the owner cut off this ferret; a confirmed owner resume is required');
     expect(f.runner.starts).toBe(0);
+  });
+
+  test('should claim the conversation the record names through the files’ leases before the pane opens, and free it on stop', async () => {
+    // Arrange
+    const leases = new RecordingLeases();
+    const f = await wired({ leases });
+
+    // Act
+    await f.lifecycle.start(FERRET);
+    const claimedAt = leases.calls.length;
+    await f.lifecycle.stop(FERRET);
+
+    // Assert — one claim for this session, made before the launch, and one release after the stop
+    expect(leases.calls[0]?.startsWith(`claim ${FERRET} `)).toBe(true);
+    expect(claimedAt).toBe(1);
+    expect(leases.calls.at(-1)).toBe(`release ${FERRET}`);
+  });
+
+  test('should open no pane when the conversation is held, and say who holds it', async () => {
+    // Arrange
+    const leases = new RecordingLeases();
+    leases.claimError = new Error('conversation c is being written by session mw7bp89h-61f11260');
+    const f = await wired({ leases });
+
+    // Act
+    const starting = f.lifecycle.start(FERRET);
+
+    // Assert
+    await expect(starting).rejects.toThrow('being written by session mw7bp89h-61f11260');
+    expect(f.runner.starts).toBe(0);
+  });
+
+  test.each([{ kind: 'stopped' as const }, { kind: 'completed' as const }])(
+    'should never revive a ferret that ended on purpose ($kind), and leave its session and credential as they were',
+    async cause => {
+      // Arrange
+      const leases = new RecordingLeases();
+      const f = await wired({ leases, record: { cause } });
+      const before = await f.files.environmentStore(FERRET).read(FERRET);
+
+      // Act
+      const starting = f.lifecycle.start(FERRET);
+
+      // Assert
+      await expect(starting).rejects.toThrow('stopped on purpose or finished its work');
+      expect(f.runner.starts).toBe(0);
+      expect(f.registry.get(ferretId(FERRET))?.state).toBe('stopped');
+      expect(((await f.storage.readState(parseSessionId(FERRET))) as { status: string }).status).toBe('created');
+      expect(await f.files.environmentStore(FERRET).read(FERRET)).toEqual(before);
+      expect(leases.calls).toEqual([]);
+    },
+  );
+
+  test('should refuse, before re-issuing the credential, a ferret the registry calls live whose terminal is not visible', async () => {
+    // Arrange — recorded `working` with no handle: a launch would answer "already running" and only rotate the hash
+    const leases = new RecordingLeases();
+    const f = await wired({ leases, record: { state: 'working' } });
+    const before = await f.files.environmentStore(FERRET).read(FERRET);
+
+    // Act
+    const starting = f.lifecycle.start(FERRET);
+
+    // Assert
+    await expect(starting).rejects.toThrow('would open no pane and only re-issue its credential');
+    expect(f.runner.starts).toBe(0);
+    expect(await f.files.environmentStore(FERRET).read(FERRET)).toEqual(before);
+    expect(leases.calls).toEqual([]);
   });
 
   test('should refuse, and open no pane, for a session whose ferret the registry does not hold', async () => {

@@ -4,16 +4,21 @@ set -euo pipefail
 # OWNER-RUN, ONCE, BEFORE THE FIRST `pwa-pages-v5.yaml` RUN: prepares the GitHub side of the 5.0 preview app
 # (https://ferretry-v5.pages.dev). The owner runs it; an agent never does.
 #
-#   scripts/local/setup-pwa-release-v5.sh [--dry-run] [--repo <owner/name>] [--force]
+#   scripts/local/setup-pwa-release-v5.sh [--dry-run] [--rules-only] [--repo <owner/name>] [--force]
 #
 #   --dry-run  print every step and call nothing: no gh, no openssl, no key, no prompt.
 #   --repo     the repository; default: the one `gh repo view` reports for this checkout.
+#   --rules-only  do step 1 only: set the two deployment-branch rules and stop. No terminal prompt, no key, no secret.
+#              Idempotent: safe to repeat, and the way an already-set-up repository gains `rebuild/5.0-after`.
 #   --force    replace a signing key that is already set. Without it the script stops, because replacing the key
 #              strands every installed copy of the preview app until it is reinstalled (docs/pwa-release-signing.md).
 #
 # WHAT IT DOES (workflow: .github/workflows/pwa-pages-v5.yaml)
-#   1. Creates two GitHub environments, each with a deployment-branch rule that allows `rebuild/5.0` ONLY, BEFORE the
-#      first run can ask for them: `pwa-release-v5` (the signing key) and `pwa-deploy-v5` (the Cloudflare credentials).
+#   1. Creates two GitHub environments, each with deployment-branch rules that allow `rebuild/5.0` and
+#      `rebuild/5.0-after` and NOTHING ELSE (the preview follows 5.0-after while it exists, see the workflow header),
+#      BEFORE the first run can ask for them. Re-running it is how an existing environment gains `rebuild/5.0-after`:
+#      the rules are only added or removed to match, never widened beyond those two, and no secret is touched
+#      (`--rules-only`, below, stops after this step with no prompt, key or Cloudflare value): `pwa-release-v5` (the signing key) and `pwa-deploy-v5` (the Cloudflare credentials).
 #      They are two environments so the job that signs never holds the Cloudflare token and the job that deploys never
 #      holds the key (docs/pwa-release-signing.md).
 #   2. Generates an Ed25519 key in a 0600 file inside a 0700 temp directory and sets it as the environment secret
@@ -36,20 +41,22 @@ cd "${root_dir}"
 
 dry_run=0
 force=0
+rules_only=0
 repo="${GH_REPO:-}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
   --dry-run) dry_run=1 && shift ;;
   --force) force=1 && shift ;;
+  --rules-only) rules_only=1 && shift ;;
   --repo)
     [[ $# -ge 2 ]] || { echo "❌ --repo needs a value (owner/name)" >&2 && exit 64; }
     repo="$2" && shift 2
     ;;
-  *) echo "❌ usage: setup-pwa-release-v5.sh [--dry-run] [--repo <owner/name>] [--force]" >&2 && exit 64 ;;
+  *) echo "❌ usage: setup-pwa-release-v5.sh [--dry-run] [--rules-only] [--repo <owner/name>] [--force]" >&2 && exit 64 ;;
   esac
 done
 
-branch="rebuild/5.0"
+branches=(rebuild/5.0 rebuild/5.0-after)
 signing_env="pwa-release-v5"
 deploy_env="pwa-deploy-v5"
 key_secret="PWA_RELEASE_SIGNING_KEY"
@@ -72,7 +79,9 @@ echo "📝 repository: ${repo}"
 cf_secrets=(CLOUDFLARE_PAGES_V5_API_TOKEN CLOUDFLARE_PAGES_V5_ACCOUNT_ID)
 cf_token=""
 cf_account=""
-if [[ ${dry_run} -eq 1 ]]; then
+if [[ ${rules_only} -eq 1 ]]; then
+  : # --rules-only asks for nothing
+elif [[ ${dry_run} -eq 1 ]]; then
   for secret in "${cf_secrets[@]}"; do
     echo "⚙️  [dry-run] would REQUIRE, with a hidden prompt and BEFORE any key is made, ${secret} (a blank answer or no terminal stops here)"
   done
@@ -90,32 +99,40 @@ else
   [[ -n ${cf_account} ]] || { echo "❌ CLOUDFLARE_PAGES_V5_ACCOUNT_ID is required" >&2 && exit 1; }
 fi
 
-# ─── 1. the environments, restricted to the branch before anything can run ──────────────────────
+# ─── 1. the environments, restricted to the two preview branches before anything can run ───────
 for environment in "${signing_env}" "${deploy_env}"; do
-  echo "⚙️  environment ${environment}: deployment branches limited to ${branch}"
+  echo "⚙️  environment ${environment}: deployment branches limited to ${branches[*]}"
   if [[ ${dry_run} -eq 1 ]]; then
     echo "   [dry-run] gh api --method PUT repos/${repo}/environments/${environment} --input - <<< '${policy}'"
-    echo "   [dry-run] gh api repos/${repo}/environments/${environment}/deployment-branch-policies  (delete any rule but ${branch}, add it if absent)"
+    echo "   [dry-run] gh api repos/${repo}/environments/${environment}/deployment-branch-policies  (delete any rule but ${branches[*]}, add each if absent)"
     continue
   fi
   gh api --method PUT "repos/${repo}/environments/${environment}" --input - <<<"${policy}" >/dev/null
   policies="$(gh api "repos/${repo}/environments/${environment}/deployment-branch-policies" --jq '.branch_policies[] | "\(.id)\t\(.name)"')"
-  present=0
+  present=" "
   while IFS=$'\t' read -r id name; do
     [[ -n ${id} ]] || continue
-    if [[ ${name} == "${branch}" ]]; then
-      present=1
+    if [[ " ${branches[*]} " == *" ${name} "* ]]; then
+      present+="${name} "
     else
       echo "🔁 removing the rule for '${name}' from ${environment}"
       gh api --method DELETE "repos/${repo}/environments/${environment}/deployment-branch-policies/${id}" >/dev/null
     fi
   done <<<"${policies}"
-  if [[ ${present} -eq 0 ]]; then
-    gh api --method POST "repos/${repo}/environments/${environment}/deployment-branch-policies" \
-      --input - <<<"{\"name\":\"${branch}\",\"type\":\"branch\"}" >/dev/null
-  fi
-  echo "✅ ${environment}: only ${branch} may deploy to it"
+  for branch in "${branches[@]}"; do
+    if [[ ${present} != *" ${branch} "* ]]; then
+      echo "➕ adding the rule for '${branch}' to ${environment}"
+      gh api --method POST "repos/${repo}/environments/${environment}/deployment-branch-policies" \
+        --input - <<<"{\"name\":\"${branch}\",\"type\":\"branch\"}" >/dev/null
+    fi
+  done
+  echo "✅ ${environment}: only ${branches[*]} may deploy to it"
 done
+
+if [[ ${rules_only} -eq 1 ]]; then
+  echo "✅ --rules-only: the deployment-branch rules are set; no key, secret or Cloudflare value was touched"
+  exit 0
+fi
 
 # ─── 2. the signing key ────────────────────────────────────────────────────────────────────────
 if [[ ${dry_run} -eq 1 ]]; then
@@ -163,5 +180,5 @@ fi
 # ─── 4. the public key and the next step ───────────────────────────────────────────────────────
 echo "📝 the preview's PUBLIC release key:"
 echo "${public_key}"
-echo "📝 NEXT STEP: save it as packages/app/release-signing-key.preview.pub on ${branch}, commit and push."
-echo "   The first push to ${branch} after that builds, signs and deploys https://ferretry-v5.pages.dev."
+echo "📝 NEXT STEP: save it as packages/app/release-signing-key.preview.pub on rebuild/5.0, commit and push."
+echo "   The first push to rebuild/5.0 or rebuild/5.0-after after that builds, signs and deploys https://ferretry-v5.pages.dev."
