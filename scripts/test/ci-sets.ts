@@ -226,7 +226,7 @@ const dispatchShape = (input: string) => ({
   ),
 });
 assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', "a 4x8 dispatch must run main's part limits");
-assert.equal(dispatchShape('8x16').FY_CI_QUICK_PARALLEL, '6');
+assert.equal(dispatchShape('8x16').FY_CI_QUICK_PARALLEL, '4');
 assert.ok(runsOnOf('int').includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
 const prRunner = (name: string) =>
   evaluate(runsOnExpression(name), event('pull_request', 'synchronize', ['full-ci']), {}, {});

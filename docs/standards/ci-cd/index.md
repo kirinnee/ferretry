@@ -104,7 +104,9 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   `parallel.sh` is a POOL: the next part starts the moment any running part ends, so parts are listed longest
   first. The contention rule still holds - no test budget is raised to make room for other work - and is now met by
   RUNNER, not by ordering: the static parts (format/gates/build, `nice -n 10`) run in their own `Static Checks` job,
-  so Quick's 8x16 runs only the five unit groups and the scripts tests (six processes on eight cores). The first 8x16
+  so Quick's 8x16 runs only the five unit groups and the scripts tests, FOUR at a time: six on eight vCPUs stretched
+  the board watcher-stall test's 100 ms slice to 164 ms, and four finish at the kernel group's ~280 s anyway. Static
+  Checks runs two parts and two gates at a time on its 4x8 (four gates got tsc OOM-killed). The first 8x16
   run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
   instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
   `unit-timings.tsv` in the part artifact.
