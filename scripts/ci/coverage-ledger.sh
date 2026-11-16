@@ -19,7 +19,8 @@
 # A SCOPED RUN (scripts/ci/scope.ts): quick.sh exports FY_CI_SCOPE_FILE for a pull request whose unit tests were narrowed
 # to the changed plugins. The unit ledger is then judged for the packages that RAN only - every platform package and the
 # selected plugins - and the plugins the scope skipped are left out of both the source list and the judged records
-# (their lib files are loaded, but not fully exercised, by the platform tests). It says so in its last line, which is
+# (their lib files are loaded, but not fully exercised, by the platform tests). A PLATFORM file (outside packages/plugins/) that
+# is under 100% and that no test which ran imports is exercised only by those skipped tests, so it is left out too. It says so in its last line, which is
 # NEVER the complete-ledger sentence: a scoped ledger must not pass for a complete one. int is never scoped.
 #
 # Only POSIX tools (bash, awk, grep, find, sort, comm), so the CI ledger job runs without a nix shell. The scope file is
@@ -55,13 +56,47 @@ for lcov in "$@"; do
   [[ ! -f ${lcov} ]] && echo "❌ No coverage artifact found at ${lcov}" >&2 && exit 1
 done
 
+scope="lib/"
+[[ ${mode} == "int" ]] && scope="adapters/"
+skipped_rels=()
+if [[ ${mode} == "unit" && -n ${FY_CI_SCOPE_FILE:-} ]]; then
+  [[ -f ${FY_CI_SCOPE_FILE} && "$(jq -r '.mode' "${FY_CI_SCOPE_FILE}")" == "scoped" ]] ||
+    { echo "❌ FY_CI_SCOPE_FILE (${FY_CI_SCOPE_FILE}) is not a SCOPED decision" >&2 && exit 1; }
+  mapfile -t skipped_rels < <(jq -r '.skipped[].rel' "${FY_CI_SCOPE_FILE}")
+fi
+# One alternation of the skipped plugins' folders (empty when nothing is skipped), for awk's path tests.
+skipped_alternation="$(IFS='|' && echo "${skipped_rels[*]:-}")"
+# A SCOPED run judges a PLATFORM file (not under packages/plugins/) only when a test that ran names it: its own tests are
+# then in the run. A platform file nothing that ran imports is exercised only by the skipped plugins' tests, so under 100%
+# it is left out of the ledger (and out of its source list) here; a FULL run has no such exemption.
+owned="$(mktemp)"
+exempt_list="$(mktemp)"
+trap 'rm -f "${source_list:-}" "${coverage_list:-}" "${judged:-}" "${owned}" "${exempt_list}"' EXIT
+if [[ ${#skipped_rels[@]} -gt 0 ]]; then
+  {
+    jq -r '.alwaysRun[].file' "${FY_CI_SCOPE_FILE}"
+    find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -print |
+      awk -v skips="${skipped_alternation}" '$0 !~ ("^(" skips ")/")'
+  } |
+    xargs grep -ohE "['\"][^'\"]*/[^'\"/]+['\"]" 2>/dev/null |
+    sed -E "s/^.*\/([^\/'\"]+)['\"]$/\1/; s/\.(m|c)?[jt]sx?$//" | sort -u >"${owned}" || true
+fi
+exempt_awk='
+  BEGIN { if (scoped) while ((getline name < owned_file) > 0) owned[name] = 1 }
+  function exempt(sf,   name) {
+    if (!scoped || sf ~ /(^|\/)packages\/plugins\//) return 0
+    name = sf; sub(/^.*\//, "", name); sub(/\.[^.]*$/, "", name)
+    return !(name in owned)
+  }'
+scoped=0
+[[ ${#skipped_rels[@]} -gt 0 ]] && scoped=1
 coverage_file="coverage/${mode}/lcov.info"
 if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
   mkdir -p "coverage/${mode}"
   merged="$(mktemp)"
   ledger_scope="lib/"
   [[ ${mode} == "int" ]] && ledger_scope="adapters/"
-  awk -v scope="${ledger_scope}" '
+  awk -v scope="${ledger_scope}" -v scoped="${scoped}" -v owned_file="${owned}" -v skips="${skipped_alternation}" "${exempt_awk}"'
     FNR == 1 { group = FILENAME; sub(/\/lcov\.info$/, "", group); sub(/^.*\//, "", group); sub(/^coverage-(unit|int)-/, "", group) }
     /^SF:/ { sf = substr($0, 4); record = $0 "\n"; lf = 0; lh = 0; next }
     /^end_of_record/ {
@@ -84,7 +119,8 @@ if [[ $# -gt 1 || $1 != "${coverage_file}" ]]; then
         # too. A 0/0 from one group never excuses unhit lines in another.
         if (most_lf[sf] == 0) { printf "%s", best[sf]; continue }
         # Only a file the tier judges (below) is reported; any other is carried for the record.
-        if (sf ~ ("(^|/)packages/.*/" scope)) printf "❌ %s reaches 100%% in no single test group (lines hit/found:%s); test its missed lines in the group that owns it\n", sf, seen[sf] > "/dev/stderr"
+        # A SCOPED run does not judge a skipped plugin file, nor a platform file only skipped plugin tests exercise.
+        if (sf ~ ("(^|/)packages/.*/" scope) && !exempt(sf) && !(skips != "" && sf ~ ("(^|/)(" skips ")/"))) printf "❌ %s reaches 100%% in no single test group (lines hit/found:%s); test its missed lines in the group that owns it\n", sf, seen[sf] > "/dev/stderr"
         printf "%s", best[sf]
       }
     }
@@ -97,31 +133,30 @@ fi
 # `packages/plugins/<id>/daemon/lib/`, `packages/core/kernel/host/lib/` and so on. A new package or half is
 # in the ledger the moment it has such a directory; nobody lists it here. Files outside those directories
 # (contracts, manifests, host entries, skeleton halves) are not judged by either ledger.
-scope="lib/"
-[[ ${mode} == "int" ]] && scope="adapters/"
-skipped_rels=()
-if [[ ${mode} == "unit" && -n ${FY_CI_SCOPE_FILE:-} ]]; then
-  [[ -f ${FY_CI_SCOPE_FILE} && "$(jq -r '.mode' "${FY_CI_SCOPE_FILE}")" == "scoped" ]] ||
-    { echo "❌ FY_CI_SCOPE_FILE (${FY_CI_SCOPE_FILE}) is not a SCOPED decision" >&2 && exit 1; }
-  mapfile -t skipped_rels < <(jq -r '.skipped[].rel' "${FY_CI_SCOPE_FILE}")
-fi
-# One alternation of the skipped plugins' folders (empty when nothing is skipped), for awk's path tests.
-skipped_alternation="$(IFS='|' && echo "${skipped_rels[*]:-}")"
 mapfile -t scope_dirs < <(find packages -path '*/node_modules' -prune -o -path '*/tests' -prune -o -type d -name "${scope%/}" -print | sort |
   awk -v skips="${skipped_alternation}" 'skips == "" || $0 !~ ("^(" skips ")/")')
 source_list="$(mktemp)"
 coverage_list="$(mktemp)"
 judged="$(mktemp)"
-trap 'rm -f "${source_list}" "${coverage_list}" "${judged}"' EXIT
 
 # Only the records inside the tier's scope are judged.
-awk -v scope="${scope}" -v skips="${skipped_alternation}" '
+awk -v scope="${scope}" -v skips="${skipped_alternation}" -v scoped="${scoped}" -v owned_file="${owned}" -v exempt_out="${exempt_list}" "${exempt_awk}"'
   /^SF:/ {
     path = substr($0, 4); gsub(/\\\\/, "/", path)
     keep = (path ~ "(^|/)packages/.*/" scope)
     if (keep && skips != "" && path ~ ("(^|/)(" skips ")/")) keep = 0
+    buf = ""; lf = 0; lh = 0
   }
-  keep { print }
+  /^LF:/ { lf = substr($0, 4) + 0 }
+  /^LH:/ { lh = substr($0, 4) + 0 }
+  keep { buf = buf $0 "\n" }
+  /^end_of_record/ {
+    if (keep) {
+      if (lh < lf && exempt(path)) { sub(/^.*\/packages\//, "packages/", path); print path > exempt_out }
+      else printf "%s", buf
+    }
+    keep = 0
+  }
 ' "${coverage_file}" >"${judged}"
 
 if [[ ${#scope_dirs[@]} -eq 0 ]]; then
@@ -168,12 +203,13 @@ awk '
     print path
   }
 ' "${judged}" | sort -u >"${coverage_list}"
-missing="$(comm -23 "${source_list}" "${coverage_list}" | head -n 1)"
+missing="$(comm -23 "${source_list}" "${coverage_list}" | comm -23 - <(sort -u "${exempt_list}") | head -n 1)"
 [[ -n ${missing} ]] && echo "❌ source file missing from coverage ledger: ${missing}" >&2 && exit 1
 
 if [[ ${#skipped_rels[@]} -gt 0 ]]; then
+  exempted="$(sort -u "${exempt_list}" | wc -l | tr -d ' ')"
   # Deliberately a different sentence from the full run's below, in the log and the step summary.
-  echo "⚠️ SCOPED coverage ledger: 100% for the platform packages and the selected plugins; ${#skipped_rels[@]} unselected plugins were not run and are NOT judged. This is NOT the complete ${mode} production ledger: ${coverage_file}" |
+  echo "⚠️ SCOPED coverage ledger: 100% for the platform packages and the selected plugins; ${#skipped_rels[@]} unselected plugins were not run and are NOT judged, nor are ${exempted} platform files only those plugins' tests exercise. This is NOT the complete ${mode} production ledger: ${coverage_file}" |
     tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 0
 fi
