@@ -10,6 +10,7 @@ import {
   BUZZES,
   MODES,
   NUDGES,
+  REST_NUDGES,
   SEEN,
   cap,
 } from './contract/index.ts';
@@ -439,7 +440,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SEEN, BUZZES, MODES, NUDGES],
+    state: [SEEN, BUZZES, MODES, NUDGES, REST_NUDGES],
     config: [AGENDA_CONFIG],
     readModels: ['open', 'daemon-agenda', 'mode'],
     publishes: [AgendaModeChanged, AgendaBuzzed],
