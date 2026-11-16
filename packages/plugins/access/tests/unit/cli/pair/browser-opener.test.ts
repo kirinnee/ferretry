@@ -9,7 +9,7 @@
 
 import { describe, it } from 'bun:test';
 import type { ChildProcess, spawn } from 'node:child_process';
-import { MemoryStateFolder } from '@ferretry/kernel/testing';
+import { fixedClock, MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import {
   createPairingRedirectPage,
@@ -69,7 +69,6 @@ const openerWith = (log: string[], schedule: (run: () => void, ms: number) => vo
   const opener = new DesktopBrowserOpener({
     platform: 'linux',
     spawn: quietSpawn,
-    stateHome: '/unused',
     createPage: store.createPage,
     retentionMs: 30_000,
     schedule,
@@ -131,7 +130,6 @@ describe('DesktopBrowserOpener with a state-backed page', () => {
     const opener = new DesktopBrowserOpener({
       platform: 'linux',
       spawn: quietSpawn,
-      stateHome: '/unused',
       createPage: async () => ({
         file: '/fenced/fy-pair-ABCDEF/pairing.html',
         discard: async () => {
@@ -156,7 +154,6 @@ describe('DesktopBrowserOpener with a state-backed page', () => {
       spawn: (() => {
         throw new Error('spawn xdg-open ENOENT');
       }) as unknown as typeof spawn,
-      stateHome: '/unused',
       createPage: store.createPage,
       retentionMs: 30_000,
       schedule: () => undefined,
@@ -204,10 +201,9 @@ function launcherWorld(platform = 'linux') {
         unref: () => undefined,
       } as unknown as ChildProcess;
     }) as unknown as typeof spawn,
-    stateHome: '/unused',
     // The daemon makes the page (`POST /v1/pair/redirect`); here its own writer runs over the same in-memory state.
     createPage: page =>
-      createPairingRedirectPage({ state, make: made => stateRedirectWriter(state).write(made) }, page),
+      createPairingRedirectPage({ state, make: made => stateRedirectWriter(state, fixedClock()).write(made) }, page),
     retentionMs: 10_000,
     schedule: (run, ms) => void timers.push({ run, ms }),
     onExit: run => void exits.push(run),

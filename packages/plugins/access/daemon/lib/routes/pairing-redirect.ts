@@ -7,15 +7,17 @@
  * root call that reaches an alias of the new file (a hard link in a hard-link root, a bind mount) answers from the
  * snapshot kept before it. So the CLI sends the page and the daemon makes it.
  *
- * WHO MAY ASK. Only the host's own admin credential (`minimum: 'admin-token'`, the route table): a caller that is not
- * the machine cannot make the daemon write a file into its private state. The body is the page and nothing else; the
- * daemon names the directory itself, so a caller never chooses a path.
+ * WHO MAY ASK. Only the host's own admin credential (`minimum: 'admin-token'`, the route table), and only when it
+ * ARRIVED on the host (`privilegedOnly`, decided from the carrier): the admin bearer carried over a relay, a tunnel or
+ * WebRTC is refused with 403 before this handler runs, so a caller that is not the machine cannot make the daemon write
+ * a file into its private state. The body is the page and nothing else; the daemon names the directory itself, so a
+ * caller never chooses a path.
  */
 import {
   type ApiRoute,
   errorResponse,
   jsonResponse,
-  PAIRING_REDIRECT_PAGE_MAX_BYTES,
+  PAIRING_REDIRECT_PAGE_MAX_CHARS,
   PairingRedirectRequestSchema,
   PairingRedirectResponseSchema,
   parseBody,
@@ -33,12 +35,14 @@ export function pairingRedirectRoutes(writer: PairingRedirectWriter): readonly A
       method: 'POST',
       path: '/v1/pair/redirect',
       minimum: 'admin-token',
+      privilegedOnly: true,
       caller: 'person',
       noStore: true,
       handle: async ({ request }) => {
-        // The read is bounded before the schema sees it: the page's own cap, plus the JSON envelope around it.
+        // The read is bounded before the schema sees it: the page's own cap in characters (a character is at most six
+        // bytes once JSON-escaped, `\u00XX`), plus the JSON envelope around it.
         const { page } = await parseBody(request, PairingRedirectRequestSchema, {
-          maxBytes: PAIRING_REDIRECT_PAGE_MAX_BYTES * 6 + 64,
+          maxBytes: PAIRING_REDIRECT_PAGE_MAX_CHARS * 6 + 64,
         });
         try {
           return jsonResponse(PairingRedirectResponseSchema.parse({ directory: await writer.write(page) }), 201);

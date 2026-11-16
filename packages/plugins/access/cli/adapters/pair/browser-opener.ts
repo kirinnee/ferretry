@@ -1,9 +1,6 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
-  PAIRING_REDIRECT_DIRECTORY_PREFIX,
   PAIRING_REDIRECT_FILE_NAME,
   PAIRING_REDIRECT_LIFETIME_MS,
   PairingRedirectsFile,
@@ -20,11 +17,12 @@ import { renderPairingRedirectPage } from '../../lib/pair/redirect-page.ts';
  * the path of a page this adapter just wrote, whose one script replaces itself with the link
  * (`renderPairingRedirectPage`); a path carries nothing worth reading.
  *
- * THE PAGE IS PRIVATE AND SHORT-LIVED, because it holds the code for as long as it exists. It is made
- * inside a fresh `0700` directory under the user's state home — never the shared `/tmp`, where a
- * neighbour could pre-create the name or watch the directory — and written `0600` with `O_EXCL`, so it
- * is either ours or the write fails. It is deleted `retentionMs` after the launcher was started, and
- * also when this process exits or is told to stop. That is the contract `docs/pairing.md` states: the
+ * THE PAGE IS PRIVATE AND SHORT-LIVED, because it holds the code for as long as it exists. THE CLI NEVER WRITES IT:
+ * this file has no file-writing import at all, so that is structural, not a habit. The daemon makes it
+ * (`POST /v1/pair/redirect`) inside a fresh `0700` directory of Access's own state — never the shared `/tmp`,
+ * where a neighbour could pre-create the name or watch the directory — as a `0600` file pinned before the write
+ * returns, and this adapter only finds it and removes it. It is deleted `retentionMs` after the launcher was started,
+ * and also when this process exits or is told to stop; the daemon removes any page that outlives its code regardless. That is the contract `docs/pairing.md` states: the
  * code is never persisted beyond the seconds a browser needs to read the page.
  *
  * THE TIMER KEEPS THE PROCESS ALIVE ON PURPOSE. `fy pair --no-wait` would otherwise exit the moment
@@ -42,7 +40,7 @@ import { renderPairingRedirectPage } from '../../lib/pair/redirect-page.ts';
  *
  * FAILURE IS A `false`, NOT A THROW. Every reason this fails is an ordinary place to run the command: a
  * headless server, an SSH session, a container, a desktop with no handler registered, a state home
- * that cannot be written. The QR and the link are already on the screen, so the caller has something
+ * that cannot be written, a daemon that will not make the page. The QR and the link are already on the screen, so the caller has something
  * true to say; an exception would turn a fallback into an error report.
  *
  * WHAT IT DOES NOT CLAIM: that a browser actually rendered anything. A zero exit from `xdg-open` means
@@ -65,14 +63,12 @@ const launcher = (platform: string): { readonly command: string; readonly leadin
 };
 
 export interface BrowserOpenerEnvironment {
-  /** The shipped adapter writes through the CLI's fenced Access state; direct host IO remains a test fixture. */
-  readonly createPage?: (page: string) => Promise<{ readonly file: string; discard(): Promise<void> }>;
+  /** Asks the daemon for the page and answers how to find it and take it away again; the CLI itself writes nothing. */
+  readonly createPage: (page: string) => Promise<{ readonly file: string; discard(): Promise<void> }>;
   /** `process.platform`, injected so every branch is provable on one host. */
   readonly platform: string;
   /** `spawn`, injected so no suite ever launches a real browser. */
   readonly spawn: typeof spawn;
-  /** The user's state home, where the page's private directory is made — never a shared temp directory. */
-  readonly stateHome: string;
   /** How long the page outlives the launcher. */
   readonly retentionMs: number;
   /** Runs `run` after `ms`, holding the process open until it has — injected so no suite waits on a clock. */
@@ -90,33 +86,24 @@ export class DesktopBrowserOpener implements IBrowserOpener {
   async open(link: string): Promise<boolean> {
     const target = launcher(this.environment.platform);
     if (target === undefined) return false;
-    let directory: string | undefined;
-    let stored: Awaited<ReturnType<NonNullable<BrowserOpenerEnvironment['createPage']>>> | undefined;
+    let stored: Awaited<ReturnType<BrowserOpenerEnvironment['createPage']>> | undefined;
     /*
      * One removal however many paths ask for it (the timer, a failed launcher, a signal, the exit event), and
-     * one promise every caller can wait on. The direct page goes synchronously, inside the first call, so even
-     * the `exit` event — which cannot wait — still takes it; the state-backed page has to be awaited, which is
-     * why a signal waits on this promise before it ends the process.
+     * one promise every caller can wait on. The page lives in the fenced state, whose removal is asynchronous, which
+     * is why a signal waits on this promise before it ends the process; the `exit` event, which cannot wait, only
+     * starts the removal.
      */
     let discarding: Promise<void> | undefined;
     const discard = (): Promise<void> => {
       discarding ??= (async () => {
-        if (directory !== undefined) rmSync(directory, { recursive: true, force: true });
         if (stored !== undefined) await stored.discard();
       })().catch(() => undefined);
       return discarding;
     };
     try {
       const page = renderPairingRedirectPage(link);
-      let file: string;
-      if (this.environment.createPage !== undefined) {
-        stored = await this.environment.createPage(page);
-        file = stored.file;
-      } else {
-        directory = mkdtempSync(join(this.environment.stateHome, PAIRING_REDIRECT_DIRECTORY_PREFIX));
-        file = join(directory, PAIRING_REDIRECT_FILE_NAME);
-        writeFileSync(file, page, { flag: 'wx', mode: 0o600 });
-      }
+      stored = await this.environment.createPage(page);
+      const { file } = stored;
       // Registered before the launcher starts, so there is no window in which the page exists unguarded.
       this.environment.onExit(discard);
       this.environment.schedule(() => void discard(), this.environment.retentionMs);
@@ -224,12 +211,11 @@ export async function createPairingRedirectPage(
 }
 
 /** The shipped opener uses the same declared opaque tree as the daemon sweep; absent ports refuse --open. */
-export const desktopBrowserOpener = (stateHome: string, ready?: PairingRedirectCli): IBrowserOpener => {
+export const desktopBrowserOpener = (ready?: PairingRedirectCli): IBrowserOpener => {
   if (ready === undefined) return { open: async () => false };
   return new DesktopBrowserOpener({
     platform: process.platform,
     spawn,
-    stateHome,
     createPage: page => createPairingRedirectPage(ready, page),
     retentionMs: PAIRING_REDIRECT_LIFETIME_MS,
     schedule: holdProcessOpen,

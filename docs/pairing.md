@@ -395,18 +395,20 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   (`packages/cli/src/lib/pair/redirect-page.ts`) into a fresh `0700` directory under the user's state home
   (`<FY_HOME>/pair-open-*`, never the shared `/tmp`), as a `0600` file created with `O_EXCL`, and opens
   _that path_; the page's script does `location.replace(<link>)`, fragment intact. The DAEMON makes the page
-  (`POST /v1/pair/redirect`, the host's admin credential only; the CLI sends the page and the daemon names the
-  directory), not the CLI: a file the CLI's own state port made would be pinned in the fence only at its index's
+  (`POST /v1/pair/redirect`, the host's admin credential only, and only when it arrived on the host: the route is
+  `privilegedOnly`, so the admin bearer carried over a relay, a tunnel or WebRTC is refused with 403; the CLI sends
+  the page and the daemon names the directory), not the CLI, which holds no file-writing code for it: a file the CLI's own state port made would be pinned in the fence only at its index's
   next look, within 250 ms, and a file the daemon makes is pinned by identity before the write returns, so no
-  alias of it is reachable through any root from the moment it exists. This is the one place the
+  alias of it is reachable through any root before the write returns. This is the one place the
   code touches disk, so the page lives seconds, not minutes: it is deleted 10 seconds after the launcher
   starts, at once if the launcher is missing, and when the process exits or is stopped. The timer holds
   `fy pair --no-wait` open for those seconds so the page is not removed before a cold browser reads it.
   Declared GAP: a `SIGKILL` or a power loss inside that window leaves a page behind. **A code expires two
   minutes after it is minted whether or not a leftover file survives** — the page can outlive its
   usefulness but never extend the code's life, and a code older than that opens nothing. The file is still
-  a stale credential on disk, so it is swept rather than trusted to the expiry: the next `fy pair` and the
-  daemon's boot both remove any `<FY_HOME>/pair-open-XXXXXX/pairing.html` older than 30 seconds
+  a stale credential on disk, so it is swept rather than trusted to the expiry: the daemon's own timer (armed
+  for just past 30 seconds after every page it makes, so a lost `201`, a killed CLI or an `FY_HOME` mismatch leaves
+  no page past the code's life), the next `fy pair` and the daemon's boot each remove any `<FY_HOME>/pair-open-XXXXXX/pairing.html` older than 30 seconds
   (`sweepPairingRedirects` in `packages/protocol/src/adapters/pairing-redirect-sweep.ts`, the names and age
   in `pairing-redirect.ts` so the two programs cannot disagree). The sweep matches the directory name
   exactly, never follows a symbolic link, unlinks only a regular file, removes the directory with a plain
