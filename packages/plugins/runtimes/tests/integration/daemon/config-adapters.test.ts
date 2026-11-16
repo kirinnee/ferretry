@@ -419,7 +419,7 @@ describe('the model in effect over Runtimes’ files', () => {
     expect(() =>
       files.editsFor(
         loaded,
-        { ...before, machine: { ...before.machine, agentPermissions: 'skip' } } as AccountModel,
+        { ...before, machine: { ...before.machine, agentPermissions: 'auto' } } as AccountModel,
         NO_MOVES,
       ),
     ).toThrow(/agentPermissions.*no file of Runtimes holds/su);

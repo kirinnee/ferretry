@@ -912,7 +912,7 @@ describe('credential.remove (the Runtimes half)', () => {
 describe('machine.settings', () => {
   const settings = (over: object = {}) => ({
     kind: 'machine.settings',
-    agentPermissions: 'auto',
+    agentPermissions: 'skip',
     defaultRuntime: 'claude-default',
     agentControl: { terminals: true, browsers: true, files: true },
     ...over,
@@ -929,14 +929,14 @@ describe('machine.settings', () => {
   });
 
   it('should change agent permissions and say how it reaches running sessions', () => {
-    const none = derive(settings({ agentPermissions: 'skip' }));
-    should(none.summary).equal('Set agent permissions to Skip all permission checks');
+    const none = derive(settings({ agentPermissions: 'auto' }));
+    should(none.summary).equal('Set agent permissions to Auto mode');
     should(none.consequences).eql(['Applies to new sessions.']);
-    should(derive(settings({ agentPermissions: 'skip' }), { runningSessions: 1 }).consequences).eql([
-      'Applies to new sessions. 1 running session keeps the old mode (Auto mode) until restarted.',
+    should(derive(settings({ agentPermissions: 'auto' }), { runningSessions: 1 }).consequences).eql([
+      'Applies to new sessions. 1 running session keeps the old mode (Skip all permission checks) until restarted.',
     ]);
-    should(derive(settings({ agentPermissions: 'skip' }), { runningSessions: 3 }).consequences).eql([
-      'Applies to new sessions. 3 running sessions keep the old mode (Auto mode) until restarted.',
+    should(derive(settings({ agentPermissions: 'auto' }), { runningSessions: 3 }).consequences).eql([
+      'Applies to new sessions. 3 running sessions keep the old mode (Skip all permission checks) until restarted.',
     ]);
   });
 
@@ -1026,9 +1026,9 @@ describe('machine.settings', () => {
   });
 
   it('should join several moves into one summary', () => {
-    const edit = derive(settings({ agentPermissions: 'skip', browserMode: 'window', autoResume: false }));
+    const edit = derive(settings({ agentPermissions: 'auto', browserMode: 'window', autoResume: false }));
     should(edit.summary).equal(
-      'Set agent permissions to Skip all permission checks; the browser mode to Real window; auto-resume after restart off',
+      'Set agent permissions to Auto mode; the browser mode to Real window; auto-resume after restart off',
     );
   });
 });
