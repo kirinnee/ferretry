@@ -1,13 +1,8 @@
 import { defineEvent } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
-import { QueueChangeSchema } from './wire-send.ts';
 
-/** Wake-ups, published after the write landed (§7.4). The truth is `ConversationApi`; none is relied on. */
-export const QueueChanged = defineEvent(
-  'conversation.queue-changed',
-  z.strictObject({ ferret: FerretIdSchema, message: z.string().min(1), change: QueueChangeSchema }),
-);
+/** Wake-ups, published after the write landed (§7.4; `QueueChanged` is the Mailbox's). The truth is `ConversationApi`; none is relied on. */
 export const MessageSent = defineEvent(
   'conversation.message-sent',
   z.strictObject({ ferret: FerretIdSchema, sendId: z.string().min(1) }),

@@ -404,10 +404,10 @@ const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
  * failure — no `fy`, a lease store that errors — prints one line and launches anyway, because a lease
  * bug must never stop the person's own CLI from starting.
  *
- * EXCEPT a wrapper the daemon launched (`FY_SESSION_ID` set): the daemon leased the conversation to this
- * session under ITS OWN pid, and only this claim moves that lease to the harness's. A harness that wrote
- * under the daemon's pid would read as dead to a terminal claim once the daemon restarted, so there the
- * failure is closed — the same status (75, which the Warden does not revive), with the reason said.
+ * EXCEPT a wrapper run for a session (`FY_SESSION_ID` set): a harness this wrapper cannot check must not write
+ * unchecked, so there the failure is closed — the same status (75, which the Warden does not revive), with the
+ * reason said. A pane the DAEMON launches runs the real harness binary and never this wrapper; the daemon
+ * moves that session's lease onto the pane's pid itself (`SessionConversationLeases.moveToPane`).
  */
 const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
   const fy = shellPath(fyCommand);

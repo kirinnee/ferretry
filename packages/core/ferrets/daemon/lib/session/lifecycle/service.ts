@@ -223,6 +223,7 @@ export class SessionLifecycleService {
         // what THIS pane was told rather than what the previous one was.
         launchedAt = this.ports.clock.now();
         starting = withLaunchInstructions(starting, await this.launch(starting));
+        await this.holdConversationOnPane(starting);
       }
       if (beforeFirstTurn !== undefined) {
         try {
@@ -353,6 +354,22 @@ export class SessionLifecycleService {
         if (attempt >= this.settings.launchAttempts || (await this.ports.launcher.alive(record)))
           throw await this.recordFailure(record, error);
       }
+    }
+  }
+
+  /**
+   * Moves the session's conversation lease onto the pane's own pid. FAIL CLOSED: a pane whose conversation the
+   * daemon cannot hold under that process is stopped before anything else can write, and the start fails with the reason.
+   */
+  private async holdConversationOnPane(record: SessionLifecycleRecord): Promise<void> {
+    const leases = this.ports.leases;
+    if (leases === undefined) return;
+    try {
+      const pid = await this.ports.launcher.panePid?.(record);
+      await leases.moveToPane(record.config.id, record.config.command, pid);
+    } catch (error) {
+      await this.ports.launcher.stop(record).catch(() => undefined);
+      throw await this.recordFailure(record, error);
     }
   }
 

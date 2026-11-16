@@ -265,7 +265,7 @@ describe('session resume service', () => {
     // Assert
     should(actual.disposition).equal('revived');
     should(actual.target.status).equal('running');
-    should(world.turns.written).deepEqual([{ turn: 4, document: `carry on\n\n${SETTINGS.turnProtocolReminder}\n` }]);
+    should(world.turns.written).deepEqual([{ turn: 4, document: `carry on\n` }]);
     should(world.launcher.calls).deepEqual(['relaunch', 'deliver']);
     should(world.repository.events).deepEqual(['session.resuming', 'session.resumed']);
   });

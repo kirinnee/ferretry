@@ -138,7 +138,7 @@ describe('auto-revive of a session that died', () => {
     should(h.resumed[0]?.message).startWith(
       'Ferretry started your terminal again: it ended because its terminal disappeared at ',
     );
-    should(h.resumed[0]?.message).containEql('Re-read your last turn file and continue');
+    should(h.resumed[0]?.message).containEql('Re-read your last turn, then continue');
     should([...result.revived]).deepEqual(['a']);
     should(result.revive.sessions.a).containEql({ attempts: 1, crashRevives: 0 });
     should(h.emitted.map(entry => entry.type)).deepEqual(['warden.revive_planned', 'warden.revived']);
@@ -435,7 +435,7 @@ describe('the card a revived ferret carries on', () => {
     // Assert
     should(asked).eql(['a']);
     should(h.resumed[0]?.message).containEql(
-      'continue where you left off, on the card below.\n\nYour card: &F1 — Ship the thing',
+      'continue from where you stopped, on the card below.\n\nYour card: &F1 — Ship the thing',
     );
   });
 
@@ -469,6 +469,6 @@ describe('the card a revived ferret carries on', () => {
 
     // Assert
     should([...result.revived]).eql(['a']);
-    should(h.resumed[0]?.message).endWith('Re-read your last turn file and continue where you left off.');
+    should(h.resumed[0]?.message).endWith('Re-read your last turn, then continue from where you stopped.');
   });
 });

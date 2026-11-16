@@ -264,7 +264,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     }),
     // One live writer per harness conversation, claimed before a pane exists. The disk is the daemon's twin of what
     // `fy history claim` reads and locks (the same files and the same `flock`), so a wrapper's claim in a pane and this
-    // one decide against one set of leases; the holder is this daemon's pid plus the session.
+    // one decide against one set of leases; the holder is the session plus this daemon's pid until the lifecycle moves it onto the pane's.
     leases: new ConversationLeases(
       new ConversationLeaseStore(
         new ConversationLeaseStateDisk(

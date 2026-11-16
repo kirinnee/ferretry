@@ -64,12 +64,14 @@ function fields(document: unknown): Readonly<Record<string, unknown>> | undefine
  * The daemon's conversation leases (docs/design/account-model.md H2, §9.3): one live writer per harness conversation,
  * across every ferret, claimed BEFORE a pane exists and freed once the session is over.
  *
- * The holder is THIS daemon's pid plus the session id. The session, not the pid, is what a daemon reads back (a restarted
- * daemon must still see a pane it launched as writing), while a terminal claim sees the daemon's pid — which is why a
- * daemon-launched wrapper's own claim, carrying the session id, renews the lease with the harness pid it is about to
- * become. That is also the whole of what a session can claim for: its OWN lease. A claim for another session's
- * conversation names a different session, so a live holder refuses it whoever asks (a wrapper inside S is no exception),
- * and only a holder that is over lets it take the conversation.
+ * The holder is the session id plus a pid. The session, not the pid, is what a daemon reads back (a restarted daemon must
+ * still see a pane it launched as writing). A terminal claim cannot ask the daemon, so it reads the PID — and the pid
+ * must be the pane's, not this daemon's, or a restarted daemon's dead pid would let it take the conversation while the
+ * pane writes. So the lease names this daemon's pid only from `claim` (before any pane exists) until
+ * {@link ConversationLeases.moveToPane}, which the lifecycle calls as soon as the pane has opened (a pane the daemon
+ * launches never runs the runtime wrapper, so no wrapper claim ever moves it). That is the whole of what a session can
+ * claim for: its OWN lease. A claim for another session's conversation names a different session, so a live holder
+ * refuses it whoever asks, and only a holder that is over lets it take the conversation.
  */
 export class ConversationLeases implements SessionConversationLeases {
   constructor(
@@ -80,6 +82,15 @@ export class ConversationLeases implements SessionConversationLeases {
 
   /** Throws {@link ConversationLeaseHeldError} when another live writer holds the conversation `command` names. */
   async claim(sessionId: string, command: readonly string[]): Promise<void> {
+    await this.lease(sessionId, command, this.holderPid);
+  }
+
+  /** The same session claiming again, now as the pane's process: a renewal, under the pool's lock. */
+  async moveToPane(sessionId: string, command: readonly string[], pid: number | undefined): Promise<void> {
+    await this.lease(sessionId, command, pid);
+  }
+
+  private async lease(sessionId: string, command: readonly string[], pid: number | undefined): Promise<void> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return;
     const launch = this.sessions.launchOf(id);
@@ -87,12 +98,17 @@ export class ConversationLeases implements SessionConversationLeases {
     // Index 0 is the executable, never an argument.
     const conversation = conversationFromArguments(launch.harness, command.slice(1));
     if (conversation === undefined) return;
+    if (pid === undefined)
+      throw new Error(
+        `session ${id} could not tell which process runs its terminal, so conversation ${conversation} cannot be kept ` +
+          'for it; it was stopped rather than risk a second writer',
+      );
     const outcome = await this.store.claim(
       {
         harness: launch.harness,
         conversation,
         holder: {
-          pid: this.holderPid,
+          pid,
           session: id,
           ...(launch.runtime === undefined ? {} : { runtime: launch.runtime }),
         },

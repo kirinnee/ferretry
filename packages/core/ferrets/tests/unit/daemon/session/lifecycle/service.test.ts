@@ -1156,6 +1156,13 @@ class RecordingLeases {
     if (this.claimError !== undefined) throw this.claimError;
   }
 
+  /** Every move onto a pane's pid (kept apart from `calls`: most tests are about claim and release). */
+  readonly moves: string[] = [];
+
+  async moveToPane(sessionId: string, _command: readonly string[], pid: number | undefined): Promise<void> {
+    this.moves.push(`${sessionId}:${pid}`);
+  }
+
   async release(sessionId: string): Promise<void> {
     this.calls.push(`release:${sessionId}`);
     if (this.releaseError !== undefined) throw this.releaseError;

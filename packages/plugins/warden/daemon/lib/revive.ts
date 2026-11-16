@@ -192,7 +192,7 @@ export function reviveMessage(
   const notice = `Ferretry started your terminal again: it ended because ${causeText(cause)} at ${clock(diedAt)}.`;
   if (mode === 'interactive') return notice;
   return (
-    `${notice} Your conversation was resumed as it was. Re-read your last turn file and continue where you left off` +
+    `${notice} Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped` +
     (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`)
   );
 }

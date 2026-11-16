@@ -375,3 +375,65 @@ describe('registryLeaseSessions', () => {
     should(state).deepEqual({ status: 'running' });
   });
 });
+
+describe('ConversationLeases.moveToPane (c58-36c-r1)', () => {
+  it('should move the lease onto the pane’s pid and start, so a terminal claim holds once the daemon pid is dead', async () => {
+    // Arrange — a Claude session and a Codex one, both claimed as this daemon before their panes exist
+    const { disk, sessions, store, leases, launching } = built();
+    launching(S);
+    sessions.launches.set(T, { harness: 'codex' });
+    sessions.registry.set(T, 'working');
+    sessions.registry.set(S, 'working');
+    await leases.claim(S, resume(C));
+    await leases.claim(T, ['/opt/fleet/bin/codex', 'resume', D]);
+    disk.running.set(WRAPPER_PID, 7);
+
+    // Act
+    await leases.moveToPane(S, resume(C), WRAPPER_PID);
+    await leases.moveToPane(T, ['/opt/fleet/bin/codex', 'resume', D], WRAPPER_PID);
+    disk.running.delete(DAEMON_PID);
+    const claude = await store.claim(
+      { harness: 'claude', conversation: C, holder: { pid: 9000 } },
+      async () => 'unknown',
+    );
+    const codex = await store.claim(
+      { harness: 'codex', conversation: D, holder: { pid: 9000 } },
+      async () => 'unknown',
+    );
+
+    // Assert
+    should(disk.holder('claude', C)).deepEqual({ pid: WRAPPER_PID, start: 7, session: S, runtime: 'claude-review' });
+    should(claude.kind).equal('held');
+    should(codex.kind).equal('held');
+  });
+
+  it('should refuse, and leave the lease as it was, when the pane’s pid is not known', async () => {
+    // Arrange
+    const { disk, leases, launching } = built();
+    launching(S);
+    await leases.claim(S, resume(C));
+
+    // Act
+    const moving = leases.moveToPane(S, resume(C), undefined);
+
+    // Assert
+    await should(moving).rejectedWith(/could not tell which process runs its terminal/u);
+    should(disk.holder('claude', C)?.pid).equal(DAEMON_PID);
+  });
+
+  it('should refuse when another live session holds the conversation, and move nothing for a command that names none', async () => {
+    // Arrange
+    const { disk, leases, launching } = built();
+    launching(S);
+    launching(T);
+    await leases.claim(T, resume(C));
+
+    // Act
+    const moving = leases.moveToPane(S, resume(C), WRAPPER_PID);
+    await leases.moveToPane(S, ['/opt/fleet/bin/claude'], undefined);
+
+    // Assert
+    await should(moving).rejectedWith(ConversationLeaseHeldError);
+    should(disk.holder('claude', C)?.session).equal(T);
+  });
+});

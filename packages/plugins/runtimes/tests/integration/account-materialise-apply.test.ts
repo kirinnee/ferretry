@@ -474,9 +474,8 @@ describe('a runtime wrapper, run', () => {
     should(ordinary.stderr).equal('');
   });
 
-  // c58-36c (a): a pane the daemon launched has the daemon's pid on its lease until THIS claim renews it. A wrapper that
-  // launched without renewing would leave a harness writing under a pid a terminal claim reads as dead after a daemon
-  // restart, so a daemon-launched wrapper (FY_SESSION_ID set) refuses instead of launching anyway.
+  // c58-36c (a): a wrapper run for a session (FY_SESSION_ID set) that cannot check its conversation refuses instead of
+  // launching anyway. (A pane the daemon launches never runs the wrapper: the daemon moves its lease, see the lifecycle test.)
   it('should refuse to launch, with the reason, when a daemon-launched wrapper cannot renew its lease', async () => {
     // Arrange
     const { run } = await withWrapper({}, { fyStatus: 1, sessionId: 'mw7bp88g-50e00159' });
