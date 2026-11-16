@@ -8,6 +8,7 @@
  * `ferret-auth.test.ts` merge bar 11). 10 s is far above any healthy read and still ends a taker that is truly hung
  * with the same named refusal, inside the time a person waits on a start before looking away.
  *
- * `auto-resume.decide` keeps the kernel default: its tests pin a late answer as a refusal (fails closed).
+ * `auto-resume.decide` takes the same bound (its taker is the same Runtimes, reading the same files): a yes that
+ * arrives after it is still a refusal (fails closed), pinned on a virtual clock.
  */
 export const DECIDE_ASK_TIMEOUT_MS = 10_000;

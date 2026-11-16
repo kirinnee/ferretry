@@ -87,7 +87,7 @@ import {
 } from '../host/secrets.ts';
 import { outboundSecretTransport } from '../host/adapters/outbound-secret.ts';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { err, hours, type Instant, instantFromEpochMs, ok } from '@ferretry/std';
+import { err, hours, type Instant, instantFromEpochMs, milliseconds, ok } from '@ferretry/std';
 import type { Actor, HoldDecision, RefusalCode, TargetRef } from '../contract/act.ts';
 import type {
   Admission,
@@ -755,13 +755,23 @@ async function start(world: World): Promise<TestHost> {
     const own = (name: string): void => {
       if (!offered.has(name)) throw new Error(`${manifest.id} invokes hook "${name}" it does not offer`);
     };
-    const timed = async <T>(value: T | Promise<T>, ms: number): Promise<T> =>
-      Promise.race([
-        Promise.resolve(value),
-        new Promise<T>((_, reject) => {
-          setTimeout(() => reject(new Error('hook timed out')), ms);
-        }),
-      ]);
+    // The bound runs on BOTH clocks and the first to pass it wins: a real timer (a taker that hangs in real time) and the
+    // driven clock (a test winds it past the bound instead of waiting it out, as the daemon's kernel clock does).
+    const timed = async <T>(value: T | Promise<T>, ms: number): Promise<T> => {
+      const cancels: (() => void)[] = [];
+      try {
+        return await Promise.race([
+          Promise.resolve(value),
+          new Promise<T>((_, reject) => {
+            const timer = setTimeout(() => reject(new Error('hook timed out')), ms);
+            cancels.push(() => clearTimeout(timer));
+            cancels.push(clock.after(milliseconds(ms), () => reject(new Error('hook timed out'))));
+          }),
+        ]);
+      } finally {
+        for (const cancel of cancels) cancel();
+      }
+    };
     /** The real host's decide walk (`host/hooks.ts` `decideAnswered`): the first no wins; each taker reached is listed. */
     const decideAnswered = async (
       hook: { readonly name: string; readonly timeoutMs: number },
