@@ -23,9 +23,6 @@ import type { SwallowedWord, VerbInvocation, VerbOptionDecl } from '@ferretry/ke
 
 type OptionValue = string | boolean | readonly string[];
 
-/** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
-const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
-
 /** The names one declared flag answers to: `-s, --session <id>` is `s` and `session`. */
 const flagNames = (flag: string): readonly string[] =>
   flag
@@ -46,6 +43,9 @@ export function declaredSwitches(options: readonly Pick<VerbOptionDecl, 'flag'>[
   }
   return names;
 }
+
+/** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
+const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
 
 export function parseArgs(tokens: readonly string[], switches: ReadonlySet<string> = new Set()): VerbInvocation {
   const args: string[] = [];
