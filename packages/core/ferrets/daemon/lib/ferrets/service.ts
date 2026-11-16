@@ -53,6 +53,8 @@ import type {
   FerretStartedPayload,
   FerretId,
   FerretRecord,
+  FerretRuntimeRecord,
+  FerretRuntimeRename,
   FerretAddress,
   FerretsApi,
   FerretState,
@@ -433,6 +435,16 @@ export interface FerretSessionPort {
    * and writing atomically. The value reaching it has already been parsed by the service.
    */
   setCompactAt?(ferret: FerretId, value: 'auto' | number | undefined): Promise<void>;
+  /**
+   * What the session config says about the runtime this ferret launched as (`agent`, `command[0]`), or `undefined` when
+   * the document is missing or is not an object. Rejects when it cannot be read.
+   */
+  runtimeFacts?(ferret: FerretId): Promise<{ readonly agent?: string; readonly executable?: string } | undefined>;
+  /**
+   * Re-points the session config's `agent` and `command[0]` from the old runtime to the new one under the storage's
+   * locked read-modify-write, keeping every other field. Answers whether the config named the old runtime (and so moved).
+   */
+  repointRuntime?(ferret: FerretId, rename: FerretRuntimeRename): Promise<boolean>;
   /**
    * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
    * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
@@ -2049,6 +2061,54 @@ export class FerretsService implements FerretsApi {
         await this.saveDetails(ferret, { ...before, options });
       }
     }
+  }
+
+  /** Every ferret and the runtime it launched as (`FerretsApi.runtimeRecords`): the record, with the session config's words. */
+  async runtimeRecords(): Promise<readonly FerretRuntimeRecord[]> {
+    await this.ports.ready?.();
+    const read = this.ports.session?.runtimeFacts?.bind(this.ports.session);
+    const rows = await Promise.all(
+      this.registry.list().map(async (ferret): Promise<FerretRuntimeRecord | undefined> => {
+        const facts = await read?.(ferret.id).catch(() => undefined);
+        const agent = facts?.agent ?? ferret.runtime;
+        if (agent === undefined) return undefined;
+        return {
+          id: ferret.id,
+          name: ferret.name,
+          harness: ferret.harness === 'codex' ? 'codex' : 'claude',
+          agent,
+          ...(facts?.executable === undefined ? {} : { executable: facts.executable }),
+          state: ferret.state,
+        };
+      }),
+    );
+    return rows.filter(row => row !== undefined);
+  }
+
+  /**
+   * Re-points every ferret on a renamed runtime (`FerretsApi.repointRuntime`). Each ferret is rewritten on its own mutation
+   * lane, so a start, stop or resume of it is never interleaved: the record's `runtime` through the ordinary durable write,
+   * the session config's `agent` and `command[0]` through the session storage's locked read-modify-write. A ferret that
+   * does not name the old runtime is not written at all, and one that cannot be rewritten is skipped, never reported moved.
+   */
+  async repointRuntime(rename: FerretRuntimeRename): Promise<number> {
+    await this.ports.ready?.();
+    let moved = 0;
+    for (const { id } of this.registry.list()) {
+      try {
+        const done = await this.serial.run(id, async () => {
+          const configMoved = (await this.ports.session?.repointRuntime?.(id, rename)) ?? false;
+          const record = this.registry.get(id);
+          if (record?.runtime !== rename.from) return configMoved;
+          await this.write({ ...record, runtime: rename.to }, record.state, 'moved');
+          return true;
+        });
+        if (done) moved += 1;
+      } catch {
+        // One ferret that cannot be rewritten still resolves through the runtime's former names; the rest still move.
+      }
+    }
+    return moved;
   }
 
   /**
