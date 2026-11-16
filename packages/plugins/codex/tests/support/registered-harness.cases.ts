@@ -52,6 +52,20 @@ export function registeredHarnessCases(): void {
         ],
       });
 
+    test('(no guarantees row) the registered half listens for a ferret that stopped and a login that was revoked, and a ferret with no Codex home says nothing', async () => {
+      const box = fixture();
+      const { subscribers } = box.buildHalf() as unknown as {
+        subscribers: Record<string, (payload: unknown) => Promise<void>>;
+      };
+      expect(Object.keys(subscribers).sort()).toEqual(['ferrets.changed', 'logins.changed']);
+
+      await subscribers['ferrets.changed']?.({ ferret: 'f1', generation: 1, state: 'stopped' });
+      await subscribers['ferrets.changed']?.({ ferret: 'f1', generation: 2, gone: true });
+      await subscribers['logins.changed']?.({ loginId: 'work', change: 'removed' });
+
+      expect(box.warnings).toEqual([]);
+    });
+
     test('(no guarantees row) the held fast-start catalog is read by ONE job on the worker lane, once after start; there is no timer', () => {
       const box = fixture();
       box.buildHalf();

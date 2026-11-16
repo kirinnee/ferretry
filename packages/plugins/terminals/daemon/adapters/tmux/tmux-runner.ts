@@ -902,7 +902,13 @@ export class TmuxRunner implements Runner {
     if (names.length !== spec.env.names.length) return err('failed');
     const session = ferretTmuxSession(spec.ferret);
     try {
-      await this.options.launchGuard?.check({ session, cwd: spec.cwd, command: [program, ...args], envNames: names });
+      await this.options.launchGuard?.check({
+        session,
+        cwd: spec.cwd,
+        command: [program, ...args],
+        envNames: names,
+        handle: spec.env,
+      });
     } catch (error) {
       if (!(error instanceof LaunchGuardRefusal)) throw error;
       this.options.log?.warn(error.message, {
