@@ -73,10 +73,16 @@ export function observedInputsOf(
 ): readonly ObservedHumanInput[] {
   const record = recordOf(observer.harness, entry);
   if (record === undefined) return [];
-  return observer.observe(record, {
+  const inputs = observer.observe(record, {
     source: observer.harness,
     byteOffset: ordinal,
     byteLength: 1,
     observedAt: entry.at,
   });
+  // The send a Ferretry channel message is (its wrapper's `send_id`, kept by the harness's reader): only that send is
+  // proven by it, so two identical messages never share one receipt.
+  const channelSendId = objectOf(entry.data)?.channelSendId;
+  return typeof channelSendId === 'string' && channelSendId !== ''
+    ? inputs.map(input => ({ ...input, channelSendId }))
+    : inputs;
 }

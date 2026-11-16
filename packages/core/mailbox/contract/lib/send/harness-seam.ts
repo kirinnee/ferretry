@@ -6,6 +6,7 @@ import type {
   HarnessRefusal,
   PaneNotReadyReason,
   QueueOutcome,
+  RunnerPaneObservation,
 } from '@ferretry/core-ferrets/contract';
 import { ApiError, REFUSAL_SENTENCES } from '@ferretry/kernel/contract';
 import type { TurnStopped } from './interrupt.ts';
@@ -104,6 +105,11 @@ interface BoundTerminal {
    * bound, or the write failed). Throws exactly as {@link deliver} does.
    */
   queue(text: string, sendId: string): Promise<QueueOutcome | undefined>;
+  /**
+   * One look at the pane through the SAME open of the ferret's terminal the typing will use (so a look is not another
+   * open). `undefined` when the runner cannot look or the pane cannot be read: the terminal's own checks then decide.
+   */
+  observe(): Promise<RunnerPaneObservation | undefined>;
   /** Presses the harness's stop under its own rule and says what it did. Throws the answer for a refusal. */
   interrupt(): Promise<TurnStopped>;
   /**
@@ -235,6 +241,10 @@ export function terminalSeam(ferrets: Pick<FerretsApi, 'harness'>): TerminalSeam
           if (queued.ok) return queued.value;
           if ('refused' in queued.error && queued.error.refused === 'plugin_unavailable') return undefined;
           throw deliveryAnswer(ferret, queued.error);
+        },
+        observe: async () => {
+          const seen = await harness.observe?.().catch(() => undefined);
+          return seen?.ok === true ? seen.value : undefined;
         },
         stopActive: async () => {
           const stopped = await harness.stopActive?.();

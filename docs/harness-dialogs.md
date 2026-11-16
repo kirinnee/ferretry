@@ -105,6 +105,13 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
   `dismissed_version` empty, measured on both versions), so the next launch asks again and a person at the
   terminal still sees it. "Update now" would run a package manager on the owner's machine and "Skip until
   next version" would record a choice, so neither is picked.
+- **Claude "WARNING: Loading development channels" → "I am using this for local development".** Every launch with
+  `--dangerously-load-development-channels` shows it, and the Claude Code launch adds that flag for Ferretry's own channel
+  (see [launch-settings.md](launch-settings.md#the-claude-channel)). Only the ACTIVE bottom dialog is answered: the exact
+  title line "WARNING: Loading development channels" inside the bottom window, exactly the two rows `1. I am using this for
+local development` and `2. Exit` with nothing else numbered, and the selection on row 1 alone — a quoted copy above
+  another dialog, or a cursor resting on Exit, is not answered. Enter takes it, and **Exit is never chosen** (a daemon that left it would stop every ferret it launched). The answer repeats the decision
+  the flag already made, so it grants nothing new.
 - Unchanged from before: Claude's theme picker, its "Make auto mode your default permission mode?" nudge
   (answered No, which keeps the owner's mode), the large-session resume menu, the custom-API-key
   confirmation the wrapper's own key raises, and the launch-folder trust dialogs — the folder the fixed

@@ -59,7 +59,16 @@ interface CheckedLaunch {
 export class LaunchGate {
   readonly #checked = new Map<string, CheckedLaunch>();
 
-  constructor(private readonly deps: { readonly source: RuntimeLaunchFactsSource }) {}
+  constructor(
+    private readonly deps: {
+      readonly source: RuntimeLaunchFactsSource;
+      /**
+       * The organisation type of the login a launch spends (its own non-secret account file), by login id. Absent, or an
+       * answer that rejects or is undefined: the launch carries no `account` part and the channel stays off.
+       */
+      readonly organizationType?: (login: string) => Promise<string | undefined>;
+    },
+  ) {}
 
   /** The `start.decide` answer: a start whose own compaction trigger its model cannot honour is refused. */
   readonly decide = async (input: StartDecideInput): Promise<HookDecision> => {
@@ -121,7 +130,12 @@ export class LaunchGate {
         accountDefault: facts.compactAt,
         window: launchContextWindow(spec.model, facts.windows),
       });
-      return at === undefined ? [] : [{ kind: 'compact' as const, at }];
+      const organizationType =
+        spec.login === undefined ? undefined : await this.deps.organizationType?.(spec.login).catch(() => undefined);
+      return [
+        ...(at === undefined ? [] : [{ kind: 'compact' as const, at }]),
+        ...(organizationType === undefined ? [] : [{ kind: 'account' as const, organizationType }]),
+      ];
     },
   };
 }

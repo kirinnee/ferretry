@@ -167,6 +167,7 @@ export function buildLoginsDaemon() {
         catalog,
         status,
         email: async source => await store.email(source),
+        organizationType: async source => await store.organizationType(source),
         machineName: () => 'this machine',
         locate: harness => PROGRAMS[harness],
         run: async spec => {

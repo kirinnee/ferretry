@@ -13,7 +13,14 @@ import { registry } from '../../../src/generated/commands.ts';
  * standard input it is handed.
  */
 const everyManifest = [registry.kernel, ...registry.plugins];
-const declared = everyManifest.flatMap(entry => entry.manifest.actions?.agentTools ?? []);
+const everyDeclared = everyManifest.flatMap(entry => entry.manifest.actions?.agentTools ?? []);
+
+/**
+ * Agent tools only `fy mcp serve`'s own channel pump calls, as the session (docs/claude-channel.md): declared so the daemon
+ * serves and guards them, and NEVER listed to a model, so they have no row. Pinned here so a new unlisted tool is noticed.
+ */
+const PUMP_ONLY = ['channel_poll', 'channel_claim'];
+const declared = everyDeclared.filter(tool => !PUMP_ONLY.includes(tool.name));
 
 /**
  * Tools whose manifest declaration carries no zod `input` (their owner parses the call itself), so their row's property
@@ -70,6 +77,14 @@ describe('the MCP tool rows against the manifests’ agent tools', async () => {
 
   it('should list exactly the tools the manifests declare', () => {
     should(rows.map(row => row.name).sort()).eql(declared.map(tool => tool.name).sort());
+  });
+
+  it('should declare the channel pump tools and list them to no model', () => {
+    const names = everyDeclared.map(tool => tool.name);
+    for (const name of PUMP_ONLY) {
+      should(names).containEql(name);
+      should(rows.map(row => row.name)).not.containEql(name);
+    }
   });
 
   it('should declare and list the two asking tools Accounts answers (account_propose, task_plan)', () => {

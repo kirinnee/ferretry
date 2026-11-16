@@ -19,6 +19,7 @@ import {
 } from '../../../../daemon/lib/tmux/delivery.ts';
 import {
   codexUpdateAction,
+  devChannelsAction,
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
@@ -930,5 +931,167 @@ describe('a submission Codex 0.166 parks until its startup ends', () => {
     should(paneShowsStartupWait(capture('startup-queued-slash').visible)).be.true();
     should(paneShowsStartupWait(quoted)).be.false();
     should(promptIsReady(quoted, 3, 2)).be.true();
+  });
+});
+
+describe('claude development-channels warning (2.1.317)', () => {
+  const screen = (): string =>
+    readFileSync(join(import.meta.dir, '../../../fixtures/startup-dialogs/claude-2.1.317-dev-channels.txt'), 'utf8');
+
+  it('should be recognised and answered with option 1 (Enter on the highlighted row), never Exit', () => {
+    // Act
+    const actual = [startupDialogAction(screen()), devChannelsAction(screen())];
+
+    // Assert
+    should(actual).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should answer nothing when the cursor sits on Exit: the dialog is not in its measured state, so no key is pressed', () => {
+    // Arrange
+    const onExit = screen().replace('❯ 1. I am using', '  1. I am using').replace('  2. Exit', '❯ 2. Exit');
+
+    // Act
+    const actual = [startupDialogAction(onExit), devChannelsAction(onExit)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing for a quoted copy of the warning above an unrelated live consent dialog', () => {
+    // Arrange
+    const live = [
+      ' Do you want to proceed with this unrelated action?',
+      ' ❯ 1. Yes',
+      '   2. No, and tell Claude what to do differently',
+      '',
+      ' Esc to cancel',
+    ].join('\n');
+    const pane = `${screen()}\n${live}`;
+
+    // Act
+    const actual = [startupDialogAction(pane), devChannelsAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing for a quoted warning with its two numbered options above an active UNNUMBERED consent menu', () => {
+    // Arrange: the reviewer's case. Everything numbered below the title is the quoted dialog; the live menu has no numbers.
+    // Two live rows right under the quoted dialog: the quoted title is still within the last 16 lines, as on screen.
+    const pane = `${screen().trimEnd()}\n ❯ Yes\n   No`;
+
+    // Act
+    const actual = [startupDialogAction(pane), devChannelsAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the cursor marker is on BOTH rows, or on neither', () => {
+    const both = screen().replace('  2. Exit', '❯ 2. Exit');
+    const neither = screen().replace('❯ 1. I am using', '  1. I am using');
+
+    should([devChannelsAction(both), devChannelsAction(neither)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing for the title alone in scrollback above a normal composer', () => {
+    // Arrange: the warning was quoted in an earlier answer; the live screen is the ordinary prompt.
+    const pane = [
+      ' WARNING: Loading development channels',
+      '',
+      ' ● That is the warning Claude printed on launch.',
+      '',
+      '╭──────────────────────────────────────────────╮',
+      '│ >                                            │',
+      '╰──────────────────────────────────────────────╯',
+      '  ? for shortcuts',
+    ].join('\n');
+
+    // Act / Assert
+    should([startupDialogAction(pane), devChannelsAction(pane)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when any other line follows the dialog (a prompt, a second dialog, a stray line)', () => {
+    const prompt = `${screen()}\n ❯ `;
+    const stray = `${screen()}\n some other output`;
+
+    should([devChannelsAction(prompt), devChannelsAction(stray)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the second numbered row is missing (the hint line stands where Exit should be)', () => {
+    const oneRow = screen().replace('  2. Exit\n', '');
+
+    should([startupDialogAction(oneRow), devChannelsAction(oneRow)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the body is not the measured one (edited text, a missing paragraph)', () => {
+    const edited = screen().replace('only. Do not use', 'only. Please do use');
+    const missing = screen().replace(' Channels: server:ferretry\n', '');
+
+    should([devChannelsAction(edited), devChannelsAction(missing)]).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer a dialog the pane wrapped to another width, and one drawn inside a box', () => {
+    // Arrange
+    const narrow = screen().replace(
+      ' --dangerously-load-development-channels is for local channel development only. Do not use this option to run\n channels you',
+      ' --dangerously-load-development-channels is for local channel\n development only. Do not use this option to run channels\n you',
+    );
+    const boxed = [
+      '╭──────────────────────────────────────────────────╮',
+      ...screen()
+        .trimEnd()
+        .split('\n')
+        .map(line => `│${line.padEnd(50)}│`),
+      '╰──────────────────────────────────────────────────╯',
+    ].join('\n');
+
+    // Act / Assert
+    should([devChannelsAction(narrow), devChannelsAction(boxed)]).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should answer the LAST copy of the dialog when an identical one was quoted above it, and a dialog drawn without its hint line', () => {
+    const doubled = `${screen()}\n${screen()}`;
+    const hintless = screen().replace(' Enter to confirm · Esc to cancel\n', '');
+
+    should([devChannelsAction(doubled), devChannelsAction(hintless)]).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should answer nothing when the warning has scrolled out of the bottom window', () => {
+    // Arrange
+    const pane = `${screen()}\n${Array.from({ length: 20 }, (_, i) => `output line ${String(i)}`).join('\n')}`;
+
+    // Act
+    const actual = devChannelsAction(pane);
+
+    // Assert
+    should(actual).be.undefined();
+  });
+
+  it('should answer nothing when the option set is not exactly the two measured rows', () => {
+    // Arrange
+    const extra = screen().replace('  2. Exit', '  2. Exit\n  3. Something else');
+    const renamed = screen().replace('I am using this for local development', 'I am using this for production');
+
+    // Act
+    const actual = [devChannelsAction(extra), devChannelsAction(renamed)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the warning is shown without the development row, or is only talked about', () => {
+    should(devChannelsAction('WARNING: Loading development channels\n❯ 1. Exit')).be.undefined();
+    should(devChannelsAction('the user asked about the dev flag')).be.undefined();
+    should(startupDialogAction('I read: loading development channels is only for development')).be.undefined();
   });
 });

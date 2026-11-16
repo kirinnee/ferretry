@@ -384,3 +384,40 @@ a handover freezes the provenance with the resolved model in its plan, so a fork
 - A change of the runtime, the profile or the credential's environment since the launch is not detected either:
   today's wrapper digest covered them, but in 5.0 nothing Runtimes or the Vault supply is compared. Restart the
   ferret to apply it.
+
+## The Claude channel
+
+A Claude Code ferret can be handed a message **without anything being typed into its composer**: Claude Code accepts
+a push from an MCP server that declares the `claude/channel` capability and sends `notifications/claude/channel`.
+Ferretry's own tools server (`fy mcp serve`, registered under the name `ferretry`) is that server.
+
+- **The launch.** The harness a `fy new` really starts (the Claude Code plugin's launch, the same single builder as every
+  other launch: start, Restart CLI, migrate, revive) — not the runtime wrapper a person runs by hand — adds, when the channel
+  is on for that ferret: `--dangerously-load-development-channels=server:ferretry` to the argv; the Ferretry tools server
+  (`fy mcp serve`, registered as `ferretry`, `FY_TOKEN` emptied, `FERRETRY_CHANNEL=1`) to the `--mcp-config` file beside the
+  profile's own servers; and one paragraph to the ferret's memory (the layer that carries Ferretry's agent instructions)
+  saying that `<channel source="ferretry">` messages are work from its lead or other ferrets and are acted on exactly like
+  those messages typed, though Claude marks channel content untrusted. Claude's plain `--channels` refuses a server that is
+  not on its approved list, so the development spelling is the only one that works. Every launch with it shows a "WARNING:
+  Loading development channels" screen, which the daemon answers with option 1 and never with Exit
+  ([harness-dialogs.md](harness-dialogs.md)).
+- **The switch.** Per launch. `channels` in `config/harness-claude-code.yaml` is **unset by default**, and unset means:
+  **on** for a login whose own Claude account file says `oauthAccount.organizationType: claude_max`, **off** for
+  `claude_enterprise`, `claude_team`, any other type, and a login whose type cannot be read (an organisation's policy
+  blocks channels, and an unknown login is not assumed to allow them). Ferretry reads **only that one non-secret field**,
+  never a token: Runtimes' launch hook adds it to the launch (an `account` part) from what Logins names for a login it keeps,
+  and from the person's own `~/.claude.json` for a login kept by the host (`store: host`). Written `channels: true` or
+  `false` it wins for every login. The value is read at each launch and applies at the next one (it is **on restart**). It is not a loosening, so an edit that turns it on is not held. Off
+  means no flag, no `FERRETRY_CHANNEL` marker, no polling, and every message is typed as before. If a channel is on but Claude
+  refuses it, the first message goes unreceived for the 10 s window, the channel is marked broken for that ferret, and
+  everything is typed.
+- **The path.** The tools server polls the daemon for messages held for ITS session (`channel_poll`, a long poll that
+  also says the channel is connected) and writes each as one `notifications/claude/channel` carrying the exact text
+  that would have been typed, with `meta` `{ send_id, from }` (never a `source` key: it collides with the tag's own
+  attribute); the server asks the daemon to **claim** each one just before writing it (`channel_claim`), so a message the
+  daemon already typed instead can never be pushed late ([claude-channel.md](claude-channel.md)). The server does this only
+  when the launch set `FERRETRY_CHANNEL=1` beside the flag. Neither tool is in the list a model sees. The server's instructions tell the
+  model that `<channel source="ferretry">` messages are work from Ferretry and other ferrets, and that the owner's own
+  words arrive as normal prompts, never through the channel.
+- **Measured** (Claude Code 2.1.317, a personal Max login): an idle session takes a message in about 15 ms and starts a
+  turn; a busy one takes it at the next tool boundary, in order, none lost.
