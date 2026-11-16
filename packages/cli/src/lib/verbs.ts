@@ -232,12 +232,11 @@ const SHELL_VERB_LINES: readonly ShellVerbLine[] = [
  * The spellings today's `fy` had for verbs the 5.0 split renamed, each running the verb that replaced it (v4 parity: a
  * person's habit, a script and an agent's old instructions still work). Thin by design: the alias adds no behaviour, no
  * option and no help of its own, and every word after it is handed to the new verb. The docs/design/rebuild-parity.tsv
- * rows name the old and the new spelling together (V-0232, V-0241, V-0245 … V-0248, V-0250, V-0436).
+ * rows name the old and the new spelling together (V-0232, V-0245 … V-0248, V-0250, V-0436).
  */
 const SHELL_ALIAS_LINES = [
   { verb: 'daemon tunnel', alias: 'tunnel' },
   { verb: 'daemon update', alias: 'update' },
-  { verb: 'daemon setup', alias: 'onboard' },
   { verb: 'daemon import', alias: 'runtime link' },
   { verb: 'setup', alias: 'onboard' },
 ] as const satisfies readonly { readonly verb: string; readonly alias: string }[];
