@@ -15,11 +15,7 @@ import path from 'node:path';
 import should from 'should';
 
 import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-unavailable.ts';
-import {
-  CLAUDE_QUESTION_HOOKS,
-  CODEX_QUESTIONS_OFF_OVERRIDE,
-  codexTrustOverride,
-} from '../../daemon/lib/account/fixed-layer.ts';
+import { CODEX_QUESTIONS_OFF_OVERRIDE, codexTrustOverride } from '../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
@@ -188,7 +184,6 @@ describe('materialising the account model onto disk', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
-      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({
       version: 1,

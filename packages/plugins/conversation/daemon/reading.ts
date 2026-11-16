@@ -100,8 +100,9 @@ type ReadingApi = Pick<
 
 export interface ReadingHalf {
   /**
-   * The parsed tail of a CODEX ferret's transcript, for the question watch (its `request_user_input` is in the transcript
-   * while the form is open): `'unreadable'` when it cannot be read, `undefined` for a ferret that is not a Codex one.
+   * The parsed tail of a Codex or Claude Code ferret's transcript, for the question watch (Codex's `request_user_input` is
+   * in the transcript while the form is open; Claude's call lands with its result, so its tail is what says a form on the
+   * pane is over): `'unreadable'` when it cannot be read, `undefined` for any other harness.
    */
   questionEvents(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   readonly routes: Readonly<Record<string, RouteHandler>>;
@@ -338,7 +339,7 @@ export function buildReading(deps: {
   const questionEvents: ReadingHalf['questionEvents'] = async (ferret, limit = QUESTION_TAIL_EVENTS) => {
     const id = tryParseSessionId(ferret);
     const summary = id === undefined ? undefined : await ferrets.get(id);
-    if (summary === undefined || harnessFamily(summary.harness) !== 'codex') return undefined;
+    if (summary === undefined || harnessFamily(summary.harness) === undefined) return undefined;
     const read = await reader.tail(ferret, limit).catch(() => undefined);
     return read?.kind === 'read' ? read.events : 'unreadable';
   };

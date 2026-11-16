@@ -9,12 +9,6 @@ export const CLAUDE_PROMPTS_SEEN = {
   fullscreenUpsellSeenCount: 3,
 } as const;
 
-const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
-export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
-export const CLAUDE_QUESTION_HOOKS = {
-  PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-};
-
 /**
  * `.claude.json` keys set ONLY when absent or `null` (today's `SEED_FILTER`): `claudeInChromeDefaultEnabled` is the
  * gate for Claude's browser prompt, and a home where somebody chose `true` must not be silently turned off.
@@ -94,9 +88,11 @@ export const rmWaiverApplies = (dangerousRmWaiver: boolean, permissionMode: Harn
   dangerousRmWaiver && permissionMode === 'skip';
 
 /**
- * Fixed settings override item settings; the question hook and the compaction hooks (`./compaction.ts`) are ONLY in the
- * separate flag overlay. They are part of the `fixed-layer` fingerprint, so a ferret launched before them reads as
- * Restart-needed.
+ * Fixed settings override item settings; the compaction hooks (`./compaction.ts`) are ONLY in the separate flag
+ * overlay. They are part of the `fixed-layer` fingerprint, so a ferret launched before them reads as Restart-needed.
+ *
+ * M7: there is NO question hook. An open `AskUserQuestion` form is read off the pane (and its end off the transcript) by
+ * the conversation plugin's question watch (`questions/lib/watch.ts`), so no `PreToolUse` hook is written.
  */
 export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd: string) {
   const skip = permissionMode === 'skip';
@@ -107,7 +103,7 @@ export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd:
   };
   return {
     settings,
-    overlay: { ...settings, hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS } },
+    overlay: { ...settings, hooks: { ...CLAUDE_COMPACTION_HOOKS } },
     claudeJson: {
       hasCompletedOnboarding: true,
       hasCompletedClaudeInChromeOnboarding: true,
