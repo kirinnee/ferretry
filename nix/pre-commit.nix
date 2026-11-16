@@ -310,7 +310,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Dead-code keep markers name an open fact";
       entry = validator "scripts/validate/pending-tags.sh";
-      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports)\\.ts)$";
+      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|(.*/)?ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports|pending-files)\\.ts)$";
       pass_filenames = false;
       language = "system";
     };
