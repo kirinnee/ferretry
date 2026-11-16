@@ -18,6 +18,7 @@ import {
   type ConversationApi,
   type ConversationCaller,
   type ConversationRefusal,
+  type MailboxHost,
   MessageBeforeSend,
   parseMessageAttachments,
   PEER_MESSAGE_LABELS,
@@ -301,6 +302,8 @@ export interface ConversationAHalf {
   readonly sitrep: SitrepLineSource;
   /** The owner's messages to a ferret as `fy agenda log` copies them: the queue and the send ledger, by message id. */
   readonly ownerChat: AskOwnerChat;
+  /** The queue log and send ledger over the files this plugin keeps, handed to the Mailbox through `mailbox.host`. */
+  readonly mailboxHost: MailboxHost;
   /** The hypermedia switch the owner set for a ferret, or `undefined` when none (the launch reads it). */
   hypermediaRecorded(ferret: string): Promise<boolean | undefined>;
   /** The ferret stopped or went away: the question it was asking is withdrawn, so `question.json` goes. */
@@ -407,22 +410,20 @@ export function buildConversationA(deps: {
   };
   let questionAsksReconciled = false;
 
+  const queueStore = new StateQueueStore(kernel.state, undefined, failure =>
+    kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
+      ferret: failure.ferret,
+      events: failure.events,
+      bytes: failure.bytes,
+      error: String(failure.error),
+    }),
+  );
   const queue = new SessionQueueService({
-    store: new NotifyingSessionQueueStore(
-      new StateQueueStore(kernel.state, undefined, failure =>
-        kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
-          ferret: failure.ferret,
-          events: failure.events,
-          bytes: failure.bytes,
-          error: String(failure.error),
-        }),
-      ),
-      {
-        publish: async (id, _type, data) => {
-          await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
-        },
+    store: new NotifyingSessionQueueStore(queueStore, {
+      publish: async (id, _type, data) => {
+        await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
       },
-    ),
+    }),
     clock,
     serial: queueSerial,
   });
@@ -1816,6 +1817,7 @@ export function buildConversationA(deps: {
     api,
     sitrep,
     ownerChat: new SessionOwnerChat(queue, ledger),
+    mailboxHost: { queue: queueStore, ledger },
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => {
       questionWatch.forget(ferret);
