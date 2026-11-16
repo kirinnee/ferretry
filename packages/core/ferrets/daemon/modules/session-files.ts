@@ -118,6 +118,9 @@ export interface SessionFilesDeps {
 /** The folder of a ferret's own session folder its opening attachments are written to (one of `FERRET_READABLE_FOLDERS`). */
 const ATTACHMENTS_FOLDER = 'attachments';
 
+/** The folder of a ferret's own session folder its agent puts media in (`FY_MEDIA_DIR`; today's `SessionPaths.media`). */
+const MEDIA_FOLDER = 'media';
+
 /** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
 const QUESTION_ASKED_FILE = 'question-asked.json';
 
@@ -226,6 +229,15 @@ export class SessionFiles {
       questionFile: async ferret => {
         const named = this.root(parseSessionId(ferret)).resolve(QUESTION_ASKED_FILE);
         if (!named.ok) throw new Error('the question file of this ferret could not be named');
+        return named.value;
+      },
+      // The agent's "show this" folder (`FY_MEDIA_DIR`, F-0327): `media/` in the ferret's own session folder, made `0700`.
+      mediaFolder: async ferret => {
+        const id = parseSessionId(ferret);
+        const named = this.root(id).resolve(MEDIA_FOLDER);
+        if (!named.ok) throw new Error('the media folder of this ferret could not be named');
+        await new OwnFolder(this.root(id)).ensure();
+        await new OwnFolder(this.mediaRoot(id)).ensure();
         return named.value;
       },
       assign: async (ferret, prompt) => {
@@ -490,6 +502,11 @@ export class SessionFiles {
    */
   private attachmentsRoot(ferret: string): RootHandle {
     return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: `${ferret}/${ATTACHMENTS_FOLDER}` });
+  }
+
+  /** The ferret's `media/` folder and nothing else of its session (F-0327): what `scope=media` reads. */
+  mediaRoot(ferret: string): RootHandle {
+    return this.deps.roots.root(FERRET_SESSIONS_ROOT, { subfolder: `${ferret}/${MEDIA_FOLDER}` });
   }
 
   /** The ferret's own `sessions` handle: one minted folder, internal, private. */

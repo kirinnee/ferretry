@@ -24,6 +24,8 @@ export function WithSlotPanels({
   const everyPanel = Object.values(slots).flat();
   const shell = {
     runtime: {
+      // A page mounted in these slots may read an app hook; no plugin here provides one.
+      appHook: (): unknown => undefined,
       subscribe: () => () => undefined,
       version: () => 0,
       titleOf: (plugin: string) => plugin,

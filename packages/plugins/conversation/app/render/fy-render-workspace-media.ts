@@ -22,10 +22,10 @@
  * route with `scope=media`: the daemon names the folder, this never does.
  */
 import { DaemonCallError } from '@ferretry/app';
+import { codeReferenceRelativePath } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
 import type { FyRenderWorkspaceRead, FyRenderWorkspaceScope } from './fy-render.ts';
-import { codeReferenceRelativePath } from './workspace-path.ts';
 
 /**
  * The one file read, as the filesystem route answers it (`GET /v1/ferrets/:ferretId/fs/file?format=base64`).
@@ -63,7 +63,7 @@ const PATH_REFUSALS: Readonly<Record<string, string>> = {
 const MASKED_RULE = 'private values masked — this is not the file';
 
 export const readWorkspaceMedia = async (
-  client: PluginClient,
+  client: Pick<PluginClient, 'call'>,
   ferretId: string,
   path: string,
   cwd: string | undefined,
