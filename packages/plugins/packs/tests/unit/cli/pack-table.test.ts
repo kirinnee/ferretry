@@ -49,7 +49,7 @@ describe('renderPackTable', () => {
       row({
         id: 'a',
         name: 'ada',
-        card: { ref: '&F7', lane: 'Implement' },
+        task: { ref: '&F7', lane: 'Implement' },
         pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: true, checks: 'passing' },
         last: { at: at('2026-11-03T11:58:00.000Z'), source: 'note', text: 'wiring the route' },
       }),
@@ -61,9 +61,17 @@ describe('renderPackTable', () => {
 
     // Assert
     should(lines[0]).equal('rhett (ses-lead): 2 helpers');
-    should(lines[1]).match(/^FERRET\s+MODEL\s+STATE\s+CARD\s+PR\s+LAST$/);
+    should(lines[1]).match(/^FERRET\s+MODEL\s+STATE\s+TASK\s+PR\s+LAST$/);
     should(lines[2]).match(/^ada\s+sonnet\s+running\s+&F7 Implement\s+#42 draft CI passing\s+\[2m\] wiring the route$/);
     should(lines[3]).match(/^ {2}bo\s+glm-5\.3\s+running\s+-\s+-\s+-$/);
+  });
+
+  it('should read the task from a table that still carries it under its old key', () => {
+    const subject = table([row({ id: 'a', name: 'ada', card: { ref: '&F9', lane: 'Review' } })]);
+
+    const lines = renderPackTable(PackTableSchema.parse(subject), NOW, markerColour);
+
+    should(lines[2]).match(/^ada\s+sonnet\s+running\s+&F9 Review\s+-\s+-$/);
   });
 
   it('should show CI for a live PR and the state once it no longer matters', () => {

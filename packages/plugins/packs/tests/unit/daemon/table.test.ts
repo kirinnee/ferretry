@@ -160,7 +160,7 @@ describe('readPackTable', () => {
       model: 'opus-5.5',
       state: 'running',
       depth: 1,
-      card: { ref: '&F7', lane: 'Implement' },
+      task: { ref: '&F7', lane: 'Implement' },
       pr: { number: 42, url: 'https://github.com/o/r/pull/42', state: 'open', draft: false, checks: 'passing' },
     });
     should(w?.last).deepEqual({ at: at(3), source: 'note', text: 'halfway' });
@@ -270,7 +270,7 @@ describe('readPackTable', () => {
     // Assert
     should(table.rows.map(row => row.id)).deepEqual(['a']);
     should(table.rows[0]?.last).be.undefined();
-    should(table.rows[0]?.card).be.undefined();
+    should(table.rows[0]?.task).be.undefined();
   });
 
   it('should be an empty table for a lead with no helpers', async () => {

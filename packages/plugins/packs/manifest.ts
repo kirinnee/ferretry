@@ -148,7 +148,7 @@ export default definePlugin({
       }),
       verb('pack [id]', {
         summary:
-          'a table of every live ferret in a pack: model, state, card and its last line (defaults to the calling ferret)',
+          'a table of every live ferret in a pack: model, state, task and its last line (defaults to the calling ferret)',
         args: [{ name: 'id', help: 'a ferret in the pack; defaults to the calling ferret', optional: true }],
         options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
