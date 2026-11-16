@@ -14,7 +14,7 @@ jq -e '.schemaVersion == 1 and (.actions | type == "object") and ([.actions[] | 
 tmp="$(mktemp)"
 seen="$(mktemp)"
 trap 'rm -f "${tmp}" "${seen}"' EXIT
-rg -n --no-heading '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+' .github/workflows .github/actions >"${tmp}" || true
+rg -n --no-heading '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+' .github --glob '*.yml' --glob '*.yaml' >"${tmp}" || true
 
 while IFS=: read -r file line body; do
   [ -n "${body}" ] || continue
@@ -31,25 +31,18 @@ while IFS=: read -r file line body; do
   classification="$(jq -r --arg action "${action}" '.actions[$action] // empty' "${map_file}")"
   [ -z "${classification}" ] && echo "❌ ${file}:${line}: action '${action}' has no authored trust classification" >&2 && exit 1
   [ "${classification}" != "${mode}" ] && continue
-  # A trusted action may ALSO be pinned to an exact SHA (with its tag as a trailing comment): a job
-  # that holds a long-lived secret pins everything it runs (docs/standards/ci-cd/index.md).
-  if [ "${mode}" = "trusted" ] && ! [[ ${ref} =~ ^[0-9a-fA-F]{40}$ ]]; then
-    [[ ${ref} =~ ^v[1-9][0-9]*$ ]] || {
-      echo "❌ ${file}:${line}: trusted action '${action}' must use a major pin or an exact SHA, got '${ref}'" >&2
-      exit 1
-    }
-  else
-    [[ ${ref} =~ ^[0-9a-fA-F]{40}$ ]] || {
-      echo "❌ ${file}:${line}: non-trusted action '${action}' must use an exact SHA, got '${ref}'" >&2
-      exit 1
-    }
-    comment="${raw#*#}"
-    [ "${comment}" = "${raw}" ] && echo "❌ ${file}:${line}: non-trusted SHA pin needs its tag as a trailing comment" >&2 && exit 1
-    [[ ${comment} =~ v[0-9]+([.][0-9x]+)* ]] || {
-      echo "❌ ${file}:${line}: trailing comment must name the source tag" >&2
-      exit 1
-    }
-  fi
+  # EVERY external action is pinned to a full 40-hex commit SHA with its tag as a trailing comment,
+  # trusted or not: a tag (even a major) can be moved, a SHA cannot (docs/standards/ci-cd/index.md).
+  [[ ${ref} =~ ^[0-9a-fA-F]{40}$ ]] || {
+    echo "❌ ${file}:${line}: ${classification} action '${action}' must use an exact 40-hex SHA, got '${ref}'" >&2
+    exit 1
+  }
+  comment="${raw#*#}"
+  [ "${comment}" = "${raw}" ] && echo "❌ ${file}:${line}: SHA pin needs its tag as a trailing comment" >&2 && exit 1
+  [[ ${comment} =~ v[0-9]+([.][0-9x]+)* ]] || {
+    echo "❌ ${file}:${line}: trailing comment must name the source tag" >&2
+    exit 1
+  }
 done <"${tmp}"
 
 sort -u -o "${seen}" "${seen}"

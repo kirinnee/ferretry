@@ -987,25 +987,28 @@ a tag of its own and a branch still running the old action keeps working on `fer
 
 ## Action pins
 
-Actions are classified in `config/action-trust.json` (`schemaVersion: 1`, each entry `trusted`
-or `non-trusted`):
+**Every action is pinned to a full 40-character commit SHA, with its tag as a trailing comment** (owner ruling,
+!A537). A tag, even a major one, can be moved; a SHA cannot. No `uses:` under `.github` may name a tag or a branch:
+only `./...` (a local action) or `owner/repo@<40 hex> # vN.M.P`.
 
-- **Trusted** actions pin a major tag (`actions/checkout@v5`). Currently trusted:
-  `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact`,
-  `namespacelabs/nscloud-cache-action`. `DeterminateSystems/nix-installer-action` and `actions/create-github-app-token` (run inside the
-  vendored `setup-nix`) are `non-trusted` (exact SHA).
-- **A job that holds a long-lived secret** pins EVERY action it runs to an exact SHA, trusted ones
-  included (`pwa-pages.yaml`, whose jobs hold the release signing key and the Cloudflare token). A
-  tag can be moved; a SHA cannot.
-- **Everything else** pins an exact 40-character SHA with its tag as a trailing comment:
+```yaml
+- uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+```
 
-  ```yaml
-  - uses: some/action@1234567890abcdef1234567890abcdef12345678 # v2.1.0
-  ```
+Resolve a tag read-only with `gh api repos/<owner>/<repo>/commits/<tag> -q .sha` (an annotated tag resolves to its
+commit) and keep the SAME version: a re-pin is not an upgrade. The repo uses `actions/checkout` v5.1.0,
+`actions/upload-artifact` v4.6.2, `actions/download-artifact` v4.3.0 (the `download-binaries` composite action uses
+v8.0.2), the vendored `setup-nix` carries its own SHAs (see above).
 
-`scripts/validate/action-pins.sh trusted|non-trusted` enforces this from pre-commit and fails on
-three separate mistakes: an action used but never classified, a classification that does not
-match the pin style, and a classified action no longer used anywhere. The last rule keeps the
+Actions are still classified in `config/action-trust.json` (`schemaVersion: 1`, each entry `trusted` or
+`non-trusted`) so a new action has to be named by someone, but the classification no longer changes the pin style: both
+classes need the SHA. Currently trusted: `actions/checkout`, `actions/upload-artifact`,
+`actions/download-artifact`, `namespacelabs/nscloud-cache-action`; `non-trusted`:
+`DeterminateSystems/nix-installer-action`, `actions/create-github-app-token`.
+
+`scripts/validate/action-pins.sh trusted|non-trusted` enforces this from pre-commit over every `.yml`/`.yaml` under `.github`
+and fails on three separate mistakes: an action used but never classified, an action not pinned to a 40-hex SHA with its
+tag in a trailing comment (any tag or branch, a major included), and a classified action no longer used anywhere. The last rule keeps the
 trust map from rotting into a list of actions nobody remembers.
 
 ## Local reproduction

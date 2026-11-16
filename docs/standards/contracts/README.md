@@ -324,8 +324,8 @@ harmless" is not one of them — daemon ids are durable across a re-pair.
 ## Action pinning
 
 `config/action-trust.json` (`schemaVersion: 1`) classifies every action as `trusted` or
-`non-trusted`. Trusted actions pin a major tag; everything else pins an exact 40-character SHA
-with its tag as a trailing comment. The validator also fails on an action used but unclassified,
+`non-trusted`. Every action, trusted or not, pins an exact 40-character SHA with its tag as a
+trailing comment; a tag (a major included) fails. The validator also fails on an action used but unclassified,
 and on a classification for an action nobody uses any more — so the trust map cannot rot. Full
 policy in [CI/CD](../ci-cd/index.md).
 

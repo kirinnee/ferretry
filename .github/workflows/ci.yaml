@@ -92,7 +92,7 @@ jobs:
       proved: ${{ steps.decide.outputs.proved }}
       proof: ${{ steps.decide.outputs.proof }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -134,7 +134,7 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
         || '8x16')) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Mount the tsc cache
@@ -172,7 +172,7 @@ jobs:
       - name: Upload unit coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-unit
           path: coverage/unit/
@@ -181,7 +181,7 @@ jobs:
       - name: Upload scripts test results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-scripts
           path: coverage/scripts/
@@ -189,7 +189,7 @@ jobs:
       - name: Upload quick part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quick-parts
           path: |
@@ -220,7 +220,7 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Mount the tsc cache
@@ -248,7 +248,7 @@ jobs:
       - name: Upload static part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: static-parts
           path: |
@@ -276,7 +276,7 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
@@ -287,7 +287,7 @@ jobs:
       - name: Upload perf results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: perf-results
           path: coverage/perf/
@@ -303,7 +303,7 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -332,7 +332,7 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
@@ -341,7 +341,7 @@ jobs:
       - name: Upload integration coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-int
           path: coverage/int/
@@ -349,7 +349,7 @@ jobs:
       - name: Upload integration part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: integration-parts
           path: |
@@ -383,7 +383,7 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
@@ -431,7 +431,7 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
@@ -455,7 +455,7 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Say that the macOS smoke was skipped
@@ -470,7 +470,7 @@ jobs:
       - name: Upload binaries
         id: upload_3
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -479,7 +479,7 @@ jobs:
       # now and then) is retried once from the same files; a second failure fails the job as before.
       - name: Upload binaries (retry)
         if: steps.upload_3.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -509,7 +509,7 @@ jobs:
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Download compiled binaries
@@ -566,7 +566,7 @@ jobs:
       actions: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
