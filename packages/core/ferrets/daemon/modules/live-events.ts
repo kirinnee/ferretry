@@ -19,8 +19,8 @@
  * registry does not hold, or holds stopped, has no pane to look at.
  *
  * NO FASTER THAN TODAY: the stream samples at 500 ms; a quiet transcript costs one stamp per sample (the tail asks for its own only when the readout needs it) and is re-read only
- * when its stamp moved; an idle pane is looked at every 2 s; a followed transcript is asked every second (the kernel has
- * no file watch on a root: GAP(live)).
+ * when its stamp moved; an idle pane is looked at every 2 s; a followed transcript is asked every second (the 1 s poll
+ * is the chosen design, not a stand-in for a file watch).
  */
 import type { Redaction } from '@ferretry/kernel/contract';
 import type { CompactionHistorySource, FerretId, FerretRecord, Runner, RunnerHandle } from '../../contract/index.ts';
