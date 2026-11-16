@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { fixedClock, MemoryStateFolder, owner, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import { ANSWERS_STATE, CONVERSATION_STATE, INBOX_STATE, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
@@ -97,8 +97,8 @@ describe('conversation daemon half, through the kernel test host', () => {
   const ferrets = { get: async () => ({ id: 'f1' }), resolve: async () => ({ kind: 'unknown' as const }) };
   const boot = async () =>
     await testHost({
-      plugins: [daemon],
-      fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: {} },
+      plugins: [mailboxDaemon, daemon],
+      fakes: { ferrets, asks: {} },
       clock: fixedClock('2026-11-06T09:00:00Z'),
     });
 
@@ -134,9 +134,8 @@ describe('conversation daemon half, through the kernel test host', () => {
 
   test('a queue nobody wrote to, of a ferret nobody knows, is not found even to a reader holding a tag', async () => {
     const host = await testHost({
-      plugins: [daemon],
+      plugins: [mailboxDaemon, daemon],
       fakes: {
-        mailbox: new FakeMailboxQueue(),
         ferrets: { get: async () => undefined, resolve: async () => ({ kind: 'unknown' as const }) },
         asks: {},
       },
@@ -185,9 +184,8 @@ describe('conversation daemon half, through the kernel test host', () => {
 describe('the merged half', () => {
   const boot = async () =>
     await testHost({
-      plugins: [daemon],
+      plugins: [mailboxDaemon, daemon],
       fakes: {
-        mailbox: new FakeMailboxQueue(),
         ferrets: {
           get: async () => ({ id: 'f1' }),
           list: async () => [],
