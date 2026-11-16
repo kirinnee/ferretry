@@ -107,26 +107,55 @@ Leases live at `fleet/shared/<harness>/.leases`.
   replacing `~/.claude/projects` or `~/.codex/sessions` with a link — a write to the owner's folders. Parked as an
   opt-in for a ruling; nothing here does it.
 
-### 3.3 The index (the "FAST")
+### 3.3 The index (the "FAST") — built in PR 1 (&F4336)
 
-- Conversation owns one `sqlite-cache` state file, `conversation-index.sqlite` (dropped and rebuilt on mismatch, so it
-  grants nothing). One row per (harness, conversation id, source): `source` (`pool` | `computer`), relative path,
-  size, mtime, bytes scanned, a hash of the first 4 KiB, folder, name, first prompt, latest prompt, first/last activity,
-  turns (+ `turnsAtLeast`), model, and a lowercase `hay` column for search.
-- **Incremental update**, in a worker thread (the kernel's worker `sqlite` seam): walk the sources with `stat` only
-  (≈250 ms for 13k files); a file whose size and mtime are unchanged is skipped; one that grew with the same first-4-KiB
-  hash is read only from `bytes scanned` to its end (append-only transcripts); a new or rewritten file is read head
-  256 KiB + tail 1 MiB, never whole (cold build reads ≈6.6 GB of the 15.5 GB Claude pool, once, paced, in the
-  background; 6,379 of 9,397 files fit whole). A file that disappears drops its row.
-- **When:** at boot (background warm-up), and before a listing when the last refresh is older than 5 s. A listing never
-  waits on a cold build: it answers from what is indexed and says the rest is still being read.
-- **Query:** `WHERE last_at >= ?since AND instr(hay, ?word) …  ORDER BY last_at DESC LIMIT ?` — 2.8 ms for 15k rows.
-  Same matcher semantics as today (every word, substring, in name / first / latest / folder).
-- `LinkService.list / preview / history / keep` read rows from the index; `preview` still reads the one file fresh.
-  The harness plugins' `ConversationFinder.list` (which re-reads every file's head per listing) is replaced by the
-  index as the listing source.
-- Targets: `fy link <words> --since 7d` warm **< 300 ms** end to end (index query < 10 ms), cold-after-boot answers
-  immediately with partial results, full build < 60 s in the background.
+- Conversation owns one `sqlite-cache` state file, `conversation-index.sqlite` (dropped and rebuilt on a layout mismatch, so
+  it grants nothing). One row per (harness, source kind, source label, relative path), i.e. per transcript file: `kind`
+  (`computer` | `ferret-home` | `pool`), the file's size, mtime, `bytes scanned` and a hash of its first 4 KiB, the
+  conversation id, folder, `file_title` (the transcript's own title) and `index_title` (Codex's `session_index.jsonl` name) with
+  the `title` that wins, `ferret_id` and `ferret_name`, first prompt, latest prompt, first/last activity, turns
+  (+ `turns_at_least`), model, a lowercase `hay` column for search, and a settled `win` flag (the newest copy of a
+  conversation held in several places). A transcript that describes no conversation is kept as an `ok = 0` row, so an
+  unchanged one is never read again; those rows are the listing's `skipped` count.
+- **Where the sources come from** (the plugin boundary): the harness plugin owns where its CLI keeps history, Conversation owns
+  what a listing says about it. Each harness's additive `Harness.historySources()` (`core/ferrets/contract/history.ts`) hands
+  over read-only trees (`HarnessHistoryFiles`: `entries`, `stat`, ranged `read`; no write of any kind) — the owner's own
+  home through its existing `harness-history` root, and each ferret home through its own `agent-homes` root, a link never
+  followed — and Conversation reaches them through `FerretsApi.historySources()`. Conversation touches no other plugin's
+  state. The **pool** is a third kind the seam already carries; the harness plugins offer it when PR 3 creates
+  `state/<harness>/history-pool/` (until then there is nothing to offer, which reads as empty).
+- **Incremental update.** Every tree is walked with directory listings alone (a listing already carries size and mtime, so no
+  file is opened to find out it is unchanged). A file with the same size and mtime is skipped; one that grew with the same
+  first-4-KiB hash is read only from `bytes scanned` to its end (at most 4 MiB, else re-read) and its new records are folded
+  into latest prompt, last activity, turns and model — unless they carry a title record, which re-reads the file because the
+  name rules need the whole conversation; a new or rewritten file is read **head 256 KiB + tail** (never whole, `turnsAtLeast`
+  when the middle was skipped). The tail is read in two steps for Claude — 256 KiB, widened to 1 MiB only when the narrow tail
+  holds no message the owner said — and at 1 MiB at once for Codex, whose rollouts rarely do. A head that parses to no owner
+  message at all (a first record carrying a large paste) is looked at once more over its first 4 MiB. A vanished file drops its
+  row; a vanished source drops its rows (only for a harness that answered at all). The files are described by the **existing**
+  rules (`describeConversation`: `spokenMessages`, `transcriptNames`, the wrapper-title rule), so a row says what a listing
+  always said.
+- **Paced on the main thread, not in a worker.** The worker seam grants a worker only the plugin's own roots, and the trees come
+  from other plugins' roots through the seam above, so a worker could not read them; the files are read on the main thread
+  (async, eight at a time) and each is parsed in one go (a read is at most ~1.25 MiB) with the loop handed back after every file.
+  A worker that is handed the bytes and returns the row is the next step if a cold build must be faster (below).
+- **When:** a background build two seconds after the daemon starts, and before a listing when the last refresh is older than
+  5 s. A listing of a built index waits for that refresh at most 250 ms (then it answers with what it has and says so); a listing never waits on a first build: it answers from
+  what is indexed (newest transcripts are read first) and sets `indexing: true`, which `fy link` prints as one line.
+- **Query:** `WHERE ok = 1 AND win = 1 AND last_at >= ?since AND instr(hay, ?word) > 0 … ORDER BY last_at DESC LIMIT ?` — the
+  same matcher as ever (every word, as a substring, case-insensitively), over the ferret's name, the title, the first and latest
+  message and the folder. Asked for some kinds only (`source=computer`, `source=ferretry`), the newest copy among those kinds is
+  compared in the query.
+- **Names (owner requirement).** A conversation's `name` is, in order: the **ferret's name** when a ferret runs or ran it (read from
+  Ferrets' registry, `FerretSummary.harnessConversation`, never its files, re-applied on every update so a rename shows on the
+  next listing), then the conversation's own **title** (Claude `custom-title` / generated summary, Codex thread name), then the
+  first prompt cut to 60 characters. Both ferret name and title are stored separately (`ferretName`, `title`, `ferret` on the
+  wire) and both are searched; when they differ `name` reads `<ferret name> — <title>`.
+- `LinkService.list / preview / history / keep` read the index. `preview` and a history entry still read the one file fresh
+  (ranged reads, head 4 MiB + tail 4 MiB as before). The harness plugins' `ConversationFinder.list` is no longer a listing source.
+  `alsoOnComputer` marks a Ferretry copy whose conversation is also in the owner's own history.
+- Targets (`fy link <words> --since 7d`): query < 10 ms, warm refresh < 500 ms, warm `fy link` < 300 ms, full cold build < 60 s in
+  the background. The measured numbers are in the PR body (&F4336).
 
 ### 3.4 Safety with the lease store
 
@@ -137,9 +166,9 @@ Leases live at `fleet/shared/<harness>/.leases`.
 
 ## 4. Build plan (PRs into `rebuild/5.0-after`)
 
-1. **Index** (Conversation): `conversation-index.sqlite`, the worker updater, sources = pool (when present) + every
-   ferret home + the owner's default homes, `LinkService` on the index. Delivers the speed alone, and lists every
-   ferret's conversations even before pooling.
+1. **Index** (Conversation): `conversation-index.sqlite`, the paced updater, sources = every ferret home + the owner's default
+   homes (+ the pool once PR 3 offers it) through `Harness.historySources`, `LinkService` on the index. Delivers the speed alone,
+   and lists every ferret's conversations even before pooling. (Built: &F4336.)
 2. **Kernel door**: `permissions.historyPool` + `RootHandle.linkHistory`, testing host twin, `docs/secrets.md` row.
 3. **Pooling** (Claude Code + Codex + migrator): link entries at home preparation, move existing folders in,
    `CODEX_SQLITE_HOME`, `hasConversation` through the pool, migrator target, copy-on-link for default-home
@@ -149,7 +178,7 @@ Each PR: Sonnet builder, one gpt-6.1-sol high review, at most 2 fix rounds.
 
 ## 5. Open points
 
-- Two-way default-home sharing (3.2) needs an owner ruling.
+- Two-way default-home sharing (3.2): owner ruled ONE WAY (!A530, 2026-11-16). Ferretry never writes into `~/.claude` or `~/.codex`; no two-way PR.
 - The migrator copies 19 GB; a hard-link or rename import would be faster and use no extra disk. Separate card.
 - Codex `resume <id>` of a copied rollout that its SQLite does not list yet must be proven against the real binary in
   PR 3 (pooled SQLite should index it; if not, the copy also inserts nothing and the PR says so).

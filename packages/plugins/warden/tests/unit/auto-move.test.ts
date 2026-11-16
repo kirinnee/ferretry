@@ -12,8 +12,10 @@ import {
   providerOf,
   pruneAutoMoveMemory,
   rankMoveTargets,
+  parseAutoMoveMemory,
   rateLimitedSubjects,
   recordMove,
+  subjectOf,
   triedLine,
 } from '../../daemon/lib/auto-move.ts';
 import type { WardenSessionView } from '../../daemon/lib/types.ts';
@@ -74,6 +76,25 @@ describe('rateLimitedSubjects', () => {
         trigger: 'rate_limited',
       },
     ]);
+  });
+
+  it('should carry the reset time the limit shows, and none that is unset, zero or not a number', () => {
+    // Arrange
+    const at = (quota: { resetAt?: number } | undefined) =>
+      ({
+        ...session('limited'),
+        state: { status: 'rate_limited', ...(quota === undefined ? {} : { quota }) },
+      }) as WardenSessionView;
+
+    // Act
+    const known = subjectOf(at({ resetAt: NOW + 60_000 }), 'rate_limited');
+    const none = [undefined, {}, { resetAt: 0 }, { resetAt: Number.NaN }].map(quota =>
+      subjectOf(at(quota), 'rate_limited'),
+    );
+
+    // Assert
+    should(known?.resetAt).equal(NOW + 60_000);
+    for (const subject of none) should(subject).not.have.property('resetAt');
   });
 
   it('should take none when rate limits are not a trigger', () => {
@@ -220,6 +241,66 @@ describe('chooseMoveTarget', () => {
     // Assert
     should(choice.kind === 'chosen' ? choice.runtime.name : undefined).equal('glm');
     should(choice.tried).deepEqual([{ runtime: 'missing', why: 'there is no runtime by that name on this machine' }]);
+  });
+
+  it('should never choose a login outside a non-empty list, whatever room the others have (work logins, both harnesses)', () => {
+    // Arrange: personal logins are tight; the work logins are nearly empty.
+    const tight = { usage: { fiveHour: { usedPercent: 90 }, weekly: {} } };
+    const empty = { usage: { fiveHour: { usedPercent: 1 }, weekly: {} } };
+    const claude = facts({
+      runtimes: [runtime('claude-a'), runtime('personal-a'), runtime('claude-liftoff')],
+      credentials: [
+        credential('claude-a-login'),
+        credential('personal-a-login', tight),
+        credential('claude-liftoff-login', empty),
+      ],
+      tools: [claudeTool],
+    });
+    const codex = facts({
+      runtimes: [
+        runtime('codex-a', { harness: 'codex' }),
+        runtime('codex-personal', { harness: 'codex' }),
+        runtime('codex-loai', { harness: 'codex' }),
+      ],
+      credentials: [
+        credential('codex-a-login', { harness: 'codex' }),
+        credential('codex-personal-login', { harness: 'codex', ...tight }),
+        credential('codex-loai-login', { harness: 'codex', ...empty }),
+      ],
+      tools: [tool('codex', true)],
+    });
+
+    // Act
+    const anyClaude = chooseMoveTarget({ source, facts: claude, targets: [], minHeadroomPercent: 5 });
+    const listedClaude = rankMoveTargets({ source, facts: claude, targets: ['personal-a'], minHeadroomPercent: 5 });
+    const tightClaude = rankMoveTargets({ source, facts: claude, targets: ['personal-a'], minHeadroomPercent: 20 });
+    const listedCodex = rankMoveTargets({
+      source: { agent: 'codex-a-wrapper', harness: 'codex' },
+      facts: codex,
+      targets: ['codex-personal'],
+      minHeadroomPercent: 20,
+    });
+    const verdict = chooseFailoverTarget({
+      source,
+      facts: claude,
+      targets: ['personal-a'],
+      minHeadroomPercent: 5,
+      named: 'claude-liftoff',
+    });
+
+    // Assert: unlisted, the work login wins; listed, it is never even a candidate
+    should(anyClaude.kind === 'chosen' ? anyClaude.runtime.name : undefined).equal('claude-liftoff');
+    should(listedClaude.ready.map(entry => entry.name)).deepEqual(['personal-a']);
+    should(listedClaude.tried).deepEqual([]);
+    should(tightClaude.ready).deepEqual([]);
+    should(tightClaude.tried.map(entry => entry.runtime)).deepEqual(['personal-a']);
+    should(listedCodex.ready).deepEqual([]);
+    should(listedCodex.tried.map(entry => entry.runtime)).deepEqual(['codex-personal']);
+    should(verdict.kind === 'chosen' ? verdict.runtime.name : undefined).equal('personal-a');
+    should(verdict.tried[0]).match({
+      runtime: 'claude-liftoff',
+      why: 'it is not in the autoMove.targets the owner set',
+    });
   });
 
   it('should refuse a named login of another harness', () => {
@@ -466,6 +547,19 @@ describe('the move ledger', () => {
     // Assert
     should(Object.keys(pruned.sessions)).deepEqual(['live']);
     should(pruned.sessions.live?.moves).deepEqual([iso(NOW - 60_000)]);
+  });
+
+  it('should keep a ferret that has only its resume at a reset to remember, and read it back from storage', () => {
+    // Arrange
+    const stored = { sessions: { s1: { moves: [], resumed: iso(NOW) } } };
+
+    // Act
+    const parsed = parseAutoMoveMemory(stored);
+    const pruned = pruneAutoMoveMemory(parsed ?? EMPTY_AUTO_MOVE_MEMORY, new Set(['s1']), NOW);
+
+    // Assert
+    should(parsed?.sessions.s1?.resumed).equal(iso(NOW));
+    should(pruned.sessions.s1?.resumed).equal(iso(NOW));
   });
 
   it('should key a hold by trigger, login and reason, so a standing reason is told once', () => {

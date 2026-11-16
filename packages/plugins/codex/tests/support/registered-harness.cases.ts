@@ -249,6 +249,32 @@ export function registeredHarnessCases(): void {
       expect((await box.build().transcript.read(spec.ferret)).length).toBe(entries.length);
     });
 
+    test('historySources offers the owner’s ~/.codex and each ferret home as read-only trees', async () => {
+      const box = fixture();
+      const harness = box.build();
+      const spec = box.spec();
+      await harness.start(spec, box.runner, ENV);
+      box.files.set(
+        '/fixture-owner/.codex/sessions/2026/10/20/rollout-import.jsonl',
+        header('import-native', '/elsewhere'),
+      );
+      box.files.set(`${spec.home}/sessions/2026/10/20/rollout-mine.jsonl`, header('mine', spec.home));
+
+      const sources = await harness.historySources?.();
+
+      const owner = sources?.find(source => source.kind === 'computer');
+      const mine = sources?.find(source => source.kind === 'ferret-home' && source.label === spec.ferret);
+      expect(owner?.label).toBe('owner');
+      expect((await owner?.files.entries('sessions/2026/10/20'))?.map(entry => entry.name)).toEqual([
+        'rollout-import.jsonl',
+      ]);
+      expect((await mine?.files.entries('sessions/2026/10/20'))?.map(entry => entry.name)).toEqual([
+        'rollout-mine.jsonl',
+      ]);
+      expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
+      expect(box.rootsUsed.every(root => ['agent-homes', 'harness-history'].includes(root.name))).toBe(true);
+    });
+
     test('U5 a newest record larger than the tail window reads as a turn at work, never as no records', async () => {
       const box = fixture();
       const harness = box.build();
