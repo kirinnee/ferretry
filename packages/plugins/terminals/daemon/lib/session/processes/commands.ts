@@ -10,9 +10,7 @@ import type { ProcessStreamTarget } from './ports.ts';
  * has its stdout and stderr redirected to `/tmp/claude-<uid>/<project-slug>/<session-uuid>/tasks/<id>.output`.
  * A foreground command's file is deleted when the command returns; a background one's stays.
  */
-export function claudeTaskId(path: string): string | undefined {
-  return /\/tasks\/([A-Za-z0-9_-]{1,64})\.output$/u.exec(path)?.[1];
-}
+export { claudeTaskId } from '../../../../contract/jobs.ts';
 
 /** The file a process's output can be read from: stdout's if it is a regular file, else stderr's. */
 export function outputFileOf(stdout?: ProcessStreamTarget, stderr?: ProcessStreamTarget): string | undefined {

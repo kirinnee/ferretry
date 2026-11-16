@@ -12,27 +12,27 @@
  * through the harness seam (so Vault's input holds apply and a hold types nothing).
  *
  * WHO MAY SWITCH WHOSE: asking the seam for the ferret is the authorization. A person (no `caller`) reaches any ferret; a
- * ferret reaches itself and its lead and helpers, and `FerretsService.harness` refuses anyone else with a 403 `forbidden`
+ * ferret reaches itself and its helpers (its descendants), never its lead, and `FerretsService.harness` refuses anyone else with a 403 `forbidden`
  * before anything else is read. It is checked here, not in the route, so every transport gets the same rule.
  */
 import {
-  FORM_KEYS,
+  PICKER_KEYS,
   RuntimeControlError,
   type FerretHarness,
   type FerretId,
   type FerretView,
-  type FormKey,
   type HarnessRuntimeSwitch,
+  type PickerKey,
   type RuntimeControlApi,
   type RuntimeControlRequest,
   type RuntimeModelCatalog,
+  type RuntimeSwitchAccount,
   type RuntimeSwitchFrame,
   type RuntimeSwitchPane,
 } from '../../../../contract/index.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
 import type { SessionEffectLedger } from '../effects/types.ts';
-import type { AccountInventoryPort } from '../peers/core.ts';
 import type { CodexRuntimeCatalogCache, HarnessRuntimeCatalogs, PickerSleeper } from '../peers/harness.ts';
 import { HARNESS_PICKER_COMMAND, SessionRuntimeControlService, type SessionRuntimeControlPorts } from './service.ts';
 import {
@@ -58,7 +58,11 @@ export interface FerretRuntimeControlDeps {
   /** Stops a ferret whose per-ferret key the caller ALREADY HOLDS (the control holds it while it drives). */
   readonly stopHeld: (ferret: FerretId) => Promise<void>;
   readonly serial: SerialExecutor;
-  readonly accounts: AccountInventoryPort;
+  /**
+   * What the runtime THIS FERRET WAS STARTED ON serves, read from the ferret's own record by the host (never from a request),
+   * or nothing when it has none recorded or cannot say. Values-free: models and their levels, no credential, no path.
+   */
+  readonly served: (ferret: FerretId) => Promise<RuntimeModelCatalog | undefined>;
   readonly clock: ClockPort;
   readonly sleeper: PickerSleeper;
   /** The CLI a quarantined session tells a human to type. */
@@ -102,7 +106,37 @@ export function ferretRuntimePane(seam: FerretHarness, stop: () => Promise<void>
       const pressed = await form.key(key);
       if (!pressed.ok) throw new Error(`the key could not be pressed (${refusalSentence(pressed.error)})`);
     },
+    pickerKey: async key => {
+      const press = form?.pickerKey;
+      if (form === undefined || press === undefined) return unavailable();
+      const pressed = await press(key);
+      if (!pressed.ok) throw new Error(`the key could not be pressed (${refusalSentence(pressed.error)})`);
+    },
     stop,
+  };
+}
+
+/**
+ * The one account a switch reads, from the catalog a runtime serves: its servable models with their levels, the default, and
+ * the catalog's own say on custom ids. A catalog with no model is an account that is down, and says so.
+ */
+export function accountOfServed(served: RuntimeModelCatalog, agent: string): RuntimeSwitchAccount {
+  const defaultModel = served.choices.find(choice => choice.isDefault === true)?.value ?? null;
+  return {
+    agent,
+    available: served.choices.length > 0,
+    unavailableReason: served.choices.length > 0 ? null : 'its runtime serves no model',
+    defaultModel,
+    models: served.choices.map(choice => ({
+      id: choice.value,
+      displayName: choice.label,
+      ...(choice.tier === undefined ? {} : { tier: choice.tier }),
+      ...(choice.context === undefined ? {} : { context: choice.context }),
+      efforts: choice.reasoningEfforts.map(effort => effort.value),
+      ...(choice.defaultReasoningEffort === undefined ? {} : { defaultEffort: choice.defaultReasoningEffort }),
+      available: true as const,
+    })),
+    ...(served.catalog === undefined ? {} : { modelCatalog: served.catalog }),
   };
 }
 
@@ -114,7 +148,8 @@ function lacking(what: string): never {
 /** The service's whole catalog seam, from the members this harness supplied. */
 function catalogsOf(supplied: HarnessRuntimeSwitch['catalogs']): HarnessRuntimeCatalogs {
   return {
-    claudeRuntimeCatalog: () => lacking('a model catalog'),
+    claudeRuntimeCatalog: account =>
+      supplied.claudeRuntimeCatalog === undefined ? lacking('a model catalog') : supplied.claudeRuntimeCatalog(account),
     codexRuntimeCatalog: (choices, account) =>
       supplied.codexRuntimeCatalog === undefined
         ? lacking('a live model catalog')
@@ -139,16 +174,16 @@ const NO_LIVE_CATALOG: CodexRuntimeCatalogCache = {
  * The picker transport over ONE ferret's pane: open the picker with the harness's own command, read a frame, press a row's
  * digit. It does the pane's part only. Whether the row a digit is aimed at is STILL on screen is the harness's own
  * knowledge of its picker, so a harness's `pickerDriver` wraps this and proves the row before it lets a digit through.
- * Only the closed `FORM_KEYS` can be pressed.
+ * Only the closed `PICKER_KEYS` can be pressed.
  */
 function pickerTransportOf(pane: RuntimeSwitchPane): RuntimePickerTransport {
   return () => ({
     openPicker: async () => await pane.command(HARNESS_PICKER_COMMAND),
     readPane: async () => await pane.observe(),
     sendKey: async key => {
-      if (!(FORM_KEYS as readonly string[]).includes(key))
+      if (!(PICKER_KEYS as readonly string[]).includes(key))
         throw new Error(`${key} is not a key a picker is driven with`);
-      await pane.key(key as FormKey);
+      await pane.pickerKey(key as PickerKey);
     },
   });
 }
@@ -228,7 +263,12 @@ export class FerretRuntimeControl implements NonNullable<RuntimeControlApi['runt
       picker: pickerTransportOf(pane),
       harness: harness.quirks,
       catalogs: catalogsOf(harness.catalogs),
-      accounts: deps.accounts,
+      accounts: {
+        accounts: async () => {
+          const [served, view] = await Promise.all([deps.served(ferret), deps.view(id)]);
+          return served === undefined || view === undefined ? [] : [accountOfServed(served, view.config.agent)];
+        },
+      },
       catalog: harness.liveCatalog ?? NO_LIVE_CATALOG,
       serial: deps.serial,
       sleeper: deps.sleeper,

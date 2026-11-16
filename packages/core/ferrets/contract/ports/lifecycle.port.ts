@@ -165,8 +165,8 @@ export type StartFailure =
 
 /**
  * How a resume differs from a person's plain one (today's `ResumePolicy.automatic`, copied). It defaults to `false`: an
- * explicit resume by a person is not automatic. Replacing a LIVE pane is not on the port: only a move does it, through
- * Ferrets' own service.
+ * explicit resume by a person is not automatic. Replacing a LIVE pane is a move's, through Ferrets' own service, and the
+ * Warden's alone through {@link ResumeOptions.replaceLiveTerminal}.
  */
 export interface ResumeOptions {
   /**
@@ -206,6 +206,12 @@ export interface ResumeOptions {
    * nothing: it changes no policy, admission or refusal; `resume`'s answer type is unchanged.
    */
   readonly onCarried?: (typed: { readonly text: string; readonly turn: number; readonly file: string }) => void;
+  /**
+   * Additive (Warden's alone, c58-55): replace a LIVE pane instead of answering `running` (the send shortcut). The
+   * conversation's start gate, login and folder are judged FIRST, then the old pane is stopped and the ferret relaunched
+   * through the ordinary launch, all in this one resume. Any other consumer is refused with a sentence, nothing resumed.
+   */
+  readonly replaceLiveTerminal?: boolean;
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
