@@ -136,11 +136,12 @@ describe('the pane wrapper', () => {
     ]);
   });
 
-  it('should hold a log cap of 64 MiB, state it in the marker, and re-walk the tree before the KILL', () => {
+  it('should hold a log cap of 64 MiB, state it in the marker, and track each process by pid and start time', () => {
     should(JOB_LOG_CAP_BYTES).equal(64 * 1024 * 1024);
     should(jobPaneArgv({ dir: 'd', shell: 's', command: 'c', cwd: '/', logCapBytes: 5 }).at(-1)).equal('5');
     should(JOB_WRAPPER_SCRIPT).containEql('further output is dropped');
-    should(JOB_WRAPPER_SCRIPT).containEql('now=$(tree "$pid")');
+    should(JOB_WRAPPER_SCRIPT).containEql('signal_seen KILL');
+    should(JOB_WRAPPER_SCRIPT).containEql('ident()');
   });
 
   it('should record the exit atomically, from the pane, and never forward a signal as the attachment would', () => {
