@@ -125,6 +125,12 @@ interface PendingReply {
   readonly since: number;
 }
 
+/** The prompt of a `needs-input` turn that was read: when the turn began (ms) and the words that were read. */
+interface AskedPrompt {
+  readonly turnAt: number | null;
+  readonly words: string;
+}
+
 /** The id a send went under once its request came back (null until then). */
 interface SendToken {
   readonly sendId: string | null;
@@ -154,6 +160,13 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The key of the reading this hook started, or null. */
   const mine = useRef<string | null>(null);
+  /**
+   * The prompt this hook last read in a `needs-input` turn: the turn's instant and the words read. A turn is ONE state
+   * (`turnStateAt` moves only when it changes), but a ferret can ask again inside it (a second permission, a next
+   * question); that is a new occurrence, read once, and the same one on a re-render or a row update is not read again.
+   * Null until this hook has read a prompt of the turn: a prompt already on screen when the page opened is never read.
+   */
+  const asked = useRef<AskedPrompt | null>(null);
 
   const state = useSyncExternalStore(controller.subscribe, controller.getState, () => IDLE);
   const reading = mine.current !== null && state.status === 'reading' && state.key === mine.current;
@@ -173,6 +186,7 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
       watch.current = stopWatching(watch.current);
       token.current = null;
       pending.current = null;
+      asked.current = null;
       return;
     }
     const at = now();
@@ -188,8 +202,33 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     });
     watch.current = step.watch;
     if (step.watch.armed?.kind !== 'sent') token.current = null;
+    if (step.fire === null && asked.current !== null) {
+      const before = asked.current;
+      const turnAt = parseInstant(current.turnStateAt);
+      if (!current.authoritative || current.turn !== 'needs-input' || turnAt === null || turnAt !== before.turnAt) {
+        // The turn moved on: the prompt it asked is over.
+        asked.current = null;
+      } else {
+        const next = pickQuestion(current.question);
+        if (next.markdown !== before.words) {
+          if (!current.visible) {
+            // Nobody is looking: a new prompt is gone for good, never spoken on return.
+            asked.current = { turnAt, words: next.markdown };
+          } else if (at - changedAt.current < TEXT_SETTLED_MS) {
+            timer.current = setTimeout(evaluate, Math.max(1, Math.ceil(TEXT_SETTLED_MS - (at - changedAt.current))));
+            return;
+          } else {
+            asked.current = { turnAt, words: next.markdown };
+            mine.current = next.key;
+            controller.read(next.key, next.markdown, readOptionsOf(current.settings));
+            return;
+          }
+        }
+      }
+    }
     if (step.fire !== null) {
       pending.current = null;
+      asked.current = null;
       if (step.fire.outcome === 'your-turn' && step.fire.startedAt === null) {
         // The end of a SEND's turn is proven; its words are not read until the transcript shows the send's own row.
         pending.current = {
@@ -202,6 +241,8 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
             ? pickQuestion(current.question)
             : pickReply(current.entries, step.fire.startedAt, current.settings.whatToRead);
         mine.current = pick.key;
+        if (step.fire.outcome === 'needs-input')
+          asked.current = { turnAt: parseInstant(current.turnStateAt), words: pick.markdown };
         controller.read(pick.key, pick.markdown, readOptionsOf(current.settings));
         return;
       }
@@ -238,17 +279,30 @@ export function useAutoRead(input: AutoReadInput): AutoReadHandle {
     watch.current = IDLE_WATCH;
     token.current = null;
     pending.current = null;
+    asked.current = null;
     mine.current = null;
     return () => {
       if (timer.current !== null) clearTimeout(timer.current);
       timer.current = null;
+      // Leaving the chat (unmounting, or another chat's subject) ends the reading THIS panel started, and only that one:
+      // a reading another surface owns is never stopped from here.
+      if (
+        mine.current !== null &&
+        controller.getState().key === mine.current &&
+        controller.getState().status === 'reading'
+      )
+        controller.dismiss();
+      mine.current = null;
     };
-  }, [scope]);
+  }, [scope, controller]);
 
   // The conversation changed (a record, a new turn state, the daemon's word on a send): note the moment and look again.
   const last = entries.at(-1);
   const acceptance = sends.find(send => send.sendId === token.current?.sendId)?.acceptedAt ?? '';
-  const changeKey = `${scope}|${input.authoritative ? 1 : 0}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}|${acceptance}`;
+  // A prompt asked inside a `needs-input` turn is part of what moved: its words are in the key, so a second prompt at
+  // the same turn instant is looked at (and its quiet guard starts) once.
+  const asking = turn === 'needs-input' ? pickQuestion(input.question).markdown : '';
+  const changeKey = `${scope}|${input.authoritative ? 1 : 0}|${entries.length}|${last?.id ?? ''}|${last?.text.length ?? 0}|${turn ?? ''}|${turnStateAt ?? ''}|${acceptance}|${asking}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: the change key is what says the conversation moved; the rest is read through `latest`.
   useEffect(() => {
     if (seen.current !== changeKey) {
