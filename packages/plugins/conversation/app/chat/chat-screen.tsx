@@ -48,6 +48,7 @@ import { useSendView } from '../queue/use-send-view.ts';
 import { pendingQuestionOf, type PendingQuestion } from '../questions/question-form.tsx';
 import { logSearchOf, type ChatSearchPort } from '../search/chat-search.tsx';
 import { chatReadApi, readQuestion } from './chat-reads.ts';
+import { ChatTurnContext } from './chat-turn-context.ts';
 import { type ChatSession, unreadChatSession } from './chat-session.ts';
 import {
   type ChatRefreshControl,
@@ -329,6 +330,10 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
    */
   const unread = useMemo(() => unreadChatSession(ferretId), [ferretId]);
   const drawn = view ?? (error === null ? null : unread);
+  // What this chat last read of the ferret's turn, for the toolbar's turn word (`toolbar/turn-panel.tsx`): one reading,
+  // the refresh's own, so the word follows every turn change the conversation does and never draws an older read.
+  const drawnTurn = drawn?.state.turnState;
+  const chatTurn = useMemo(() => ({ ferret: ferretId, turnState: drawnTurn }), [ferretId, drawnTurn]);
 
   return (
     <div className="h-full min-h-0 w-full" data-daemon={daemonId} data-session={ferretId}>
@@ -341,29 +346,31 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
       </p>
       {drawn !== null ? (
         <QueueActionsContext.Provider value={queueActionsValue}>
-          <SessionChatPage
-            chatWidth={controls.chatWidth}
-            client={client}
-            conversationSearch={conversationSearch}
-            daemonId={daemonId}
-            embedded={embedded}
-            {...(ask === undefined ? {} : { ask })}
-            entries={placedEntries}
-            history={history}
-            onCancel={cancelSend}
-            onDismiss={dismissSend}
-            onExpand={toggleSend}
-            {...(navigate === undefined ? {} : { onNavigate: (to: string) => navigate(to) })}
-            onRefresh={refresh}
-            onRetry={retrySend}
-            onSubmit={submitSend}
-            {...(question === undefined ? {} : { question })}
-            {...(readingPosition === undefined ? {} : { readingPosition })}
-            refreshError={issue}
-            sends={sends}
-            session={drawn}
-            transcriptUnbound={transcriptUnbound}
-          />
+          <ChatTurnContext.Provider value={chatTurn}>
+            <SessionChatPage
+              chatWidth={controls.chatWidth}
+              client={client}
+              conversationSearch={conversationSearch}
+              daemonId={daemonId}
+              embedded={embedded}
+              {...(ask === undefined ? {} : { ask })}
+              entries={placedEntries}
+              history={history}
+              onCancel={cancelSend}
+              onDismiss={dismissSend}
+              onExpand={toggleSend}
+              {...(navigate === undefined ? {} : { onNavigate: (to: string) => navigate(to) })}
+              onRefresh={refresh}
+              onRetry={retrySend}
+              onSubmit={submitSend}
+              {...(question === undefined ? {} : { question })}
+              {...(readingPosition === undefined ? {} : { readingPosition })}
+              refreshError={issue}
+              sends={sends}
+              session={drawn}
+              transcriptUnbound={transcriptUnbound}
+            />
+          </ChatTurnContext.Provider>
         </QueueActionsContext.Provider>
       ) : (
         <p className="fy-shell-line fy-shell-line--info" data-session-opening="">
