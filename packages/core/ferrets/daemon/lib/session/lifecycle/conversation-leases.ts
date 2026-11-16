@@ -1,11 +1,14 @@
 import type { FerretId, FerretRecord, HarnessKey } from '../../../../contract/index.ts';
 import {
   type ConversationHolderStanding,
+  type ConversationId,
+  ConversationIdSchema,
   ConversationLeaseHeldError,
   type ConversationLeaseStore,
   conversationFromArguments,
   type HistoryHarness,
 } from '../../../../contract/conversation-lease.ts';
+import type { FerretLaunchLeases } from '../../ferrets/launch-leases.ts';
 import { type SessionId, tryParseSessionId } from '../../session-id.ts';
 import type { SessionConversationLeases } from '../peers/conversation-lease.ts';
 import { type ResumableSessionStatus, TERMINAL_RESUME_STATUSES } from '../resume/types.ts';
@@ -61,7 +64,7 @@ function fields(document: unknown): Readonly<Record<string, unknown>> | undefine
  * conversation names a different session, so a live holder refuses it whoever asks (a wrapper inside S is no exception),
  * and only a holder that is over lets it take the conversation.
  */
-export class ConversationLeases implements SessionConversationLeases {
+export class ConversationLeases implements SessionConversationLeases, FerretLaunchLeases {
   constructor(
     private readonly store: ConversationLeaseStore,
     private readonly sessions: ConversationLeaseSessions,
@@ -77,12 +80,43 @@ export class ConversationLeases implements SessionConversationLeases {
     // Index 0 is the executable, never an argument.
     const conversation = conversationFromArguments(launch.harness, command.slice(1));
     if (conversation === undefined) return;
+    await this.hold(id, launch, conversation, this.holderPid);
+  }
+
+  /** {@link FerretLaunchLeases.claim}: the conversation a launch resumes or binds, as this daemon, before a pane exists. */
+  async claimConversation(ferret: FerretId, conversation: string): Promise<void> {
+    await this.holdFor(ferret, conversation, this.holderPid);
+  }
+
+  /** {@link FerretLaunchLeases.moveToPane}: a renewal as the pane's process; fails closed when its pid is not known. */
+  async moveToPane(ferret: FerretId, conversation: string, pid: number | undefined): Promise<void> {
+    if (pid === undefined)
+      throw new Error(
+        `ferret ${ferret} could not tell which process runs its terminal, so conversation ${conversation} cannot be kept for it`,
+      );
+    await this.holdFor(ferret, conversation, pid);
+  }
+
+  private async holdFor(ferret: FerretId, conversation: string, pid: number): Promise<void> {
+    const id = tryParseSessionId(ferret);
+    const launch = id === undefined ? undefined : this.sessions.launchOf(id);
+    const parsed = ConversationIdSchema.safeParse(conversation);
+    if (id === undefined || launch === undefined || !parsed.success) return;
+    await this.hold(id, launch, parsed.data, pid);
+  }
+
+  private async hold(
+    id: SessionId,
+    launch: NonNullable<ReturnType<ConversationLeaseSessions['launchOf']>>,
+    conversation: ConversationId,
+    pid: number,
+  ): Promise<void> {
     const outcome = await this.store.claim(
       {
         harness: launch.harness,
         conversation,
         holder: {
-          pid: this.holderPid,
+          pid,
           session: id,
           ...(launch.runtime === undefined ? {} : { runtime: launch.runtime }),
         },

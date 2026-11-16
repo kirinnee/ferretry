@@ -249,6 +249,22 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     const found = hooks.provider(Runners, 'tmux');
     return found === 'unavailable' ? undefined : found;
   };
+  // One set of conversation leases for the whole daemon: the lifecycle claims through it before a pane exists, and Ferrets'
+  // launch (the ONE place every pane opens) holds the pane's conversation on it and frees it when the ferret stops.
+  const conversationLeases = new ConversationLeases(
+    new ConversationLeaseStore(
+      new ConversationLeaseStateDisk(
+        kernel.state,
+        processIncarnationFor(kernel.hostFacts, kernel.spawn),
+        { nowMs: () => kernel.clock.nowMs(), sleep: async ms => await kernel.clock.sleep(milliseconds(ms)) },
+        kernel.hostFacts.platform,
+      ),
+      () => new Date(kernel.clock.nowMs()),
+    ),
+    registryLeaseSessions(registry, async id => await sessionStore.readState(id)),
+    process.pid,
+  );
+
   const sessionFilesDeps = {
     // The members marked `satisfies` at the end are REQUIRED here (a daemon without them runs a second cut-off fact or no
     // pane launcher), though a unit fixture may leave them off.
@@ -265,19 +281,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // One live writer per harness conversation, claimed before a pane exists. The disk is the daemon's twin of what
     // `fy history claim` reads and locks (the same files and the same `flock`), so a wrapper's claim in a pane and this
     // one decide against one set of leases; the holder is this daemon's pid plus the session.
-    leases: new ConversationLeases(
-      new ConversationLeaseStore(
-        new ConversationLeaseStateDisk(
-          kernel.state,
-          processIncarnationFor(kernel.hostFacts, kernel.spawn),
-          { nowMs: () => kernel.clock.nowMs(), sleep: async ms => await kernel.clock.sleep(milliseconds(ms)) },
-          kernel.hostFacts.platform,
-        ),
-        () => new Date(kernel.clock.nowMs()),
-      ),
-      registryLeaseSessions(registry, async id => await sessionStore.readState(id)),
-      process.pid,
-    ),
+    leases: conversationLeases,
     roots: kernel.roots,
     storage: sessionStore,
     clock: { now: () => kernel.clock.now() },
@@ -609,6 +613,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     storedLastSnapshot: async ferret => await lastSnapshotReading.read(ferret),
     vault: needs.vault,
     asks: needs.asks,
+    leases: conversationLeases,
   } satisfies FerretsPorts & Required<Pick<FerretsPorts, 'serial' | 'cutOffMark'>>;
   const service = new FerretsService(registry, tokens, servicePorts);
 
