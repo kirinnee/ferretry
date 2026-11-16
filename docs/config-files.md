@@ -887,7 +887,12 @@ included — is never shown, and an agent's text that holds one is refused. Not 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
 - `harness-claude-code.yaml`, `harness-codex.yaml` (the agent permission mode): each also holds the harness
-  binary and search paths, which no agent reached before, and only the permission mode is judged.
+  binary and search paths, which no agent reached before, and only the permission mode is judged. **A file that
+  says no `permissionMode` means `skip`** (owner decision !A525: Claude runs with `--permission-mode
+bypassPermissions`, Codex with `approval_policy=never` and `sandbox_mode=danger-full-access`); a file that says
+  `auto` keeps `auto`, and nothing rewrites an explicit value. The hold therefore judges explicit values: `auto`
+  turned into `skip`, or `auto` with the key removed (which reads as `skip`), is held for the owner; no value turned
+  into `auto` asks more and is not held.
 - `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
   not reach) and `presets/` (no successor declared yet).
 

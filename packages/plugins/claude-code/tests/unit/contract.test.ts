@@ -5,6 +5,7 @@ import {
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_SETTINGS,
+  HarnessConfigSchema,
   harnessConfigLoosens,
 } from '../../contract/index.ts';
 import { claudeCodeConformance, fakeClaudeCode } from '../../contract/testing/index.ts';
@@ -73,5 +74,28 @@ describe('claude-code contract', () => {
     expect(harnessConfigLoosens(auto, skip)).toEqual(['agents now skip every permission prompt']);
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CLAUDE_CODE_CONFIG.axis).toBe('configure');
+  });
+
+  test('!A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
+    expect(HarnessConfigSchema.parse({}).permissionMode).toBe('skip');
+    expect(HarnessConfigSchema.parse({ permissionMode: 'auto' }).permissionMode).toBe('auto');
+    expect(HarnessConfigSchema.parse({ permissionMode: 'skip' }).permissionMode).toBe('skip');
+  });
+
+  test('!A525 the hold judges explicit values: auto to skip or to nothing is a loosening, nothing to auto a tightening', () => {
+    const explicitAuto = HarnessConfigSchema.parse({ permissionMode: 'auto' });
+    const nothing = HarnessConfigSchema.parse({});
+    const explicitSkip = HarnessConfigSchema.parse({ permissionMode: 'skip' });
+    const held = ['agents now skip every permission prompt'];
+    // An agent edit that turns an explicit auto into skip, or deletes the key (= skip), is held.
+    expect(harnessConfigLoosens(explicitAuto, explicitSkip)).toEqual(held);
+    expect(harnessConfigLoosens(explicitAuto, nothing)).toEqual(held);
+    // No value (= skip) to an explicit auto asks more, never less; skip to nothing changes nothing.
+    expect(harnessConfigLoosens(nothing, explicitAuto)).toEqual([]);
+    expect(harnessConfigLoosens(explicitSkip, nothing)).toEqual([]);
+    // A file that did not exist reads as skip: creating it with skip, or with the key left out, loosens nothing.
+    expect(harnessConfigLoosens(undefined, explicitSkip)).toEqual([]);
+    expect(harnessConfigLoosens(undefined, nothing)).toEqual([]);
+    expect(harnessConfigLoosens(undefined, explicitAuto)).toEqual([]);
   });
 });
