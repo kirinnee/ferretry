@@ -177,6 +177,7 @@ export function harnessHomeCases(): void {
       const config = await readFile(join(home, 'config.toml'), 'utf8');
       expect(config).toBe(
         [
+          'check_for_update_on_startup = false',
           'model = "gpt-5"',
           '',
           '[shell_environment_policy]',
@@ -202,14 +203,16 @@ export function harnessHomeCases(): void {
         ...spec('f2', home),
         runtime: 'work',
       } as LaunchSpec);
-      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('model = "gpt-5"\n');
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe(
+        'check_for_update_on_startup = false\nmodel = "gpt-5"\n',
+      );
 
-      // A profile that names no settings component gets none, so no config.toml settings at all.
+      // A profile that names no settings component gets none: only Ferretry's own default is in its config.toml.
       await build(items, { selected: selectSettings() }).harness.prepareHome({
         ...spec('f2', home),
         runtime: 'bare',
       } as LaunchSpec);
-      await expect(readFile(join(home, 'config.toml'), 'utf8')).rejects.toThrow();
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
     });
 
     test('settings items merge in name order (the later wins), beside the MCP servers a launch adds, and a launch server replaces a settings one', async () => {
@@ -254,13 +257,25 @@ export function harnessHomeCases(): void {
       expect(said[0]).toContain('no configuration port');
     });
 
-    test('no settings item and no server writes no config.toml at all, as before', async () => {
+    test('O11b no settings item and no server still writes the one top-level key that answers the update prompt', async () => {
       const { harness } = build();
       const home = await harness.homeFor('f2' as FerretId);
 
       await harness.prepareHome(spec('f2', home));
 
-      expect(await readdir(home)).not.toContain('config.toml');
+      expect(await readFile(join(home, 'config.toml'), 'utf8')).toBe('check_for_update_on_startup = false\n');
+    });
+
+    test('O11b a settings item that sets check_for_update_on_startup keeps the person’s value, true included', async () => {
+      for (const value of [true, false]) {
+        const { harness } = build(new Map([['mine', { settings: { check_for_update_on_startup: value } }]]));
+        const home = await harness.homeFor('f2' as FerretId);
+
+        await harness.prepareHome(spec('f2', home));
+
+        const config = await readFile(join(home, 'config.toml'), 'utf8');
+        expect(config).toBe(`check_for_update_on_startup = ${String(value)}\n`);
+      }
     });
 
     test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {

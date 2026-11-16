@@ -13,19 +13,29 @@ const clock = { now: () => instantFromEpochMs(1_794_052_800_000) };
 const f1 = parseSessionId('f1');
 
 describe('conversation state adapters, on the kernel state port', () => {
-  test('the queue store appends events and reads them back in order, skipping an event it does not know', async () => {
+  test('the queue store appends events and folds them into messages, skipping an event it does not know', async () => {
     const state = new MemoryStateFolder().port(CONVERSATION_STATE);
     const store = new StateQueueStore(state);
     await state.append<unknown>(QUEUE_STATE, { v: 1, kind: 'bogus' }, 'f1');
     await store.append(f1, {
       v: 1,
-      kind: 'moved',
+      kind: 'enqueued',
       at: clock.now(),
-      id: 'm1',
-      state: 'cancelled',
+      message: {
+        v: 1,
+        id: 'm1',
+        sender: 'human',
+        text: 'hi',
+        attachmentIds: [],
+        enqueuedAt: clock.now(),
+        state: 'queued',
+        stateAt: clock.now(),
+        revision: 1,
+      },
     });
-    const events = await store.read(f1);
-    expect(events.map(event => event.kind)).toEqual(['moved']);
+    await store.append(f1, { v: 1, kind: 'moved', at: clock.now(), id: 'm1', state: 'cancelled' });
+    const messages = await store.messages(f1);
+    expect(messages.map(message => [message.id, message.state, message.version])).toEqual([['m1', 'cancelled', 2]]);
   });
 
   test('the send ledger is last-write-wins per send and refuses a second accept of the same send', async () => {

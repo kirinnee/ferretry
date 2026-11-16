@@ -37,7 +37,12 @@ import {
   type HarnessConfig,
   type SettingsItem,
 } from '../../contract/index.ts';
-import { codexFixedArguments, codexPermissionArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
+import {
+  CODEX_CONFIG_DEFAULTS,
+  codexFixedArguments,
+  codexPermissionArguments,
+  codexQuestionArguments,
+} from '../lib/fixed-layer.ts';
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
@@ -122,7 +127,8 @@ function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsIte
     servers[part.name] = typeof config === 'object' && config !== null && !Array.isArray(config) ? config : {};
   }
   const blocks = [
-    tomlDocument(settings),
+    // The defaults first, then the person's items over them: an explicit value is never overwritten.
+    tomlDocument({ ...CODEX_CONFIG_DEFAULTS, ...settings }),
     Object.keys(servers).length === 0 ? '' : tomlTables('mcp_servers', servers),
   ].filter(block => block !== '');
   return blocks.length === 0 ? '' : `${blocks.join('\n\n')}\n`;

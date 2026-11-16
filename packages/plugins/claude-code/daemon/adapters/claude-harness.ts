@@ -182,7 +182,11 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
-  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
+  private async prepareHomeFrom(
+    spec: LaunchSpec,
+    inputs: LaunchSettingsInputs,
+    version?: string | undefined,
+  ): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // Nothing is written into a home under a folder chain another user could rewrite (v4's checked directory chain, now the
     // kernel's rule).
@@ -213,7 +217,7 @@ export class ClaudeHarness implements Harness {
     await write(HOME_FILES.overlay, text.overlay);
     // MERGED into the document already there, never replaced: Claude keeps its own decisions in it (a project
     // server the person disabled among them), and a launch must not undo them (today's wrapper seed).
-    const claudeJson = await this.claudeJsonText(home, text.claudeJson);
+    const claudeJson = await this.claudeJsonText(home, text.claudeJson, version);
     if (claudeJson !== undefined) await write(HOME_FILES.claudeJson, claudeJson);
     if (text.mcp !== undefined) await write(HOME_FILES.mcp, text.mcp);
     return { files, args: [] };
@@ -499,7 +503,7 @@ export class ClaudeHarness implements Harness {
     // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
     // reload between them cannot leave a record that differs from what the process runs on.
     const inputs = await this.launchInputs(spec.runtime);
-    await this.prepareHomeFrom(spec, inputs);
+    await this.prepareHomeFrom(spec, inputs, found.version);
     const command = launchCommand({
       binary: found.binary,
       flags: settingsFlags(inputs.settings),
@@ -509,6 +513,7 @@ export class ClaudeHarness implements Harness {
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       mode: spec.mode,
       questionTool: inputs.questionTool,
+      dangerousRmWaiver: inputs.dangerousRmWaiver,
       conversation,
       readable: spec.readable,
     });
@@ -557,12 +562,16 @@ export class ClaudeHarness implements Harness {
    * merged — see `mergeClaudeJson`). Read through the ferret's own home, so a link or a file the root refuses fails
    * the launch exactly as the write would; one too large to read is left as it is, like one that is not JSON.
    */
-  private async claudeJsonText(home: RootHandle, fresh: string): Promise<string | undefined> {
+  private async claudeJsonText(
+    home: RootHandle,
+    fresh: string,
+    version: string | undefined,
+  ): Promise<string | undefined> {
     const path = this.fenced(home.resolve(HOME_FILES.claudeJson));
     const info = await home.stat(path);
-    if (info === undefined || info.kind !== 'file') return mergeClaudeJson(undefined, fresh);
+    if (info === undefined || info.kind !== 'file') return mergeClaudeJson(undefined, fresh, version);
     if (info.size > MAX_CLAUDE_JSON_BYTES) return undefined;
-    return mergeClaudeJson(await home.readText(path, MAX_CLAUDE_JSON_BYTES), fresh);
+    return mergeClaudeJson(await home.readText(path, MAX_CLAUDE_JSON_BYTES), fresh, version);
   }
 
   private home(ferret: FerretId): RootHandle {
@@ -664,7 +673,7 @@ export class ClaudeHarness implements Harness {
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
   private async launchInputs(
     runtime: string | undefined,
-  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean }> {
+  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean; readonly dangerousRmWaiver: boolean }> {
     const selected = await this.deps.selected(runtime);
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
@@ -673,6 +682,7 @@ export class ClaudeHarness implements Harness {
       permissionMode: file?.permissionMode ?? 'skip',
       // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
       questionTool: file?.questionTool ?? false,
+      dangerousRmWaiver: file?.dangerousRmWaiver ?? false,
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),
