@@ -15,6 +15,7 @@ type Job = {
   steps?: { name?: string; env?: Record<string, string> }[];
 };
 type Workflow = {
+  on?: { pull_request?: { types?: string[] } };
   jobs: Record<string, Job>;
   env?: Record<string, string>;
   concurrency: { group: string; 'cancel-in-progress': string };
@@ -82,12 +83,17 @@ const evaluate = (source: string, github: object, needs = {}, vars = {}, inputs 
     JSON.parse,
   );
 };
-const event = (eventName: string, action = '', labels: string[] = [], label = '') => ({
+const event = (eventName: string, action = '', labels: string[] = [], label = '', changes: object = {}) => ({
   event_name: eventName,
   workflow: 'CI',
   ref: eventName === 'push' ? 'refs/heads/main' : 'refs/pull/42/merge',
   run_id: 123,
-  event: { action, label: { name: label }, pull_request: { number: 42, labels: labels.map(name => ({ name })) } },
+  event: {
+    action,
+    label: { name: label },
+    changes,
+    pull_request: { number: 42, labels: labels.map(name => ({ name })) },
+  },
 });
 const fullJobs = Object.keys(ci.jobs).filter(name => !['quick', 'full-pending', 'full'].includes(name));
 const successful = Object.fromEntries(
@@ -100,6 +106,46 @@ for (const action of ['opened', 'synchronize', 'reopened']) {
   for (const name of [...fullJobs, 'full'])
     assert.equal(evaluate(conditionOf(ci, name), quick, successful), false, `${name} ran without full-ci`);
 }
+// A retarget re-runs the selection: the `edited` type is on, and only a changed base acts on it.
+assert.deepEqual(
+  need(ci.on?.pull_request?.types, 'on.pull_request.types'),
+  ['opened', 'synchronize', 'reopened', 'labeled', 'edited'],
+  'the pull_request types are the PR lifecycle, the full-ci label and an edit (a retarget)',
+);
+const retarget = event('pull_request', 'edited', [], '', { base: { ref: { from: 'rebuild/5.0-after' } } });
+const retitle = event('pull_request', 'edited', [], '', { title: { from: 'old' } });
+const groupOf = (workflow: Workflow) =>
+  need(workflow.concurrency.group.match(/-\$\{\{([\s\S]*)\}\}/)?.[1], `${workflow.concurrency.group} expression`);
+assert.equal(evaluate(conditionOf(ci, 'quick'), retarget), true, 'a retarget must re-run Quick');
+assert.equal(evaluate(conditionOf(ci, 'full-pending'), retarget), true, 'a retarget needs a fresh exact-head status');
+assert.equal(
+  evaluate(groupOf(ci), retarget),
+  'pr-42',
+  'a retarget shares the PR group, so it supersedes the old base run',
+);
+assert.equal(evaluate(ci.concurrency['cancel-in-progress'], retarget), true, 'a retarget cancels the old base run');
+for (const name of fullJobs)
+  assert.equal(
+    evaluate(conditionOf(ci, name), retarget, successful),
+    false,
+    `${name} ran on a retarget without full-ci`,
+  );
+for (const name of fullJobs)
+  assert.equal(
+    evaluate(
+      conditionOf(ci, name),
+      event('pull_request', 'edited', ['full-ci'], '', retarget.event.changes),
+      successful,
+    ),
+    true,
+    `${name} missed a retarget of a full-ci pull request`,
+  );
+// Any other edit (title, body, ...) runs nothing, cancels nothing and has a group of its own.
+for (const name of Object.keys(ci.jobs))
+  assert.equal(evaluate(conditionOf(ci, name), retitle, successful), false, `${name} ran on a title or body edit`);
+assert.equal(evaluate(groupOf(ci), retitle), 123, 'a title or body edit must not share the PR group');
+assert.equal(evaluate(ci.concurrency['cancel-in-progress'], retitle), false, 'a title or body edit cancels nothing');
+assert.equal(evaluate(groupOf(ci), event('pull_request', 'synchronize')), 'pr-42');
 for (const [eventName, action, labels, label] of [
   ['pull_request', 'labeled', ['full-ci'], 'full-ci'],
   ['pull_request', 'synchronize', ['full-ci'], ''],

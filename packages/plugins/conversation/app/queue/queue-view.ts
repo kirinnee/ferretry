@@ -190,17 +190,19 @@ export interface QueueGroup {
   readonly ferretId: string;
   readonly ferret: string;
   readonly rows: readonly QueueRow[];
+  /** The daemon's sentence when this ferret's queue could not be read: it is NOT counted as empty. */
+  readonly unread?: string;
 }
 
 /** When the longest-waiting message of these rows was queued (rows may be listed in delivery order, not age). */
 const oldestAt = (rows: readonly QueueRow[]): string =>
   rows.reduce((oldest, row) => (oldest === '' || row.at < oldest ? row.at : oldest), '');
 
-/** Only ferrets with something waiting, the longest-waiting first. */
+/** Only ferrets with something waiting, or whose queue could not be read, the longest-waiting first. */
 export const waitingGroups = (groups: readonly QueueGroup[]): readonly QueueGroup[] =>
   groups
     .map(group => ({ ...group, rows: group.rows.filter(isWaitingRow) }))
-    .filter(group => group.rows.length > 0)
+    .filter(group => group.rows.length > 0 || group.unread !== undefined)
     .sort((a, b) => oldestAt(a.rows).localeCompare(oldestAt(b.rows)) || a.key.localeCompare(b.key));
 
 /** "3 waiting for connection" — the one line a count of saved-on-device messages reads as. */

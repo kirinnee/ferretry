@@ -60,7 +60,7 @@ export default provideToShell(
         );
         return surfaces;
       };
-      const screen = (id: 'chat' | 'links') =>
+      const screen = (id: 'chat' | 'links' | 'queues') =>
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
       const panel = (
         id:
@@ -74,7 +74,7 @@ export default provideToShell(
           | 'agenda-conversation',
       ) => lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       return {
-        screens: { chat: screen('chat'), links: screen('links') },
+        screens: { chat: screen('chat'), links: screen('links'), queues: screen('queues') },
         panels: {
           attachments: panel('attachments'),
           queue: panel('queue'),

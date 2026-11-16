@@ -365,6 +365,15 @@ describe('QueuePanel', () => {
     expect(mounted!.root.findAllByProps({ 'data-queue-older': '' })).toHaveLength(1);
   });
 
+  test('the All queues button opens the screen that lists every ferret’s queue', async () => {
+    open(daemon({ '/v1/ferrets/s1/queue': { messages: [queued('q1', 'from the machine')] } }));
+    await settleUntil(() => page().includes('from the machine'), 'queue shown', runAsync);
+    await runAsync(async () =>
+      mounted?.root.findAll(node => node.type === 'button' && text(node) === 'All queues')[0]?.props.onClick(),
+    );
+    expect(window.location.pathname).toBe('/d1/conversation/queues');
+  });
+
   test('a machine that cannot be reached shows only what this device holds for it', async () => {
     const outbox = deviceOutbox();
     await outbox.outbox.submit({ daemonId: 'd1', ferretId: 's1', message: 'still here' });

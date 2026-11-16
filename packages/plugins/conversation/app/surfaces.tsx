@@ -25,6 +25,7 @@ import { ConversationSettings } from './composer/conversation-settings.tsx';
 import { CompactAtPanel } from './compact-at/compact-at-panel.tsx';
 import { LinksScreen } from './links/links-screen.tsx';
 import { QuestionRenderer } from './questions/question-renderer.tsx';
+import { AllQueuesScreen } from './queue/all-queues-screen.tsx';
 import { QueuePanel } from './queue/queue-page.tsx';
 import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
 import { FilesSearchPanel } from './slots/files-search-panel.tsx';
@@ -42,7 +43,11 @@ const scoped =
   );
 
 export interface ConversationSurfaces {
-  readonly screens: { readonly chat: AppComponent<ScreenProps>; readonly links: AppComponent<ScreenProps> };
+  readonly screens: {
+    readonly chat: AppComponent<ScreenProps>;
+    readonly links: AppComponent<ScreenProps>;
+    readonly queues: AppComponent<ScreenProps>;
+  };
   readonly panels: {
     readonly attachments: AppComponent<PanelProps>;
     readonly queue: AppComponent<PanelProps>;
@@ -77,6 +82,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
   screens: {
     chat: scoped<ScreenProps>(client, ChatScreen),
     links: scoped<ScreenProps>(client, () => <LinksScreen />),
+    queues: scoped<ScreenProps>(client, AllQueuesScreen),
   },
   panels: {
     attachments: scoped<PanelProps>(client, ComposerAttachPanel),
