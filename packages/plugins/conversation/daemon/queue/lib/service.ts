@@ -2,7 +2,6 @@ import { type Instant, instantFromEpochMs } from '@ferretry/std';
 import type { PeerMessageLabel, QueueAuthor, QueuedMessage, SendSenderKind } from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import { foldQueue } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from './ports.ts';
 import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
 
@@ -68,7 +67,7 @@ export class SessionQueueService {
 
   /** Every message the session's queue holds, oldest first. */
   async list(id: SessionId): Promise<readonly QueuedMessage[]> {
-    return foldQueue(await this.ports.store.read(id));
+    return await this.ports.store.messages(id);
   }
 
   /** Accepts one message: on disk, `queued`, before this resolves — the first tick. */

@@ -211,8 +211,16 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
   };
   const write = async <Shape>(file: StateFileDef<string, Shape>, value: Shape, name?: string): Promise<void> => {
     guard(file);
-    if (file.store === 'jsonl' || file.store === 'sqlite' || file.store === 'sqlite-cache')
+    if (file.store === 'sqlite' || file.store === 'sqlite-cache')
       throw new TypeError(`state ${file.name}: a ${file.store} file is not written with write()`);
+    if (file.store === 'jsonl') {
+      // As the real port: a jsonl file is replaced whole from an array of records, one stamped line each.
+      if (!Array.isArray(value))
+        throw new TypeError(`state ${file.name}: a jsonl file is written from an array of records`);
+      folder.files.set(pathOf(file, name), value.map(record => `${stamp(file, record)}\n`).join(''));
+      folder.landed();
+      return;
+    }
     if (isBytes(file)) {
       if (!(value instanceof Uint8Array) && typeof value !== 'string')
         throw new TypeError(`state ${file.name}: a ${file.store} file holds bytes`);
@@ -306,7 +314,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       if (stored === undefined) return undefined;
       const size = typeof stored === 'string' ? new TextEncoder().encode(stored).byteLength : stored.byteLength;
       // content-addressed: equal etags mean the same bytes (the real port's moves on any rewrite or append)
-      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}` };
+      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}`, settled: true };
     },
     async records(file, name) {
       guard(file);

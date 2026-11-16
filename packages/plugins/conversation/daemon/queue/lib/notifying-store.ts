@@ -1,4 +1,4 @@
-import { QUEUE_CHANGED_EVENT, type QueueChangedEventData } from '@ferretry/core-mailbox/contract';
+import { QUEUE_CHANGED_EVENT, type QueueChangedEventData, type QueuedMessage } from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { QueueEvent } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from './ports.ts';
@@ -25,8 +25,8 @@ export class NotifyingSessionQueueStore implements SessionQueueStore {
     private readonly publisher: QueueChangePublisher,
   ) {}
 
-  async read(id: SessionId): Promise<readonly QueueEvent[]> {
-    return await this.inner.read(id);
+  async messages(id: SessionId): Promise<readonly QueuedMessage[]> {
+    return await this.inner.messages(id);
   }
 
   async append(id: SessionId, event: QueueEvent): Promise<void> {

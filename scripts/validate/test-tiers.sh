@@ -31,6 +31,7 @@ cd "${root_dir}"
 
 # The tier's workflow and exact-head merge status are part of the test contract too.
 bun scripts/test/ci-sets.ts
+bun scripts/test/proof-reuse.ts
 
 failures=0
 refuse() {

@@ -69,7 +69,7 @@ describe('the files a ferret’s conversation is kept in', () => {
   test('F-0316 F-0399 the queue is the ferret’s queue.jsonl', async () => {
     const { state, touched } = recorded();
     expect(QUEUE_STATE.path).toBe('*/queue.jsonl');
-    expect(await new StateQueueStore(state).read(F1)).toEqual([]);
+    expect(await new StateQueueStore(state).messages(F1)).toEqual([]);
     expect(touched).toEqual(['*/queue.jsonl f1']);
   });
 

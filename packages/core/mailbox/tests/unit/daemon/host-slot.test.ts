@@ -4,7 +4,7 @@ import daemon from '../../../daemon/index.ts';
 import { MAILBOX_HOST_MISSING, MailboxHostMissingError, requireMailboxHost } from '../../../daemon/lib/host-slot.ts';
 
 const HOST: MailboxHost = {
-  queue: { read: async () => [], append: async () => undefined },
+  queue: { messages: async () => [], append: async () => undefined },
   ledger: {} as MailboxHost['ledger'],
 };
 

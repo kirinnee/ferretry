@@ -13,19 +13,29 @@ const clock = { now: () => instantFromEpochMs(1_794_052_800_000) };
 const f1 = parseSessionId('f1');
 
 describe('conversation state adapters, on the kernel state port', () => {
-  test('the queue store appends events and reads them back in order, skipping an event it does not know', async () => {
+  test('the queue store appends events and folds them into messages, skipping an event it does not know', async () => {
     const state = new MemoryStateFolder().port(CONVERSATION_STATE);
     const store = new StateQueueStore(state);
     await state.append<unknown>(QUEUE_STATE, { v: 1, kind: 'bogus' }, 'f1');
     await store.append(f1, {
       v: 1,
-      kind: 'moved',
+      kind: 'enqueued',
       at: clock.now(),
-      id: 'm1',
-      state: 'cancelled',
+      message: {
+        v: 1,
+        id: 'm1',
+        sender: 'human',
+        text: 'hi',
+        attachmentIds: [],
+        enqueuedAt: clock.now(),
+        state: 'queued',
+        stateAt: clock.now(),
+        revision: 1,
+      },
     });
-    const events = await store.read(f1);
-    expect(events.map(event => event.kind)).toEqual(['moved']);
+    await store.append(f1, { v: 1, kind: 'moved', at: clock.now(), id: 'm1', state: 'cancelled' });
+    const messages = await store.messages(f1);
+    expect(messages.map(message => [message.id, message.state, message.version])).toEqual([['m1', 'cancelled', 2]]);
   });
 
   test('the send ledger is last-write-wins per send and refuses a second accept of the same send', async () => {
@@ -192,18 +202,13 @@ describe('the merged half', () => {
     expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
-  test('a render saved is served back, and a link listing and its preview say plainly that they are not in 5.0 yet', async () => {
+  test('a link listing answers from the conversation index (empty while no harness offers history), and an unknown preview is a 404', async () => {
     const host = await boot();
     const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
-    expect(links.status).toBe(503);
-    // One fixed sentence, never a raw error: the app draws `error` as it is.
-    expect(links.json()).toMatchObject({
-      code: 'conversation_harness_unavailable',
-      error: expect.stringContaining('Not in 5.0 yet'),
-    });
+    expect(links.status).toBe(200);
+    expect(links.json()).toMatchObject({ conversations: [], matched: 0, skipped: 0 });
     const preview = await host.request('GET', '/v1/links/conversations/claude-code/abc/preview', { as: owner() });
-    expect(preview.status).toBe(503);
-    expect(preview.json()).toMatchObject({ error: (links.json() as { error: string }).error });
+    expect(preview.status).toBe(404);
     const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
     expect([400, 404]).toContain(unknown.status);
   });

@@ -197,6 +197,19 @@ export function spokenMessages(
   });
 }
 
+/**
+ * What the owner's messages say AS WRITTEN: a hand-off pointer is its own line, not skipped. For a conversation whose every
+ * message is a pointer (a ferret's: its turns arrive as "Read the file …/turn-001.md"), where {@link spokenMessages} finds
+ * nothing to describe it by. Reminders, a CLI's own tagged blocks and interruption markers still say nothing.
+ */
+export function writtenMessages(events: readonly TranscriptEvent[]): readonly string[] {
+  return events.flatMap(event => {
+    if (!isOwnerMessage(event)) return [];
+    const written = collapse(withoutDeliveryWrappers(event.text));
+    return written === '' || written.startsWith('<') || NOISE.has(written) ? [] : [written];
+  });
+}
+
 /** `text` cut to `max` characters, the cut marked. */
 export const truncateText = (text: string, max: number): string =>
   text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`;
