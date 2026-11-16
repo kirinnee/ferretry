@@ -16,7 +16,8 @@ import {
   CodexUpdateFinished,
 } from './contract/index.ts';
 import { cap } from '@ferretry/core-gate/contract';
-import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import { LoginChanged } from '@ferretry/plugin-logins/contract';
 import {
   PROFILE_COMPONENTS_KEY,
   ProfileCodexHooksSource,
@@ -142,6 +143,9 @@ export default definePlugin({
     config: [CODEX_CONFIG, CODEX_SETTINGS, CODEX_HOOKS],
     readModels: CODEX_READ_MODELS,
     publishes: [CodexUpdateFinished],
+    // A ferret that stopped or went away, and a login removed, signed out or switched off, each take the login's sign-in
+    // back out of the Codex homes it was linked into (`RootHandle.linkCredential` makes the link; nothing else removes it).
+    subscribes: [FerretsChanged, LoginChanged],
   },
 
   hooks: {

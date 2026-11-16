@@ -26,7 +26,13 @@ import { packageRunner } from './adapters/package-run.ts';
 import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
-import { codexRuntimeSwitch, codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import {
+  codexRuntimeSwitch,
+  codexUpdateRoutes,
+  followCredentialEnds,
+  HarnessUpdateService,
+  locateCodex,
+} from './lib/index.ts';
 import { codexDoctor } from './lib/doctor.ts';
 import { CATALOG_LOADING, CODEX_NOT_FOUND, fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
@@ -146,6 +152,42 @@ export default implementDaemon(manifest, {
     };
     const routes = codexUpdateRoutes({ view, start });
 
+    const harness = codexHarness({
+      kernel,
+      // Changing a running ferret's model, effort or fast mode. The models are the held catalog's (the same list a fast
+      // start is judged against), read without spawning anything; a catalog not yet held is a stated failure, never an
+      // empty list. GAP(codex): that catalog is read without the ferret's login, so it is the list Codex advertises to
+      // nobody in particular, not this account's own.
+      runtimeSwitch: codexRuntimeSwitch({
+        choices: {
+          get: async () => {
+            await catalog.loaded();
+            catalog.refreshIfStale();
+            const held = catalog.held();
+            if (held === undefined) throw new Error(catalog.binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING);
+            // Never changed by anyone after it is read, so the contract's mutable arrays are safe to hand it.
+            return held as readonly RuntimeModelChoice[];
+          },
+        },
+        sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
+        binaryName: 'fy',
+      }),
+      selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
+      locate,
+      probe,
+      permissionMode: () => paths().permissionMode,
+      questionTool: () => paths().questionTool,
+      historyDirectory: async () => {
+        const home = await homeDirectory();
+        return home === '' ? undefined : `${home}/.codex/sessions`;
+      },
+      historyHome: async () => {
+        const home = await homeDirectory();
+        return home === '' ? undefined : `${home}/.codex`;
+      },
+      update: { view, start, settled: () => service.settled() },
+    });
+
     return {
       routes,
       // Which `codex` this host runs and by which rule (today's `codex` row), by the same location every start uses.
@@ -174,42 +216,10 @@ export default implementDaemon(manifest, {
             () => catalog.binaryMissing(),
           );
         },
-        'harnesses:codex': codexHarness({
-          kernel,
-          // Changing a running ferret's model, effort or fast mode. The models are the held catalog's (the same list a fast
-          // start is judged against), read without spawning anything; a catalog not yet held is a stated failure, never an
-          // empty list. GAP(codex): that catalog is read without the ferret's login, so it is the list Codex advertises to
-          // nobody in particular, not this account's own.
-          runtimeSwitch: codexRuntimeSwitch({
-            choices: {
-              get: async () => {
-                await catalog.loaded();
-                catalog.refreshIfStale();
-                const held = catalog.held();
-                if (held === undefined) throw new Error(catalog.binaryMissing() ? CODEX_NOT_FOUND : CATALOG_LOADING);
-                // Never changed by anyone after it is read, so the contract's mutable arrays are safe to hand it.
-                return held as readonly RuntimeModelChoice[];
-              },
-            },
-            sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
-            binaryName: 'fy',
-          }),
-          selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
-          locate,
-          probe,
-          permissionMode: () => paths().permissionMode,
-          questionTool: () => paths().questionTool,
-          historyDirectory: async () => {
-            const home = await homeDirectory();
-            return home === '' ? undefined : `${home}/.codex/sessions`;
-          },
-          historyHome: async () => {
-            const home = await homeDirectory();
-            return home === '' ? undefined : `${home}/.codex`;
-          },
-          update: { view, start, settled: () => service.settled() },
-        }),
+        'harnesses:codex': harness,
       },
+      // A ferret that stopped, or a login that was revoked, takes the sign-in out of the home it was linked into.
+      subscribers: followCredentialEnds(harness.credentials),
     };
   },
 });
