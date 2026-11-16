@@ -29,7 +29,7 @@ describe('the harness gate is OPEN, and the mapping it opened on cannot drift fr
   // daemon/harness-seam.ts (and the session-layer refusals in daemon/delivery/lib/interrupt.ts) against the new surface,
   // answer every new kind there, then move these pins. Do not just edit the expectation.
   test('Ferrets’ deliver, queue and interrupt answer exactly the taxonomy Conversation maps', () => {
-    const port = read('../../../../../core/ferrets/contract/port.ts');
+    const port = read('../../../../../core/ferrets/contract/ports/harness.port.ts');
     const kinds = read('../../../../../core/ferrets/contract/kinds.ts');
 
     for (const line of [
