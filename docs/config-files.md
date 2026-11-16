@@ -256,8 +256,8 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   unparsed text is shown as it is).
 
 What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
-under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
-flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a password stuck to `-p`
+that holds a plain `=` or blank is not cut; and a text that does not parse can
 show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
 
 ## Editing

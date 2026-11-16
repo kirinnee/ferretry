@@ -55,13 +55,25 @@ function said(name: string, value: unknown): Pick<ResolvedSetter, 'value' | 'hid
     : { value: text };
 }
 
-/** A path with its %-escapes read back, or as it is when they do not parse. */
+/** A run of %-escapes: the bytes of one or more characters. */
+const ESCAPE_RUN = /(?:%[0-9A-Fa-f]{2})+/gu;
+
+/** One escape of an ASCII character: `%20`. */
+const ASCII_ESCAPE = /%([0-7][0-9A-Fa-f])/gu;
+
+/**
+ * A path with its %-escapes read back, run by run: a run that does not parse (`%E0%A4`, half a character) does not
+ * keep the valid ones around it from being read (`/%zz/mcp%20--token%20V` is `/%zz/mcp --token V`), and the ASCII ones
+ * inside it are read too (`%20%E0%A4`), because a blank is what splits a flag from its value.
+ */
 function decodedPath(path: string): string {
-  try {
-    return decodeURIComponent(path);
-  } catch {
-    return path;
-  }
+  return path.replace(ESCAPE_RUN, run => {
+    try {
+      return decodeURIComponent(run);
+    } catch {
+      return run.replace(ASCII_ESCAPE, (_, hex: string) => String.fromCharCode(Number.parseInt(hex, 16)));
+    }
+  });
 }
 
 /** Where a server is reached, without a query, a fragment or a user in it. */
