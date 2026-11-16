@@ -1,15 +1,11 @@
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { type BearerDigest, ferretOf } from '@ferretry/core-gate/contract';
+import { randomBytes } from 'node:crypto';
+import { type BearerDigest } from '@ferretry/core-gate/contract';
 import {
   ApiError,
-  type ApiResponse,
   type CallContext,
   decodeParameter,
   type FencedPath,
-  headerValue,
-  jsonResponse,
   type PinnedWorkingDirectory,
-  queryValue,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
@@ -21,20 +17,14 @@ import {
   FerretStopping,
   FerretStarted,
   FerretFiles,
-  RestartsFile,
   FerretHistoryFiles,
   type FerretIngestEvidence,
-  FerretLiveReadSchema,
   type FerretRecord,
   type FerretState,
   FerretsChanged,
   FerretTokensFile,
   type HarnessKey,
   LimitsConfigFile,
-  ArchiveConfigFile,
-  ArchiveKeeps,
-  COMPACTION_HISTORY_KEY,
-  CompactionHistoryHook,
   FerretLaunchSectionsFiles,
   Harnesses,
   LAUNCH_ROOTS_KEY,
@@ -48,36 +38,24 @@ import {
   RUNTIME_START_KEY,
   RuntimeStart,
   SitrepLines,
-  SubtreeViewSchema,
   StartDecide,
-  AutoResumeDecide,
   AgentPinsFile,
   FerretDetailsFile,
-  FerretPinsFile,
-  lookupStartRequest,
-  StartRequestsFile,
-  startFingerprintText,
-  withStartRequest,
-  RestartQueueEntrySchema,
   FerretLaunchEnvironmentFiles,
   FerretSummaryFiles,
   FerretWaitFiles,
-  MonitorTickFile,
-  DAEMON_ORIGIN,
 } from '../contract/index.ts';
-import { SubtreeService } from './lib/session/pack/subtree.ts';
 import manifest from '../manifest.ts';
-import { ConditionalFleetList } from './lib/fleet-list/conditional.ts';
+import { archivedNameClaims } from './lib/names/session-names.ts';
+import { ferretsPort } from './lib/ferrets/port.ts';
+import { turnWatchFailureFields } from './modules/turn-watch.ts';
 import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
-import { FerretsService, type FerretsPorts, RENAME_HTTP } from './lib/ferrets/service.ts';
+import { FerretsService, type FerretsPorts } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
-import { boundedReason } from './lib/ferrets/auto-resume.ts';
-import { parseRenameBody, parseResumeBody, parseStartBody, parseStopBody } from './lib/ferrets/wire.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
-import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer, suggestCallsigns } from './lib/names/index.ts';
+import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer } from './lib/names/index.ts';
 import type { NameClaim } from './lib/names/types.ts';
-import { archivedNameClaims } from './lib/names/session-names.ts';
 import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
@@ -94,56 +72,22 @@ import { LaunchEnvironmentStore, switchesOfRecord } from './lib/agent-control/la
 import { agentControlReader } from './lib/agent-control/reader.ts';
 import { RegistryWorkFolders } from './lib/work-folders/work-folders.ts';
 import { ferretsAgendaContext } from './modules/agenda-context.ts';
-import { buildWorktrees } from './modules/worktrees.ts';
-import { FY_REQUEST_ID_HEADER } from './lib/protocol/headers.ts';
-import { WARDEN_LABEL } from './lib/session/peers/warden-lifecycle.ts';
-import { sessionFilesystemRoutes } from './lib/runtime/mounts/session-filesystem.ts';
-import { AGENT_READ_FENCE, SessionFilesystem } from './lib/session/filesystem/index.ts';
+import { SessionFilesystem } from './lib/session/filesystem/index.ts';
 import { KernelGitRunner } from './adapters/git/runner.ts';
-import { createKernelWorktreeHostIo } from './adapters/worktrees/kernel-host-io.ts';
 import { KernelDiffScratch, KernelSessionRootPinner, RunnerSessionGit } from './adapters/session/filesystem/index.ts';
 import { StateAgentPinRepository } from './adapters/agent-pins/index.ts';
-import { RegistryPinSessionDirectory, StatePinRepository } from './adapters/pins/index.ts';
 import { KeyedSerialExecutor } from './adapters/storage/keyed-serial-executor.ts';
-import { type StateHomeLaunchReach, stateHomeLaunchRefusal } from './lib/route-security/state-home.ts';
-import { terminalLaunchRefusal } from './lib/route-security/launch.ts';
-import { confirmRestore } from './lib/route-security/restore.ts';
-import { AgentPinService, AgentPinSubsystem, withPinned } from './lib/agent-pins/index.ts';
-import { PinService } from './lib/pins/index.ts';
-import { pinRoutes } from './lib/runtime/mounts/pins.ts';
-import { sessionPinRoutes } from './lib/runtime/mounts/session-pin.ts';
-import { sessionArchiveRoutes } from './lib/runtime/mounts/session-archive.ts';
-import { ARCHIVE_PASS_JOB, ARCHIVE_TICK_MS, buildArchive, hiddenFromLiveList } from './modules/archive.ts';
-import { sessionRestartRoutes } from './lib/runtime/mounts/session-restart.ts';
-import { FerretRestarts, restartService } from './lib/ferrets/restarts.ts';
-import { sessionSignalRoutes } from './lib/runtime/mounts/session-signal.ts';
-import { FerretSignals } from './lib/ferrets/signals.ts';
-import { SessionSignalService } from './lib/session/signal/service.ts';
-import {
-  FerretSignalArtifacts,
-  type FerretSignalHost,
-  FerretSignalRepository,
-  FerretSignalTerminal,
-} from './adapters/session/signal/ferret-signal.ts';
-import { FerretMonitorSend, MonitorFiles, StorageMonitorWaits } from './adapters/session/monitor/index.ts';
-import { defaultSessionMonitorSettings } from './lib/session/monitor/index.ts';
-import { buildMonitor, MONITOR_RECORD_NAME, MONITOR_TICK_JOB } from './modules/monitor.ts';
+import { type StateHomeLaunchReach } from './lib/route-security/state-home.ts';
+import { AgentPinService } from './lib/agent-pins/index.ts';
 import { DaemonStorage } from './adapters/storage/session-storage.ts';
 import { SessionFiles, type SessionFilesDeps } from './modules/session-files.ts';
-import { buildMoves, MOVE_ROUTE_KEYS } from './moves.ts';
-import { movesDeps } from './moves-deps.ts';
-import { fleetEventsAccept, followableFerret, HistoryEventSource } from './modules/fleet-events.ts';
+import { HistoryEventSource } from './modules/fleet-events.ts';
 import { folderLister } from './lib/ferrets/folder-listing.ts';
-import { ferretsPort } from './lib/ferrets/port.ts';
-import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
-import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
-import type { ResumeActor } from './lib/session/resume/types.ts';
+import { callerIsAgent } from './lib/ferrets/launch-origin.ts';
 import { SessionConfigSchema, SessionStateSchema } from './lib/protocol/session.ts';
-import { displayModel, ingestEvidence, liveRead } from './lib/protocol/session-subtree.ts';
+import { displayModel, ingestEvidence } from './lib/protocol/session-subtree.ts';
 import { livePaneLimits } from './lib/ferrets/pane-limits.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
-import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
-import { buildLiveEvents } from './modules/live-events.ts';
 import { FileLastSnapshotStore } from './adapters/session/snapshot/file-last-snapshot-store.ts';
 import { LastSnapshotCapture } from './lib/session/snapshot/capture.ts';
 import { LastSnapshotReading } from './lib/session/snapshot/read.ts';
@@ -151,38 +95,13 @@ import { HarnessTranscript } from './adapters/session/live/harness-transcript.ts
 import { applicableInstructions, outdatedSectionIds, sectionDigests } from './lib/ferrets/launch-sections.ts';
 import type { LaunchInstructionSectionId } from './lib/protocol/session.ts';
 import { lifecycleStatus, withLifecycleStatus } from './lib/ferrets/session-document.ts';
-import { AUTO_RESUME_JOB, buildAutoResume } from './modules/auto-resume.ts';
-import { INDEX_REBUILD_JOB, runIndexRebuild } from './modules/index-rebuild.ts';
-import { relaunchSettings } from './modules/relaunch-settings.ts';
+import features from './generated/features.ts';
+import { callerFerret, NOT_OWN_FERRET_CODE } from './features/caller.ts';
+import { registerFeatures } from './features/compose.ts';
+import { TURN_WATCH_JOB } from './features/turn-watch.feature.ts';
+import type { FerretsContext, LateBindings } from './features/types.ts';
 
-/** The code an agent asking for a ferret that is not its own, or its helper's, is refused with (today's). */
-export const NOT_OWN_FERRET_CODE = 'not_own_session';
-
-/** The job that arms the turn watch once the daemon serves (today's `activities.run('turn watcher', …)`, J-0001). */
-export const TURN_WATCH_JOB = 'ferrets.turn-watch';
-
-/**
- * The ferret behind a call, from Gate's standing (`ferretOf`, today's `agentSessionOf`): a ferret's own token, or the
- * admin token with a ferret named in `x-ferretry-session-id` (the call's actor is then that ferret's). `undefined` for a
- * person (the admin token with no ferret behind it, a device) and for the Warden, which acts as no ferret.
- */
-export function callerFerret(call: CallContext): FerretId | undefined {
-  return ferretOf(call);
-}
-
-/**
- * Who asked for a resume, for the author recorded beside its turn document (today's `resumeTurnAuthor` input):
- * ATTRIBUTION only, never authority, which the route has already decided. The warden is the Warden; a ferret's token,
- * or the admin token with a ferret behind it, is a peer ferret; a device and the admin UI or CLI are the owner.
- */
-function resumeActorOf(call: CallContext): ResumeActor {
-  const credential = call.credential;
-  if (credential?.tokenClass === 'warden') return 'warden';
-  if (credential?.tokenClass === 'ferret' || callerFerret(call) !== undefined) return 'peer';
-  if (credential?.tokenClass === 'device') return 'device';
-  if (call.actor === 'admin-cli' || call.actor === 'admin-ui') return call.actor;
-  return 'unknown';
-}
+export { callerFerret, NOT_OWN_FERRET_CODE, TURN_WATCH_JOB };
 
 /** A random ferret id: base-36 time + 8 hex characters (today's `TimeSessionIdFactory`). */
 const mintId = (nowMs: number): FerretId => `${nowMs.toString(36)}-${randomBytes(4).toString('hex')}` as FerretId;
@@ -198,7 +117,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   });
   const tokens = new FerretTokenDirectory();
   const workFolders = new RegistryWorkFolders(registry);
-  const fleetList = new ConditionalFleetList();
 
   // Load what is held. Sync answers (`mayTouch`, `bearers:ferret`, `WorkFolders`) see nothing until this lands,
   // which fails closed: an unknown ferret is refused, an unknown digest is no ferret.
@@ -475,10 +393,13 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
   });
 
-  // Bound once the turn watch is built below: a delivery into a ferret's pane brings its next look forward.
-  let wakeTurnWatch: ((ferret: FerretId) => void) | undefined;
-  // Bound once the harness transcript is built below: a stopped ferret's remembered transcript and tail are dropped.
-  let forgetTranscript: ((ferret: FerretId) => void) | undefined;
+  // What a feature builds that this composition's ports reach lazily: the turn watch's wake-up, the managed worktrees and
+  // the moves. Assigned when the features register, read only when a call is made.
+  const late: LateBindings = {};
+  const lateOf = <T>(held: T | undefined, feature: string): T => {
+    if (held === undefined) throw new Error(`ferrets: the ${feature} feature is not registered`);
+    return held;
+  };
   /** The `logins:<kind>` provider that holds the named login, or why none does. */
   const loginKindOf = (login: string): Result<LoginKind, string> => {
     const kinds = [...hooks.providers(Logins).values()];
@@ -622,11 +543,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // The folder the ferret will really work in, judged by the kernel's identity fence (a work folder or a link swapped
     // in after the route's check lands here).
     stateHomeHolding: async path => await kernel.paths.stateHomeHolding(path),
-    delivered: ferret => wakeTurnWatch?.(ferret),
+    delivered: ferret => late.wakeTurnWatch?.(ferret),
     changed: payload => {
       followStatus(payload.ferret, payload.state, 'lifecycle');
       if (payload.state === 'stopped') {
-        forgetTranscript?.(payload.ferret);
+        transcripts.forget(payload.ferret);
         removeEnvironment(payload.ferret);
       }
       hooks.observe(FerretChanged, payload);
@@ -662,10 +583,10 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return checked.ok ? await root.realPath(checked.value) : undefined;
     },
     // The registry the worktrees module keeps (built below); read only, through its own lifecycle chain.
-    managedWorktrees: async () => await worktrees.service.records(),
+    managedWorktrees: async () => await lateOf(late.worktrees, 'worktrees').service.records(),
     // Bound below, once the moves are built (the moves resume through this very service).
     move: async (ferret, runtime, options) =>
-      await moves.move.move(ferret, {
+      await lateOf(late.moves, 'moves').move.move(ferret, {
         agent: runtime,
         ...(options.model === undefined ? {} : { model: options.model }),
         allowContextDowngrade: options.allowContextDowngrade ?? false,
@@ -691,9 +612,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   } satisfies FerretsPorts & Required<Pick<FerretsPorts, 'serial' | 'cutOffMark'>>;
   const service = new FerretsService(registry, tokens, servicePorts);
 
-  // The turn watch (U4, RULING #44): the session observer's turn part on the main thread, every live ferret's pane looked
-  // at through `Runner.look` at today's 2 s tick (a quiet pane backing off to 10 s), one pane per turn of the loop.
-  // Armed once the daemon serves (today's `observer.arm()` after the first monitor tick), closed when it stops.
   // The transcript, through the harness that wrote it (U5): the proof of WHICH file is a ferret's is the harness's, so
   // Ferrets opens no transcript path. The turn fold and both stream sources read it here.
   const transcripts = new HarnessTranscript(
@@ -704,39 +622,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     },
     ferret => registry.get(ferret)?.harness,
   );
-  forgetTranscript = ferret => transcripts.forget(ferret);
-  const turnWatch = buildTurnWatch({
-    storage: sessionStore,
-    tail: transcripts.tail,
-    record: ferret => registry.get(ferret),
-    runner: () => {
-      const found = hooks.provider(Runners, 'tmux');
-      return found === 'unavailable' ? undefined : found;
-    },
-    turnObserved: async (ferret, turn) => await service.turnObserved(ferret, turn),
-    clock: { now: () => kernel.clock.now() },
-    every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
-    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
-    log,
-  });
-  wakeTurnWatch = turnWatch.wake;
-  kernel.jobs.add({
-    id: TURN_WATCH_JOB,
-    schedule: { onceAfterStart: true },
-    run: async () => {
-      await ready();
-      await storeLoaded.catch(() => undefined);
-      // Once per arm, every held ferret's document is brought to its registry state: one left `starting` by a crash
-      // between the registry's write and the status lane's (or written before U4) would otherwise never be given a
-      // turn, and no registry change would come to repair it. The same lane and rule as every later edge.
-      // A registry read at arm may be stale, so it is no proof of a new run: it never revives an ended document.
-      for (const record of registry.list()) followStatus(record.id, record.state, 'reconcile');
-      // The boot sweep: an ended ferret's environment file a crash (or an older daemon) left behind goes now.
-      for (const record of registry.list()) if (record.state === 'stopped') removeEnvironment(record.id);
-      turnWatch.host.arm();
-      kernel.lifecycle.onStop(async () => await turnWatch.host.close());
-    },
-  });
 
   /**
    * The model a ferret is really running (today's `displayModel`): what the harness last reported, then its configured
@@ -766,41 +651,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     const state = SessionStateSchema.safeParse(await sessionStore.readState(id).catch(() => undefined));
     return config.success && state.success ? ingestEvidence(config.data, state.data) : undefined;
   };
-
-  // G24: the same bounded read as today's subtree API, masked whole before excerpts are cut.
-  const subtree = new SubtreeService(registry, {
-    nowMs: () => kernel.clock.nowMs(),
-    model: displayModelOf,
-    lines: async ferret => (await service.sitrep(ferret))?.lines ?? [],
-    redact: texts => kernel.redaction.read(scope => texts.map(text => scope.text(text))),
-  });
-
-  // Managed worktrees (today's worktrees module). Its Git and disk IO is the kernel's roots and spawn: the `worktrees` root
-  // (`<home>-worktrees`) is the managed folder, and a repository a checkout is made from is reached through the `work`
-  // root of the ferret standing in it. A host whose `worktrees` root names no folder hosts none, and every route says so.
-  const worktreeIo = createKernelWorktreeHostIo({
-    worktrees: kernel.roots.root('worktrees'),
-    work: ferret => kernel.roots.root('work', { ferret }),
-    ferrets: () => registry.list().map(ferret => ({ id: ferret.id, folder: ferret.folder })),
-    spawn: kernel.spawn,
-  });
-  const worktrees = buildWorktrees({
-    ...(worktreeIo === undefined ? {} : { io: worktreeIo }),
-    state: kernel.state,
-    clock: kernel.clock,
-    sessions: async () => {
-      await ready();
-      // A ferret standing in a folder, as today's session directory reported it: stopped ferrets are finished.
-      return registry.list().map(ferret => ({
-        id: ferret.id,
-        cwd: ferret.folder,
-        status: ferret.state === 'stopped' ? ('stopped' as const) : ('running' as const),
-        ...(ferret.state === 'stopped' ? { finishedAt: ferret.stateAt } : {}),
-      }));
-    },
-    terminalRoots: async () => undefined,
-    newId: () => randomUUID(),
-  });
 
   /** The ferret an id or a name addresses; a name two ferrets hold on one footing addresses none. */
   const resolveFerret = (reference: string): FerretId | undefined => {
@@ -857,7 +707,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   const knownLaunchRoots = async (): Promise<readonly string[]> => {
     const found = hooks.provider(LaunchRoots, LAUNCH_ROOTS_KEY);
     const projects = found === 'unavailable' ? [] : await found.roots();
-    return worktrees.managedRoot === undefined ? projects : [...projects, worktrees.managedRoot];
+    const managedRoot = lateOf(late.worktrees, 'worktrees').managedRoot;
+    return managedRoot === undefined ? projects : [...projects, managedRoot];
   };
 
   /** S47: an agent reaches only its own ferret and its helpers'; a person is unaffected. */
@@ -885,11 +736,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${target} is neither`, 'forbidden');
   };
 
-  // The file browser (today's session-filesystem mount) over the kernel: each ferret's `work` root pins its folder and
-  // walks beneath it by descriptor and Git runs in the held object. For an AGENT the pin refuses (`denied`, 403) every
-  // path inside the state home and every hard link, and the service asks the pin's name verdict wherever a name never
-  // passes through the walk (Git's change list, a HEAD read, a badge); a PERSON is unfenced, as today (S47). The
-  // service is stateless, so one is made for the ferret a request names.
   const sessionGit = new RunnerSessionGit(
     new KernelGitRunner({
       // A string folder is one this module already fenced (a scratch folder); a held directory is the kernel's pin.
@@ -907,24 +753,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       sessionGit,
       () => kernel.clock.nowMs(),
     );
-  const fileBrowser = sessionFilesystemRoutes({
-    filesystem: sessionFilesystemOf,
-    // `scope=media` (F-0327): the ferret's `media/` folder on the sessions root, held open the same way and no wider.
-    media: ferret =>
-      new SessionFilesystem(new KernelSessionRootPinner(sessionFiles.mediaRoot(ferret)), sessionGit, () =>
-        kernel.clock.nowMs(),
-      ),
-    redaction: kernel.redaction,
-    reach: async call => {
-      const id = await pathFerret(call);
-      agentMayReach(call, id);
-      const folder = registry.get(id)?.folder;
-      if (folder === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-      // S47, today's `agentFence`: an agent reads only its own ferret's and its helpers' files (above), behind the
-      // state-home fence; a person reads unfenced.
-      return { id, cwd: folder, ...(callerIsAgent(call) ? { fence: AGENT_READ_FENCE } : {}) };
-    },
-  });
 
   const parseJson = (text: string): unknown => {
     if (text.trim() === '') return {};
@@ -936,221 +764,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   const body = async (call: CallContext): Promise<unknown> => parseJson(await call.request.text());
 
-  // Moves and forks (ferrets-c): today's fork, handover and move modules, built once. The archive the session store
-  // keeps is read before the first of their routes answers; the handover's reconcile loop is armed once the daemon
-  // serves (today: beside the warden sweep) and disarmed when it stops.
-  const moves = buildMoves(
-    ctx,
-    movesDeps(ctx, {
-      storage: sessionStore,
-      clientName: 'fy',
-      environment: sessionFiles.environment,
-      createLifecycle: sessionFiles.createLifecycle,
-      // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
-      resume: ferretsMoveResume(
-        service,
-        ferret => registry.get(ferret),
-        async ferret => await movedTarget(async () => await sessionStore.readConfig(ferret as unknown as SessionId)),
-      ),
-      // The relaunch-settings read (W2-c, RULING #27 Q9): the ferret's own harness compares what it launched under with
-      // its settings now; Ferrets reads no harness file. The caller check is `mayAct` below, as for every move route.
-      launch: relaunchSettings({
-        harnessOf: ferret => registry.get(ferret)?.harness,
-        harness: key => {
-          const found = hooks.provider(Harnesses, key);
-          return found === 'unavailable' ? undefined : found;
-        },
-        after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
-      }),
-    }),
-  );
-  // These routes fork, hand over, move or read the conversation of the ferret they name, so — like resume and stop — a
-  // ferret may reach only itself and its helpers.
-  const MOVE_ACTING_ROUTES: readonly string[] = [
-    'POST /v1/ferrets/:ferretId/move',
-    'POST /v1/ferrets/:ferretId/move/ask-to-stop-jobs',
-    'POST /v1/ferrets/:ferretId/fork',
-    'POST /v1/ferrets/:ferretId/handover',
-    'GET /v1/ferrets/:ferretId/handover',
-    'POST /v1/ferrets/:ferretId/handover/cancel',
-    'GET /v1/ferrets/:ferretId/relaunch-settings',
-    'POST /v1/ferrets/:ferretId/conversion-preview',
-  ];
-  const moveRoutes = Object.fromEntries(
-    MOVE_ROUTE_KEYS.map(key => [
-      key,
-      async (call: CallContext) => {
-        if (MOVE_ACTING_ROUTES.includes(key)) mayAct(call, await pathFerret(call));
-        await storeLoaded;
-        return await moves.routes[key](call);
-      },
-    ]),
-  ) as typeof moves.routes;
-  // Auto-resume after a host restart (W2-a, today's `createAutoResume` + `BootExitRecorder`): once the daemon serves, the
-  // ferrets whose terminal the runner PROVES gone are settled `terminal_gone` and written to the ledger, then resumed
-  // through the ordinary resume, staggered, two at a time, each only on Runtimes' OWN yes (RULING #27 Q5: no answer, no
-  // resume, no spend). A person's stop, resume or archive in between wins (`expect`, judged under the ferret's queue).
-  const autoResume = buildAutoResume({
-    state: kernel.state,
-    // The held records (with the runner handle the list view leaves out): the handle is what the settle compares.
-    records: () =>
-      registry.list().flatMap(ferret => {
-        const held = registry.get(ferret.id);
-        return held === undefined ? [] : [held];
-      }),
-    record: ferret => registry.get(ferret),
-    status: async ferret => {
-      const state = SessionStateSchema.safeParse(await sessionStore.readState(ferret as unknown as SessionId));
-      return state.success ? state.data.status : undefined;
-    },
-    gone: async ferret => {
-      const runner = hooks.provider(Runners, 'tmux');
-      return runner !== 'unavailable' && runner.gone !== undefined && (await runner.gone(ferret)) === true;
-    },
-    settle: async (ferret, handle, exited) => await service.settleGone(ferret, handle, exited),
-    decide: async input => await hooks.decideAnswered(AutoResumeDecide, input),
-    // Why a resume was refused (a start.decide taker's sentence, a launch's message) is kept in the journal and the
-    // summary, so it is bounded as Runtimes' own refusal is.
-    resume: async (ferret, message, expect) => {
-      const resumed = await service
-        .resume(ferret, message, { actor: 'daemon', automatic: true, expect, origin: DAEMON_ORIGIN })
-        .catch((error: unknown) => {
-          throw new Error(boundedReason(error instanceof Error ? error.message : String(error)));
-        });
-      if (!resumed.ok) throw new Error(boundedReason(resumed.error.reason));
-    },
-    history: appendHistory,
-    clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
-    sleep: async delay => await kernel.clock.sleep(milliseconds(delay)),
-    log,
-  });
-  kernel.jobs.add({
-    id: AUTO_RESUME_JOB,
-    schedule: { onceAfterStart: true },
-    run: async () => {
-      await ready();
-      await storeLoaded.catch(() => undefined);
-      await autoResume
-        .run()
-        .catch((error: unknown) =>
-          log.warn('the auto-resume pass stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
-        );
-    },
-  });
-
-  // The session index rebuilt in slices when its cache file was lost (BG-049). Not on the housekeeping lane: the
-  // readers of the session list are empty until it has run. A stop aborts it between sessions.
-  kernel.jobs.add({
-    id: INDEX_REBUILD_JOB,
-    schedule: { onceAfterStart: true },
-    run: async signal => {
-      // An archive that did not load names no archived session, and a rebuild would index them: wait for it.
-      if (
-        !(await storeLoaded.then(
-          () => true,
-          () => false,
-        ))
-      )
-        return;
-      await runIndexRebuild(
-        {
-          storage: sessionStore,
-          yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
-          nowMs: () => kernel.clock.nowMs(),
-          log,
-        },
-        signal,
-      ).catch((error: unknown) =>
-        log.warn('the session index rebuild stopped early', { error: error instanceof Error ? error.name : 'unknown' }),
-      );
-    },
-  });
-
-  kernel.jobs.add({
-    id: 'ferrets.handover-reconcile',
-    schedule: { onceAfterStart: true },
-    run: async () => {
-      await storeLoaded;
-      kernel.lifecycle.onStop(moves.arm());
-    },
-  });
-
-  const signalHost: FerretSignalHost = {
-    ready,
-    record: ferret => registry.get(ferret),
-    resolve: resolveFerret,
-    waitingOf: ferret => registry.waitingOf(ferret),
-    creditOf: async ferret => (await parkedFile(ferret)).creditSeconds,
-    saveWaiting: async (ferret, waiting, creditSeconds) => {
-      const { waiting: _before, creditSeconds: _credit, ...kept } = await parkedFile(ferret);
-      await kernel.state.write(
-        FerretWaitFiles,
-        {
-          ...kept,
-          ...(waiting === undefined ? {} : { waiting }),
-          ...(creditSeconds === undefined ? {} : { creditSeconds }),
-        },
-        ferret,
-      );
-      registry.putWaiting(ferret, waiting);
-    },
-    saveFinished: async (ferret, at) => {
-      await kernel.state.write(FerretWaitFiles, { ...(await parkedFile(ferret)), finishedAt: at as never }, ferret);
-      registry.putFinished(ferret, at);
-    },
-    writeSummary: async (ferret, text) => {
-      await kernel.state.write(FerretSummaryFiles, new TextEncoder().encode(text), ferret);
-    },
-    history: appendHistory,
-    // `signal done` is the ferret ending on its own word: its cause is `completed`, not a stop.
-    stop: async (ferret, reason) => await service.stop(ferret, 'now', reason, { kind: 'completed' }),
-  };
-  const signalRepository = new FerretSignalRepository(signalHost);
-  const signalService = new SessionSignalService({
-    repository: signalRepository,
-    artifacts: new FerretSignalArtifacts(signalHost),
-    terminal: new FerretSignalTerminal(signalHost),
-    serial: new KeyedSerialExecutor(),
-    clock: { now: () => kernel.clock.now() },
-  });
-  const signalRoutes = sessionSignalRoutes(
-    new FerretSignals(signalService, { resolve: resolveFerret, view: async ferret => await service.get(ferret) }),
-  );
-  // The declared-wait monitor: a wait that ends wakes its ferret. The loop's own record sits in Ferrets' state, a
-  // ferret's heartbeat in its own session folder; the tick is one job at the loop's own cadence.
-  const monitor = buildMonitor({
-    waits: new StorageMonitorWaits(sessionStore, signalRepository, signalService, defaultSessionMonitorSettings),
-    files: new MonitorFiles(ferret => sessionFiles.root(ferret), {
-      name: MONITOR_RECORD_NAME,
-      write: async text => await kernel.state.write(MonitorTickFile, JSON.parse(text)),
-    }),
-    sends: new FerretMonitorSend(async ferret => await service.harness(ferret)),
-    clock: { now: () => kernel.clock.now(), nowMs: () => kernel.clock.nowMs() },
-  });
-  let monitorArmed = false;
-  kernel.jobs.add({
-    id: MONITOR_TICK_JOB,
-    schedule: { every: milliseconds(monitor.intervalMs) },
-    run: async signal => {
-      await ready();
-      await storeLoaded.catch(() => undefined);
-      // A stop that landed while this waited arms nothing: `close()` has already said the loop is not running.
-      if (signal.aborted) return;
-      if (!monitorArmed) {
-        monitorArmed = true;
-        monitor.arm();
-        kernel.lifecycle.onStop(async () => await monitor.close());
-      }
-      await monitor.run(signal);
-    },
-  });
-  // A ferret signals for itself and its helpers; a person for any ferret (the same rule as stop, resume and rename).
-  const signals = {
-    'POST /v1/ferrets/:ferretId/signal': async (call: CallContext): Promise<ApiResponse> => {
-      mayAct(call, await pathFerret(call));
-      return await signalRoutes['POST /v1/ferrets/:ferretId/signal'](call);
-    },
-  };
   // What a launch now would tell a RUNNING ferret, against what its own launch told it (U6): the same entries a launch
   // narrows by role and harness, compared by fingerprint. Nothing recorded, a stopped ferret or a damaged record answers
   // nothing: a restart is only ever taken on proof.
@@ -1166,80 +779,6 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   };
   // The same answer as a MARK on the list and the view (today's `withOutdated`, 5 s): advice, never a restart decision.
   const outdatedMarks = outdatedMark({ outdated: outdatedFor, nowMs: () => kernel.clock.nowMs(), ttlMs: 5_000 });
-  const restartSubsystem = new FerretRestarts(
-    restartService({
-      ready,
-      ferrets: () => registry.list(),
-      waitingOf: ferret => registry.waitingOf(ferret),
-      outdated: outdatedFor,
-      // The daemon's own restart: its turn is drawn as Ferretry's Restart, never as the owner's words. It REPLACES the live
-      // pane: the runtime, its login, the folder and the start gate are judged first, and only then is the old harness
-      // stopped (`now`, as a move's `releaseLive` does: a polite stop is one Ctrl-C, which Claude Code answers with "Press
-      // Ctrl-C again to exit"). A login that needs sign-in therefore leaves the ferret running, never stopped and unstarted.
-      resume: async (ferret, origin) =>
-        await service.resume(ferret, undefined, { actor: 'daemon', origin, replaceLiveTerminal: true }),
-      startable: async ferret => await service.startable(ferret),
-      history: appendHistory,
-      // An entry that does not parse is dropped on its own; the rest survive, and a queue that cannot be read is empty.
-      loadQueue: async () => {
-        const read = await kernel.state.read(RestartsFile);
-        const queued = read.ok ? (read.value as { queued?: unknown } | undefined)?.queued : undefined;
-        if (!Array.isArray(queued)) return [];
-        return queued.flatMap(entry => {
-          const parsed = RestartQueueEntrySchema.safeParse(entry);
-          return parsed.success ? [parsed.data] : [];
-        });
-      },
-      saveQueue: async entries => {
-        await kernel.state.write(RestartsFile, { queued: entries });
-      },
-      now: () => kernel.clock.now(),
-    }),
-    { resolve: resolveFerret, mayTouch: (caller, target) => registry.mayTouch(caller, target) },
-  );
-  const restartRoutes = sessionRestartRoutes(restartSubsystem);
-  const restarts = {
-    ...restartRoutes,
-    // Clearing the queue clears every ferret's waiting restart: a person's act.
-    'DELETE /v1/restarts': async (call: CallContext): Promise<ApiResponse> => {
-      if (callerFerret(call) !== undefined)
-        throw new ApiError(403, 'a ferret does not clear the restart queue of every ferret', 'forbidden');
-      return await restartRoutes['DELETE /v1/restarts'](call);
-    },
-  };
-  // A waiting restart is tried again at its ferret's next idle moment; an empty queue costs no read.
-  kernel.jobs.add({
-    id: 'restart-drain',
-    schedule: { every: milliseconds(10_000) },
-    run: async () => await restartSubsystem.drain(),
-  });
-  // The archive (U6): finished autonomous ferrets leave the live set when `archive.yaml` says so and Board and Agenda have
-  // both said what keeps a ferret live. Nothing moves, only a write revives, and the list below reads and writes nothing.
-  const archive = buildArchive({
-    storage: sessionStore,
-    settings: () => kernel.config.file(ArchiveConfigFile),
-    nowMs: () => kernel.clock.nowMs(),
-    pinned: async () => await agentPins.pinnedAt(),
-    keeps: () => hooks.contributions(ArchiveKeeps).map(contribution => contribution.item),
-    // Kept by the record whatever the session document says: a ferret still running, and one the record does not say is
-    // autonomous (a record with no `mode` is read as interactive, as the signal path reads it).
-    isLive: ferret => {
-      const record = registry.get(ferret as FerretId);
-      return record !== undefined && (record.state !== 'stopped' || record.mode !== 'auto');
-    },
-    loaded: async () => await storeLoaded,
-    yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
-    // A view names its session's folder, and 5.0 names no state folder to any caller: the ferret's own id stands for it.
-    directory: id => `sessions/${id}`,
-    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
-    log,
-  });
-  kernel.jobs.add({
-    id: ARCHIVE_PASS_JOB,
-    schedule: { every: milliseconds(ARCHIVE_TICK_MS) },
-    run: async signal => await archive.tick(signal),
-  });
-  const archived = sessionArchiveRoutes(archive.subsystem);
   /** Whether the archive took this ferret out of the live set (a read: it writes nothing and revives nothing). */
   const isArchived = (ferret: string): boolean => sessionStore.isArchived(ferret as unknown as SessionId);
   /** Brings an archived ferret back into the live set; nothing for one that is live. */
@@ -1248,130 +787,63 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     await sessionStore.retainSession(ferret as unknown as SessionId);
   };
 
-  // Pins (a3's handlers): the owner's sidebar pins (agent-pins.json) and each ferret's note board (<ferret>/pins.json).
-  const pinnedReader = withPinned(
-    {
-      list: async () => {
-        await ready();
-        return registry
-          .list()
-          .map(ferret => registry.summary(ferret.id))
-          .filter(summary => summary !== undefined);
-      },
-      get: async reference => {
-        await ready();
-        const resolution = resolveAgentAddress(
-          reference,
-          registry.list().map(ferret => ({ id: ferret.id, name: ferret.name, status: ferret.state })),
-        );
-        return resolution.kind === 'session' ? registry.summary(resolution.id as FerretId) : undefined;
-      },
-    },
-    agentPins,
-  );
-  // A pin is a keep the owner wrote: pinning an archived ferret brings it back into the live set (the store's own
-  // idempotent revival, ancestors included). A revival that fails answers the failure; pinning again retries it, since
-  // the pin is already saved and the ferret is still archived.
-  const pinSubsystem = new AgentPinSubsystem(pinnedReader, agentPins);
-  const sidebarPins = sessionPinRoutes(
-    {
-      pin: async reference => {
-        const pinned = await pinSubsystem.pin(reference);
-        await reviveArchived(pinned.id);
-        return pinned;
-      },
-      unpin: async reference => await pinSubsystem.unpin(reference),
-    },
-    ferret => {
-      // A wake-up for views (the ferret list re-reads): a pin is not a registry change, so nothing else says it moved.
-      generation += 1;
-      kernel.events.publish(FerretsChanged, { ferret, generation });
-    },
-  );
-  const noteBoard = pinRoutes({
-    pins: new PinService(
-      new RegistryPinSessionDirectory(ferret => registry.get(ferret as FerretId) !== undefined),
-      new StatePinRepository(kernel.state, FerretPinsFile, pinClock),
-      pinClock,
-      { next: () => randomUUID() },
-    ),
-    ferretOf: pathFerret,
-    callerOf: call => {
-      const own = callerFerret(call);
-      return { isAgent: callerIsAgent(call), ...(own === undefined ? {} : { ferret: own }) };
-    },
-  });
-
-  /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
-  const payloadDigest = (text: string): string =>
-    createHash('sha256').update(startFingerprintText(text), 'utf8').digest('hex');
-  /** Starts under one request id run one at a time, so a retry racing its original cannot start a second ferret. */
-  const startsInFlight = new Map<string, Promise<unknown>>();
-  const oneAtATime = async <T>(requestId: string, work: () => Promise<T>): Promise<T> => {
-    const before = startsInFlight.get(requestId) ?? Promise.resolve();
-    const run = before.then(work, work);
-    const settled = run.catch(() => undefined);
-    startsInFlight.set(requestId, settled);
-    try {
-      return await run;
-    } finally {
-      if (startsInFlight.get(requestId) === settled) startsInFlight.delete(requestId);
-    }
+  /** A wake-up for views (the ferret list re-reads): a change the registry does not carry (a pin) says so. */
+  const publishChanged = (ferret: string): void => {
+    generation += 1;
+    kernel.events.publish(FerretsChanged, { ferret, generation });
   };
 
-  const startFailure = (failure: { readonly code: string; readonly reason: string }): never => {
-    const status =
-      failure.code === 'refused' || failure.code === 'unservable_model'
-        ? 409
-        : failure.code === 'folder'
-          ? 400
-          : failure.code === 'state_home'
-            ? 403
-            : 503;
-    throw new ApiError(status, failure.reason, failure.code);
-  };
-
-  // Today's `findSession` also found archived ferrets, whose journals are untouched, so their streams replay.
-  // `?live=1` and `?transcript=1` (U5, G161): the live readout and the transcript signal, each read through its owner and
-  // masked on the way out (`modules/live-events.ts`).
-  const liveEvents = buildLiveEvents({
-    readState: async id => await sessionStore.readState(id),
-    record: ferret => registry.get(ferret),
-    runner: () => {
-      const found = hooks.provider(Runners, 'tmux');
-      return found === 'unavailable' ? undefined : found;
-    },
-    transcript: transcripts,
-    clock: { now: () => kernel.clock.now() },
-    every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
-    redaction: kernel.redaction,
-    history: () => {
-      const found = hooks.provider(CompactionHistoryHook, COMPACTION_HISTORY_KEY);
-      return found === 'unavailable' ? undefined : found;
-    },
-  });
-  const eventsAccept = fleetEventsAccept(
+  // One composition, handed to every feature in `./features/*.feature.ts` (listed by the generator into
+  // `./generated/features.ts`): each adds its own routes, sockets, jobs and port members. This file keeps the stores, the
+  // service and the shared guards; a new feature adds a file there and edits nothing here.
+  const context: FerretsContext = {
+    daemon: ctx,
+    kernel,
+    hooks,
+    needs,
+    log,
+    registry,
+    service,
+    sessionStore,
+    sessionFiles,
+    ready,
+    storeLoaded,
+    archiveRead,
+    heldClaims,
+    appendHistory,
     eventSource,
-    { after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }) },
-    followableFerret({
-      live: id => registry.get(id as FerretId) !== undefined,
-      archived: id => {
-        const session = tryParseSessionId(id);
-        return session !== undefined && sessionStore.findSession(session) !== undefined;
-      },
-    }),
-    {
-      ...liveEvents,
-      // A ferret's own token follows its own live readout and its helpers', never another's (G161).
-      mayFollow: (call, id) => mayAct(call, id as FerretId),
-    },
-  );
+    agentPins,
+    pinClock,
+    transcripts,
+    followStatus,
+    removeEnvironment,
+    parkedFile,
+    sessionFilesystemOf,
+    sessionGit,
+    displayModelOf,
+    ingestEvidenceOf,
+    outdated: { sections: outdatedFor, marks: outdatedMarks },
+    resolveFerret,
+    pathFerret,
+    mayAct,
+    agentMayReach,
+    parseJson,
+    body,
+    stateHomeReach,
+    knownLaunchRoots,
+    publishChanged,
+    isArchived,
+    reviveArchived,
+    late,
+  };
+  const served = registerFeatures(features, context);
 
   return {
     provides: {
       ferrets: perNeeder(needer => ({
         ...ferretsPort(service, needer.id),
-        lastAutoResume: async () => await autoResume.summary.read(),
+        // What the features add to the port (a read each owns, `lastAutoResume` among them).
+        ...served.port,
         displayModel: displayModelOf,
         // One folder of a ferret's tree for the composer's `@` menu, through the file browser's own service and fence.
         listFolder: folderLister({
@@ -1411,198 +883,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         generation: () => tokens.generation(),
       },
     },
-    sockets: {
-      'GET /v1/events': async call => {
-        // The archive is read once at open; a stream asked for before that must not 404 an archived ferret.
-        await storeLoaded.catch(() => undefined);
-        return await eventsAccept(call);
-      },
-    },
-    routes: {
-      ...worktrees.routes,
-      ...moveRoutes,
-      ...fileBrowser,
-      ...signals,
-      ...restarts,
-      ...archived,
-      'POST /v1/ferrets/:ferretId/pin': sidebarPins.pin,
-      'POST /v1/ferrets/:ferretId/unpin': sidebarPins.unpin,
-      'GET /v1/ferrets/:ferretId/pins': noteBoard.list,
-      'POST /v1/ferrets/:ferretId/pins': noteBoard.apply,
-      // The LIVE list: a ferret the archive took out of the live set is left out (nothing is deleted: its record, its
-      // documents and `GET /v1/ferrets/:id` stay, and a write brings it back); `GET /v1/archived-sessions` lists it.
-      'GET /v1/ferrets': async call => {
-        await ready();
-        await storeLoaded.catch(() => undefined);
-        // Hidden only while ARCHIVED AND STOPPED: a ferret the record holds in any other state is live whatever the archive
-        // flag says (an adopted live pane writes only the record, and a revival's document write may still be on its way).
-        const live = (await service.list()).filter(
-          summary => !hiddenFromLiveList(summary.state, isArchived(summary.id)),
-        );
-        return fleetList.answer(await outdatedMarks.list(live), headerValue(call.request, 'if-none-match'));
-      },
-      'GET /v1/ferrets/:ferretId/subtree': async call => {
-        const id = await pathFerret(call);
-        mayAct(call, id);
-        const view = await subtree.view(id);
-        if (view === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-        return jsonResponse(SubtreeViewSchema.parse(view));
-      },
-      'GET /v1/ferrets/:ferretId': async call => {
-        const id = await pathFerret(call);
-        const summary = await service.get(id);
-        // `pathFerret` already refused an id the registry does not hold; a ferret gone in between is still a 404 with a
-        // sentence, never a 200 with no body.
-        if (summary === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
-        return jsonResponse(await outdatedMarks.one(summary));
-      },
-      'GET /v1/ferrets/:ferretId/live': async call =>
-        jsonResponse(FerretLiveReadSchema.parse(liveRead(await ingestEvidenceOf(await pathFerret(call))))),
-      'POST /v1/ferrets': async call => {
-        await ready();
-        const text = await call.request.text();
-        const parsed = parseStartBody(parseJson(text));
-        const own = callerFerret(call);
-        // Today's `lineageOf` (G12): a ferret starts only its own helpers. Naming any other parent is refused; naming
-        // none is filled from its token below, so a ferret never starts a parent-less ferret. The owner (no ferret on the
-        // call) may start under any parent, which must exist, or none.
-        if (own !== undefined && parsed.parent !== undefined && parsed.parent !== own)
-          throw new ApiError(
-            403,
-            'a ferret starts sessions only as its own children; leave the parent out, the daemon reads it from your session',
-            'parent_mismatch',
-          );
-        if (own === undefined && parsed.parent !== undefined && registry.get(parsed.parent) === undefined)
-          throw new ApiError(404, `there is no ferret ${parsed.parent} to start a helper of`, 'unknown_parent');
-        // The Warden's own label marks the Warden's tree (exempt from the helper limits and supervision); only the Warden
-        // starts under it, so an agent asking for it is refused, as today.
-        if (parsed.options?.label?.trim() === WARDEN_LABEL && callerIsAgent(call))
-          throw new ApiError(
-            403,
-            'only the Warden starts a ferret under its own label; leave --label out',
-            'owner_only',
-          );
-        // An agent never starts inside the state home (the kernel's name-and-link fence AND its bound-directory identity):
-        // 403 there, 503 where the kernel cannot tell. A person is unaffected.
-        await stateHomeLaunchRefusal(callerIsAgent(call), stateHomeReach, parsed.folder);
-        // What counts as a known project: Projects' registered folders plus the managed worktree root. Read at each start;
-        // a throw from Projects answers 503 `launch_roots_unavailable` (it cannot classify), never "outside".
-        await terminalLaunchRefusal(call, parsed, knownLaunchRoots);
-        let startedFerret: FerretId | undefined;
-        const start = async (): Promise<ApiResponse> => {
-          const started = await service.start(
-            {
-              ...parsed,
-              // A ferret's start is its helper: the parent is the caller, never a value from the request.
-              ...(own === undefined ? {} : { parent: own }),
-              by: own === undefined ? 'owner' : 'ferret',
-            },
-            // Who the start is FOR is the admitted credential's, as the state-home check above judged it.
-            launchOriginOf(call),
-          );
-          if (!started.ok) return startFailure(started.error);
-          startedFerret = started.value;
-          return jsonResponse({ id: started.value }, 201);
-        };
-        // A start is IDEMPOTENT on its request id (today's retry contract): the same id and body answer the ferret it
-        // already started; the same id with another body is a conflict, never a second ferret.
-        const requestId = headerValue(call.request, FY_REQUEST_ID_HEADER)?.trim();
-        if (requestId === undefined || requestId === '')
-          throw new ApiError(
-            400,
-            `a start must carry ${FY_REQUEST_ID_HEADER}: without it a retried request starts a second session`,
-            'missing_request_id',
-          );
-        const digest = payloadDigest(text);
-        return await oneAtATime(requestId, async () => {
-          const held = await kernel.state.read(StartRequestsFile);
-          const seen = lookupStartRequest(held.ok ? held.value : undefined, requestId, digest);
-          if (seen.kind === 'same') return jsonResponse({ id: seen.ferret });
-          if (seen.kind === 'conflict')
-            throw new ApiError(
-              409,
-              `request id ${JSON.stringify(requestId)} already started a different ferret`,
-              'request_id_reused',
-            );
-          const answer = await start();
-          const ferret = startedFerret;
-          if (ferret !== undefined) {
-            await kernel.state.update(StartRequestsFile, current =>
-              withStartRequest(current, { requestId, digest, ferret, at: kernel.clock.now() }),
-            );
-          }
-          return answer;
-        });
-      },
-      // Four segments deep with a literal third, so `by-request` can never be mistaken for a ferret id (R-0187).
-      'GET /v1/ferrets/by-request/:requestId': async call => {
-        await ready();
-        const id = decodeParameter(call.params.get('requestId') ?? '');
-        if (id === undefined || id === '')
-          throw new ApiError(400, 'the request id in the path is not usable', 'invalid_request_id');
-        const digest = call.request.query.get('payload')?.[0]?.trim() ?? '';
-        if (digest === '')
-          throw new ApiError(
-            400,
-            'a recovery read must carry ?payload=<sha-256 of the start body>: without it any caller could ask which session a request id produced',
-            'missing_payload_digest',
-          );
-        const held = await kernel.state.read(StartRequestsFile);
-        const seen = lookupStartRequest(held.ok ? held.value : undefined, id, digest);
-        if (seen.kind === 'conflict')
-          throw new ApiError(409, `request id ${JSON.stringify(id)} started a different ferret`, 'request_id_reused');
-        const summary = seen.kind === 'same' ? await service.get(seen.ferret) : undefined;
-        if (summary === undefined)
-          throw new ApiError(404, `no start by this daemon carries request id ${JSON.stringify(id)}`, 'not-found');
-        return jsonResponse(summary);
-      },
-      'POST /v1/ferrets/:ferretId/stop': async call => {
-        const id = await pathFerret(call);
-        mayAct(call, id);
-        const how = queryValue(call.request, 'how') === 'now' ? 'now' : 'polite';
-        const { reason } = parseStopBody(await body(call));
-        await service.stop(id, how, reason);
-        return jsonResponse({ id, state: registry.get(id)?.state });
-      },
-      'POST /v1/ferrets/:ferretId/resume': async call => {
-        const id = await pathFerret(call);
-        mayAct(call, id);
-        const { message } = parseResumeBody(await body(call));
-        const resumed = await service.resume(id, message, {
-          confirmRestore: confirmRestore(call, callerIsAgent(call)),
-          actor: resumeActorOf(call),
-          origin: launchOriginOf(call),
-        });
-        if (!resumed.ok) return startFailure(resumed.error);
-        return jsonResponse({ id: resumed.value });
-      },
-      'POST /v1/ferrets/:ferretId/rename': async call => {
-        const id = await pathFerret(call);
-        mayAct(call, id);
-        const renamed = await service.rename(id, parseRenameBody(await body(call)));
-        if (!renamed.ok) {
-          const refusal = RENAME_HTTP[renamed.error.failure];
-          throw new ApiError(refusal.status, renamed.error.message, refusal.code);
-        }
-        return jsonResponse(renamed.value);
-      },
-      'POST /v1/ferrets/:ferretId/revoke-credential': async call => {
-        const id = await pathFerret(call);
-        return jsonResponse({ id, revoked: await service.revokeToken(id) });
-      },
-      'GET /v1/names': async call => {
-        await ready();
-        const raw = queryValue(call.request, 'count');
-        const count = raw === undefined ? 1 : Number(raw);
-        if (!Number.isInteger(count) || count < 1)
-          throw new ApiError(400, 'count must be a whole number of at least one', 'invalid_count');
-        await archiveRead();
-        const nowMs = kernel.clock.nowMs();
-        // A suggestion, not a reservation: the names the fleet holds (a stopped ferret's inside its window), as today.
-        const start = Math.floor(nowMs / 1000) % DEFAULT_CALLSIGN_POOL.length;
-        return jsonResponse([...suggestCallsigns(DEFAULT_CALLSIGN_POOL, heldClaims(), nowMs, count, start)]);
-      },
-    },
+    sockets: served.sockets as NonNullable<DaemonHalf<typeof manifest>['sockets']>,
+    routes: served.routes as NonNullable<DaemonHalf<typeof manifest>['routes']>,
   };
 }
 

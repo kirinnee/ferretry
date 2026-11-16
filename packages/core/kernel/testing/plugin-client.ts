@@ -58,7 +58,11 @@ export function testPluginClient(host: TestHost, as?: TestCaller): PluginClient 
       const { method, path } = pathOf(key, params);
       const headers: Record<string, string> = { ...((init.headers ?? {}) as Record<string, string>) };
       if (init.ifNoneMatch !== undefined) headers['if-none-match'] = init.ifNoneMatch;
-      const response = await host.request(method, path, { headers, ...(as === undefined ? {} : { as }) });
+      const response = await host.request(method, path, {
+        headers,
+        ...(init.query === undefined ? {} : { query: init.query }),
+        ...(as === undefined ? {} : { as }),
+      });
       const etag = response.headers.get('etag');
       if (response.status === 304) return etag === undefined ? { status: 304 } : { status: 304, etag };
       if (response.status !== 200) throw new Error(`${key} answered ${String(response.status)}: ${response.body}`);
