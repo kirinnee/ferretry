@@ -198,7 +198,7 @@ describe('batched answers notice', () => {
 describe('browserRepliesClock', () => {
   test('reads the wall clock and ticks until cancelled', async () => {
     const { browserRepliesClock } = await import('../../../app/hooks/use-agenda-replies.ts');
-    expect(Math.abs(browserRepliesClock.now() - Date.now())).toBeLessThan(1_000);
+    expect(Math.abs(browserRepliesClock.now() - Date.now())).toBeLessThan(1_000); // not-a-budget: asserts the default clock reads the wall clock, a correctness check
     let ticks = 0;
     const stop = browserRepliesClock.every(() => (ticks += 1), 5);
     await new Promise(done => setTimeout(done, 40));
