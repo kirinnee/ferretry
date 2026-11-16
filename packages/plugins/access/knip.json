@@ -1,5 +1,4 @@
 {
   "entry": ["tests/**/*.test.{ts,tsx}"],
-  "project": ["**/*.{ts,tsx}"],
-  "ignore": ["app/lib/device-preference.ts"]
+  "project": ["**/*.{ts,tsx}"]
 }

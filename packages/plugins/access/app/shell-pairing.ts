@@ -17,7 +17,6 @@
  * ONE COPY PER NAME ACROSS ACCESS'S APP HALF: `cn`, `IFyApiClient`, `useDaemonClient`, `useDialogFocus` and
  * `toBase64Url` are held by the grants half's seam (`shell-grants.ts`) and re-exported below, not copied twice.
  */
-import type { ReactNode } from 'react';
 import { z } from 'zod';
 import {
   DaemonOriginSchema,
@@ -379,13 +378,8 @@ export { cn } from './shell-grants.ts';
 
 // ─── 9. shell components and hooks (today: `pwa/src/shell/*`, `pwa/src/hooks/*`; spine-app-shell: `src/shell/`) ─
 
-/** The shell's bottom sheet, the Ferretry mark, and the layout and viewport hooks: `@ferretry/app/ui`. */
-export { BottomSheet, BrandMark, useAppViewport, useKeyboardOpen, useLayoutMode } from '@ferretry/app/ui';
-
-/** The sessions bar the pairing harness opens its sheet from. STAND-IN: the shell holds no feature, and this bar is one. */
-export function SessionsBar(_props: Readonly<Record<string, unknown>>): ReactNode {
-  return fromShell('SessionsBar');
-}
+/** The shell's bottom sheet, the Ferretry mark, and the layout and keyboard hooks: `@ferretry/app/ui`. */
+export { BottomSheet, BrandMark, useKeyboardOpen, useLayoutMode } from '@ferretry/app/ui';
 
 /** Moves focus into an open dialog, traps Tab, and gives it back on close: the shell's, held by `shell-grants.ts`. */
 export { useDialogFocus } from './shell-grants.ts';

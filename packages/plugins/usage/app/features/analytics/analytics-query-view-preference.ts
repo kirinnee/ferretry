@@ -5,8 +5,7 @@
  * zone: it survives a reload, follows the reader across daemons and falls back to a single result whenever
  * the stored value is anything else.
  */
-import { localKey } from '@ferretry/app';
-import { devicePreference } from '../../lib/device-preference.ts';
+import { devicePreference, localKey } from '@ferretry/app';
 import { QUERY_VIEWS, type QueryView } from './analytics-query-trend.ts';
 
 /** The sole browser-storage key for the Query page's Single/Trend choice. */

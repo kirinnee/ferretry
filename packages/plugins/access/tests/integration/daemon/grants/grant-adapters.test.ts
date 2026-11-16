@@ -4,7 +4,7 @@ import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { journalState } from '../../../support/daemon/journal-state.ts';
 import should from 'should';
 import { DevicesFile, GrantAuditFile } from '../../../../contract/index.ts';
-import { JournalGrantAudit } from '../../../../daemon/adapters/grants/index.ts';
+import { JournalGrantAudit } from '../../../../daemon/adapters/grants/runtime-grant-ports.ts';
 
 /**
  * The grant journal (`grant-audit.jsonl`) over the kernel's state port. The daemon-wide grant document is Gate's
