@@ -3,8 +3,6 @@
   "pending": ["voice"],
   "pendingReasons": {
     "voice": [
-      "[contribute: conversation] GAP(voice): app/lib/voice-chat/turn-endpointer-scoring.ts is not reached: v4 never mounted the turn endpointer on a screen (only its scoring helper), and 5.0 has no voice chat mode surface or Conversation slot for a plugin to run it in (owner: conversation)",
-      "[contribute: conversation] GAP(voice): app/lib/voice-chat/turn-endpointer.ts is not reached: v4 never mounted the turn endpointer on a screen (only its scoring helper), and 5.0 has no voice chat mode surface or Conversation slot for a plugin to run it in (owner: conversation)",
       "[compose] GAP(voice): daemon/lib/speedups/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
       "[compose] GAP(voice): daemon/lib/stt/index.ts is not reached by the daemon composition (daemon/index.ts imports the files directly, only tests import this index) (owner: voice port)",
       "[own] GAP(voice): app/lib/stt/speed-bench-report.ts is not reached by the speed benchmark page (a realworld harness only) (owner: voice port)"
