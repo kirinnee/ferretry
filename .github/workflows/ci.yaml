@@ -25,7 +25,10 @@ on:
       - 'packages/cli/package.json'
       - 'packages/core/kernel/package.json'
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    # `edited` fires for a title, body AND base change; only a changed base (`changes.base`) is acted on, because the
+    # scope below is decided from the base ref and a retarget (to main: FULL) must supersede the old base's run. Every
+    # other edit skips every job (the unrelated-label shape: its own run-id group, nothing cancelled).
+    types: [opened, synchronize, reopened, labeled, edited]
   workflow_dispatch:
     inputs:
       quick_shape:
@@ -49,11 +52,11 @@ on:
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
-      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && format('pr-{0}', github.event.pull_request.number)
+      github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) && format('pr-{0}', github.event.pull_request.number)
       || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
 
 # THE ONE SWITCH of the strict Appendix D report (the `strict-guarantees` job below). Workflow-level, so the job that
 # counts and the `Full CI` verdict (scripts/ci/full-status.sh) read the same value. See docs/standards/ci-cd.
@@ -64,7 +67,7 @@ jobs:
   # Shared setup once, then independent processes with separate logs and coverage directories.
   quick:
     name: Quick Checks
-    if: ${{ github.event.action != 'labeled' || github.event.label.name == 'full-ci' }}
+    if: ${{ (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -153,7 +156,7 @@ jobs:
   # Starts immediately, before Namespace provisioning. A new head has no full proof yet.
   full-pending:
     name: Full CI Pending
-    if: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ github.event_name == 'pull_request' && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -176,7 +179,7 @@ jobs:
   # by guessing.
   int:
     name: Integration Tests
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -233,7 +236,7 @@ jobs:
   strict-guarantees:
     name: Strict Guarantees
     needs: [quick, int]
-    if: ${{ !cancelled() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ !cancelled() && (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -282,7 +285,7 @@ jobs:
   # per-hook buckets and not in compile, which runs SIT and whose binaries the smokes and darwin wait for. A job of
   # its own, in the verdict's needs, so it overlaps compile instead of lengthening the critical path.
   full-gates:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 15
     name: Full Gates
     permissions:
@@ -309,7 +312,7 @@ jobs:
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/full-gates.sh
 
   compile:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 20
     name: Compile Binaries + SIT
     permissions:
@@ -367,7 +370,7 @@ jobs:
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
   smoke:
-    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') }}
+    if: ${{ (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
     timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
     needs: compile
@@ -419,7 +422,7 @@ jobs:
   smoke-darwin:
     name: Smoke darwin-arm64
     needs: compile
-    if: ${{ vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    if: ${{ vars.MACOS_SMOKE != 'skip' && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     permissions:
       contents: read
     uses: ./.github/workflows/smoke-darwin.yaml
@@ -429,7 +432,7 @@ jobs:
   full:
     name: Full CI
     needs: [quick, full-pending, int, strict-guarantees, full-gates, compile, smoke, smoke-darwin]
-    if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci')) }}
+    if: ${{ always() && ((github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)) }}
     timeout-minutes: 5
     permissions:
       contents: read

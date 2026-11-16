@@ -112,11 +112,18 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   silently, so the rules are an allowlist:**
   - The changed set is `git diff --name-only --no-renames <base>...<head>` (both sides of a rename are listed).
   - A file may be scoped only under `packages/plugins/<one>/` of a workspace package, and never that package's
-    `package.json`. Any other path (core, app, cli, std, scripts, nix, `.github`, docs, root manifests, `generated/`, a path nobody
+    `package.json` or `manifest.ts`, and never a `ports-pending` record (the root file, a per-plugin file or a folder of them: the
+    validation reads every one). Any other path (core, app, cli, std, scripts, nix, `.github`, docs, root manifests, `generated/`, a path nobody
     has seen) makes the run FULL. A new top-level path is therefore FULL until someone allowlists it in `scope.ts`.
   - The dependency graph is the UNION of workspace `package.json` dependencies (all four kinds), the manifests' `needs` /
-    `uses` / hook `takes` / `order` edges (consumer to provider), and every `@ferretry/<package>` or `plugins/<dir>/` mention in a
-    source file. Dependents are followed transitively **between plugins**. They are never followed through a platform package,
+    `uses` / hook `takes` / `order` edges (consumer to provider), and the REAL imports of every source file of every package (src,
+    contract, app, daemon, cli, tests, support: static imports, re-exports and literal dynamic imports, plus a stylesheet's `@import`,
+    resolved against the importing file by `scripts/gen/lib/imports.ts`), so a relative path into a sibling plugin is an edge exactly
+    like `@ferretry/plugin-x`. A file that does not parse, or a relative import that leaves the repository, makes the run FULL and the
+    log says which file and line. A **computed** `import(x)` makes its package depend on everything (it runs whenever any plugin changes;
+    in a platform package it makes every plugin a hub, so FULL), unless the line above it says `// scope-deps: manifests` (it loads
+    plugin manifests only, and a changed plugin manifest is FULL); a template with a relative prefix (`` `./views/${name}.tsx` ``) lands
+    under that prefix. Dependents are followed transitively **between plugins**. They are never followed through a platform package,
     since every plugin depends on the kernel and the app; instead a plugin that a platform package depends on is a **hub**
     (today `connections`, `runtimes`, `conversation`, ...) and a change that reaches one is FULL. Selecting every plugin is FULL too.
   - Always run, scoped or not: all platform tests, format, every gate hook, the build part (whole-repo typecheck), the `scripts`
@@ -130,6 +137,10 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
 run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <reason>. Every unit test runs.` `scope.ts decide`
     never fails: any error is FULL, with the error as the reason.
   - A pull request that changes `scripts/`, `.github/` or `docs/` (this machinery included) is FULL by the allowlist.
+  - **A retarget re-runs the selection.** `pull_request` also fires on `edited`, and every job runs for it only when the base changed
+    (`github.event.changes.base`); a title or body edit skips every job, cancels nothing and has a run-id group of its own. A base change
+    shares the PR's concurrency group with cancel-in-progress, so it supersedes the old base's run and the new base's rules apply (a
+    retarget to `main` is FULL). `scripts/test/ci-sets.ts` holds the event list and the condition.
   - `FY_CI_QUICK_DRY_RUN=1 ./scripts/ci/quick.sh` decides and prints what a run would do (unit files, parts, proofs) without testing.
 - **The guarantee proof reads the JUnit reports.** After its last part, Quick runs
   `bun scripts/gen/check.ts guarantees --strict --tier unit --results coverage/unit --results coverage/scripts`, and the
@@ -319,7 +330,7 @@ vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
 
 | Workflow                      | Trigger                                                                                                   | Responsibility                                                                        |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| CI                            | PR opened/pushed/reopened; `full-ci` labeled; `main`; dispatch                                            | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status |
+| CI                            | PR opened/pushed/reopened; `full-ci` labeled; base changed; `main`; dispatch                              | Quick every push; Full on labeled PRs and every non-PR run; exact-head Full CI status |
 | E2E Slow                      | nightly, dispatch, relevant PRs with `full-ci`                                                            | slow journeys, existing advisory summary                                              |
 | Realworld                     | nightly, dispatch (timing tests); `main` and relevant PRs with `full-ci` (macOS and tmux 3.8 proofs only) | machine budgets (nightly), macOS proofs and pinned harness contract; advisory         |
 | Harness Contract (latest)     | nightly, dispatch                                                                                         | upstream drift and issue reports                                                      |

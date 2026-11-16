@@ -11,20 +11,27 @@
  *   2. The changed set is `git diff --name-only --no-renames <base>...<head>` (merge-base). No merge-base, no diff, a
  *      path this file cannot classify: FULL. `--no-renames` lists BOTH sides of a rename (the old and the new path).
  *   3. A file may be scoped ONLY when it lives under `packages/plugins/<one>/` of a workspace package, and is not that
- *      package's `package.json` (a changed dependency declaration changes the graph this selection reads). Any other path
- *      - core, app, cli, std, daemon, scripts, nix, .github, docs, the root manifests, generated registries, a path
- *      nobody has seen yet - makes the whole run FULL. The allowlist is the only list there is.
+ *      package's `package.json` or `manifest.ts` (a changed declaration changes the graph this selection reads, and a
+ *      computed `import()` marked `// scope-deps: manifests` loads every manifest) nor a
+ *      `ports-pending` record anywhere (the ports-pending validation reads every one). Any other path - core, app, cli,
+ *      std, daemon, scripts, nix, .github, docs, the root manifests, generated registries, a path nobody has seen yet -
+ *      makes the whole run FULL. The allowlist is the only list there is.
  *   4. The selection is the changed plugins plus everything that depends on them, transitively. The dependency graph is
  *      the UNION of three sources (so a miss in one cannot skip a test): workspace `package.json` dependencies (all four
  *      kinds), the plugin manifests' `needs` / `uses` / hook `takes` / `order` edges (port consumer → provider), and
- *      every `@ferretry/<package>` or `plugins/<dir>/` mention in a source file (a superset of real imports).
+ *      the REAL imports of every source file of every package - static imports, re-exports and literal dynamic imports
+ *      (and a stylesheet's `@import`) resolved against the importing file, so a relative path into a sibling plugin is
+ *      an edge like `@ferretry/plugin-x`. An import that cannot be resolved, a dynamic import with no literal specifier
+ *      or a file that does not parse makes the whole run FULL, and the decision log says which.
  *   5. Selecting every plugin leaves nothing to skip, so that is FULL too and says so.
  *
  * `selectScope` is pure; the git and file-system reads are below it, and every failure there ends in FULL.
  */
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { importsAndOpaqueOf, resolveSpecifier } from '../gen/lib/imports.ts';
+import type { Workspace } from '../gen/lib/workspace.ts';
 
 /** The only base a scoped run exists for. */
 export const SCOPED_BASE_REF = 'rebuild/5.0-after';
@@ -53,6 +60,11 @@ export interface ScopeInput {
   readonly packages: readonly PackageNode[];
   /** Package name → the package names it depends on (the union of every source). */
   readonly dependsOn: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * Package name → where it imports something the scope cannot resolve (it then depends on everything, which
+   * `dependsOn` already says; this only names the reason in the log).
+   */
+  readonly opaque?: ReadonlyMap<string, string>;
 }
 
 export interface Selected extends PackageNode {
@@ -114,6 +126,10 @@ export function selectScope(input: ScopeInput): Decision {
   const changedPlugins = new Map<string, PackageNode>();
   for (const file of input.changed) {
     if (!cleanPath(file)) return full(`the changed path ${JSON.stringify(file)} is not a plain repository path`);
+    // Rule 3: a ports-pending record (the root file, a per-plugin file, or a split layout's folder) is read by the
+    // ports-pending validation of every package, so it is never scopable wherever it sits.
+    if (file.split('/').some(segment => segment === 'ports-pending' || segment.startsWith('ports-pending.')))
+      return full(`${file} is a ports-pending record, which the cross-plugin validation reads`);
     const match = /^packages\/plugins\/([^/]+)\/(.+)$/.exec(file);
     if (match === null)
       return full(`${file} is outside the plugin packages (only packages/plugins/<one>/... may be scoped)`);
@@ -122,6 +138,10 @@ export function selectScope(input: ScopeInput): Decision {
     if (pkg === undefined) return full(`${file} is under ${dir}, which is no workspace package`);
     if (match[2] === 'package.json')
       return full(`${file} changes a plugin's dependency declaration, which changes the graph`);
+    if (match[2] === 'manifest.ts')
+      return full(
+        `${file} changes a plugin manifest, which is a graph source and is loaded whole by cross-plugin tests`,
+      );
     changedPlugins.set(pkg.name, pkg);
   }
 
@@ -139,7 +159,11 @@ export function selectScope(input: ScopeInput): Decision {
     const name = queue[head] as string;
     for (const dependent of [...(dependents.get(name) ?? [])].sort()) {
       if (why.has(dependent)) continue;
-      why.set(dependent, `depends on ${name}`);
+      const unresolved = input.opaque?.get(dependent);
+      why.set(
+        dependent,
+        `depends on ${name}${unresolved === undefined ? '' : `; it imports something the scope cannot resolve (${unresolved}), so it depends on everything`}`,
+      );
       queue.push(dependent);
     }
   }
@@ -228,12 +252,20 @@ function* walk(root: string, dir: string): Generator<string> {
   }
 }
 
-const SOURCE_EXTENSION = /\.(?:[cm]?[jt]sx?|css|json)$/;
+/** The files whose imports are read: `code` through the parser, `css` through its `@import` lines. */
+/** `// scope-deps: manifests` above a computed `import()`: it loads plugin manifests and nothing else. */
+const MANIFESTS_MARKER = /^\s*\/\/\s*scope-deps:\s*manifests\s*$/;
+
+const sourceKind = (file: string): 'code' | 'css' | undefined => {
+  if (/\.[cm]?[jt]sx?$/.test(file)) return 'code';
+  return file.endsWith('.css') ? 'css' : undefined;
+};
 
 /** The union of the dependency sources; every package of the workspace is a node. */
 export async function readGraph(root: string): Promise<{
   readonly packages: PackageNode[];
   readonly dependsOn: Map<string, Set<string>>;
+  readonly opaque: Map<string, string>;
 }> {
   // Imported lazily: scope.ts is also the module the unit tests load, and it needs no workspace to select.
   const { loadManifests, loadWorkspace } = await import('../gen/lib/workspace.ts');
@@ -277,32 +309,116 @@ export async function readGraph(root: string): Promise<{
     }
   }
 
-  // 3. Every mention: a superset of what is really imported (comments and strings count), so it can only add edges.
-  const names = new Map(packages.map(pkg => [pkg.name, pkg.name] as const));
-  const byRel = new Map(packages.map(pkg => [pkg.rel, pkg.name] as const));
-  const owners = [...packages].sort((a, b) => b.rel.length - a.rel.length);
+  // 3. The REAL imports of every source file of every package (src, contract, app, daemon, cli, tests, support, ...):
+  // static imports, re-exports and literal dynamic imports, resolved against the importing file into the workspace
+  // package they land in. A relative path into a sibling plugin is an edge exactly like `@ferretry/plugin-x`.
+  //
+  // FAIL CLOSED, by what the doubt is about:
+  //   - A file that does not parse, or a RELATIVE import that leaves the repository (an absolute path is no workspace file): the graph cannot be trusted at
+  //     all, so it throws and `decide` turns that into FULL, saying which file and line.
+  //   - A relative import that lands in the repository but in no plugin package (scripts/, the root manifests, a
+  //     ports-pending record, a platform package): no edge, because a change to any of those is FULL already.
+  //   - A dynamic import whose specifier is computed (`import(variable)`): the package it lives in may depend on
+  //     ANYTHING, so it gets an edge to every package (it runs whenever any plugin changes, and a platform package
+  //     with one makes every plugin a hub, which is FULL). Its location is recorded and printed with the plugin.
+  //   - A template literal with a RELATIVE static prefix (`./views/${name}.tsx`) lands under that prefix: an edge to
+  //     the package that owns it. It cannot name a `..` through its hole, which no source here does.
+  const fatal: string[] = [];
+  const opaque = new Map<string, string>();
   for (const file of walk(root, 'packages')) {
-    if (!SOURCE_EXTENSION.test(file) || file.endsWith('package.json')) continue;
-    const owner = owners.find(pkg => file.startsWith(`${pkg.rel}/`));
-    if (owner === undefined || /(^|\/)generated\//.test(file)) continue; // the registries name every plugin
-    // A platform package's tests always run, so what they mention decides nothing; its own code decides who is a hub.
-    if (!isPlugin(owner) && /(^|\/)tests\/|\.test\.tsx?$/.test(file)) continue;
-    let text: string;
-    try {
-      text = readFileSync(join(root, file), 'utf8');
-    } catch {
-      continue; // deleted in the working tree: nothing to read
-    }
-    for (const match of text.matchAll(/@ferretry\/[A-Za-z0-9._-]+/g)) {
-      const target = names.get(match[0]);
-      if (target !== undefined) edge(owner.name, target);
-    }
-    for (const match of text.matchAll(/\b(core|plugins)\/([a-z0-9][a-z0-9-]*)\//g)) {
-      const target = byRel.get(`packages/${match[1]}/${match[2]}`);
-      if (target !== undefined) edge(owner.name, target);
+    const kind = sourceKind(file);
+    if (kind === undefined) continue;
+    if (/(^|\/)generated\//.test(file)) continue; // generator output names every plugin; a change to it is FULL anyway
+    const abs = join(root, file);
+    const owner = ws.ownerOf(abs);
+    if (owner === undefined) continue; // under no workspace package: a change there is FULL before any graph is read
+    const from = packages.find(pkg => pkg.name === owner.name) as PackageNode;
+    // A platform package's tests always run, so what they import decides nothing; its own code decides who is a hub.
+    if (!isPlugin(from) && /(^|\/)tests\/|\.test\.tsx?$/.test(file)) continue;
+    const found = kind === 'css' ? cssImports(ws, abs) : sourceImports(ws, abs);
+    for (const problem of found.fatal) fatal.push(`${file}: ${problem}`);
+    for (const target of found.targets) edge(from.name, target);
+    if (found.opaque.length > 0) {
+      if (!opaque.has(from.name)) opaque.set(from.name, `${file}: ${found.opaque[0]}`);
+      for (const pkg of packages) edge(from.name, pkg.name);
     }
   }
-  return { packages, dependsOn };
+  if (fatal.length > 0)
+    throw new Error(
+      `${fatal.length} import(s) could not be resolved, so no scope can be proved: ${fatal.slice(0, 5).join('; ')}${fatal.length > 5 ? `; and ${fatal.length - 5} more` : ''}`,
+    );
+  return { packages, dependsOn, opaque };
+}
+
+interface Found {
+  /** Names of the workspace packages the file imports. */
+  readonly targets: readonly string[];
+  /** Why the graph cannot be trusted at all (parse failure, a path that leaves the repository). */
+  readonly fatal: readonly string[];
+  /** Imports whose target is computed: the file may depend on anything. */
+  readonly opaque: readonly string[];
+}
+
+/** Whether `target` (absolute) is inside the repository. */
+const insideRepo = (root: string, target: string): boolean => {
+  const rel = relative(root, target);
+  return rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+};
+
+/** One import of a file as the resolver sees it: a relative path, a workspace package, or something else. */
+function place(
+  ws: Workspace,
+  file: string,
+  specifier: string,
+  at: string,
+  found: { targets: string[]; fatal: string[] },
+): void {
+  const edge = resolveSpecifier(ws, file, specifier);
+  if (edge.toPkg !== undefined) found.targets.push(edge.toPkg.name);
+  else if (
+    edge.external === undefined &&
+    specifier.startsWith('.') &&
+    !insideRepo(ws.root, resolve(dirname(file), specifier))
+  )
+    found.fatal.push(`${at}: ${JSON.stringify(specifier)} leaves the repository`);
+}
+
+/** A `.ts`/`.tsx`/`.js`/`.mjs`/`.cjs`/`.jsx` file, through the same module-record pass the import checks use. */
+function sourceImports(ws: Workspace, file: string): Found {
+  let result: ReturnType<typeof importsAndOpaqueOf>;
+  try {
+    result = importsAndOpaqueOf(ws, file);
+  } catch (error) {
+    return {
+      targets: [],
+      fatal: [`the file could not be parsed (${error instanceof Error ? error.message : String(error)})`],
+      opaque: [],
+    };
+  }
+  const found = { targets: [] as string[], fatal: [] as string[] };
+  for (const edge of result.edges) place(ws, file, edge.specifier, `line ${edge.line}`, found);
+  const opaque: string[] = [];
+  const lines = result.opaque.length === 0 ? [] : readFileSync(file, 'utf8').split('\n');
+  for (const op of result.opaque) {
+    // A computed import that reaches only plugin manifests says so on the line above it. A change to a plugin
+    // manifest is FULL (it is a graph source), so such an import needs no edge.
+    if (lines.slice(Math.max(0, op.line - 3), op.line - 1).some(line => MANIFESTS_MARKER.test(line))) continue;
+    // `\`./views/${name}.tsx\``: everything before the first hole, when it is a relative path.
+    const prefix = /^`(\.{1,2}\/[^`$]*)\$\{/.exec(op.text)?.[1];
+    const owner = prefix === undefined ? undefined : ws.ownerOf(resolve(dirname(file), prefix));
+    if (owner !== undefined) found.targets.push(owner.name);
+    else if (prefix === undefined || !insideRepo(ws.root, resolve(dirname(file), prefix)))
+      opaque.push(`line ${op.line}: import(${op.text}) has no literal specifier`);
+  }
+  return { ...found, opaque };
+}
+
+/** A stylesheet's `@import "x"` / `@import url("x")`. */
+function cssImports(ws: Workspace, file: string): Found {
+  const found = { targets: [] as string[], fatal: [] as string[] };
+  for (const match of readFileSync(file, 'utf8').matchAll(/@import\s+(?:url\(\s*)?(['"])([^'"]+)\1/g))
+    place(ws, file, match[2] as string, '@import', found);
+  return { ...found, opaque: [] };
 }
 
 // ─── the command line ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -339,6 +455,7 @@ export async function decide(root: string, env: Record<string, string | undefine
         ...('error' in changed ? { changedError: changed.error } : {}),
         packages: graph.packages,
         dependsOn: graph.dependsOn,
+        opaque: graph.opaque,
       });
     }
   } catch (error) {

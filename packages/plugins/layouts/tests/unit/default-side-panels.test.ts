@@ -25,6 +25,7 @@ const declaredFor = async (slot: string): Promise<readonly Declared[]> => {
   const found: Declared[] = [];
   for (const root of ['packages/core', 'packages/plugins']) {
     for await (const file of new Bun.Glob('*/manifest.ts').scan({ cwd: resolve(workspace, root) })) {
+      // scope-deps: manifests
       const manifest = (await import(resolve(workspace, root, file))).default as {
         readonly id: string;
         readonly ui?: {

@@ -359,8 +359,7 @@ test('the graph is the UNION of package.json, the manifests (needs/uses) and sou
     {
       id: 'relative',
       files: {
-        'tests/unit/x.test.ts':
-          "import '../../../declared/contract/index.ts';\nimport '../../../../plugins/declared/contract/index.ts';\n",
+        'tests/unit/x.test.ts': "import '../../../declared/contract/index.ts';\n",
       },
     },
     { id: 'alone' },
@@ -444,4 +443,203 @@ test('decide reads the CI environment: a push, a dispatch, a label list that is 
     full(await run({ FY_SCOPE_EVENT: 'pull_request', FY_SCOPE_BASE_REF: SCOPED_BASE_REF, FY_SCOPE_LABELS: 'null' })),
   ).toContain('could not be computed');
   expect(JSON.parse(readFileSync(join(dir, 'scope.json'), 'utf8')).mode).toBe('full');
+});
+
+// ─── the REAL imports: a relative path into a sibling plugin is an edge ─────────────────────────────────────────
+
+const edgesOf = (graph: Awaited<ReturnType<typeof readGraph>>, id: string): string[] =>
+  [...(graph.dependsOn.get(`@ferretry/plugin-${id}`) ?? [])].sort();
+const choose = (graph: Awaited<ReturnType<typeof readGraph>>, changed: string[]): Decision =>
+  selectScope({ event: 'pull_request', baseRef: SCOPED_BASE_REF, labels: [], changed, ...graph });
+
+test('a relative import of a sibling plugin is an edge in every place a file can import from, with no other mention', async () => {
+  const fx = fixture([
+    { id: 'owner' },
+    // Each dependent holds the sibling ONLY as a relative path: no `@ferretry/` name, no `plugins/` segment.
+    { id: 'via-test', files: { 'tests/unit/x.test.ts': "import '../../../owner/contract/index.ts';\n" } },
+    {
+      id: 'via-support',
+      files: {
+        'tests/support/helper.ts': "import { x } from '../../../owner/contract/index.ts';\nexport const y = x;\n",
+      },
+    },
+    { id: 'via-reexport', files: { 'src/index.ts': "export * from '../../owner/contract/index.ts';\n" } },
+    { id: 'via-named-reexport', files: { 'app/index.ts': "export { x } from '../../owner/contract/index.ts';\n" } },
+    {
+      id: 'via-dynamic',
+      files: { 'cli/lazy.ts': "export const load = () => import('../../owner/contract/index.ts');\n" },
+    },
+    {
+      id: 'via-template',
+      files: { 'daemon/lazy.ts': 'export const load = (n: string) => import(`../../owner/daemon/${n}.ts`);\n' },
+    },
+    {
+      id: 'via-type-only',
+      files: { 'daemon/types.ts': "import type { T } from '../../owner/contract/index.ts';\nexport type U = T;\n" },
+    },
+    { id: 'via-css', files: { 'app/styles.css': "@import '../../owner/app/styles.css';\n" } },
+    // None of these reaches the owner.
+    {
+      id: 'own-template',
+      files: { 'app/index.ts': 'export const view = (n: string) => import(`./views/${n}.tsx`);\n' },
+    },
+    { id: 'alone' },
+  ]);
+  fixtures.push(fx);
+  const result = await readGraph(fx.root);
+  for (const id of [
+    'via-test',
+    'via-support',
+    'via-reexport',
+    'via-named-reexport',
+    'via-dynamic',
+    'via-template',
+    'via-type-only',
+    'via-css',
+  ])
+    expect(edgesOf(result, id)).toEqual(['@ferretry/plugin-owner']);
+  expect(edgesOf(result, 'own-template')).toEqual([]);
+  expect(edgesOf(result, 'alone')).toEqual([]);
+  expect(ran(choose(result, ['packages/plugins/owner/contract/x.ts'])).sort()).toEqual(
+    [
+      'owner',
+      'via-css',
+      'via-dynamic',
+      'via-named-reexport',
+      'via-reexport',
+      'via-support',
+      'via-template',
+      'via-test',
+      'via-type-only',
+    ].sort(),
+  );
+});
+
+test('an import that lands in the repository but in no plugin package is no edge (a change there is FULL already)', async () => {
+  const fx = fixture([
+    {
+      id: 'reads',
+      files: {
+        'tests/unit/a.test.ts':
+          "import '../../../../../ports-pending.json';\nimport '../../../../../scripts/validate/x.ts';\n",
+      },
+    },
+    { id: 'alone' },
+  ]);
+  fixtures.push(fx);
+  const result = await readGraph(fx.root);
+  expect(edgesOf(result, 'reads')).toEqual([]);
+  expect(full(choose(result, ['scripts/validate/x.ts']))).toContain('outside the plugin packages');
+});
+
+test('a relative import that leaves the repository makes the graph fail, and the decision says which file and line', async () => {
+  const fx = fixture([
+    { id: 'escapes', files: { 'daemon/a.ts': "export const ok = 1;\nimport '../../../../../outside.ts';\n" } },
+    { id: 'fine' },
+  ]);
+  fixtures.push(fx);
+  await expect(readGraph(fx.root)).rejects.toThrow(
+    'escapes/daemon/a.ts: line 2: "../../../../../outside.ts" leaves the repository',
+  );
+  const decision = await decide(
+    fx.root,
+    {
+      FY_SCOPE_EVENT: 'pull_request',
+      FY_SCOPE_BASE_REF: SCOPED_BASE_REF,
+      FY_SCOPE_LABELS: '[]',
+      FY_SCOPE_BASE_SHA: 'a'.repeat(40),
+      FY_SCOPE_HEAD_SHA: 'b'.repeat(40),
+      GITHUB_STEP_SUMMARY: join(fx.root, 'summary.md'),
+    },
+    join(fx.root, 'scope.json'),
+  );
+  expect(full(decision)).toContain('leaves the repository');
+});
+
+test('a file that does not parse makes the graph fail', async () => {
+  const fx = fixture([{ id: 'broken', files: { 'daemon/a.ts': 'export const = ;\n' } }, { id: 'fine' }]);
+  fixtures.push(fx);
+  await expect(readGraph(fx.root)).rejects.toThrow('could not be parsed');
+});
+
+test('a computed dynamic import makes its package depend on everything, says why, and costs only that package', async () => {
+  const fx = fixture([
+    { id: 'owner' },
+    { id: 'computed', files: { 'daemon/lazy.ts': 'export const load = (m: string) => import(m);\n' } },
+    {
+      id: 'multiline',
+      files: { 'daemon/lazy.ts': 'export const load = (a: string) =>\n  import(\n    a + "x",\n  );\n' },
+    },
+    {
+      id: 'marked',
+      files: {
+        'tests/unit/all.test.ts':
+          'export const load = async (f: string) => {\n  // scope-deps: manifests\n  return import(f);\n};\n',
+      },
+    },
+    {
+      id: 'unmarked',
+      files: {
+        'tests/unit/all.test.ts':
+          'export const load = async (f: string) => {\n  // scope-deps: something else\n  return import(f);\n};\n',
+      },
+    },
+    { id: 'alone' },
+  ]);
+  fixtures.push(fx);
+  const result = await readGraph(fx.root);
+  expect(edgesOf(result, 'computed')).toContain('@ferretry/plugin-owner');
+  expect(edgesOf(result, 'computed')).toContain('@ferretry/plugin-alone');
+  expect(edgesOf(result, 'multiline')).toContain('@ferretry/plugin-owner');
+  expect(edgesOf(result, 'unmarked')).toContain('@ferretry/plugin-owner');
+  expect(edgesOf(result, 'marked')).toEqual([]);
+  expect(result.opaque.get('@ferretry/plugin-computed')).toContain('daemon/lazy.ts: line 1');
+  const decision = scoped(choose(result, ['packages/plugins/alone/daemon/x.ts']));
+  expect(ran(decision).sort()).toEqual(['alone', 'computed', 'multiline', 'unmarked']);
+  const line = describeScope(decision, 6).find(row => row.includes('run  packages/plugins/computed')) ?? '';
+  expect(line).toContain('cannot resolve');
+  expect(line).toContain('daemon/lazy.ts: line 1');
+});
+
+test('a computed dynamic import in a platform package makes every plugin a hub: FULL', async () => {
+  const fx = fixture([
+    { id: 'platform', core: true, files: { 'src/lazy.ts': 'export const load = (m: string) => import(m);\n' } },
+    { id: 'a' },
+    { id: 'b' },
+  ]);
+  fixtures.push(fx);
+  const result = await readGraph(fx.root);
+  expect(full(choose(result, ['packages/plugins/a/daemon/x.ts']))).toContain('depended on by the platform package');
+});
+
+test('a ports-pending record or a plugin manifest is never scopable, wherever it sits', () => {
+  for (const path of [
+    'ports-pending.json',
+    'packages/plugins/a/ports-pending.json',
+    'packages/plugins/a/daemon/ports-pending.json',
+    'packages/plugins/a/ports-pending/b.json',
+    'packages/plugins/a/ports-pending.yaml',
+    'packages/core/kernel/ports-pending.json',
+  ])
+    expect(full(selectScope(input([path])))).toMatch(/ports-pending|outside the plugin packages/);
+  expect(full(selectScope(input(['packages/plugins/a/ports-pending.json'])))).toContain('ports-pending record');
+  expect(full(selectScope(input(['packages/plugins/a/manifest.ts'])))).toContain('plugin manifest');
+  // Lookalikes are plain files of the plugin.
+  expect(ran(selectScope(input(['packages/plugins/a/daemon/ports-pending-note.ts'])))).toContain('a');
+});
+
+// ─── the real workspace ─────────────────────────────────────────────────────────────────────────────────────────
+
+const REPO = join(import.meta.dir, '..', '..');
+const MCP_LIMITS = './packages/plugins/mcp/tests/unit/cli/tools-limits.test.ts';
+const realGraph = readGraph(REPO);
+
+test.each([
+  ['Lessons', 'packages/plugins/lessons/contract/suggest.ts'],
+  ['Accounts', 'packages/plugins/accounts/contract/routes/login-recipes.ts'],
+])('the real workspace: a %s contract change keeps the MCP limits test that imports it', async (_, changed) => {
+  const result = await realGraph;
+  const decision = choose(result, [changed]);
+  expect(filterFiles(decision, [MCP_LIMITS])).toEqual([MCP_LIMITS]);
+  expect(ran(decision)).toContain('mcp');
 });
