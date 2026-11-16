@@ -1,4 +1,4 @@
-import { type AgentAddressCandidate, resolveAgentAddress } from '../protocol/agent-address.ts';
+import { type AgentAddressCandidate, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import { MAX_SESSION_TITLE_LENGTH, type NameClaim } from './types.ts';
 
 /** A callsign in its one stored spelling, or `null` (the contract owns the rule). */

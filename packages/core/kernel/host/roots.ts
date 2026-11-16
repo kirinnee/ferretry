@@ -152,14 +152,20 @@ const SESSION_FOLDER = /^[a-z0-9][a-z0-9_-]{0,127}$/u;
 /**
  * What a `sessions` handle may be scoped to: one minted ferret folder, or that folder's own `attachments` folder
  * (`<ferret>/attachments`, so a writer of files an agent is sent holds THAT folder alone, with no link from the home down
- * to it, instead of the whole session where a link to a sibling folder would still be inside the fence). Nothing else.
+ * to it, instead of the whole session where a link to a sibling folder would still be inside the fence), or its own
+ * `media` folder (`<ferret>/media`: what its agent made to show the person, read back by the file route's
+ * `scope=media`, held the same no-link way). Nothing else.
  */
 function sessionFolder(subfolder: string | undefined): string | undefined {
   if (subfolder === undefined) return undefined;
-  const own = subfolder.endsWith(SESSION_ATTACHMENTS) ? subfolder.slice(0, -SESSION_ATTACHMENTS.length) : subfolder;
+  const own = nestedSessionScope(subfolder) === undefined ? subfolder : subfolder.slice(0, subfolder.lastIndexOf('/'));
   return SESSION_FOLDER.test(own) ? subfolder : undefined;
 }
 const SESSION_ATTACHMENTS = '/attachments';
+const SESSION_MEDIA = '/media';
+/** The nested folder a `sessions` subfolder names (`/attachments` or `/media`), or `undefined` for a ferret's own folder. */
+const nestedSessionScope = (subfolder: string): string | undefined =>
+  [SESSION_ATTACHMENTS, SESSION_MEDIA].find(nested => subfolder.endsWith(nested));
 
 /**
  * The folder below an internal root's anchor that a handle scoped to `subfolder` names, or `undefined` when the
@@ -3102,7 +3108,10 @@ export function rootsPortFor(
         ...(within === undefined ? {} : { within }),
         anchor,
         scopedParent,
-        ...(name === 'sessions' && subfolder?.endsWith(SESSION_ATTACHMENTS) === true && base() !== undefined
+        ...(name === 'sessions' &&
+        subfolder !== undefined &&
+        nestedSessionScope(subfolder) !== undefined &&
+        base() !== undefined
           ? { attachmentsScope: true as const }
           : {}),
         check,

@@ -76,7 +76,7 @@ import type { NameClaim } from './lib/names/types.ts';
 import { archivedNameClaims } from './lib/names/session-names.ts';
 import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-claim-store.ts';
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
-import { ambiguousAgentAddressMessage, resolveAgentAddress } from './lib/protocol/agent-address.ts';
+import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
 import { FerretSessionLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
@@ -886,6 +886,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     );
   const fileBrowser = sessionFilesystemRoutes({
     filesystem: sessionFilesystemOf,
+    // `scope=media` (F-0327): the ferret's `media/` folder on the sessions root, held open the same way and no wider.
+    media: ferret =>
+      new SessionFilesystem(new KernelSessionRootPinner(sessionFiles.mediaRoot(ferret)), sessionGit, () =>
+        kernel.clock.nowMs(),
+      ),
     redaction: kernel.redaction,
     reach: async call => {
       const id = await pathFerret(call);

@@ -22,12 +22,12 @@
 import { ArrowLeft, Code2, GitCompareArrows, ListTree, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { formatCodeReference, PanelSlot, useOptionalRouter } from '@ferretry/app';
-import { FILES_SEARCH_SLOT, type FilesSearchSlotProps } from '@ferretry/core-ferrets/contract';
+import { FILES_SEARCH_SLOT, type FilesSearchSlotProps, isOpenablePath } from '@ferretry/core-ferrets/contract';
 import { useInputModality, useLayoutMode } from '@ferretry/app/ui';
 import { daemonOfRoute } from '../header/header-paths.ts';
 import { FileTree } from './file-tree.tsx';
 import { fsApi, useFsProbe } from './files-api.ts';
-import { baseName, crumbs, isOpenablePath, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { baseName, crumbs, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
 import { ReloadAction, StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FilesScope, scopeKey } from './scope.ts';

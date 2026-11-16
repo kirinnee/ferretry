@@ -675,6 +675,10 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
           scoped.set('deeper', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/attachments/x' }));
           scoped.set('bare', ctx.kernel.roots.root('sessions', { subfolder: '/attachments' }));
           scoped.set('upAttach', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/attachments' }));
+          scoped.set('media', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/media' }));
+          scoped.set('deeperMedia', ctx.kernel.roots.root('sessions', { subfolder: 'aaa-1/media/x' }));
+          scoped.set('bareMedia', ctx.kernel.roots.root('sessions', { subfolder: '/media' }));
+          scoped.set('upMedia', ctx.kernel.roots.root('sessions', { subfolder: 'AAA-1/media' }));
           scoped.set('homeA', ctx.kernel.roots.root('agent-homes', { subfolder: 'aaa-1' }));
           scoped.set('homeB', ctx.kernel.roots.root('agent-homes', { subfolder: 'bbb-2' }));
           scoped.set('homeUp', ctx.kernel.roots.root('agent-homes', { subfolder: '../x' }));
@@ -701,13 +705,30 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
     await homeA.writeText(resolved(homeA, 'x.json'), 'a');
     await expect(homeB.readText(resolved(homeB, 'x.json'))).rejects.toThrow();
     // production's refusals: the whole base, a nested path, an upper-case id, a traversing agent-homes scope
-    for (const key of ['whole', 'nested', 'upper', 'homeUp', 'turns', 'deeper', 'bare', 'upAttach'])
+    for (const key of [
+      'whole',
+      'nested',
+      'upper',
+      'homeUp',
+      'turns',
+      'deeper',
+      'bare',
+      'upAttach',
+      'deeperMedia',
+      'bareMedia',
+      'upMedia',
+    ])
       expect(handle(key).resolve('environment.json')).toEqual({ ok: false, error: 'outside' });
     // a ferret's own `attachments` folder is the one nested scope, and a file written through it is that folder's alone
     const attach = handle('attach');
     await attach.writeText(resolved(attach, 'shot.txt'), 'in-attachments');
     expect(await attach.readText(resolved(attach, 'shot.txt'))).toBe('in-attachments');
     await expect(a.readText(resolved(a, 'shot.txt'))).rejects.toThrow();
+    // F-0327: so is its own `media` folder, the folder its agent shows the person from
+    const media = handle('media');
+    await media.writeText(resolved(media, 'chart.txt'), 'in-media');
+    expect(await media.readText(resolved(media, 'chart.txt'))).toBe('in-media');
+    await expect(a.readText(resolved(a, 'chart.txt'))).rejects.toThrow();
     await host.stop();
   });
 
@@ -723,6 +744,53 @@ describe('K1 the testing host refuses an owned root to a plugin that does not ow
       await host.stop();
     });
   }
+});
+
+describe('K1 the sessions root scoped to <ferret>/media (F-0327): held no-follow like attachments, reading nothing outside it', () => {
+  const MEDIA = 'state/ferrets/sessions/f1/media';
+  const scoped = async () => {
+    const f = await fresh();
+    await ensureInternalRootBases(f.fs, { home: f.home, plugin: 'ferrets' }, ['sessions']);
+    const media = `${f.home}/${MEDIA}`;
+    await mkdir(media, { recursive: true, mode: 0o700 });
+    const root = rootsPortFor(
+      f.fs,
+      { home: f.home, plugin: 'ferrets', worktrees: `${f.home}-worktrees` },
+      ['sessions'],
+      () => undefined,
+    ).root('sessions', { subfolder: 'f1/media' });
+    return { ...f, media, root };
+  };
+
+  test('a file the agent made reads back, and only through the media folder', async () => {
+    const s = await scoped();
+    await writeFile(`${s.media}/chart.txt`, 'FIXTURE-CHART');
+    expect(await s.root.readText(resolved(s.root, 'chart.txt'))).toBe('FIXTURE-CHART');
+    expect(s.root.resolve('../environment.json')).toEqual({ ok: false, error: 'outside' });
+  });
+
+  test('a file that is a link out of the session refuses and its target is never read', async () => {
+    const s = await scoped();
+    const outside = `${s.parent}/outside.txt`;
+    await writeFile(outside, 'FIXTURE-OUTSIDE');
+    await symlink(outside, `${s.media}/leak.txt`);
+    await expect(s.root.readText(resolved(s.root, 'leak.txt'))).rejects.toThrow();
+  });
+
+  test('a file that is a link to another file INSIDE the media folder refuses too, as it does for attachments', async () => {
+    const s = await scoped();
+    await writeFile(`${s.media}/real.txt`, 'FIXTURE-REAL');
+    await symlink(`${s.media}/real.txt`, `${s.media}/alias.txt`);
+    expect(await s.root.readText(resolved(s.root, 'real.txt'))).toBe('FIXTURE-REAL');
+    await expect(s.root.readText(resolved(s.root, 'alias.txt'))).rejects.toThrow();
+  });
+
+  test('a folder that is a link to the session folder refuses, so a sibling of media is never reached', async () => {
+    const s = await scoped();
+    await writeFile(`${s.media}/../environment.json`, 'FIXTURE-CREDENTIAL');
+    await symlink(`${s.media}/..`, `${s.media}/up`);
+    await expect(s.root.readText(resolved(s.root, 'up/environment.json'))).rejects.toThrow();
+  });
 });
 
 describe('K1 the sessions root scoped to <ferret>/attachments: every component below it is no-follow and descriptor-bound', () => {
