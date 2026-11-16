@@ -217,7 +217,7 @@ describe('help names the flags the handlers read', () => {
     '--teammate <callsign>',
     '--teammate-fallback',
     '--label <label>',
-    '--card <id>',
+    '--task <id>',
     '--prompt-file <file>',
     '--model <model>',
     '--effort <level>',

@@ -43,7 +43,9 @@ export const SubtreeRowSchema = z.strictObject({
   state: SubtreeStateSchema,
   /** The session's own status, for a reader who needs more than the four-way state. */
   status: SessionStatusSchema,
-  /** The card it works on (`&F767`) and that card's lane; absent for a ferret with no card. */
+  /** The task it works on (`&F767`) and that task's lane; absent for a ferret with no task. */
+  task: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
+  /** The former name of `task`: read for one release, never written. */
   card: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
   /** The card's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
   pr: z

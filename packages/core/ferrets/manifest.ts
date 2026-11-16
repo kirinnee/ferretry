@@ -45,7 +45,7 @@ export default definePlugin({
   words: [
     {
       word: 'sitrep',
-      means: "a ferret's whole status: what it is doing across its cards, its turn, its blockers",
+      means: "a ferret's whole status: what it is doing across its tasks, its turn, its blockers",
       insteadOf: ['status'],
     },
     { word: 'start', means: 'bring a ferret up', insteadOf: ['spawn', 'launch'] },

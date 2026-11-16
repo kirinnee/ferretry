@@ -26,7 +26,9 @@ export interface ICellColour {
  * `POST /v1/ferrets`'s body: who to start, on what, where, with which prompt (Ferrets' start, §2.2), and today's start
  * fields flat beside them (the contract's `StartOptions`: the model, the supervision timers, the label, …).
  */
-export interface StartBody extends StartOptions {
+export interface StartBody extends Omit<StartOptions, 'card'> {
+  /** The existing task the new ferret takes over (`--task`); the daemon files it under the stored option `card`. */
+  readonly task?: string;
   readonly name?: string;
   readonly parent?: string;
   readonly pack?: string;

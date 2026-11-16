@@ -276,7 +276,7 @@ export class FerretCards {
         const name = project ?? (await this.ports.projects.nameOf(childBoard));
         return {
           notes: [
-            `No task was made for the helper: the ${name} board is off and you hold no task for this work. \`${this.ports.bin} new --card <id>\` hands it one.`,
+            `No task was made for the helper: the ${name} board is off and you hold no task for this work. \`${this.ports.bin} new --task <id>\` hands it one.`,
           ],
         };
       }
@@ -284,7 +284,7 @@ export class FerretCards {
       const notes =
         parent === null
           ? [
-              `The helper's task has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--card <id>\`) says where your helpers' tasks go next time.`,
+              `The helper's task has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--task <id>\`) says where your helpers' tasks go next time.`,
             ]
           : [];
       return {
@@ -317,7 +317,7 @@ export class FerretCards {
   async startOn(lead: string | undefined, id: CardId, ordinary = true): Promise<DelegationOutcome> {
     if (!ordinary) {
       return {
-        refusal: `--card is for an ordinary ferret: a worker the daemon starts for itself takes no task`,
+        refusal: `--task is for an ordinary ferret: a worker the daemon starts for itself takes no task`,
         notes: [],
       };
     }

@@ -56,8 +56,8 @@ export default fragment({
         },
         { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
         {
-          flag: '--card <id>',
-          help: 'an existing card it takes over (assigned to it; no second card is made); needs a prompt',
+          flag: '--task <id>',
+          help: 'an existing task it takes over (assigned to it; no second task is made); needs a prompt',
         },
         { flag: '--prompt-file <file>', help: 'read the prompt from a file instead of the command line' },
         { flag: '--model <model>', help: 'override the model (alias or full id)' },
@@ -124,8 +124,8 @@ export default fragment({
         },
         { flag: '--label <label>', help: 'ownership label; filter later with `ps --label`' },
         {
-          flag: '--card <id>',
-          help: 'an existing card it takes over (assigned to it; no second card is made); needs a prompt',
+          flag: '--task <id>',
+          help: 'an existing task it takes over (assigned to it; no second task is made); needs a prompt',
         },
         { flag: '--prompt-file <file>', help: 'read the prompt from a file instead of the command line' },
         { flag: '--model <model>', help: 'override the model (alias or full id)' },

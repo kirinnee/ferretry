@@ -1,4 +1,8 @@
 {
   "format": 1,
+<<<<<<< HEAD
   "count": 3
+=======
+  "count": 1
+>>>>>>> 4b16b79887 (refactor(ferrets): say task where owner and agent text said card)
 }

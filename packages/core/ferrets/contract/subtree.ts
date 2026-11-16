@@ -14,9 +14,11 @@ const SubtreeRowSchema = z.strictObject({
   model: z.string().min(1).optional(),
   state: SubtreeStateSchema,
   ferretState: FerretStateSchema,
-  /** The card it works on (`&F767`) and that card's lane, as its card line says. */
+  /** The task it works on (`&F767`) and that task's lane, as its task line says. */
+  task: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
+  /** The former name of `task`: read for one release, never written. */
   card: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
-  /** The card's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
+  /** The task's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
   pr: z
     .strictObject({
       number: z.number().int().min(1),
@@ -27,7 +29,7 @@ const SubtreeRowSchema = z.strictObject({
     })
     .optional(),
   last: z
-    .strictObject({ at: z.string(), kind: z.enum(['doing', 'card', 'turn', 'note']), text: z.string() })
+    .strictObject({ at: z.string(), kind: z.enum(['doing', 'task', 'card', 'turn', 'note']), text: z.string() })
     .optional(),
   endedAt: z.string().optional(),
 });

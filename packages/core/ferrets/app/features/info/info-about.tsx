@@ -68,7 +68,7 @@ export function InfoAbout({ ferret, overlayKey, subFerrets, onOpenFerret, card, 
           )}
         </InfoRow>
         {card === undefined ? null : (
-          <InfoRow label="Card">
+          <InfoRow label="Task">
             <span className="font-mono" data-info-card={card}>
               {card}
             </span>

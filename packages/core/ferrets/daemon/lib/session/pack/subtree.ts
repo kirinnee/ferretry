@@ -148,9 +148,9 @@ function excerptEligible(members: readonly SubtreeMember[], limits: SubtreeLimit
   return new Set([...liveChosen, ...endedChosen]);
 }
 
-/** The card line a plugin added (the Board's), whose reference, lane and PR the table shows. */
+/** The task line a plugin added (the Board's; `card` is its former kind), whose reference, lane and PR the table shows. */
 function cardLine(lines: readonly SitrepLine[]): SitrepLine | undefined {
-  return lines.find(line => line.kind === 'card' && line.ref !== undefined);
+  return lines.find(line => (line.kind === 'task' || line.kind === 'card') && line.ref !== undefined);
 }
 
 function rowOf(
@@ -171,7 +171,7 @@ function rowOf(
     ferretState: ferret.state,
     ...(card?.ref === undefined
       ? {}
-      : { card: { ref: card.ref, ...(card.lane === undefined ? {} : { lane: card.lane }) } }),
+      : { task: { ref: card.ref, ...(card.lane === undefined ? {} : { lane: card.lane }) } }),
     ...(card?.pr === undefined ? {} : { pr: card.pr }),
     ...(last === undefined ? {} : { last }),
     ...(state === 'ended' ? { endedAt: ferret.stateAt } : {}),

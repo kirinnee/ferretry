@@ -309,7 +309,7 @@ describe('fy start', () => {
       teammateFallback: true,
       title: 'Fix login',
       label: 'mine',
-      card: 'F21',
+      task: 'F21',
       model: 'opus',
       effort: 'high',
       fast: false,

@@ -288,7 +288,7 @@ describe('a session started with a brief', () => {
       // Assert
       should(outcome).deepEqual({
         notes: [
-          'No task was made for the helper: the Ferretry board is off and you hold no task for this work. `fy new --card <id>` hands it one.',
+          'No task was made for the helper: the Ferretry board is off and you hold no task for this work. `fy new --task <id>` hands it one.',
         ],
       });
       should(opened).deepEqual({ notes: [] });
@@ -502,7 +502,7 @@ describe('a session started with a brief', () => {
       should(delegation?.parent).be.null();
       should(delegation).not.have.property('parentFrom');
       should(notes).deepEqual([
-        "The helper's task has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--card <id>`) says where your helpers' tasks go next time.",
+        "The helper's task has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--task <id>`) says where your helpers' tasks go next time.",
       ]);
       should(opened.card?.parent).be.null();
       should(stored(ports, 'F2').parent).be.null();

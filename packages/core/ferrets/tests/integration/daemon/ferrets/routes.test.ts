@@ -406,7 +406,16 @@ describe('today’s start fields, the title, and the stop and resume words', () 
       .filter(line => line !== '')
       .map(line => JSON.parse(line) as { sequence: number; type: string; data: Record<string, unknown> });
 
-  test('a start carries today’s flat fields: the summary shows model and card, details.json keeps every option', async () => {
+  test('a start that still names the task by its former key takes it over just the same', async () => {
+    const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
+    const id = await started(h, { prompt: 'fix it', mode: 'auto', card: 'F21' });
+    const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
+    expect(view).toMatchObject({ task: 'F21' });
+    const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFile, id) as string);
+    expect(details.options.card).toBe('F21');
+  });
+
+  test('a start carries today’s flat fields: the summary shows model and task, details.json keeps every option', async () => {
     const h = await host([], { harness: new FakeHarness(), runner: new FakeRunner() });
     const id = await started(h, {
       prompt: 'fix it',
@@ -414,7 +423,7 @@ describe('today’s start fields, the title, and the stop and resume words', () 
       title: 'Fix the login',
       label: 'mine',
       model: 'opus',
-      card: 'F21',
+      task: 'F21',
       intervalSeconds: 30,
       timeoutSeconds: 3600,
       nudgeAfterSeconds: 120,
@@ -422,7 +431,8 @@ describe('today’s start fields, the title, and the stop and resume words', () 
       harnessFlags: ['--verbose'],
     });
     const view = (await h.request('GET', `/v1/ferrets/${id}`)).json<Record<string, unknown>>();
-    expect(view).toMatchObject({ model: 'opus', card: 'F21', title: 'Fix the login' });
+    expect(view).toMatchObject({ model: 'opus', task: 'F21', title: 'Fix the login' });
+    expect(view.card).toBeUndefined();
     expect(view.label).toBe('mine');
     const details = JSON.parse(h.state('ferrets').raw(FerretDetailsFile, id) as string);
     expect(details).toEqual({
@@ -500,7 +510,9 @@ describe('today’s start fields, the title, and the stop and resume words', () 
       { maxSnapshots: '5' },
       { harnessFlags: ['x'.repeat(16_385)] },
       { harnessFlags: ['--a\nb'] },
+      { task: 'F0' },
       { card: 'F0' },
+      { task: 'F1', card: 'F2' },
       { mode: 'auto' },
       { auto: true, runtime: 'claude-alpha' },
       { agent: 'claude-alpha' },

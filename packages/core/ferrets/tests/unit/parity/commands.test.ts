@@ -321,7 +321,7 @@ describe('commands parity', () => {
           parent: 'boss',
           name: 'Fix login',
           label: 'mine',
-          card: '&F21',
+          task: '&F21',
           model: 'opus',
           fast: true,
           rc: false,
@@ -349,7 +349,7 @@ describe('commands parity', () => {
             teammateFallback: true,
             title: 'Fix login',
             label: 'mine',
-            card: 'F21',
+            task: 'F21',
             model: 'opus',
             fast: true,
             remoteControl: false,
@@ -605,7 +605,7 @@ describe('commands parity', () => {
       expect(refused.calls).toEqual([]);
     });
 
-    test('V-0334 fy new starts a helper on a named --runtime or --auto (never both), with --model, --effort, --name, --card, --json', async () => {
+    test('V-0334 fy new starts a helper on a named --runtime or --auto (never both), with --model, --effort, --name, --task, --json', async () => {
       const named = run({ answers: startAnswers });
       expect(
         await named.verb('new [words...]', ['look', 'around'], {
@@ -613,7 +613,7 @@ describe('commands parity', () => {
           model: 'gpt-5.6-sol',
           effort: 'high',
           name: 'Look',
-          card: 'F3',
+          task: 'F3',
           cwd: '/abs',
           json: true,
         }),
@@ -626,7 +626,7 @@ describe('commands parity', () => {
           model: 'gpt-5.6-sol',
           effort: 'high',
           title: 'Look',
-          card: 'F3',
+          task: 'F3',
         },
       });
       const auto = run({ answers: startAnswers });

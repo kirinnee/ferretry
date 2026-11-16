@@ -98,7 +98,7 @@ export function createSessionArchive(input: {
     pinned: async () => new Set((await sources.pinned()).keys()),
     onOpenCards: async () => {
       // Unwired, this rejects: `sessionKeeps` reads a rejection as "board unreadable" and keeps every session.
-      if (sources.board === undefined) throw new Error('no board is wired to say which sessions are on an open card');
+      if (sources.board === undefined) throw new Error('no board is wired to say which sessions are on an open task');
       return sessionsOnOpenCards(await sources.board());
     },
     hasOpenAgendaItem: sources.hasOpenAgendaItem,

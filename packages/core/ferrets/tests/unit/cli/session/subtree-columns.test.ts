@@ -13,7 +13,7 @@ const view = (rows: SubtreeView['rows']): SubtreeView => ({
   rows,
 });
 
-test('a lead reads the model, the card with its lane and the PR of each helper, as today’s table showed them', () => {
+test('a lead reads the model, the task with its lane and the PR of each helper, as today’s table showed them', () => {
   const lines = renderSubtreeTable(
     view([
       {
@@ -23,7 +23,7 @@ test('a lead reads the model, the card with its lane and the PR of each helper, 
         model: 'sonnet-5-5',
         state: 'running',
         ferretState: 'working',
-        card: { ref: '&F767', lane: 'Implement' },
+        task: { ref: '&F767', lane: 'Implement' },
         pr: { number: 321, url: 'https://github.com/o/r/pull/321', state: 'open', draft: false, checks: 'pending' },
         last: { at: '2026-11-06T08:58:00.000Z', kind: 'note', text: 'route and table done' },
       },
@@ -31,7 +31,7 @@ test('a lead reads the model, the card with its lane and the PR of each helper, 
     ]),
     NOW,
   );
-  expect(lines[1]).toMatch(/^FERRET\s+MODEL\s+STATE\s+CARD\s+PR\s+LAST$/u);
+  expect(lines[1]).toMatch(/^FERRET\s+MODEL\s+STATE\s+TASK\s+PR\s+LAST$/u);
   expect(lines[2]).toMatch(
     /^ada\s+sonnet-5-5\s+running\s+&F767 Implement\s+#321 CI pending\s+\[2m\] route and table done$/u,
   );
@@ -44,4 +44,24 @@ test('a PR shows CI while it is live and its state once it is not', () => {
   expect(prCell({ ...base, number: 7, state: 'open', draft: true })).toBe('#7 draft CI failing');
   expect(prCell({ ...base, number: 7, state: 'merged' })).toBe('#7 merged');
   expect(prCell(undefined)).toBe('-');
+});
+
+test('a row from a daemon that still says the former key is read as a task, and a task row is the one written', () => {
+  const row = {
+    id: ferretId('ada'),
+    name: 'ada',
+    depth: 1,
+    model: 'sonnet-5-5',
+    state: 'running',
+    ferretState: 'working',
+  } as const;
+  const lines = renderSubtreeTable(
+    view([
+      { ...row, card: { ref: '&F1', lane: 'Plan' } },
+      { ...row, id: ferretId('bo'), name: 'bo', task: { ref: '&F2' } },
+    ]),
+    NOW,
+  );
+  expect(lines[2]).toMatch(/&F1 Plan/u);
+  expect(lines[3]).toMatch(/&F2/u);
 });
