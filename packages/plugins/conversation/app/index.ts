@@ -68,6 +68,7 @@ export default provideToShell(
           | 'queue'
           | 'compact-at'
           | 'hypermedia'
+          | 'turn'
           | 'files-search'
           | 'interrupt-row'
           | 'agenda-conversation',
@@ -79,6 +80,7 @@ export default provideToShell(
           queue: panel('queue'),
           'compact-at': panel('compact-at'),
           hypermedia: panel('hypermedia'),
+          turn: panel('turn'),
           'chat-width': notDrawnPerDaemon,
           'message-marks': notDrawnPerDaemon,
           'files-search': panel('files-search'),

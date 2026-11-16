@@ -24,6 +24,7 @@ import {
   RestartsFile,
   FerretHistoryFiles,
   type FerretIngestEvidence,
+  FerretLiveReadSchema,
   type FerretRecord,
   type FerretState,
   FerretsChanged,
@@ -135,7 +136,7 @@ import { ferretsMoveResume, movedTarget } from './lib/ferrets/move-resume.ts';
 import { callerIsAgent, launchOriginOf } from './lib/ferrets/launch-origin.ts';
 import type { ResumeActor } from './lib/session/resume/types.ts';
 import { SessionConfigSchema, SessionStateSchema } from './lib/protocol/session.ts';
-import { displayModel, ingestEvidence } from './lib/protocol/session-subtree.ts';
+import { displayModel, ingestEvidence, liveRead } from './lib/protocol/session-subtree.ts';
 import { livePaneLimits } from './lib/ferrets/pane-limits.ts';
 import { promptOf } from './lib/ferrets/prompt.ts';
 import { buildTurnWatch, turnWatchFailureFields } from './modules/turn-watch.ts';
@@ -1446,6 +1447,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
         if (summary === undefined) throw new ApiError(404, `no ferret ${id}`, 'not-found');
         return jsonResponse(await outdatedMarks.one(summary));
       },
+      'GET /v1/ferrets/:ferretId/live': async call =>
+        jsonResponse(FerretLiveReadSchema.parse(liveRead(await ingestEvidenceOf(await pathFerret(call))))),
       'POST /v1/ferrets': async call => {
         await ready();
         const text = await call.request.text();

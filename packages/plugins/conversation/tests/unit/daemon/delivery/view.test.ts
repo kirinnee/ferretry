@@ -36,6 +36,14 @@ function record(overrides: Partial<SendRecord> = {}): SendRecord {
 }
 
 describe('a send record on the wire', () => {
+  it('shows a stuck send as stuck only while it is open, never the untyped bookkeeping', () => {
+    const open = sendRecordView(record({ senderKind: 'human', untyped: true, stuckAt: AT }));
+    should(open.stuckAt).equal(AT);
+    should(open).not.have.property('untyped');
+    should(SendRecordSchema.safeParse(open).success).be.true();
+    should(sendRecordView(record({ fate: 'delivered', stuckAt: AT }))).not.have.property('stuckAt');
+  });
+
   it('keeps every proven fact and drops the private payload path and typed text', () => {
     const view = sendRecordView(
       record({

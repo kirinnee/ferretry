@@ -119,3 +119,19 @@ export function nextTab(tabs: readonly PhoneTab[], current: string, key: string)
       return null;
   }
 }
+
+/** Whether the layout placed the panel with this id (`insights`) in the side column. */
+export const panelPlaced = (panels: readonly PanelRef[], panelId: string): boolean =>
+  panels.some(candidate => candidate.id === panelId);
+
+/**
+ * Beside the chat every panel is already on screen, so asking for one only scrolls the side column to it (a column
+ * taller than the window would otherwise leave a click with nothing to show). A panel nobody placed is ignored.
+ */
+export function revealPanel(panels: readonly PanelRef[], panelId: string): void {
+  const panel = panels.find(candidate => candidate.id === panelId);
+  if (panel === undefined) return;
+  document
+    .querySelector(`[data-slot="ferret.side"] [data-panel="${panelKey(panel)}"]`)
+    ?.scrollIntoView?.({ block: 'nearest' });
+}
