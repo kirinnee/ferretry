@@ -15,6 +15,7 @@ import {
   PROCESSES_FORBIDDEN_TEXT,
   processElapsedText,
   processErrorText,
+  processForbiddenText,
   processTitle,
   readSessionProcessOutput,
   stopSessionProcess,
@@ -41,6 +42,7 @@ interface Call {
     readonly query?: Record<string, string>;
     readonly headers?: Record<string, string>;
     readonly body?: unknown;
+    readonly quiet?: boolean;
   };
 }
 
@@ -142,6 +144,21 @@ describe('what a failure says', () => {
     );
   });
 
+  it('words a grant refusal in the grant’s own words, one remedy per cause, and keeps the plain 403 copy for the rest', () => {
+    const passkey = processErrorText(new DaemonCallError(403, 'grant_step_up_required', 'needs a passkey'));
+    expect(passkey).toContain('This needs your passkey');
+    expect(passkey).toContain('needs a passkey');
+    expect(passkey).not.toContain('Settings › Devices');
+    expect(processForbiddenText(new DaemonCallError(403, 'grant_device_not_granted', 'x'))).toContain(
+      'this device has not been given it',
+    );
+    expect(processForbiddenText(new DaemonCallError(403, 'grant_not_granted', ''))).toBe(
+      'The operator of this machine switched this off. It is turned back on on the host.',
+    );
+    expect(processForbiddenText(new DaemonCallError(403, 'forbidden', 'forbidden'))).toBe(PROCESSES_FORBIDDEN_TEXT);
+    expect(processForbiddenText(new Error('network down'))).toBe(PROCESSES_FORBIDDEN_TEXT);
+  });
+
   it('says nothing was stopped when the process changed under the request', () => {
     expect(processErrorText(new DaemonCallError(409, 'process_changed', 'changed'))).toBe(PROCESS_CHANGED_TEXT);
     expect(processErrorText(new DaemonCallError(409, 'other', 'something else'))).toBe('something else');
@@ -157,7 +174,9 @@ describe('the client', () => {
   it('lists, addressing the session’s processes route by key and parsing the answer', async () => {
     const { calls, client } = answering(ALL_PROCESSES);
     const list = await listSessionProcesses(client, daemon, scope);
-    expect(calls).toEqual([{ route: PROCESS_ROUTES.list, init: { params: { ferretId: 'agent-session' } } }]);
+    expect(calls).toEqual([
+      { route: PROCESS_ROUTES.list, init: { params: { ferretId: 'agent-session' }, quiet: true } },
+    ]);
     expect(list.processes).toHaveLength(6);
   });
 

@@ -638,7 +638,19 @@ const CONFIG = {
   'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
 };
 
-async function compose(logins = [sampleLogin('claude-you', { store: 'ferretry' })]) {
+/**
+ * A configuration the files cannot publish yet: the runtime names a profile that is not there. (A runtime whose LOGIN
+ * is gone no longer does this: a2abd6585d sets that one aside as unavailable so it never takes the fleet load down.)
+ */
+const UNPUBLISHABLE = {
+  ...CONFIG,
+  runtimes: { 'claude-default': { login: 'claude-you', profile: 'nowhere', agent: true } },
+};
+
+async function compose(
+  logins = [sampleLogin('claude-you', { store: 'ferretry' })],
+  config: Readonly<Record<string, unknown>> = CONFIG,
+) {
   const world = await fleetWorld();
   const host = await testHost({
     plugins: [
@@ -648,7 +660,7 @@ async function compose(logins = [sampleLogin('claude-you', { store: 'ferretry' }
     ],
     fakes: { ferrets: new FakeFerrets(), logins: fakeLogins(logins), loginChanges: fakeLoginChanges() },
     gate: new StandInAdmission(() => ownerStanding()),
-    config: CONFIG,
+    config,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
     searchPath: '/fixture/bin',
@@ -677,6 +689,15 @@ const publishOnce = async (host: TestHost): Promise<void> => {
 };
 
 const REPAIR = 'runtimes.manifest-repair';
+
+/** Polls `done` for at most 5 s (a publish fired by a watch has no promise to await). */
+async function until(done: () => Promise<boolean>, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!(await done().catch(() => false))) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
 
 describe('the composed daemon rebuilds an unreadable manifest after start', () => {
   it('registers the repair as a once-after-start job', async () => {
@@ -735,16 +756,48 @@ describe('the composed daemon rebuilds an unreadable manifest after start', () =
     expect(await kept(world)).toEqual([]);
   });
 
-  it('a machine with no manifest yet is left alone too', async () => {
-    const { host, world } = await compose();
+  it('a machine with no configuration and no manifest yet is left alone too', async () => {
+    const { host, world } = await compose([], {});
 
     await host.runJob(REPAIR);
 
     expect(await readdir(world.fleet)).not.toContain('manifest.json');
   });
 
+  it('a machine whose files an owner wrote and that has no manifest yet is published from them at start, with no config write', async () => {
+    const { host, world } = await compose();
+    expect(await readdir(world.fleet)).not.toContain('manifest.json');
+
+    await host.runJob(REPAIR);
+
+    const published = JSON.parse(await readFile(manifestPathOf(world), 'utf8')) as FleetManifest;
+    expect(published.runtimes.map(runtime => runtime.name)).toEqual(['claude-default']);
+    expect((await fleetHomes(world.roots, new FleetPublication()).homes()).length).toBeGreaterThan(0);
+    // A ferret started right after boot finds its runtime's launch facts (the start gate refuses one with none).
+    const facts = launchFactsSource({ roots: world.roots }, new FleetPublication());
+    expect(await facts.facts('claude-default')).toMatchObject({ kind: 'claude' });
+  });
+
+  it('a change to a runtime or profile file is published when it lands: the new runtime has its home with no config write', async () => {
+    const { host, world } = await compose();
+    await host.runJob(REPAIR);
+
+    host.setConfig('runtimes', {
+      'claude-default': { login: 'claude-you', profile: 'default', agent: true },
+      'claude-extra': { login: 'claude-you', profile: 'default', agent: true },
+    });
+    await host.settle();
+    await until(
+      async () => (await readFile(manifestPathOf(world), 'utf8')).includes('claude-extra'),
+      'the extra runtime to be published',
+    );
+
+    const published = JSON.parse(await readFile(manifestPathOf(world), 'utf8')) as FleetManifest;
+    expect(published.runtimes.map(runtime => runtime.name).toSorted()).toEqual(['claude-default', 'claude-extra']);
+  });
+
   it('says so, and FAILS the job (so the runner retries it), when the manifest is unreadable and the configuration cannot be published yet', async () => {
-    const { host, world } = await compose([]);
+    const { host, world } = await compose(undefined, UNPUBLISHABLE);
     await writeFile(manifestPathOf(world), withUnknownKey());
 
     await expect(host.runJob(REPAIR)).rejects.toThrow('could not be rebuilt yet');
@@ -835,12 +888,15 @@ describe('the start boundary says the manifest is being rebuilt', () => {
 
 // ── the real JobRunner over a driven clock ──────────────────────────────────────────────────────────────────────────
 
-async function scheduledCompose(failures = 0, missingLogins = false) {
+async function scheduledCompose(failures = 0, unpublishable = false) {
   const world = await fleetWorld();
   const clock = fixedClock();
   const silent = { debug() {}, info() {}, warn() {}, error() {}, child: () => silent };
   const runner = new JobRunner(clock, silent as never);
   let attempts = 0;
+  // A publish the apply's own change event fires (`fromFiles.soon`) has no promise a test can await, yet it repairs a
+  // damaged manifest just as the job does, outside the counted `republish`: tracked so a test damages only once it is quiet.
+  const strays = new Set<Promise<unknown>>();
   let assembled: ReturnType<typeof hostAssembly> | undefined;
   const host = await testHost({
     plugins: [
@@ -855,6 +911,16 @@ async function scheduledCompose(failures = 0, missingLogins = false) {
         const assembly = hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
         const catalog = new Proxy(assembly.catalog, {
           get(target, property) {
+            if (property === 'publishFromFiles')
+              return () => {
+                const stray = Promise.resolve(target.publishFromFiles?.());
+                strays.add(stray);
+                void stray.then(
+                  () => strays.delete(stray),
+                  () => strays.delete(stray),
+                );
+                return stray;
+              };
             if (property === 'republish')
               return async (options: never) => {
                 attempts += 1;
@@ -871,11 +937,11 @@ async function scheduledCompose(failures = 0, missingLogins = false) {
     ],
     fakes: {
       ferrets: new FakeFerrets(),
-      logins: fakeLogins(missingLogins ? [] : [sampleLogin('claude-you', { store: 'ferretry' })]),
+      logins: fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]),
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
-    config: CONFIG,
+    config: unpublishable ? UNPUBLISHABLE : CONFIG,
     ownerHome: world.person,
     executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
     searchPath: '/fixture/bin',
@@ -884,6 +950,15 @@ async function scheduledCompose(failures = 0, missingLogins = false) {
   const advance = async (ms: number): Promise<void> => {
     await clock.advance(ms);
     await runner.settle();
+  };
+  // The apply of the fixture's one runtime, then every publish its change event started has finished: what follows
+  // (a damaged manifest, a count of the job's attempts) is the repair job's alone, however slowly the machine runs.
+  const published = async (): Promise<void> => {
+    await publishOnce(host);
+    while (strays.size > 0) {
+      await Promise.allSettled([...strays]);
+      await new Promise<void>(resolve => setImmediate(resolve));
+    }
   };
   const boot = async (): Promise<void> => {
     runner.start();
@@ -894,14 +969,25 @@ async function scheduledCompose(failures = 0, missingLogins = false) {
     if (assembled?.launchFacts === undefined) throw new Error('the composed daemon has no launch facts');
     return assembled.launchFacts;
   };
-  return { host, world, runner, clock, advance, boot, facts, assembly: () => assembled, attempts: () => attempts };
+  return {
+    host,
+    world,
+    runner,
+    clock,
+    advance,
+    boot,
+    published,
+    facts,
+    assembly: () => assembled,
+    attempts: () => attempts,
+  };
 }
 
 describe('the repair is retried by the real JobRunner until it works', () => {
   it('one transient failure: the job fails (not a successful terminal run), is retried with backoff, and then repairs on its own', async () => {
     const f = await scheduledCompose(1);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), truncated());
 
       await f.boot();
@@ -925,7 +1011,7 @@ describe('the repair is retried by the real JobRunner until it works', () => {
   it('a repair that keeps failing keeps being retried, and a later success ends it', async () => {
     const f = await scheduledCompose(3);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), withUnknownKey());
       await f.boot();
       await f.advance(1_000);
@@ -949,7 +1035,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('a healthy boot and healthy starts never publish', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       const before = await readFile(manifestPathOf(f.world), 'utf8');
       await f.boot();
       const gate = new LaunchGate({ source: f.facts() });
@@ -968,7 +1054,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('healthy boot, then truncation: a start is refused retryably, the repair runs by itself, the next start passes', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       expect(f.attempts()).toBe(0);
       await writeFile(manifestPathOf(f.world), truncated());
@@ -991,7 +1077,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('a refused start never publishes by itself: only the repair job does, one at a time', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       await writeFile(manifestPathOf(f.world), truncated());
       const source = f.facts();
@@ -1012,7 +1098,7 @@ describe('damage after a healthy boot is repaired without anyone asking', () => 
   it('the homes reader asks for the repair too (a Codex start never reads the launch facts)', async () => {
     const f = await scheduledCompose();
     try {
-      await publishOnce(f.host);
+      await f.published();
       await f.boot();
       await writeFile(manifestPathOf(f.world), withUnknownKey());
       const homes = f.assembly()?.homes;
@@ -1110,7 +1196,7 @@ describe('ONE repair owner across running and backoff', () => {
   it('the backoff still retries by itself and a success hands the repair back: the next damage is repaired at once', async () => {
     const f = await scheduledCompose(1);
     try {
-      await publishOnce(f.host);
+      await f.published();
       await writeFile(manifestPathOf(f.world), truncated());
       await f.boot();
       expect(f.attempts()).toBe(1);

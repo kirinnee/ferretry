@@ -2,6 +2,9 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- A pairing link opened here has no taker: its fragment is stripped and dropped, and any later one with it
+         (public/arrival.js, `data-drop`). It must stay the first script of the page; the build checks it. -->
+    <script src="/arrival.js" data-drop></script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="color-scheme" content="light dark" />
     <title>Get started — Ferretry</title>

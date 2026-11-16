@@ -2,6 +2,7 @@ import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/
 import { audit, cap } from '@ferretry/core-gate/contract';
 import { ACTIONS_ROW_SLOT, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
+import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { PROFILE_COMPONENTS_KEY, ProfileMcpSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -25,10 +26,10 @@ import {
  * descriptor fields copied exactly. Paths follow §3.2/§1.4: `/v1/fleet/mcp-auth…` → `/v1/mcp/auth…`;
  * `/v1/sessions/:sessionId/…` → `/v1/ferrets/:ferretId/…`.
  *
- * GAPS (for the port / the lead): `permissions.spawn` is empty and a check's own network reach is undeclared. A check
- * starts the owner's own stdio command (any program) and reaches the server it checks; today's code spawns and fetches
- * freely. The kernel ports refuse what is undeclared, so the check needs the data-driven allowance (the M3 unit) before
- * `ports-pending` can drop `mcp`. The sign-in's reach is declared (`network`, the `mcp-sign-in` resolver).
+ * REACH. A check starts the owner's own stdio command (any program) and reaches the server it checks. The program is
+ * allowed by the `mcp-check` spawn resolver (`daemon/lib/check-reach.ts`): ONLY the one command of the one approved
+ * server being checked, for as long as that check runs. The hosts are the `mcp-sign-in` resolver's (`daemon/lib/reach.ts`):
+ * the servers with a web address, the sign-ins on file and the hosts a sign-in in flight discovered.
  */
 export default definePlugin({
   id: 'mcp',
@@ -174,13 +175,72 @@ export default definePlugin({
     cli: [
       verb('mcp serve', {
         summary: 'serve the terminal and browser tools over MCP on stdin/stdout, as this agent session',
+        args: [],
       }),
-      verb('mcp ls', { summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in' }),
-      verb('mcp check', { summary: 'connect to one MCP server and list its tools, by name or id' }),
-      verb('mcp add', { summary: 'add an MCP server item' }),
-      verb('mcp show', { summary: 'one MCP server item and where it is used' }),
-      verb('mcp edit', { summary: 'change an MCP server item; every profile and runtime that uses it changes too' }),
-      verb('mcp rm', { summary: 'remove an MCP server item' }),
+      verb('mcp ls', {
+        summary: 'list the MCP servers a ferret sees, by scope, with approval and sign-in',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('mcp check', {
+        summary: 'connect to one MCP server and list its tools, by name or id',
+        args: [{ name: 'server', help: 'the MCP server to check; every one it can see when left out' }],
+        options: [
+          {
+            flag: '--session <id>',
+            help: 'check it as this ferret reaches it (default: this one, when run inside one)',
+          },
+          { flag: '--machine', help: 'pick the server from the whole machine instead of one ferret' },
+          {
+            flag: '--scope <scope>',
+            help: 'when the name is declared twice: ferretry, component, user, project or local',
+          },
+          { flag: '--json', help: 'print the protocol result' },
+        ],
+      }),
+      verb('mcp add', {
+        summary: 'add an MCP server item',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file (- reads standard input)" },
+          { flag: '--command <command>', help: 'MCP: the command to run' },
+          { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },
+          { flag: '--url <url>', help: 'MCP: the server address, instead of a command' },
+          { flag: '--env <NAME=value>', help: 'MCP: one environment variable; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('mcp show', {
+        summary: 'one MCP server item and where it is used',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('mcp edit', {
+        summary: 'change an MCP server item; every profile and runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file (- reads standard input)" },
+          { flag: '--command <command>', help: 'MCP: the command to run' },
+          { flag: '--arg <arg>', help: 'MCP: one argument; repeat it' },
+          { flag: '--url <url>', help: 'MCP: the server address, instead of a command' },
+          { flag: '--env <NAME=value>', help: 'MCP: one environment variable; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('mcp rm', {
+        summary: 'remove an MCP server item',
+        args: [{ name: 'name', help: 'the MCP server item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
   },
 
@@ -191,7 +251,7 @@ export default definePlugin({
       // Ferrets' Actions ▾ menu: MCP's own row, "Add MCP server…".
       panel(ACTIONS_ROW_SLOT, { id: 'add-mcp-row', order: 10 }),
     ],
-    settings: [settingsTab('mcp', { label: 'MCP servers', order: 50 })],
+    settings: [settingsTab('mcp', { group: 'tools', label: 'MCP servers', order: 50 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed OAuth refresh tokens and client secrets (`PrivacyDecl`). */
@@ -214,7 +274,12 @@ export default definePlugin({
 
   hooks: {
     // Runtimes reads the `mcp` components a profile names through this plugin, which alone owns them (its `takers` list).
-    takes: [{ hook: LaunchParts }, { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY }],
+    takes: [
+      { hook: LaunchParts },
+      { hook: ProfileMcpSource, key: PROFILE_COMPONENTS_KEY },
+      // Catalogs shares this plugin's servers and installs a catalog's servers through it (the kind it owns).
+      { hook: CatalogItems, key: 'mcp' },
+    ],
   },
 
   doctor: ['mcp-inventory'],
@@ -222,11 +287,17 @@ export default definePlugin({
   permissions: {
     // `work`: a ferret's own folder. `imports`: ONLY the `.mcp.json` of a registered project root or a live managed
     // worktree, read-only (lead ruling (B); `daemon/adapters/project-root-files.ts`).
-    roots: ['work', 'imports'],
+    roots: ['work', 'imports', 'project-files'],
+    // A catalog install adds a server to a project's `.mcp.json` (the root of a project or worktree the daemon knows) and nothing else there.
+    projectFiles: ['.mcp.json'],
     // Sign-in: the servers being signed in to, and the issuer and endpoints their metadata named, answered by the
-    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). The check's own reach is still the GAP above.
+    // `mcp-sign-in` resolver (`daemon/lib/reach.ts`). A check reaches the same hosts.
     network: [{ resolver: 'mcp-sign-in' }],
-    spawn: [],
+    // A check's stdio command: the one being checked, while it is checked (`mcp-check`).
+    spawn: [{ resolver: 'mcp-check' }],
+    // A check starts a command for a runtime: the secrets that runtime's profile references may go into that one child
+    // (`VaultApi.childEnvironmentForRuntime`), and nothing else beyond this plugin's own server entries.
+    profileSecrets: true,
     secrets: [],
     // The OAuth access tokens a sign-in files in the Vault (`mcpOAuthSecretNames`): today's exact names, and no others.
     mintedSecrets: [SIGN_IN_SECRET_NAME],

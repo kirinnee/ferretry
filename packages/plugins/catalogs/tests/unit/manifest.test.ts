@@ -5,8 +5,9 @@ const routes = manifest.actions.routes;
 const members = manifest.actions.memberRoutes;
 
 describe('catalogs manifest', () => {
-  test('declares the catalog, share, member, link and install routes and the eleven member routes (the new GET /v1/shared/contract is one)', () => {
-    expect(routes).toHaveLength(47);
+  test('declares the catalog, share, member, link and install routes and the eleven member routes (the new GET /v1/shared/contract is one; GET /v1/catalog-installs/targets is the 48th route)', () => {
+    // 4735673c16 (B16) added GET /v1/catalog-installs/targets.
+    expect(routes).toHaveLength(48);
     expect(members).toHaveLength(11);
   });
   test("Projects' and Skills' routes, mounted from catalogs.ts today, are not declared here", () => {
@@ -27,7 +28,7 @@ describe('catalogs manifest', () => {
   // A member unlocks with its own passkeys and never steps up: Gate's `step-up` hook has Access as its only taker.
   test('needs Access by token name and takes the member credential and session mode (never a step-up)', () => {
     expect(Object.keys(manifest.needs ?? {})).toEqual(['access', 'gate', 'vault', 'sealed']);
-    expect(Object.keys(manifest.uses)).toEqual(['connections', 'projects', 'skills']);
+    expect(Object.keys(manifest.uses)).toEqual(['connections', 'ferrets', 'projects', 'skills', 'runtimes']);
     expect(manifest.hooks.takes.map(take => `${take.hook.name}:${take.key}`)).toEqual([
       'credentials:member',
       'session.modes:member',

@@ -13,13 +13,18 @@ import type { LiveRuntimesClient } from '../lib/client.ts';
  * edit held for the owner and a newly broken file (the last good version stays in effect) said nothing to an open
  * editor. A client with no `subscribe` hears nothing; a frame for another file or plugin is ignored.
  */
-export function useConfigFileChanges(client: LiveRuntimesClient, path: string, onChange: () => void): void {
+export function useConfigFileChanges(
+  client: LiveRuntimesClient,
+  path: string,
+  onChange: () => void,
+  plugin = 'runtimes',
+): void {
   const latest = useRef(onChange);
   latest.current = onChange;
   useEffect(() => {
     if (client.subscribe === undefined) return;
     return client.subscribe(ConfigChanged, frame => {
-      if (frame.plugin === 'runtimes' && frame.path === path) latest.current();
+      if (frame.plugin === plugin && frame.path === path) latest.current();
     });
-  }, [client, path]);
+  }, [client, path, plugin]);
 }

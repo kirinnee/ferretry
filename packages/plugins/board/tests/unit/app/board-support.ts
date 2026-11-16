@@ -179,6 +179,7 @@ export const fakePort = (overrides: Partial<BoardPort> = {}): BoardPort & { read
       calls.push(`projects:${daemon.daemonId}`);
       return [];
     },
+    agenda: async () => null,
     version: async () => '4.110.0',
     lanes: async () => {
       throw new Error('lanes was not expected');

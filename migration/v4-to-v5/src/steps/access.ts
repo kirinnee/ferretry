@@ -79,6 +79,10 @@ export const V5_PUSH_KEYS_FILE = join(V5_DIR, PushKeysFile.path);
 const OFF = { use: false, configure: false } as const;
 
 const ACCESS_NOT_CARRIED: readonly NotCarried[] = [
+  {
+    what: 'the grant audit history (state/grant-audit.jsonl, state/security-audit.jsonl)',
+    why: 'owner ruling !A516: left behind, so it is not promised in v5; the originals stay in the v4 home. Until the converter stops reading those two files, their lines may still be written to the v5 grant journal',
+  },
   { what: 'pairing codes', why: 'single-use and two minutes long; none survives a stop' },
   {
     what: 'live unlocks (state/unlocks.json)',
@@ -187,7 +191,10 @@ async function convertJournals(ctx: StepContext, part: Part): Promise<void> {
     { path: V5_GRANT_AUDIT_FILE, format: GrantAuditFile.format, schema: GrantAuditLineSchema },
     lines.map(entry => entry.line),
   );
-  part.kept.push({ what: 'grant and security journal lines', count: lines.length });
+  part.kept.push({
+    what: 'grant and security journal lines (the grant audit history is left behind by owner ruling, see not carried)',
+    count: lines.length,
+  });
   if (unreadable > 0) part.notes.push(`${String(unreadable)} unreadable journal line(s) skipped, as v4 skipped them`);
   if (refused > 0) part.notes.push(`${String(refused)} journal line(s) v5 refuses skipped`);
 }
@@ -256,7 +263,7 @@ async function convertPush(ctx: StepContext, part: Part, devices: ReadonlySet<st
 
 export const accessStep: Step = {
   id: 'access',
-  title: 'Paired devices and passkeys (public keys, grants, grant journal, push)',
+  title: 'Paired devices and passkeys (public keys, grants, push; the grant audit history is left behind)',
   owner: ['plugin-access'],
   reads: [V4_DEVICES, V4_PASSKEYS, V4_UNLOCKS, V4_PUSH, V4_PUSH_VAPID, V4_GRANT_JOURNAL, V4_SECURITY_JOURNAL],
   // The VAPID key is opened (its envelope changes), so it is not a sealed move; it is never shown.

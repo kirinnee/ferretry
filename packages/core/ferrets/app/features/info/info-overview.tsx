@@ -23,7 +23,7 @@ export interface InfoOverviewProps {
   /** Goes to another ferret; the host decides where. */
   readonly onOpenFerret?: (ferretId: string) => void;
   /** The "About this ferret" block's Restart. */
-  readonly about?: Pick<InfoAboutProps, 'onRestart'>;
+  readonly about?: Pick<InfoAboutProps, 'onRestart' | 'overlayKey'>;
 }
 
 const ferretName = (ferret: FerretSummary): string => displayCallsign(ferret.name) || ferret.title || ferret.id;
@@ -60,6 +60,7 @@ export function InfoOverview({
   return (
     <>
       <InfoAbout
+        ferret={ferret}
         subFerrets={family.children}
         {...(ferret.card === undefined ? {} : { card: ferret.card })}
         {...(onOpenFerret === undefined ? {} : { onOpenFerret })}

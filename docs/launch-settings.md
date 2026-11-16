@@ -49,6 +49,27 @@ ferret is bound to — as if only the process had restarted:
   `409 conversation_unresumable` and changes nothing. It never quietly starts a new conversation.
   **Start fresh** (`conversation: "fresh"`, `fy migrate … --conversation fresh`) is the person's explicit way
   past.
+- A relaunch on the **same login** (resume, Restart CLI, a queued restart) whose conversation the harness
+  **proves is not in the ferret's home** (`Harness.hasConversation` answers `false`: Claude finds `<id>.jsonl` in NO
+  `projects/*` folder of the home, after listing them all, because its own folder spelling can differ from Ferretry's
+  for a folder reached through a link or one spelled over 200 characters; Codex walks every rollout under `sessions/`
+  and none names it) starts a NEW
+  conversation instead of a `--resume` the CLI would fail ("No conversation found…"), and says so out loud: the
+  ferret's history gets `session.conversation_not_found` naming the old id, and an autonomous ferret's revive turn
+  is typed after a fixed sentence telling it so and pointing at its assigned task (`turn-001.md`). The old id and
+  transcript pointer are dropped from the record. Any doubt (a link, an unreadable file, a capped walk) resumes as
+  asked. The case this exists for is a ferret converted from Ferretry 4, whose chats were left behind.
+- **A Codex conversation is recorded once it is proved.** Codex names its conversation after launch, so a start
+  records none. When the ferret stops, and again before a plain resume or Restart (never a move, which names its own),
+  Ferrets asks the harness for the conversation its last launch PROVABLY wrote (`Harness.provedConversation`: the one
+  new rollout carrying the correlation marker only that launch typed, or the native id it resumed; any doubt answers
+  nothing) and writes it to the record as `harnessConversation` and a `correlated` transcript, journalled once as
+  `session.conversation_recorded`. The relaunch then runs `codex resume <id>`. Claude Code names its conversation on
+  the launch argv and is never asked. A record that names one is never re-proved.
+- A relaunch with **no conversation to resume at all** (nothing was ever proved: a Codex ferret stopped before its
+  first turn wrote a rollout, or a v4 ferret whose rollout v4 never found) starts a NEW one and says so the same way:
+  history `session.conversation_not_found` with `{ unknown: true }`, and a fixed sentence before an autonomous
+  ferret's revive turn, so it never forgets everything in silence.
 - **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
   Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
   harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and
@@ -149,13 +170,21 @@ in-flight inventory and is **never forced past it**: a running test, a held proc
 question all refuse it. A refusal is not an error; the ferret is **queued** and restarted at its next idle
 moment (its turn is the owner's, or it declared a wait), once the inventory agrees.
 
-| Outcome   | Meaning                                                                                        |
-| --------- | ---------------------------------------------------------------------------------------------- |
-| restarted | idle, and the inventory agreed: restarted now                                                  |
-| queued    | `mid-turn`, `in-flight` (the inventory refused), or `own-session` (see below); restarted later |
-| skipped   | not found, or not running                                                                      |
-| failed    | the restart itself failed; the others carry on                                                 |
+| Outcome   | Meaning                                                                                                           |
+| --------- | ----------------------------------------------------------------------------------------------------------------- |
+| restarted | idle, and the inventory agreed: restarted now                                                                     |
+| queued    | `mid-turn`, `in-flight` (the inventory refused), `own-session` (see below), or `blocked` (below); restarted later |
+| skipped   | not found, or not running                                                                                         |
+| failed    | the restart itself failed; the others carry on                                                                    |
 
+- **A restart never stops a ferret it cannot start again.** It is ONE relaunch that replaces the live pane (as a
+  move is): the runtime and its login, the folder, the start gate and the harness are judged first, and only then is
+  the old harness stopped. When the runtime cannot start (a login that needs sign-in, a runtime switched off) the
+  ferret keeps running untouched and the restart is **queued `blocked`**; its history says why once
+  (`session.restart_blocked`, with the reason), not on every try, and the drain tries again on the backoff below, so it
+  restarts by itself once the owner signs the login in (`fy login signin <login>`). Any other refusal (a folder the
+  fence refuses never clears by itself) also leaves the ferret running, and gives up (`session.restart_gave_up`, with
+  the reason), as does a launch that fails after the stop.
 - **The caller's own session is always queued.** A ferret that runs `fy restart` never restarts itself
   mid-turn: the CLI sends its own session id and the daemon waits until its turn has ended.
 - **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
@@ -185,8 +214,8 @@ Each prints what restarted now, then what is queued and why. `--json` prints the
 
 ### In the app
 
-An **Outdated** mark sits on the sidebar row and in the session header of every outdated ferret, and a
-**Restart outdated (N)** row in the sessions bar's **⋯** menu (the ⋯ wears the count as a badge while any ferret is outdated, so it is found without hunting) offers the restart. It sends the same request as `fy restart
+An **Outdated** mark sits on the ferret list's row and in **Info › Overview**, beside Restart, of every outdated ferret (a reader who may not restart it still sees it), and a
+**Restart outdated (N)** row in the ferret list's **⋯** menu (the ⋯ wears the count as a badge while any ferret is outdated, so it is found without hunting) offers the restart. It sends the same request as `fy restart
 --outdated` and shows the same result, restarted now and queued, until it is dismissed. Nothing restarts
 automatically: a restart interrupts a ferret, so the owner presses it.
 
@@ -242,6 +271,22 @@ switch, so its form box is disabled and its Info row says so.
 Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--rc` is ignored by Claude Code
 for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
 the user-settings control and the `--rc` argv in the unit tests.
+
+## The question tool is per ferret, from its mode
+
+Only an **interactive** ferret has an owner at the pane, so only it can ask a question. The ferret's mode reaches the
+launch through the one builder as `LaunchSpec.mode` (the record's own mode, set on every launch: a start, a resume,
+Restart CLI, a migration, a revive), and each harness spells it:
+
+| Harness     | Interactive                                               | Auto, or no mode                     |
+| ----------- | --------------------------------------------------------- | ------------------------------------ |
+| Claude Code | keeps `AskUserQuestion`                                   | `--disallowed-tools=AskUserQuestion` |
+| Codex       | `--enable default_mode_request_user_input` (Default mode) | nothing added                        |
+
+The pane is also handed `FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part,
+so it can never disagree with what the harness decided; `instructions` and the Runtimes wrappers read it. A ferret's
+mode never changes, so these arguments are outside the recorded launch's fixed-layer fingerprint: they cannot make a
+running ferret read as outdated.
 
 ## Claude's questions reach the app through a hook
 

@@ -224,12 +224,23 @@ describe('the mcp cli half', () => {
     should(Object.keys(built().verbs).sort()).eql((manifest.actions?.cli ?? []).map(verb => verb.verb).sort());
   });
 
-  it('should answer the item verbs with the not-built sentence and exit 69, changing nothing', async () => {
-    for (const verb of ['mcp add', 'mcp show', 'mcp edit', 'mcp rm']) {
-      const { verbs, err } = built();
-      should(await verbs[verb]?.({ args: [], options: {} })).equal(69);
-      should(err.join('')).containEql('not served by this daemon yet; nothing was changed');
-    }
+  it('should serve the item verbs over the config routes, not the exit-69 stub', async () => {
+    const calls: string[] = [];
+    const out: string[] = [];
+    const context = {
+      manifest,
+      client: {
+        call: async (route: string, init?: { query?: { path?: string } }) => {
+          calls.push(`${route} ${init?.query?.path ?? ''}`.trim());
+          return { path: init?.query?.path, exists: true, text: 'command: docs\n', etag: 'e1', state: 'ok' };
+        },
+      },
+      io: { out: (t: string) => out.push(t), err: () => {}, isTty: false },
+    } as unknown as CliContext<typeof manifest>;
+    const { verbs } = (cli.build as (c: typeof context) => { verbs: Record<string, VerbHandler> })(context);
+    should(await verbs['mcp show']?.({ args: ['docs'], options: {} })).equal(0);
+    should(calls).eql(['GET /v1/config/file mcp/docs.yaml']);
+    should(out.join('')).containEql('command: docs');
   });
 
   it('should refuse `mcp serve` plainly when the shell gave it no standard input', async () => {

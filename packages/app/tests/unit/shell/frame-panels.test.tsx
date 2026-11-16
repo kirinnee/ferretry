@@ -1,14 +1,12 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import { BUILT_IN_LAYOUTS } from '@ferretry/plugin-layouts/contract';
 import { type ReactNode, useState } from 'react';
-import { deviceControls, useDeviceControls } from '../../../src/compose/device-controls.ts';
 import { provideToShell } from '../../../src/connect/provides.ts';
 import { useAppHook } from '../../../src/shell/app-hooks.ts';
 import { PanelSlot } from '../../../src/shell/views.tsx';
 import { useViewPlace } from '../../../src/shell/view-place.tsx';
 import { useEveryDaemon } from '../../../src/shell/every-daemon.ts';
-import { useDevicePaired } from '../../../src/shell/device-context.tsx';
 import { useNavForm } from '../../../src/shell/device-panels.tsx';
 import { APP_STORAGE } from '../../../src/storage/names.ts';
 import { memoryStore, writeRecord } from '../../../src/storage/records.ts';
@@ -37,12 +35,9 @@ const setCount = (daemon: string, n: number): void => {
 
 function NeedsYou(): ReactNode {
   const rows = useEveryDaemon();
-  const scope = useDeviceControls().device.sessionsList;
-  const selected = useDevicePaired().selected;
-  const shown = scope === 'current' ? rows.filter(row => row.daemon === selected) : rows;
   return (
     <ul data-testid="needs-you" data-form={useNavForm()}>
-      {shown.map(row => (
+      {rows.map(row => (
         <li key={row.daemon} data-testid={`needs-${row.daemon}`} data-online={String(row.online)}>
           {row.machine}
         </li>
@@ -92,7 +87,13 @@ const inboxManifest = manifestOf('inbox', {
     routes: [{ key: 'POST /v1/inbox/marks', minimum: 'authenticated', caller: 'any', audit: 'skip' }],
   },
   ui: {
-    screens: [{ id: 'inbox', path: 'inbox', nav: { label: 'Inbox', order: 1 } }],
+    screens: [
+      { id: 'inbox', path: 'inbox', nav: { label: 'Inbox', order: 1 } },
+      // A screen whose only parameter is optional (the Board's `board/:project?`): it has a bare address of its own.
+      { id: 'lanes', path: 'lanes/:project?', nav: { label: 'Lanes', order: 2 } },
+      // A screen that cannot be reached without its subject.
+      { id: 'thread', path: 'thread/:id', nav: { label: 'Thread', order: 3 } },
+    ],
     panels: [
       { id: 'needs-you', slot: 'nav', order: 10 },
       { id: 'marks', slot: 'device.settings', order: 10 },
@@ -107,7 +108,7 @@ const inbox = entryOf(
   provideToShell(
     implementApp(inboxManifest, {
       build: () => ({
-        screens: { inbox: () => <p>inbox page</p> },
+        screens: { inbox: () => <p>inbox page</p>, lanes: () => <p>lanes page</p>, thread: () => <p>thread page</p> },
         panels: {
           'side-note': ({ subject }: PanelProps) => <p data-testid="side-note">side note {String(subject)}</p>,
           'top-note': () => <p>top note</p>,
@@ -186,9 +187,6 @@ const deviceLayout = (nav: Record<string, unknown>, phoneNav: Record<string, unk
 };
 
 let view: Mounted | null = null;
-beforeEach(() => {
-  deviceControls().setDeviceControls({ sessionsList: 'all' });
-});
 afterEach(async () => {
   await view?.unmount();
   view = null;
@@ -201,7 +199,6 @@ afterEach(async () => {
   placesSeen.length = 0;
   misbehave.countThrows = false;
   misbehave.subscribeThrows = false;
-  deviceControls().setDeviceControls({ sessionsList: 'all' });
 });
 
 const text = (): string => view?.container.textContent ?? '';
@@ -498,19 +495,6 @@ describe('the Needs-you nav panel (device-level)', () => {
     expect(text()).not.toContain('paused');
   });
 
-  test('shell S4: "Sessions list: current" shows the selected machine only; "all" shows both', async () => {
-    const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/', storage: deviceLayout(LIST) });
-    view = app.view;
-    app.runtime.daemons.select('d2');
-    await interact(() => deviceControls().setDeviceControls({ sessionsList: 'current' }));
-    await settle();
-    expect(app.view.container.querySelector('[data-testid="needs-d1"]')).toBeNull();
-    expect(app.view.container.querySelector('[data-testid="needs-d2"]')).not.toBeNull();
-    await interact(() => deviceControls().setDeviceControls({ sessionsList: 'all' }));
-    expect(app.view.container.querySelector('[data-testid="needs-d1"]')).not.toBeNull();
-    expect(app.view.container.querySelector('[data-testid="needs-d2"]')).not.toBeNull();
-  });
-
   test('shell S4: a machine whose feed drops keeps its row, offline (the panel greys it)', async () => {
     const app = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/', storage: deviceLayout(LIST) });
     view = app.view;
@@ -614,7 +598,7 @@ describe('the side column', () => {
     expect(panels('inbox.side-note')).toBe(1);
     expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
     await view.unmount();
-    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', storage });
+    const home = await bootApp({ surfaces: [inbox], machines: ['d1', 'd2'], path: '/app/', arrived: true, storage });
     view = home.view;
     expect(panels('inbox.side-note')).toBe(0);
   });
@@ -623,6 +607,45 @@ describe('the side column', () => {
     const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', viewport: 'phone' });
     view = app.view;
     expect(panels('inbox.side-note')).toBe(0);
+  });
+});
+
+describe('a screen the side column holds', () => {
+  /** The column holds the inbox screen itself (as the default layout holds the ferret list). */
+  const holdingInbox = () => {
+    const storage = memoryStore();
+    writeRecord(storage, APP_STORAGE.layout, {
+      nav: { side: 'left', style: 'list', items: ['inbox', 'lanes', 'thread'] },
+      side: { holds: 'inbox' },
+      phone: { nav: PHONE },
+      panels: { 'ferret.side': [] },
+      'composer.tools': [],
+    });
+    return storage;
+  };
+  const drawn = (word: string): number => text().split(word).length - 1;
+
+  test('ferrets list: on the page that IS the held screen it is drawn once, not in the page and again beside it', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage: holdingInbox() });
+    view = app.view;
+    expect(drawn('inbox page')).toBe(1);
+  });
+
+  test('ferrets list: on any other page the column still holds it', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/lanes', storage: holdingInbox() });
+    view = app.view;
+    expect(drawn('inbox page')).toBe(1);
+    expect(app.view.container.querySelector('.fy-side')).not.toBeNull();
+  });
+
+  test('ferrets list: a nav entry whose screen has only an optional parameter is a real link; one that needs a subject is not', async () => {
+    const app = await bootApp({ surfaces: [inbox], machines: ['d1'], path: '/d/d1/inbox', storage: holdingInbox() });
+    view = app.view;
+    const entry = (label: string) =>
+      [...app.view.container.querySelectorAll('.fy-nav__item')].find(node => node.textContent?.startsWith(label));
+    expect(entry('Lanes')?.tagName).toBe('A');
+    expect(entry('Lanes')?.getAttribute('href')).toBe('/d/d1/lanes');
+    expect(entry('Thread')?.tagName).toBe('SPAN');
   });
 });
 

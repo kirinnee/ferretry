@@ -15,6 +15,7 @@ import {
   type ProfileFile,
   type ResolveResult,
   type RuntimeFile,
+  type RuntimeFactsApi,
   type RuntimeHomesApi,
   type RuntimeLayersApi,
   type RuntimeId,
@@ -69,7 +70,7 @@ const phrase = (block: { readonly reason?: string; readonly until?: string }): s
 
 export function createRuntimesApi(
   deps: RuntimesApiDeps,
-): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi> {
+): Omit<RuntimesApi, keyof RuntimeHomesApi | keyof RuntimeLayersApi | keyof RuntimeFactsApi> {
   type Read = { readonly summary: RuntimeSummary } | { readonly refusal: Extract<ResolveResult, { ok: false }> };
 
   const read = (name: string, file: RuntimeFile, logins: ReadonlyMap<string, LoginView>, now: number): Read => {

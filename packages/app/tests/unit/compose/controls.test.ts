@@ -62,17 +62,12 @@ const stored = (record: unknown): string => JSON.stringify(record);
 const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   query: 'needle',
   mode: 'interactive',
-  rcOnly: true,
-  includeFinished: true,
-  dashboardView: 'table',
   density: 'compact',
   groupNeedsYou: false,
   chatWidth: 'full',
   composerEnterKey: 'send',
   composerPhoneEnterKey: 'send',
   motion: 'reduced',
-  sidebarCollapsed: true,
-  sessionsList: 'current',
   sessionsMode: 'auto',
   machineOrder: ['b', 'a'],
   wardenDaemon: 'daemon-b',
@@ -80,8 +75,6 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   skillSuggestions: false,
   composerVimMode: true,
   openLinksIn: 'panel',
-  keepChatsFresh: false,
-  keepChatsFreshNotOnCellular: true,
 };
 
 const scopeRecord = (entries: readonly (readonly [string, string, number])[]): ControlsRecord => {
@@ -100,10 +93,6 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
         device: {
           query: 'transcript',
           mode: 'interactive',
-          rcOnly: true,
-          includeFinished: true,
-          dashboardView: 'table',
-          sidebarCollapsed: true,
         },
       }),
     );
@@ -111,9 +100,6 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(record.device).eql({
       query: 'transcript',
       mode: 'interactive',
-      rcOnly: true,
-      includeFinished: true,
-      dashboardView: 'table',
       // Absent means "follow the device", not a written default.
       density: null,
       // A payload written before `chatWidth` existed degrades to 'full', which
@@ -124,9 +110,6 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerEnterKey: null,
       composerPhoneEnterKey: null,
       motion: 'system',
-      sidebarCollapsed: true,
-      // A payload written before the list could span machines shows every machine: the new default.
-      sessionsList: 'all',
       // Never chosen: the Sessions bar opens on Interactive.
       sessionsMode: null,
       groupNeedsYou: true,
@@ -139,8 +122,6 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerVimMode: false,
       // A payload written before links had a home opens them in the reader's browser.
       openLinksIn: 'browser',
-      keepChatsFresh: true,
-      keepChatsFreshNotOnCellular: false,
     });
     // The old shape had no daemon scopes at all.
     should(Object.keys(record.scopes)).be.empty();
@@ -257,26 +238,20 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { mode: 'headless' } })).device.mode).equal(
       'all',
     );
-    should(
-      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { dashboardView: 'grid' } })).device.dashboardView,
-    ).be.null();
-    const cards = parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { dashboardView: 'cards' } }));
-    should(cards.device.dashboardView).equal('cards');
   });
 
   it('falls back field by field so one bad field cannot poison the others', () => {
     const record = parseControlsRecord(
       stored({
         format: CONTROLS_FORMAT,
-        device: { query: 'keep me', density: 'tiny', sidebarCollapsed: 'yes', rcOnly: 1, includeFinished: null },
+        device: { query: 'keep me', density: 'tiny', chatWidth: 'wide', motion: 1 },
       }),
     );
 
     should(record.device.query).equal('keep me');
     should(record.device.density).be.null();
-    should(record.device.sidebarCollapsed).be.false();
-    should(record.device.rcOnly).be.false();
-    should(record.device.includeFinished).be.false();
+    should(record.device.chatWidth).equal('readable');
+    should(record.device.motion).equal('system');
   });
 
   it('resets cleanly on a corrupt, non-object, array or wrong-version payload', () => {
@@ -605,10 +580,10 @@ describe('DaemonControlsStore', () => {
     const store = new DaemonControlsStore(new MemoryStorage());
     store.setControls(alpha, { projectScope: '/work/alpha' });
 
-    should(store.setDeviceControls({ sidebarCollapsed: true }).sidebarCollapsed).be.true();
+    should(store.setDeviceControls({ composerVimMode: true }).composerVimMode).be.true();
     // A device patch must not disturb any daemon's scope.
     should(store.controls(alpha).projectScope).equal('/work/alpha');
-    should(store.controls(alpha).sidebarCollapsed).be.true();
+    should(store.controls(alpha).composerVimMode).be.true();
   });
 
   it('applies, persists and reloads every device field, so a new control cannot be dropped in silence', () => {
@@ -762,13 +737,48 @@ describe('DaemonControlsStore', () => {
   });
 });
 
-describe('the Sessions list scope', () => {
-  it('reads every machine by default, keeps "current", and refuses anything else', () => {
-    const read = (sessionsList: unknown) =>
-      parseControlsRecord(stored({ format: CONTROLS_FORMAT, device: { sessionsList } })).device.sessionsList;
-    should(read(undefined)).equal('all');
-    should(read('current')).equal('current');
-    should(read('every')).equal('all');
+describe('controls an older build stored that 5.0 has no surface for', () => {
+  // keepChatsFresh, keepChatsFreshNotOnCellular, includeFinished, rcOnly, dashboardView, sessionsList, sidebarCollapsed.
+  it('loads every other control and drops the stored ones, which are never written back', () => {
+    const device = {
+      query: 'kept',
+      mode: 'interactive',
+      density: 'full',
+      groupNeedsYou: false,
+      chatWidth: 'full',
+      motion: 'reduced',
+      openLinksIn: 'panel',
+      sessionsMode: 'auto',
+      keepChatsFresh: false,
+      keepChatsFreshNotOnCellular: true,
+      includeFinished: true,
+      rcOnly: true,
+      dashboardView: 'table',
+      sessionsList: 'current',
+      sidebarCollapsed: true,
+    };
+    const record = parseControlsRecord(stored({ format: CONTROLS_FORMAT, device }));
+    should(record.device).eql({
+      ...DEFAULT_DEVICE_CONTROLS,
+      query: 'kept',
+      mode: 'interactive',
+      density: 'full',
+      groupNeedsYou: false,
+      chatWidth: 'full',
+      motion: 'reduced',
+      openLinksIn: 'panel',
+      sessionsMode: 'auto',
+    });
+    for (const gone of [
+      'keepChatsFresh',
+      'keepChatsFreshNotOnCellular',
+      'includeFinished',
+      'rcOnly',
+      'dashboardView',
+      'sessionsList',
+      'sidebarCollapsed',
+    ])
+      should(Object.keys(record.device)).not.containEql(gone);
   });
 });
 

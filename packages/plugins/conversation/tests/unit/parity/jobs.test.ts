@@ -29,7 +29,9 @@ async function conversation() {
   let listed = 0;
   const open = asks.open.bind(asks);
   asks.open = async (...args: Parameters<typeof open>) => {
-    listed += 1;
+    // The question reconcile (pb-question-answer) lists only ITS source's asks, on its own schedule; the work search
+    // lists them all, and that listing is what this row's warm is seen by.
+    if (args[0]?.source === undefined) listed += 1;
     return await open(...args);
   };
   const state = memoryStatePort(CONVERSATION_STATE);

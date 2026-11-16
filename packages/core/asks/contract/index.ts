@@ -9,7 +9,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { type Brand, InstantSchema, KEBAB_NAME } from '@ferretry/std';
 import { z } from 'zod';
-import type { AgendaSnapshot } from './snapshot/agenda.ts';
+import { AgendaFormFieldSchema, type AgendaSnapshot } from './snapshot/agenda.ts';
 
 /**
  * The agenda wire shapes the Agenda app and the daemon share: schemas, types and the pure helpers around them
@@ -115,6 +115,20 @@ export class AskOwnerActionError extends Error {
   }
 }
 
+/**
+ * The engine's own refusal of a raise or a close: the board READ the request and said no, in its own sentence. It is a
+ * verdict, not a failure to reach the board, so asking again with the same request is refused again.
+ */
+export class AskRefusedError extends Error {
+  override readonly name = 'AskRefusedError';
+  /** The engine's reason (`invalid`, `full`, …) when it gave one: what tells a draft that is wrong from a board that is full. */
+  readonly code: string | undefined;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 /** An answer's own id: each answer is applied once, by this id (§7.4 rule 4). */
 export type AnswerId = Brand<string, 'AnswerId'>;
 export const AnswerIdSchema = z
@@ -209,8 +223,12 @@ export const AskDraftSchema = z
     ferret: z.string().min(1).max(128).optional(),
     /** Pings the owner. */
     blocking: z.boolean().optional(),
+    /** The fields of a form: what the owner fills in before one Send. */
+    fields: z.array(AgendaFormFieldSchema).min(1).optional(),
   })
   .superRefine((draft, context) => {
+    if ((draft.kind === 'form') !== (draft.fields !== undefined))
+      context.addIssue({ code: 'custom', path: ['fields'], message: 'a form names its fields, and only a form' });
     if ((draft.kind === 'choice') !== (draft.options !== undefined))
       context.addIssue({ code: 'custom', path: ['options'], message: 'a choice names its options, and only a choice' });
     const labels = (draft.options ?? []).map(option => option.label);
@@ -324,13 +342,25 @@ export interface AsksApi {
     filter: { readonly source: SourceKey; readonly entry?: EntryId },
     since?: string,
   ): Promise<readonly AskAnswer[]>;
-  close(ask: AskRef, reason: CloseReason): Promise<void>;
+  /**
+   * Closes an ask. For a card ask CARRIED on an agenda item, `entry` names the one gate entry to withdraw: only that
+   * carried ask goes, and the carrier and its other carried asks stay. Without it every carried ask is withdrawn.
+   */
+  close(ask: AskRef, reason: CloseReason, entry?: EntryId): Promise<void>;
   open(filter: AskFilter): Promise<readonly AskSummary[]>;
   get(ask: AskRef): Promise<AskSummary | undefined>;
   /** All boards, or one board (including an empty one); open and parked items are complete. */
   snapshots(filter?: { readonly ferret?: string }): Promise<readonly AgendaSnapshot[]>;
   /** Apply a machine-board owner verb with the owner as actor. Ferret-board answers still use Asks' own route. */
   ownerAction(action: AskOwnerAction): Promise<AgendaSnapshot>;
+  /**
+   * The OWNER dismisses one open ask on ANY ferret's board, as the owner and nothing else (the owner's clear of the agent
+   * ferrets' backlog): the engine's own dismissal by the human actor, so the item closes as dismissed by the owner and tells
+   * its ferret as an owner's dismiss does. It is not {@link close} (daemon provenance dismisses only what the daemon
+   * raised) and not {@link ownerAction} (the machine board's). A refusal throws {@link AskOwnerActionError} with the engine's
+   * words; an ask already closed is a no-op.
+   */
+  ownerDismiss(ask: AskRef, note?: string): Promise<void>;
   /**
    * Tells a ferret something in its own terminal: the text joins the ferret's reply batch, the one an owner's answer
    * joins, so it goes in ONE message with them (blank-line apart), after the same settle window, once the ferret's turn
@@ -416,6 +446,39 @@ export const AskDeliveries = defineHook('ask.delivery', {
   value: z.custom<AskDelivery>(),
 });
 
+/** One message the owner sent a ferret, its words as they typed them (a chat reply's `[re !A5 …]` heading is not theirs). */
+export interface AskOwnerChatMessage {
+  /** The id the message has in the ferret's queue and send ledger. */
+  readonly messageId: string;
+  readonly at: string;
+  readonly text: string;
+}
+
+export type AskOwnerChatLookup =
+  | { readonly ok: true; readonly message: AskOwnerChatMessage }
+  /** `none`: the owner sent nothing; `unknown`: no such message for this ferret; `not-owner`: it is not the owner's. */
+  | { readonly ok: false; readonly reason: 'none' | 'unknown' | 'not-owner' };
+
+/**
+ * THE OWNER'S CHAT, as `fy agenda log` reads it: the messages the owner sent THIS ferret, from the ferret's own message
+ * store (its queue and its send ledger). Conversation owns that store, so Conversation provides it under
+ * `ask.owner-chat:conversation`; unprovided (Conversation off), nothing can be logged and `agenda log` says so.
+ */
+export interface AskOwnerChat {
+  /** The owner's latest message to the ferret, or the one with `messageId`. Total: an unreadable store is `none`/`unknown`. */
+  find(ferret: string, messageId?: string): Promise<AskOwnerChatLookup>;
+}
+
+/** The one key `ask.owner-chat` is provided under. */
+export const ASK_OWNER_CHAT_KEY = 'conversation' as const;
+
+export const AskOwnerChats = defineHook('ask.owner-chat', {
+  mode: 'provide',
+  key: z.literal(ASK_OWNER_CHAT_KEY),
+  takers: ['conversation'],
+  value: z.custom<AskOwnerChat>(),
+});
+
 /** An answer landed. A wake-up: the source reads `answers` and applies each once. */
 export const AskAnswered = defineEvent(
   'asks.answered',
@@ -486,3 +549,7 @@ export const AskOnScreenSchema = z.object({
   projectId: z.string().optional(),
 });
 export type AskOnScreen = z.infer<typeof AskOnScreenSchema>;
+
+// ─── when a ferret's last words ask the owner for something ───────────────────────────────────────────────────────
+/** The pure detector the turn-end check reads a reply with (Agenda's nudge): Asks owns the rule, a consumer reads it here. */
+export * from './owner-asks.ts';

@@ -28,6 +28,7 @@ asksConformance('FakeAsks', () => {
       get: asks.get.bind(asks),
       snapshots: asks.snapshots.bind(asks),
       ownerAction: asks.ownerAction.bind(asks),
+      ownerDismiss: asks.ownerDismiss.bind(asks),
     },
     answer: (id, effect) => asks.answerAs(id, effect),
   };

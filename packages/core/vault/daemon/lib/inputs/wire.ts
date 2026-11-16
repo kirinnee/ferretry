@@ -178,6 +178,10 @@ const InputSourceSchema = z.strictObject({
   kind: z.literal('sealed'),
   name: CopyNameSchema,
   from: CopyOriginSchema,
+  /** How many characters it holds: a count the card may show, never a sample of the value. */
+  length: z.number().int().nonnegative().optional(),
+  /** When THIS capture was read: the card is for this one, and the write opens no other under the name. */
+  capturedAt: InstantSchema.optional(),
 });
 
 /**

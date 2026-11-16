@@ -6,9 +6,15 @@ import {
   type DevicesLookedDetail,
 } from '../../../../../app/features/device-notice/devices-looked.ts';
 import type { SecurityLogClient } from '../../../../../app/features/settings/security-api.ts';
+import { STEP_UP_REQUIRED_CODE } from '@ferretry/core-gate/contract';
 import {
+  REFUSAL_WORDS,
+  refusalKindOf,
+  SECURITY_PASSKEY_INTRO,
+  SECURITY_PASSKEY_REMEDY,
   SECURITY_REFUSED_INTRO,
   SECURITY_REFUSED_REMEDY,
+  SECURITY_THIS_DEVICE_INTRO,
   type SecurityLogClientFactory,
   SecurityLogSurface,
   securityLogSettingsTab,
@@ -57,6 +63,7 @@ class HttpRefusal extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code?: string,
   ) {
     super(message);
   }
@@ -266,7 +273,7 @@ describe('Settings › Security log', () => {
       <SecurityLogSurface
         connection={alpha}
         createClient={answering(async () => {
-          throw new HttpRefusal('Pairing is switched off for other devices.', 403);
+          throw new HttpRefusal('Pairing is switched off for other devices.', 403, 'grant_not_granted');
         })}
         now={now}
       />,
@@ -280,12 +287,76 @@ describe('Settings › Security log', () => {
     await shown.unmount();
   });
 
+  it('a cancelled passkey is said to be a passkey, never "pairing is switched off"', async () => {
+    const shown = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => {
+          throw new HttpRefusal('This change needs a passkey confirmation.', 403, STEP_UP_REQUIRED_CODE);
+        })}
+        now={now}
+      />,
+    );
+    await settled(shown.container, '[data-security-log-refused]');
+    const text = shown.container.textContent ?? '';
+    expect(text).toContain(SECURITY_PASSKEY_INTRO);
+    expect(text).toContain(SECURITY_PASSKEY_REMEDY);
+    expect(text).toContain('This change needs a passkey confirmation.');
+    expect(text).not.toContain('switched pairing off');
+    expect(shown.container.querySelector('h3')?.textContent).toBe(REFUSAL_WORDS.passkey.heading);
+    await shown.unmount();
+  });
+
+  it('a device the machine has not granted is told so, in its own words', async () => {
+    const shown = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => {
+          throw new HttpRefusal('', 403, 'grant_device_not_granted');
+        })}
+        now={now}
+      />,
+    );
+    await settled(shown.container, '[data-security-log-refused]');
+    const text = shown.container.textContent ?? '';
+    expect(text).toContain(SECURITY_THIS_DEVICE_INTRO);
+    expect(text).not.toContain('switched pairing off');
+    await shown.unmount();
+  });
+
+  it('a refusal with no grant code names no cause it cannot know', async () => {
+    const shown = await mount(
+      <SecurityLogSurface
+        connection={alpha}
+        createClient={answering(async () => {
+          throw new HttpRefusal('nope', 403);
+        })}
+        now={now}
+      />,
+    );
+    await settled(shown.container, '[data-security-log-refused]');
+    const text = shown.container.textContent ?? '';
+    expect(text).toContain(REFUSAL_WORDS.other.intro);
+    expect(text).toContain('nope');
+    expect(text).not.toContain('switched pairing off');
+    expect(text).not.toContain('passkey');
+    await shown.unmount();
+  });
+
+  it('reads the refusal kind from the daemon code alone', () => {
+    expect(refusalKindOf(new HttpRefusal('x', 403, 'grant_not_granted'))).toBe('pairing-off');
+    expect(refusalKindOf(new HttpRefusal('x', 403, 'grant_device_not_granted'))).toBe('this-device');
+    expect(refusalKindOf(new HttpRefusal('x', 403, STEP_UP_REQUIRED_CODE))).toBe('passkey');
+    expect(refusalKindOf(new HttpRefusal('x', 403))).toBe('other');
+    expect(refusalKindOf(new Error('x'))).toBe('other');
+  });
+
   it('a refusal with no sentence still explains itself', async () => {
     const shown = await mount(
       <SecurityLogSurface
         connection={alpha}
         createClient={answering(async () => {
-          throw new HttpRefusal('  ', 403);
+          throw new HttpRefusal('  ', 403, 'grant_not_granted');
         })}
         now={now}
       />,

@@ -1108,7 +1108,7 @@ const CopyStateSchema = z.enum(['live', 'discarded', 'expired']);
  * EVERYTHING AN AGENT IS EVER TOLD ABOUT A COPY. `length` is in characters; `lines` counts line breaks plus
  * one. A command copy also says how the command ended and what it printed on stderr, masked.
  */
-const CopyMetaSchema = z.strictObject({
+export const CopyMetaSchema = z.strictObject({
   handle: z.string().regex(/^sealed:[a-z][a-z0-9_-]{0,39}$/u),
   name: CopyNameSchema,
   from: CopyOriginSchema,
@@ -1342,6 +1342,23 @@ const AccountDefaultsFileSchema = z.strictObject({
 });
 
 type AccountDefaultsFile = z.infer<typeof AccountDefaultsFileSchema>;
+
+/**
+ * WHAT ACCOUNTS ANSWERS to "who is asking" through `input.saved` (a {@link SignInChoiceContext} without the ferret's own
+ * hint), parsed here so a provider that sent more than the order needs is refused whole, never read.
+ */
+export const SignInChoiceContextSchema = z.strictObject({
+  project: z
+    .strictObject({
+      id: z.string().min(1).max(SIGN_IN_PROJECT_MAX_LENGTH),
+      name: z.string().min(1).max(SIGN_IN_PROJECT_MAX_LENGTH),
+      nameIsUnique: z.boolean(),
+    })
+    .optional(),
+  folder: z.string().min(1).max(4_096).optional(),
+  home: z.string().min(1).max(4_096).optional(),
+  defaults: AccountDefaultsFileSchema.optional(),
+});
 
 /** What {@link chosenSignIn} needs of a sign-in. */
 export interface SignInCandidate {

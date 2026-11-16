@@ -7,22 +7,44 @@
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaCardRow, AgendaItem } from '@ferretry/core-asks/contract';
-import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { ScreenHrefProvider } from '@ferretry/app';
+import { interact, type Mounted, mount, must, WithAppHooks } from '@ferretry/app/testing';
 import type { ReactNode } from 'react';
+import {
+  AGENDA_CARD_ANSWER_HOOK,
+  AGENDA_CARD_REFERENCE_HOOK,
+  AGENDA_LANE_PROPOSAL_HOOK,
+  type AgendaLaneEditor,
+} from '../../../../contract/app-hooks.ts';
 import { fakeAnswer, fakeReference } from '../../../support/app/board-hooks.ts';
 import {
   AgendaBoardProviders,
+  AgendaCardBoard,
   agendaBoardHooks,
+  laneEditorBook,
   laneEditorOf,
   useAgendaBoardHooks,
+  useCardBoards,
 } from '../../../../app/features/agenda/agenda-board-hooks.tsx';
+import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
+import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
+import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
 import { AgendaCardsHost } from '../../../../app/features/agenda/agenda-cards-host.tsx';
 import type { BoardTaskId } from '../../../../app/features/agenda/agenda-cards-list.tsx';
 import { AgendaItemView } from '../../../../app/features/agenda/agenda-item-view.tsx';
 import { agendaProse } from '../../../../app/features/agenda/agenda-prose.tsx';
+import type { AgendaFerretReferences, AgendaReferenceFacts } from '../../../../app/lib/agenda-references.ts';
 import type { InboxAction } from '../../../../app/lib/agenda-inbox.ts';
-import { daemonConnection, ReferenceSurfaceProvider } from '../../../../app/shell.ts';
-import { agendaItem, testLaneEditor } from '../../../support/app/agenda-inbox.tsx';
+import { daemonConnection, daemonId, ReferenceSurfaceProvider } from '../../../../app/shell.ts';
+import {
+  agendaItem,
+  choices,
+  fakeInbox,
+  InboxHarness,
+  inboxCard,
+  LANE_PROPOSAL_ANSWERS,
+  testLaneEditor,
+} from '../../../support/app/agenda-inbox.tsx';
 import { click, settle, typeInto } from '../../../support/app/dom-form.ts';
 import { flush, laptop } from '../board-support.ts';
 
@@ -38,6 +60,7 @@ const bound = (
   provided: { cardAnswer?: unknown; laneProposal?: unknown; cardReference?: unknown },
   children: ReactNode,
   onNavigate: (to: string) => void = () => undefined,
+  references?: AgendaReferenceFacts,
 ) => (
   <AgendaBoardProviders
     hooks={agendaBoardHooks(laptop.daemonId, {
@@ -46,6 +69,7 @@ const bound = (
       cardReference: provided.cardReference,
     })}
     onNavigate={onNavigate}
+    {...(references === undefined ? {} : { references })}
   >
     {children}
   </AgendaBoardProviders>
@@ -204,6 +228,80 @@ describe('agenda.card-reference: `&F12` in an ask’s words', () => {
   });
 });
 
+describe('Agenda’s own references: `!A3`, `:agent` and `@file` in an ask’s words', () => {
+  const prose = agendaProse()('See !A3 and !A8, ask :aniya or :nobody, read @src/a.ts and @missing.ts.');
+  const links = (): readonly HTMLAnchorElement[] => [...root().querySelectorAll<HTMLAnchorElement>('a')];
+  const texts = () => links().map(link => link.textContent);
+  const opened: Array<[string, string]> = [];
+  const page = (over: Partial<AgendaFerretReferences> = {}): AgendaFerretReferences => ({
+    id: 'f1',
+    ledger: ['A3'],
+    openAsk: () => undefined,
+    showFiles: () => undefined,
+    ...over,
+  });
+  const facts = (over: Partial<AgendaReferenceFacts> = {}): AgendaReferenceFacts => ({
+    daemonId: laptop.daemonId,
+    fleet: [{ config: { id: 'f2', teammate: 'aniya', cwd: '/repo' }, state: { status: 'working' } }],
+    client: {
+      call: async (_route: string, request?: { query?: Record<string, string> }) =>
+        request?.query?.path === 'src' ? { entries: [{ name: 'a.ts', type: 'file' }] } : { entries: [] },
+    } as never,
+    fileOpen: { open: (ferret, path) => (opened.push([ferret, path]), true) },
+    onNavigate: () => undefined,
+    ...over,
+  });
+  const draw = async (
+    references: AgendaReferenceFacts | undefined,
+    navigate: (to: string) => void = () => undefined,
+  ) => {
+    view = await mount(
+      <ScreenHrefProvider href={(daemon, _plugin, _screen, params) => `/${daemon}/chat/${params?.ferret ?? ''}`}>
+        {bound({}, prose, navigate, references === undefined ? undefined : { ...references, onNavigate: navigate })}
+      </ScreenHrefProvider>,
+    );
+    await interact(() => flush());
+    await interact(() => flush());
+  };
+
+  afterEach(() => {
+    opened.length = 0;
+  });
+
+  test('proves an item on the ferret’s ledger, an agent of the fleet and a listed file — and only those', async () => {
+    const asks: string[] = [];
+    const navigated: string[] = [];
+    await draw(facts({ ferret: page({ openAsk: id => asks.push(id) }) }), to => navigated.push(to));
+
+    expect(texts()).toEqual(['!A3', ':aniya', '@src/a.ts']);
+    await interact(() => must(links()[0], 'the !A3 link').click());
+    await interact(() => must(links()[1], 'the :aniya link').click());
+    await interact(() => must(links()[2], 'the @src/a.ts link').click());
+    expect(asks).toEqual(['A3']);
+    expect(navigated).toEqual([`/${laptop.daemonId}/chat/f2`]);
+    expect(opened).toEqual([['f1', 'src/a.ts']]);
+  });
+
+  test('proves only :agent where no ferret has a page of its own (the machine-wide Inbox)', async () => {
+    await draw(facts());
+
+    expect(texts()).toEqual([':aniya']);
+  });
+
+  test('proves no file without Ferrets’ opener, and no agent before the fleet is read', async () => {
+    await draw(facts({ ferret: page(), fileOpen: undefined, fleet: null }));
+
+    expect(texts()).toEqual(['!A3']);
+  });
+
+  test('stays prose with no facts at all', async () => {
+    await draw(undefined);
+
+    expect(links()).toEqual([]);
+    expect(root().textContent).toContain('See !A3 and !A8');
+  });
+});
+
 describe('agenda.lane-proposal and the hooks outside a shell', () => {
   test('the Inbox’s lane editor is Board’s editorFor, and nothing without the hook', () => {
     const hooks = agendaBoardHooks(laptop.daemonId, {
@@ -230,5 +328,244 @@ describe('agenda.lane-proposal and the hooks outside a shell', () => {
       laneProposal: undefined,
       cardReference: undefined,
     });
+  });
+});
+
+describe('the Inbox is every machine’s: Board’s hooks are read per card’s machine', () => {
+  const desk = daemonId('daemon/desk');
+  const there = daemonId('daemon/laptop');
+
+  describe('the lane editors of the machines on screen', () => {
+    const upon =
+      (tag: string): AgendaLaneEditor =>
+      ask =>
+        `/${tag}/${ask.sourceRef}`;
+    const ask = { sourceRef: 'lanes:P1:3' };
+    const edit = { kind: 'respond', response: { kind: 'multiple-choice', choice: 'Edit' } } as unknown as InboxAction;
+
+    test('answers each machine from its own editor, and nothing for a machine that registered none', () => {
+      const book = laneEditorBook();
+      book.register(desk, upon('desk'));
+      book.register(there, upon('laptop'));
+      book.register(daemonId('daemon/none'), undefined);
+      expect([desk, there, daemonId('daemon/none')].map(id => book.editorFor(id, ask, edit as never))).toEqual([
+        '/desk/lanes:P1:3',
+        '/laptop/lanes:P1:3',
+        undefined,
+      ]);
+    });
+
+    test('keeps a machine’s editor until its last card goes, then forgets it', () => {
+      const book = laneEditorBook();
+      const first = book.register(desk, upon('first'));
+      const second = book.register(desk, upon('second'));
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/second/lanes:P1:3');
+      second();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/first/lanes:P1:3');
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBeUndefined();
+    });
+
+    test('releases only the registration being disposed, though every card of a machine registers the SAME function', () => {
+      // The shell hands one cached `editorFor` per machine, so each card's scope registers the identical function.
+      const shared = upon('shared');
+      const book = laneEditorBook();
+      const first = book.register(desk, shared);
+      const second = book.register(desk, shared);
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/shared/lanes:P1:3');
+      second();
+      expect(book.editorFor(desk, ask, edit as never)).toBeUndefined();
+    });
+
+    test('a release is spent once: calling it again does not take the other card’s registration', () => {
+      const shared = upon('shared');
+      const book = laneEditorBook();
+      const first = book.register(desk, shared);
+      book.register(desk, shared);
+      first();
+      first();
+      expect(book.editorFor(desk, ask, edit as never)).toBe('/shared/lanes:P1:3');
+    });
+  });
+
+  /** An open card of `daemon`, with the Inbox page binding Board per card exactly as the screens do. */
+  const Page = ({
+    cards,
+    open,
+    navigated,
+    reducedMotion,
+  }: {
+    cards: InboxCard[];
+    open: string;
+    navigated: string[];
+    reducedMotion?: boolean;
+  }) => (
+    <InboxHarness
+      cards={cards}
+      fake={fakeInbox()}
+      render={inbox => <BoundPage inbox={inbox} navigated={navigated} open={open} reducedMotion={reducedMotion} />}
+    />
+  );
+  function BoundPage({
+    inbox,
+    open,
+    navigated,
+    reducedMotion,
+  }: {
+    inbox: AgendaInbox;
+    open: string;
+    navigated: string[];
+    reducedMotion: boolean | undefined;
+  }) {
+    const { laneEditor, cardBoard } = useCardBoards(to => navigated.push(to));
+    return (
+      <AgendaInboxPage
+        cardBoard={cardBoard}
+        inbox={{ ...inbox, laneEditor }}
+        initialOpen={open}
+        now={NOW}
+        onNavigate={to => navigated.push(to)}
+        phone
+        {...(reducedMotion === undefined ? {} : { reducedMotion })}
+      />
+    );
+  }
+  const onDesk = inboxCard(
+    agendaItem('A9', {
+      why: 'Try &F12 on the desk.',
+      ask: choices('Ship', 'Hold'),
+      task: { id: 'F1' },
+      offerClose: true,
+    } as Partial<AgendaItem>),
+    undefined,
+    'Desk',
+    desk,
+  );
+  const proposal = inboxCard(
+    agendaItem('A7', {
+      sourceRef: 'lanes:P1:3',
+      ask: choices(LANE_PROPOSAL_ANSWERS.accept, LANE_PROPOSAL_ANSWERS.edit),
+    } as Partial<AgendaItem>),
+    undefined,
+    'Desk',
+    desk,
+  );
+  const shell = (provided: Record<string, Record<string, unknown>>, children: ReactNode) => (
+    <WithAppHooks onDaemon={provided} provided={{}}>
+      {children}
+    </WithAppHooks>
+  );
+
+  test('Done · closes on another machine’s card goes to that machine’s Board, not the page’s', async () => {
+    const mine = fakeAnswer();
+    const theirs = fakeAnswer();
+    view = await mount(
+      shell(
+        { [there]: { [AGENDA_CARD_ANSWER_HOOK]: mine.answer }, [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
+        <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() => must(chip(), 'the Done · closes button').click());
+    await interact(() => flush());
+
+    expect(theirs.calls).toContain('done:F1');
+    expect(mine.calls).toEqual([]);
+  });
+
+  test('`&F12` in another machine’s card proves against that machine’s Board only', async () => {
+    const mine = fakeReference();
+    const theirs = fakeReference();
+    const unproved = { ...mine, proves: () => () => false };
+    view = await mount(
+      shell(
+        { [there]: { [AGENDA_CARD_REFERENCE_HOOK]: unproved }, [desk]: { [AGENDA_CARD_REFERENCE_HOOK]: theirs } },
+        <Page cards={[onDesk]} navigated={[]} open={onDesk.key} />,
+      ),
+    );
+    await interact(() => flush());
+
+    expect(theirs.watched).toEqual(['ids']);
+    expect(mine.watched).toEqual([]);
+    expect([...root().querySelectorAll('a')].map(link => link.textContent)).toContain('&F12');
+  });
+
+  test('Edit on another machine’s lane proposal opens that machine’s lane editor', async () => {
+    const navigated: string[] = [];
+    view = await mount(
+      shell(
+        {
+          [desk]: {
+            [AGENDA_LANE_PROPOSAL_HOOK]: {
+              editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
+            },
+          },
+        },
+        <Page cards={[proposal]} navigated={navigated} open={proposal.key} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('[data-agenda-option="Edit"]'), 'the Edit button').click(),
+    );
+
+    expect(navigated).toContain('/desk-lanes/lanes:P1:3');
+  });
+
+  test('Edit still opens the machine’s lane editor after another card of the same machine has gone', async () => {
+    const navigated: string[] = [];
+    // Listed before the proposal, so Next deals the proposal after it.
+    const first = inboxCard(
+      agendaItem('A1', { ask: choices('Ship', 'Hold') } as Partial<AgendaItem>),
+      undefined,
+      'Desk',
+      desk,
+    );
+    view = await mount(
+      shell(
+        {
+          [desk]: {
+            [AGENDA_LANE_PROPOSAL_HOOK]: {
+              // ONE function for the machine, as the shell caches it: every card's scope registers this same value.
+              editorFor: (ask: { sourceRef?: string | null }) => `/desk-lanes/${ask.sourceRef}`,
+            },
+          },
+        },
+        <Page cards={[first, proposal]} navigated={navigated} open={first.key} reducedMotion={false} />,
+      ),
+    );
+    await interact(() => flush());
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('.fy-attn-deck__top [aria-label="Next item"]'), 'Next').click(),
+    );
+    // The leaving card unmounts once its fly-out ends, releasing its scope's registration.
+    await interact(() => new Promise(resolve => setTimeout(resolve, 400)));
+    await interact(() => flush());
+    expect(root().querySelector('.fy-attn-deck__leaving')).toBeNull();
+    await interact(() =>
+      must(root().querySelector<HTMLButtonElement>('[data-agenda-option="Edit"]'), 'the Edit button').click(),
+    );
+
+    expect(navigated).toContain('/desk-lanes/lanes:P1:3');
+  });
+
+  test('a notice’s Start on another machine goes to that machine’s Board, not refused', async () => {
+    const theirs = fakeAnswer();
+    const cards: readonly AgendaCardRow[] = [{ task: { id: 'B1' as BoardTaskId }, line: '&B1 is waiting.' }];
+    view = await mount(
+      shell(
+        { [desk]: { [AGENDA_CARD_ANSWER_HOOK]: theirs.answer } },
+        <AgendaCardBoard daemonId={desk} editors={laneEditorBook()} onNavigate={() => undefined}>
+          <AgendaCardsHost cards={cards} connection={daemonConnection({ daemonId: desk })} />
+        </AgendaCardBoard>,
+      ),
+    );
+
+    await click(must(root().querySelector<HTMLElement>('[data-agenda-card-start]'), 'Start'));
+    await settle();
+
+    expect(theirs.calls).toEqual(['start:B1:key']);
+    expect(root().textContent).not.toContain('on another machine');
   });
 });

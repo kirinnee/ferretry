@@ -34,7 +34,7 @@ describe('the sign-in reach', () => {
     expect(reach().reach.hosts()).toEqual([]);
   });
 
-  test('the servers that may sign in are named by their listing, and only those with a web address and oauth', async () => {
+  test('the servers a person may sign in to or check are named by their listing: those with a web address, whatever their auth', async () => {
     const { reach: r } = reach();
     const listed: McpOAuthServer[] = [
       { component: 'a', url: 'https://A.example.test:8443/mcp', auth: 'oauth' },
@@ -44,7 +44,7 @@ describe('the sign-in reach', () => {
     ];
     const servers = r.observeServers({ list: async () => listed, missing: async name => `no ${name}` });
     expect(await servers.list()).toEqual(listed);
-    expect(r.hosts()).toEqual(['a.example.test:8443']);
+    expect(r.hosts()).toEqual(['a.example.test:8443', 'plain.example.test']);
     expect(await servers.missing?.('x')).toBe('no x');
     // The list is replaced, not grown: a server taken out of the configuration is no longer reachable.
     listed.length = 0;

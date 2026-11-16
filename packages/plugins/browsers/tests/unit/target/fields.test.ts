@@ -373,8 +373,93 @@ describe('describeInputDocument', () => {
     should(await describeInputDocument(world.subject)).eql({
       navigationId: 'loader-5',
       host: new URL(PAGE_URL).host,
+      pairingSeen: 0,
     });
-    should(world.session('page-target').calls.map(call => call.method)).eql(['Page.getFrameTree']);
+    // The loader, then the pairing-screen look: DevTools' DOM domain only, so no page script runs and no field is looked at.
+    const calls = world.session('page-target').calls.map(call => call.method);
+    should(calls[0]).equal('Page.getFrameTree');
+    should(calls.slice(1).every(method => method.startsWith('DOM.'))).be.true();
+  });
+
+  it('says the page carries the pairing-screen marker, and how many codes it has shown', async () => {
+    const { world } = loginWorld();
+    world.pairing.marked = true;
+    world.pairing.seen = 2;
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: 2 });
+  });
+
+  it('says marked when the browser cannot be asked (FAILS CLOSED)', async () => {
+    const { world } = loginWorld();
+    world.session('page-target').failOn = method => (method === 'DOM.performSearch' ? new Error('gone') : undefined);
+    should(await describeInputDocument(world.subject)).match({ pairingScreen: true, pairingSeen: -1 });
+  });
+
+  it('does not ask the DOM of a page with a dialog open (it is frozen): the last look stands in, and none yet is marked', async () => {
+    const { world } = loginWorld();
+    let last: { marked: boolean; seen: number } | undefined;
+    let frozen = false;
+    const subject = {
+      ...world.subject,
+      hint: {
+        frozen: () => frozen,
+        last: () => last,
+        keep: (state: { marked: boolean; seen: number }) => {
+          last = state;
+        },
+      },
+    };
+    world.pairing.seen = 4;
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    const asked = world.session('page-target').calls.length;
+    frozen = true;
+    world.session('page-target').failOn = method => (method.startsWith('DOM.') ? new Error('frozen') : undefined);
+
+    should(await describeInputDocument(subject)).match({ pairingSeen: 4 });
+    should(world.session('page-target').calls.filter(call => call.method.startsWith('DOM.')).length).equal(
+      world
+        .session('page-target')
+        .calls.slice(0, asked)
+        .filter(call => call.method.startsWith('DOM.')).length,
+    );
+
+    last = undefined;
+    should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
+  });
+
+  it('says marked when the page’s own session cannot be reached for the pairing-screen look (FAILS CLOSED)', async () => {
+    const { world } = loginWorld();
+    let reached = 0;
+    const subject = {
+      ...world.subject,
+      cdp: {
+        ...world.subject.cdp,
+        page: async () => {
+          reached += 1;
+          if (reached > 1) throw new Error('the session is gone');
+          return await world.subject.cdp.page();
+        },
+      },
+    };
+    should(await describeInputDocument(subject)).match({ pairingScreen: true, pairingSeen: -1 });
+    should(reached).equal(2);
+  });
+
+  it('refuses when the document cannot be read while no dialog is open, instead of reading a frozen page', async () => {
+    const { world } = loginWorld();
+    const subject = {
+      ...world.subject,
+      cdp: {
+        ...world.subject.cdp,
+        page: async () => {
+          throw new Error('the session is gone');
+        },
+      },
+      hint: { frozen: () => false, last: () => undefined, keep: () => undefined },
+    };
+    await describeInputDocument(subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      (error: unknown) => should((error as Error).message).equal('the session is gone'),
+    );
   });
 
   it('says the host the page is on, so a login’s facts can watch it leave the sign-in hosts', async () => {
@@ -386,7 +471,7 @@ describe('describeInputDocument', () => {
   it('says no host for a page whose address will not parse', async () => {
     const { world } = loginWorld();
     world.pageUrl = '';
-    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId });
+    should(await describeInputDocument(world.subject)).eql({ navigationId: world.loaderId, pairingSeen: 0 });
   });
 
   it('refuses a closed page', async () => {
@@ -396,6 +481,111 @@ describe('describeInputDocument', () => {
       () => should.fail(undefined, undefined, 'it should reject'),
       () => undefined,
     );
+  });
+});
+
+describe('FINDING 6: describeInputDocument names every frame’s host (secure-clip-2 fix round 1)', () => {
+  const frame = (world: FakeWorld, address: string, parent?: FakeFrame): FakeFrame => {
+    const made = new FakeFrame(address, `session-${address}`);
+    made.parent = parent ?? world.main;
+    world.frames.push(made);
+    return made;
+  };
+
+  it('should name the host of each frame inside the page, once, in lower case', async () => {
+    const { world } = loginWorld();
+    frame(world, 'https://Keys.Example.test/embed');
+    frame(world, 'https://keys.example.test/other');
+    frame(world, 'https://ads.example.test:8443/x');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.frameHosts).eql(['keys.example.test', 'ads.example.test:8443']);
+    should(document.framesUnreadable).equal(undefined);
+  });
+
+  it('should give a blank or srcdoc frame its parent’s host, and a blob frame the host inside the blob', async () => {
+    const { world } = loginWorld();
+    const outer = frame(world, 'https://keys.example.test/embed');
+    frame(world, 'about:blank', outer);
+    frame(world, 'about:srcdoc', outer);
+    frame(world, 'blob:https://blobs.example.test/1234');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.frameHosts).eql(['keys.example.test', 'blobs.example.test']);
+    should(document.framesUnreadable).equal(undefined);
+  });
+
+  it('should say a frame cannot be told for a data: frame, an address with no host, or a page with a great many frames', async () => {
+    for (const address of ['data:text/html,hi', 'https://', 'file:///a']) {
+      const { world } = loginWorld();
+      frame(world, address);
+      should((await describeInputDocument(world.subject)).framesUnreadable).equal(true);
+    }
+    const { world } = loginWorld();
+    for (let index = 0; index < 40; index += 1) frame(world, `https://f${String(index)}.example.test/`);
+    should((await describeInputDocument(world.subject)).framesUnreadable).equal(true);
+  });
+
+  it('should answer a blank frame in a blank page as one that cannot be told, not as a host of nothing', async () => {
+    const { world } = loginWorld();
+    world.pageUrl = 'about:blank';
+    // A blank frame in a blank page inherits nothing: no ancestor has a host to give it.
+    const blank = frame(world, 'about:blank');
+    blank.parent = new FakeFrame('about:blank', 'session-blank-parent');
+
+    const document = await describeInputDocument(world.subject);
+
+    should(document.framesUnreadable).equal(true);
+    should(document.host).equal(undefined);
+  });
+});
+
+describe('FINDING 6: readInputText reads every frame, and refuses when one cannot be read', () => {
+  const embed = (world: FakeWorld, address = 'https://keys.example.test/embed'): FakeFrame => {
+    const made = new FakeFrame(address, `session-${address}`);
+    made.parent = world.main;
+    world.frames.push(made);
+    return made;
+  };
+
+  it('should include the text, the accessibility tree, the markup and the address of a child frame', async () => {
+    const { world } = loginWorld();
+    const inner = embed(world);
+    inner.bodyText = 'Your API key: FAKE-SC-7f3a91';
+    inner.markup = '<p data-x="FAKE-ATTR-12">hi</p>';
+
+    const read = await readInputText(world.subject);
+
+    for (const part of ['Your API key: FAKE-SC-7f3a91', 'FAKE-ATTR-12', 'https://keys.example.test/embed'])
+      should(read).containEql(part);
+  });
+
+  it('should refuse the whole read when a frame cannot be read, rather than say a value is not there', async () => {
+    const { world } = loginWorld();
+    embed(world).unreadable = true;
+
+    await readInputText(world.subject).then(
+      () => should.fail(undefined, undefined, 'it should reject'),
+      () => undefined,
+    );
+  });
+
+  it('should refuse a frame too big to look through, a page with too many frames, and a frame that offers no way to read it', async () => {
+    const big = loginWorld().world;
+    embed(big).bodyText = 'x'.repeat(BROWSER_INPUT_TEXT_MAX_CHARS + 10);
+    const many = loginWorld().world;
+    for (let index = 0; index < 40; index += 1) embed(many, `https://f${String(index)}.example.test/`);
+    const bare = loginWorld().world;
+    const noMethods = embed(bare);
+    (noMethods as { locator?: unknown }).locator = undefined;
+
+    for (const world of [big, many, bare])
+      await readInputText(world.subject).then(
+        () => should.fail(undefined, undefined, 'it should reject'),
+        () => undefined,
+      );
   });
 });
 

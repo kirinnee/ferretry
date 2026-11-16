@@ -74,15 +74,23 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('tunnel', { summary: 'turn this machine’s Cloudflare tunnel on or off, or show it' }),
-      verb('tunnel status', { summary: "show whether this machine's Cloudflare tunnel is on, and where it is" }),
-      verb('tunnel on', { summary: 'turn the tunnel on for this machine' }),
-      verb('tunnel off', { summary: 'turn the tunnel off and release it' }),
+      verb('tunnel', {
+        summary: 'turn this machine’s Cloudflare tunnel on or off, or show it',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('tunnel status', {
+        summary: "show whether this machine's Cloudflare tunnel is on, and where it is",
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the sentence' }],
+      }),
+      verb('tunnel on', { summary: 'turn the tunnel on for this machine', args: [] }),
+      verb('tunnel off', { summary: 'turn the tunnel off and release it', args: [] }),
     ],
   },
 
   ui: {
-    settings: [settingsTab('connection', { label: 'Connection', order: 15 })],
+    settings: [settingsTab('connection', { group: 'devices-access', label: 'Connection', order: 15 })],
     panels: [
       panel('daemon.status', { id: 'carrier', order: 20 }),
       // How this device reaches each machine: a device-level panel, so it needs no machine (the whole-machine block links here).
@@ -130,5 +138,8 @@ export default definePlugin({
   permissions: {
     network: [new URL(HOSTED_RELAY_DIRECTORY_ORIGIN).host, { resolver: 'relay' }, 'stun.cloudflare.com'],
     spawn: ['cloudflared'],
+    // Where `cloudflared` is (`kernel.paths.locate`: bounded, never executing): the operator's `FY_CLOUDFLARED`, else the PATH.
+    which: true,
+    whichOverrides: ['FY_CLOUDFLARED'],
   },
 });

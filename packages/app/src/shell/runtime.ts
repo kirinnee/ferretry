@@ -306,12 +306,13 @@ export class ShellRuntime {
   /**
    * The value the ONE provider of app hook `name` gives on this daemon (`shell/app-hooks.ts`), built over the client
    * that provider's half is built with, only once that provider is allowed there; `undefined` otherwise, and when no
-   * half or more than one provides it.
+   * half or more than one provides it. With `from`, the value only when that plugin IS the one provider: a shared
+   * action (`<provider>.<action>`) read from anywhere else is nobody's.
    */
-  appHook(daemon: string, name: string): unknown {
+  appHook(daemon: string, name: string, from?: string): unknown {
     const providers = appHookProviders(this.surfaces, name);
     const only = providers.length === 1 ? providers[0] : undefined;
-    if (only === undefined) return undefined;
+    if (only === undefined || (from !== undefined && only.plugin !== from)) return undefined;
     const client = this.#halves.client(daemon, only.plugin);
     if (client === undefined) return undefined;
     return this.#hooks.get(daemon, only.plugin, name, client, only.provide);

@@ -133,8 +133,30 @@ describe('the model Runtimes assembles from its own files', () => {
     });
   });
 
-  it('refuses files that do not fit together, naming the rule: a runtime on a login that is not there', () => {
-    expect(() => assembleRuntimesModel(files({ logins: [] }))).toThrow(/uses unknown credential/u);
+  it('sets a runtime on a login that is not there aside as unavailable, and the other runtimes still load', () => {
+    const assembled = assembleRuntimesModel(
+      files({
+        logins: [sampleLogin('claude-you', { store: 'ferretry' })],
+        runtimes: new Map([
+          ['claude-default', runtime({ agent: true })],
+          ['orphan', runtime({ login: 'gone' })],
+        ]),
+        settings: { defaultRuntime: 'orphan' },
+      }),
+    );
+
+    expect(assembled.unavailable).toEqual([{ runtime: 'orphan', login: 'gone' }]);
+    expect(Object.keys(assembled.model.runtimes)).toEqual(['claude-default']);
+    // The default naming an unavailable runtime is left unset, never a fault of the whole machine.
+    expect(assembled.model.machine.defaultRuntime).toBeUndefined();
+    expect(assembled.unreadable).toEqual([]);
+  });
+
+  it('with no login at all every runtime is unavailable and the model is empty, not refused', () => {
+    const assembled = assembleRuntimesModel(files({ logins: [] }));
+
+    expect(assembled.unavailable).toEqual([{ runtime: 'claude-default', login: 'claude-you' }]);
+    expect(Object.keys(assembled.model.runtimes)).toEqual([]);
   });
 
   it('gives the same revision for the same files and another for a changed one', () => {

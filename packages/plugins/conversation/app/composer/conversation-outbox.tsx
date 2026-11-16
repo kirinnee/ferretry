@@ -21,7 +21,11 @@ export function ConversationOutbox({ children }: { readonly children?: ReactNode
   // A client the shell recorded no daemon for has no outbox to keep: its composers send straight away.
   if (daemonId === undefined || sender === undefined) return children;
   return (
-    <SendOutboxProvider daemonId={daemonId} sender={sender}>
+    <SendOutboxProvider
+      daemonId={daemonId}
+      sender={sender}
+      {...(client.feed === undefined ? {} : { feed: client.feed })}
+    >
       {children}
     </SendOutboxProvider>
   );

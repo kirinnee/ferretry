@@ -17,6 +17,7 @@ import { HARNESS_NAMES, HARNESSES, type HarnessKind, suggestLoginId } from '../l
 import { type Prefill, withheldSentence } from '../lib/paste-model.ts';
 import { Button, ChangeApplyPanel } from '../ui.ts';
 import { PasteVariables } from './paste-variables.tsx';
+import { ProviderGrid, usableHarnesses } from './provider-grid.tsx';
 
 export interface AddLoginPanelProps {
   readonly client: LoginsClient;
@@ -26,10 +27,6 @@ export interface AddLoginPanelProps {
 
 const secretReference = (variable: ProviderPresetView['variables'][number]): string =>
   variable.kind === 'secret' ? `\${secret:${variable.secret ?? variable.name}}` : (variable.value ?? '');
-
-function usableHarnesses(preset: ProviderPresetView): readonly HarnessKind[] {
-  return preset.halves.filter(half => half.offered.available).map(half => half.harness);
-}
 
 /** One preset's form: which CLI it is listed under first, its variables, its cloud credential reference, a label. */
 function PresetForm({
@@ -60,8 +57,8 @@ function PresetForm({
     ),
   );
   const [cloud, setCloud] = useState(preset.cloudCredential?.suggested ?? '');
-  // The secrets a paste carried, by NAME only: this form takes a `${secret:NAME}` reference, so each
-  // key is pasted into the secret store itself — its value never reaches this screen.
+  // The secrets a paste carried, by NAME only: Continue already filed each key in the Vault, and this form
+  // takes a `${secret:NAME}` reference — a key's value never reaches this screen.
   const pastedSecrets = prefill?.secrets ?? [];
   const withheld = withheldSentence(prefill?.withheld ?? []);
 
@@ -96,8 +93,8 @@ function PresetForm({
     <div className="flex flex-col gap-2" data-add-login-form={preset.id}>
       {pastedSecrets.length === 0 ? null : (
         <p role="status" className="m-0 text-cell leading-base text-muted" data-paste-secrets="">
-          A pasted key is never typed here: paste {pastedSecrets.join(', ')} into the secret store, then write the NAME
-          it is stored under as {'${secret:NAME}'} below.
+          Your pasted {pastedSecrets.join(', ')} {pastedSecrets.length === 1 ? 'is' : 'are'} in the secret store, and
+          the fields below name {pastedSecrets.length === 1 ? 'it' : 'them'} as {`\${secret:NAME}`}.
         </p>
       )}
       {withheld === null ? null : (
@@ -267,6 +264,7 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
     return (
       <section className="flex min-w-0 flex-col gap-3" data-add-login="">
         <PasteVariables
+          client={client}
           presets={catalog.presets}
           onBack={() => {
             setHeld(undefined);
@@ -279,6 +277,33 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
         />
       </section>
     );
+
+  // A tile folds the grid to its provider's own form.
+  const picked = catalog?.presets.find(preset => preset.id === choosing && preset.offered.available);
+  if (picked !== undefined) {
+    const close = (): void => {
+      setHeld(undefined);
+      setChoosing(null);
+    };
+    return (
+      <section className="flex min-w-0 flex-col gap-3" data-add-login="">
+        <div className="kt-panel flex flex-col gap-1 p-panel" data-add-login-preset={picked.id}>
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-row font-semibold text-fg">{picked.label}</span>
+            <LoginScopeChip harnesses={usableHarnesses(picked)} />
+          </span>
+          <span className="text-cell leading-base text-muted">{picked.summary}</span>
+          <PresetForm
+            client={client}
+            preset={picked}
+            {...(held === undefined || held.presetId !== picked.id ? {} : { prefill: held.prefill })}
+            onAdded={done}
+            onCancel={close}
+          />
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="flex min-w-0 flex-col gap-3" data-add-login="">
@@ -293,69 +318,15 @@ export function AddLoginPanel({ client, onAdded }: AddLoginPanelProps) {
           {failure}
         </p>
       )}
-      {catalog === null
-        ? failure === null && (
-            <p role="status" className="m-0 text-cell text-muted">
-              Reading the providers…
-            </p>
-          )
-        : [
-            ...HARNESSES.map(harness => {
-              const presets = catalog.presets.filter(preset => preset.harness === harness);
-              if (presets.length === 0) return null;
-              return (
-                <div key={harness} data-add-login-group={harness}>
-                  <h4 className="m-0 text-meta font-semibold uppercase text-muted">{HARNESS_NAMES[harness]}</h4>
-                  <ul className="m-0 mt-2 flex list-none flex-col gap-2 p-0">
-                    {presets.map(preset => (
-                      <li
-                        key={preset.id}
-                        className="kt-panel flex flex-col gap-1 p-panel"
-                        data-add-login-preset={preset.id}
-                      >
-                        <span className="flex min-w-0 flex-wrap items-center gap-2">
-                          <span className="text-row font-semibold text-fg">{preset.label}</span>
-                          <LoginScopeChip harnesses={usableHarnesses(preset)} />
-                        </span>
-                        <span className="text-cell leading-base text-muted">{preset.summary}</span>
-                        {preset.offered.available ? (
-                          choosing === preset.id ? (
-                            <PresetForm
-                              client={client}
-                              preset={preset}
-                              {...(held === undefined || held.presetId !== preset.id ? {} : { prefill: held.prefill })}
-                              onAdded={done}
-                              onCancel={() => {
-                                setHeld(undefined);
-                                setChoosing(null);
-                              }}
-                            />
-                          ) : (
-                            <div>
-                              <Button
-                                type="button"
-                                data-add-login-use={preset.id}
-                                onClick={() => {
-                                  setChoosing(preset.id);
-                                }}
-                              >
-                                Use this provider
-                              </Button>
-                            </div>
-                          )
-                        ) : (
-                          <span className="text-meta text-warn">Not offered: {preset.offered.reason}</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            }),
-            <Button key="paste" type="button" data-add-login-paste="" onClick={() => setChoosing('paste')}>
-              Paste variables…
-            </Button>,
-          ]}
+      {catalog === null ? (
+        failure === null && (
+          <p role="status" className="m-0 text-cell text-muted">
+            Reading the providers…
+          </p>
+        )
+      ) : (
+        <ProviderGrid presets={catalog.presets} onPick={setChoosing} onPaste={() => setChoosing('paste')} />
+      )}
     </section>
   );
 }

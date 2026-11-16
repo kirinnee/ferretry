@@ -358,3 +358,215 @@ test('ferret.started (D2 #12): a start tells its takers who started, where, the 
   ]);
   expect(order.slice(0, 2)).toEqual(['changed:started', 'started']);
 });
+
+/** Polls until the check holds (a detached launch settles on its own time), or fails after about a second. */
+async function eventually(check: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100 && !check(); attempt += 1) await new Promise(resolve => setTimeout(resolve, 10));
+  expect(check()).toBe(true);
+}
+
+test('fy start --detach (v4): the answer comes once the ferret is recorded `starting`, before the harness launches; the launch then finishes on its own', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let open: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => {
+    open = resolve;
+  });
+  const prepare = f.harness.prepareHome.bind(f.harness);
+  f.harness.prepareHome = async spec => {
+    await gate;
+    return await prepare(spec);
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  expect(f.registry.get(child)?.state).toBe('starting');
+  expect(f.harness.launched).toEqual([]);
+  open();
+  await eventually(() => f.harness.launched.length === 1);
+  await eventually(() => f.registry.get(child)?.state !== 'starting');
+});
+
+test('fy start --detach: a launch that fails after the answer still settles the recorded ferret (it is not left `starting`)', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.harness.prepareHome = async () => {
+    throw new Error('the harness home could not be made');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => f.registry.get(child)?.state !== 'starting');
+  expect(f.harness.launched).toEqual([]);
+});
+
+test('a plain start still waits for the launch: the harness has launched when the answer comes', async () => {
+  const f = fixture();
+  f.ports.newId = () => ferretId('sprout');
+  f.ports.newName = () => 'sprout';
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go' }, PERSON_ORIGIN);
+
+  expect(answer.ok).toBe(true);
+  expect(f.harness.launched).toHaveLength(1);
+});
+
+test('fy start --detach: a late failure whose first stopped-record write throws is settled `stopped` afterwards and said, without the port text', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let stopWrites = 0;
+  f.ports.save = async record => {
+    if (record.state === 'stopped' && ++stopWrites === 1) throw new Error('transient stopped-record write failure');
+  };
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  expect(f.registry.get(child)?.state).toBe('stopped');
+  expect(f.registry.get(child)?.cause).toEqual({ kind: 'start_failed' });
+  expect(f.tokens.holds(child)).toBe(false);
+  const failed = said.find(entry => entry.type === 'start.failed');
+  expect(failed?.data).toEqual({
+    code: 'failed',
+    reason: 'the launch failed after the start was answered',
+    settled: true,
+  });
+  expect(JSON.stringify(said)).not.toContain('transient');
+  expect(JSON.stringify(said)).not.toContain('home unavailable');
+});
+
+test('fy start --detach: a created pane that cannot be stopped keeps its handle, is never marked stopped, and the failure is said without the port text', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  const start = f.harness.start.bind(f.harness);
+  f.harness.start = async (...args) => {
+    await start(...args);
+    throw new Error('harness failed after spawn');
+  };
+  f.runner.stop = async () => {
+    throw new Error('pane could not be stopped');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  const record = f.registry.get(child);
+  expect(record?.state).toBe('starting');
+  expect(record?.handle).toBeDefined();
+  expect(await f.runner.alive(record?.handle as never)).toBe(true);
+  expect(f.tokens.holds(child)).toBe(false);
+  const failed = said.find(entry => entry.type === 'start.failed');
+  expect(failed?.data).toMatchObject({ code: 'runner_unavailable', settled: false });
+  expect(JSON.stringify(said)).not.toContain('pane could not be stopped');
+  expect(JSON.stringify(said)).not.toContain('harness failed after spawn');
+});
+
+test('fy start --detach: when the very first record write fails the caller gets the error and nothing is left unhandled or launched', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.ports.save = async () => {
+    throw new Error('initial record write failed');
+  };
+  const unhandled: unknown[] = [];
+  const watch = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', watch);
+  try {
+    await expect(
+      f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN),
+    ).rejects.toThrow('initial record write failed');
+    // Let the event loop turn so a rejection nobody observed would surface.
+    await new Promise(resolve => setTimeout(resolve, 50));
+  } finally {
+    process.off('unhandledRejection', watch);
+  }
+  expect(unhandled).toEqual([]);
+  expect(f.harness.launched).toEqual([]);
+});
+
+test('fy start --detach: when no stopped record can be written at all the ferret stays `starting`, and the failure is said as not settled', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  f.ports.save = async record => {
+    if (record.state === 'stopped') throw new Error('the disk is full');
+  };
+  const said: { type: string; data: Readonly<Record<string, unknown>> }[] = [];
+  f.ports.history = async (_ferret, type, data) => {
+    said.push({ type, data });
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+
+  const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+  expect(answer).toEqual(ok(child));
+  await eventually(() => said.some(entry => entry.type === 'start.failed'));
+  expect(f.registry.get(child)?.state).toBe('starting');
+  expect(said.find(entry => entry.type === 'start.failed')?.data).toEqual({
+    code: 'failed',
+    reason: 'the launch failed after the start was answered',
+    settled: false,
+  });
+  expect(JSON.stringify(said)).not.toContain('disk is full');
+});
+
+test('fy start --detach: a history that cannot be written is no unhandled rejection, and the ferret is still settled', async () => {
+  const f = fixture();
+  const child = ferretId('sprout');
+  f.ports.newId = () => child;
+  f.ports.newName = () => 'sprout';
+  let tried = 0;
+  f.ports.history = async () => {
+    tried += 1;
+    throw new Error('the journal is unwritable');
+  };
+  f.harness.prepareHome = async () => {
+    throw new Error('home unavailable');
+  };
+  const unhandled: unknown[] = [];
+  const watch = (reason: unknown): void => {
+    unhandled.push(reason);
+  };
+  process.on('unhandledRejection', watch);
+  try {
+    const answer = await f.service.start({ folder: '/work', by: 'owner', prompt: 'go', detach: true }, PERSON_ORIGIN);
+
+    expect(answer).toEqual(ok(child));
+    await eventually(() => tried > 0);
+    await new Promise(resolve => setTimeout(resolve, 20));
+  } finally {
+    process.off('unhandledRejection', watch);
+  }
+
+  expect(unhandled).toEqual([]);
+  expect(f.registry.get(child)?.state).toBe('stopped');
+});

@@ -3,9 +3,29 @@
    Token-driven only; sizes multiply by `--fy-text-scale` so the text-size setting reaches the shell.
    ============================================================================ */
 
+/* THE SHELL IS THE VIEWPORT (v4's `kt-shell overflow-hidden`): the frame is fixed to the visible app box (`--app-top`,
+   `--app-h`), so the nav and the top bar never leave the screen and only the page body, a nav that is longer than the
+   window and the side column scroll — each inside its own box. A frame with only a `min-height` grew with its page,
+   and a focus or a scrollIntoView then carried the nav and the top bar off the window. The insets (notch, release
+   notice, home indicator) are paid here, once, at the outermost box; a bottom nav pays the home indicator itself. */
 .fy-frame {
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
   display: flex;
-  min-height: 100dvh;
+  box-sizing: border-box;
+  width: 100%;
+  height: 100dvh;
+  height: var(--app-h, 100dvh);
+  overflow: hidden;
+  padding-top: calc(var(--inset-top, 0px) + var(--release-notice-h, 0px));
+  padding-bottom: var(--safe-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+.fy-frame--nav-bottom {
+  padding-bottom: 0;
 }
 .fy-frame--nav-right {
   flex-direction: row-reverse;
@@ -22,10 +42,12 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
 }
 
 .fy-nav {
   display: flex;
+  flex: none;
   gap: 4px;
   padding: 8px;
   background: var(--bar-bg);
@@ -38,6 +60,7 @@
 .fy-nav--right {
   flex-direction: column;
   width: calc(var(--fy-text-scale, 1) * 168px);
+  overflow-y: auto;
 }
 .fy-nav--left {
   border-right-width: var(--border-width);
@@ -107,9 +130,13 @@
 .fy-main {
   flex: 1;
   min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
   padding: 16px;
 }
 .fy-side {
+  min-height: 0;
+  overflow-y: auto;
   width: 360px;
   border-left: var(--border-width) solid var(--border);
   padding: 16px;
@@ -147,10 +174,136 @@
   color: var(--err);
 }
 
+/* THE LAYERS (one scale; Tailwind's z-40 sheets and z-50 dialogs are the two it sits between): an anchored popover — the item
+   menu — paints above the page and its own item view (z-40) and below every dialog and its scrim (z-50), so a dialog that
+   opens over a menu is the thing that takes the click. */
+:root {
+  --z-popover: 45;
+}
+
 .fy-slot {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* A ferret's toolbar (`ferret.toolbar`, drawn above the chat by Conversation's page): name, status, the switches and chips,
+   Info, Actions and Lessons are small controls, so they sit in ONE wrapping row, like v4's header. As the default column above
+   they stacked one per line (about 330px) and, being the page's only non-shrinking block, took the whole window of a phone or
+   a laptop and left the conversation about 40px. A panel that is a full-width bar (Lessons' scan) still takes its own line. */
+.fy-slot[data-slot='ferret.toolbar'] {
+  flex: 0 0 auto;
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 12px;
+  row-gap: 4px;
+  min-width: 0;
+  padding: 4px var(--flow-3, 12px);
+}
+.fy-slot[data-slot='ferret.toolbar'] > .fy-panel {
+  min-width: 0;
+}
+
+/* On a phone even one wrapping row is too much (name, status, two chips, Info, Actions, two switches and a scan bar wrap
+   to five lines, about 30% of a 390x844 screen). The toolbar is ONE line that scrolls sideways, like the chip row under it,
+   so the conversation keeps the screen. The controls a person reaches for (the name, the status, Actions) are drawn
+   first whatever the plugins' order; the rest follows in that order. Nothing is hidden: it is a swipe away. */
+@media (max-width: 767.98px) {
+  .fy-slot[data-slot='ferret.toolbar'] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    column-gap: 8px;
+  }
+  .fy-slot[data-slot='ferret.toolbar']::-webkit-scrollbar {
+    display: none;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.name'] {
+    order: -4;
+    max-width: 45vw;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.status'] {
+    order: -3;
+  }
+  .fy-slot[data-slot='ferret.toolbar'] > .fy-panel[data-panel$='.actions'] {
+    order: -2;
+  }
+}
+
+/* A ferret's side pane (`ferret.side`, drawn beside the chat by Conversation's page): the default layout lists every panel
+   the plugins provide for it — fourteen — so the pane is its own COLUMN with its own scroll, never the chat's width and never
+   taller than the page it sits in (the frame is the viewport, so the pane takes the row's height and scrolls inside, and a
+   panel below the fold stays reachable). On a phone there is no room beside a
+   chat: the pane is not drawn there (Info is the phone's way to a ferret's details). */
+.fy-slot[data-slot='ferret.side'] {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: min(360px, 40%);
+  min-height: 0;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 8px;
+  border-left: var(--border-width) solid var(--border);
+}
+/* A panel is never wider than the pane: one with a row that is (a toolbar, a long path) scrolls that row inside itself. Left
+   to itself it widened the pane's own content, and the whole pane got a sideways scrollbar that every panel shared. */
+.fy-slot[data-slot='ferret.side'] > .fy-panel {
+  flex-shrink: 0;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+/* On a phone the pane is not drawn BESIDE the chat: the page's chip row (`ferret-workspace.tsx`) shows one panel at a time,
+   full width, in the same host. `data-phone-active` is set while a panel (not the chat) is on show; every panel stays
+   mounted and only the one marked `data-phone-shown` is drawn. */
+@media (max-width: 767.98px) {
+  .fy-slot[data-slot='ferret.side'] {
+    display: none;
+  }
+  .fy-slot[data-slot='ferret.side'][data-phone-active] {
+    display: flex;
+    flex: 1 1 0;
+    width: auto;
+    max-height: none;
+    padding: 0;
+    border-left: 0;
+    gap: 0;
+    overflow: hidden;
+  }
+  .fy-slot[data-slot='ferret.side'][data-phone-active] > .fy-panel {
+    display: none;
+  }
+  .fy-slot[data-slot='ferret.side'][data-phone-active] > .fy-panel[data-phone-shown] {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 8px;
+  }
+}
+
+/* THE STATUS STRIP (frame.tsx): what the views mounted at the frame root draw in flow, a row under the top bar. Empty, it
+   takes no room; a line it holds is one quiet bar across the page, never a column of its own. */
+.fy-status:empty {
+  display: none;
+}
+.fy-status > .fy-shell-line {
+  margin: 0;
+  padding: 6px 12px;
+  border-bottom: var(--border-width) solid var(--border);
 }
 
 /* The page scroll region adds a node to listen on, never a box (scroll/page-scroll-region.tsx). */
@@ -189,4 +342,40 @@
 .fy-nav--rail .fy-slot--device {
   min-width: 0;
   overflow: hidden;
+}
+
+/* Settings, grouped (v4's machine-panels groups): a heading over each run of tabs, stacked so a phone reads down one
+   column instead of along one long wrapped row. */
+.fy-tabs--grouped {
+  flex-direction: column;
+  gap: 12px;
+}
+.fy-tab-group__title {
+  margin: 0 0 4px;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fg-soft);
+}
+.fy-tab-group__tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fy-settings-device {
+  margin: 0 0 12px;
+}
+.fy-settings-device__hint {
+  color: var(--fg-soft);
+}
+.fy-settings-daemons {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+}
+
+/* The chosen Settings page takes focus when a tab is picked (so a screen reader names it); a ring on the whole page
+   would only be noise, and the page is not a control. */
+.fy-settings-page:focus {
+  outline: none;
 }

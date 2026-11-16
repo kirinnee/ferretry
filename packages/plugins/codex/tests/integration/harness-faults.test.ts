@@ -11,6 +11,7 @@ import { HARNESS_UPDATE_CODES } from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { HarnessUpdateRefusal } from '../../daemon/lib/update/service.ts';
 import { realClock } from '../support/ports.ts';
+import { selectEverything } from '../support/selected.ts';
 
 const FERRET = 'f1' as FerretId;
 const HOME = '/state/codex/agent-homes/f1' as FencedPath;
@@ -44,6 +45,7 @@ function harness(options: {
   readonly state?: object;
 }) {
   return codexHarness({
+    selected: selectEverything,
     kernel: {
       roots: { root: () => handle } as unknown as KernelPorts['roots'],
       state: (options.state ?? { write: async () => undefined }) as never,

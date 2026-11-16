@@ -1,5 +1,6 @@
 import type { CopyElementPart } from '../../../contract/routes/index.ts';
 import type { BrowserCopyPort } from '../local-ports.ts';
+import { SecureCopyError } from './errors.ts';
 import type { CopyPageGuard, CopyPagePort, CopyPageQueue, CopyPageRead } from './ports.ts';
 import type { BrowserElementTarget } from '../vault-inputs.ts';
 
@@ -42,5 +43,10 @@ export class BrowserCopyPages implements CopyPagePort {
       },
       ...(queue.guard === undefined ? {} : { guard: queue.guard }),
     });
+  }
+
+  /** This host reads elements only; the clipboard is Browsers' own reach (browsers-pages.ts). */
+  async clipboard(): Promise<CopyPageRead> {
+    throw new SecureCopyError('unavailable', "Copying from a page's clipboard is not available here.");
   }
 }

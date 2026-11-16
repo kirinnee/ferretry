@@ -30,10 +30,9 @@ describe('R-0198 the descriptor reach of the host is said once at boot', () => {
   test('R-0198 a host with neither the path nor the C calls warns, naming the consequence and no path', async () => {
     const note = await descriptorReachNote(fsReaching({ path: false, calls: false, bracket: false }));
     expect(note).toMatchObject({ plugin: 'kernel', state: 'warn' });
-    expect(note?.detail).toContain('read by path after the link check');
-    // Row 148: this host answers a stat and a file identity by path too, so its line names sizes and inodes.
-    expect(note?.detail).toContain("the outside folder's names, sizes and inodes");
-    expect(note?.detail).toContain("no file's text is read through it");
+    // c58-01: such a host fails closed, so the line says the reads are refused and no longer that they go by path.
+    expect(note?.detail).toContain('are refused (no_descriptor_reach)');
+    expect(note?.detail).not.toContain('read by path after the link check');
     expect(note?.detail).not.toContain('/home');
   });
 

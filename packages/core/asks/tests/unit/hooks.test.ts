@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { AgendaContext, AskDeliveries } from '../../contract/index.ts';
+import { AgendaContext, AskDeliveries, AskOwnerChats } from '../../contract/index.ts';
 import manifest from '../../manifest.ts';
 
 describe('the hooks Asks offers', () => {
@@ -14,5 +14,13 @@ describe('the hooks Asks offers', () => {
 
   test('ask.delivery types into a ferret, so one named plugin (conversation) may provide it', () => {
     expect(AskDeliveries.takers).toEqual(['conversation']);
+  });
+
+  test('ask.owner-chat hands out what the owner said, so one named plugin (conversation) may provide it, under one key', () => {
+    expect(AskOwnerChats.mode).toBe('provide');
+    expect(AskOwnerChats.takers).toEqual(['conversation']);
+    expect(AskOwnerChats.key.safeParse('conversation').success).toBe(true);
+    expect(AskOwnerChats.key.safeParse('machine').success).toBe(false);
+    expect(manifest.hooks?.offers?.map(o => o.hook)).toContain(AskOwnerChats);
   });
 });

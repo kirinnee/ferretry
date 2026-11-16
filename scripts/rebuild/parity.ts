@@ -14,6 +14,7 @@ import { existsSync, readFileSync, writeFileSync, statSync, mkdirSync } from 'no
 import { dirname, join, relative, resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { parseSync } from 'oxc-parser';
+import { CHECK_NONE_YET, CHECK_NOT_APPLICABLE } from '../validate/parity-ticks.ts';
 
 type Kind = 'R' | 'V' | 'T' | 'S' | 'J' | 'F';
 interface Row {
@@ -236,17 +237,24 @@ function ownerOf(file: string, what = ''): string {
 }
 
 function renamed(what: string): string {
-  return what
-    .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
-    .replace(/^fy task\b/, 'fy card')
-    .replace(/^fy card status\b/, 'fy card progress')
-    .replace(/^fy (?:credentials?|login)\b/, 'fy login')
-    .replace(/^fy learning\b/, 'fy lesson')
-    .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
-    .replace(/^fy migrate\b/, 'fy ferret move')
-    .replace(/^fy import conversations\b/, 'fy link')
-    .replace(/--ping\b/g, '--buzz')
-    .replace(/\btask_plan\b/g, 'card_plan');
+  return (
+    what
+      .replace(/\/v1\/sessions(?=\/|\b)/g, '/v1/ferrets')
+      // The ferret segment is `:ferretId` in every manifest route but Runtimes' two (`:id`), so the 5.0 column names what the
+      // manifest declares, not the v4 spelling (`:sessionId`, `:sid`).
+      .replace(/\/v1\/ferrets\/:(?:sessionId|sid|id)(?=\/|$)(\/runtime(?:-models)?$)?/, (_match, runtime?: string) =>
+        runtime === undefined ? '/v1/ferrets/:ferretId' : `/v1/ferrets/:id${runtime}`,
+      )
+      .replace(/^fy task\b/, 'fy card')
+      .replace(/^fy card status\b/, 'fy card progress')
+      .replace(/^fy (?:credentials?|login)\b/, 'fy login')
+      .replace(/^fy learning\b/, 'fy lesson')
+      .replace(/^fy harness update(?: \[harness\])?$/, 'fy harness {claude-code|codex} update')
+      .replace(/^fy migrate\b/, 'fy ferret move')
+      .replace(/^fy import conversations\b/, 'fy link')
+      .replace(/--ping\b/g, '--buzz')
+      .replace(/\btask_plan\b/g, 'card_plan')
+  );
 }
 /**
  * Owner decision !A466 (2026-11-08): the local skill copy is gone from 5.0, with the "from this machine" group of the Add
@@ -280,6 +288,12 @@ function removal(kind: Kind, what: string, file: string, detail: string): string
   if (kind === 'V' && /fy daemon adopt\b/.test(what)) return 'removed by design (§9.1, §9.2: old home adoption)';
   if (kind === 'V' && what === 'fyd --config')
     return 'removed by design (5.0 reads configuration from $FY_HOME/config/; fyd refuses --config by name, exit 64)';
+  // cli-work-small (s2 triage rulings 1 and 3): v4's `fy fleet` was dead on 4.291.17 and `fy recommend` replaces it; `fy board import`
+  // is the converter's job.
+  if (kind === 'V' && (what === 'fy fleet' || what === 'fy fleet recommend <task...>'))
+    return 'removed by design (v4 `fy fleet` read a routing.json 4.291.17 no longer ships and printed only "no routing catalog"; `fy recommend` replaces it, no alias; proved by test(s) V-0260 V-0261)';
+  if (kind === 'V' && what === 'fy board import')
+    return "removed by design (the v4-to-v5 converter turns old per-session task files into cards: 5.0 has no v4 readers, and `fy board import` exits 2 naming board's sub-verbs; proved by test(s) V-0086)";
   if (kind === 'V' && what === 'fy import')
     return 'removed by design (§1.4: imports are links; its one verb is `fy link`)';
   if (kind === 'R' && /legacy-tasks/.test(file)) return 'removed by design (§9.1, §9.2: per-ferret tasks/old readers)';
@@ -423,24 +437,27 @@ const SHELL_STORAGE_FILES: ReadonlySet<string> = new Set([
 function checkOf(kind: Kind, what: string, file: string, actualOwner: string): string {
   return kind === 'V' && what === 'fy daemon update'
     ? 'packages/cli/tests/unit/update/shell.test.ts'
-    : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
-      kind === 'V' && SHELL_DAEMON_VERBS.has(what)
-      ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
-      : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
-        kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
-        ? 'packages/cli/tests/unit/parity/storage.test.ts'
-        : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
-          kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
-          ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
-          : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
-            kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
-            ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
-            : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
-              kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
-              ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
-              : kind === 'R'
-                ? 'descriptor-parity'
-                : parityFileOf(actualOwner, kind);
+    : // The refusal of a verb `board` does not have is the shell's own sub-verb table, not Board's parity file.
+      kind === 'V' && what === 'fy board import'
+      ? 'packages/cli/tests/unit/agenda-verbs.test.ts'
+      : // The daemon process verbs are the fy shell's, which a kernel test may not import (context-imports).
+        kind === 'V' && SHELL_DAEMON_VERBS.has(what)
+        ? 'packages/cli/tests/unit/parity/daemon-verbs.test.ts'
+        : // The lifecycle claim and the daemon lock's place in the state home are the shell's own files.
+          kind === 'F' && actualOwner === 'kernel' && SHELL_STORAGE_FILES.has(file)
+          ? 'packages/cli/tests/unit/parity/storage.test.ts'
+          : // The sweep arm is proved by name in Vault's composition test (it drives `inputs-sweep`), not a jobs file.
+            kind === 'J' && /\.startInputHousekeeping\.sweepInputRequests$/.test(what)
+            ? 'packages/core/vault/tests/unit/daemon/composition.test.ts'
+            : // The watched document's cache is the kernel config service's snapshot (J-0096): its watcher test proves it.
+              kind === 'J' && file.endsWith('/fleet-reading/watched-document.ts')
+              ? 'packages/core/kernel/tests/unit/host-config/service.test.ts'
+              : // The tmux release reader's bound (J-0198) is proved where the reader is: kill at the bound, nothing left running.
+                kind === 'J' && file.endsWith('/adapters/tmux/tmux-release-reader.ts')
+                ? 'packages/plugins/terminals/tests/unit/daemon/tmux/release-and-scrub.test.ts'
+                : kind === 'R'
+                  ? 'descriptor-parity'
+                  : parityFileOf(actualOwner, kind);
 }
 /** The owner's parity file for a kind: the unit tier's, unless that file lives in the integration tier (real disk). */
 function parityFileOf(actualOwner: string, kind: Exclude<Kind, 'R'>): string {
@@ -1827,13 +1844,22 @@ function applyReowned(all: ReadonlyMap<string, Row>) {
       throw new Error(`REOWNED names ${id}, which is not in the inventory`);
     }
     row.owner = owner;
-    // A ticked route row already names the test that proves it (kept from the registry above); moving the row to its
-    // real owner must not put the default check back, or the owner's tick loses its test path on the next regeneration.
-    const provenRoute = row.kind === 'R' && row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
-    if (!provenRoute) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
+    // A ticked row already names the test that proves it (kept from the registry above), whatever its kind; moving the
+    // row to its real owner must not put the default check back, or the tick loses its test path on the next regeneration.
+    const proven = row.status.startsWith('[x]') && row.check !== 'descriptor-parity';
+    if (!proven) row.check = checkOf(row.kind, row.what, stripLine(row.source), owner);
   }
 }
 applyReowned(unique);
+/**
+ * The check cell says only what is TRUE: a row keeps a path when that file exists, a removed-by-design row has no test
+ * to name (`n/a`), and a row whose proof file is not written yet says so (`none yet`). The owner's PLANNED parity file
+ * is never written as if it were there; `scripts/validate/parity-ticks.ts` fails any other value that is not a tracked test.
+ */
+for (const row of unique.values()) {
+  if (row.status.startsWith('removed by design')) row.check = CHECK_NOT_APPLICABLE;
+  else if (row.check !== 'descriptor-parity' && !existsSync(join(root, row.check))) row.check = CHECK_NONE_YET;
+}
 const inventory = [...unique.values()].sort(
   (a, b) =>
     owners.indexOf(a.owner) - owners.indexOf(b.owner) || a.kind.localeCompare(b.kind) || a.id.localeCompare(b.id),
@@ -1885,6 +1911,7 @@ const out: string[] = [
   '- T-0032 (config_read), T-0033 (config_validate) and T-0034 (config_write) are tightened by design, not a parity break: a raw key in a YAML comment or a tag is now a raw secret like one in a value. Today the detector walked parsed values only, so such a file was accepted, its text returned by `config_read` and a write of it by an agent put in effect; in 5.0 the same check (every reload, every write, the agent door) scans the raw text line by line too, so the file is refused with a located issue that never repeats the key, its last good version stays in effect, `config_read` withholds its text, and `config_validate` / `config_write` refuse it.',
   '- F-0324 (a ferret\u2019s `environment.json`) with the launch read allowance is tightened by design, not a parity break: today every Claude launch pre-allowed reads of the hand-off folders (`handoffFolders`, `fyd.ts:10841`; no inventory row of its own, its paths are joins over a passed folder) and never of the session folder, so `environment.json` was never readable without asking and still is not. 5.0 pre-allows the ferret\u2019s OWN `turns/`, `channel/` and `attachments/` (`LaunchSpec.readable`, Codex adds nothing, as today) and drops today\u2019s fourth, the attachment root a send\u2019s delivered copies were written to, because 5.0 writes no delivered copy to disk yet (GAP(deliver)). Pinned by `packages/plugins/claude-code/tests/unit/parity/launch-read-allow.test.ts` against today\u2019s argv.',
   '- T-0032 (config_read), T-0033 (config_validate) and T-0034 (config_write), with boot and every reload, are also tightened by design on SIZE and SHAPE, not a parity break: today’s 256 KiB cap held at the wire and at the disk read only; in 5.0 the same cap is checked inside the one check every door uses, before anything parses or scans the text (boot, reload, an accepted record read back, a file that grew after its size was read, config_read, config_validate, config_write), so a text over it is refused in one fixed sentence that quotes nothing, config_read shows no text of it, its last good version stays in effect and boot carries on. Two shapes today read on are refused too, located: a mapping key that is a mapping or a list (or an alias to one), and aliases whose read-out value weighs more than 10 000 plus 2 per character of the file, a string weighing its length (today the library counted aliases, not what they read out to).',
+  '- V-0428 (`fy secret set NAME`) is tightened by design, not a parity break: v4 read standard input to its end even on a terminal, so a value typed there was echoed on the screen and in its scrollback, and nothing said how to finish. 5.0 asks `value for NAME (hidden; press Enter when done): ` on stderr when standard input is a terminal, turns echo off, reads one line, restores the terminal on every way out (Ctrl-C, or a SIGINT sent to the process, ends with status 130) and refuses an empty line; piped input is read exactly as before. Pinned by `packages/core/vault/tests/unit/cli/secret-set-tty.test.ts` and `packages/cli/tests/integration/terminal/hidden-prompt.test.ts`.',
   '- AGENDA-SEND-NOW-COMPOSER (agenda "Send now" into the owner\'s composer) is tightened by design, not a parity break: today `AgendaReplyBatcher.sendNow` skipped the composer check, so a Send now typed into a draft the owner was writing and merged with it, though its doc said it never types into a non-empty composer. 5.0 types nothing into a non-empty or unreadable composer: the answers stay queued in order and are rechecked, and a Send now into an empty composer types once, with the held answers. Pinned by `packages/core/asks/tests/unit/daemon/agenda/reply-batch.test.ts` ("should never type on \\"Send now\\" into a composer that holds text, and keep the answers queued in order", with its siblings for an unreadable composer and for a composer that empties).',
   "- R-0349 (the owner's input-request deliver) is tightened by design for a page card, not a parity break (#42 SF1): \"What agents may control › Browsers\" is read at the page target, the one gate every write into a ferret's page passes, so the owner's Send on a page card raised while Browsers was on is refused once it is off (today it typed whatever the switch said). Nothing is typed or held, the card goes back to pending and can be sent again once Browsers is on, and the owner is told \"Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.\" The agents' sentence (T-0024 browser_request_input, T-0042 secure_paste) is today's, unchanged. A terminal card's Send still types while Terminals is off, as today.",
   "- Renaming a runtime is changed by design, not a parity break (ruling #52, kernel batch item 4, user-visible): today the rename rewrote every mention of the runtime in `warden.yaml` and `learning.yaml` in the same act (`renamedRuntimeMentions`, `rebuild-ref/packages/fleet/src/lib/config-files/render.ts`). In 5.0 no plugin writes another plugin's file, so Runtimes publishes `runtimes.renamed { from, to }` and Warden and Lessons each re-point their own file through `writeAsOwner` a moment later. Until a file is re-pointed (or while a re-point is held for the owner) that plugin's status says its file names a runtime that no longer exists. Pinned by a Warden and a Lessons test of the re-point when that wiring lands (GAP in ports-pending `runtimes`).",

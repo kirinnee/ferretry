@@ -65,7 +65,8 @@ export const useNotificationPreferences = (
 export interface NotificationWatchHost {
   /** The fleet cache, whose `null` snapshot means "not yet" rather than "empty". */
   readonly sessions: SessionsSource;
-  readonly preferences: DaemonNotificationPreferences;
+  /** Read live on every tick, so only the read half is asked for: Access's switch writes the same record. */
+  readonly preferences: Pick<DaemonNotificationPreferences, 'get'>;
   readonly filter: DeviceNotificationFilterStore;
   readonly surface: NotificationSurface;
   /** Whether the app is currently out of sight. */

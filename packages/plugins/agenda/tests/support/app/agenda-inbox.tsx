@@ -224,7 +224,7 @@ export function InboxHarness({
     repliedState: replied,
     connectionFor: () => undefined,
     // As the screen binds it: the lane editor Board's `agenda.lane-proposal` hook answers (a stand-in path here).
-    laneEditor: testLaneEditor,
+    laneEditor: (_daemon, ask, answer) => testLaneEditor(ask, answer),
   };
   const drawn = <ScreenHrefProvider href={SCREENS}>{render(inbox)}</ScreenHrefProvider>;
   return client === undefined ? (

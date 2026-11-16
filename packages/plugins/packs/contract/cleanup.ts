@@ -174,8 +174,12 @@ export const PackRoutingAcceptRequestSchema = z.strictObject({
 export type PackRoutingAcceptRequest = z.infer<typeof PackRoutingAcceptRequestSchema>;
 
 export const PackRoutingWriteResultSchema = z.strictObject({
-  /** `nothing`: there was nothing to do (an undo with no replaced prompt kept). */
-  outcome: z.enum(['applied', 'nothing']),
+  /**
+   * `nothing`: there was nothing to do (an undo with no replaced prompt kept). `held`: the configuration writer
+   * saved the edit but it is not in effect until the owner confirms it (the same hold a `PUT /v1/config/file` gets);
+   * nothing was replaced, so no undo is kept for it.
+   */
+  outcome: z.enum(['applied', 'held', 'nothing']),
   message: NonEmpty,
 });
 export type PackRoutingWriteResult = z.infer<typeof PackRoutingWriteResultSchema>;

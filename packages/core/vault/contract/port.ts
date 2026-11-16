@@ -7,6 +7,8 @@ import type { ObserveResult, PushNumberRead } from './targets.ts';
 import type {
   AuthorizedOutcome,
   CredentialPlacement,
+  MintedExchangeOutcome,
+  MintedExchangeRequest,
   OutboundHttpRequest,
   SecretName,
   SecretSummary,
@@ -36,6 +38,25 @@ export interface PageActNote {
   placed(page: ActedPage | undefined): void;
 }
 
+/** What a secure copy runs: no shell, an allowlisted environment, a timeout and a byte cap (`VaultApi.captureCommand`). */
+export interface SecureCopyCommand {
+  readonly command: readonly string[];
+  readonly cwd: string;
+  readonly timeoutMs: number;
+  readonly maxOutputBytes: number;
+}
+
+/** What running it produced. Raw: the caller seals stdout and masks stderr before anybody else sees either. */
+export interface SecureCopyCommandOutcome {
+  readonly outcome: 'exited' | 'timeout' | 'spawn_failed';
+  readonly program?: string;
+  readonly replaceable?: true;
+  readonly exitCode?: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly truncated: boolean;
+}
+
 /**
  * The Vault port (§2.2, §3.7): secrets by NAME only. There is no getter, and none may be added (it would delete the
  * feature): `run` executes a command with the values in that child's environment and returns masked output;
@@ -56,12 +77,35 @@ export interface VaultApi {
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
   /**
+   * Sends ONE request with a secret the CALLER MINTED placed on it (default `authorization: Bearer`), and answers a
+   * SANITIZED reply built inside the Vault (status, masked statusText, allowlisted headers, a masked or dropped body),
+   * never the raw one. Additive, and offered to NON-core needers only: a core needer is
+   * never narrowed to what it minted. Refused (nothing sent) unless the Vault's own mint ledger says this needer wrote
+   * the secret's CURRENT value: an owner's value under a matching name, a name another plugin minted and a name a
+   * manifest merely declares are all refused, whatever a pattern says. The destination must be a host the needer's own
+   * `network` already allows; a redirect is never followed. The needer never holds the value.
+   */
+  fetchMinted?(
+    name: SecretName,
+    request: MintedExchangeRequest,
+    placement?: CredentialPlacement,
+  ): Promise<MintedExchangeOutcome>;
+  /**
    * Resolves `${secret:NAME}` in `env` for one ferret's child; a missing secret refuses the launch. A variable whose
    * whole value is an optional reference (`${secret?:NAME}`, {@link optionalSecretReference}) is set when the secret
    * is held and left out of the child's environment when it is not.
    */
   childEnvironment(
     ferret: FerretId,
+    env: Readonly<Record<string, string>>,
+  ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>>;
+  /**
+   * {@link childEnvironment} for ONE command started for `runtime`: besides what the caller may use, the secrets that
+   * runtime's profile references (`ProfileSecrets`, Runtimes' answer) are allowed, for this call only; nothing is kept,
+   * so the next call is asked afresh. Present only for a plugin whose manifest declares `permissions.profileSecrets`.
+   */
+  childEnvironmentForRuntime?(
+    runtime: string,
     env: Readonly<Record<string, string>>,
   ): Promise<Result<ChildEnvironment, { readonly unknown: readonly SecretName[] }>>;
   /** Input requests: a ferret raises one, the owner answers on its card. */
@@ -75,6 +119,12 @@ export interface VaultApi {
    * host-less act notes are all the lock hears (stricter, never looser).
    */
   pageActed?(ferret: FerretId, script: boolean): PageActNote;
+  /**
+   * A person took a ferret's page over, told by Browsers with the page's name and id: a secure paste still waiting for the
+   * owner into it ends as refused (`taken_over`) at once, instead of only when someone allows it. Browsers alone is handed
+   * it (any other plugin could only cancel cards with it). Additive: absent, a waiting paste is refused when it is allowed.
+   */
+  pageTakenOver?(ferret: FerretId, keys: readonly string[]): Promise<void>;
   /**
    * A page script is about to run, anywhere on the machine (today's `RuleSignInGrants.running`): until the returned
    * call, every page card counts as scripted. Memory only: a restart ends every script.
@@ -91,6 +141,13 @@ export interface VaultApi {
    * no such open card. Additive.
    */
   cardTarget?(requestId: string): { readonly matchKey?: string; readonly observedDigest?: string } | undefined;
+  /**
+   * Whether this ferret has an input card the owner has not answered yet: a yes or no, never a card, a field or a
+   * value. It is one of the reads behind the ferret-level owner hold Accounts answers for the Warden (a move would
+   * kill the pane the owner is about to type into). Additive, and handed to Accounts alone: any other needer is
+   * handed none, so no one else learns which ferret has a card open.
+   */
+  inputOpen?(ferret: FerretId): boolean;
   /**
    * "USE IT NOW" (today's `InputRequestService.useNow`): the owner just saved a 2FA seed with a passkey from this OPEN
    * code card, so the Vault types the new key's first code into that card through every check a "Use code from Ferretry"
@@ -131,6 +188,36 @@ export interface VaultApi {
    * Present only for the plugins whose tools carry the raise; the ferret is the CALLER's credential, never a body.
    */
   raisePhoneApproval?(ferret: FerretId, ask: PhoneApprovalAsk): Promise<Result<PhoneApprovalAgentView, string>>;
+  /**
+   * SECURE COPY (docs/secure-copy.md). Additive, optional and present for Accounts and the trusted core callers (which are
+   * handed the Vault's full reach), and ABSENT for every other needer: the Vault owns the
+   * child runner and the masking registry, so a copy reaches both only through these two members. An absent member means
+   * no copy is captured (fail closed).
+   *
+   * Runs `command` with NO shell, in `cwd`, with an allowlisted environment (no admin token, none of the daemon's own
+   * secrets), stdin closed, a timeout and a byte cap, and answers its raw output ONCE, to the service that seals it.
+   * Never a log line, never an error message: the caller masks before anyone else sees a byte.
+   */
+  captureCommand?(spec: SecureCopyCommand): Promise<SecureCopyCommandOutcome>;
+  /**
+   * The masking registry (`EphemeralValues`), for a secure copy: from `hold` on, `value` is masked as `marker` in every
+   * read of the ferret's surfaces, the owner's transcript and the journal, until `until` (epoch milliseconds); `retime`
+   * brings the end of every hold of `marker` forward. Neither returns a value.
+   */
+  maskCopy?: {
+    hold(ferret: FerretId, value: string, marker: string, until: number): void;
+    retime(ferret: FerretId, marker: string, until: number): void;
+    /**
+     * A copy was PASTED INTO A TERMINAL: `value` stays masked as `marker` in that ferret's reads for the life of its session
+     * (the scrollback the terminal keeps), not for the copy's own life. A later `retime` of `marker` does not shorten it.
+     */
+    holdScrollback(ferret: FerretId, value: string, marker: string): boolean;
+    /**
+     * Whether this ferret already keeps as many DIFFERENT copies masked in scrollback as it may, and `marker` is not one of
+     * them: a mask is never dropped while its value can still be read, so a new paste is refused instead.
+     */
+    scrollbackFull(ferret: FerretId, marker: string): boolean;
+  };
 }
 
 export const VaultPort = definePort<VaultApi>('vault');

@@ -46,6 +46,22 @@ const manifest = (accounts: readonly Account[], runtimes: readonly Runtime[] = [
 });
 
 describe('the harness homes a manifest names', () => {
+  it('publishes the secret bindings of a runtime profile as references, and nothing for a runtime that binds none', () => {
+    // Arrange
+    const bound: Account = {
+      ...account(1, `${FLEET}/homes/one`, '/placeholder/bin/work'),
+      secretEnv: { API_KEY: '${secret:WORK_KEY}' },
+    };
+    const plain = account(2, `${FLEET}/homes/two`, '/placeholder/bin/other');
+
+    // Act
+    const homes = homesOf(manifest([bound, plain]), FLEET);
+
+    // Assert
+    expect(homes[0]?.secretEnv).toEqual({ API_KEY: '${secret:WORK_KEY}' });
+    expect(homes[1] && 'secretEnv' in homes[1]).toBe(false);
+  });
+
   it('lists none for a machine no apply has published to', () => {
     expect(homesOf(undefined, FLEET)).toEqual([]);
   });

@@ -2,6 +2,9 @@ import type { AsksApi, AskId } from '@ferretry/core-asks/contract';
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { AgendaClearAgentsResult } from '../../contract/index.ts';
 
+/** The note each dismissal carries, so the ferret and the audit say who cleared it and why. */
+const CLEARED_NOTE = 'cleared by the owner (agenda clear --agents)';
+
 /** Which ferrets on this machine are agent ferrets: the ones the agenda's "Agents" filter lists. */
 export interface AgentFerretDirectory {
   agentFerrets(): Promise<readonly FerretId[]>;
@@ -10,14 +13,14 @@ export interface AgentFerretDirectory {
 /**
  * THE OWNER'S "CLEAR ALL FROM AGENT FERRETS" (docs/agenda.md § Clearing the agent ferrets' backlog): every open ask on the
  * board of every non-interactive ferret on this machine is DISMISSED, as the owner. An interactive ferret's board is never
- * read. One ask at a time through the ordinary close, so each leaves the same trail and tells its ferret as any dismiss
+ * read. One ask at a time through the owner's own dismissal (`ownerDismiss`: the human actor, not the daemon's close, which may dismiss only what the daemon raised), so each leaves the same trail and tells its ferret as any dismiss
  * does; a board that cannot be read, or an ask that cannot be closed, is skipped and not counted — the number is what
  * actually went.
  */
 export class AgendaAgentClearer {
   constructor(
     private readonly agents: AgentFerretDirectory,
-    private readonly asks: Pick<AsksApi, 'open' | 'close'>,
+    private readonly asks: Pick<AsksApi, 'open' | 'ownerDismiss'>,
   ) {}
 
   /** What a clear would dismiss now; changes nothing. */
@@ -39,7 +42,8 @@ export class AgendaAgentClearer {
     for (const ferret of await this.agents.agentFerrets()) {
       let here = 0;
       for (const id of await this.openIds(ferret)) {
-        const closed = await this.asks.close({ ferret, id }, 'dismissed').then(
+        // The owner's own dismissal, whoever raised the ask: the daemon's close would dismiss only what the daemon raised.
+        const closed = await this.asks.ownerDismiss({ ferret, id }, CLEARED_NOTE).then(
           () => true,
           () => false,
         );

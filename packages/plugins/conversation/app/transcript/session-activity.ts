@@ -22,7 +22,7 @@
  * waiting, finished, starting — and this must never contradict one of them.
  */
 
-import type { FerretView } from '@ferretry/core-ferrets/contract';
+import type { ChatSession } from '../chat/chat-session.ts';
 import type { PaneActivity } from './pane-activity.ts';
 
 /** One read of the agent's pane: whether a frame was read at all, and the status line it showed. */
@@ -36,7 +36,7 @@ export interface PaneReading {
 export const UNREAD_PANE: PaneReading = Object.freeze({ read: false, activity: null });
 
 /** Whether a live session is idle at its prompt, on the evidence above. */
-const sessionAtPrompt = (view: FerretView, pane: PaneReading): boolean => {
+const sessionAtPrompt = (view: ChatSession, pane: PaneReading): boolean => {
   const { state } = view;
   if (state.status !== 'running') return false;
   if (pane.activity !== null) return false;
@@ -56,7 +56,7 @@ export type SessionTurn = 'working' | 'your-turn' | 'needs-input';
  * daemon that predates the watcher sends none — then the page falls back to the evidence it can see
  * itself ({@link sessionAtPrompt}), so an older daemon still never spins over an idle prompt.
  */
-export const sessionTurn = (view: FerretView, pane: PaneReading = UNREAD_PANE): SessionTurn | null => {
+export const sessionTurn = (view: ChatSession, pane: PaneReading = UNREAD_PANE): SessionTurn | null => {
   const { state } = view;
   if (state.turnState !== undefined) return state.turnState;
   if (state.status !== 'running') return null;

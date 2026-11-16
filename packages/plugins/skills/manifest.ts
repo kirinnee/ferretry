@@ -1,6 +1,7 @@
 import { definePlugin, panel, renderer, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
+import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { PROFILE_COMPONENTS_KEY, ProfileSkillsSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
@@ -75,18 +76,53 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('skill ls', { summary: 'the skills a ferret or this machine has' }),
-      verb('skill show', { summary: 'one skill item and where it is used' }),
-      verb('skill add', { summary: 'add a skills item' }),
-      verb('skill edit', { summary: 'change a skills item; every profile and runtime that uses it changes too' }),
-      verb('skill rm', { summary: 'remove a skills item' }),
+      verb('skill ls', {
+        summary: 'the skills a ferret or this machine has',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('skill show', {
+        summary: 'one skill item and where it is used',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('skill add', {
+        summary: 'add a skills item',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--item <skill>', help: 'skills: one skill; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('skill edit', {
+        summary: 'change a skills item; every profile and runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--item <skill>', help: 'skills: one skill; repeat it' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('skill rm', {
+        summary: 'remove a skills item',
+        args: [{ name: 'name', help: 'the skills item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
   },
 
   ui: {
     // The Skills tab of a ferret's "This folder" context, and the inventory under Settings.
     panels: [panel('ferret.side', { id: 'skills', order: 50 })],
-    settings: [settingsTab('skills', { label: 'Skills', order: 60 })],
+    settings: [settingsTab('skills', { group: 'tools', label: 'Skills', order: 60 })],
     // `/name` and `$name` are one skill reference: Claude invokes `/name`, Codex `$name` (docs/reference-standard.md).
     renderers: [renderer('reference', { prefix: '/' }), renderer('reference', { prefix: '$' })],
   },
@@ -106,6 +142,8 @@ export default definePlugin({
       { hook: ReferenceCatalog, key: '/' },
       { hook: ReferenceCatalog, key: '$' },
       { hook: ProfileSkillsSource, key: PROFILE_COMPONENTS_KEY },
+      // Catalogs shares this plugin's skills and installs a catalog's skills through it (the kind it owns).
+      { hook: CatalogItems, key: 'skill' },
     ],
   },
 
@@ -113,7 +151,9 @@ export default definePlugin({
     // `work`: a ferret's own folder. `imports`: read-only, and ONLY the skills folders (`.claude/skills`,
     // `.agents/skills`) of a registered project root, each scoped one folder at a time (`adapters/project-skill-files.ts`
     // narrows the kernel's grant, which would take any folder outside the fence, as MCP's `.mcp.json` reader does).
-    roots: ['work', 'imports'],
+    roots: ['work', 'imports', 'project-files'],
+    // A catalog install writes a skill folder into a project (`<root>/.claude/skills/<name>/**`, `<root>/.agents/skills/<name>/**`) and nothing else there.
+    projectFiles: ['.claude/skills/*/**', '.agents/skills/*/**'],
     // Mints a shared folder of its own installed skills for the harness that links them into a ferret home (kernel batch #10).
     shareTrees: true,
     network: [],

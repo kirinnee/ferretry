@@ -18,6 +18,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 
 import { Button } from '@ferretry/app/ui';
 import { compactAddress, type BrowserChip } from './browser-bar-model.ts';
+import './browser.css';
 
 type Open = 'chip' | 'pages' | 'menu' | null;
 
@@ -130,145 +131,149 @@ export function BrowserBar({
   );
 
   return (
-    <header
-      ref={barRef}
-      className="relative flex min-h-[52px] shrink-0 items-center gap-1 border-b border-border-soft px-1.5 py-1"
-      data-browser-bar=""
-    >
-      {pages === undefined ? null : (
-        <button
-          type="button"
-          onClick={() => toggle('pages')}
-          aria-haspopup="dialog"
-          aria-expanded={open === 'pages'}
-          aria-label={`Browser pages — ${name}`}
-          title={`${name} — switch page`}
-          data-browser-trigger="pages"
-          data-browser-bar-part="page"
-          className="inline-flex min-h-[44px] max-w-[4rem] shrink-0 items-center gap-0.5 rounded-control px-1 min-[420px]:max-w-[5.5rem] min-[420px]:px-1.5 text-ui font-medium text-fg hover:bg-accent-soft sm:max-w-[9rem]"
-        >
-          <Globe2 size={14} aria-hidden="true" className="shrink-0 text-muted" />
-          <span className="hidden min-w-0 truncate min-[420px]:inline">{name}</span>
-          <ChevronDown size={12} aria-hidden="true" className="shrink-0 text-muted max-[419px]:hidden" />
-        </button>
-      )}
-
-      <form onSubmit={submit} className="flex min-w-0 flex-1" data-browser-bar-part="address">
-        <label className="flex min-h-[40px] min-w-0 flex-1 items-center gap-1 rounded-control border border-strong bg-surface-2 px-1.5 sm:px-2">
-          <span className="sr-only">URL or DuckDuckGo search</span>
-          <Search size={13} aria-hidden="true" className="hidden shrink-0 text-muted sm:block" />
-          <input
-            value={editing ? address : compactAddress(address)}
-            onChange={event => onAddressChange(event.target.value)}
-            onFocus={() => {
-              setEditing(true);
-              onAddressFocus();
-            }}
-            onBlur={() => {
-              setEditing(false);
-              onAddressBlur();
-            }}
-            placeholder="URL or search"
-            title={address}
-            inputMode="url"
-            enterKeyHint="go"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            className="h-9 w-0 min-w-0 flex-1 truncate border-0 bg-transparent p-0 shadow-none outline-none font-mono text-meta text-fg max-sm:text-[11px] placeholder:text-muted"
-          />
-        </label>
-        {/* Enter is Go: a visible button would take 44px from the address for a thing the keyboard does. */}
-        <button type="submit" disabled={navigateDisabled} className="sr-only">
-          Go
-        </button>
-      </form>
-
-      <span className="shrink-0" data-browser-bar-part="chip">
-        <button
-          type="button"
-          onClick={() => toggle('chip')}
-          aria-haspopup="dialog"
-          aria-expanded={open === 'chip'}
-          aria-label={`Status: ${chip.summary}`}
-          title={chip.summary}
-          data-browser-chip={chip.kind}
-          data-browser-trigger="chip"
-          data-attention={chip.attention ? '' : undefined}
-          data-tone={chip.tone}
-          className="kt-badge inline-flex min-h-[32px] items-center gap-1 px-1.5 max-sm:tracking-normal sm:max-w-[10rem]"
-        >
-          <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current max-sm:hidden" />
-          <span className="min-w-0 truncate">{chip.label}</span>
-        </button>
-        {open === 'chip' && (
-          <div
-            role="dialog"
-            aria-label="Browser status"
-            data-browser-chip-detail=""
-            className={`${popoverClass} right-1.5 w-[min(320px,calc(100vw-16px))]`}
-            style={{ maxHeight: 'min(70dvh, 420px)' }}
-          >
-            {chipDetail}
-          </div>
-        )}
-      </span>
-
-      {step('back', back)}
-      {step('forward', forward)}
-      {step('reload', reload)}
-
-      <span className="flex shrink-0 items-center" data-browser-bar-part="menu">
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => toggle('menu')}
-          aria-haspopup="dialog"
-          aria-expanded={open === 'menu'}
-          aria-label="Browser controls"
-          title={menuTitle}
-          data-browser-trigger="menu"
-          className="min-h-[44px] min-w-[32px] justify-center p-0 sm:min-w-[44px]"
-        >
-          <MoreVertical size={16} aria-hidden="true" />
-        </Button>
-        {open === 'menu' && (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: a keyboard press on a menu button is a click that bubbles here; this only closes the menu
-          <div
-            role="dialog"
-            aria-label="Browser controls"
-            data-browser-menu=""
-            className={`${popoverClass} right-1.5 w-[min(300px,calc(100vw-16px))]`}
-            style={{ maxHeight: 'min(calc(100dvh - 72px), 640px)' }}
-            onClick={event => {
-              if (event.target instanceof Element && event.target.closest('button,a') !== null) setOpen(null);
-            }}
-          >
-            {menu}
-          </div>
-        )}
-      </span>
-
-      {open === 'pages' && pages !== undefined && (
-        <div
-          role="dialog"
-          aria-label="Browser pages"
-          className={`${popoverClass} left-1.5 w-[min(340px,calc(100vw-16px))]`}
-          style={{ maxHeight: 'min(calc(100dvh - 72px), 640px)' }}
-        >
-          {pages}
-        </div>
-      )}
-
-      {/* Mounted always, never on and off: only its opacity follows the work, so the bar never moves. */}
-      <div
-        className={`pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-accent transition-opacity ${working ? 'opacity-100' : 'opacity-0'}`}
-        role="status"
-        aria-live="polite"
-        data-browser-progress=""
+    // The frame is the width the bar answers to: a bar in a 328px dock is narrow on a 1920px screen, so the
+    // viewport breakpoints below cannot tell (browser.css folds the bar by this frame's width instead).
+    <div className="fy-browser-bar-frame shrink-0" data-browser-bar-frame="">
+      <header
+        ref={barRef}
+        className="fy-browser-bar relative flex min-h-[52px] items-center gap-1 border-b border-border-soft px-1.5 py-1"
+        data-browser-bar=""
       >
-        <span className="sr-only">{working ? chip.summary : ''}</span>
-      </div>
-    </header>
+        {pages === undefined ? null : (
+          <button
+            type="button"
+            onClick={() => toggle('pages')}
+            aria-haspopup="dialog"
+            aria-expanded={open === 'pages'}
+            aria-label={`Browser pages — ${name}`}
+            title={`${name} — switch page`}
+            data-browser-trigger="pages"
+            data-browser-bar-part="page"
+            className="inline-flex min-h-[44px] max-w-[4rem] shrink-0 items-center gap-0.5 rounded-control px-1 min-[420px]:max-w-[5.5rem] min-[420px]:px-1.5 text-ui font-medium text-fg hover:bg-accent-soft sm:max-w-[9rem]"
+          >
+            <Globe2 size={14} aria-hidden="true" className="shrink-0 text-muted" />
+            <span className="hidden min-w-0 truncate min-[420px]:inline">{name}</span>
+            <ChevronDown size={12} aria-hidden="true" className="shrink-0 text-muted max-[419px]:hidden" />
+          </button>
+        )}
+
+        <form onSubmit={submit} className="flex min-w-0 flex-1" data-browser-bar-part="address">
+          <label className="flex min-h-[40px] min-w-0 flex-1 items-center gap-1 rounded-control border border-strong bg-surface-2 px-1.5 sm:px-2">
+            <span className="sr-only">URL or DuckDuckGo search</span>
+            <Search size={13} aria-hidden="true" className="hidden shrink-0 text-muted sm:block" />
+            <input
+              value={editing ? address : compactAddress(address)}
+              onChange={event => onAddressChange(event.target.value)}
+              onFocus={() => {
+                setEditing(true);
+                onAddressFocus();
+              }}
+              onBlur={() => {
+                setEditing(false);
+                onAddressBlur();
+              }}
+              placeholder="URL or search"
+              title={address}
+              inputMode="url"
+              enterKeyHint="go"
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              className="h-9 w-0 min-w-0 flex-1 truncate border-0 bg-transparent p-0 shadow-none outline-none font-mono text-meta text-fg max-sm:text-[11px] placeholder:text-muted"
+            />
+          </label>
+          {/* Enter is Go: a visible button would take 44px from the address for a thing the keyboard does. */}
+          <button type="submit" disabled={navigateDisabled} className="sr-only">
+            Go
+          </button>
+        </form>
+
+        <span className="shrink-0" data-browser-bar-part="chip">
+          <button
+            type="button"
+            onClick={() => toggle('chip')}
+            aria-haspopup="dialog"
+            aria-expanded={open === 'chip'}
+            aria-label={`Status: ${chip.summary}`}
+            title={chip.summary}
+            data-browser-chip={chip.kind}
+            data-browser-trigger="chip"
+            data-attention={chip.attention ? '' : undefined}
+            data-tone={chip.tone}
+            className="kt-badge inline-flex min-h-[32px] items-center gap-1 px-1.5 max-sm:tracking-normal sm:max-w-[10rem]"
+          >
+            <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current max-sm:hidden" />
+            <span className="min-w-0 truncate">{chip.label}</span>
+          </button>
+          {open === 'chip' && (
+            <div
+              role="dialog"
+              aria-label="Browser status"
+              data-browser-chip-detail=""
+              className={`${popoverClass} right-1.5 w-[min(320px,calc(100vw-16px))]`}
+              style={{ maxHeight: 'min(70dvh, 420px)' }}
+            >
+              {chipDetail}
+            </div>
+          )}
+        </span>
+
+        {step('back', back)}
+        {step('forward', forward)}
+        {step('reload', reload)}
+
+        <span className="flex shrink-0 items-center" data-browser-bar-part="menu">
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => toggle('menu')}
+            aria-haspopup="dialog"
+            aria-expanded={open === 'menu'}
+            aria-label="Browser controls"
+            title={menuTitle}
+            data-browser-trigger="menu"
+            className="min-h-[44px] min-w-[32px] justify-center p-0 sm:min-w-[44px]"
+          >
+            <MoreVertical size={16} aria-hidden="true" />
+          </Button>
+          {open === 'menu' && (
+            // biome-ignore lint/a11y/useKeyWithClickEvents: a keyboard press on a menu button is a click that bubbles here; this only closes the menu
+            <div
+              role="dialog"
+              aria-label="Browser controls"
+              data-browser-menu=""
+              className={`${popoverClass} right-1.5 w-[min(300px,calc(100vw-16px))]`}
+              style={{ maxHeight: 'min(calc(100dvh - 72px), 640px)' }}
+              onClick={event => {
+                if (event.target instanceof Element && event.target.closest('button,a') !== null) setOpen(null);
+              }}
+            >
+              {menu}
+            </div>
+          )}
+        </span>
+
+        {open === 'pages' && pages !== undefined && (
+          <div
+            role="dialog"
+            aria-label="Browser pages"
+            className={`${popoverClass} left-1.5 w-[min(340px,calc(100vw-16px))]`}
+            style={{ maxHeight: 'min(calc(100dvh - 72px), 640px)' }}
+          >
+            {pages}
+          </div>
+        )}
+
+        {/* Mounted always, never on and off: only its opacity follows the work, so the bar never moves. */}
+        <div
+          className={`pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-accent transition-opacity ${working ? 'opacity-100' : 'opacity-0'}`}
+          role="status"
+          aria-live="polite"
+          data-browser-progress=""
+        >
+          <span className="sr-only">{working ? chip.summary : ''}</span>
+        </div>
+      </header>
+    </div>
   );
 }

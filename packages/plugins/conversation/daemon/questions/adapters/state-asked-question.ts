@@ -1,7 +1,8 @@
-import type { Instant } from '@ferretry/std';
+import { type Instant, InstantSchema } from '@ferretry/std';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { type Question, QUESTION_STATE } from '../../../contract/index.ts';
 import { type AskedQuestion, parseAskedQuestion } from '../lib/asked.ts';
+import type { PendingQuestion } from '../../seams/protocol.ts';
 
 /**
  * The one lane every change to a ferret's `question.json` runs in, keyed by the ferret: the writer, the exact-id clear
@@ -43,19 +44,44 @@ async function writeNow(
   transcript: string | undefined,
 ): Promise<Question | undefined> {
   const asked = parseAskedQuestion(payload, Date.parse(askedAt), transcript);
-  const [first, ...more] = asked?.questions ?? [];
-  if (asked === undefined || first === undefined || transcript === undefined) {
+  if (asked === undefined || transcript === undefined) {
+    await state.remove(QUESTION_STATE, ferret);
+    return undefined;
+  }
+  return await persistQuestion(state, ferret, asked.toolUseId, asked.questions, askedAt, transcript);
+}
+
+/** One question of a tool call, as either path parsed it. */
+interface AskedItem {
+  readonly header?: string | undefined;
+  readonly question: string;
+  readonly options: readonly { readonly label: string; readonly description?: string | undefined }[];
+  readonly multiple: boolean;
+}
+
+const optionOf = ({ label, description }: AskedItem['options'][number]) =>
+  description === undefined ? { label } : { label, description };
+
+/** The one place a {@link Question} is built and stored; `transcript` is the hook path's proof and absent for Codex's. */
+async function persistQuestion(
+  state: StatePort,
+  ferret: string,
+  toolUseId: string,
+  items: readonly AskedItem[],
+  askedAt: Instant,
+  transcript: string | undefined,
+): Promise<Question | undefined> {
+  const [first, ...more] = items;
+  if (first === undefined) {
     await state.remove(QUESTION_STATE, ferret);
     return undefined;
   }
   const question: Question = {
     format: 1,
-    toolUseId: asked.toolUseId,
+    toolUseId,
     ...(first.header === undefined ? {} : { header: first.header }),
     text: first.question,
-    options: first.options.map(({ label, description }) =>
-      description === undefined ? { label } : { label, description },
-    ),
+    options: first.options.map(optionOf),
     multiple: first.multiple,
     // Every question of the tool call is kept: a tabbed form is ONE form, shown and guarded whole.
     ...(more.length === 0
@@ -64,17 +90,48 @@ async function writeNow(
           more: more.map(item => ({
             ...(item.header === undefined ? {} : { header: item.header }),
             text: item.question,
-            options: item.options.map(({ label, description }) =>
-              description === undefined ? { label } : { label, description },
-            ),
+            options: item.options.map(optionOf),
             multiple: item.multiple,
           })),
         }),
     askedAt,
-    transcript,
+    ...(transcript === undefined ? {} : { transcript }),
   };
   await state.write(QUESTION_STATE, question, ferret);
   return question;
+}
+
+/**
+ * A question the TRANSCRIPT projected (Codex's `request_user_input`: the call sits in the transcript while its form is
+ * open, so no hook file exists), stored as `question.json` through the same builder and lane as the hook's. Nothing proves
+ * a transcript path for it, so the file names none; the exact-id clear and the answered stamp work as they do for Claude.
+ */
+export async function writeProjectedQuestion(
+  state: StatePort,
+  lane: QuestionLane,
+  ferret: string,
+  pending: PendingQuestion,
+  askedAt: string | undefined,
+  now: () => Instant,
+): Promise<Question | undefined> {
+  const items = pending.questions.map(item => ({
+    ...(item.header === undefined ? {} : { header: item.header }),
+    question: item.question,
+    options: item.options ?? [],
+    multiple: item.multiSelect === true,
+  }));
+  return await lane.run(
+    ferret,
+    async () =>
+      await persistQuestion(
+        state,
+        ferret,
+        pending.toolUseId,
+        items,
+        InstantSchema.safeParse(askedAt).data ?? now(),
+        undefined,
+      ),
+  );
 }
 
 /**

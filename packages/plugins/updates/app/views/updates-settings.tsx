@@ -12,7 +12,7 @@ import {
   DaemonUpdateViewSchema,
   describeInstallMethod,
 } from '../../contract/index.ts';
-import { behindSentence, refusalSentence, updateOffer, updateRequest } from '../lib/behind.ts';
+import { headlineSentence, refusalSentence, updateOffer, updateRequest } from '../lib/behind.ts';
 import { pollUpdateStatus } from '../lib/poll-status.ts';
 
 export const createSettings = (client: PluginClient): AppComponent<SettingsProps> =>
@@ -73,7 +73,7 @@ export const createSettings = (client: PluginClient): AppComponent<SettingsProps
         <p>
           Running {view.current}, installed via {describeInstallMethod(view.method)}.
         </p>
-        <p>{behindSentence(view) ?? 'This daemon is up to date.'}</p>
+        <p>{headlineSentence(view)}</p>
         {offer.kind === 'busy' ? <p>{offer.sentence}</p> : null}
         {offer.kind === 'update' ? (
           <p>

@@ -121,6 +121,10 @@ class World {
   readonly told = new Set<string>();
   /** The notifier throws, so a notice is attempted and not sent. */
   noticeFails = false;
+  /** Every stuck alarm the tracker raised: the send, and how long it had waited. */
+  readonly alarms: Array<{ sendId: string; waitedMs: number }> = [];
+  /** The alarm throws, as a log that cannot be written would. */
+  alarmFails = false;
   /** The daemon dies on this write of a notice crossed off a record (1 = the first), before the line is written. */
   crashOnCrossOff: number | undefined;
   private crossOffs = 0;
@@ -250,6 +254,12 @@ class World {
             this.notices.push({ sender, recipient, record: entry });
             if (this.noticeFails) throw new Error('sender unreachable');
             this.told.add(`send-failed:${recipient}:${entry.sendId}`);
+          },
+        },
+        alarm: {
+          stuck: async (_id, entry, waitedMs) => {
+            this.alarms.push({ sendId: entry.sendId, waitedMs });
+            if (this.alarmFails) throw new Error('log unwritable');
           },
         },
         scheduler: {
@@ -2036,6 +2046,66 @@ describe("typing a person's send that nothing was typed for yet", () => {
     await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
 
     should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'not_delivered', retryable: true });
+  });
+
+  /**
+   * THE STUCK STATE, as v4 left it for six and a half hours: an idle pane whose composer the reader cannot prove
+   * empty draws nothing by itself, so every try meets the same refusal. Each try is silent; past `stuckAlarmMs` the
+   * send must be said out loud, once, and still be tried, so a redraw lets it through.
+   */
+  it('says a send stuck untyped past the limit out loud, once, and keeps trying until the screen reads clear', async () => {
+    const { untypedLookMs, stuckAlarmMs } = defaultSendTrackerSettings;
+    const world = new World(record({ untyped: true }));
+    world.withhold = 'unreadable';
+
+    // Every try up to the limit is a quiet retry: nothing typed, nobody told yet.
+    for (let ms = untypedLookMs; ms < stuckAlarmMs; ms += untypedLookMs) await world.checkAt(ms);
+    should(world.alarms).be.empty();
+    should(world.only.stuckAt).be.undefined();
+
+    // Past it, the send is marked, journalled and alarmed ONCE however many more tries meet the same screen.
+    for (let ms = stuckAlarmMs; ms <= stuckAlarmMs + 12 * untypedLookMs; ms += untypedLookMs) await world.checkAt(ms);
+    should(world.alarms).eql([{ sendId: 'send-1', waitedMs: stuckAlarmMs }]);
+    should(world.only).containEql({ fate: 'accepted', untyped: true, stuckAt: at(stuckAlarmMs) });
+    should(world.events.filter(event => event === 'control.send_stuck')).have.length(1);
+    should(world.retyped).be.empty();
+
+    // Something redraws the screen: the next try types it, and the mark comes off.
+    world.withhold = undefined;
+    await world.checkAt(stuckAlarmMs + 13 * untypedLookMs);
+    should(world.retyped).eql(['send-1']);
+    should(world.only.untyped).be.undefined();
+    should(world.only.stuckAt).be.undefined();
+    should(world.events).containEql('control.send_unstuck');
+  });
+
+  it('still marks and retries a stuck send when the alarm itself fails', async () => {
+    const world = new World(record({ untyped: true }));
+    world.withhold = 'unreadable';
+    world.alarmFails = true;
+
+    await world.checkAt(defaultSendTrackerSettings.stuckAlarmMs);
+
+    should(world.alarms).have.length(1);
+    should(world.only).containEql({
+      fate: 'accepted',
+      untyped: true,
+      stuckAt: at(defaultSendTrackerSettings.stuckAlarmMs),
+    });
+    should(world.only.deadlineAt).equal(
+      at(defaultSendTrackerSettings.stuckAlarmMs + defaultSendTrackerSettings.untypedLookMs),
+    );
+  });
+
+  it('drops the stuck mark when the hold ceiling settles the send', async () => {
+    const world = new World(record({ untyped: true, stuckAt: at(defaultSendTrackerSettings.stuckAlarmMs) }));
+    world.withhold = 'unreadable';
+
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
+
+    should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'not_delivered' });
+    should(world.only.stuckAt).be.undefined();
+    should(world.alarms).be.empty();
   });
 
   it('settles it as ended when its session has ended', async () => {

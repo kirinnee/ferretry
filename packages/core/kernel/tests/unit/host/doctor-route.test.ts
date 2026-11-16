@@ -6,6 +6,7 @@ import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import kernelPlugin from '../../../plugin.ts';
 import { DoctorReportSchema } from '../../../contract/doctor.ts';
+import { doctorReport } from '../../../host/doctor-report.ts';
 import { fixedClock } from '../../../testing/clock.ts';
 import { recordingAdmission, request } from './fixtures.ts';
 import { AdmissionPort } from '../../../contract/bound.ts';
@@ -158,6 +159,64 @@ test('R-0081 the doctor body never carries a plugin’s thrown build-error text;
     expect(response.body).not.toContain('sk-ant');
     expect(JSON.stringify(await outcome.host.doctor())).not.toContain('/secret/path');
     expect(logged.join('\n')).toContain('/secret/path');
+  } finally {
+    if (outcome.kind === 'running') await outcome.host.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('V-0257 the booted host’s report carries the program inventory, named and kinded as today’s was, and a plugin’s own row name', async () => {
+  const root = await mkdtemp(`${tmpdir()}/doctor-programs-`);
+  const home = `${root}/home`;
+  const named = definePlugin({
+    id: 'named',
+    title: 'Named',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: [],
+    doctor: ['harness'],
+  });
+  const outcome = await bootHost({
+    home,
+    version: '5.0.0',
+    adapters: {
+      ...realAdapters(home, () => {}, { binary: 'fy' }),
+      clock: fixedClock(),
+      homeLock: async () => ({ release: async () => {} }),
+    },
+    implementations: [
+      implementDaemon(named, {
+        build: () => ({
+          doctor: {
+            harness: async () => ({
+              state: 'warn',
+              detail: 'not found in the inherited environment, and no extra search path is declared',
+              name: 'codex',
+              requirement: 'alternative',
+              fix: 'no codex session can start',
+            }),
+          },
+        }),
+      }),
+    ],
+  });
+  try {
+    if (outcome.kind !== 'running') throw new Error(outcome.sentence);
+    const report = DoctorReportSchema.parse(
+      await outcome.host.doctor().then(lines => JSON.parse(JSON.stringify(doctorReport(lines)))),
+    );
+    const names = report.checks.map(check => check.name);
+    for (const program of ['bash', 'git', 'launchctl', 'systemctl', 'cat', 'tail', 'ps', 'nix-store', 'jq', 'gh'])
+      expect(names).toContain(program);
+    expect(report.checks.find(check => check.name === 'bash')?.requirement).toBe('required');
+    // A finding's own name and requirement reach the report: `codex` is an alternative, not "named: harness".
+    expect(report.checks.find(check => check.name === 'codex')).toMatchObject({
+      requirement: 'alternative',
+      status: 'missing',
+      impact: 'no codex session can start',
+    });
+    expect(names).not.toContain('named: harness');
   } finally {
     if (outcome.kind === 'running') await outcome.host.stop();
     await rm(root, { recursive: true, force: true });

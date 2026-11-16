@@ -28,11 +28,6 @@
       "owner": "britnee"
     },
     {
-      "id": "launch-renewal",
-      "what": "launch renewal (deferred by ruling)",
-      "owner": "britnee"
-    },
-    {
       "id": "differential-harness",
       "what": "(A)+(E) the v4-vs-5.0 differential harness: core, CI job and mutation check, then the R/V row tables and the J cadence tests, per the reviewed plan (moved after merge by the owner, !A481)",
       "owner": "britnee"
@@ -73,8 +68,33 @@
       "owner": "britnee"
     },
     {
+      "id": "host-store-codex-login",
+      "what": "host-store Codex login (store: host): a Codex login kept in the terminal's own folder cannot start a ferret in the product. The migration converts each one to Ferretry's own sign-in under the same name (the owner signs in once); an old terminal sign-in keeps working (card &F3468) (due 2026-11-27)",
+      "owner": "britnee"
+    },
+    {
       "id": "v4-doctor-checks",
-      "what": "the v4 doctor checks and readiness 5.0 does not have yet (doctor lists the unbuilt checks on one line as not built yet): user-slice, loopback-firewall (warn-only), notifications health, claude-code/codex paths; and doctor readiness: ready only when some runtime can launch (v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224). Starts already refuse by name. Due 2026-11-27, card &F3715",
+      "what": "what is left of the v4 doctor after rebuild/config-doctor (which built the host program rows, the claude and codex path rows, the notifications row, the loopback-firewall row and the Doctor, Host checks and Files tabs): doctor readiness (ready only when some runtime can launch, v4 doctor.ts:317) and a required row for an unreadable fleet/manifest.json (v4 :224); the loopback-firewall row appears only once Runtimes serves browserPorts (today every launch is on random ports, which v4 also left out); the notifications row has no ledger rows (5.0 keeps no notifications.jsonl) and its newest push is this run only; the `directory syscalls` row (kernel FFI); the declared checks with no v4 row still say not built yet (chrome, shells-nix, update, board-store, agenda-buzz, mcp-inventory, warden-sweep, logins-store, usage-meter, lessons-board, conversation-store, conversation-search-index); the Host checks tab cannot rename a machine or remove this browser's pairing, nor show its address (the shell owns that record and an app half is not handed it). Due 2026-11-27, card &F3715",
+      "owner": "britnee"
+    },
+    {
+      "id": "app-component-editing",
+      "what": "component editing in the app: MCP servers add/edit/delete/detail, Claude Code and Codex settings and hooks, skills, instructions (v4 Profiles > Components); the CLI way stays before merge, owner !A510",
+      "owner": "britnee"
+    },
+    {
+      "id": "fy-ask-archive-paging",
+      "what": "fy ask reads the asks of at most 500 archived ferrets (the archive route has no cursor); past that it says so and exits 1",
+      "owner": "britnee"
+    },
+    {
+      "id": "fy-browser-firewall-entry",
+      "what": "fy browser firewall entry: 5.0 has no route for the browser ports (browserPorts is read by Runtimes, not Browsers); the verb refuses with a sentence and exits 1. The firewall script/unit/verify-unit/timer verbs are in 5.0",
+      "owner": "britnee"
+    },
+    {
+      "id": "contract-hooks-restore",
+      "what": "the four v4 contract hooks dropped from 5.0 hook config in 26ed171ad0 (closed-set-agreement, composition-invocation, composition-reachability, route-agreement): rebuild 5.0 versions or record why one no longer applies, card &C57",
       "owner": "britnee"
     }
   ]

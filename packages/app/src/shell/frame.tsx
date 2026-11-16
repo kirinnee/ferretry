@@ -6,11 +6,18 @@ import { DEFAULT_LAYOUT } from '../layout/layout.ts';
 import { CommandBar } from '../ui/command-bar.tsx';
 import { useAppViewport } from '../ui/hooks/use-app-viewport.ts';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../ui/palette-shortcut.ts';
-import { buildPluginCommandSources, deviceLayoutSource, placeSource } from './command-sources.ts';
+import { buildPluginCommandSources, deviceLayoutSource, placeSource, settingsSource } from './command-sources.ts';
 import { useScreenHref } from '../router/screen-href.ts';
 import { daemonTitle } from '../daemons/daemon-list.ts';
 import type { NavEntry } from '../layout/engine.ts';
-import { daemonHomeHref, DEVICE_SETTINGS_HREF, HOME_HREF, pairAgainHref, type Route } from '../router/routes.ts';
+import {
+  daemonHomeHref,
+  DEVICE_SETTINGS_HREF,
+  HOME_HREF,
+  needsSubject,
+  pairAgainHref,
+  type Route,
+} from '../router/routes.ts';
 import { useRouter } from '../router/router.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import {
@@ -53,7 +60,7 @@ function Nav({ daemon }: { readonly daemon: string | undefined }) {
   const href = (entry: NavEntry): string | undefined => {
     if (entry.kind !== 'screen') return undefined;
     const { screen } = entry;
-    if (screen.path.includes(':')) return undefined; // a screen that needs a subject is not a nav destination
+    if (needsSubject(screen.path)) return undefined; // a screen that needs a subject is not a nav destination
     if (screen.path.startsWith('/')) return routes.href(screen, {});
     return daemon === undefined ? undefined : routes.href(screen, {}, daemon);
   };
@@ -172,12 +179,20 @@ function Main({ route }: { readonly route: Route }) {
   }
 }
 
-function Side({ daemon }: { readonly daemon: string | undefined }) {
+function Side({ daemon, route }: { readonly daemon: string | undefined; readonly route: Route }) {
   const { plan, viewport } = useShell();
   const { show, holds } = plan.side;
   if (show === 'never' || (show === 'wide-only' && viewport === 'phone') || holds.kind === 'none') return null;
   if (daemon === undefined) return null;
-  if (holds.kind === 'screen' && holds.screen.path.includes(':')) return null; // needs a subject the route lacks
+  if (holds.kind === 'screen' && needsSubject(holds.screen.path)) return null; // needs a subject the route lacks
+  // The page IS the screen the column holds (the ferret list on /ferrets): draw it once, in the page, not again beside it.
+  if (
+    holds.kind === 'screen' &&
+    route.kind === 'screen' &&
+    route.screen.plugin === holds.screen.plugin &&
+    route.screen.id === holds.screen.id
+  )
+    return null;
   return (
     <aside className="fy-side" data-slot="side">
       {holds.kind === 'screen' ? <ScreenView daemon={daemon} screen={holds.screen} params={{}} /> : null}
@@ -209,16 +224,27 @@ function ShellCommandBar(props: {
 }) {
   const { runtime, views, routes, owner, layouts } = useShell();
   const router = useRouter();
+  const { route } = router;
+  // The ferret whose page this is, for the entries that are about "this ferret" (Board's, S-0449).
+  const ferret = route.kind === 'screen' ? route.params.ferret : undefined;
   // `useScreenHref` answers a fresh function every render with the same answers; the sources read the latest one.
   const screenHrefOf = useScreenHref();
   const screenHrefRef = useRef(screenHrefOf);
   screenHrefRef.current = screenHrefOf;
+  // The bar follows which plugins the machine allows: opened right after a page loads, it is open BEFORE the machine has
+  // said which plugins are on, and sources built then would have no plugin to ask and never be built again.
+  useRuntimeVersion(runtime);
+  const allowed =
+    props.daemon === undefined
+      ? ''
+      : runtime.surfaces.map(entry => runtime.standing(props.daemon as string, entry.id).state).join(',');
   const daemons = runtime.daemons.snapshot().daemons;
   // A plugin source that was waiting on its daemon asks for a new listing by bumping this.
   const [answers, setAnswers] = useState(0);
   const changed = useCallback(() => setAnswers(current => current + 1), []);
   const daemon = props.daemon;
-  // Built once per daemon (a source holds what its daemon last answered), and only while the bar is open.
+  // Built once per daemon and plugin set (a source holds what its daemon last answered), and only while the bar is open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `allowed` rebuilds the sources when a plugin becomes allowed.
   const pluginSources = useMemo(
     () =>
       daemon === undefined || !props.open
@@ -230,8 +256,10 @@ function ShellCommandBar(props: {
             navigate: href => router.navigate(href),
             screenHref: (...address) => screenHrefRef.current(...address),
             changed,
+            ferret,
+            appHook: name => runtime.appHook(daemon, name),
           }),
-    [daemon, props.open, runtime, router, changed],
+    [daemon, props.open, runtime, router, changed, ferret, allowed],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: `answers` re-lists when a plugin source's answer arrives.
   const sources = useMemo(
@@ -243,10 +271,11 @@ function ShellCommandBar(props: {
         routes,
         navigate: href => router.navigate(href),
       }),
+      settingsSource({ daemon, surfaces: runtime.surfaces, navigate: href => router.navigate(href) }),
       deviceLayoutSource(owner ?? DEFAULT_LAYOUT, layouts),
       ...pluginSources,
     ],
-    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers],
+    [daemons, daemon, views, routes, router, owner, layouts, pluginSources, answers, runtime],
   );
   return <CommandBar open={props.open} focusSignal={props.focusSignal} onClose={props.onClose} sources={sources} />;
 }
@@ -307,13 +336,24 @@ export function Frame() {
         <Nav daemon={daemon ?? runtime.daemons.snapshot().selected ?? undefined} />
         <div className="fy-body">
           <TopBar daemon={daemon} onSearch={openBar} />
+          {/* THE STATUS STRIP: where the views mounted at the frame root draw what they draw IN FLOW — a line a watcher
+      says ("Couldn't reach it through the relay…"), a banner. They sit here, a row under the top bar and above the
+      columns, never as a child of the frame's own row: a line placed beside the body is a COLUMN of the frame and takes its
+      width from the page (the agenda's item column fell from v4's ~680px to 350px at 1280). An overlay a view draws is
+      fixed or portalled and does not care where it is mounted; an empty strip takes no room. */}
+          <div className="fy-status" data-slot="status">
+            {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
+            <DeviceViews />
+            {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
+            <BackgroundViews />
+          </div>
           <div className="fy-columns">
             <main className="fy-main" data-slot="main">
               <PageScrollRegion entryKey={entryKey} memory={scroll}>
                 {whole === undefined ? <Main route={route} /> : <WholeLine daemon={daemon} line={whole} />}
               </PageScrollRegion>
             </main>
-            {whole === undefined ? <Side daemon={daemon} /> : null}
+            {whole === undefined ? <Side daemon={daemon} route={route} /> : null}
           </div>
         </div>
         <ShellCommandBar
@@ -325,10 +365,6 @@ export function Frame() {
         {/* One passkey prompt for the whole app (Access's): any daemon call refused for want of an unlock or a step-up
       raises it, and only the machine on screen may raise a background one (G95, G105). */}
         <PasskeyMount onScreen={runtime.passkeyOnScreen.chosen() ?? daemon ?? runtime.daemons.snapshot().selected} />
-        {/* Every plugin's device views, once each (S3): the one taker of its keyed fragments, over every machine. */}
-        <DeviceViews />
-        {/* Every plugin's background views, once per paired daemon where it may run (S5): watchers and overlays. */}
-        <BackgroundViews />
       </div>
     </FrameRootContext.Provider>
   );

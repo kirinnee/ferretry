@@ -22,7 +22,6 @@
  */
 
 import { useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferretry/app';
-import type { FerretView } from '@ferretry/core-ferrets/contract';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -49,6 +48,8 @@ import { useSendView } from '../queue/use-send-view.ts';
 import { pendingQuestionOf, type PendingQuestion } from '../questions/question-form.tsx';
 import { logSearchOf, type ChatSearchPort } from '../search/chat-search.tsx';
 import { chatReadApi, readQuestion } from './chat-reads.ts';
+import { ChatTurnContext } from './chat-turn-context.ts';
+import { type ChatSession, unreadChatSession } from './chat-session.ts';
 import {
   type ChatRefreshControl,
   type ChatRefreshEnvironment,
@@ -61,7 +62,7 @@ import {
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { placeLedgerRows } from './ledger-placement.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse } from './send-ledger.ts';
-import { SessionChatPage } from './session-chat-page.tsx';
+import { type AskReply, SessionChatPage } from './session-chat-page.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import type { TranscriptEntry } from './transcript-entries.ts';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
@@ -95,7 +96,11 @@ const CHAT_STATE_MESSAGE: Readonly<Record<ChatState, string>> = {
   failed: 'This ferret’s conversation could not be opened.',
 };
 
-export function ChatScreen({ params }: ScreenProps): ReactNode {
+export function ChatScreen({
+  params,
+  embedded = false,
+  ask,
+}: ScreenProps & { readonly embedded?: boolean; readonly ask?: AskReply | undefined }): ReactNode {
   const client = useConversationClient();
   const daemonId = useConversationDaemon();
   const ferretId = params['ferret'];
@@ -109,7 +114,14 @@ export function ChatScreen({ params }: ScreenProps): ReactNode {
     // Every composer below saves a send on this device first and hands it to the daemon second.
     <ConversationOutbox>
       {/* Keyed on the daemon and the ferret: another ferret is another chat, with nothing carried over. */}
-      <ChatRoute client={client} daemonId={daemonId} ferretId={ferretId} key={`${daemonId}\u0000${ferretId}`} />
+      <ChatRoute
+        client={client}
+        daemonId={daemonId}
+        embedded={embedded}
+        ferretId={ferretId}
+        key={`${daemonId}\u0000${ferretId}`}
+        {...(ask === undefined ? {} : { ask })}
+      />
     </ConversationOutbox>
   );
 }
@@ -118,16 +130,20 @@ interface ChatRouteProps {
   readonly client: PluginClient;
   readonly daemonId: string;
   readonly ferretId: string;
+  /** Drawn under an agenda item: the conversation alone (`SessionChatPageProps.embedded`). */
+  readonly embedded: boolean;
+  /** Drawn under an agenda item's ask: the composer is that item's reply box. */
+  readonly ask?: AskReply;
 }
 
-function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
+function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps) {
   const router = useOptionalRouter();
   const navigate = router?.navigate;
   const { controls } = useDaemonControls(daemonId);
   const scope = useMemo(() => daemonFerretScope(daemonConnection(daemonId), ferretId), [daemonId, ferretId]);
   // Per ferret, not per history entry: coming back to a conversation by any route finds the reading position.
   const readingPosition = useChatScrollSlot(daemonFerretKey(scope));
-  const [view, setView] = useState<FerretView | null>(null);
+  const [view, setView] = useState<ChatSession | null>(null);
   const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
   /** The ferret's send ledger — where each message the reader (or a teammate) sent actually went. */
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
@@ -139,6 +155,10 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   /** What the top of the chat offers: older messages to load, the first message, or nothing to page. */
   const [historyStatus, setHistoryStatus] = useState<TranscriptHistoryStatus>('unavailable');
   const refreshControl = useRef<ChatRefreshControl | null>(null);
+  /** Bumped to read the question again (a wake-up, or a refresh after a failed read). */
+  const [questionTick, setQuestionTick] = useState(0);
+  /** Whether the last question read FAILED: the summary's status cannot say it changed, so a refresh retries it. */
+  const questionFailed = useRef(false);
   const history = useMemo<TranscriptHistoryControl>(
     () => ({ status: historyStatus, loadOlder: () => void refreshControl.current?.loadOlder() }),
     [historyStatus],
@@ -155,7 +175,11 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
       onSends: rows => ledger.onSends(parseLedgerSendsResponse(rows)),
       onSendsFailed: ledger.onSendsFailed,
       onQueue: setQueue,
-      onSession: setView,
+      onSession: session => {
+        setView(session);
+        // Working and idle are one status here, so a failed question read is retried on the next read of the ferret.
+        if (questionFailed.current) setQuestionTick(tick => tick + 1);
+      },
       onError: setError,
       onTranscriptUnbound: setTranscriptUnbound,
     });
@@ -170,7 +194,6 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
    * THE WAKE-UPS. A send landing, the queue moving, a question asked or answered, the ferret changing state: each
    * nudges the poll at once rather than waiting for its next tick. None is relied on — the reads are the truth.
    */
-  const [questionTick, setQuestionTick] = useState(0);
   useEffect(() => {
     const mine = (payload: { readonly ferret: string }): boolean => payload.ferret === ferretId;
     const nudge = (payload: { readonly ferret: string }): void => {
@@ -195,8 +218,10 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
 
   /**
    * THE QUESTION, read from Conversation's own route — proved against the transcript — whenever the ferret's status
-   * moves or a question wake-up arrives. A failed read leaves the last answer: the status alone still says a
-   * question is waiting, and the page says it cannot be answered safely rather than inventing one.
+   * moves or a question wake-up arrives, and again on the next refresh of the ferret after a read that failed (the
+   * summary's status does not move between working and idle, so it cannot be the only trigger). A failed read leaves the
+   * last answer: the status alone still says a question is waiting, and the page says it cannot be answered safely
+   * rather than inventing one.
    */
   const status = view?.state.status;
   const [question, setQuestion] = useState<PendingQuestion | null | undefined>(undefined);
@@ -206,9 +231,12 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
     let current = true;
     readQuestion(client, ferretId)
       .then(asked => {
+        questionFailed.current = false;
         if (current) setQuestion(asked === null ? null : pendingQuestionOf(asked));
       })
-      .catch(() => undefined);
+      .catch(() => {
+        if (current) questionFailed.current = true;
+      });
     return () => {
       current = false;
     };
@@ -288,12 +316,24 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
   }, [scope]);
 
   const refresh = useCallback(() => {
+    if (questionFailed.current) setQuestionTick(tick => tick + 1);
     refreshControl.current?.acted();
     void refreshControl.current?.refresh(true);
   }, []);
 
   const chatState: ChatState = view !== null ? 'connected' : error !== null ? 'failed' : 'opening';
   const issue = error === null ? null : `Conversation issue: ${error}`;
+  /**
+   * DEGRADE, NEVER BLANK. A ferret whose read failed — refused, unreachable, or answered in a shape this build cannot
+   * read — still gets its page from the id alone: the toolbar and side panels (theirs to read), the transcript (read on
+   * its own route) and the composer, with the issue line naming what failed. Only the very first read is waited on.
+   */
+  const unread = useMemo(() => unreadChatSession(ferretId), [ferretId]);
+  const drawn = view ?? (error === null ? null : unread);
+  // What this chat last read of the ferret's turn, for the toolbar's turn word (`toolbar/turn-panel.tsx`): one reading,
+  // the refresh's own, so the word follows every turn change the conversation does and never draws an older read.
+  const drawnTurn = drawn?.state.turnState;
+  const chatTurn = useMemo(() => ({ ferret: ferretId, turnState: drawnTurn }), [ferretId, drawnTurn]);
 
   return (
     <div className="h-full min-h-0 w-full" data-daemon={daemonId} data-session={ferretId}>
@@ -304,32 +344,37 @@ function ChatRoute({ client, daemonId, ferretId }: ChatRouteProps) {
       <p className="sr-only" data-session-error="" role="alert">
         {issue ?? ''}
       </p>
-      {view !== null ? (
+      {drawn !== null ? (
         <QueueActionsContext.Provider value={queueActionsValue}>
-          <SessionChatPage
-            chatWidth={controls.chatWidth}
-            client={client}
-            conversationSearch={conversationSearch}
-            daemonId={daemonId}
-            entries={placedEntries}
-            history={history}
-            onCancel={cancelSend}
-            onDismiss={dismissSend}
-            onExpand={toggleSend}
-            {...(navigate === undefined ? {} : { onNavigate: (to: string) => navigate(to) })}
-            onRefresh={refresh}
-            onRetry={retrySend}
-            onSubmit={submitSend}
-            {...(question === undefined ? {} : { question })}
-            {...(readingPosition === undefined ? {} : { readingPosition })}
-            refreshError={issue}
-            session={view}
-            transcriptUnbound={transcriptUnbound}
-          />
+          <ChatTurnContext.Provider value={chatTurn}>
+            <SessionChatPage
+              chatWidth={controls.chatWidth}
+              client={client}
+              conversationSearch={conversationSearch}
+              daemonId={daemonId}
+              embedded={embedded}
+              {...(ask === undefined ? {} : { ask })}
+              entries={placedEntries}
+              history={history}
+              onCancel={cancelSend}
+              onDismiss={dismissSend}
+              onExpand={toggleSend}
+              {...(navigate === undefined ? {} : { onNavigate: (to: string) => navigate(to) })}
+              onRefresh={refresh}
+              onRetry={retrySend}
+              onSubmit={submitSend}
+              {...(question === undefined ? {} : { question })}
+              {...(readingPosition === undefined ? {} : { readingPosition })}
+              refreshError={issue}
+              sends={sends}
+              session={drawn}
+              transcriptUnbound={transcriptUnbound}
+            />
+          </ChatTurnContext.Provider>
         </QueueActionsContext.Provider>
       ) : (
         <p className="fy-shell-line fy-shell-line--info" data-session-opening="">
-          {error === null ? 'Opening…' : issue}
+          Opening…
         </p>
       )}
     </div>

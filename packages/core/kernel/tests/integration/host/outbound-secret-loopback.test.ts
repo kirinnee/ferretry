@@ -59,9 +59,12 @@ beforeAll(() => {
             new ReadableStream({
               start(controller) {
                 controller.enqueue(encoder.encode('{"half":'));
-                setTimeout(() => controller.error(new Error('the provider hung up')), 20);
+                setTimeout(() => controller.close(), 20);
               },
             }),
+            // The body ends well short of what the header promised: the peer hung up half way. `controller.error()` says
+            // the same to the client but bun reports the server-side error as an unhandled one and fails the group.
+            { headers: { 'content-length': '64' } },
           );
         case '/redirects':
           return new Response(null, { status: 302, headers: { location: '/ok' } });

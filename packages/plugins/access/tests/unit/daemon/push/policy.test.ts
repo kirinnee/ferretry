@@ -36,11 +36,11 @@ describe('pushDeviceView', () => {
 
 describe('enrolmentConfirmation', () => {
   it('should name the device it confirms and open the application root', () => {
-    const payload = enrolmentConfirmation('Pixel 8');
+    const payload = enrolmentConfirmation('Pixel 8', 'pu-1');
 
     should(payload).eql({
       version: 1,
-      eventKey: 'push-enrolled',
+      eventKey: 'push-enrolled:pu-1',
       title: 'Notifications are on',
       body: 'Pixel 8 will be told when this machine needs you.',
       tag: 'push-enrolment',
@@ -55,20 +55,27 @@ describe('enrolmentConfirmation', () => {
 describe('buzzPayload (K-push: a tag is never a reason to lose a buzz)', () => {
   const words = { title: 'Deploy approval', body: 'Ship the build?', url: '/ferrets/f1/chat?ask=A3' };
 
-  it('should send a tag the worker reads, and name the event by it', () => {
-    const payload = buzzPayload({ ...words, tag: 'agenda-mw89lrce-92c0fa14:A3' });
+  it('should send a tag the worker reads, and name the event only by the key its sender gave', () => {
+    const payload = buzzPayload({ ...words, tag: 'agenda-mw89lrce-92c0fa14:A3', eventKey: 'ask:f1:A3' });
 
     should(payload).eql({
       version: 1,
-      eventKey: 'agenda-mw89lrce-92c0fa14:A3',
+      eventKey: 'ask:f1:A3',
       ...words,
       tag: 'agenda-mw89lrce-92c0fa14:A3',
       count: 1,
     });
     should(readPushMessage(payload)).eql({
       type: 'show',
-      show: { ...words, tag: 'agenda-mw89lrce-92c0fa14:A3', count: 1 },
+      show: { ...words, tag: 'agenda-mw89lrce-92c0fa14:A3', count: 1, eventKey: 'ask:f1:A3' },
     });
+  });
+
+  it('should never copy the tag into the event key: a buzz that names no event sends none', () => {
+    const payload = buzzPayload({ ...words, tag: 'agenda-f1' });
+
+    should(Object.keys(payload)).not.containEql('eventKey');
+    should(readPushMessage(payload)).eql({ type: 'show', show: { ...words, tag: 'agenda-f1', count: 1 } });
   });
 
   it('should send a tag the worker could not read UNTAGGED, never refuse it', () => {
@@ -77,7 +84,7 @@ describe('buzzPayload (K-push: a tag is never a reason to lose a buzz)', () => {
       const payload = buzzPayload({ ...words, tag });
 
       should(Object.keys(payload)).not.containEql('tag');
-      should(payload.eventKey).equal(tag);
+      should(Object.keys(payload)).not.containEql('eventKey');
       should(readPushMessage(payload)).eql({ type: 'show', show: { ...words, count: 1 } });
     }
   });

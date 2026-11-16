@@ -20,6 +20,8 @@ import {
   type InputTargetAdapter,
   type InputTargetFacts,
   type InputTargetField,
+  PHONE_APPROVAL_UNAVAILABLE,
+  PhoneApprovalAskSchema,
   type TypeOptions,
   targetRef,
 } from '@ferretry/core-vault/contract';
@@ -33,7 +35,7 @@ import {
   jsonResponse,
 } from '@ferretry/kernel/contract';
 import { type DaemonContext, implementDaemon, type ToolResult } from '@ferretry/kernel/manifest';
-import { instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { err, instantFromEpochMs, milliseconds } from '@ferretry/std';
 import { z } from 'zod';
 import {
   SurfaceControlRequestSchema,
@@ -86,6 +88,8 @@ import { SurfaceControl } from './lib/agent-tools/control.ts';
 import {
   type AgentToolResult,
   INPUT_SINGLE_FIELD_ID,
+  isAgentToolError,
+  TOOL_REFUSAL_STATUS,
   type TerminalToolCall,
   TerminalToolService,
 } from './lib/agent-tools/service.ts';
@@ -207,8 +211,14 @@ export function renderToolResult(result: AgentToolResult): string {
   return lines.join('\n');
 }
 
-/** `terminal_request_input`'s input: today's single-value terminal card (`push` approvals are not served yet). */
-const TerminalRequestInputSchema = z.strictObject({
+/** `terminal_request_input push:true` ("Approve on your phone"): the terminal and hints only; Accounts owns the approval. */
+const TerminalPushApprovalInputSchema = PhoneApprovalAskSchema.omit({ target: true }).extend({
+  push: z.literal(true),
+  name: z.string().min(1).max(80),
+});
+
+/** `terminal_request_input`'s card of one value: today's single-value terminal card. */
+const TerminalValueInputSchema = z.strictObject({
   name: z.string().min(1).max(80),
   prompt: z.string().trim().min(1).max(280),
   sensitivity: z.enum(['secret', 'private', 'code', 'plain']),
@@ -220,6 +230,9 @@ const TerminalRequestInputSchema = z.strictObject({
   secretHint: z.string().optional(),
   push: z.literal(false).optional(),
 });
+
+/** `terminal_request_input`: a push approval, or a card of one value. */
+const TerminalRequestInputSchema = z.union([TerminalPushApprovalInputSchema, TerminalValueInputSchema]);
 
 /** Each tool's call, parsed by the schema the manifest declares for it. */
 function parseToolCall(tool: string, input: unknown): TerminalToolCall | string {
@@ -268,6 +281,10 @@ function parseToolCall(tool: string, input: unknown): TerminalToolCall | string 
       );
     case 'terminal_request_input':
       return parsed(TerminalRequestInputSchema, (value: z.infer<typeof TerminalRequestInputSchema>) => {
+        if (value.push === true) {
+          const { name, push: _approval, ...ask } = value;
+          return { tool: 'terminal.request_push', name, ask } as unknown as TerminalToolCall;
+        }
         const { name, label, push: _push, ...rest } = value;
         const raise = {
           ...rest,
@@ -451,6 +468,11 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       const vault = ctx.needs.vault;
       return await vault.raiseInput(ferret as FerretId, raise);
     },
+    // Absent when the Vault offers none (it hands the raise to the plugins it names): the tool then says so.
+    raisePhoneApproval: async (ferret, ask) => {
+      const raise = ctx.needs.vault.raisePhoneApproval;
+      return raise === undefined ? err(PHONE_APPROVAL_UNAVAILABLE) : await raise(ferret as FerretId, ask);
+    },
   });
 
   const callerOf = async (call: CallContext): Promise<AgentToolCaller | undefined> => {
@@ -487,7 +509,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
         const result = await tools.call(caller, parsed);
         return { text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) };
       } catch (error) {
-        if (error instanceof Error && error.name === 'AgentToolError') return { text: error.message, isError: true };
+        if (isAgentToolError(error)) return { text: error.message, isError: true };
         throw error;
       }
     };
@@ -576,6 +598,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       act: kernel.act.bind(kernel),
       redaction: kernel.redaction,
       digest: text => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16),
+      // A big screen is masked in slices: the loop gets the thread back between the masker's readings.
+      yieldToLoop: async () => await kernel.clock.sleep(milliseconds(0)),
     },
   });
 
@@ -648,8 +672,15 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           ...(decision.outcome === 'attributed' ? { openedBy: decision.openedBy } : {}),
         };
         // The same answer a ferret's MCP call gets: the rendered text, and the report as `data` (`matched` included).
-        const result = await tools.call(caller, parsed);
-        return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        // A refusal (an unknown terminal, a tool only an agent may use) is answered in its own words with a status a
+        // client can branch on (v4's status for its code), as the MCP path answers it `isError`; it is never a bare 500.
+        try {
+          const result = await tools.call(caller, parsed);
+          return jsonResponse({ text: renderToolResult(result), data: JSON.parse(JSON.stringify(result)) });
+        } catch (error) {
+          if (isAgentToolError(error)) throw new ApiError(TOOL_REFUSAL_STATUS[error.code], error.message, error.code);
+          throw error;
+        }
       },
     },
     sockets: { 'GET /v1/ferrets/:ferretId/terminals/:terminalId/stream': terminalStreamAccept(subsystem) },

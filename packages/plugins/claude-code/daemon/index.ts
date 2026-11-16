@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { milliseconds } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
@@ -22,6 +23,7 @@ import { DialogAnswerService } from './lib/dialog/service.ts';
 import { PermissionAnswerService } from './lib/permission/service.ts';
 import { isConversationId } from './lib/harness/claude-path.ts';
 import { fastStartDecision } from './lib/harness/fast-mode.ts';
+import { claudeCodeDoctor } from './lib/harness/doctor.ts';
 import { claudeHooksSource, claudeSettingsSource } from './lib/profile-components.ts';
 import { ClaudeProjectApprovals } from './lib/project-approvals.ts';
 import { dialogRoute, permissionRoute, promptRoute, updateStartRoute, updateViewRoute } from './lib/routes.ts';
@@ -51,7 +53,7 @@ const discoveryOf = (view: HarnessCliView, checkedAt: Discovery['checkedAt']): D
  * (`agent-homes`, scoped to that ferret), so MCP holds no root over a harness home.
  */
 export default implementDaemon(manifest, {
-  build: ({ kernel, needs }) => {
+  build: ({ kernel, needs, uses }) => {
     const host = hostFacts(kernel.spawn);
     const location = locationSource(kernel.spawn, () => kernel.config.file(configFile), host);
     const inner = new HarnessUpdateService({
@@ -98,6 +100,7 @@ export default implementDaemon(manifest, {
     const dialog = new DialogAnswerService(pane, sleep);
 
     const harness = new ClaudeHarness({
+      selected: async runtime => await selectedComponents(uses.runtimes.current(), runtime),
       roots: kernel.roots,
       config: kernel.config,
       state: kernel.state,
@@ -125,6 +128,8 @@ export default implementDaemon(manifest, {
         'POST /v1/ferrets/:ferretId/permission': permissionRoute(permission),
         'POST /v1/ferrets/:ferretId/dialog': dialogRoute(dialog),
       },
+      // Which `claude` this host runs and by which rule (today's `claude` row), by the same location every start uses.
+      doctor: { 'claude-code-paths': claudeCodeDoctor(() => location.locate()) },
       provides: {
         claudeCode: {
           view: async () => {
@@ -143,14 +148,17 @@ export default implementDaemon(manifest, {
         'harnesses:claude-code': harness,
         // Runtimes' read of the `settings` and `hooks` components a profile names for Claude: this plugin's own items,
         // live, no cache.
-        'runtimes.components.settings.claude:components': claudeSettingsSource(() =>
-          kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        'runtimes.components.settings.claude:components': claudeSettingsSource(
+          () => kernel.config.collection(CLAUDE_CODE_SETTINGS as ConfigCollectionDef<SettingsItem>),
+          listener => kernel.config.watch(CLAUDE_CODE_SETTINGS, listener),
         ),
-        'runtimes.components.hooks.claude:components': claudeHooksSource(() =>
-          kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
+        'runtimes.components.hooks.claude:components': claudeHooksSource(
+          () => kernel.config.collection(CLAUDE_CODE_HOOKS as ConfigCollectionDef<HooksItem>),
+          listener => kernel.config.watch(CLAUDE_CODE_HOOKS, listener),
         ),
-        // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal).
-        'start.decide': fastStartDecision,
+        // A fast start on a model without fast mode is refused before anything is written (today's fyd start refusal);
+        // a start that names no model is judged on the model its runtime would launch with, read through Runtimes.
+        'start.decide': input => fastStartDecision(input, () => uses.runtimes.current()),
       },
     };
   },

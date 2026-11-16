@@ -215,6 +215,8 @@ export interface CatalogsFixtureOptions {
   readonly noMemberMode?: boolean;
   readonly config?: Readonly<Record<string, unknown>>;
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
+  /** The runtimes the MCP item provider names as install targets (with `mcp`); absent = none. */
+  readonly runtimes?: readonly { id: string; name: string; profile: string; harness: 'claude' | 'codex' }[];
   /** MCP servers the MCP item provider lists; absent = MCP is off. */
   readonly mcp?: McpSourceServer[];
   /** The sealed-documents port Catalogs is given; absent = Vault's fake. */
@@ -227,7 +229,10 @@ export interface CatalogsFixtureOptions {
  * The MCP plugin as Catalogs meets it: one `catalog.items:mcp` provider over servers the test edits. Reading the
  * inventory is all an item needs to be frozen; installing into a runtime or a project is refused here.
  */
-function mcpItems(servers: McpSourceServer[]) {
+function mcpItems(
+  servers: McpSourceServer[],
+  runtimes: readonly { id: string; name: string; profile: string; harness: 'claude' | 'codex' }[] = [],
+) {
   const refuse = async (): Promise<never> => {
     throw new Error('the test MCP provider installs nothing');
   };
@@ -237,7 +242,7 @@ function mcpItems(servers: McpSourceServer[]) {
     projectRoots: async () => [],
     project: { read: refuse, replace: refuse } as never,
     runtime: {
-      runtimes: async () => ({ runtimes: [] }),
+      runtimes: async () => ({ runtimes }),
       profiles: async () => ({ profiles: [] }),
       storedComponent: refuse,
       propose: refuse,
@@ -358,7 +363,10 @@ export async function catalogsFixture(options: CatalogsFixtureOptions = {}): Pro
     },
   };
   const host = await testHost({
-    plugins: [...(options.mcp === undefined ? [] : [mcpItems(options.mcp) as never]), composed as never],
+    plugins: [
+      ...(options.mcp === undefined ? [] : [mcpItems(options.mcp, options.runtimes) as never]),
+      composed as never,
+    ],
     fakes: { access, gate, vault, sealed: options.sealed ?? new FakeSealedDocuments() },
     uses: { connections },
     gate: admission,

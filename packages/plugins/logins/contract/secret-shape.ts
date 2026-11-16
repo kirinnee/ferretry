@@ -243,6 +243,30 @@ export function hasTokenShape(value: string): boolean {
   );
 }
 
+/**
+ * Runs a variable NAME may hold only if it is a key typed into the wrong box. Not {@link hasTokenShape}: that is a VALUE
+ * test, whose anchored prefixes (`npm_`, `hf_`, `ASIA`) and `_`-bearing bodies also read ordinary names (`npm_config_registry`,
+ * `ASIA_REGION`, `hf_home`). A name body here has NO underscore and a real length (a variable name is words joined by `_`),
+ * and an AWS id is a whole word; the formats with a `-`, a `.` or a space cannot be a POSIX name at all.
+ */
+const NAME_KEY_SHAPE = new RegExp(
+  [
+    '(?:gh[pousr]_|github_pat_|sk_live_|npm_|hf_)[A-Za-z0-9]{20,}',
+    '\\b(?:AKIA|ASIA)[A-Z0-9]{16}\\b',
+    '(?:sk-|glpat-|xox[abposr]-)[A-Za-z0-9_-]{8,}',
+    'AIza[A-Za-z0-9]{30,}',
+    'ya29\\.',
+    'eyJ[A-Za-z0-9_-]{8,}\\.',
+    '-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----',
+  ].join('|'),
+  'u',
+);
+
+/** Whether a variable NAME is a key typed into the name box (never judge a name by {@link hasTokenShape}). */
+export function nameLooksLikeKey(name: string): boolean {
+  return NAME_KEY_SHAPE.test(name);
+}
+
 // ── the stored rule ─────────────────────────────────────────────────────────────────────────────────────────────
 //
 // Under a CREDENTIAL NAME a value is accepted only when it is exactly one of a short list of shapes (an ALLOWLIST), so a

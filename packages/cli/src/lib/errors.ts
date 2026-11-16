@@ -24,6 +24,8 @@ export class DaemonRefusal extends ShellError {
     message: string,
     readonly status: number,
     readonly code?: string,
+    /** The answer's body, for a verb that reads the located problems a refusal carries (a `422 config_invalid`). Never printed. */
+    readonly body?: unknown,
   ) {
     super(message, EXIT.failure);
     this.name = 'DaemonRefusal';

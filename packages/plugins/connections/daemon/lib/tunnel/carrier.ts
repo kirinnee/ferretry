@@ -30,7 +30,7 @@
 import type { TunnelState } from '../../../contract/index.ts';
 import type { TunnelProvision, TunnelRelease } from '../../../contract/index.ts';
 import type { DaemonTunnelCarrierEntry } from './entry.ts';
-import { type CloudflaredLocatorPort, cloudflaredRemedy } from './connector.ts';
+import { type CloudflaredLocation, type CloudflaredLocatorPort, cloudflaredRemedy } from './connector.ts';
 import {
   type ProvisioningOutcome,
   provisionRetryDelayMs,
@@ -166,12 +166,24 @@ export class TunnelCarrier {
       this.#track(this.#releaseHeld());
       return;
     }
-    const location = this.deps.cloudflared.locate();
-    if (location.kind === 'absent') {
-      this.#unavailable(cloudflaredRemedy(location.reason));
+    const located = this.deps.cloudflared.locate();
+    // A finder that answers at once decides before this returns; the kernel's answers later, behind `idle`.
+    if (located instanceof Promise) {
+      this.#track(this.#bringUpWhenLocated(located));
       return;
     }
-    this.#track(this.#bringUp(location.path));
+    if (located.kind === 'absent') {
+      this.#unavailable(cloudflaredRemedy(located.reason));
+      return;
+    }
+    this.#track(this.#bringUp(located.path));
+  }
+
+  async #bringUpWhenLocated(located: Promise<CloudflaredLocation>): Promise<void> {
+    const location = await located;
+    if (this.#stopped) return;
+    if (location.kind === 'absent') this.#unavailable(cloudflaredRemedy(location.reason));
+    else await this.#bringUp(location.path);
   }
 
   /** Resolves once the work in flight right now has settled. */
@@ -386,7 +398,7 @@ export function describeTunnelPosture(input: {
   /** Whether the document names the entry; an implied-off one is the opt-in default, not a decision. */
   readonly explicit: boolean;
   readonly configFile: string;
-  readonly location: ReturnType<CloudflaredLocatorPort['locate']> | undefined;
+  readonly location: CloudflaredLocation | undefined;
   readonly availability: Awaited<ReturnType<TunnelServicePort['read']>> | undefined;
 }): string {
   const label = 'tunnel      ';

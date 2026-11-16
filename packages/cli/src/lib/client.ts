@@ -206,7 +206,7 @@ export async function sendChecked(
   });
   if (reply.status >= 400) {
     const refusal = refusalText(reply.status, reply.body);
-    throw new DaemonRefusal(refusal.message, reply.status, refusal.code);
+    throw new DaemonRefusal(refusal.message, reply.status, refusal.code, reply.body);
   }
   return reply.body;
 }

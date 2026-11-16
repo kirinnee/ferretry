@@ -1,3 +1,4 @@
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { FERRET_ROUTE, readRuntimeSessionView } from '../../../app/lib/runtime-switch.ts';
 import { type Call, scripted } from './support/client.ts';
@@ -12,7 +13,8 @@ describe('the ferret detail read', () => {
     expect(FERRET_ROUTE).toBe('GET /v1/ferrets/:ferretId');
     const calls: Call[] = [];
     const client = scripted(
-      { [FERRET_ROUTE]: { config: { id: 'f-1', harness: 'codex' }, state: { status: 'running' } } },
+      // The route serves a FerretSummary (not the old `{ config, state }` session document).
+      { [FERRET_ROUTE]: ferretSummary({ id: 'f-1', harness: 'codex' }) },
       calls,
     );
     await readRuntimeSessionView(client, 'f-1');

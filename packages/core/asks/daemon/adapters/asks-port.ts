@@ -10,6 +10,7 @@ import {
   type AskKind,
   AskOwnerActionSchema,
   AskOwnerActionError,
+  AskRefusedError,
   type AskRef,
   type AskSourceSpec,
   type AsksApi,
@@ -21,7 +22,8 @@ import {
 } from '../../contract/index.ts';
 import type { AgendaActor, AgendaService, RaiseAgendaRequest } from '../lib/agenda/index.ts';
 import { SerialQueue } from '../lib/agenda/serial-queue.ts';
-import { cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
+import { machineNoticeRef } from '../lib/agenda/service.ts';
+import { askedCardAsks, cardAskReference } from '../lib/protocol/agenda-card-asks.ts';
 import { askForKind } from '../lib/protocol/agenda-card.ts';
 import {
   MACHINE_AGENDA_ID,
@@ -75,11 +77,6 @@ class UnknownAskSourceError extends Error {
   }
 }
 
-/** Thrown when the engine refused a raise or a close: its own sentence. */
-class AskRefusedError extends Error {
-  override readonly name = 'AskRefusedError';
-}
-
 /** The board a draft is raised on: the ferret it is about, else the ferret raising it. */
 function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
   const ferret = draft.ferret ?? (draft.raisedBy.kind === 'ferret' ? draft.raisedBy.ferret : undefined);
@@ -92,6 +89,15 @@ function boardOf(draft: Pick<AskDraft, 'ferret' | 'raisedBy'>): string {
  * the daemon, so every port raise is the daemon's. Who it is for is the draft's `ferret`.
  */
 const PORT_ACTOR: AgendaActor = { kind: 'daemon', cause: 'system' };
+
+/**
+ * The reference an item carries on the board it landed on: a notice about a ferret that lands on the machine agenda is
+ * a row of its own per ferret (`machineNoticeRef`), so a lookup there names that reference, not the one the port was given.
+ */
+const refOnBoard = (landed: string, ferret: string, sourceRef: string): string =>
+  landed === MACHINE_AGENDA_ID && ferret !== MACHINE_AGENDA_ID
+    ? machineNoticeRef(ferret, sourceRef, PORT_ACTOR)
+    : sourceRef;
 
 const kindOf = (item: Pick<AgendaItem, 'kind'>): AskKind =>
   item.kind === undefined ? 'task' : item.kind === 'info' ? 'notice' : item.kind;
@@ -227,6 +233,25 @@ function summaryOf(
   };
 }
 
+/** The `card` source the Board registers: a gate's ask, `gate:<card>:<lane>:<entry>`. */
+const CARD_SOURCE = 'card' as SourceKey;
+
+/**
+ * The open asks a card's gates put on an item that is NOT itself the card's obligation: a ferret's own item or a card
+ * agenda carrying `cardAsks` (what a v4 agenda holds, and what this engine still reads, answers and rests). Each is
+ * an open ask of the `card` source named by its gate, on its carrier's own id, so the Board finds the ask a gate
+ * already has and raises no second one. Only the Board's own read (the `card` source) lists them; the carrier stays
+ * one ask of its own source everywhere else.
+ */
+const carriedCardAsks = (ferret: string, item: AgendaItem, sources: Parameters<typeof summaryOf>[3]): AskSummary[] =>
+  parseObligation(item.sourceRef)?.source === CARD_SOURCE
+    ? []
+    : askedCardAsks(item).map(ask => ({
+        ...summaryOf(ferret, item, 'open', sources),
+        source: CARD_SOURCE,
+        entry: cardAskReference(ask) as EntryId,
+      }));
+
 /** Which ferrets have a board; the engine's own list (`ferrets/*`). */
 export interface AskBoards {
   ferrets(): Promise<readonly string[]>;
@@ -239,7 +264,15 @@ export interface AskBoards {
 export function asksPort(
   agenda: Pick<
     AgendaService,
-    'list' | 'raise' | 'resolve' | 'dismiss' | 'snooze' | 'unsnooze' | 'raisedObligation' | 'raisedObligations'
+    | 'list'
+    | 'raise'
+    | 'resolve'
+    | 'dismiss'
+    | 'snooze'
+    | 'unsnooze'
+    | 'raisedObligation'
+    | 'raisedObligations'
+    | 'cardAsk'
   >,
   boards: AskBoards,
   sources: (key: SourceKey) => AskSourceSpec | 'unavailable',
@@ -298,15 +331,16 @@ export function asksPort(
       kind,
       ...(parsed.context === undefined ? {} : { context: parsed.context }),
       ...(ask === undefined ? {} : { ask }),
+      ...(parsed.fields === undefined ? {} : { fields: parsed.fields }),
       ...(notice ? { notice: true as const } : {}),
       ...(notice && parsed.blocking === true ? { ping: true as const } : {}),
       ...(!notice && parsed.blocking === true ? { blockingNow: true as const } : {}),
     };
     const mutation = await agenda.raise(ferret, request, PORT_ACTOR);
-    if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+    if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
     // The mutation says where the ask landed: a daemon raise about a sub-ferret goes to its lineage's home, not to `ferret`.
     const landed = mutation.snapshot.sessionId;
-    const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, sourceRef));
+    const id = mutation.item?.id ?? (await agenda.raisedObligation(landed, refOnBoard(landed, ferret, sourceRef)));
     if (id === undefined) throw new AskRefusedError('the board took the ask but named no item for it');
     const ref = { ferret: landed, id: id as AskId };
     held.set(sourceRef, ref);
@@ -351,6 +385,11 @@ export function asksPort(
       if (!mutation.ok) throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
       return mutation.snapshot;
     },
+    ownerDismiss: async (ref, note) => {
+      const mutation = await agenda.dismiss(ref.ferret, ref.id, { kind: 'human' }, note);
+      if (!mutation.ok && mutation.error.code !== 'not-found')
+        throw new AskOwnerActionError(mutation.error.code, mutation.error.message);
+    },
     ...(tell === undefined ? {} : { tell }),
     raise: async draft => await raises.run(() => raise(draft, false)),
     notify: async notice => await raises.run(() => raise({ ...notice, kind: 'notice' }, true)),
@@ -377,11 +416,13 @@ export function asksPort(
           },
           PORT_ACTOR,
         );
-        if (!mutation.ok) throw new AskRefusedError(mutation.error.message);
+        if (!mutation.ok) throw new AskRefusedError(mutation.error.message, mutation.error.code);
         // The mutation says where the notice landed: a daemon notice about a sub-ferret goes to its lineage's home, so
         // both the unchanged-item lookup and the returned ref name that board, not `ferret` (as `raise` does).
         const landed = mutation.snapshot.sessionId;
-        const id = mutation.item?.id ?? (await snapshot(landed))?.items.find(item => item.sourceRef === sourceRef)?.id;
+        const id =
+          mutation.item?.id ??
+          (await snapshot(landed))?.items.find(item => item.sourceRef === refOnBoard(landed, ferret, sourceRef))?.id;
         if (id === undefined) throw new AskRefusedError('the board took the notice but named no item for it');
         return { ferret: landed, id: id as AskId };
       }),
@@ -396,8 +437,19 @@ export function asksPort(
           (filter.entry === undefined || answer.entry === filter.entry) &&
           (since === undefined || answer.at > since),
       ),
-    close: async (ref: AskRef, reason: CloseReason) => {
+    close: async (ref: AskRef, reason: CloseReason, entry?: EntryId) => {
       const daemon: AgendaActor = { kind: 'daemon', cause: 'system' };
+      if (reason !== 'answered') {
+        // A carrier's card ask is withdrawn from the carrier: the item is the ferret's own and stays open.
+        const carrier = (await snapshot(ref.ferret))?.items.find(item => item.id === ref.id);
+        if (carrier !== undefined && carriedCardAsks(ref.ferret, carrier, sources).length > 0) {
+          for (const ask of askedCardAsks(carrier).filter(
+            carried => entry === undefined || cardAskReference(carried) === entry,
+          ))
+            await agenda.cardAsk(ref.ferret, ref.id, { kind: 'withdraw', reference: cardAskReference(ask) });
+          return;
+        }
+      }
       const note = `closed: ${reason}`;
       const mutation =
         reason === 'answered'
@@ -410,7 +462,11 @@ export function asksPort(
       const listed = await everyBoard(
         (ferret, board) =>
           state === 'open'
-            ? board.items.map(item => summaryOf(ferret, item, 'open', sources))
+            ? board.items.flatMap(item =>
+                filter.source === CARD_SOURCE
+                  ? [summaryOf(ferret, item, 'open', sources), ...carriedCardAsks(ferret, item, sources)]
+                  : [summaryOf(ferret, item, 'open', sources)],
+              )
             : board.resolved.map(item =>
                 summaryOf(
                   ferret,

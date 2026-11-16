@@ -129,7 +129,11 @@ export function SettingRow({
               slot empty, so every (i) and every control end in the same two columns down a card. */}
           {info ??
             (control === undefined ? null : (
-              <span aria-hidden="true" className="ml-auto min-h-[44px] w-[44px] shrink-0" />
+              <span
+                aria-hidden="true"
+                // A wide control wraps under the name on a phone and takes the whole row, so the empty slot is not kept there.
+                className={cn('ml-auto min-h-[44px] w-[44px] shrink-0', wide && 'max-md:hidden')}
+              />
             ))}
         </span>
       </div>
@@ -195,6 +199,8 @@ export interface SegmentedProps<T extends string> {
   readonly options: readonly SegmentedOption<T>[];
   readonly onChange: (next: T) => void;
   readonly disabled?: boolean;
+  /** Fill the width its parent gives (every option an equal share), so a stack of them lines up. */
+  readonly fill?: boolean;
 }
 
 /**
@@ -202,7 +208,14 @@ export interface SegmentedProps<T extends string> {
  * jump. `relative` on the group is load-bearing: the radios are `sr-only` (absolute), and without a
  * positioned group they escape the page's scroller and scroll the fixed `.kt-shell` when focused.
  */
-export function Segmented<T extends string>({ label, value, options, onChange, disabled = false }: SegmentedProps<T>) {
+export function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled = false,
+  fill = false,
+}: SegmentedProps<T>) {
   const group = useId();
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const keys = ['ArrowDown', 'ArrowRight', 'ArrowUp', 'ArrowLeft', 'Home', 'End'];
@@ -228,7 +241,10 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
       role="radiogroup"
       aria-label={label}
       onKeyDown={onKeyDown}
-      className="relative flex min-w-0 max-w-full gap-1 rounded-control border border-border bg-surface-2 p-1 max-md:w-full"
+      className={cn(
+        'relative flex min-w-0 max-w-full gap-1 rounded-control border border-border bg-surface-2 p-1 max-md:w-full',
+        fill && 'w-full',
+      )}
     >
       {options.map(option => {
         const checked = option.id === value;
@@ -242,6 +258,7 @@ export function Segmented<T extends string>({ label, value, options, onChange, d
               checked
                 ? 'border border-accent bg-accent-soft text-accent'
                 : 'border border-transparent text-muted hover:text-fg',
+              fill && 'flex-1',
               disabled && 'cursor-not-allowed opacity-60',
             )}
           >

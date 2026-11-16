@@ -104,17 +104,21 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'agentControl',
       'attach',
       'children',
+      'compactAt',
       'effectiveLimits',
       'get',
       'handle',
       'harness',
       'harnesses',
+      'lastSnapshot',
       'list',
       'managedWorktrees',
       'mayTouch',
       'move',
       'prompt',
+      'resolve',
       'resume',
+      'setCompactAt',
       'sitrep',
       'start',
       'stop',
@@ -125,4 +129,15 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'workFolder',
     ].sort(),
   );
+});
+
+test('resolve answers an id or a callsign (any case, with the composer’s colon) with the one ferret it names', async () => {
+  const f = additivesFixture();
+  const port = ferretsPort(f.service, 'conversation');
+  const name = f.registry.get(f.id)!.name;
+
+  expect(await port.resolve(f.id)).toEqual({ kind: 'ferret', id: f.id });
+  expect(await port.resolve(name)).toEqual({ kind: 'ferret', id: f.id });
+  expect(await port.resolve(`:${name.toUpperCase()}`)).toEqual({ kind: 'ferret', id: f.id });
+  expect(await port.resolve('nobody-has-this-name')).toEqual({ kind: 'unknown' });
 });

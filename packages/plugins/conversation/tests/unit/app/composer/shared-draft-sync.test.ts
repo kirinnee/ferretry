@@ -96,7 +96,7 @@ describe('applyLocalText', () => {
     const early = applyLocalText(initialSharedDraftState(''), 'typed before connecting', ids);
     expect(same.send).toEqual([]);
     expect(early).toEqual({
-      state: { text: 'typed before connecting', items: [], serverItems: [], resyncing: false },
+      state: { text: 'typed before connecting', items: [], serverItems: [], resyncing: false, typed: true },
       send: [],
     });
   });
@@ -127,6 +127,27 @@ describe('applyServerFrame', () => {
     expect(step.send).toEqual([
       { kind: 'edit', id: 'e1', edit: { generation: G, epoch: 0, base: 0, text: ['kept locally'] } },
     ]);
+  });
+
+  test('words typed here before the first snapshot are the draft when the daemon holds none — never a conflict, though the draft has been used before', () => {
+    // The first keystroke on a page that connects after the person starts: the ferret's draft is empty because its
+    // last words were SENT (epoch 2), and nobody else is typing. This is not a second device.
+    const ids = counter('e');
+    const typed = applyLocalText(initialSharedDraftState(''), 'h', ids).state;
+    const step = applyServerFrame(typed, snapshot('', 5, 2), ids);
+
+    expect(step.conflict).toBeUndefined();
+    expect(step.state.text).toBe('h');
+    expect(step.send).toEqual([{ kind: 'edit', id: 'e1', edit: { generation: G, epoch: 2, base: 5, text: ['h'] } }]);
+  });
+
+  test('words typed here before the first snapshot are still offered back when the daemon already holds other words', () => {
+    const ids = counter('e');
+    const typed = applyLocalText(initialSharedDraftState(''), 'h', ids).state;
+    const step = applyServerFrame(typed, snapshot('from the phone', 5, 2), ids);
+
+    expect(step.state.text).toBe('from the phone');
+    expect(step.conflict).toBe('h');
   });
 
   test("applies another device's edit past this device's unanswered typing, and reports it for the caret", () => {

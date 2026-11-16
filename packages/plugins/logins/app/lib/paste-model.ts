@@ -6,8 +6,8 @@
  * NO VALUE IS EVER PUT IN A SENTENCE. Detection reports variable NAMES and the host as the PRESET
  * declares it; this module words those. A pasted value only travels from the paste to the field it
  * fills — a plain value into its field, a secret's nowhere near a field: the form takes a
- * `${secret:NAME}` reference, never the key itself, so a pasted key is only ever named, and the
- * person is told to paste it into the secret store.
+ * `${secret:NAME}` reference, never the key itself. A pasted key is filed in the Vault by Continue
+ * ({@link pastedSecrets}, `lib/secrets-api.ts`) and is only ever NAMED after that.
  */
 
 import {
@@ -29,8 +29,8 @@ export interface Withheld {
 }
 
 /**
- * What a paste fills in: plain values by variable name, the secrets it carried by secret NAME only (the value is dropped
- * where it is read), and the plain variables whose value was kept out of a field.
+ * What a paste fills in: plain values by variable name, the secrets it carried by secret NAME only (their values were
+ * filed in the Vault by Continue and are not here), and the plain variables whose value was kept out of a field.
  */
 export interface Prefill {
   readonly values: Readonly<Record<string, string>>;
@@ -47,22 +47,34 @@ export interface Prefill {
  */
 export const prefillFrom = (preset: ProviderPresetView, pasted: Readonly<Record<string, string>>): Prefill => {
   const values: Record<string, string> = {};
-  const secrets: string[] = [];
   const withheld: Withheld[] = [];
   for (const variable of preset.variables) {
     const value = pasted[variable.name];
-    if (variable.kind === 'plain') {
-      if (value === undefined) continue;
-      const verdict = plainPaste(variable.name, value, variable.allowEmpty);
-      if (verdict.kind === 'take') values[variable.name] = verdict.value;
-      else if (verdict.reason !== 'allow-empty') withheld.push({ name: variable.name, reason: verdict.reason });
-      continue;
-    }
-    const secret = variable.secret ?? variable.name;
-    const given = value ?? pasted[secret];
-    if (given !== undefined && given !== '' && !secrets.includes(secret)) secrets.push(secret);
+    if (variable.kind !== 'plain' || value === undefined) continue;
+    const verdict = plainPaste(variable.name, value, variable.allowEmpty);
+    if (verdict.kind === 'take') values[variable.name] = verdict.value;
+    else if (verdict.reason !== 'allow-empty') withheld.push({ name: variable.name, reason: verdict.reason });
   }
-  return { values, secrets, withheld };
+  return { values, secrets: Object.keys(pastedSecrets(preset, pasted)), withheld };
+};
+
+/**
+ * The secrets a paste carried, by secret NAME, each with the value the person pasted — what Continue files in the Vault
+ * and nothing else reads. A secret is the pasted variable the preset makes it, or a pasted variable named like the
+ * secret itself (`ZAI_API_KEY` for the secret behind `ANTHROPIC_AUTH_TOKEN`); an empty one is not carried.
+ */
+export const pastedSecrets = (
+  preset: ProviderPresetView,
+  pasted: Readonly<Record<string, string>>,
+): Readonly<Record<string, string>> => {
+  const secrets: Record<string, string> = {};
+  for (const variable of preset.variables) {
+    if (variable.kind !== 'secret') continue;
+    const secret = variable.secret ?? variable.name;
+    const given = pasted[variable.name] ?? pasted[secret];
+    if (given !== undefined && given !== '' && !(secret in secrets)) secrets[secret] = given;
+  }
+  return secrets;
 };
 
 /** The detection table, from the presets that declare clues. */

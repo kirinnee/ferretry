@@ -429,16 +429,22 @@ describe('the rule is what v5 refuses', () => {
     expect((JSON.stringify(reports) + output).includes('AKIAFAKE')).toBe(false);
   });
 
-  test('n1 a key held under a variable named like a key gets a vault name and a report line without that name', async () => {
+  // The converter's secret gate (converter-secret-gate.test.ts) treats a mapping KEY spelled as a token as a credential, so
+  // a login whose variable is named like a key is refused whole (loud, nothing written, the v4 file untouched) instead of
+  // being carried with that name in the v5 file.
+  test('n1 a key held under a variable named like a key is refused whole: neither the name nor the key is printed, written or sealed', async () => {
     const variable = 'AKIAFAKEFAKEFAKE0123';
     await login('work', `  ${variable}: ${KEY}\n`);
     const { reports, output } = await run();
 
+    expect(reports.settings?.status).toBe('failed');
+    expect(reports.settings?.note).toContain('env.<key>');
     expect(reports['login-keys']?.status).toBe('converted');
-    expect((await openedByTheVault(f.to)).get('LOGIN_WORK_KEY') === KEY).toBe(true);
-    expect(JSON.stringify(reports['login-keys']?.kept)).toContain('LOGIN_WORK_KEY (login work, variable <key>)');
+    expect(reports['login-keys']?.note).toContain('no login holds a plain key');
+    expect((await openedByTheVault(f.to)).size).toBe(0);
+    await expect(stat(join(f.to, 'config', 'logins', 'work.yaml'))).rejects.toThrow();
     expect((JSON.stringify(reports) + output).includes('AKIAFAKE')).toBe(false);
-    expect((await readFile(join(f.to, 'config', 'logins', 'work.yaml'), 'utf8')).includes('AKIAFAKE')).toBe(true);
+    expect((JSON.stringify(reports) + output).includes(KEY)).toBe(false);
   });
 
   test('the isPlainLoginKey rule says yes to every refused value of any length and no to what v5 accepts', () => {

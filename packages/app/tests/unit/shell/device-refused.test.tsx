@@ -13,6 +13,7 @@ import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ScrollMemory } from '../../../src/scroll/scroll-memory.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { arriveAtList } from '../../support/arrive-at-list.ts';
 import { interact, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport } from '../client/fixtures.ts';
 
@@ -100,7 +101,7 @@ describe('C1 a machine that answered 4403', () => {
   });
 
   test('a machine that is fine has no such button', async () => {
-    go('/app/');
+    arriveAtList('/app/');
     const rig = setup();
     const view = await render(rig);
     await settle();

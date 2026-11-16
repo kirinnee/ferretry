@@ -333,6 +333,23 @@ describe('SecureCopyService limits', () => {
   });
 });
 
+describe('SecureCopyService generations (secure-clip-1 fix1, P2-3)', () => {
+  it('should open a copy only for the capture a card was raised for, even when the name is taken again in the same instant', async () => {
+    const { service } = world();
+    const first = (await service.capture('s1', command())).copy;
+    should(service.open('s1', 'token', first.capturedAt)).equal(TOKEN);
+    service.discard('s1', 'token');
+
+    // The clock has not moved: a capture under the same name must still be a different generation.
+    const second = (await service.capture('s1', command())).copy;
+
+    should(second.capturedAt).not.equal(first.capturedAt);
+    should(service.open('s1', 'token', first.capturedAt)).equal(undefined);
+    should(service.open('s1', 'token', second.capturedAt)).equal(TOKEN);
+    should(service.open('s1', 'token')).equal(TOKEN);
+  });
+});
+
 describe('SecureCopyService lifetime', () => {
   it('should let go of the value on discard, keep it listed and masked for the after-mask window, then forget it', async () => {
     const { service, masking, clock } = world();
@@ -544,5 +561,55 @@ describe('SecureCopyService answering for a live copy', () => {
     should(service.describe('s1', 'short')).be.undefined();
     should(service.open('s1', 'short')).be.undefined();
     should(service.open('s9', 'token')).be.undefined();
+  });
+});
+
+describe('SecureCopyService protecting a paste it cannot protect', () => {
+  /** Room is there when the paste is raised, then gone by the write: the check passes and the hold is refused. */
+  class LosesRoom extends EphemeralValues {
+    override holdScrollback(): boolean {
+      return false;
+    }
+  }
+
+  async function captured(masking: EphemeralValues = new EphemeralValues(new Clock())) {
+    const clock = new Clock();
+    const service = new SecureCopyService({
+      clock,
+      runner: new FakeRunner(),
+      folders: { folderOf: async () => '/work/s1' },
+      exposure: { transcriptHolds: async () => 'clean' },
+      masking,
+      redact: async text => text,
+    });
+    await service.capture('s1', command());
+    return { service, masking };
+  }
+
+  it('should refuse a terminal paste, typing nothing, when the scrollback mask cannot be kept at the write', async () => {
+    const { service } = await captured(new LosesRoom(new Clock()));
+
+    const error = await refusal(
+      Promise.resolve().then(() => service.protectPaste('s1', 'token', { kind: 'terminal' }, { origins: [] })),
+    );
+
+    should(error.code).equal('unavailable');
+    should(error.message).equal(
+      'Ferretry could not keep this value masked in the terminal history, so nothing was typed.',
+    );
+    should(error.message).not.containEql(TOKEN);
+  });
+
+  it('should refuse a page paste, typing nothing, when this daemon has no guard for the pages a copy was pasted on', async () => {
+    const { service } = await captured();
+
+    const error = await refusal(
+      Promise.resolve().then(() =>
+        service.protectPaste('s1', 'token', { kind: 'page' }, { origins: ['https://form.example.test'] }),
+      ),
+    );
+
+    should(error.code).equal('unavailable');
+    should(error.message).equal('Ferretry could not guard the page this value goes to, so nothing was typed.');
   });
 });

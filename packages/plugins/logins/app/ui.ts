@@ -7,5 +7,6 @@ export {
   type ClipboardWriter,
   browserClipboardWriter,
   cn,
+  changeRefusalExplanation,
   useChangeAuthority,
 } from '@ferretry/app/ui';

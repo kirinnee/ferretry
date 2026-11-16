@@ -166,6 +166,12 @@ const foldedWhy = (folded: boolean): string =>
 const PROSE_CARRIED_ALONE =
   'routing prose carried alone: v4 would have prefixed the default prompt, this converter reads no catalogs';
 
+/** The default routing prompt v4 put in front of prose alone: v4 rendered it from its model catalogs, so it is not in any file. */
+const DEFAULT_HEAD_NOT_CARRIED: NotCarried = {
+  what: 'the default routing prompt v4 rendered from its model catalogs in front of your own routing words (the tier lines for planning, review, everyday work and chores)',
+  why: 'owner ruling !A516: left behind. It was never a file in the v4 home (v4 rendered it at boot from its model catalogs) and this converter reads no catalogs, so only your own routing words are carried',
+};
+
 const KEY_FILE = { useCases: V4_MODELS_GUIDE_YAML, routing: V4_MODELS_GUIDE_YAML, routingPreferences: V4_PACK_YAML };
 
 /**
@@ -197,7 +203,10 @@ function renderOldGuide(
   plan.notes.push(
     `routing prompt: rendered from ${rendered.used.map(key => `${KEY_FILE[key]} ${key}`).join(', ')} into one prompt exactly as v4 does once at boot${rendered.cut ? ' (cut to fit the prompt limit, use cases kept whole)' : ''}`,
   );
-  if (rendered.defaultHead) plan.notes.push(PROSE_CARRIED_ALONE);
+  if (rendered.defaultHead) {
+    plan.notes.push(PROSE_CARRIED_ALONE);
+    plan.dropped.push(DEFAULT_HEAD_NOT_CARRIED);
+  }
   count(plan, 'routing prompt rendered from the old guide');
   return rendered;
 }
@@ -283,7 +292,13 @@ async function planConfig(
       if (comment.length > 0) key.commentBefore = comment.join('\n');
       routing.commentBefore = null;
       map.items.push(new Pair(key, routing));
-      count(plan, 'routing prompt (from models-guide.yaml)', pairOf(routing, 'prompt') === undefined ? 0 : 1);
+      count(
+        plan,
+        rendered?.defaultHead === true
+          ? 'your own routing words only (the default routing prompt v4 rendered in front of them is NOT carried)'
+          : 'routing prompt (from models-guide.yaml)',
+        pairOf(routing, 'prompt') === undefined ? 0 : 1,
+      );
     }
   }
   if (map.items.length === 0) return false;

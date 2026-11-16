@@ -1,7 +1,19 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+
 /**
- * The Vite plugin this app half's build needs: Vosk's Emscripten glue made eval-free. A plugin's `build.ts` is not
- * a thing 5.0 has yet, so the app shell's single Vite config adds {@link voskEvalFreeGlue} to its worker plugins.
+ * What this app half's build needs from the app shell's Vite config: Vosk's Emscripten glue made eval-free, and the
+ * resolutions its speech workers import by name. A plugin's `build.ts` is not a thing 5.0 has yet, so the shell's single
+ * Vite config spreads {@link voiceBuild} into its own `worker` and `resolve.alias`.
  */
+
+/**
+ * `@sherpaw/asr`'s own files the sherpa worker needs and its exports map does not name: the Emscripten loader, which
+ * takes the WebAssembly binary as bytes, and the binary itself, emitted under `/assets/` and fetched only by an Install
+ * (`lib/stt/sherpa-models.ts`). Both are files of the exact version `package.json` pins; a version bump that renames
+ * the loader fails this build. Resolved from THIS package, which owns the dependency.
+ */
+const SHERPA_DIST = dirname(createRequire(import.meta.url).resolve('@sherpaw/asr'));
 
 /**
  * VOSK'S JAVASCRIPT GLUE, MADE EVAL-FREE AT BUILD TIME — the worker transform behind the Vosk speech
@@ -117,4 +129,26 @@ export const voskEvalFreeGlue = {
   transform(code: string, id: string): string | undefined {
     return VOSK_GLUE_MODULE.test(id) ? evalFreeVoskGlue(code) : undefined;
   },
+};
+
+/**
+ * WHAT THE SHELL'S VITE CONFIG TAKES FROM VOICE (the part of today's PWA `vite.config.ts` that was about speech):
+ *
+ *   - `worker`: a MODULE worker, because Parakeet's bundle has a lazy chunk (parakeet.js reaches ONNX Runtime through a
+ *     dynamic import) and Vite's default classic-worker format cannot split one. Workers are bundled by a build of
+ *     their own, so a transform one of them needs is named HERE: {@link voskEvalFreeGlue}.
+ *   - `alias`: `onnxruntime-web` resolves to its WASM-ONLY build. parakeet.js imports the bare package, whose default
+ *     build is the WebGPU one — a 12 MB runtime plus a 27 MB asyncify binary, over Cloudflare Pages' 25 MiB per-file
+ *     limit (the deploy failed from 2026-10-23 until this alias), and the pinned int8 encoder cannot run on WebGPU
+ *     anyway. Whisper's transformers.js imports `onnxruntime-web/webgpu`; that subpath goes to `wasm` too, so the
+ *     library and every worker share the one build the workers configure. The sherpa pair names the loader and binary
+ *     {@link SHERPA_DIST} holds.
+ */
+export const voiceBuild = {
+  worker: { format: 'es' as const, plugins: () => [voskEvalFreeGlue] },
+  alias: [
+    { find: /^onnxruntime-web(?:\/webgpu)?$/u, replacement: 'onnxruntime-web/wasm' },
+    { find: /^sherpa-glue$/u, replacement: join(SHERPA_DIST, 'asr-B3QtWJoU.js') },
+    { find: /^sherpa-runtime-wasm/u, replacement: join(SHERPA_DIST, 'prebuilt', 'asr.wasm') },
+  ],
 };

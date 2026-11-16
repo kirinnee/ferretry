@@ -28,7 +28,8 @@ import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
 import { settingsDocument } from '../lib/settings.ts';
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
-import { codexFixedArguments } from '../lib/fixed-layer.ts';
+import { codexFixedArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
+import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
 import { CodexRollouts } from './rollouts.ts';
@@ -46,6 +47,11 @@ export interface CodexHarnessOptions {
   readonly kernel: Pick<KernelPorts, 'roots' | 'log' | 'clock' | 'redaction' | 'state'> &
     Partial<{ readonly config: Pick<KernelPorts['config'], 'collection'> }>;
   readonly permissionMode?: () => HarnessConfig['permissionMode'];
+  /**
+   * The settings components the launching runtime's profile selects (`selectedComponents`): only those items reach its
+   * home, as v4's profile resolution gave `adaptProfile` only the resolved profile's. No runtime selects none.
+   */
+  readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
   readonly historyDirectory?: () => Promise<string | undefined>;
   readonly locate: () => Promise<HarnessLocation>;
   readonly probe: HarnessProbe;
@@ -99,9 +105,14 @@ function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsIte
 export function codexHarness(options: CodexHarnessOptions): Harness {
   const { kernel, locate, probe, update } = options;
   const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'auto';
-  /** This plugin's own settings items now (`config/codex/settings/`): what a home written now would merge. */
-  const settingsNow = (): ReadonlyMap<string, SettingsItem> =>
-    (kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined) ?? new Map();
+  /** The settings items (`config/codex/settings/`) the runtime's profile selects, now: what a home written now would merge. */
+  const settingsNow = async (runtime: string | undefined): Promise<ReadonlyMap<string, SettingsItem>> => {
+    const all =
+      (kernel.config?.collection(CODEX_SETTINGS as never) as ReadonlyMap<string, SettingsItem> | undefined) ??
+      new Map();
+    const { settings } = await options.selected(runtime);
+    return new Map([...all].filter(([name]) => settings.has(name)));
+  };
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
   /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
@@ -117,7 +128,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
-        harnessFlags: [...codexFixedArguments(permissionMode, spec.folder), ...codexCorrelationArguments(spec.home)],
+        harnessFlags: [
+          ...codexFixedArguments(permissionMode, spec.folder),
+          ...codexCorrelationArguments(spec.home),
+          ...codexQuestionArguments(spec.mode),
+        ],
         ...(resume === undefined ? {} : { resume }),
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
@@ -137,7 +152,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     if (!argv.ok) return argv;
     await ensureHome(spec);
     await rollouts.launched(spec, harnessConversation);
-    await recordLaunchSettings(spec.ferret, permissionMode);
+    await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =
       harnessConversation === undefined
         ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
@@ -155,8 +170,9 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   const recordLaunchSettings = async (
     ferret: FerretId,
     permissionMode: HarnessConfig['permissionMode'],
+    runtime: string | undefined,
   ): Promise<void> => {
-    const record = codexLaunchSettingsRecord(permissionMode, settingsNow());
+    const record = codexLaunchSettingsRecord(permissionMode, await settingsNow(runtime), runtime);
     try {
       await kernel.state.write(CODEX_LAUNCH_SETTINGS, record, ferret);
     } catch {
@@ -270,7 +286,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);
       const files: FencedPath[] = [];
       // ONE read of this plugin's own settings items per home written (`config/codex/settings/`).
-      const items = settingsNow();
+      const items = await settingsNow(spec.runtime);
       if (kernel.config === undefined && !saidNoSettings) {
         saidNoSettings = true;
         kernel.log.warn(
@@ -281,9 +297,15 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ['AGENTS.md', agentsDocument(spec)],
         ['config.toml', configDocument(spec, items)],
       ] as const) {
-        if (text === '') continue;
         const target = root.resolve(name);
         if (!target.ok) throw new Error(`Codex's ${name} could not be placed in the ferret's home: ${target.error}`);
+        if (text === '') {
+          // Nothing to say now: a config.toml an earlier launch of this reused home left must not stay applied (the
+          // settings this profile no longer selects). Agent homes are Ferretry's only, so a FILE there is ours to clear.
+          if (name === 'config.toml' && (await root.lstat(target.value))?.kind === 'file')
+            await root.remove(target.value);
+          continue;
+        }
         await root.writeText(target.value, text);
         files.push(target.value);
       }
@@ -292,6 +314,10 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     start: async (spec, runner, env) => await launch(spec, runner, env),
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
+    // A ferret converted from v4 names a conversation whose rollout was left behind: proved absent, Ferrets starts anew.
+    hasConversation: async (spec, harnessConversation) => await rollouts.has(spec.ferret, harnessConversation),
+    // Codex names its conversation after launch: the one this launch provably wrote, so Ferrets records it for a resume.
+    provedConversation: async ferret => await rollouts.provedConversation(ferret),
 
     async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
       try {
@@ -325,7 +351,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
         return compareCodexLaunchSettings(
           recorded.value,
-          codexLaunchSettingsRecord(permissionModeNow(), settingsNow()),
+          codexLaunchSettingsRecord(
+            permissionModeNow(),
+            await settingsNow(recorded.value.runtime),
+            recorded.value.runtime,
+          ),
         );
       } catch {
         return UNKNOWN_LAUNCH;

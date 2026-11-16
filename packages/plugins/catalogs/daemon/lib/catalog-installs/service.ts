@@ -24,6 +24,7 @@ import {
   type CatalogInstall,
   type CatalogInstalled,
   type CatalogInstallList,
+  type CatalogInstallTargets,
   type CatalogChanges,
   type CatalogMcpSetup,
   type CatalogInstallPreview,
@@ -221,6 +222,14 @@ export class CatalogInstallService {
     return {
       installs: state.installs.map(record => this.#view(record, prefs.installs[record.installId])),
       ...(damaged === undefined ? {} : { note: damaged }),
+    };
+  }
+
+  /** `GET /v1/catalog-installs/targets`: the runtimes an item can be installed into on this machine, ids and names only. */
+  async targets(): Promise<CatalogInstallTargets> {
+    const { runtimes } = await this.deps.fleet.runtimes();
+    return {
+      runtimes: runtimes.map(({ id, name, profile, harness }) => ({ id, name, profile, harness })),
     };
   }
 

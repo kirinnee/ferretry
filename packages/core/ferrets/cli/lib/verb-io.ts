@@ -7,7 +7,8 @@ import type { IWorktreeOutput } from './worktrees/ports.ts';
 
 /**
  * The verbs' presentation ports over the shell's terminal: stdout for answers, stderr for notes and refusals. It
- * keeps the exit code a controller sets, which is what the verb answers.
+ * keeps the exit code a controller sets, which is what the verb answers. The terminal writes exactly the text it is
+ * given, so each message is one line and this ends it.
  */
 export class VerbIo implements ISessionIo, IStopIo, IWorktreeOutput {
   #exitCode = 0;
@@ -19,23 +20,23 @@ export class VerbIo implements ISessionIo, IStopIo, IWorktreeOutput {
   }
 
   success(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
 
   report(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
 
   warn(message: string): void {
-    this.io.out(message);
+    this.io.out(`${message}\n`);
   }
 
   error(message: string): void {
-    this.io.err(message);
+    this.io.err(`${message}\n`);
   }
 
   diagnostic(message: string): void {
-    this.io.err(message);
+    this.io.err(`${message}\n`);
   }
 
   setExitCode(code: number): void {

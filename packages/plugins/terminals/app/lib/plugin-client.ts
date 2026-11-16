@@ -48,7 +48,7 @@ export const pluginTerminalDeckDependencies = (
   client: PluginClient,
   host: TerminalDeckHost,
 ): TerminalDeckDependencies => ({
-  list: (daemon, scope) => listSessionTerminals(client, daemon, scope),
+  list: (daemon, scope, options) => listSessionTerminals(client, daemon, scope, options),
   create: (daemon, scope) => createSessionTerminal(client, daemon, scope),
   rename: (daemon, scope, id, title) => renameSessionTerminal(client, daemon, scope, id, title),
   close: (daemon, scope, id) => closeSessionTerminal(client, daemon, scope, id),
@@ -95,6 +95,7 @@ function openPluginStream(
 const ROUTE_OF: Readonly<Record<string, string>> = {
   '/v1/terminals': TERMINAL_ROUTES.holders,
   '/v1/terminals/close-finished': TERMINAL_ROUTES.closeFinished,
+  '/v1/cgroups/config': 'GET /v1/cgroups/config',
 };
 
 /** The Settings › Terminals client (`readTerminalHolders`, `closeFinishedTerminals`) over the shell client. */

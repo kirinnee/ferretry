@@ -1,12 +1,40 @@
 /** `fy daemon status|start|stop|restart|install|uninstall|logs|which|reset` (§1.4). The daemon starts itself on the first other command (§9.1). */
 import { DaemonUpdateViewSchema } from '@ferretry/plugin-updates/contract';
+import { z } from 'zod';
 import type { Manifest, PluginClient } from '@ferretry/kernel/manifest';
 import { optionOn } from '../argv.ts';
 import type { DaemonController } from '../daemon/controller.ts';
 import { ClientResetInventory } from '../daemon/reset-inventory.ts';
 import { EXIT } from '../errors.ts';
 import { judgePlugin } from '../guard.ts';
+import { MidTurnUnreadableError } from '../update/mid-turn.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
+
+/** The route the app's limits panel reads; `fy daemon status` reads the same one (Terminals owns it). */
+const LIMITS_ROUTE = 'GET /v1/cgroups/config';
+
+/**
+ * Only the words of the limits view this verb prints: the daemon writes the sentences once, so the terminal and the app
+ * say the same thing (docs/ferret-limits.md). Everything else in the view is the app's.
+ */
+const LimitsWordsSchema = z.object({ lines: z.array(z.string()), warnings: z.array(z.string()) });
+
+/**
+ * The `limits` block of `fy daemon status` (today's `Limits:` block): what ferret limits are in force and whether they
+ * work, in the daemon's own words. NOTHING, rather than a failure, for every reason the read can fail — Terminals off,
+ * an older daemon with no such route, a daemon that stopped since the probe — because `status` reports on the daemon and
+ * its exit code is the daemon's, never this block's.
+ */
+async function limitsLines(ctx: ShellContext): Promise<readonly string[]> {
+  try {
+    const view = LimitsWordsSchema.parse(await ctx.client('terminals').call(LIMITS_ROUTE));
+    const words = [...view.lines, ...view.warnings.map(warning => `warning: ${warning}`)];
+    const [first, ...rest] = words;
+    return first === undefined ? [] : [`limits   ${first}`, ...rest.map(line => `         ${line}`)];
+  } catch {
+    return [];
+  }
+}
 
 export const daemonStatus: ShellVerb = async ctx => {
   const { io, identity } = ctx.world;
@@ -49,6 +77,7 @@ export const daemonStatus: ShellVerb = async ctx => {
   } catch (error) {
     lines.push(`plugins  not read: ${error instanceof Error ? error.message : String(error)}`);
   }
+  lines.push(...(await limitsLines(ctx)));
   io.out(`${lines.join('\n')}\n`);
   return EXIT.ok;
 };
@@ -81,14 +110,6 @@ const controlled =
       world.io.err('This fy has no local daemon-control adapters.\n');
       return EXIT.unavailable;
     }
-    const whileUp = async <T>(fallback: T, read: () => Promise<T>): Promise<T> => {
-      if ((await world.probe()).state !== 'up') return fallback;
-      try {
-        return await read();
-      } catch {
-        return fallback;
-      }
-    };
     // EACH of the three counts is asked only while the daemon answers, like the mid-turn read: a daemon that died since
     // the controller's probe is not started by a read in the middle of a reset.
     const whileAnswering = (id: Manifest['id']): Pick<PluginClient, 'call'> => ({
@@ -104,11 +125,16 @@ const controlled =
         whileAnswering('ferrets'),
       ),
       turns: {
-        midTurn: () =>
-          whileUp(
-            0,
-            async () => DaemonUpdateViewSchema.parse(await ctx.client('updates').call(MID_TURN_ROUTE)).midTurn,
-          ),
+        // A daemon that is down has nothing to wait for (0); one that answers but whose count cannot be read says so,
+        // and `--when-idle` then refuses instead of going ahead (`passMidTurn`).
+        midTurn: async () => {
+          if ((await world.probe()).state !== 'up') return 0;
+          try {
+            return DaemonUpdateViewSchema.parse(await ctx.client('updates').call(MID_TURN_ROUTE)).midTurn;
+          } catch {
+            throw new MidTurnUnreadableError();
+          }
+        },
       },
     });
     await run(built.controller, ctx);

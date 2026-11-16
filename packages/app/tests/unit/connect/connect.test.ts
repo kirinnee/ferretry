@@ -3,9 +3,11 @@ import { implementApp, type Manifest, skeletonApp } from '@ferretry/kernel/manif
 import { chooseDial, connector, type DirectDial } from '../../../src/connect/connector.ts';
 import {
   type ConnectPorts,
+  type HostedRelayState,
   provideToShell,
   registeredConnect,
   type ShellProvides,
+  withHostedRelay,
 } from '../../../src/connect/provides.ts';
 import { fakeCarrier, fakeDeviceClaims } from '../../../src/connect/testing.ts';
 import { DaemonList, type PairedDaemon } from '../../../src/daemons/daemon-list.ts';
@@ -84,7 +86,7 @@ describe('the providers the shell takes', () => {
 
   test('member carriers only from Connections, and none offered is none (a publisher is then unreachable)', () => {
     const carriers = {
-      rendezvousUrl: undefined,
+      rendezvous: () => Promise.resolve(undefined),
       dial: () => ({}) as never,
       drive: () => Promise.reject(new Error('not driven')),
     };
@@ -96,6 +98,37 @@ describe('the providers the shell takes', () => {
     expect(got.member).toBe(carriers);
     expect(registeredConnect([entry('catalogs', { member: () => impostor })], ports()).member).toBeUndefined();
     expect(registeredConnect([], ports()).member).toBeUndefined();
+  });
+
+  test('c58-07 the hosted relay answer is taken only from Connections; none offered is none', () => {
+    const answer = async (): Promise<HostedRelayState> => ({ kind: 'available', relayUrl: 'https://relay.invalid' });
+    const impostor = async (): Promise<HostedRelayState> => ({ kind: 'disabled' });
+    const got = registeredConnect(
+      [entry('catalogs', { hostedRelay: () => impostor }), entry('connections', { hostedRelay: () => answer })],
+      ports(),
+    );
+    expect(got.hostedRelay).toBe(answer);
+    expect(
+      registeredConnect([entry('catalogs', { hostedRelay: () => impostor })], ports()).hostedRelay,
+    ).toBeUndefined();
+    expect(registeredConnect([], ports()).hostedRelay).toBeUndefined();
+  });
+
+  test('c58-07 a daemon-less screen is told Connections’ answer, or ignorance said as ignorance (never "disabled")', async () => {
+    const available: HostedRelayState = { kind: 'available', relayUrl: 'https://relay.invalid' };
+    const base = { marker: 'kept' };
+    const told = withHostedRelay(base, { hostedRelay: async () => available });
+    expect(told.marker).toBe('kept');
+    expect(await told.hostedRelay()).toBe(available);
+    const none = await withHostedRelay(base, { hostedRelay: undefined }).hostedRelay();
+    expect(none.kind).toBe('undetermined');
+    const broken = await withHostedRelay(base, {
+      hostedRelay: async () => {
+        throw new Error('boom');
+      },
+    }).hostedRelay();
+    expect(broken.kind).toBe('undetermined');
+    expect(JSON.stringify([none, broken])).not.toContain('boom');
   });
 
   test('a skeleton half provides nothing, and a provider that throws is left out and said', () => {

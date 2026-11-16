@@ -67,6 +67,7 @@ import {
   parseCloneBase,
   serializeCloneBase,
 } from '../account/clone-base.ts';
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import { parseAccountModel, type AccountModel, isRuntimeName, type LayerReferenceText } from '../account/schema.ts';
 import { standInsNamedBy } from '../account/runtimes-model.ts';
 import { classifyCloneKeys, recordCloneKeys } from '../account/clone-keys.ts';
@@ -223,6 +224,7 @@ export type SetupCatalogDeps = Pick<
   | 'hostCodexHome'
   | 'acceptsAutoPermissionMode'
   | 'modelCatalogs'
+  | 'loginStores'
   | 'budgetHolds'
 >;
 
@@ -1421,6 +1423,12 @@ export class FleetSetupService {
     return sources === undefined ? {} : { modelCatalogs: sources };
   }
 
+  /** Where Logins keeps each Ferretry-kept login, read live for an apply; nothing on a machine wired without it. */
+  async #loginStores(): Promise<{ readonly loginStores?: readonly LoginLaunchStore[] }> {
+    const stores = await this.deps.catalog.loginStores?.();
+    return stores === undefined ? {} : { loginStores: stores };
+  }
+
   /** Materialise the model and apply it with these documents, inside the provisioner's one boundary. */
   async #applyModel(
     model: AccountModel,
@@ -1445,6 +1453,7 @@ export class FleetSetupService {
         // An import or a clone publishes the logins a budget holds unavailable too, like every other publish.
         ...budgetHoldsOf(catalog),
         ...(await this.#modelCatalogs()),
+        ...(await this.#loginStores()),
       });
     } catch (error) {
       throw new FleetCatalogRefusal(

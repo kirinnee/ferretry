@@ -36,7 +36,7 @@ function run(
     } as never,
     io: { out: text => out.push(text), err: text => err.push(text), isTty: false },
   });
-  return { calls, out, err, done: half?.verbs[verb]({ args, options }) };
+  return { calls, out, err, done: half?.verbs[verb === 'voice' ? 'voice [text...]' : verb]({ args, options }) };
 }
 
 describe('fy voice', () => {

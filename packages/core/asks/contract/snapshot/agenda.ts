@@ -126,7 +126,7 @@ const MultipleChoiceAskSchema = z
     }
   });
 
-const AgendaAskSchema = z.union([
+export const AgendaAskSchema = z.union([
   z.strictObject({ kind: z.literal('permission') }),
   MultipleChoiceAskSchema,
   z.strictObject({ kind: z.literal('answer-review') }),

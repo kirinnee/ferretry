@@ -13,7 +13,7 @@ import {
   type LinkListing,
   LinkListingSchema,
 } from '../../../contract/index.ts';
-import { createElement, type ReactNode } from 'react';
+import { createElement, Fragment, type ReactNode, useEffect, useState } from 'react';
 import type { RuntimeField } from '../../../app/links/conversation-picker.tsx';
 
 export const NOW = Date.parse('2026-10-13T08:00:00.000Z');
@@ -73,28 +73,77 @@ export const ferret = (id: string, overrides: Partial<z.input<typeof FerretSumma
  * asked about, each proposing that wrapper, and the page’s own "no runtime" node when the harness has none.
  */
 export const runtimeField =
-  (wrappers: Readonly<Record<string, readonly string[]>>): RuntimeField =>
+  (wrappers: Readonly<Record<string, readonly string[]>>, reports = false): RuntimeField =>
   props => {
     const offered = wrappers[props.harness] ?? [];
-    if (offered.length === 0) return props.noAccounts as ReactNode;
-    return createElement(
-      'div',
-      { role: 'radiogroup', 'aria-labelledby': props.labelId, 'data-test-runtimes': props.harness },
-      offered.map(wrapper =>
-        createElement(
-          'button',
-          {
-            key: wrapper,
-            type: 'button',
-            'aria-pressed': props.value === wrapper,
-            'data-test-runtime': wrapper,
-            onClick: () => props.onValueChange(wrapper),
-          },
-          wrapper,
-        ),
-      ),
-    );
+    const drawn =
+      offered.length === 0
+        ? (props.noAccounts as ReactNode)
+        : createElement(
+            'div',
+            { role: 'radiogroup', 'aria-labelledby': props.labelId, 'data-test-runtimes': props.harness },
+            offered.map(wrapper =>
+              createElement(
+                'button',
+                {
+                  key: wrapper,
+                  type: 'button',
+                  'aria-pressed': props.value === wrapper,
+                  'data-test-runtime': wrapper,
+                  onClick: () => props.onValueChange(wrapper),
+                },
+                wrapper,
+              ),
+            ),
+          );
+    // A panel that cannot say how many it offers (a page without Runtimes) reports nothing.
+    return reports
+      ? createElement(Fragment, null, drawn, createElement(OfferedReport, { props, list: offered }))
+      : drawn;
   };
+
+/** Tells the page which wrappers are usable, from an effect as the real panel does. */
+function OfferedReport({
+  props,
+  list,
+}: {
+  readonly props: Parameters<RuntimeField>[0];
+  readonly list: readonly string[] | null;
+}): null {
+  useEffect(() => {
+    props.onOffered?.(list);
+  }, [props.onOffered, list]);
+  return null;
+}
+
+/**
+ * A runtime slot that reports `sequence` one entry at a time: the first on mount, each next one when
+ * `[data-test-offer-next]` is pressed. For a roster still unread (`null`) and one that changes.
+ */
+export const sequencedRuntimeField = (sequence: readonly (readonly string[] | null)[]): RuntimeField =>
+  function Sequenced(props) {
+    return createElement(SequencedReport, { props, sequence });
+  };
+
+function SequencedReport({
+  props,
+  sequence,
+}: {
+  readonly props: Parameters<RuntimeField>[0];
+  readonly sequence: readonly (readonly string[] | null)[];
+}) {
+  const [step, setStep] = useState(0);
+  return createElement(
+    Fragment,
+    null,
+    createElement('button', {
+      type: 'button',
+      'data-test-offer-next': '',
+      onClick: () => setStep(current => current + 1),
+    }),
+    createElement(OfferedReport, { props, list: sequence[step] ?? null }),
+  );
+}
 
 export const type = async (input: HTMLInputElement, value: string): Promise<void> => {
   await interact(() => {

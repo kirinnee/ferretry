@@ -63,12 +63,6 @@ export interface SkillsInventoryPorts {
   readonly files: SkillFilesPort;
   readonly homes: () => Promise<readonly SkillRuntimeHome[]>;
   readonly projects: () => Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]>;
-  /**
-   * The v4-installed skills, listed straight from the fleet's `assets/skills/<name>` (source `ferretry`), because a
-   * link from a home into `assets/` is never followed: it is the same skill listed once here. Unbound until Runtimes
-   * offers that tree.
-   */
-  readonly ferretry?: () => Promise<readonly SkillDirectoryEntry[]>;
   /** The skill items a runtime's profile selects, resolved to Skills' own store: what the launch hands over. */
   readonly selected?: (runtime: string) => Promise<readonly SkillDirectoryEntry[]>;
 }
@@ -185,10 +179,11 @@ export class SkillsInventoryService {
 
   /**
    * One account's skills: the folders of its home (when it has a published one), then Ferretry's own, each listed once.
-   * Ferretry's own are the v4-installed skills read straight from the fleet's asset tree (a link from a home into it is
-   * a duplicate, never followed) and the skill items the runtime's profile selects. A name the home already lists, its
-   * own plain folder or a managed link alike, is not listed a second time: the harness loads the one the home holds.
-   * The asset tree reaches a launch only through a runtime home, so an account with no published home lists none of it.
+   * Ferretry's own are the skill items the runtime's profile selects, and the v4-installed skills the home LINKS into the
+   * fleet's asset tree (the home's reader lists such a link as managed). A skill in that tree that this account's home
+   * does not link is not this account's: it is never listed under every account for sitting in the shared tree (v4 showed
+   * it only where a profile layers it). A name the home already lists, its own plain folder or a managed link alike, is
+   * not listed a second time: the harness loads the one the home holds.
    */
   private async homeSkills(
     harness: Harness,
@@ -197,11 +192,10 @@ export class SkillsInventoryService {
     runtime: string | undefined,
   ): Promise<Listed> {
     const own = home === undefined ? [] : await this.ports.files.list(join(home, 'skills'), MAX_SKILLS_PER_ROOT);
-    const asset = home === undefined ? [] : ((await this.ports.ferretry?.()) ?? []);
     const chosen = runtime === undefined || runtime === '' ? [] : ((await this.ports.selected?.(runtime)) ?? []);
     const entries: SkillDirectoryEntry[] = [...own];
     const taken = new Set(own.map(folderOf));
-    for (const entry of [...asset, ...chosen]) {
+    for (const entry of chosen) {
       if (taken.has(folderOf(entry))) continue;
       taken.add(folderOf(entry));
       entries.push({ ...entry, managed: true });

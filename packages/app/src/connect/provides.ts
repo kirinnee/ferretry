@@ -136,6 +136,17 @@ export interface PairingCarriers {
 }
 
 /**
+ * WHAT THE HOSTED RELAY'S PUBLIC ADVERTISEMENT SAID, as a screen with no daemon may be told it (Connections owns the
+ * read; R580). It carries a service address at most (`available`), never a fetcher, a daemon address or a credential:
+ * the four answers are the whole of it. `undetermined` is ignorance said as ignorance (never "no relay").
+ */
+export type HostedRelayState =
+  | { readonly kind: 'checking' }
+  | { readonly kind: 'available'; readonly relayUrl: string }
+  | { readonly kind: 'disabled' }
+  | { readonly kind: 'undetermined'; readonly reason: string };
+
+/**
  * The one network read a provider may make that is not a session: the hosted relay directory's public advertisement
  * (R580). The shell answers only a `GET` to the build-time directory origin (`__FY_RELAY_DIRECTORY__`) and refuses
  * every other address, so this can never become a daemon request that skips the session.
@@ -188,16 +199,24 @@ export interface ConnectPorts {
  * WHAT A DAEMON-LESS SCREEN IS GIVEN, AND ALL IT IS GIVEN (a share link's landing page, first-run setup, the page a pairing
  * link opens on a device that has no daemon yet). It is the session layer's parts and the paired list, and no more:
  *
- * - NO CLIENT, NO TRANSPORT, NO SOCKET, NO DIRECTORY. A daemon-less screen has no daemon to talk to, so it is handed no
- *   default one, not the first, not the last used. Its only ways to a daemon are the pairing exchange ({@link pair},
- *   {@link pairDirect}: the carriers Connections' walk gives, in the order the protocol says) and, for Catalogs, its own
- *   member transport (a part of its own, never reached through here).
+ * - NO CLIENT, NO TRANSPORT, NO SOCKET, NO DIRECTORY FETCHER. A daemon-less screen has no daemon to talk to, so it is
+ *   handed no default one, not the first, not the last used. Its only ways to a daemon are the pairing exchange
+ *   ({@link pair}, {@link pairDirect}: the carriers Connections' walk gives, in the order the protocol says) and, for
+ *   Catalogs, its own member transport (a part of its own, never reached through here). It may be TOLD what the hosted
+ *   relay advertised ({@link hostedRelay}, an answer already read by Connections), never asked to read anything.
  * - It reads the paired list and may add to it (a pairing answers by adding the daemon it paired with).
  */
 export type DaemonlessPorts = Pick<
   ConnectPorts,
   'crypto' | 'subtle' | 'indexedDB' | 'now' | 'after' | 'pairDirect' | 'pair'
-> & { readonly daemons: PairedList };
+> & {
+  readonly daemons: PairedList;
+  /**
+   * What the hosted relay's advertisement said, read once per document by Connections (answered `undetermined`, with
+   * the reason, when no Connections is installed or its read could not be made).
+   */
+  readonly hostedRelay: () => Promise<HostedRelayState>;
+};
 
 /**
  * THE PAIRED LIST AS A DAEMON-LESS SCREEN MAY USE IT: read it and follow it, choose one, forget one, and add the one a
@@ -226,8 +245,20 @@ export interface DaemonlessScreenProps {
    * it. `undefined` when the person cancels; it never resolves without a click. A share code is never spent by the
    * choice itself. The chosen machine counts as the machine on screen until this screen unmounts, so its reads are not
    * left waiting for a passkey.
+   *
+   * Opt-in per call (`options.answerAloneWhenOne`): when EXACTLY ONE machine is paired at all (v4's rule) and it
+   * qualifies (connected, inventory read, this plugin on: a machine the picker would list), the shell answers with it
+   * at once and draws no picker. A second paired machine in any state (connecting, unreachable, refused, unreadable,
+   * plugin off), a lone machine that does not qualify yet, or the option left off, ask as ever. The caller's own click
+   * still starts the question.
    */
-  readonly chooseDaemon: (purpose: string) => Promise<ChosenDaemon | undefined>;
+  readonly chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined>;
+}
+
+/** How one `chooseDaemon` question differs from the plain one. Every field is off unless a caller turns it on. */
+export interface ChooseDaemonOptions {
+  /** Skip the picker when exactly one paired machine qualifies; that machine is the answer. */
+  readonly answerAloneWhenOne?: boolean;
 }
 
 /** The machine a person chose on a daemon-less screen, and the calling plugin's own client there. */
@@ -306,8 +337,10 @@ export interface ShellProvides {
   readonly carriers?: (ports: ConnectPorts) => readonly CarrierDialer[];
   /** Connections only: the carriers a pairing walks. */
   readonly pairing?: (ports: ConnectPorts) => PairingCarriers;
-  /** Connections only; NOT IMPLEMENTED YET: the carriers a member session walks to a publisher this browser is not paired with. */
+  /** Connections only: the carriers a member session walks to a publisher this browser is not paired with. */
   readonly member?: (ports: ConnectPorts) => MemberCarriers;
+  /** Connections only: what the hosted relay's advertisement said (one read per document), for daemon-less screens. */
+  readonly hostedRelay?: (ports: ConnectPorts) => () => Promise<HostedRelayState>;
   /**
    * Access only: the passkey handler every daemon call consults on a refusal, and the prompts the shell mounts
    * (`passkey/passkey.ts`). Built with the runtime, after the session parts: its ceremony rides Access's own client.
@@ -389,6 +422,7 @@ export interface RegisteredConnect {
   readonly carriers: readonly CarrierDialer[];
   readonly pairing: PairingCarriers | undefined;
   readonly member: MemberCarriers | undefined;
+  readonly hostedRelay: (() => Promise<HostedRelayState>) | undefined;
   readonly failures: readonly { readonly plugin: string; readonly reason: string }[];
 }
 
@@ -401,6 +435,7 @@ export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: Conn
   let claims: DeviceClaims | undefined;
   let pairing: PairingCarriers | undefined;
   let member: MemberCarriers | undefined;
+  let hostedRelay: (() => Promise<HostedRelayState>) | undefined;
   const carriers: CarrierDialer[] = [];
   const failures: { plugin: string; reason: string }[] = [];
   const attempt = <T>(plugin: string, build: () => T): T | undefined => {
@@ -426,14 +461,38 @@ export function registeredConnect(surfaces: readonly SurfaceEntry[], ports: Conn
     if (makeMember !== undefined && member === undefined && CARRIER_TAKERS.includes(entry.id)) {
       member = attempt(entry.id, () => makeMember(ports));
     }
+    const makeRelay = provides.hostedRelay;
+    if (makeRelay !== undefined && hostedRelay === undefined && CARRIER_TAKERS.includes(entry.id)) {
+      hostedRelay = attempt(entry.id, () => makeRelay(ports));
+    }
     const makePairing = provides.pairing;
     if (makePairing !== undefined && pairing === undefined && CARRIER_TAKERS.includes(entry.id)) {
       pairing = attempt(entry.id, () => makePairing(ports));
     }
   }
   carriers.sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
-  return { claims, carriers, pairing, member, failures };
+  return { claims, carriers, pairing, member, hostedRelay, failures };
 }
+
+/**
+ * What a daemon-less screen is told about the hosted relay: Connections' answer, or — with none installed, or a read that
+ * throws — `undetermined` with the reason said (never `disabled`, which would claim the operator switched it off).
+ */
+export const withHostedRelay = <Ports extends object>(
+  ports: Ports,
+  registered: Pick<RegisteredConnect, 'hostedRelay'>,
+): Ports & Pick<DaemonlessPorts, 'hostedRelay'> => ({
+  ...ports,
+  hostedRelay: async () => {
+    const read = registered.hostedRelay;
+    if (read === undefined) return { kind: 'undetermined', reason: 'no Connections is installed to read it' };
+    try {
+      return await read();
+    } catch {
+      return { kind: 'undetermined', reason: 'the read of the hosted relay advertisement failed' };
+    }
+  },
+});
 
 /** The passkey provision the registered halves gave, and the failure to build it (said, never thrown). */
 export interface RegisteredPasskey {

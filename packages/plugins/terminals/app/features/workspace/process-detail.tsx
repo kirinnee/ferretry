@@ -25,13 +25,7 @@ import {
   useState,
 } from 'react';
 import { findMatches, lineText, parseAnsi } from '../../lib/ansi.ts';
-import {
-  formatMemory,
-  PROCESSES_FORBIDDEN_TEXT,
-  type ProcessCalls,
-  processElapsedText,
-  processTitle,
-} from '../../lib/session-processes.ts';
+import { formatMemory, type ProcessCalls, processElapsedText, processTitle } from '../../lib/session-processes.ts';
 import { AnsiLines, type LineMatch } from './ansi-lines.tsx';
 import { KIND_LABEL, KIND_MEANING } from './process-vocabulary.ts';
 import { type ProcessOutputReader, useProcessOutput } from './use-session-processes.ts';
@@ -378,7 +372,7 @@ function ProcessOutputPane({
             <p className="fy-proc-empty text-muted">Loading output…</p>
           ) : state.status === 'forbidden' ? (
             <p className="fy-proc-empty text-err" role="alert">
-              {PROCESSES_FORBIDDEN_TEXT}
+              {state.reason}
             </p>
           ) : state.status === 'error' ? (
             <p className="fy-proc-empty text-err" role="alert">

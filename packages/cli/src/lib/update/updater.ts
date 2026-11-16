@@ -22,7 +22,7 @@ import {
 import type { InstalledDaemonBinary } from './machine.ts';
 import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from './machine.ts';
 import { formatElapsed, type IProgress, NO_PROGRESS } from './progress.ts';
-import { passMidTurn } from './mid-turn.ts';
+import { MidTurnUnreadableError, passMidTurn } from './mid-turn.ts';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -350,7 +350,12 @@ export class DaemonUpdater {
   async #passMidTurn(options: DaemonUpdateOptions): Promise<void> {
     await passMidTurn(
       {
-        midTurn: () => this.#midTurn(),
+        midTurn: async () => {
+          // Only asked while the daemon is up: a view that is not there is a count that could not be read.
+          const view = await this.deps.updateView.view();
+          if (view === undefined) throw new MidTurnUnreadableError();
+          return view.midTurn;
+        },
         sleep: ms => this.deps.clock.sleep(ms),
         warn: line => this.deps.out.warn(line),
       },

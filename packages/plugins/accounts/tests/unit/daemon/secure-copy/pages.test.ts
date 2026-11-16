@@ -8,7 +8,7 @@ import should from 'should';
 import { EphemeralValues } from '../support/masking.ts';
 import type { BrowserCopyRead } from '../../../../daemon/lib/local-ports.ts';
 import { BrowserCopyPages } from '../../../../daemon/lib/secure-copy/browser-pages.ts';
-import { type CopyPageRead } from '../../../../daemon/lib/secure-copy/ports.ts';
+import type { CopyPageRead } from '../../../../daemon/lib/secure-copy/ports.ts';
 import { PageCopyRecords } from '../../../../daemon/lib/secure-copy/page-records.ts';
 import { SecureCopyError } from '../../../../daemon/lib/secure-copy/errors.ts';
 import { SecureCopyService } from '../../../../daemon/lib/secure-copy/service.ts';
@@ -91,7 +91,8 @@ describe('copying a page element', () => {
   it('should seal the trimmed value under the frame origin, mask it at once and say nothing of it', async () => {
     const { service, masking, asked } = world();
 
-    const { copy, command } = await service.capture(SESSION, fromPage());
+    // The caller records which documents the agent read, and the agent read none of this one.
+    const { copy, command } = await service.capture(SESSION, fromPage(), { seen: () => [] });
 
     should(copy).match({
       handle: 'sealed:gh',
@@ -105,6 +106,14 @@ describe('copying a page element', () => {
     should(masking.scrub(SESSION, `the token is ${TOKEN}`)).equal('the token is [sealed:gh]');
     should(service.open(SESSION, 'gh')).equal(TOKEN);
     should(JSON.stringify(copy)).not.containEql(TOKEN);
+  });
+
+  it('should say the agent MAY have read the page when its caller records no reads (the conservative answer)', async () => {
+    const { service } = world();
+
+    const { copy } = await service.capture(SESSION, fromPage());
+
+    should(copy.exposure.pageReadBeforeCapture).be.true();
   });
 
   it("should mask the value and hold the page INSIDE the page's queue, before anything queued behind the copy runs", async () => {
@@ -340,5 +349,20 @@ describe('BrowserCopyPages', () => {
       'seal:page-1',
     ]);
     should(calls.filter(call => call.startsWith('seal'))).have.length(2);
+  });
+});
+
+describe('the page host reads elements only', () => {
+  it('should refuse a clipboard read, which is Browsers’ own reach, rather than answer an empty copy', async () => {
+    const host = { copyOnPage: async () => Promise.reject(new Error('a clipboard read runs no page job')) };
+
+    const error = await new BrowserCopyPages(host).clipboard().then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    should(error).be.instanceOf(SecureCopyError);
+    should((error as SecureCopyError).code).equal('unavailable');
+    should((error as SecureCopyError).message).equal("Copying from a page's clipboard is not available here.");
   });
 });

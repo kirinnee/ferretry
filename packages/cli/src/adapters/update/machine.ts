@@ -17,7 +17,7 @@ import { NixProfileSwitch } from '../../lib/update/profile-switch.ts';
 import { PlainProgress } from '../../lib/update/progress.ts';
 import type { DaemonUpdaterDeps } from '../../lib/update/updater.ts';
 import { ServingSchema } from '../daemon/health.ts';
-import { readDaemonRunDocument } from '../daemon/run-file.ts';
+import { readDaemonRunDocument, readHomePort } from '../daemon/run-file.ts';
 import { FileDaemonLifecycleLock } from '../daemon/lifecycle-lock.ts';
 import { NixStoreGcRoot } from '../daemon/nix-gc-root.ts';
 import { BunDaemonProcess } from '../daemon/process.ts';
@@ -138,7 +138,11 @@ export function buildUpdateMachine(
     health: async () => {
       try {
         // Always this home's own listener, as the kernel recorded it. FY_URL may name a forwarded or remote daemon.
-        const url = resolveDaemonUrl('', parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home))));
+        const url = resolveDaemonUrl(
+          '',
+          parseDaemonRun(await readDaemonRunDocument(daemonRunPath(inputs.home))),
+          await readHomePort(inputs.home),
+        );
         const response = await fetch(`${url}/healthz`, { signal: AbortSignal.timeout(3_000) });
         if (!response.ok) return undefined;
         return ServingSchema.parse(await response.json());

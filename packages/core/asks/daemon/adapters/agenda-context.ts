@@ -1,5 +1,6 @@
 import type { AgendaBoardContext, AgendaFerretsContext } from '../../contract/index.ts';
-import { AgendaHomes, type HomeSession, NO_MACHINE_AGENDA } from '../lib/agenda/index.ts';
+import { AgendaHomes, type HomeSession } from '../lib/agenda/index.ts';
+import { MACHINE_AGENDA_ID } from '../lib/protocol/agenda.ts';
 import type {
   AgendaCardLanes,
   AgendaFocusSource,
@@ -65,15 +66,22 @@ export function agendaContext(source: AgendaContextSource, warn: (message: strin
       get: async (id): Promise<HomeSession | undefined> => await ferrets()?.get(id),
       all: async () => (await ferrets()?.all()) ?? [],
     },
-    NO_MACHINE_AGENDA,
+    // A notice with no owner home lands on the machine agenda (docs/agenda.md § The machine agenda); a gate item or a
+    // follow-up never does (`AgendaHomes.of`, `notice`).
+    { home: async () => MACHINE_AGENDA_ID },
     { warn },
   );
   return {
     sessions: {
+      // The machine agenda is the daemon's own board, not a ferret: Ferrets knows no such session, and the owner's
+      // machine routes and the Warden's standing notices write it. A ferret cannot reach it: an agent is confined to
+      // its own session, and the ferret routes refuse its id.
       has: async id =>
-        (await ferrets()
+        id === MACHINE_AGENDA_ID ||
+        ((await ferrets()
           ?.has(id)
-          .catch(() => false)) ?? false,
+          .catch(() => false)) ??
+          false),
     },
     subFerrets: {
       leadOf: async id => await ferrets()?.leadOf(id),

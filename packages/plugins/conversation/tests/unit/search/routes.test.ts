@@ -66,6 +66,65 @@ describe('the search routes and tool', () => {
   });
 });
 
+describe('v4 spellings of the search kind and the text of an agenda item', () => {
+  test('--kind agenda and --kind task are the ask and card kinds', async () => {
+    const agenda = JSON.parse((await built.routes['GET /v1/search'](get({ q: 'backend', kind: 'agenda' }))).body) as {
+      hits: { id: string }[];
+    };
+    const task = JSON.parse((await built.routes['GET /v1/search'](get({ q: 'backend', kind: 'task' }))).body) as {
+      hits: { id: string }[];
+    };
+    expect(agenda.hits.map(hit => hit.id)).toEqual(['a1']);
+    expect(task.hits).toEqual([]);
+  });
+
+  test('the search_work tool takes kind task or agenda', async () => {
+    const result = await built.tools.search_work(undefined, { query: 'backend', kind: 'agenda' });
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toContain('!a1');
+  });
+
+  test('an ask is found by the premise, context and body of its item, not by its subject alone', async () => {
+    const summary = {
+      id: 'A4',
+      source: 'question',
+      entry: 'e4',
+      kind: 'question',
+      subject: 'Pick one',
+      raisedBy: { kind: 'ferret' },
+      ferret: 'lead',
+      state: 'open',
+      raisedAt: '2026-10-30T09:00:00.000Z',
+    };
+    const board = {
+      sessionId: 'lead',
+      items: [
+        {
+          id: 'A4',
+          subject: 'Pick one',
+          premise: 'The signup form needs an ask on its first step',
+          why: 'blocks launch',
+        },
+      ],
+      resolved: [],
+    };
+    const search = buildSearch({
+      asks: {
+        open: async ({ state }: { state?: string }) => (state === 'open' ? [summary] : []),
+        snapshots: async () => [board],
+      } as never,
+      redaction: { read: async fn => await fn({ text: s => s, cells: g => g, lines: l => l }) },
+      now: () => NOW_MS,
+      warn: () => undefined,
+    });
+
+    const found = await search.service.search(query('form ask'));
+
+    expect(found.hits.map(hit => hit.id)).toEqual(['A4']);
+    expect(found.hits[0]?.match.field).toBe('premise');
+  });
+});
+
 describe('buildSearch', () => {
   const plain = {
     read: async <T>(fn: (scope: never) => T | Promise<T>) => await fn({ text: (s: string) => s } as never),

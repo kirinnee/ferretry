@@ -2,24 +2,17 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { DaemonCallError } from '@ferretry/app';
 import type { Authority, ViewPlace } from '@ferretry/app';
 import { interact, type Mounted, mount, must, settleUntil, WithViewPlace } from '@ferretry/app/testing';
-import { hypermediaOn, patchFerretHypermedia, readFerretHypermedia } from '../../../../app/toolbar/hypermedia-api.ts';
+import { patchFerretHypermedia, readFerretHypermedia } from '../../../../app/toolbar/hypermedia-api.ts';
 import { HypermediaPanel } from '../../../../app/toolbar/hypermedia-panel.tsx';
+import type { HypermediaState } from '../../../../contract/index.ts';
 import { type CallHandler, fakeClient, refusal } from '../../../support/app/fake-client.ts';
 import { withClient } from '../../../support/app/client.tsx';
 
-const READ_ROUTE = 'GET /v1/ferrets/:ferretId';
+const READ_ROUTE = 'GET /v1/ferrets/:ferretId/hypermedia';
 const PATCH_ROUTE = 'PATCH /v1/ferrets/:ferretId/hypermedia';
 
-/** A ferret summary from before anyone touched the switch: interactive, so the mode default is on. */
-const SUMMARY = {
-  id: 'ferret-hadi',
-  name: 'hadi',
-  harness: 'claude-code',
-  folder: '/work',
-  state: 'working',
-  stateAt: '2026-11-07T10:00:00.000Z',
-  mode: 'interactive',
-};
+/** What the route serves for a ferret nobody touched the switch on: interactive, so the mode default is on. */
+const SUMMARY: HypermediaState = { enabled: true };
 
 const answering: CallHandler = call => {
   const enabled = (call.body as { enabled: boolean }).enabled;
@@ -149,12 +142,14 @@ describe('Hypermedia in the ferret toolbar', () => {
     expect(switchOf(mounted.container)?.getAttribute('data-hypermedia-switch')).toBe('unknown');
   });
 
-  it('reads the mode default, the ferret’s own value, and the ferret view', async () => {
-    expect(hypermediaOn({ mode: 'interactive' })).toBe(true);
-    expect(hypermediaOn({ mode: 'auto' })).toBe(false);
-    expect(hypermediaOn({ mode: 'interactive', hypermedia: false })).toBe(false);
+  it('reads the switch from the route that serves it, as the contract spells it, and refuses any other shape', async () => {
+    const on = fakeClient({ [READ_ROUTE]: () => ({ enabled: true }) satisfies HypermediaState });
+    expect(await readFerretHypermedia(on, 'f')).toBe(true);
+    const off = fakeClient({ [READ_ROUTE]: () => ({ enabled: false }) satisfies HypermediaState });
+    expect(await readFerretHypermedia(off, 'f')).toBe(false);
+    // Today's ferret view and Ferrets' summary are not what this route serves.
     const view = fakeClient({ [READ_ROUTE]: () => ({ config: { mode: 'auto', hypermedia: true } }) });
-    expect(await readFerretHypermedia(view, 'f')).toBe(true);
+    await expect(readFerretHypermedia(view, 'f')).rejects.toThrow();
   });
 
   it('passes a refusal through with its status and a request id on the write', async () => {

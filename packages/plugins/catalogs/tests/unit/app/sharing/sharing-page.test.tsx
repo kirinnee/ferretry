@@ -56,7 +56,7 @@ async function open(tab: SharingTab | undefined, handlers: Parameters<typeof fak
 }
 
 describe('SharingPage', () => {
-  it('opens on Subscriptions when the address names no tab', async () => {
+  it('S-0245 opens on Subscriptions when the address names no tab', async () => {
     expect(DEFAULT_SHARING_TAB).toBe('shared');
     const { view } = await open(undefined);
     expect(q('[data-sharing]')?.getAttribute('data-sharing')).toBe('shared');

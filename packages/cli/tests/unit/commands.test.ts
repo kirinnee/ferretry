@@ -2,13 +2,11 @@ import { describe, it } from 'bun:test';
 import { definePort } from '@ferretry/kernel/contract';
 import { definePlugin } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { ASK_ROUTES, askRows } from '../../src/lib/commands/ask.ts';
 import { diagnose, renderFindings } from '../../src/lib/commands/doctor.ts';
 import { compiledWords, findWords } from '../../src/lib/commands/words.ts';
 import type { DaemonController } from '../../src/lib/daemon/controller.ts';
 import { runFy } from '../../src/lib/run.ts';
 import { boardEntry, fakeWorld, inventoryOf, RecordingTransport, registryOf, skeletonEntry } from './fakes.ts';
-import { route } from '@ferretry/kernel/manifest';
 
 const up = { state: 'up', baseUrl: 'http://127.0.0.1:7431', health: { protocol: 1, version: '5.0.0' } } as const;
 const down = { state: 'down', baseUrl: 'http://127.0.0.1:7431', why: 'refused' } as const;
@@ -379,6 +377,40 @@ describe('fy doctor', () => {
       should(io.stdout()).containEql('warn  Not built yet in this build (nothing checked): chrome');
     });
 
+    it('V-0257 should print v4’s inventory: a not-applicable service manager as n/a, a missing alternative harness as a warning, and the limitation after the host rows', async () => {
+      const { world, io } = healthyWorld(
+        report([
+          check({
+            name: 'claude',
+            requirement: 'alternative',
+            summary: '/usr/bin/claude  (inherited environment — PATH)',
+          }),
+          check({
+            name: 'codex',
+            requirement: 'alternative',
+            status: 'missing',
+            summary: 'not found in the inherited environment, nor in PATH',
+            impact: 'no codex session can start on this host',
+          }),
+          check({
+            name: 'launchctl',
+            requirement: 'capability',
+            status: 'not_applicable',
+            summary: 'not used on this operating system',
+          }),
+        ]),
+      );
+      should(await runFy(['doctor'], world)).equal(0);
+      const lines = io.stdout().split('\n');
+      should(lines).containEql('ok    host claude: /usr/bin/claude  (inherited environment — PATH)');
+      should(lines).containEql('warn  host codex: not found in the inherited environment, nor in PATH');
+      should(lines).containEql('      fix: no codex session can start on this host');
+      should(lines).containEql('n/a   host launchctl: not used on this operating system');
+      should(lines.indexOf('note  host limitation: presence only')).above(
+        lines.indexOf('n/a   host launchctl: not used on this operating system'),
+      );
+    });
+
     it('should warn, not fail, when the report is refused or not readable', async () => {
       const refused = healthyWorld({ error: 'no' });
       refused.transport.replies[0] = { status: 403, body: { error: 'not allowed' } };
@@ -524,111 +556,5 @@ describe('fy daemon', () => {
     const { world, io } = fakeWorld();
     should(await runFy(['daemon', 'stop'], world)).equal(69);
     should(io.stderr()).containEql('no local daemon-control adapters');
-  });
-});
-
-describe('fy ask', () => {
-  const asksManifest = definePlugin({
-    id: 'asks',
-    title: 'Asks',
-    version: '5.0.0',
-    api: 5,
-    core: true,
-    kinds: [],
-    actions: {
-      routes: [
-        route(ASK_ROUTES.list, {
-          minimum: 'authenticated',
-          caller: 'any',
-          audit: { skip: 'read' },
-          guard: { none: 'ids' },
-        }),
-        route(ASK_ROUTES.show, {
-          minimum: 'authenticated',
-          caller: 'any',
-          audit: { skip: 'read' },
-          guard: { none: 'ids' },
-        }),
-        route(ASK_ROUTES.answer, {
-          minimum: 'authenticated',
-          caller: 'person',
-          audit: { skip: 'test' },
-          guard: { none: 'ids' },
-        }),
-      ],
-    },
-  });
-  const withAsks = () => {
-    const fake = fakeWorld({
-      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
-      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
-    });
-    return fake;
-  };
-
-  it('should say Asks is not built yet while it declares no routes', async () => {
-    const { world, io } = fakeWorld();
-    should(await runFy(['ask'], world)).equal(69);
-    should(io.stderr()).containEql('Asks is not built yet');
-  });
-
-  it('should list the asks waiting, or say none are', async () => {
-    const { world, io, transport } = withAsks();
-    transport.replies.push({ status: 200, body: { asks: [{ id: 'a1', source: 'board', title: 'Move c1?' }] } });
-    should(await runFy(['ask'], world)).equal(0);
-    should(io.stdout()).match(/a1\s+board\s+Move c1\?/u);
-    transport.replies.push({ status: 200, body: [] });
-    await runFy(['ask', 'list'], world);
-    should(io.stdout()).containEql('no asks are waiting');
-  });
-
-  it('should answer an ask with the text, and show one', async () => {
-    const { world, io, transport } = withAsks();
-    should(await runFy(['ask', 'answer', 'a1', 'yes', 'please'], world)).equal(0);
-    should(transport.sent).deepEqual([{ method: 'POST', path: '/v1/asks/a1/answer', body: { answer: 'yes please' } }]);
-    should(io.stdout()).containEql('answered a1');
-    transport.replies.push({ status: 200, body: { id: 'a1' } });
-    should(await runFy(['ask', 'show', 'a1'], world)).equal(0);
-  });
-
-  it('S59 a person-only shell route from a pane is refused before any connection is opened', async () => {
-    // Arrange
-    const { world, io, connects, transport } = fakeWorld({
-      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
-      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
-      environment: { FY_SESSION_ID: 's1' },
-    });
-
-    // Act
-    const code = await runFy(['ask', 'answer', 'a1', 'yes'], world);
-
-    // Assert
-    should(code).equal(1);
-    should(io.stderr()).containEql("this is the owner's command; a ferret's pane can't run it");
-    should(connects).deepEqual([]);
-    should(transport.sent).deepEqual([]);
-  });
-
-  it('S59 an open shell route from a pane still connects and is sent', async () => {
-    const { world, connects, transport } = fakeWorld({
-      registry: registryOf(skeletonEntry(asksManifest, 'h-asks')),
-      inventory: inventoryOf({ id: 'asks', contract: 'h-asks' }),
-      environment: { FY_SESSION_ID: 's1' },
-    });
-    transport.replies.push({ status: 200, body: [] });
-    should(await runFy(['ask', 'list'], world)).equal(0);
-    should(connects).have.length(1);
-    should(transport.sent).deepEqual([{ method: 'GET', path: '/v1/asks' }]);
-  });
-
-  it('should refuse an answer without an id and text, and an unknown subcommand', async () => {
-    const { world } = withAsks();
-    should(await runFy(['ask', 'answer', 'a1'], world)).equal(2);
-    should(await runFy(['ask', 'show'], world)).equal(2);
-    should(await runFy(['ask', 'zap'], world)).equal(2);
-  });
-
-  it('should read a list shape it does not know as an error, not a crash', () => {
-    should(() => askRows({ nope: true })).throw(/shape this fy does not read/u);
   });
 });

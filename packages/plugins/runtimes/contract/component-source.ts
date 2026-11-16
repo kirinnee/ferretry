@@ -34,6 +34,14 @@ export interface ProfileComponentSource {
   list(): Promise<readonly string[]>;
   /** One component, or `undefined` when there is none by that name (it may have just been removed). */
   read(name: string): Promise<ProfileComponentDocument | undefined>;
+  /**
+   * Fires, with nothing, when one of the owner's component files MOVES in effect (an item added, changed, fixed or
+   * removed), and answers how to stop listening. The owner listens to its OWN configuration (`ConfigPort.watch` on its
+   * own def), so Runtimes hears a change without reading another plugin's files and without a timer: it is the wake-up
+   * that publishes the fleet again (a profile naming a component that did not exist yet now resolves). Optional: an
+   * owner that offers none is read at the next change Runtimes does hear.
+   */
+  watch?(listener: () => void): () => void;
 }
 
 /** The kinds whose components another plugin owns (`modelSets` are Runtimes' own). */

@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { MemoryStateFolder, fixedClock, type DrivenClock } from '@ferretry/kernel/testing';
 import type {
   Cancel,
@@ -5,6 +7,7 @@ import type {
   ConfigFileDef,
   ConfigPort,
   KernelPorts,
+  ScratchPort,
   StateFileDef,
   StatePort,
 } from '@ferretry/kernel/contract';
@@ -84,8 +87,31 @@ export function wardenConfig(initial: unknown = undefined): ConfigPort & { set(v
   return port as ConfigPort & { set(value: unknown): void };
 }
 
+/** Real private folders under the OS temp root, as the daemon's scratch port makes them; `closeAll` removes what was opened. */
+export function fakeScratch(): ScratchPort & { readonly opened: string[]; closeAll(): Promise<void> } {
+  const opened: string[] = [];
+  return {
+    opened,
+    open: async () => {
+      const path = await mkdtemp(`${tmpdir()}/fy-warden-test-`);
+      opened.push(path);
+      return {
+        path: path as never,
+        makeDirectory: async rel => void (await mkdir(`${path}/${rel}`, { recursive: true })),
+        writeFile: async () => undefined,
+        symlink: async () => undefined,
+        close: async () => await rm(path, { recursive: true, force: true }),
+      };
+    },
+    closeAll: async () => {
+      for (const path of opened) await rm(path, { recursive: true, force: true });
+    },
+  };
+}
+
 export interface FakeKernel {
   readonly kernel: KernelPorts;
+  readonly scratch: ReturnType<typeof fakeScratch>;
   readonly clock: DrivenClock;
   readonly published: { readonly event: string; readonly payload: unknown }[];
   readonly logged: string[];
@@ -94,6 +120,7 @@ export interface FakeKernel {
 /** The parts of the kernel the warden touches; the rest throw when used, so a stray dependency is loud. */
 export function fakeKernel(options: { readonly config?: ConfigPort; readonly start?: string } = {}): FakeKernel {
   const clock = fixedClock(options.start ?? '2026-11-06T09:00:00.000Z');
+  const scratch = fakeScratch();
   const published: { event: string; payload: unknown }[] = [];
   const logged: string[] = [];
   const log = {
@@ -108,6 +135,7 @@ export function fakeKernel(options: { readonly config?: ConfigPort; readonly sta
     log,
     state: wardenState(),
     config: options.config ?? wardenConfig(),
+    scratch,
     events: {
       publish: (event: { name: string }, payload: unknown) => void published.push({ event: event.name, payload }),
     },
@@ -120,5 +148,5 @@ export function fakeKernel(options: { readonly config?: ConfigPort; readonly sta
       send: async () => ({ kind: 'refused', refused: 'not_configured' }),
     },
   } as unknown as KernelPorts;
-  return { kernel, clock, published, logged };
+  return { kernel, scratch, clock, published, logged };
 }

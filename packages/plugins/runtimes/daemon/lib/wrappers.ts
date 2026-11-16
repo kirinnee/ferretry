@@ -374,6 +374,11 @@ export interface RuntimeWrapperInput {
    * Absent means the harness is not located on this host, and the wrapper then execs the bare name.
    */
   readonly harnessCommand?: string | undefined;
+  /**
+   * A Codex runtime on a Ferretry-kept login: the link the wrapper makes from the runtime home's `auth.json` to the file Logins keeps
+   * that sign-in in, before it starts Codex. Paths only; the file is never read, copied or shown.
+   */
+  readonly signInLink?: { readonly path: string; readonly target: string } | undefined;
   readonly secretsFile?: string | undefined;
   /**
    * Why this runtime cannot launch at all, when it cannot (O4, G5). The wrapper then says so and exits
@@ -385,7 +390,8 @@ export interface RuntimeWrapperInput {
 /**
  * The arguments that may name a conversation, per harness: the shell `case` patterns a wrapper looks
  * for before it pays for a `fy history claim`. Wider than what names one — `--resume` alone opens a
- * picker — because `fy` decides exactly (`conversationFromArguments` in `./shared-history.ts`);
+ * picker — because `fy` decides exactly (Ferrets' `fy history claim`, `conversationFromArguments` in
+ * `core/ferrets/contract/conversation-lease.ts`);
  * this only keeps an ordinary launch from running it.
  */
 const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
@@ -499,6 +505,7 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...(environment.guards.length > 0 ? [...environment.guards, ''] : []),
     `export ${HARNESS_HOME_ENV[input.harness]}=${shellPath(input.configDirectory)}`,
     ...environment.exports,
+    ...(input.signInLink === undefined ? [] : signInLinkLines(input.signInLink)),
     ...(input.seedFirstRun === true ? firstRunSeedLines(input.harness) : []),
     ...historyClaimLines(input.harness, input.fyCommand),
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
@@ -511,6 +518,27 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   ].join('\n');
 }
 
+/**
+ * Codex's sign-in on a Ferretry-kept login: the runtime home's `auth.json` is a link to the file Logins keeps it in, so a run by
+ * hand is signed in and Codex renews the one file through the link (a credential is stored once, never copied). Made here, as the
+ * person about to run Codex, because Logins' file is outside every folder the provisioner may link into.
+ *
+ * Only a link (or nothing) is replaced: a regular file the person put there is theirs and stands. A link already right is left
+ * alone. The link may dangle until somebody signs in. A failure to link is said and the launch goes on (Codex then asks to sign in).
+ * Nothing here reads the file; the two paths are quoted literals.
+ */
+export function signInLinkLines(link: { readonly path: string; readonly target: string }): string[] {
+  return [
+    '',
+    "# Codex's sign-in is the file Logins keeps: link this home's auth.json to it (a link already right is left alone).",
+    `_fy_auth=${shellQuote(link.path)}`,
+    `_fy_auth_target=${shellQuote(link.target)}`,
+    'if [ -L "$_fy_auth" ] || [ ! -e "$_fy_auth" ]; then',
+    '  [ "$(readlink "$_fy_auth" 2>/dev/null)" = "$_fy_auth_target" ] || ln -sfn "$_fy_auth_target" "$_fy_auth" 2>/dev/null ||',
+    `    echo ${shellQuote('ferretry: could not link this runtime to its Codex sign-in; sign in when Codex asks')} >&2`,
+    'fi',
+  ];
+}
 /** The shell variable the per-ferret sections are gathered into, already in the harness's own quoting. */
 const SECTIONS_VARIABLE = '_fy_sections';
 

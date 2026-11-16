@@ -1,3 +1,4 @@
+import { homePortAccepted, homePortAcceptedPath } from '@ferretry/kernel/contract/home-port';
 import { readFile } from 'node:fs/promises';
 
 /**
@@ -11,4 +12,14 @@ export async function readDaemonRunDocument(path: string): Promise<string | unde
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The port this home's configuration has IN EFFECT, from the record the daemon keeps of what it put into effect: never
+ * the text on disk, which may be an edit still held for the owner. `undefined` when it names none (or nothing is
+ * accepted yet): a client with nothing to dial falls back to the well-known address.
+ */
+export async function readHomePort(home: string): Promise<number | undefined> {
+  const outcome = homePortAccepted(await readDaemonRunDocument(homePortAcceptedPath(home)));
+  return outcome.kind === 'port' ? outcome.port : undefined;
 }

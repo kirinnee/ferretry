@@ -10,8 +10,12 @@
 import type { ProfileComponentSource } from '@ferretry/plugin-runtimes/contract';
 import type { HooksItem, SettingsItem } from '../../contract/index.ts';
 
-export function codexSettingsSource(items: () => ReadonlyMap<string, SettingsItem>): ProfileComponentSource {
+export function codexSettingsSource(
+  items: () => ReadonlyMap<string, SettingsItem>,
+  watch?: ProfileComponentSource['watch'],
+): ProfileComponentSource {
   return {
+    ...(watch === undefined ? {} : { watch }),
     list: async () => [...items().keys()].toSorted((left, right) => left.localeCompare(right)),
     read: async name => {
       const item = items().get(name);
@@ -20,8 +24,12 @@ export function codexSettingsSource(items: () => ReadonlyMap<string, SettingsIte
   };
 }
 
-export function codexHooksSource(items: () => ReadonlyMap<string, HooksItem>): ProfileComponentSource {
+export function codexHooksSource(
+  items: () => ReadonlyMap<string, HooksItem>,
+  watch?: ProfileComponentSource['watch'],
+): ProfileComponentSource {
   return {
+    ...(watch === undefined ? {} : { watch }),
     list: async () => [...items().keys()].toSorted((left, right) => left.localeCompare(right)),
     read: async name => {
       const item = items().get(name);

@@ -103,3 +103,13 @@ export const configErrorCode = (error: unknown): string | undefined => {
   const code = callFailure(error)?.code;
   return typeof code === 'string' ? code : undefined;
 };
+
+/** Which configuration files this machine has, and how each stands (`GET /v1/config/status`): names and states only. */
+const ConfigStatusViewSchema = z.looseObject({
+  files: z.array(z.looseObject({ path: NonEmpty, state: z.string() })),
+});
+export type ConfigStatusView = z.infer<typeof ConfigStatusViewSchema>;
+
+export async function readConfigStatus(client: RuntimesClient): Promise<ConfigStatusView> {
+  return ConfigStatusViewSchema.parse(await client.call('GET /v1/config/status'));
+}

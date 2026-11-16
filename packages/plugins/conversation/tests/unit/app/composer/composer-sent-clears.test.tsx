@@ -9,6 +9,7 @@
  * the keyboard idle and with it composing the last word.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { useState } from 'react';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
 import {
@@ -383,4 +384,78 @@ describe('the Inbox reply box after Send (B135)', () => {
       expect(it.shown()).toBe('n');
       await view.unmount();
     });
+});
+
+/**
+ * pb-composer-sent — THE CHAT PAGE HANDS THE COMPOSER A FRESH `daemon` OBJECT ON EVERY RENDER, and it renders
+ * whenever a send starts, lands or the transcript moves. A scope rebuilt from that object each time reopened the
+ * draft stream (a second "device" with the first one's words: the merge offer), forgot the send's mark and
+ * reloaded the saved draft: the sent words stayed in the box, with Send enabled. One daemon is one scope, whatever
+ * object names it.
+ */
+describe('a parent that re-renders with a fresh daemon object each time (pb-composer-sent)', () => {
+  test('Send empties the box, the saved draft and the daemon, and offers nothing back', async () => {
+    const machine = new Machine();
+    const sent: string[] = [];
+    const api = {
+      send: async (_ferretId: string, body: { message: string; sharedDraft?: SharedDraftSent }, requestId?: string) => {
+        sent.push(body.message);
+        if (body.sharedDraft !== undefined) machine.clear(requestId ?? 'no-id', body.sharedDraft);
+        return {};
+      },
+    };
+    const drafts = new DaemonDraftStore(new MemoryStorage());
+    let minted = 0;
+    const outbox = new SendOutbox({
+      backend: new MemoryOutboxBackend(),
+      resolve: async () => api as never,
+      mintId: () => {
+        minted += 1;
+        return `send-${minted}`;
+      },
+    });
+    // Like the chat page: it re-renders on a send starting, landing and on every typed change.
+    const Page = () => {
+      const [, setRenders] = useState(0);
+      const bump = (): void => setRenders(count => count + 1);
+      return (
+        <SendOutboxProvider
+          daemonId="sent"
+          outbox={{ outbox, offer: () => () => undefined, stop: () => undefined }}
+          sender={{ send: api.send as never, upload: async () => 'none' }}
+        >
+          <Composer
+            api={api as never}
+            daemon={daemonConnection('sent')}
+            draftStore={drafts}
+            ferretId="s1"
+            onDraftChange={bump}
+            onSending={bump}
+            onSent={bump}
+          />
+        </SendOutboxProvider>
+      );
+    };
+    const view = await mount(withClient(<Page />, fakeClient({}, { more: socketOf(machine.open) })));
+    await settle();
+    const element = must(view.container.querySelector<HTMLElement>('[data-live-editor]'), 'the live editor');
+    await interact(() => element.focus());
+    const it = person(element);
+    await it.type('hello world');
+    await settle();
+    expect(machine.text).toBe('hello world');
+    const streams = machine.opened.length;
+
+    await it.send();
+    await settle();
+
+    expect(sent).toEqual(['hello world']);
+    expect(it.shown()).toBe('');
+    expect(machine.text).toBe('');
+    expect(drafts.load(daemonFerretScope(daemon, 's1'))).toBe('');
+    // One stream for the whole visit, and no offer to merge words with another device.
+    expect(machine.opened.length).toBe(streams);
+    expect(view.container.textContent).not.toContain("could not be merged with your other device's");
+    await view.unmount();
+  });
 });

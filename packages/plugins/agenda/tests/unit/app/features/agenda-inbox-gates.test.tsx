@@ -93,7 +93,8 @@ const buttonNamed = (mounted: Mounted, name: string): HTMLButtonElement =>
     `the ${name} button`,
   );
 const tool = (mounted: Mounted, name: string): HTMLButtonElement =>
-  must(mounted.container.querySelector<HTMLButtonElement>(`.fy-attn-deck__top [data-inbox-tool="${name}"]`), name);
+  // A quiet tool sits in the ⋯ menu, which is drawn on the page body (so no card clips it).
+  must(mounted.container.ownerDocument.body.querySelector<HTMLButtonElement>(`[data-inbox-tool="${name}"]`), name);
 const openInfo = (mounted: Mounted) =>
   press(must(mounted.container.querySelector('.fy-attn-deck__top [data-agenda-menu-toggle]'), 'the ⋯'));
 const flush = async (): Promise<void> => {
@@ -169,8 +170,10 @@ describe('a gate item in the Inbox', () => {
 
   it('shows "Not needed" once — the button — and no composer under the card', async () => {
     const mounted = await mount(page(fakeInbox(), [gate], { initialOpen: gate.key, renderComposer: composer }));
-    const top = must(mounted.container.querySelector('.fy-attn-deck__top'), 'the open card');
-    const notNeeded = () => [...top.querySelectorAll('button')].filter(b => /not needed/i.test(b.textContent ?? ''));
+    must(mounted.container.querySelector('.fy-attn-deck__top'), 'the open card');
+    // The ⋯ menu holding it is drawn on the page body, so the whole page is searched: still exactly one, and none before it opens.
+    const notNeeded = () =>
+      [...document.body.querySelectorAll('button')].filter(b => /not needed/i.test(b.textContent ?? ''));
     expect(notNeeded().length).toBe(0);
     await openInfo(mounted);
     expect(notNeeded().length).toBe(1);
@@ -475,7 +478,7 @@ describe('the card’s plain buttons for the compass moves', () => {
     const mounted = await mount(page(fake, [question], { initialOpen: question.key }));
     expect(mounted.container.querySelector('[data-inbox-snooze]')).toBeNull();
     await openInfo(mounted);
-    await press(must(mounted.container.querySelector('[data-agenda-menu-snooze]'), 'the first snooze choice'));
+    await press(must(document.body.querySelector('[data-agenda-menu-snooze]'), 'the first snooze choice'));
     const action = fake.deferred.getSnapshot().pending[0]?.action;
     expect(action?.kind).toBe('snooze');
     expect(Date.parse((action as { until: string }).until)).toBe(NOW + 3_600_000);

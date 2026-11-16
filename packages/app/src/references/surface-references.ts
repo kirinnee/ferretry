@@ -32,7 +32,7 @@
  * a name and for every reference written before names existed. A name can never look like an id —
  * the protocol refuses twelve hex characters as a name — so one key can never mean two terminals.
  *
- * A BROWSER PAGE IS PROVED AGAINST THE SESSION'S BROWSER STATUS. `GET /v1/sessions/:id/browser` lists
+ * A BROWSER PAGE IS PROVED AGAINST THE SESSION'S BROWSER STATUS. `GET /v1/ferrets/:ferretId/browser` lists
  * every page that belongs to the session — the agent's and the person's, popups included — by id and,
  * when it was opened with one, by name, so `%browser:app` proves the way `%terminal:dev` does. The
  * status is a complete enumeration only in a SETTLED state: `running`, `stopping` and `stopped` (a

@@ -19,6 +19,16 @@ import {
   daemonUninstall,
   daemonWhich,
 } from './commands/daemon.ts';
+import {
+  configCheckVerb,
+  configConfirmVerb,
+  configGuideVerb,
+  configPathVerb,
+  configSchemaVerb,
+  configShowVerb,
+  configStatusVerb,
+  configWriteVerb,
+} from './commands/config.ts';
 import { doctorVerb } from './commands/doctor.ts';
 import { pluginInstall, pluginList, pluginOff, pluginOn, pluginShow } from './commands/plugin.ts';
 import {
@@ -28,14 +38,16 @@ import {
   machineSetVerb,
   machineShowVerb,
 } from './commands/machine.ts';
+import { statuslineVerb } from './commands/statusline.ts';
 import { wordsVerb } from './commands/words.ts';
 import { updateVerb } from './commands/update.ts';
 import { EXIT, reportFailure, ShellError } from './errors.ts';
 import { lazyClient } from './lazy-client.ts';
-import { pluginEnvironment } from './plugin-env.ts';
+import { declaredEnvironment, pluginEnvironment } from './plugin-env.ts';
 import { buildPluginGraph } from './plugin-graph.ts';
 import type { ShellContext, ShellVerb } from './shell-context.ts';
-import { buildVerbTable, expandAlias, renderHelp, resolveVerb, type VerbEntry } from './verbs.ts';
+import { renderGroupHelp, renderRootHelp, renderVerbHelp, usageLine, verbsUnder } from './help.ts';
+import { buildVerbTable, expandAlias, resolveVerb, type VerbEntry, type VerbTable } from './verbs.ts';
 import type { CliWorld } from './world.ts';
 
 /** The shell's own verb lines and their handlers. The line is the key, exactly as `SHELL_VERB_LINES` spells it. */
@@ -49,6 +61,14 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'plugin check': pluginInstall,
   words: wordsVerb,
   doctor: doctorVerb,
+  'config check': configCheckVerb,
+  'config path': configPathVerb,
+  'config schema': configSchemaVerb,
+  'config status': configStatusVerb,
+  'config show': configShowVerb,
+  'config write': configWriteVerb,
+  'config confirm': configConfirmVerb,
+  'config guide': configGuideVerb,
   'daemon status': daemonStatus,
   'daemon start': daemonStart,
   'daemon stop': daemonStop,
@@ -65,6 +85,7 @@ const SHELL_HANDLERS: Readonly<Record<string, ShellVerb>> = {
   'machine export': machineExportVerb,
   'machine clone': machineCloneVerb,
   update: updateVerb,
+  statusline: statuslineVerb,
 };
 
 /** Flags before the verb. `--help` and `--version` anywhere in the leading flags answer at once. */
@@ -103,6 +124,79 @@ function asksForHelp(tokens: readonly string[]): boolean {
   return false;
 }
 
+type Unknown = Extract<ReturnType<typeof resolveVerb>, { kind: 'unknown' }>;
+type Subverb = Extract<ReturnType<typeof resolveVerb>, { kind: 'subverb' }>;
+
+/** What a help request resolved to: text to print, or the words that name nothing. */
+type HelpRequest =
+  | { readonly kind: 'text'; readonly text: (binary: string) => string }
+  | { readonly kind: 'root' }
+  | { readonly kind: 'unknown'; readonly resolution: Unknown };
+
+/**
+ * `fy help [verb ...]` and `fy <group> --help`: help for words that are a verb or the first words of several (a group).
+ * Anything else falls through to the ordinary dispatch, which owns the unknown-verb sentence.
+ */
+function helpRequest(table: VerbTable, tokens: readonly string[]): HelpRequest | undefined {
+  const viaHelp = tokens[0] === 'help' && !table.entries.some(entry => entry.words[0] === 'help');
+  const words = viaHelp ? tokens.slice(1) : tokens;
+  if (!viaHelp && !asksForHelp(tokens)) return undefined;
+  const leading: string[] = [];
+  for (const word of words) {
+    if (word.startsWith('-')) break;
+    leading.push(word);
+  }
+  if (leading.length === 0) return viaHelp ? { kind: 'root' } : undefined;
+  const resolution = resolveVerb(table, leading);
+  // A bare group that declares a default resolves to that sub-verb, but its help is the group's: the list of its verbs.
+  if (
+    resolution.kind === 'verb' &&
+    resolution.entry.words.length > leading.length &&
+    verbsUnder(table, leading).length > 0
+  )
+    return { kind: 'text', text: binary => renderGroupHelp(binary, leading, table) };
+  if (resolution.kind === 'verb') {
+    // A verb's own `--help` is answered after alias expansion, below; `fy help <verb>` answers it here.
+    if (!viaHelp) return undefined;
+    const { entry } = resolution;
+    return { kind: 'text', text: binary => renderVerbHelp(binary, entry, table) };
+  }
+  if (verbsUnder(table, leading).length > 0)
+    return { kind: 'text', text: binary => renderGroupHelp(binary, leading, table) };
+  if (!viaHelp) return undefined;
+  // A run that leads into a group but names nothing in it (`help agenda bogus`) is as unknown as a first word nothing owns.
+  const nearby = table.entries.filter(entry => entry.words[0] === leading[0]);
+  const unknown: Unknown = resolution.kind === 'unknown' ? resolution : { kind: 'unknown', typed: leading, nearby };
+  return { kind: 'unknown', resolution: unknown };
+}
+
+/** A known verb with sub-verbs and a word where its sub-verb belongs that is none of them (or no word at all). */
+function subverbRefusal(world: CliWorld, resolved: Subverb): number {
+  const { io, identity } = world;
+  const parent = resolved.parent.words.join(' ');
+  const subs = resolved.subverbs.map(each => `  ${identity.binary} ${each.words.join(' ')}`);
+  const said =
+    resolved.word === undefined
+      ? `${identity.binary}: ${parent} needs a sub-verb:`
+      : `${identity.binary}: "${resolved.word}" is not a sub-verb of ${parent}${
+          resolved.didYouMean === undefined
+            ? ''
+            : ` (did you mean "${resolved.didYouMean.words.join(' ')}"? to use "${resolved.word}" as words, put it after --)`
+        }; its sub-verbs are:`;
+  io.err(`${said}\n${subs.join('\n')}\n`);
+  return EXIT.usage;
+}
+
+function unknownVerb(world: CliWorld, resolved: Unknown): number {
+  const { io, identity } = world;
+  const typed = resolved.typed.join(' ');
+  const near = resolved.nearby.map(entry => `  ${identity.binary} ${entry.words.join(' ')}`);
+  io.err(
+    `${identity.binary}: unknown verb "${typed}"${near.length > 0 ? `; did you mean:\n${near.join('\n')}` : `; see \`${identity.binary} --help\``}\n`,
+  );
+  return EXIT.usage;
+}
+
 /** `argv` excludes the runtime and script. Returns the exit code; never throws. */
 export async function runFy(argv: readonly string[], world: CliWorld): Promise<number> {
   const { io, identity } = world;
@@ -127,7 +221,15 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     return EXIT.ok;
   }
   if (leading.help || leading.rest.length === 0) {
-    io.out(`${renderHelp(identity.binary, table, { ...surfaces.titles })}\n`);
+    io.out(`${renderRootHelp(identity.binary, table, { ...surfaces.titles })}\n`);
+    return EXIT.ok;
+  }
+  const asked = helpRequest(table, leading.rest);
+  if (asked !== undefined) {
+    if (asked.kind === 'unknown') return unknownVerb(world, asked.resolution);
+    io.out(
+      `${asked.kind === 'root' ? renderRootHelp(identity.binary, table, { ...surfaces.titles }) : asked.text(identity.binary)}\n`,
+    );
     return EXIT.ok;
   }
 
@@ -138,25 +240,21 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     tokens = expandAlias(resolved.entry, resolved.rest) ?? tokens;
     resolved = resolveVerb(table, tokens);
   }
-  if (resolved.kind === 'unknown') {
-    const typed = resolved.typed.join(' ');
-    const near = resolved.nearby.map(entry => `  ${identity.binary} ${entry.words.join(' ')}`);
-    io.err(
-      `${identity.binary}: unknown verb "${typed}"${near.length > 0 ? `; did you mean:\n${near.join('\n')}` : `; see \`${identity.binary} --help\``}\n`,
-    );
-    return EXIT.usage;
-  }
+  if (resolved.kind === 'unknown') return unknownVerb(world, resolved);
+
+  if (resolved.kind === 'subverb') return subverbRefusal(world, resolved);
 
   const { entry } = resolved;
   if (asksForHelp(resolved.rest)) {
-    io.out(`${identity.binary} ${entry.words.join(' ')}${entry.summary === undefined ? '' : `: ${entry.summary}`}\n`);
-    if (entry.options !== undefined && entry.options.length > 0) {
-      io.out('\noptions:\n');
-      for (const option of entry.options) io.out(`  ${option.flag}\n      ${option.help}\n`);
-    }
+    io.out(`${renderVerbHelp(identity.binary, entry, table)}\n`);
     return EXIT.ok;
   }
   const invocation = parseArgs(resolved.rest);
+  const lacking = missingRequiredOption(entry, invocation);
+  if (lacking !== undefined) {
+    io.err(`error: required option '${lacking.flag}' not specified\n${usageLine(identity.binary, entry)}\n`);
+    return EXIT.failure;
+  }
 
   let opened: Promise<ClientDeps> | undefined;
   const deps = (): Promise<ClientDeps> => {
@@ -188,7 +286,22 @@ async function dispatch(argv: readonly string[], world: CliWorld): Promise<numbe
     };
     return await handler(context);
   }
-  return await runPluginVerb(world, entry, invocation, deps, surfaces);
+  return await runPluginVerb(world, entry, { ...invocation, words: resolved.rest }, deps, surfaces);
+}
+
+/** The first option the verb declares required that the words do not carry, by any of its spellings (`-s, --scope <scope>`). */
+function missingRequiredOption(
+  entry: VerbEntry,
+  invocation: ReturnType<typeof parseArgs>,
+): { readonly flag: string } | undefined {
+  return (entry.options ?? []).find(option => {
+    if (option.required !== true) return false;
+    const names = option.flag
+      .split(/[|,]/u)
+      .map(part => (part.trim().split(/\s+/u)[0] ?? '').replace(/^-{1,2}/u, ''))
+      .filter(name => name !== '');
+    return !names.some(name => invocation.options[name] !== undefined);
+  });
 }
 
 async function runPluginVerb(
@@ -218,7 +331,9 @@ async function runPluginVerb(
     readBytes: path => world.host.readBytes(path),
     exists: path => world.host.exists(path),
     stdin: () => world.host.stdin(),
+    ...(world.promptHidden === undefined ? {} : { promptHidden: world.promptHidden }),
     env: pluginEnvironment(world.environment, world.host.cwd()),
+    readEnvironment: names => declaredEnvironment(world.environment, plugin.manifest.permissions?.cliEnvReads, names),
     ownState: world.host.ownState(plugin.manifest),
   });
   const handler = (built.verbs as Readonly<Record<string, VerbHandler | undefined>>)[entry.line];

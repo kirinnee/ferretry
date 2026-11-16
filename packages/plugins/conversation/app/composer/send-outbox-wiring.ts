@@ -8,6 +8,7 @@
  * daemon's entries. A composer reaches it with {@link useSendOutbox} inside a {@link SendOutboxProvider}.
  */
 
+import type { PluginFeed } from '@ferretry/kernel/manifest';
 import { createElement, type ReactNode, useContext, useEffect, useMemo, createContext } from 'react';
 import { uploadAttachment } from './attachment-upload.ts';
 import { type ConversationCaller, type DaemonConnection, daemonFerretScope } from './seam.ts';
@@ -83,23 +84,21 @@ export const daemonOutboxBackend = (backend: OutboxBackend, daemonId: string): O
   delete: async (id: string) => await backend.delete(id),
 });
 
-/**
- * The browser's own signals. GAP(app-shell): a half hears no "this machine recovered" moment (today's connection
- * health), so only the browser coming online and the outbox's own retry timer make it try again.
- */
-const browserEnvironment: OutboxWatchEnvironment = {
-  onRecovered: () => () => undefined,
-  onOnline: listener => {
-    globalThis.addEventListener?.('online', listener);
-    return () => globalThis.removeEventListener?.('online', listener);
-  },
+/** The browser's own "network is back" signal. */
+const browserOnline: OutboxWatchEnvironment['onOnline'] = listener => {
+  globalThis.addEventListener?.('online', listener);
+  return () => globalThis.removeEventListener?.('online', listener);
 };
 
 /** One daemon's outbox, and the senders the composers drawn for that daemon offer it. */
 export interface DaemonOutbox {
   readonly outbox: SendOutbox;
-  /** A composer for this daemon is up: its sender carries the outbox's entries. Returns the way to take it back. */
-  offer(sender: OutboxSender): () => void;
+  /**
+   * A composer for this daemon is up: its sender carries the outbox's entries. `feed` is that client's event feed: while
+   * the sender is offered, the feed coming live (the machine answering again) makes the outbox try again. Returns the
+   * way to take it back.
+   */
+  offer(sender: OutboxSender, feed?: Pick<PluginFeed, 'subscribeLive'>): () => void;
   stop(): void;
 }
 
@@ -117,11 +116,21 @@ export interface DaemonOutboxOptions {
 
 /**
  * Builds one daemon's outbox: it loads what a previous page left, tries it, and keeps trying at the moments a message
- * could get through. Its machine is reachable only while a composer for it has offered a sender; until then its
+ * could get through. Its machine is reachable only while a sender has been offered for it (a composer's, or the shell's
+ * background {@link OutboxHost}); until then its
  * entries wait (`waiting for connection`), exactly as today's outbox waited for a machine it could not dial.
  */
 export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox => {
   const senders: OutboxSender[] = [];
+  // The "machine recovered" moment, heard from the feeds of the clients that offered a sender (see `offer`).
+  const recovery = new Set<() => void>();
+  const environment: OutboxWatchEnvironment = options.environment ?? {
+    onRecovered: (_daemonId, listener) => {
+      recovery.add(listener);
+      return () => recovery.delete(listener);
+    },
+    onOnline: browserOnline,
+  };
   const outbox = new SendOutbox({
     backend: daemonOutboxBackend(options.backend ?? new MemoryOutboxBackend(), options.daemonId),
     mintId: options.mintId ?? (() => crypto.randomUUID()),
@@ -132,14 +141,18 @@ export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox =
     ...(options.clearTimer === undefined ? {} : { clearTimer: options.clearTimer }),
   });
   void outbox.load().then(() => outbox.drainAll());
-  const stop = watchOutbox(outbox, options.environment ?? browserEnvironment);
+  const stop = watchOutbox(outbox, environment);
   return {
     outbox,
-    offer: sender => {
+    offer: (sender, feed) => {
       senders.push(sender);
+      const hearFeed = feed?.subscribeLive(live => {
+        if (live) for (const listener of [...recovery]) listener();
+      });
       // A composer coming up is the moment this machine became reachable from here.
       void outbox.drainDaemon(options.daemonId);
       return () => {
+        hearFeed?.();
         const index = senders.lastIndexOf(sender);
         if (index >= 0) senders.splice(index, 1);
       };
@@ -151,7 +164,7 @@ export const createDaemonOutbox = (options: DaemonOutboxOptions): DaemonOutbox =
 const documentOutboxes = new Map<string, DaemonOutbox>();
 
 /** The document-lifetime outbox of one daemon, made on first use over the browser's storage. */
-const documentOutbox = (daemonId: string): DaemonOutbox => {
+export const documentOutbox = (daemonId: string): DaemonOutbox => {
   let existing = documentOutboxes.get(daemonId);
   if (existing === undefined) {
     existing = createDaemonOutbox({ daemonId, backend: browserOutboxBackend() ?? new MemoryOutboxBackend() });
@@ -170,15 +183,18 @@ export function SendOutboxProvider({
   daemonId,
   sender,
   outbox,
+  feed,
   children,
 }: {
   readonly daemonId: string;
   readonly sender: OutboxSender;
   readonly outbox?: DaemonOutbox;
+  /** The client's event feed: the outbox tries again when it comes live. */
+  readonly feed?: Pick<PluginFeed, 'subscribeLive'>;
   readonly children?: ReactNode;
 }) {
   const daemonOutbox = useMemo(() => outbox ?? documentOutbox(daemonId), [outbox, daemonId]);
-  useEffect(() => daemonOutbox.offer(sender), [daemonOutbox, sender]);
+  useEffect(() => daemonOutbox.offer(sender, feed), [daemonOutbox, sender, feed]);
   return createElement(SendOutboxContext.Provider, { value: daemonOutbox.outbox }, children);
 }
 

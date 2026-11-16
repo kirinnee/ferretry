@@ -10,7 +10,7 @@
       "project": ["**/*.ts"]
     },
     "packages/core/kernel": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/*": {
@@ -26,7 +26,13 @@
       "project": ["**/*.ts"]
     },
     "packages/app": {
-      "entry": ["src/main.tsx", "src/worker/service-worker.ts", "scripts/**/*.ts", "tests/**/*.test.{ts,tsx}"],
+      "entry": [
+        "src/main.tsx",
+        "src/worker/service-worker.ts",
+        "scripts/**/*.ts",
+        "tests/**/*.test.{ts,tsx}",
+        "tests/**/fixtures/**/*.{ts,tsx}"
+      ],
       "project": ["**/*.{ts,tsx,css}"],
       "ignore": ["tests/support/dom-leak-guard.ts"]
     },
@@ -35,7 +41,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/ferrets": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
         "daemon/lib/session/events/service.ts",
@@ -54,10 +60,8 @@
         "daemon/lib/session/peers/question.ts",
         "daemon/lib/session/peers/send.ts",
         "daemon/lib/session/restart/index.ts",
-        "daemon/lib/session/live/index.ts",
         "daemon/adapters/session/archive/index.ts",
         "daemon/lib/session/directory/session-directory.ts",
-        "daemon/lib/session/monitor/types.ts",
         "daemon/lib/session/runtime-control/index.ts",
         "daemon/lib/session/runtime-control/service.ts"
       ]
@@ -68,7 +72,7 @@
       "ignore": ["app/lib/agenda-source-refs.ts"]
     },
     "packages/plugins/board": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/claude-code": {
@@ -76,20 +80,16 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/packs": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/projects": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
-      "ignore": [
-        "app/hooks/use-project-scope.ts",
-        "app/hooks/use-work-project-names.ts",
-        "app/lib/work-project-names.ts"
-      ]
+      "ignore": ["app/hooks/use-project-scope.ts"]
     },
     "packages/plugins/runtimes": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/updates": {
@@ -97,11 +97,11 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/warden": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/connections": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/worker.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "worker/src/adapters/worker.ts"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/catalogs": {
@@ -113,11 +113,19 @@
       ],
       "project": ["**/*.{ts,tsx}"]
     },
+    "packages/plugins/browsers": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
     "packages/plugins/conversation": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/usage": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/logins": {
       "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"]
     },
@@ -148,7 +156,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/onboarding": {
-      "entry": ["tests/**/*.test.{ts,tsx}"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}"],
       "project": ["**/*.{ts,tsx}"],
       "ignore": ["app/landing-geometry.ts"]
     }

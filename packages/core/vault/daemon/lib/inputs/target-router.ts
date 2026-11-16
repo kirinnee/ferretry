@@ -61,7 +61,7 @@ export class InputTargetRouter implements InputTargetPort {
     if (target.kind === 'secret')
       return this.store === undefined
         ? 'target_gone'
-        : await this.store.type(sessionId, target, values, submit, expected);
+        : await this.store.type(sessionId, target, values, submit, expected, options);
     if (target.kind === 'page')
       return this.browser === undefined
         ? 'target_gone'

@@ -108,6 +108,11 @@ export const SendRecordSchema = z.strictObject({
   deadlineAt: InstantSchema.optional(),
   retryable: z.boolean().optional(),
   typedNotSent: z.boolean().optional(),
+  /**
+   * Set while a send is STUCK: nothing could be typed for it for longer than the daemon's stuck limit, because the
+   * agent's input box could not be proven empty. The daemon keeps trying; a redraw of the agent's screen lets it go.
+   */
+  stuckAt: InstantSchema.optional(),
   cancelEffect: SendCancelEffectSchema.optional(),
   opportunityAt: InstantSchema.optional(),
   unaccountedDeadline: InstantSchema.optional(),
@@ -230,6 +235,14 @@ export type ComposerResult = z.infer<typeof ComposerResultSchema>;
 /** `PATCH /v1/ferrets/:ferretId/hypermedia`: whether the ferret may emit renders (today's route; body is a switch). */
 export const HypermediaRequestSchema = z.strictObject({ enabled: z.boolean() });
 export type HypermediaRequest = z.infer<typeof HypermediaRequestSchema>;
+
+/**
+ * `GET /v1/ferrets/:ferretId/hypermedia`: whether the ferret is told to use hypermedia now — the switch the owner set,
+ * else the default for its mode (on for an interactive ferret, off for an automatic one). The daemon says it; a reader
+ * never works the default out from a summary of the ferret.
+ */
+export const HypermediaStateSchema = z.strictObject({ enabled: z.boolean() });
+export type HypermediaState = z.infer<typeof HypermediaStateSchema>;
 
 /** What switching it did: nothing is sent to the ferret, so a RUNNING one takes the change at its next launch. */
 export const HypermediaResultSchema = z.strictObject({

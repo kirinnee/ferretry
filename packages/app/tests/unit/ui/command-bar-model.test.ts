@@ -1,5 +1,74 @@
 import { describe, expect, it } from 'bun:test';
-import { commandBarCountLabel, nextActiveIndex } from '../../../src/ui/command-bar-model.ts';
+import {
+  type CommandBarEntry,
+  type CommandBarSource,
+  commandBarCountLabel,
+  commandBarResults,
+  MAX_GROUP_RESULTS,
+  nextActiveIndex,
+} from '../../../src/ui/command-bar-model.ts';
+
+const entry = (id: string, extra: Partial<CommandBarEntry> = {}): CommandBarEntry => ({
+  id,
+  group: 'Go to',
+  label: id,
+  resting: true,
+  run: () => undefined,
+  ...extra,
+});
+const source =
+  (...entries: CommandBarEntry[]): CommandBarSource =>
+  () =>
+    entries;
+
+describe('commandBarResults: one place, one row', () => {
+  it('lists an id two sources offer once, where the first stood, with the later source’s entry', () => {
+    const plain = source(entry('a'), entry('screen-board.board', { label: 'Board' }), entry('c'));
+    const rich = source(entry('screen-board.board', { label: 'Board', description: 'Every task on every machine' }));
+    const found = commandBarResults([plain, rich], '').results;
+    expect(found.map(one => one.id)).toEqual(['a', 'screen-board.board', 'c']);
+    expect(found[1]?.description).toBe('Every task on every machine');
+  });
+
+  it('drops the earlier entry when the later one does not match the query', () => {
+    const plain = source(entry('x', { label: 'Board' }));
+    const rich = source(entry('x', { label: 'Elsewhere' }));
+    expect(commandBarResults([plain, rich], 'board').results).toEqual([]);
+  });
+});
+
+describe('commandBarResults: order', () => {
+  it('lists a group by entry order at rest, whichever source brought it, and unordered ones after', () => {
+    const found = commandBarResults(
+      [
+        source(entry('settings', { order: 1000 })),
+        source(entry('loose'), entry('board', { order: 30 }), entry('ferrets', { order: 5 })),
+      ],
+      '',
+    ).results;
+    expect(found.map(one => one.id)).toEqual(['ferrets', 'board', 'settings', 'loose']);
+  });
+
+  it('breaks a tie between equal matches by order, not by which source spoke first', () => {
+    const found = commandBarResults(
+      [source(entry('late', { order: 9, label: 'Match' }), entry('early', { order: 1, label: 'Match' }))],
+      'match',
+    );
+    expect(found.results.map(one => one.id)).toEqual(['early', 'late']);
+  });
+});
+
+describe('commandBarResults: how many a group shows', () => {
+  const many = source(...Array.from({ length: MAX_GROUP_RESULTS + 5 }, (_, index) => entry(`place-${index}`)));
+
+  it('shows every resting entry with no query: v4 listed all its places on an empty palette', () => {
+    expect(commandBarResults([many], '').results).toHaveLength(MAX_GROUP_RESULTS + 5);
+  });
+
+  it('caps a searched group: the bar is for jumping, not browsing', () => {
+    expect(commandBarResults([many], 'place').results).toHaveLength(MAX_GROUP_RESULTS);
+  });
+});
 
 describe('nextActiveIndex', () => {
   it('leaves every key alone when the list is empty', () => {

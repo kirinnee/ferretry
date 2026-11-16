@@ -5,6 +5,7 @@ import {
   type FerretEndCause,
   FerretEndCauseSchema,
   FerretSummarySchema,
+  START_EXPLAINED_MAX,
 } from '../../../../contract/index.ts';
 import { T0 } from '../../../../contract/testing/index.ts';
 import { summaryOf } from '../../../../daemon/lib/registry/registry.ts';
@@ -24,6 +25,15 @@ test('death cause: today’s words parse, anything else does not', () => {
     expect(FerretEndCauseSchema.safeParse(cause).success).toBe(true);
   expect(FerretEndCauseSchema.safeParse({ kind: 'oom' }).success).toBe(false);
   expect(FerretEndCauseSchema.safeParse({ kind: 'signal', signal: 0 }).success).toBe(false);
+});
+
+test('death cause: a start_failed may carry the harness sentence, bounded and never empty', () => {
+  const parse = (explained: unknown) => FerretEndCauseSchema.safeParse({ kind: 'start_failed', explained }).success;
+  expect(parse('Codex needs a network connection to start.')).toBe(true);
+  expect(parse('x'.repeat(START_EXPLAINED_MAX))).toBe(true);
+  expect(parse('x'.repeat(START_EXPLAINED_MAX + 1))).toBe(false);
+  expect(parse('')).toBe(false);
+  expect(FerretEndCauseSchema.safeParse({ kind: 'stopped', explained: 'no' }).success).toBe(false);
 });
 
 test('death cause: a stopped ferret says it was stopped; resuming clears it; a running ferret has none', async () => {

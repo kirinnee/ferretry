@@ -945,7 +945,13 @@ export class WardenSweepService {
       ...(state.lastSpawnAt === undefined ? {} : { lastSpawnAt: state.lastSpawnAt }),
       // A report's head is the owner's: a ferret is never shown report text, so it is not even read for one.
       ...(scope === undefined ? await this.latestReportField() : {}),
-      failover: await this.failoverStatus(stored.config, resolved.accounts, state.failover ?? {}),
+      // A strike or a demotion is the record of some investigation's failure, whichever lineage it was: a scoped reader
+      // judges a login by its settings and the usage feed alone, so another lineage's failure cannot flip `eligible`.
+      failover: await this.failoverStatus(
+        stored.config,
+        resolved.accounts,
+        scope === undefined ? (state.failover ?? {}) : {},
+      ),
       login: resolved.login,
       triage: budget.status,
       spend: budget.spend,
@@ -1716,7 +1722,7 @@ export class WardenSweepService {
         state,
         {
           name: `Investigate ${target.config.teammate === undefined ? targetId.slice(0, 8) : displayAgentName(target.config.teammate)}`,
-          prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
+          prompt: buildAssignedWardenPrompt(anomaly, target, this.settings),
           cwd: this.settings.wardenCwd,
           effort: input.config.investigation.effort,
           stopCapability: capability,
@@ -2608,8 +2614,11 @@ export class WardenSweepService {
     let routed: { readonly agent: string; readonly note?: string } | undefined;
     try {
       if (act.action === 'failover') {
-        routed = await this.routeFailover(target, act.agent);
-        await this.ports.remedies.failover(targetId, routed.agent);
+        routed = await this.routeFailover(target, act.agent, async chosen => {
+          // Named before the move so a refused move is recorded against the login it was routed TO.
+          routed = chosen;
+          await this.ports.remedies.failover(targetId, chosen.agent);
+        });
       } else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
       else if (act.action === 'resume' || act.action === 'restart') {
         // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
@@ -2672,18 +2681,25 @@ export class WardenSweepService {
   /**
    * The login an investigation's `MOVE (agent)` really goes to: the one it named when it is ready, else the best
    * ready one, else an error naming every login tried (`auto-move.ts`). Without the mover there is no one to say
-   * a login is ready, and the move is refused rather than made blind.
+   * a login is ready, and the move is refused rather than made blind. The move itself (`move`) runs INSIDE the
+   * mover's guard — its lock, the fail-closed owner-hold read, the hourly cap and its ledger — never beside it.
    */
   private async routeFailover(
     target: WardenFleetSession,
     named: string,
+    move: (chosen: { readonly agent: string; readonly note?: string }) => Promise<void>,
   ): Promise<{ readonly agent: string; readonly note?: string }> {
     const service = this.ports.autoMove;
     if (service === undefined) throw new Error(`nothing can check that ${named} is ready, so it was not moved`);
     const { agent, harness } = target.config;
     if (agent === undefined || harness === undefined) throw new Error('it records no login to move from');
     const config = parseStoredWardenConfig(await this.ports.config.read()).config;
-    return await service.failoverTarget({ agent, harness }, named, config);
+    return await service.failover(
+      { sessionId: target.config.id, source: { agent, harness }, named },
+      config,
+      this.ports.nowMs(),
+      move,
+    );
   }
 
   /** The logins each flagged ferret could be moved to, for the investigation's prompt; none without the mover. */
@@ -3180,6 +3196,11 @@ export class WardenSweepService {
       const finished = record.finishedAt ?? (live.has(record.id) || record.startedAt === at ? undefined : at);
       const finishedMs = finished === undefined ? undefined : Date.parse(finished);
       const worthAsking = record.costUsd === undefined && finishedMs !== undefined && nowMs - finishedMs < 86_400_000;
+      // A finished investigator's report is the summary of its last `signal done`; only a read through the artifacts
+      // adapter files it (masked, never over a report already filed). Done for every finished record, not only an
+      // assignment's, and for a day — the summary may land after the session stops, so an absent one is retried.
+      if (finishedMs !== undefined && nowMs - finishedMs < 86_400_000)
+        await this.ports.artifacts.readReport(record.reportPath).catch(() => undefined);
       const costUsd = worthAsking ? await this.ports.costs.costUsd(record.id).catch(() => undefined) : undefined;
       if (costUsd !== undefined && Number.isFinite(costUsd) && costUsd >= 0)
         average = { count: average.count + 1, totalUsd: average.totalUsd + costUsd };
@@ -3269,7 +3290,6 @@ export class WardenSweepService {
         prompt: buildWardenSweepPrompt({
           anomalies,
           sessions: input.fleet,
-          reportPath,
           at: input.at,
           moveCandidates: await this.moveCandidates(anomalies, input.fleet, config),
           settings: this.settings,

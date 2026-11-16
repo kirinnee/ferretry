@@ -55,7 +55,14 @@ export const TidyKeepSchema = z.discriminatedUnion('kind', [
 ]);
 export type TidyKeep = z.infer<typeof TidyKeepSchema>;
 
-/** The plan names the calling ferret from its own credential and never takes one in the request. */
+/**
+ * `POST /v1/tidy/plan`'s optional body. `ferret` is the owner's way to plan ANOTHER ferret's tidy (v4's `--session`); a
+ * ferret's own credential may leave it out or name itself, and any other ferret is refused.
+ */
+export const TidyPlanRequestSchema = z.strictObject({ ferret: FerretIdSchema.optional() });
+export type TidyPlanRequest = z.infer<typeof TidyPlanRequestSchema>;
+
+/** The plan names the ferret it is for: the caller's own from its credential, or the one the owner asked about. */
 export const TidyPlanSchema = z.strictObject({
   ferret: FerretIdSchema,
   /** A helper holds no cards to drop (the board refuses its drops), so its plan has none. */
@@ -110,7 +117,13 @@ export const SCRATCH_CODES = {
   unknownParameter: 'unknown_parameter',
   invalidLimit: 'invalid_limit',
 } as const;
-export const TIDY_CODES = { forbidden: 'forbidden', unavailable: 'unavailable' } as const;
+export const TIDY_CODES = {
+  forbidden: 'forbidden',
+  /** A ferret's credential named a ferret other than itself. */
+  notYours: 'not_yours',
+  unknownFerret: 'unknown_ferret',
+  unavailable: 'unavailable',
+} as const;
 
 // ─── config and state ─────────────────────────────────────────────────────────────────────────────────────────────
 

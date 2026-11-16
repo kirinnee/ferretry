@@ -399,8 +399,14 @@ Every push names a page, and the worker opens a page even when one does not:
   today); this happens when the owner is present, as today.
 - **A push with no item** opens the chat it came from: `/ferrets/<id>/chat`
   (`sessionNotificationPath`).
-- **A push that names no page it may open** (`/`, an enrolment confirmation, a new-device alert) opens the app. There is no
-  `sessionId` fallback.
+- **A push that names no page it may open** (`/`, an enrolment confirmation, a new-device alert) opens the machine's home,
+  or the conversation the push is about when it carries a `sessionId` (`/ferrets/<sessionId>/chat`, read through the same
+  closed grammar as any page). The show envelope carries `eventKey` and `sessionId` as optional hints (dropped, never
+  refused, when malformed). An `eventKey` names ONE event (a passkey addition's device and instant, a stop's moment), never
+  the notification tag, which distinct events share. A push whose `eventKey` a line already showing carries is a
+  re-delivery and is skipped, but only when the push is tagged and its key is not its tag: an older daemon copied the
+  tag into the key, and trusting that would drop a second real alert. A buzz that names no event sends no key and is
+  never skipped; the cost of any doubt is a duplicate line, never a lost one.
 - **Which window.** An app window wins over the landing page, which has no router. Among app windows,
   the one the reader is looking at wins.
 - **How the window gets there.** The worker brings the window forward and asks the app to route there
@@ -501,7 +507,7 @@ Bug batch: ONE agenda, line each + where tracked. Owner Q: answer ON it, options
   Info › Runtime tab shows it as a row, and the sidebar / header marks (a to-do list icon) show it only
   while it is on.
 - **Flipping it from a ferret:** `fy notify agenda` reads the mode, `fy notify agenda on|off` switches it,
-  over `GET`/`PATCH /v1/sessions/:id/agenda-mode` (operator scope; no capability, like the Pack switch).
+  over `GET`/`PATCH /v1/ferrets/:ferretId/agenda-mode` (operator scope; no capability, like the Pack switch).
   `PATCH` answers `{ view, restartRequired, note }` like the Hypermedia and Pack switches: a running ferret
   reads its instructions once, at launch, so the change takes effect when the ferret next starts.
 - **The nudge follows the mode.** The turn-end check (the safety net for a reply that asks the owner to act

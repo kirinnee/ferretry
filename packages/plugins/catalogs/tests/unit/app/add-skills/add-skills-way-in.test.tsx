@@ -18,16 +18,18 @@ const props = {
 };
 
 describe('S-0388 Catalogs declares the Add skills screen and contributes the way in to Skills’ slot', () => {
-  it('declares the screen under a ferret, and one panel in skills.add', () => {
+  it('S-0388 declares the screen under a ferret, and one panel in skills.add (and the Actions row beside it)', () => {
     expect(manifest.ui?.screens?.find(screen => screen.id === 'add-skills')?.path).toBe('ferrets/:ferret/add-skills');
-    expect(manifest.ui?.panels).toEqual([{ slot: SKILLS_ADD_SLOT, id: 'add-skills', order: 10 }] as never);
+    expect(manifest.ui?.panels?.filter(panel => panel.slot === SKILLS_ADD_SLOT)).toEqual([
+      { slot: SKILLS_ADD_SLOT, id: 'add-skills', order: 10 },
+    ] as never);
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills']);
+    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row']);
   });
 });
 
 describe('S-0304 the way in carries where the ferret is', () => {
-  it('writes the place into the query and reads the same place back', () => {
+  it('S-0304 writes the place into the query and reads the same place back', () => {
     expect(readPlace(placeQuery(props))).toEqual({
       cwd: '/work/app',
       harness: 'codex',

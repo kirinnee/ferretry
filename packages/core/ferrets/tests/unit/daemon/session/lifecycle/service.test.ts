@@ -109,6 +109,11 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   /** Set when a *failing* launch still leaves a pane behind — the case retrying must not fight. */
   liveAfterFailure = false;
 
+  /** Set to the sentence a launcher gives for a launch it would refuse ahead. */
+  refusal: string | undefined;
+  /** How many times the start asked, kept apart from `calls` so no launch-order assertion moves. */
+  refusalAsks = 0;
+
   constructor(private readonly order: string[] = []) {}
 
   private record(call: string): void {
@@ -119,6 +124,11 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   async alive(): Promise<boolean> {
     this.record('alive');
     return this.live;
+  }
+
+  async refuseLaunch(): Promise<string | undefined> {
+    this.refusalAsks += 1;
+    return this.refusal;
   }
 
   /** What a successful launch says its pane was told; `undefined` is a launcher that cannot say. */
@@ -1534,7 +1544,7 @@ function credentialResolver(
 describe('SessionLifecycleService credential per launch', () => {
   const capabilities = ['created-capability', 'first-pane-capability', 'second-pane-capability'] as const;
 
-  function rotating(): Harness & {
+  function rotating(extra: Partial<SessionLifecyclePorts> = {}): Harness & {
     readonly environment: RecordingEnvironmentStore;
     readonly credentials: SequenceCredentialIssuer;
     readonly hashes: RepositoryHashStore;
@@ -1565,7 +1575,7 @@ describe('SessionLifecycleService credential per launch', () => {
         },
       },
     });
-    const built = harness({ credentials, environment, rotation });
+    const built = harness({ credentials, environment, rotation, ...extra });
     hashes = new RepositoryHashStore(built.repository, built.order);
     const session = async () => {
       const record = built.repository.current();
@@ -1604,6 +1614,67 @@ describe('SessionLifecycleService credential per launch', () => {
     should(await built.resolve('created-capability')).be.undefined();
     // Recorded before the pane exists, so the pane is never holding a credential nothing accepts.
     should(built.order.indexOf('hash')).be.below(built.order.indexOf('launch'));
+  });
+
+  it('should refuse a start the launcher refuses BEFORE it re-issues the credential, marks the record or takes a lease', async () => {
+    // Arrange — a launch that would do nothing (the registry calls the ferret live but no pane is visible)
+    const leases = new RecordingLeases();
+    const built = rotating({ leases });
+    await built.subject.create(input());
+    built.launcher.refusal = 'ferret mw7bp88g is recorded as working, so a launch would open no pane';
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert — the creation's credential still authenticates, nothing was written, claimed or launched
+    await should(starting).be.rejectedWith(/a launch would open no pane/u);
+    should(await built.resolve('created-capability')).equal(ID);
+    should(await built.resolve('first-pane-capability')).be.undefined();
+    should(built.environment.written.get(ID)).deepEqual({
+      FY_SESSION_BOARD_CAPABILITY: 'created-capability',
+      FY_SESSION_MODE: 'auto',
+    });
+    should(built.repository.current().state.status).equal('created');
+    should(leases.calls).deepEqual([]);
+    should(built.launcher.launches()).equal(0);
+  });
+
+  it('should not ask the launcher whether to refuse a start whose terminal is already live', async () => {
+    // Arrange
+    const built = rotating();
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+    await built.subject.start(ID);
+    built.launcher.refusal = 'never reached';
+    const asked = built.launcher.refusalAsks;
+
+    // Act — a retried start of a running session with a live pane
+    const again = await built.subject.start(ID);
+
+    // Assert
+    should(again.state.status).equal('running');
+    should(built.launcher.refusalAsks).equal(asked);
+  });
+
+  it('should refuse a held conversation BEFORE the credential is re-issued, so a refused launch never cuts a pane off', async () => {
+    // Arrange
+    const leases = new RecordingLeases();
+    leases.claimError = new Error('conversation c is being written by session s-2 on claude-review');
+    const built = rotating({ leases });
+    await built.subject.create(input());
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert
+    await should(starting).be.rejectedWith(/being written by session s-2/u);
+    should(await built.resolve('created-capability')).equal(ID);
+    should(built.environment.written.get(ID)).deepEqual({
+      FY_SESSION_BOARD_CAPABILITY: 'created-capability',
+      FY_SESSION_MODE: 'auto',
+    });
+    should(built.order).not.containEql('hash');
+    should(built.launcher.launches()).equal(0);
   });
 
   it('should re-issue on every relaunch, so the replaced pane credential dies with it', async () => {

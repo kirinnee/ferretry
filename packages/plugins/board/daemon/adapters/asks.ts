@@ -36,7 +36,7 @@ export class AsksCardObligations implements CardObligations {
 
   async withdraw(entry: string, reason: 'withdrawn' | 'superseded'): Promise<void> {
     for (const ask of await this.asks.open({ source: CARD_SOURCE, entry: entry as EntryId, state: 'open' }))
-      await this.asks.close({ ferret: ask.ferret ?? '', id: ask.id }, reason);
+      await this.asks.close({ ferret: ask.ferret ?? '', id: ask.id }, reason, entry as EntryId);
   }
 
   async open(card?: CardId): Promise<readonly OpenCardAskEntry[]> {

@@ -42,6 +42,8 @@ export interface KernelPorts {
   readonly paths: PathsPort;
   /** Read-only facts about this machine from `/proc` and `/sys`; only for a manifest with `permissions.hostFacts`. */
   readonly hostFacts: HostFactsPort;
+  /** THIS process's own `/proc/self/io` and `/proc/self/stat` counters and nothing else; only for a manifest with `permissions.selfCounters`. */
+  readonly selfCounters: SelfCountersPort;
   /**
    * This user's live processes, as pids and yes/no answers only, and SIGTERM to one that runs from this plugin's own
    * folder; only for a manifest with `permissions.processes` ({@link ProcessesPort}).
@@ -187,6 +189,15 @@ export interface StatePort {
     file: StateFileDef,
     name: string,
   ): Promise<{ readonly kind: 'file' | 'directory' | 'symlink'; readonly modifiedMs: number } | undefined>;
+  /**
+   * Own opaque named trees only. What is directly inside one directory of the tree (never followed into a link, and a
+   * link there is a `symlink` entry): `[]` when the directory is absent or is itself not a plain directory. A walk of
+   * the whole tree is the caller's loop, so it can bound it.
+   */
+  entries(
+    file: StateFileDef,
+    name: string,
+  ): Promise<readonly { readonly name: string; readonly kind: 'file' | 'directory' | 'symlink' }[]>;
   /** Own opaque named trees only. Plain rmdir: never recursive, refuses links and nonempty directories. */
   removeEmptyDirectory(file: StateFileDef, name: string): Promise<void>;
   /** Own opaque named trees only. Exclusive mkdir, mode 0700; any existing entry is refused. */
@@ -1018,9 +1029,9 @@ export interface RootsPort {
        * descriptor: the anchor opened once, each component below it opened from its parent's descriptor without following
        * (`O_DIRECTORY | O_NOFOLLOW`), and the leaf acted on through the last one, so a folder swapped for a link after the
        * check reaches nothing. An `imports` READ (a file, a stat, a listing) reaches its folder the same way, so a folder
-       * swapped for a link at any step of ONE call reads nothing outside it; only a host with neither a descriptor path
-       * nor the C library's calls lists and stats by path behind the link walk, and a host with the calls but not the
-       * working-directory bracket lists by path (a listing there can answer an outside folder's names; file reads are
+       * swapped for a link at any step of ONE call reads nothing outside it; a host with neither a descriptor path
+       * nor the C library's calls refuses the read `no_descriptor_reach` (it never reads by path), and a host with the
+       * calls but not the working-directory bracket lists by path (a listing there can answer an outside folder's names; file reads are
        * still refused by the spelling and identity proofs). An anchor that is not the folder or its ancestor, or one given to a root that takes no
        * absolute folder, names no folder: every call is refused `outside`. A caller that scopes `project-files` to a
        * project the person named passes THAT folder (or the folder it is reached from, when it is a link such as
@@ -1223,6 +1234,13 @@ export interface SpawnOptions {
   readonly stdin?: string | Uint8Array;
   readonly timeout?: Duration;
   readonly signal?: AbortSignal;
+  /**
+   * A SEALED child (a secure copy's command capture): it sees only the host's sealed environment (the nine names a
+   * child may inherit: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `LANG`, `LC_ALL`, `TMPDIR`, `TERM`) and what its caller
+   * hands over in `env`. The host's tool environment (the proxy, ssh-agent and config variables a `git` or `gh` child is given)
+   * is NEVER added, whatever the program is called: a name is no evidence that a program is the trusted tool.
+   */
+  readonly sealed?: true;
   /** Runs inside this ferret's limits. */
   readonly forFerret?: FerretId;
   /**
@@ -1415,6 +1433,21 @@ export interface BindPort {
  */
 /** A per-process file under `/proc/<pid>/` (or `/proc/self/`) that `hostFacts.procFile` reads. */
 export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
+
+/**
+ * The daemon's OWN process counters, for a plugin that reports on the daemon itself (Usage's `fy daemon profile`). A port of
+ * its own rather than a grant of `hostFacts`: `hostFacts` reaches any pid's command line, the process list, descriptors and
+ * machine facts, and none of that is needed (or allowed) here. The two methods name their one file; no pid, path or file name
+ * crosses, so there is nothing to widen. Each throws as the read it replaces does (a missing file, a platform without `/proc`).
+ */
+export interface SelfCountersPort {
+  /** `process.platform`. */
+  readonly platform: string;
+  /** `/proc/self/io`: read and write system-call counts (`syscr`, `syscw`). */
+  io(): Promise<string>;
+  /** `/proc/self/stat`: CPU times, including the reaped children's (`cutime`, `cstime`). */
+  stat(): Promise<string>;
+}
 
 /** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */
 export type ProcSystemFile = 'stat' | 'meminfo' | 'sys/kernel/pid_max' | 'net/tcp' | 'net/tcp6';

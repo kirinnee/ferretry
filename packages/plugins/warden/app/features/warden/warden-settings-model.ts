@@ -24,7 +24,8 @@ import {
 import type { PickerAccount } from '../../lib/account-picker.ts';
 
 /** Whether the Jev key is in this machine's secret store. `unknown` when that could not be read. */
-type JevKeyState = 'set' | 'missing' | 'unknown' | 'off';
+/** `not_named`: a key is stored in Speed-ups, but `warden.yaml` does not name it, so the kernel spends nothing. */
+type JevKeyState = 'set' | 'missing' | 'not_named' | 'unknown' | 'off';
 
 export interface JevKeyStatus {
   /** `off`: Voice, which answers it, is not running on the daemon — the form shows no key line at all. */

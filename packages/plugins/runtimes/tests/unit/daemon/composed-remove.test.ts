@@ -1,7 +1,7 @@
 /**
  * `runtime.remove` through the COMPOSED daemon (`hostAssembly` over the kernel test host and real fenced roots, the same
  * harness as `composed-daemon.test.ts`). A removal is judged by the file it removes: the owner's is admitted and the
- * runtime is gone, and one an agent asks for is not applied. Before the fix a removal threw in `runtimeFileLoosens`
+ * runtime is held for the owner (B01: the file cannot see a login budget), and one an agent asks for is not applied. A removal once threw in `runtimeFileLoosens`
  * (`after` undefined) and every caller, the owner included, was held as "could not be judged".
  */
 import { afterEach, describe, expect, it } from 'bun:test';
@@ -51,7 +51,7 @@ async function names(host: TestHost): Promise<string> {
 }
 
 describe('runtime.remove through the composed daemon', () => {
-  it('the owner’s removal is admitted: applied, and the runtime is no longer listed', async () => {
+  it('B01 a removal is judged like a re-point: held when the caller cannot loosen (no judge here), and the runtime stays', async () => {
     const host = await compose(() => ownerStanding());
     expect(await names(host)).toContain('claude-extra');
 
@@ -61,10 +61,14 @@ describe('runtime.remove through the composed daemon', () => {
       body: {},
     });
 
-    expect([applied.status, JSON.stringify(applied.json())]).toEqual([200, expect.stringContaining('applied')]);
+    // The removal is no longer admitted unseen: the file cannot see a login's budget, so it is held for the owner,
+    // who confirms it through the config layer (a host admin or a fresh passkey), never silently by the apply.
+    expect(applied.status).toBe(409);
+    expect(JSON.stringify(applied.json())).toContain('is removed from login');
+    expect(JSON.stringify(applied.json())).toContain('held for the owner');
     expect(JSON.stringify(applied.json())).not.toContain('could not be judged');
     const after = await names(host);
-    expect(after).not.toContain('claude-extra');
+    expect(after).toContain('claude-extra');
     expect(after).toContain('claude-default');
   });
 

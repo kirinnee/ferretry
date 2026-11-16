@@ -36,6 +36,8 @@ export interface StartBody extends StartOptions {
   readonly login?: string;
   readonly folder: string;
   readonly prompt?: string;
+  /** `--detach`: the daemon answers once the ferret is recorded, not launched. */
+  readonly detach?: boolean;
 }
 
 /** What `fy rename` changes: a new first name, a new task title, or both. */

@@ -11,7 +11,9 @@ export class SecureCopyError extends Error {
       | 'forbidden'
       | 'capacity'
       | 'unavailable'
-      | 'upstream_failed',
+      | 'upstream_failed'
+      /** A person holds the page: nothing is copied from it or pasted into it until they hand it back. */
+      | 'taken_over',
     message: string,
   ) {
     super(message);

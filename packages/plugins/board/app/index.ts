@@ -10,6 +10,7 @@ import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
 import { agendaHooks } from './agenda-hooks.ts';
+import { boardForFerretCommands, boardPlaces } from './command-bar.ts';
 import { lazyComponent } from './lazy.ts';
 
 type Surfaces = {
@@ -46,7 +47,7 @@ export default provideToShell(
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
       const panel = (id: 'cards-of-ferret' | 'card-progress') =>
         lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
-      const renderer = (key: 'ask:card' | 'reference:&') =>
+      const renderer = (key: 'ask:card' | 'reference:&' | 'reference:&board') =>
         lazyComponent<RendererProps>(async () => (await surfacesOf()).renderers[key] as AppComponent<RendererProps>);
       return {
         screens: { board: screen('board'), card: screen('card') },
@@ -56,9 +57,13 @@ export default provideToShell(
             async () => (await surfacesOf()).settings.board as AppComponent<SettingsProps>,
           ),
         },
-        renderers: { 'ask:card': renderer('ask:card'), 'reference:&': renderer('reference:&') },
+        renderers: {
+          'ask:card': renderer('ask:card'),
+          'reference:&': renderer('reference:&'),
+          'reference:&board': renderer('reference:&board'),
+        },
       };
     },
   }),
-  { hooks: agendaHooks },
+  { commands: context => [boardPlaces(context), boardForFerretCommands(context)], hooks: agendaHooks },
 );

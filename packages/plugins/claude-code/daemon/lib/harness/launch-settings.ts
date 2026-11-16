@@ -28,6 +28,8 @@ export interface LaunchSettingsInputs {
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly settings: ReadonlyMap<string, SettingsItem>;
   readonly hooks: ReadonlyMap<string, HooksItem>;
+  /** The runtime the launch ran as: kept in the record so a later comparison selects the same components. */
+  readonly runtime?: string;
 }
 
 /** A SHA-256 of the value's one canonical spelling. Throws a fixed sentence: the canonical refusal may name a key. */
@@ -43,6 +45,7 @@ export function launchSettingsRecord(inputs: LaunchSettingsInputs): LaunchSettin
   const none = new Map<string, never>();
   return {
     format: 1,
+    ...(inputs.runtime === undefined ? {} : { runtime: inputs.runtime }),
     sections: {
       'permission-mode': fingerprint(inputs.permissionMode),
       'fixed-layer': fingerprint({ settings: fixed.settings, overlay: fixed.overlay }),

@@ -11,7 +11,7 @@ import { basename, dirname } from 'node:path';
 import type { RootsPort, SharedCredential } from '@ferretry/kernel/contract';
 import type { FleetCredentialCatalog } from '../../lib/credentials/credentials-service.ts';
 import { notPlainFileSentence } from '../../lib/kinds.ts';
-import type { OwnedLoginStore } from './owned-store.ts';
+import { HOST_STORE_PENDING, type OwnedLoginStore } from './owned-store.ts';
 
 /** The one file a Codex sign-in is, and the plugin that links it into its ferret homes. */
 const CODEX_CREDENTIAL_FILE = 'auth.json';
@@ -46,8 +46,7 @@ export function codexCredentialSource(deps: {
       if (resolution === undefined) return `the login ${login} is not known on this machine`;
       if (resolution.store === 'environment') return `the login ${login} is not a sign-in`;
       if ('unavailable' in resolution) return `the login ${login} cannot be used: ${resolution.unavailable}`;
-      if (resolution.store !== 'ferretry')
-        return `the login ${login} cannot be used: this build can only read owned login stores`;
+      if (resolution.store !== 'ferretry') return `the login ${login} cannot be used: ${HOST_STORE_PENDING}`;
       if (resolution.harness !== 'codex' || !('canonicalFile' in resolution))
         return `the login ${login} is not a Codex sign-in`;
       const facts = await deps.store.local(resolution).catch(() => undefined);

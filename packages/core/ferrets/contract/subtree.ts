@@ -10,8 +10,22 @@ const SubtreeRowSchema = z.strictObject({
   name: z.string(),
   parent: FerretIdSchema.optional(),
   depth: z.number().int().min(1),
+  /** The model it runs (what it was started with; `default` when it named none), as today's table showed. */
+  model: z.string().min(1).optional(),
   state: SubtreeStateSchema,
   ferretState: FerretStateSchema,
+  /** The card it works on (`&F767`) and that card's lane, as its card line says. */
+  card: z.strictObject({ ref: z.string().min(1), lane: z.string().min(1).optional() }).optional(),
+  /** The card's PR — the open one when there are several, else the newest — as the board's PR cache last read it. */
+  pr: z
+    .strictObject({
+      number: z.number().int().min(1),
+      url: z.string().min(1),
+      state: z.enum(['unknown', 'open', 'closed', 'merged']),
+      draft: z.boolean(),
+      checks: z.enum(['none', 'pending', 'passing', 'failing']),
+    })
+    .optional(),
   last: z
     .strictObject({ at: z.string(), kind: z.enum(['doing', 'card', 'turn', 'note']), text: z.string() })
     .optional(),

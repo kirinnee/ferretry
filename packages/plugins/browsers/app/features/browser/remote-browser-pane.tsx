@@ -202,7 +202,7 @@ export function RemoteBrowserPane({
   // (daemonId, sessionId) scope exists to make impossible.
   if (daemon.daemonId !== scope.daemonId) throw new Error('remote browser scope must belong to the paired daemon');
 
-  const { status, error, busy, runAction, reportError, clearError } = useRemoteBrowser({
+  const { status, error, busy, needsPasskey, runAction, reportError, clearError } = useRemoteBrowser({
     daemon,
     scope,
     isActive,
@@ -248,7 +248,13 @@ export function RemoteBrowserPane({
   const running = status?.state === 'running';
   const connected = connection === 'connected';
   const loading = page?.pageState === 'loading';
-  const unavailableReason = status?.state === 'error' ? status.error : null;
+  // What the daemon said it could not do. A browser nobody has heard from (no status yet) is not a STOPPED browser: when
+  // the read was refused for want of this device's passkey the person is told so and given the press that asks for it,
+  // and any other failure is shown in its own words — never "stopped", which would send them to start what is running.
+  const waitingForPasskey = status === null && needsPasskey;
+  const unavailableReason =
+    status?.state === 'error' ? status.error : status === null && !needsPasskey && error !== null ? error : null;
+  const unheard = status === null && !waitingForPasskey && unavailableReason === null;
 
   // The daemon lays out the real page, so the container's size has to become a
   // validated `resize` action rather than a client-side scale. It is debounced
@@ -498,14 +504,37 @@ export function RemoteBrowserPane({
           </div>
         )}
         {!running && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-code-bg px-panel text-center">
+          <div
+            className={`absolute inset-0 flex items-center justify-center bg-code-bg px-panel text-center ${waitingForPasskey ? '' : 'pointer-events-none'}`}
+            data-browser-unavailable={
+              waitingForPasskey ? 'passkey' : unheard ? 'checking' : unavailableReason === null ? 'stopped' : 'error'
+            }
+          >
             <div className="max-w-xs">
               <Monitor
                 size={30}
                 aria-hidden="true"
                 className={`mx-auto ${unavailableReason === null ? 'text-muted' : 'text-err'}`}
               />
-              {unavailableReason === null ? (
+              {waitingForPasskey ? (
+                <>
+                  <p className="mb-0 mt-3 text-ui font-medium text-fg">Confirm it’s you to use the browser</p>
+                  <p className="mb-0 mt-1 text-meta leading-base text-muted">
+                    This machine asks for your passkey before this device can show or drive its browser. Nothing is
+                    stopped.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => runAction({ action: 'start' })}
+                    className="mt-3 min-h-[44px] rounded-control border border-border bg-surface px-3 text-ui font-medium text-fg hover:bg-accent-soft disabled:opacity-60"
+                  >
+                    Confirm with passkey
+                  </button>
+                </>
+              ) : unheard ? (
+                <p className="mb-0 mt-3 text-ui font-medium text-muted">Checking the browser…</p>
+              ) : unavailableReason === null ? (
                 <>
                   <p className="mb-0 mt-3 text-ui font-medium text-fg">Browser is stopped</p>
                   <p className="mb-0 mt-1 text-meta leading-base text-muted">

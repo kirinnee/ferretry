@@ -25,7 +25,8 @@ let HOME: string;
 beforeEach(async () => {
   fixture = await mkdtemp(join(tmpdir(), 'claude-code-approvals-unit-'));
   HOME = join(fixture, 'fy-home/state/claude-code/agent-homes/f1');
-  await mkdir(HOME, { recursive: true });
+  // Private (0700) whatever the runner's umask: the launch refuses a home its group could write (mode 775 under umask 002).
+  await mkdir(HOME, { recursive: true, mode: 0o700 });
 });
 afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
@@ -41,7 +42,8 @@ function half(): { readonly claudeCode: ClaudeCodeApi; readonly harness: Harness
   const built = daemon.build?.({
     manifest,
     needs: {},
-    uses: {},
+    // Runtimes is a use: the harness asks it which components a launch selects; here it is off, so nothing is selected.
+    uses: { runtimes: { current: () => undefined } },
     hooks: {} as never,
     kernel: {
       roots,

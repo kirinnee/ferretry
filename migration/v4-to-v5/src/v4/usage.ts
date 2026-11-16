@@ -113,3 +113,10 @@ export function canonicalRateRow(row: unknown): unknown {
   const legacy = V4LegacyPricingRate.safeParse(row);
   return legacy.success ? legacy.data : undefined;
 }
+
+/**
+ * `<v4 FY_HOME>/compaction-history.json` (`packages/daemon/bin/fyd.ts:11512`, `FileCompactionHistory`): `{version: 1,
+ * entries: [CompactionRecord…]}`, oldest first. Entries are checked one at a time by v5's own `CompactionRecordSchema`.
+ */
+export const V4_COMPACTION_HISTORY = 'compaction-history.json';
+export const V4CompactionHistory = z.looseObject({ version: z.literal(1), entries: z.array(z.unknown()) });

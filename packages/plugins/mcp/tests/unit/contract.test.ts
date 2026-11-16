@@ -17,10 +17,14 @@ describe('mcp contract', () => {
     expect((await mcpConformance(fakeMcp)).ok).toBe(true);
   });
 
-  test('the manifest declares 13 routes, 7 verbs and takes launch.parts', () => {
+  test('the manifest declares 13 routes, 7 verbs and takes launch.parts and catalog.items for the mcp kind', () => {
     expect(manifest.actions.routes.length).toBe(13);
     expect(manifest.actions.cli.length).toBe(7);
-    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual(['launch.parts', 'runtimes.components.mcp']);
+    expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'launch.parts',
+      'runtimes.components.mcp',
+      'catalog.items',
+    ]);
   });
 
   test('G176 (declaration only) each MCP-add route declares exactly one capability, as tabled', () => {

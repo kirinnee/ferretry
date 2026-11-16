@@ -1,7 +1,7 @@
 /**
  * `ferret.toolbar` › `status` — how this ferret is doing, as a shape and a word. A parked ferret says what it waits
- * for. (Whose turn it is and what a stopped-for-input ferret is blocked on belong to Conversation's turn watcher; the
- * ferret record carries neither.)
+ * for. (Whose turn it is belongs to Conversation's turn watcher, which draws it in its own `ferret.toolbar` panel beside
+ * this one; the ferret record carries no turn.)
  */
 
 import type { FerretSummary } from '../../../contract/index.ts';

@@ -53,6 +53,13 @@ test('a start splits identity fields from option fields, leaving options out whe
   expect(withOptions.options).toMatchObject({ model: 'm1' });
 });
 
+test('fy start --detach rides the body as a request fact: it reaches the request beside the identity, never the stored options', () => {
+  const detached = parseStartBody({ folder: '/work', detach: true, model: 'm1' });
+  expect(detached.detach).toBe(true);
+  expect(detached.options).toEqual({ model: 'm1' });
+  expect(parseStartBody({ folder: '/work' }).detach).toBeUndefined();
+});
+
 test('a start body with an unknown field is refused', () => {
   expect(refused(() => parseStartBody({ folder: '/work', bogus: 1 })).code).toBe('invalid_request');
 });

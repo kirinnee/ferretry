@@ -51,7 +51,9 @@ import {
   type SurfaceOwnership,
   useDocumentVisible,
   useFullscreen,
+  usePanelIntent,
 } from '@ferretry/app';
+import type { PanelIntent } from '@ferretry/kernel/manifest';
 import { Button, FullscreenToggle, KEYBOARD_CAPTURE_ATTRIBUTE, useLinkBehaviour } from '@ferretry/app/ui';
 import { type DaemonConnection, type DaemonSessionScope, grantRefusalNotice } from '../shell.ts';
 import {
@@ -70,6 +72,7 @@ import {
 } from '../lib/terminal-links.ts';
 import {
   type TerminalAttachOptions,
+  type TerminalListOptions,
   type TerminalStream,
   type TerminalStreamHandlers,
   TerminalStreamRefused,
@@ -90,7 +93,7 @@ type XtermModules = {
  * harness renders a deck with a scripted pane instead of opening a real shell.
  */
 export interface TerminalDeckDependencies {
-  list(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalListView>;
+  list(daemon: DaemonConnection, scope: DaemonSessionScope, options?: TerminalListOptions): Promise<TerminalListView>;
   create(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<TerminalView>;
   rename(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, title: string): Promise<TerminalView>;
   close(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<unknown>;
@@ -157,6 +160,8 @@ export const browserTerminalDeckHost = (): TerminalDeckHost => ({
 });
 
 export interface SessionTerminalDeckProps {
+  /** What the host just asked of this panel: "new-terminal" starts a shell (the phone's "+ New terminal"). */
+  readonly intent?: PanelIntent;
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope;
   /** Display only — the daemon derives and enforces the shell's cwd itself. */
@@ -652,6 +657,7 @@ export function SessionTerminalDeck({
   active: onScreen = true,
   interceptInput = passInput,
   onInputPort,
+  intent,
 }: SessionTerminalDeckProps) {
   // Not on screen is not attached: a hidden tab or a backgrounded page holds no stream.
   const streaming = useDocumentVisible() && onScreen;
@@ -668,26 +674,30 @@ export function SessionTerminalDeck({
   const [revealed, setRevealed] = useState<ReadonlySet<string>>(new Set());
   const [reconnectVersion, setReconnectVersion] = useState(0);
 
-  const refresh = useCallback(async () => {
-    try {
-      const next = await dependencies.list(connection, scope);
-      // A listing about another session is damaged evidence, not an empty one.
-      // Showing it would put another session's shells under this one's tabs.
-      if (next.sessionId !== scope.sessionId) {
-        setError('the daemon answered about a different session');
-        return;
+  // `explicit` is the person pressing Retry: that read is not quiet, so a refused step-up can be answered.
+  const refresh = useCallback(
+    async (explicit = false) => {
+      try {
+        const next = await dependencies.list(connection, scope, explicit ? { explicit: true } : undefined);
+        // A listing about another session is damaged evidence, not an empty one.
+        // Showing it would put another session's shells under this one's tabs.
+        if (next.sessionId !== scope.sessionId) {
+          setError('the daemon answered about a different session');
+          return;
+        }
+        setList(next);
+        setActiveId(current =>
+          current !== null && next.terminals.some(terminal => terminal.id === current)
+            ? current
+            : (next.terminals[0]?.id ?? null),
+        );
+        setError(null);
+      } catch (caught) {
+        setError(failure(caught));
       }
-      setList(next);
-      setActiveId(current =>
-        current !== null && next.terminals.some(terminal => terminal.id === current)
-          ? current
-          : (next.terminals[0]?.id ?? null),
-      );
-      setError(null);
-    } catch (caught) {
-      setError(failure(caught));
-    }
-  }, [connection, dependencies, scope]);
+    },
+    [connection, dependencies, scope],
+  );
 
   useEffect(() => {
     void refresh();
@@ -775,6 +785,8 @@ export function SessionTerminalDeck({
       setBusy(false);
     }
   };
+
+  usePanelIntent(intent, 'new-terminal', () => void createTerminal());
 
   const createTerminal = async (): Promise<void> => {
     if (busy || atSessionCap || atGlobalCap) return;
@@ -911,7 +923,13 @@ export function SessionTerminalDeck({
             <span className="kt-webterm__cwd" title={cwd ?? 'Session working directory'}>
               {cwd ?? 'session cwd'}
             </span>
-            <span>{list === null ? 'loading terminals…' : terminalLimitLabel(list)}</span>
+            <span>
+              {list === null
+                ? error === null
+                  ? 'loading terminals…'
+                  : 'terminals unavailable'
+                : terminalLimitLabel(list)}
+            </span>
           </div>
         </div>
       )}
@@ -919,7 +937,7 @@ export function SessionTerminalDeck({
       {error === null ? null : (
         <div className="kt-webterm__error" role="alert">
           <span>{error}</span>
-          <button aria-label="Retry loading terminals" onClick={() => void refresh()} type="button">
+          <button aria-label="Retry loading terminals" onClick={() => void refresh(true)} type="button">
             <RefreshCw aria-hidden="true" size={14} />
           </button>
         </div>
@@ -940,8 +958,26 @@ export function SessionTerminalDeck({
             <SquareTerminal size={24} />
           </span>
           <div>
-            <strong>No shell terminals open</strong>
-            <p>Start one here; it opens in this session’s working directory and survives page reloads.</p>
+            {list === null ? (
+              // Not known yet, or the listing failed (the error above says why): "none open" would be a claim
+              // nobody has checked. Starting one stays possible — the daemon enforces the caps.
+              <>
+                <strong>
+                  {error === null ? 'Asking the daemon for this session’s terminals…' : 'Terminals not read'}
+                </strong>
+                {error === null ? null : (
+                  <p>
+                    The list of open terminals could not be read, so one may already be open. Retry above, or start a
+                    new one.
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <strong>No shell terminals open</strong>
+                <p>Start one here; it opens in this session’s working directory and survives page reloads.</p>
+              </>
+            )}
           </div>
           <Button
             disabled={busy || atSessionCap || atGlobalCap}

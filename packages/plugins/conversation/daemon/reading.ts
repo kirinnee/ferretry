@@ -6,7 +6,7 @@ import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import type { ConversationApi, ConversationRefusal, RenderBody, RenderMeta } from '../contract/index.ts';
 import { buildAttachments } from './attachments/index.ts';
 import { AttachmentError } from './attachments/lib/index.ts';
-import { buildLinks } from './links/index.ts';
+import { buildLinks, keepInSyncFrom } from './links/index.ts';
 import type { LinkHarness, LinkKeeper } from './links/lib/service.ts';
 import type { TranscriptOpener } from './reader/adapters/file-reads.ts';
 import type { HarnessTranscripts } from './reader/adapters/entries-source.ts';
@@ -16,8 +16,10 @@ import { messageTokenCodec } from './reader/adapters/message-token-key.ts';
 import { buildRenders } from './renders/index.ts';
 import { RenderError } from './renders/lib/types.ts';
 import { buildSearch, WORK_SEARCH_WARM_DELAY_MS, type WorkSource } from './search/index.ts';
+import { QUESTION_TAIL_EVENTS } from './questions/lib/watch.ts';
 import { tryParseSessionId } from './seams/ferret-id.ts';
 import { harnessFamily } from './seams/harness-family.ts';
+import type { TranscriptEvent } from './seams/transcript-types.ts';
 
 /**
  * The ONE sentence said by everything that needs the conversations a harness holds: the Conversations screen (its list
@@ -98,6 +100,11 @@ type ReadingApi = Pick<
 >;
 
 export interface ReadingHalf {
+  /**
+   * The parsed tail of a CODEX ferret's transcript, for the question watch (its `request_user_input` is in the transcript
+   * while the form is open): `'unreadable'` when it cannot be read, `undefined` for a ferret that is not a Codex one.
+   */
+  questionEvents(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
   readonly routes: Readonly<Record<string, RouteHandler>>;
   readonly tools: { readonly search_work: ToolHandler };
   readonly api: ReadingApi;
@@ -127,7 +134,7 @@ export interface ReadingHalf {
 export function buildReading(deps: {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
-  readonly asks: Pick<AsksApi, 'open'>;
+  readonly asks: Pick<AsksApi, 'open'> & Partial<Pick<AsksApi, 'snapshots'>>;
   readonly onKept: (ferret: FerretId, link: string) => void;
   /** The work other plugins hand the work search through `search.sources` (Board's cards), asked on every use. */
   readonly workSources?: () => readonly WorkSource[];
@@ -194,6 +201,8 @@ export function buildReading(deps: {
     now: () => kernel.clock.now(),
     clockMs: () => kernel.clock.nowMs(),
     kept: deps.onKept,
+    // The version of conversation.yaml in effect, asked on every listing: an edit is live for the next one.
+    keepInSync: keepInSyncFrom(kernel.config),
   });
 
   const attachments = buildAttachments({
@@ -293,7 +302,16 @@ export function buildReading(deps: {
     keep: async request => await links.service.keep(request),
   };
 
+  const questionEvents: ReadingHalf['questionEvents'] = async (ferret, limit = QUESTION_TAIL_EVENTS) => {
+    const id = tryParseSessionId(ferret);
+    const summary = id === undefined ? undefined : await ferrets.get(id);
+    if (summary === undefined || harnessFamily(summary.harness) !== 'codex') return undefined;
+    const read = await reader.tail(ferret, limit).catch(() => undefined);
+    return read?.kind === 'read' ? read.events : 'unreadable';
+  };
+
   return {
+    questionEvents,
     routes: {
       ...reader.routes,
       ...links.routes,

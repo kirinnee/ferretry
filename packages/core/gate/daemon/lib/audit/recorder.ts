@@ -1,4 +1,4 @@
-import { type CallStanding, decodeParameter, type RecordedCall } from '@ferretry/kernel/contract';
+import { type CallStanding, decodeParameter, type RecordedCall, type SecretSendNote } from '@ferretry/kernel/contract';
 import { type AuditDetail, type AuditDraft, auditKind, type AuthenticatedCredential } from '../../../contract/index.ts';
 import { agentAuditDetail, auditActorOf, auditOutcomeOf, routeAuditDraft } from './policy.ts';
 import { AUDITED_ROUTES, type AuditedRouteRule } from './routes.ts';
@@ -44,6 +44,23 @@ export function recordedCallDraft(
     code: refusalCodeIn(status, body),
     configKind: options.configKind,
   });
+}
+
+/**
+ * The record one `kernel.secrets.send` leaves: `secrets.used`, subject the secret's NAME, detail the plugin, the host
+ * and the outcome's kind. The note has no field for a value or a reply, so none can reach the log. The machine did it
+ * on a plugin's behalf (a sweep, a job), so the actor is the host and the cause the daemon's. A reply that came back
+ * (any status) is a send that succeeded; only a send that never got one failed.
+ */
+export function secretSentDraft(note: SecretSendNote): AuditDraft {
+  return {
+    event: auditKind('secrets.used'),
+    actor: { kind: 'host' },
+    subject: note.secret,
+    outcome: note.outcome === 'completion' || note.outcome === 'status' ? 'succeeded' : 'failed',
+    detail: { plugin: note.plugin, host: note.host, outcome: note.outcome },
+    cause: 'daemon',
+  };
 }
 
 interface Answer {

@@ -7,7 +7,8 @@
  * media. Its instructions were fixed when it started, so a change takes effect at its next launch and nothing is sent
  * to it; the daemon's own `note` says so, and the panel shows it.
  *
- * The state is the ferret's own `config.hypermedia` (absent means the mode default: on for interactive, off for auto).
+ * The state is what the daemon says the ferret is told now (its own switch, else the mode default: on for interactive,
+ * off for auto).
  * Once the daemon answered a switch, that answer is what the toggle shows, so it never flips back under the reader.
  */
 

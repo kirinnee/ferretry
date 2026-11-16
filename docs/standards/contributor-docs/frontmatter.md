@@ -88,7 +88,7 @@ status: stable # draft | stable | deprecated
 type: cli # api | cli | sdk | event
 command: fy --version # CLI surfaces only
 method: GET # API surfaces only
-path: /v1/sessions/:id # API surfaces only
+path: /v1/ferrets/:id # API surfaces only
 tags: [cli, version]
 related:
   - ../surfaces/help-flag.md

@@ -24,10 +24,19 @@ function mover(
     credentials: [credential('claude-a-login'), credential('claude-b-login')],
     tools: [tool('claude', true)],
   },
+  guard: {
+    readonly hold?: () => Promise<string | undefined> | string | undefined;
+    readonly facts?: () => void;
+    readonly ledger?: { value: unknown };
+  } = {},
 ) {
+  const stored = guard.ledger ?? { value: undefined };
   return new WardenAutoMoveService({
-    facts: async () => facts(fleet),
-    ownerHold: async () => undefined,
+    facts: async () => {
+      guard.facts?.();
+      return facts(fleet);
+    },
+    ownerHold: async () => await guard.hold?.(),
     blockingJobs: async () => [],
     askToStopJobs: async () => undefined,
     stopJobs: async () => ({ stopped: [], survivors: [] }),
@@ -35,7 +44,12 @@ function mover(
       moved.push({ sessionId, agent: request.agent });
     },
     agentOf: async sessionId => moved.find(entry => entry.sessionId === sessionId)?.agent ?? 'claude-a-wrapper',
-    ledger: { read: async () => undefined, write: async () => undefined },
+    ledger: {
+      read: async () => stored.value,
+      write: async memory => {
+        stored.value = memory;
+      },
+    },
     notifyOwner: async () => undefined,
     emit: async () => undefined,
     journal: { record: () => undefined },
@@ -309,6 +323,97 @@ describe('a MOVE verdict, in the sweep', () => {
       outcome: 'failed',
       agent: 'claude-c-wrapper',
       detail: /\(claude-c-wrapper\) did not take: failover refused\. claude-b-wrapper was turned down/,
+    });
+  });
+
+  describe('and what the owner has open', () => {
+    const verdictOn = (autoMove: WardenAutoMoveService) =>
+      harness({
+        config: enabled(),
+        fleet: [stuck()],
+        reports: reports('claude-b-wrapper'),
+        state: verdict(),
+        autoMove,
+      });
+
+    it('should not move a ferret the owner has something open on, and say why', async () => {
+      // Arrange: an input card, a phone approval, a plan card or a copied secret — Accounts answers one yes.
+      const subject = verdictOn(mover([], undefined, { hold: () => 'it has something of the owner open' }));
+
+      // Act
+      await subject.service.run({ force: false });
+
+      // Assert
+      should(subject.remedies).deepEqual([]);
+      should(subject.state().actions?.[0]).match({
+        action: 'failover',
+        outcome: 'failed',
+        detail: /not moved: it has something of the owner open/,
+      });
+    });
+
+    it('should not move when the hold cannot be read, or the read throws', async () => {
+      // Arrange
+      const absent = verdictOn(
+        mover([], undefined, {
+          hold: () => "whether something of the owner's is open on it could not be checked (Accounts did not answer)",
+        }),
+      );
+      const throwing = verdictOn(
+        mover([], undefined, {
+          hold: () => {
+            throw new Error('accounts exploded');
+          },
+        }),
+      );
+
+      // Act
+      await absent.service.run({ force: false });
+      await throwing.service.run({ force: false });
+
+      // Assert
+      should(absent.remedies).deepEqual([]);
+      should(throwing.remedies).deepEqual([]);
+      should(throwing.state().actions?.[0]).match({
+        outcome: 'failed',
+        detail: /could not be checked \(accounts exploded\)/,
+      });
+    });
+
+    it('should not move a ferret a card was opened on while the logins were being read', async () => {
+      // Arrange: no hold when the verdict is first checked; one by the time the facts have been read.
+      let open = false;
+      const subject = verdictOn(
+        mover([], undefined, {
+          facts: () => {
+            open = true;
+          },
+          hold: () => (open ? 'a card opened' : undefined),
+        }),
+      );
+
+      // Act
+      await subject.service.run({ force: false });
+
+      // Assert
+      should(subject.remedies).deepEqual([]);
+      should(subject.state().actions?.[0]).match({ outcome: 'failed', detail: /not moved: a card opened/ });
+    });
+
+    it('should count every verdict move toward the hourly cap, so contrary verdicts cannot bounce a ferret', async () => {
+      // Arrange: one service and one ledger across two sweeps, each with its own MOVE verdict for the same ferret.
+      const service = mover([], undefined, { ledger: { value: undefined } });
+      const first = verdictOn(service);
+      const second = verdictOn(service);
+
+      // Act
+      await first.service.run({ force: false });
+      await second.service.run({ force: false });
+
+      // Assert: the default allows one move an hour.
+      should(first.remedies).deepEqual([{ action: 'failover', sessionId: 's1', detail: 'claude-b-wrapper' }]);
+      should(second.remedies).deepEqual([]);
+      should(second.state().actions?.[0]).match({ outcome: 'failed', detail: /already moved once in the last hour/ });
     });
   });
 

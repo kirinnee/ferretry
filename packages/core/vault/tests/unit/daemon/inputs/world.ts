@@ -9,6 +9,7 @@ import type {
 } from '../../../../daemon/lib/inputs/borrowed.ts';
 import {
   type GrantReservation,
+  type ScriptedOriginsView,
   type SignInGrant,
   SignInGrantLedger,
   type SignInGrantSource,
@@ -18,6 +19,7 @@ import type {
   InputAuditEntry,
   InputCaller,
   InputCard,
+  InputChoicePort,
   InputLoginPort,
   InputStoreAuditEntry,
   ObserveResult,
@@ -70,7 +72,7 @@ export const PASTE_RAISE: InputRaise = {
   source: { kind: 'sealed', name: 'vercel' },
 };
 
-const copyMeta = (over: Partial<CopyMeta> = {}): CopyMeta => ({
+export const copyMeta = (over: Partial<CopyMeta> = {}): CopyMeta => ({
   handle: 'sealed:vercel',
   name: 'vercel',
   from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
@@ -94,6 +96,10 @@ export interface WorldOptions {
   /** The grants the source reports; read at every call, so a test may change them mid-flight. */
   readonly grants?: SignInGrant[];
   readonly grantsEnabled?: boolean;
+  /** A grant source of the test's own (the production hook adapter over a provider); wins over `grants`. */
+  readonly grantPort?: SignInGrantSource;
+  /** Where page scripts ran as Browsers told the Vault (`MachineScripts`), which a rule's fill is held to as well. */
+  readonly scripts?: { scriptedOrigins(): ScriptedOriginsView };
   /** Whether the ferret ran a page script / acted since (the login observer's `tainted`); never by default. */
   readonly tainted?: boolean;
   readonly history?: readonly InputEvent[];
@@ -102,7 +108,13 @@ export interface WorldOptions {
   readonly withSealed?: boolean;
   readonly withRules?: boolean;
   readonly withLogins?: boolean;
+  /** The saved-login port itself (the production adapter over a fake provider), in place of the recording fake. */
+  readonly loginPort?: InputLoginPort;
+  /** Who is asking, for the order of a sign-in card (the production adapter over a fake provider). */
+  readonly choicePort?: InputChoicePort;
   readonly clear?: boolean;
+  /** The production routing instead of the recording fake: every request goes to this target (a real router over a real store). */
+  readonly route?: InputRequestServiceDependencies['target'];
 }
 
 /** The service and everything it recorded. */
@@ -121,6 +133,8 @@ export function world(options: WorldOptions = {}) {
     codeProgram: false,
     listingFails: false,
     fillFails: undefined as Error | undefined,
+    /** Runs inside the target's turn after its takeover/copy check and before it installs the protection (fix2, R3). */
+    onBeforeProtect: undefined as (() => void) | undefined,
     fillValue: undefined as ((role: LoginFieldRole) => string) | undefined,
     saveFails: undefined as Error | undefined,
     verify: { ok: true } as { ok: true } | { ok: false; reason?: string },
@@ -129,6 +143,18 @@ export function world(options: WorldOptions = {}) {
     holdsSeq: [] as boolean[],
     keyOfFails: false,
     ruleId: undefined as string | undefined,
+    /** What the secure copy's takeover check says of the target now: a sentence while a person holds the page. */
+    pasteRefusal: undefined as string | undefined,
+    /** Answers of the next takeover checks, in order (undefined = free); then `pasteRefusal`. */
+    pasteRefusals: [] as (string | undefined)[],
+    /** What the sealed paste's protection says when the target asks it inside its own turn: a sentence refuses (nothing is typed). */
+    protectRefusal: undefined as string | undefined,
+    /** What the target reports to the protection as the document/frame origins it is about to write into. */
+    protectOrigins: ['https://form.example.test'] as readonly string[],
+    /** Runs while the write waits its turn in the target's own queue, before the target's takeover check. */
+    onQueue: undefined as (() => void) | undefined,
+    /** Runs while the attempt is journalled as delivering, before the target's turn (fix2, R4). */
+    onDelivering: undefined as (() => void) | undefined,
     journalFails: false,
     agendaFails: false,
     sessionEnded: false,
@@ -148,7 +174,8 @@ export function world(options: WorldOptions = {}) {
     onAgendaRaise: undefined as ((card: InputCard) => void) | undefined,
     quarantineSessions: undefined as readonly string[] | Error | undefined,
   };
-  const writes: { values: string[]; submit: boolean; options: TypeOptions | undefined }[] = [];
+  const writes: { values: string[]; submit: boolean; options: TypeOptions | undefined; protectedBefore?: number }[] =
+    [];
   const cleared: ClearJob[] = [];
   const cards: InputCard[] = [];
   const closed: string[] = [];
@@ -163,7 +190,8 @@ export function world(options: WorldOptions = {}) {
   const saves: unknown[] = [];
   const fills: { id: string; role: LoginFieldRole; factor?: string }[] = [];
   const timers: { ms: number; fire: () => void }[] = [];
-  const used: { copy: string }[] = [];
+  const used: { copy: string; target?: unknown }[] = [];
+  const protects: { copy: string; target: unknown; where: unknown; capturedAt?: string }[] = [];
   const ruleLog: { reserved: unknown[][]; released: string[]; spent: string[] } = {
     reserved: [],
     released: [],
@@ -227,7 +255,18 @@ export function world(options: WorldOptions = {}) {
     ...(options.refind === undefined ? {} : { refind: async () => (options.refind as () => ObserveResult)() }),
     document: async () => state.document,
     type: async (_session, _target, typedValues, submit, _expected, typeOptions) => {
-      writes.push({ values: typedValues.map(each => each.text), submit, options: typeOptions });
+      state.onQueue?.();
+      // The target's own turn: a takeover that landed since the last look types nothing (secure-clip-1 fix1, P1-1).
+      if ((await typeOptions?.refuse?.()) !== undefined) return 'guard_refused';
+      state.onBeforeProtect?.();
+      // A sealed paste's protection is installed here, in the target's own turn, before the write (a throw types nothing).
+      typeOptions?.protect?.({ origins: state.protectOrigins });
+      writes.push({
+        values: typedValues.map(each => each.text),
+        submit,
+        options: typeOptions,
+        protectedBefore: protects.length,
+      });
       state.onType?.();
       if (typeOptions?.armClear === 'try') typeOptions.armed?.(true);
       return state.typedQueue.shift() ?? state.typed;
@@ -243,7 +282,7 @@ export function world(options: WorldOptions = {}) {
   };
 
   const service = new InputRequestService({
-    target,
+    target: options.route ?? target,
     agenda: {
       raise: async (_session, raised) => {
         if (state.agendaFails) return { ok: false, message: 'the agenda is full' };
@@ -260,6 +299,7 @@ export function world(options: WorldOptions = {}) {
       publish: async (_session, event) => {
         if (state.journalFails) throw new Error('the journal is not writable');
         events.push(event);
+        if (event.state === 'delivering') state.onDelivering?.();
       },
       history: async () => options.history ?? [],
       quarantine: async () => undefined,
@@ -291,14 +331,30 @@ export function world(options: WorldOptions = {}) {
     quarantine,
     redact: async text => values.scrubAll(text),
     hostName: 'kirin-box',
-    ...((options.withLogins ?? true) ? { logins } : {}),
-    ...(options.grants === undefined ? {} : { grants: grantSource }),
+    ...(options.scripts === undefined ? {} : { scripts: options.scripts }),
+    ...((options.withLogins ?? true) ? { logins: options.loginPort ?? logins } : {}),
+    ...(options.choicePort === undefined ? {} : { choice: options.choicePort }),
+    ...(options.grantPort === undefined
+      ? options.grants === undefined
+        ? {}
+        : { grants: grantSource }
+      : { grants: options.grantPort }),
     ...(options.withSealed === true
       ? {
           sealed: {
             describe: (_session: string, name: string) => copies.get(name)?.meta,
-            open: (_session: string, name: string) => copies.get(name)?.value,
-            used: (_session: string, name: string) => void used.push({ copy: name }),
+            open: (_session: string, name: string, pinned?: string) => {
+              const found = copies.get(name);
+              return found !== undefined && (pinned === undefined || pinned === found.meta.capturedAt)
+                ? found.value
+                : undefined;
+            },
+            used: (_session: string, name: string, target?: unknown) => void used.push({ copy: name, target }),
+            protect: (_session: string, name: string, target: unknown, where: unknown, pinned?: string) => {
+              if (state.protectRefusal !== undefined) throw new Error(state.protectRefusal);
+              protects.push({ copy: name, target, where, ...(pinned === undefined ? {} : { capturedAt: pinned }) });
+            },
+            refusal: async () => (state.pasteRefusals.length > 0 ? state.pasteRefusals.shift() : state.pasteRefusal),
           },
         }
       : {}),
@@ -366,6 +422,7 @@ export function world(options: WorldOptions = {}) {
     fills,
     timers,
     used,
+    protects,
     ruleLog,
     grantLog,
     copies,

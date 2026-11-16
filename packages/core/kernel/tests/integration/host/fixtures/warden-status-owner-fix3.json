@@ -163,7 +163,7 @@
     "login": {
       "source": "not_set",
       "unknown": [],
-      "available": ["claude-code"]
+      "available": []
     }
   },
   "populated": {
@@ -818,7 +818,7 @@
     "login": {
       "source": "not_set",
       "unknown": [],
-      "available": ["claude-code"]
+      "available": []
     }
   }
 }

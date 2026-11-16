@@ -6,13 +6,22 @@
  * `aria-current="page"`. A row is one link to the ferret's chat.
  *
  * The kind is kept for this device in the app's controls (`sessionsMode`); "Show stopped" lasts while the list does.
+ *
+ * NEEDS YOU. Under Pinned, a "Needs you" group gathers the ferrets with open items waiting on the owner (the Agenda says
+ * which, through `ferrets.needs-you`) while the device's "Group Needs you at the top" is on; with it off they stay in
+ * their folders, still bold and badged. Without a provider the list draws none of it.
  */
 
-import { useDeviceControls, useOptionalRouter } from '@ferretry/app';
+import { useAppHook, useDeviceControls, useOptionalRouter } from '@ferretry/app';
 import { type ReactNode, useState } from 'react';
+import { FERRETS_NEEDS_YOU_HOOK, type FerretNeedsYou, isFerretsNeedsYou } from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
+import { useNeedsYou } from './use-needs-you.ts';
 import { daemonOfRoute, ferretOfRoute } from '../header/header-paths.ts';
-import { newFerretHref } from '../new-ferret/hrefs.ts';
+import { NewFerretButton } from '../new-ferret/new-machine-menu.tsx';
+import { ListOptions } from '../restart-outdated/restart-outdated-menu.tsx';
+import { restartFerrets } from '../restart-outdated/restart-outdated-api.ts';
+import { RestartOutdatedResult, useRestartOutdated } from '../restart-outdated/restart-outdated.tsx';
 import { FerretRow } from './ferret-row.tsx';
 import {
   DEFAULT_LIST_FILTER,
@@ -20,16 +29,35 @@ import {
   type FerretListFilter,
   ferretListView,
   MODE_SEGMENTS,
+  type NeedingYou,
 } from './list-model.ts';
 import { STALE_LIST, useFerretList } from './use-ferret-list.ts';
 
 export function FerretList({ client }: { readonly client: LiveFerretsClient }): ReactNode {
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
+  const provided = useAppHook(daemon, FERRETS_NEEDS_YOU_HOOK);
+  const needing = useNeedsYou(isFerretsNeedsYou(provided) ? provided : undefined);
+  return <FerretListBody client={client} needing={needing} />;
+}
+
+/** The list over an answer to "who waits on the owner": what `FerretList` draws once the hook is read. */
+export function FerretListBody({
+  client,
+  needing,
+}: {
+  readonly client: LiveFerretsClient;
+  readonly needing: NeedingYou;
+}): ReactNode {
+  const router = useOptionalRouter();
+  const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const openFerret = router === null ? undefined : ferretOfRoute(router.route);
   const { read, retry } = useFerretList(client);
   const { device, set } = useDeviceControls();
   const [showStopped, setShowStopped] = useState(DEFAULT_LIST_FILTER.showStopped);
+  const restart = useRestartOutdated(client, read.kind === 'ready' ? read.ferrets : null, request =>
+    restartFerrets(client, request),
+  );
   const filter: FerretListFilter = { mode: device.sessionsMode ?? DEFAULT_LIST_FILTER.mode, showStopped };
   if (daemon === undefined) return null;
   const onNavigate = router === null ? undefined : (to: string) => router.navigate(to);
@@ -51,11 +79,25 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
       </div>
     );
 
-  const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret);
-  const row = (ferret: (typeof read.ferrets)[number]): ReactNode => (
-    <FerretRow active={ferret.id === openFerret} daemon={daemon} ferret={ferret} key={ferret.id} {...navigation} />
-  );
-  const empty = view.pinned.length === 0 && view.groups.length === 0;
+  const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret, {
+    needing,
+    group: device.groupNeedsYou,
+  });
+  const row = (ferret: (typeof read.ferrets)[number]): ReactNode => {
+    const waiting: FerretNeedsYou | undefined = needing.get(ferret.id);
+    return (
+      <FerretRow
+        active={ferret.id === openFerret}
+        daemon={daemon}
+        ferret={ferret}
+        key={ferret.id}
+        overlayKey={client}
+        {...(waiting === undefined ? {} : { needsYou: waiting })}
+        {...navigation}
+      />
+    );
+  };
+  const empty = view.pinned.length === 0 && view.needsYou.length === 0 && view.groups.length === 0;
   return (
     <div className="fy-sbar__ferrets" data-ferret-list="">
       <div className="fy-sbar__filters">
@@ -75,25 +117,24 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
             </button>
           ))}
         </fieldset>
-        <label className="fy-sbar__stopped" data-sbar-show-stopped="">
-          <input
-            checked={showStopped}
-            onChange={event => setShowStopped(event.currentTarget.checked)}
-            type="checkbox"
-          />
-          <span>Show stopped</span>
-          {view.hiddenStopped > 0 ? <span className="fy-sbar__count">({view.hiddenStopped})</span> : null}
-        </label>
+        <div className="fy-sbar__tools">
+          <label className="fy-sbar__stopped" data-sbar-show-stopped="">
+            <input
+              checked={showStopped}
+              onChange={event => setShowStopped(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            <span>Show stopped</span>
+            {view.hiddenStopped > 0 ? <span className="fy-sbar__count">({view.hiddenStopped})</span> : null}
+          </label>
+          <ListOptions restart={restart} />
+        </div>
       </div>
+      <RestartOutdatedResult restart={restart} />
       <div className="fy-sbar__list scroll-thin">
         {empty ? (
           <div className="fy-sbar__empty">
             <p className="m-0">{emptyMessage(filter, view.hiddenStopped)}</p>
-            {filter.mode === 'all' && view.hiddenStopped === 0 ? (
-              <a className="kt-btn mt-2" data-ferret-new="" href={newFerretHref(daemon)}>
-                + New ferret
-              </a>
-            ) : null}
           </div>
         ) : (
           <>
@@ -104,6 +145,19 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
                   <span className="fy-sbar__count">{view.pinned.length}</span>
                 </h2>
                 <ul>{view.pinned.map(row)}</ul>
+              </section>
+            )}
+            {view.needsYou.length === 0 ? null : (
+              <section
+                aria-label="Needs you"
+                className="fy-sbar__group fy-sbar__needs-you"
+                data-sbar-needs-you-group=""
+              >
+                <h2 className="fy-sbar__project">
+                  <span className="truncate">Needs you</span>
+                  <span className="fy-sbar__count">{view.needsYou.length}</span>
+                </h2>
+                <ul>{view.needsYou.map(row)}</ul>
               </section>
             )}
             {view.groups.map(group => (
@@ -123,6 +177,11 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
           {STALE_LIST}
         </p>
       ) : null}
+      {/* v4's sessions bar ended in a primary "New session" button whatever the list held: the door to start one is
+          never only a command-bar entry or an empty-list message. */}
+      <div className="fy-sbar__footer">
+        <NewFerretButton daemon={daemon} onNavigate={onNavigate} />
+      </div>
     </div>
   );
 }

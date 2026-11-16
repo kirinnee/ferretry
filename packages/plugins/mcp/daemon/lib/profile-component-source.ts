@@ -9,8 +9,12 @@
 import type { ProfileComponentSource } from '@ferretry/plugin-runtimes/contract';
 import type { McpItem } from '../../contract/index.ts';
 
-export function mcpComponentSource(items: () => ReadonlyMap<string, McpItem>): ProfileComponentSource {
+export function mcpComponentSource(
+  items: () => ReadonlyMap<string, McpItem>,
+  watch?: ProfileComponentSource['watch'],
+): ProfileComponentSource {
   return {
+    ...(watch === undefined ? {} : { watch }),
     list: async () => [...items().keys()].toSorted((left, right) => left.localeCompare(right)),
     read: async name => {
       const item = items().get(name);

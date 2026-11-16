@@ -1,3 +1,21 @@
+## [4.291.17](https://github.com/kirinnee/ferretry/compare/v4.291.16...v4.291.17) (2026-11-14)
+
+### Fixes
+
+* **browser:** refuse agent reads of a screen showing a live pairing code ([#1597](https://github.com/kirinnee/ferretry/issues/1597)) ([547ac82](https://github.com/kirinnee/ferretry/commit/547ac82f6abcccb78df2ddb0f6706d1582ea1d82))
+
+## [4.291.16](https://github.com/kirinnee/ferretry/compare/v4.291.15...v4.291.16) (2026-11-13)
+
+### Fixes
+
+* **browser:** hide pairing codes in every browser tool result ([#1596](https://github.com/kirinnee/ferretry/issues/1596)) ([9c6a33b](https://github.com/kirinnee/ferretry/commit/9c6a33b5ecf1e77676c0618e099d1f1b7f651822)), closes [#v1](https://github.com/kirinnee/ferretry/issues/v1) [#v1](https://github.com/kirinnee/ferretry/issues/v1)
+
+## [4.291.15](https://github.com/kirinnee/ferretry/compare/v4.291.14...v4.291.15) (2026-11-13)
+
+### Fixes
+
+* **daemon:** retry the hosted relay lookup after a failed boot-time read ([#1595](https://github.com/kirinnee/ferretry/issues/1595)) ([21b469d](https://github.com/kirinnee/ferretry/commit/21b469d165870392634a17d07aabb1ddaea5f604))
+
 ## [4.291.14](https://github.com/kirinnee/ferretry/compare/v4.291.13...v4.291.14) (2026-11-13)
 
 ### Fixes

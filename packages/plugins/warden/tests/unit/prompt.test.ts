@@ -3,13 +3,11 @@ import should from 'should';
 import {
   buildAssignedWardenPrompt,
   buildWardenSweepPrompt,
-  provenancePath,
   type WardenAnomaly,
   type WardenPromptSession,
   type WardenPromptSettings,
 } from '../../daemon/lib/index.ts';
 
-const REPORT = '/state/warden/reports/2026-07-31T00-00-00-000Z.md';
 const ACTING: WardenPromptSettings = { clientName: 'fy', mayAct: true };
 const REPORTING: WardenPromptSettings = { clientName: 'fy', mayAct: false };
 
@@ -33,7 +31,7 @@ const anomaly = (overrides: Partial<WardenAnomaly> = {}): WardenAnomaly => ({
 describe('the assigned warden prompt', () => {
   it('should name the one session it may look at', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
 
     // Assert
     should(actual).match(/ASSIGNED warden for exactly one session: s1 \(teammate :scout\)/u);
@@ -44,7 +42,7 @@ describe('the assigned warden prompt', () => {
     const target = session({ config: { id: 's1', mode: 'auto', agent: 'claude-auto-a' } });
 
     // Act
-    const actual = buildAssignedWardenPrompt(anomaly(), target, REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), target, ACTING);
 
     // Assert
     should(actual).match(/teammate unknown/u);
@@ -55,31 +53,25 @@ describe('the assigned warden prompt', () => {
     const subject = anomaly({ idleMinutes: 22, ledger: { lastTranscriptAt: '2026-07-31T11:00:00.000Z' } });
 
     // Act
-    const actual = buildAssignedWardenPrompt(subject, session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(subject, session(), ACTING);
 
     // Assert
     should(actual).containEql(JSON.stringify(subject, null, 2));
   });
 
-  it('should dictate the exact report path', () => {
+  it('should have the report delivered as the final signal, with no file path to write', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
 
     // Assert
-    should(actual).match(new RegExp(`Write your report to EXACTLY: ${REPORT}`, 'u'));
-  });
-
-  it('should name the daemon-owned provenance sidecar so the warden never writes into it', () => {
-    // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
-
-    // Assert
-    should(actual).containEql(provenancePath(REPORT));
+    should(actual).match(/signal done "<the report>"/u);
+    should(actual).not.match(/Write your report to EXACTLY/u);
+    should(actual).not.containEql('/state/warden/reports');
   });
 
   it('should carry the machine-stable template the verdict parser reads', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
 
     // Assert
     should(actual).containEql('Verdict: LEAVE|NUDGE|RESUME|KILL|NEEDS_HUMAN');
@@ -92,7 +84,7 @@ describe('the assigned warden prompt', () => {
     const target = session({ config: { id: 's1', mode: 'auto', teammate: 'scout', agent: 'claude-auto-a' } });
 
     // Act
-    const actual = buildAssignedWardenPrompt(anomaly(), target, REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), target, ACTING);
 
     // Assert
     should(actual).match(/teammate :scout, -\)/u);
@@ -100,7 +92,7 @@ describe('the assigned warden prompt', () => {
 
   it('should offer the read-only workspace look when a working directory is known', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
 
     // Assert
     should(actual).containEql('git -C /home/dev/repo diff --stat');
@@ -111,7 +103,7 @@ describe('the assigned warden prompt', () => {
     const target = session({ cwd: undefined });
 
     // Act
-    const actual = buildAssignedWardenPrompt(anomaly(), target, REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), target, ACTING);
 
     // Assert
     should(actual).not.containEql('git -C');
@@ -125,7 +117,7 @@ describe('the assigned warden prompt', () => {
     { kind: 'owner_request' as const, expected: /The OWNER asked for this investigation/u },
   ])('should explain what to weigh for $kind', ({ kind, expected }) => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly({ kind }), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly({ kind }), session(), ACTING);
 
     // Assert
     should(actual).match(expected);
@@ -133,7 +125,7 @@ describe('the assigned warden prompt', () => {
 
   it('should name a long data conversion, not a "move", as a legitimate long tool command', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'sus_subprocess' }), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'sus_subprocess' }), session(), ACTING);
 
     // Assert
     should(actual).containEql('(build, test suite, long data conversion…)');
@@ -142,7 +134,7 @@ describe('the assigned warden prompt', () => {
 
   it('should tell an authorized warden to answer only an unambiguous question', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'unattended_question' }), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'unattended_question' }), session(), ACTING);
 
     // Assert
     should(actual).containEql('`fy answer`');
@@ -150,7 +142,7 @@ describe('the assigned warden prompt', () => {
 
   it('should ask an unauthorized warden to state the decision instead of answering', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'unattended_question' }), session(), REPORT, REPORTING);
+    const actual = buildAssignedWardenPrompt(anomaly({ kind: 'unattended_question' }), session(), REPORTING);
 
     // Assert
     should(actual).not.containEql('`fy answer`');
@@ -161,7 +153,7 @@ describe('the assigned warden prompt', () => {
 describe('what a warden is told about its own authority', () => {
   it('should hand an authorized warden the commands it can actually run', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
 
     // Assert
     should(actual).containEql('`fy send s1 <message>`');
@@ -171,7 +163,7 @@ describe('what a warden is told about its own authority', () => {
 
   it('should tell an unauthorized warden plainly that its report is the action', () => {
     // Arrange / Act
-    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORT, REPORTING);
+    const actual = buildAssignedWardenPrompt(anomaly(), session(), REPORTING);
 
     // Assert
     should(actual).containEql('## Your authority');
@@ -181,8 +173,8 @@ describe('what a warden is told about its own authority', () => {
 
   it('should keep the verdict vocabulary identical either way, because the parser reads it', () => {
     // Arrange / Act
-    const acting = buildAssignedWardenPrompt(anomaly(), session(), REPORT, ACTING);
-    const reporting = buildAssignedWardenPrompt(anomaly(), session(), REPORT, REPORTING);
+    const acting = buildAssignedWardenPrompt(anomaly(), session(), ACTING);
+    const reporting = buildAssignedWardenPrompt(anomaly(), session(), REPORTING);
 
     // Assert
     for (const verdict of ['LEAVE', 'NUDGE', 'RESUME', 'KILL', 'NEEDS_HUMAN']) {
@@ -197,7 +189,6 @@ describe('the fleet sweep prompt', () => {
     buildWardenSweepPrompt({
       anomalies: [anomaly()],
       sessions: [session()],
-      reportPath: REPORT,
       at: '2026-07-31T00:00:00.000Z',
       settings: ACTING,
       ...overrides,

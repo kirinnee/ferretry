@@ -52,9 +52,11 @@ beforeAll(() => {
             new ReadableStream({
               start(controller) {
                 controller.enqueue(encoder.encode('{"half":'));
-                setTimeout(() => controller.error(new Error('hung up')), 20);
+                setTimeout(() => controller.close(), 20);
               },
             }),
+            // Ends well short of the declared length: the peer hung up half way (`controller.error()` would fail the group).
+            { headers: { 'content-length': '64' } },
           );
         default:
           return new Response('no', { status: 404 });

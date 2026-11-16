@@ -11,6 +11,7 @@ export * from './wire-compact.ts';
 export * from './wire-draft.ts';
 export * from './wire-link.ts';
 export * from './wire-media.ts';
+export * from './wire-prompt.ts';
 export * from './wire-question.ts';
 export * from './wire-read.ts';
 export * from './wire-search.ts';

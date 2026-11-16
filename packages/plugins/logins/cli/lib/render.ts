@@ -229,7 +229,7 @@ export function renderModelCatalogs(view: ModelCatalogsView): string {
 }
 
 const OUTCOME_WORDS: Readonly<Record<ModelCatalogRefreshResult['outcome'], string>> = {
-  updated: 'A newer model catalog was published; it is in effect now',
+  updated: 'The published model catalog was updated; it is in effect now',
   unchanged: 'The published model catalog has not changed',
   'not-due': 'The model catalog was checked recently',
   unreachable: 'The published model catalog could not be reached; the one held stays in effect',

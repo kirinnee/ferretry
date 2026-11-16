@@ -18,6 +18,7 @@ import {
   PROCESS_CHANGED_TEXT,
   PROCESS_OUTPUT_HELD_MAX,
   PROCESSES_FORBIDDEN_TEXT,
+  processForbiddenText,
 } from '../../../../../app/lib/session-processes.ts';
 import { interact, mount, must } from '@ferretry/app/testing';
 import {
@@ -184,10 +185,20 @@ describe('the process list', () => {
   });
 
   it('says why this device cannot see the processes when the daemon refuses with 403', async () => {
-    const { view } = await setup({ state: { status: 'forbidden' } });
+    const { view } = await setup({ state: { status: 'forbidden', reason: PROCESSES_FORBIDDEN_TEXT } });
     expect(must(view.container.querySelector('[data-processes-forbidden]'), 'the refusal').textContent).toBe(
       PROCESSES_FORBIDDEN_TEXT,
     );
+  });
+
+  it('shows the grant’s own words, not the device remedy, when a missing passkey is what refused', async () => {
+    const passkey = processForbiddenText(
+      new DaemonCallError(403, 'grant_step_up_required', 'using session terminals needs a passkey confirmation'),
+    );
+    const { view } = await setup({ state: { status: 'forbidden', reason: passkey } });
+    const shown = must(view.container.querySelector('[data-processes-forbidden]'), 'the refusal').textContent ?? '';
+    expect(shown).toContain('This needs your passkey');
+    expect(shown).not.toContain('Settings › Devices');
   });
 
   it('keeps the last list and says it is old when a read failed', async () => {
@@ -422,6 +433,18 @@ describe('an opened process', () => {
     await click(rowFor('100.1'));
     await turns();
     expect(q('.fy-proc-body [role="alert"]', 'the alert').textContent).toBe(PROCESSES_FORBIDDEN_TEXT);
+  });
+
+  it('says the passkey is what is missing when the output read is refused for one', async () => {
+    const reader: ProcessOutputReader = async () => {
+      throw new DaemonCallError(403, 'grant_step_up_required', 'using session terminals needs a passkey confirmation');
+    };
+    const { q, rowFor, click } = await setup({ readOutput: reader });
+    await click(rowFor('100.1'));
+    await turns();
+    const alert = q('.fy-proc-body [role="alert"]', 'the alert').textContent ?? '';
+    expect(alert).toContain('This needs your passkey');
+    expect(alert).not.toContain('Settings › Devices');
   });
 
   it('closes, and on a phone the list shrinks to the open row with a way back', async () => {

@@ -32,7 +32,7 @@ const AgendaPatchTabsSchema = z
     `a patch changes at most ${MAX_AGENDA_TAB_EDITS} tabs at once`,
   );
 
-const AgendaPatchSchema = z.strictObject({
+export const AgendaPatchSchema = z.strictObject({
   /**
    * READ BEFORE WRITE: the revision `fy agenda show <id> --yaml` printed. Required, so a patch is always written
    * against the whole item as last read; one the item has moved past is refused `stale` (read it again).
@@ -82,10 +82,10 @@ const AgendaPatchSchema = z.strictObject({
   answers: edit.answers,
   fields: edit.fields,
 });
-type AgendaPatch = z.infer<typeof AgendaPatchSchema>;
+export type AgendaPatch = z.infer<typeof AgendaPatchSchema>;
 
 /** Every key a patch takes, in the order `show --yaml` prints them. */
-const AGENDA_PATCH_KEYS = Object.keys(AgendaPatchSchema.shape) as readonly (keyof AgendaPatch)[];
+export const AGENDA_PATCH_KEYS = Object.keys(AgendaPatchSchema.shape) as readonly (keyof AgendaPatch)[];
 
 /**
  * The fields an item's revision covers: everything the owner reads on it and a ferret may change, the ask's version,

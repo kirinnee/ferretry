@@ -497,6 +497,100 @@ describe('network log', () => {
     should(text).containEql('(body not shown: image/png)');
   });
 
+  it('should never show the body of a pairing mint, whatever its type, and never even read it', async () => {
+    // Arrange — the response IS a live code; the fixed fake stands for it
+    const log = new NetworkLog();
+    let read = false;
+    const mint = new FakeResponse(
+      201,
+      { 'content-type': 'application/json' },
+      new TextEncoder().encode('{"code":"FAKE-PAIR-0000"}'),
+    );
+    mint.body = async () => {
+      read = true;
+      return new TextEncoder().encode('{"code":"FAKE-PAIR-0000"}');
+    };
+    const addresses = [
+      'https://daemon.example.test/v1/pair/code',
+      'https://daemon.example.test/v1/pair/code/fy_pair_abc?x=1',
+      'https://daemon.example.test/v1/pair/code#frag',
+    ];
+    for (const [index, address] of addresses.entries()) {
+      const request = new FakeRequest(address, 'fetch', 'POST');
+      log.started(request);
+      await finish(log, request, mint);
+
+      // Act
+      const text = await log.get(`r${String(index + 1)}`);
+
+      // Assert
+      should(text).containEql('(body not shown: a pairing code)');
+      should(text).not.containEql('FAKE-PAIR-0000');
+    }
+    should(read).be.false();
+  });
+
+  it('should never show the body of a catalog SHARE mint (a join invite is a credential), and never even read it', async () => {
+    // Arrange — the response carries the invite's code, link and QR text; the fixed fake stands for it
+    const log = new NetworkLog();
+    let read = false;
+    const mint = new FakeResponse(
+      201,
+      { 'content-type': 'application/json' },
+      new TextEncoder().encode('{"code":"FAKE-SHARE-0000"}'),
+    );
+    mint.body = async () => {
+      read = true;
+      return new TextEncoder().encode('{"code":"FAKE-SHARE-0000"}');
+    };
+    const addresses = [
+      'https://daemon.example.test/v1/catalog-shares',
+      'https://daemon.example.test/v1/catalog-shares/shr_abc?x=1',
+      'https://daemon.example.test/v1/catalog-shares#frag',
+    ];
+    for (const [index, address] of addresses.entries()) {
+      const request = new FakeRequest(address, 'fetch', 'POST');
+      log.started(request);
+      await finish(log, request, mint);
+
+      // Act
+      const shown = await log.get(`r${String(index + 1)}`);
+
+      // Assert
+      should(shown).containEql('(body not shown: a pairing code)');
+      should(shown).not.containEql('FAKE-SHARE-0000');
+    }
+    should(read).be.false();
+  });
+
+  it('should show an ordinary body from a path that merely resembles the share route', async () => {
+    // Arrange
+    const log = new NetworkLog();
+    const request = new FakeRequest('https://app.test/v1/catalog-sharesx', 'fetch');
+    log.started(request);
+    await finish(log, request, new FakeResponse(200, { 'content-type': 'application/json' }));
+
+    // Act
+    const shown = await log.get('r1');
+
+    // Assert
+    should(shown).containEql('{"ok":true}');
+  });
+
+  it('should show an ordinary response body from a path that merely resembles the mint route', async () => {
+    // Arrange
+    const log = new NetworkLog();
+    const request = new FakeRequest('https://app.test/v1/pair/codes', 'fetch');
+    log.started(request);
+    await finish(log, request, new FakeResponse(200, { 'content-type': 'application/json' }));
+
+    // Act
+    const text = await log.get('r1');
+
+    // Assert
+    should(text).containEql('{"ok":true}');
+  });
+
   it('should say what happened to a request that failed or has no response yet, and refuse an id it never had', async () => {
     // Arrange
     const log = new NetworkLog();

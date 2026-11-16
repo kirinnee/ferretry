@@ -11,7 +11,7 @@ The value is `auto` (the harness's own trigger — the default, no change in beh
 
 | Where                                  | How                                                                                                    |
 | -------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| One ferret, at start                   | `fy start --compact-at 250k …`, `fy new --compact-at 250k …`, or `compactAt` on `POST /v1/sessions`    |
+| One ferret, at start                   | `fy start --compact-at 250k …`, `fy new --compact-at 250k …`, or `compactAt` on `POST /v1/ferrets`     |
 | One ferret, later                      | `fy session compact-at <session> 250k` (`auto` for the harness's own, `inherit` to drop it)            |
 | One ferret, in the app                 | Actions › **Compact memory at**: Auto, 200k, 250k, 400k or a custom size                               |
 | Every ferret on a runtime or a profile | `compactAt:` in `runtimes/<name>.yaml` or `profiles/<name>.yaml` ([config-files.md](config-files.md))  |
@@ -19,7 +19,8 @@ The value is `auto` (the harness's own trigger — the default, no change in beh
 
 A size is `250k`, `1m`, `250000` or `auto`. The runtime's value wins over its profile's, and the ferret's own
 value wins over both. A ferret with no value of its own follows the default; an explicit `auto` on the ferret
-overrides a login default, and `inherit` drops the ferret's own value so the default applies again.
+overrides a login default, and `inherit` drops the ferret's own value so the default applies again — including a value the
+ferret was started with, which does not come back after a clear.
 
 ## What is checked
 

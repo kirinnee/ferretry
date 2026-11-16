@@ -66,6 +66,10 @@ export interface WardenSettingsFormProps {
   /** Settings › machine › Browser, where the browser's mode and proxy are (the Warden only closes leftovers). */
   readonly browserHref?: string;
   readonly onNavigate?: (to: string) => void;
+  /** Names the stored Jev key in `warden.yaml` (names only, never a value). Offered when `jevKey` is `not_named`. */
+  readonly onUseStoredKey?: () => void;
+  /** The "use stored key" act is in flight. */
+  readonly namingKey?: boolean;
 }
 
 const EVENTS: readonly { readonly id: WardenEventTrigger; readonly label: string }[] = [
@@ -123,6 +127,7 @@ const KEY_PILL: Readonly<
 > = {
   set: { label: 'key set', tone: 'ok' },
   missing: { label: 'needs Jev key', tone: 'warn' },
+  not_named: { label: 'key not named', tone: 'warn' },
   unknown: { label: 'key status unknown', tone: 'pend' },
 };
 
@@ -499,6 +504,8 @@ export function WardenSettingsForm({
   speedupsHref,
   browserHref,
   onNavigate,
+  onUseStoredKey,
+  namingKey = false,
 }: WardenSettingsFormProps) {
   const name = useId();
   const llm = value.layers.llm;
@@ -558,7 +565,30 @@ export function WardenSettingsForm({
             on={value.layers.jev}
             onToggle={jev => set({ layers: { ...value.layers, jev } })}
           >
-            {jevKey.state !== 'set' && jevKey.state !== 'off' && (
+            {jevKey.state === 'not_named' && (
+              <div
+                className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn"
+                data-warden-jev-not-named=""
+              >
+                <p className="m-0 font-semibold">A Jev key is stored, but the Warden is not told to use it.</p>
+                <p className="m-0 mt-xs text-fg-soft">
+                  Until warden.yaml names it (<code>jev.key</code>), nothing is sent to Jev and every flag{' '}
+                  {value.layers.llm ? 'goes to an investigation' : 'is shown to you'}.
+                </p>
+                {onUseStoredKey !== undefined && (
+                  <button
+                    type="button"
+                    className="kt-btn mt-2 min-h-[44px]"
+                    data-variant="primary"
+                    disabled={namingKey}
+                    onClick={onUseStoredKey}
+                  >
+                    {namingKey ? 'Using stored key…' : 'Use stored key'}
+                  </button>
+                )}
+              </div>
+            )}
+            {jevKey.state !== 'set' && jevKey.state !== 'not_named' && jevKey.state !== 'off' && (
               <div className="rounded-control border border-warn-border bg-warn-bg px-cell-x py-2 text-meta leading-base text-warn">
                 <p className="m-0 font-semibold">
                   {jevKey.state === 'missing' ? 'No Jev key yet.' : 'Could not check the Jev key.'}

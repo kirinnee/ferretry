@@ -14,7 +14,7 @@ import {
   type ReplyKey,
 } from './reply-batch.ts';
 import type { AgendaBoardChange, AgendaChangeObserver, AgendaService } from './service.ts';
-import { isOnBehalfItem } from './state-machine.ts';
+import { isCarriedQuestionItem, isOnBehalfItem } from './state-machine.ts';
 
 /** Every observer is told, even after a failure. Critical delivery failures prevent durable acknowledgement. */
 export class AgendaChangeFanout implements AgendaChangeObserver {
@@ -37,10 +37,13 @@ export class AgendaChangeFanout implements AgendaChangeObserver {
 
 /**
  * Whether an item speaks for the ferret whose board holds it: one it raised, or a gate's follow-up conversation the
- * daemon opened on its behalf (`gate-followup:`, `card-agenda:`), so the owner's words there reach it as on its own item.
+ * daemon opened on its behalf (`gate-followup:`, `card-agenda:`), or its own question form a v4 home carried over
+ * (`question:`, `isCarriedQuestionItem`), so the owner's words there reach it as on its own item.
  */
 const speaksFor = (item: AgendaItem | ResolvedAgendaItem, sessionId: string): boolean =>
-  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) || isOnBehalfItem(item);
+  (item.raisedBy === 'agent' && item.raisedBySession === sessionId) ||
+  isOnBehalfItem(item) ||
+  isCarriedQuestionItem(item);
 
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.

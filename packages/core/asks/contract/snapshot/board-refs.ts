@@ -45,3 +45,16 @@ export const BoardReopenAttachmentsSchema = z.strictObject({
     .refine(ids => new Set(ids).size === ids.length, 'an attachment is named once'),
 });
 export type BoardReopenAttachments = z.infer<typeof BoardReopenAttachmentsSchema>;
+
+/**
+ * Reads a card reference a person or ferret typed: `&F412` or a bare `F412`, in any case. The CLI's `--task`,
+ * `--related` and `--move-cards` read through it. `ok: false` is anything that is not exactly one id.
+ */
+export const parseTaskRef = (
+  input: string,
+): { readonly ok: true; readonly value: TaskRef } | { readonly ok: false } => {
+  const trimmed = input.trim();
+  const bare = trimmed.startsWith(TASK_REF_SIGIL) ? trimmed.slice(1) : trimmed;
+  const id = bare.toUpperCase();
+  return BOARD_TASK_ID_PATTERN.test(id) ? { ok: true, value: { id } } : { ok: false };
+};

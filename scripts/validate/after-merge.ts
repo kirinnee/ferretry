@@ -51,9 +51,27 @@ export const OWNER_MOVED_ITEMS: readonly { readonly id: string; readonly decisio
     id: 'coverage-lag',
     decision: '!A484: the coverage lag (12 unit batches + 40 int files, #32 CI-only proof) moves after merge',
   },
+  { id: 'host-store-codex-login', decision: 'lizzette 2026-11-11: host-store Codex after merge (&F3468)' },
   {
     id: 'v4-doctor-checks',
     decision: 'lizzette 2026-11-13: the v4 doctor checks and readiness move after merge (card &F3715); tmux is in 5.0',
+  },
+  {
+    id: 'app-component-editing',
+    decision: '!A510 (owner 2026-11-13): component editing in the app moves after merge; the CLI way stays before',
+  },
+  {
+    id: 'fy-ask-archive-paging',
+    decision: 'lizzette 2026-11-13: fy ask past 500 archived ferrets moves after merge (not parity, fails loudly)',
+  },
+  {
+    id: 'fy-browser-firewall-entry',
+    decision: 'lizzette 2026-11-13: fy browser firewall entry stays a declared gap after merge (no 5.0 route)',
+  },
+  {
+    id: 'contract-hooks-restore',
+    decision:
+      'lizzette 2026-11-13: the four contract hooks stay out of 5.0 hook config; card &C57 restores 5.0 versions after merge',
   },
 ];
 

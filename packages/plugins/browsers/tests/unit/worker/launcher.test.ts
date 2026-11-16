@@ -250,3 +250,17 @@ describe('the worker program', () => {
     expect(workerCommand({ kind: 'source', entry: '/src/main.ts' }, undefined)).toHaveProperty('refused');
   });
 });
+
+describe('the agent browser’s clipboard, by where its window is drawn', () => {
+  test('answers shared, asking the worker nothing, for a real window on a desktop (the computer’s own clipboard)', async () => {
+    const w = world({ modes: { mode: async () => 'window', platform: 'darwin' } });
+    const browser = await w.launcher.launch(VIEWPORT);
+
+    const read = await browser.copyClipboard('pg-1');
+
+    expect(read).toEqual({ ok: false, reason: 'shared' });
+    // Not one request about the clipboard reached the worker.
+    expect(w.workers[0]?.written.join('')).not.toContain('clipboardRead');
+    await browser.close();
+  });
+});

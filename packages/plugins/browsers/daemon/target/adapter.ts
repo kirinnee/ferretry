@@ -168,6 +168,22 @@ export class PageInputTarget implements InputTargetAdapter {
           if ((await port.inputArm(pageId, expected, passwords)) !== 'armed') return 'target_changed';
           if (options.proceed?.() === false) return 'target_changed';
         }
+        // A sealed paste: the document it lands on, and every frame in it, are OBSERVED first, in this very queue turn. A page
+        // that cannot say where it is, or one of whose frames cannot be told, is not written to. Every await ends HERE.
+        let where: Awaited<ReturnType<BrowserInputFieldsPort['inputDocument']>> | undefined;
+        if (options?.protect !== undefined) {
+          where = await port.inputDocument(pageId);
+          if (where.host === undefined || where.framesUnreadable === true)
+            throw new Error(
+              'Ferretry could not tell which site that page (or a frame in it) belongs to, so it could not protect the paste and nothing was typed.',
+            );
+        }
+        // A secure paste's copy and takeover check, in THIS turn of the page's queue and the LAST thing awaited before the
+        // protection and the write (which follow it with nothing awaited between): a person who took the page over, or a copy that
+        // was discarded, expired or captured again, while the write waited (or while the page was observed) types nothing.
+        if (options?.refuse !== undefined && (await options.refuse()) !== undefined) return 'guard_refused';
+        if (options?.protect !== undefined && where?.host !== undefined)
+          options.protect({ origins: [where.host, ...(where.frameHosts ?? [])].map(host => `https://${host}`) });
         began = true;
         return await port.inputType(pageId, expected, values, submit);
       });

@@ -154,7 +154,7 @@ describe('browsers provides the %browser reference menu (reference.catalog)', ()
   });
 
   test('the demand declared is exactly what the direct page-list route declares', () => {
-    const direct = manifest.actions.routes.find(route => route.key === 'GET /v1/sessions/:sessionId/browser');
+    const direct = manifest.actions.routes.find(route => route.key === 'GET /v1/ferrets/:ferretId/browser');
     expect(direct?.capability).toBeDefined();
     expect(direct?.capability).toEqual(menu([]).demand);
   });
@@ -204,7 +204,7 @@ describe('browsers with the real half', () => {
   test('with Conversation absent the plugin boots, still serves its own reads, and nothing asks the menu', async () => {
     const host = await boot('f1' as FerretId);
     expect(host.logs.filter(entry => entry.level === 'error')).toEqual([]);
-    const own = await host.request('GET', `/v1/sessions/${FERRET}/browser`);
+    const own = await host.request('GET', `/v1/ferrets/${FERRET}/browser`);
     expect(own.status).toBe(200);
     // The only asker of the menu is Conversation's references route; with Conversation off the host holds no such route.
     const references = await host.request('GET', `/v1/ferrets/${FERRET}/references?prefix=%25browser`);

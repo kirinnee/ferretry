@@ -112,6 +112,8 @@ export const CodexRolloutBindingSchema = z.strictObject({
   format: z.literal(1),
   home: z.string(),
   baseline: z.array(z.string()),
+  /** Whether the baseline saw every rollout already there (absent in a binding written before it was recorded). */
+  baselineComplete: z.boolean().optional(),
   native: z.string().optional(),
 });
 export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
@@ -138,6 +140,8 @@ export const CodexLaunchSettingsRecordSchema = z.strictObject({
     'fixed-layer': SectionDigestSchema,
     settings: SectionDigestSchema,
   }),
+  /** The runtime this launch ran as (a name, not a secret): the selection of settings is read for it again. */
+  runtime: z.string().min(1).max(128).optional(),
 });
 export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;
 export const CODEX_LAUNCH_SETTINGS = defineState({

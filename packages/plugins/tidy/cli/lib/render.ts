@@ -75,7 +75,7 @@ function lines(plan: TidyPlan): { drop: string[]; close: string[]; keep: string[
 }
 
 /** What a dry run prints: what would be dropped, closed and kept, each with its reason. */
-export function renderDryRun(plan: TidyPlan, binary: string): string {
+export function renderDryRun(plan: TidyPlan, binary: string, ferret?: string): string {
   const { drop, close, keep } = lines(plan);
   if (drop.length === 0 && close.length === 0) {
     return [
@@ -89,7 +89,7 @@ export function renderDryRun(plan: TidyPlan, binary: string): string {
     ...section(`Would close ${String(close.length)} ask(s)`, close),
     ...section(`Would keep ${String(keep.length)}`, keep),
     '',
-    `Apply it with: ${binary} tidy --yes [--reason "<why>"]`,
+    `Apply it with: ${binary} tidy${ferret === undefined ? '' : ` --ferret ${ferret}`} --yes [--reason "<why>"]`,
   ].join('\n');
 }
 

@@ -26,7 +26,7 @@ import type { SessionId } from './lib/session-id.ts';
  * GAPS, each to be bound by its owner (name — owner):
  *   fork:     attachmentStore, attachments, conversation, selection, harnessFacts, transcripts, catalog, catalogs,
  *             harness — Conversation / the harness plugins; gateway — the managed worktree host (unbound in `index.ts`);
- *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is Terminals' and still unbound).
+ *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is an adapter over Ferrets' own launch and stop, bound there).
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
  *   move:     preflight, askAgent, sessions, planner (resume and launch are bound by `index.ts`) — Ferrets' session services; accounts,
  *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,

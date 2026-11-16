@@ -9,6 +9,9 @@
  *   - (a route) descriptor-parity does not ALSO prove it: today's route is at the same path or moved (both halves
  *     recorded) and every field that differs is a recorded tightening (minimum up, caller any → person, a capability,
  *     `noStore`, `privilegedOnly` or a `catalog` resolver added). A record never blesses a loosening.
+ * Every OPEN row's check cell is one of: a tracked `*.test.ts(x)` file under a `tests/` folder; `none yet` (no proof
+ * file is written); `n/a` (a row removed by design); `descriptor-parity` (a route row only). A pointer to a file that
+ * does not exist, or a literal on the wrong kind of row, fails the commit (the generator never writes a planned path).
  * A status that says a row is "proved by test(s) <id>" (any row, ticked or not) fails when no live `test(` / `it(` title
  * in a tracked test file names that id.
  * `parity-ticks-known.tsv` (`id<TAB>reason`) lists rows that fail today. The ids it may hold are PINNED in
@@ -45,11 +48,6 @@ export const KNOWN = 'scripts/validate/parity-ticks-known.tsv';
 
 /** The ids `${KNOWN}` may list. It only shrinks: delete an id here when its row is fixed; never add one. */
 export const FROZEN_IDS: ReadonlySet<string> = new Set([
-  'S-0010',
-  'S-0255',
-  'S-0262',
-  'S-0304',
-  'S-0388',
   'T-0003',
   'T-0004',
   'T-0005',
@@ -362,6 +360,36 @@ export function tickFindings(
   return out;
 }
 
+/** The check cell of a row with no proof file yet, and of a row removed by design. The generator writes the same words. */
+export const CHECK_NONE_YET = 'none yet';
+export const CHECK_NOT_APPLICABLE = 'n/a';
+
+/**
+ * An open row's check cell must be a tracked test file or the literal that says why there is none. A ticked row is judged
+ * by `tickFindings` (it also needs a live title naming it), so it is not repeated here.
+ */
+export function checkCellFindings(rows: readonly LedgerRow[], tracked: ReadonlySet<string>): Finding[] {
+  const out: Finding[] = [];
+  const bad = (row: LedgerRow, message: string) =>
+    out.push({ check: 'parity-ticks', where: row.id, message: `check cell "${row.check}": ${message}` });
+  for (const row of rows) {
+    if (isTicked(row)) continue;
+    const removed = row.status.startsWith('removed by design');
+    if (row.check === CHECK_NOT_APPLICABLE) {
+      if (!removed) bad(row, 'n/a is for a row removed by design; this row is not');
+    } else if (removed) bad(row, `a row removed by design has nothing to prove: write ${CHECK_NOT_APPLICABLE}`);
+    else if (row.check === 'descriptor-parity') {
+      if (row.kind !== 'R') bad(row, 'descriptor-parity proves a route (kind R) only');
+    } else if (row.check === CHECK_NONE_YET) continue;
+    else if (!tracked.has(row.check))
+      bad(
+        row,
+        `not a tracked test file; write ${CHECK_NONE_YET} until the proof exists, or point at the test that has it`,
+      );
+  }
+  return out;
+}
+
 /** A status that says a row is proved by a test: `proved by its tests J-0052`, `proved by test V-0001, V-0002`. */
 const PROVED_BY = /proved by (?:its |the )?tests? ((?:[A-Z]-\d{4}(?:,? |\b))+)/;
 
@@ -458,6 +486,7 @@ export const check: Check = {
         },
         known,
       ),
+      ...checkCellFindings(rows, new Set(trackedTests(ctx.root))),
       ...statusProofFindings(
         rows,
         trackedTests(ctx.root),

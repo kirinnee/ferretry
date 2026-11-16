@@ -21,6 +21,13 @@ const GUTTER = /[\s─-▟⎿⏺•›❯>]/u;
  */
 const MAX_SCREEN_CHARS = 262_144;
 
+/**
+ * A screen longer than this is masked in SLICES: the masker gives the event loop back (`yieldToLoop`) between its
+ * readings, so no one slice of the main thread runs the whole masking through. Below it a reading costs less than the
+ * yield would, so the screen is masked in one go, as it always was.
+ */
+const SLICE_CHARS = 16_384;
+
 /** How the visible pieces of a wrapped value meet once their gutters are gone. */
 const JOINS = ['', ' ', '\n'] as const;
 
@@ -100,11 +107,20 @@ function cover(
  * A screen over {@link MAX_SCREEN_CHARS} is REFUSED (a `RangeError` that says only the two sizes, never a character of
  * the screen), before the scope is asked anything: it is never cut and then masked, and never handed on unmasked.
  */
-export function maskedScreen(scope: RedactionScope, screen: string): string {
+export async function maskedScreen(
+  scope: RedactionScope,
+  screen: string,
+  yieldToLoop?: () => Promise<void>,
+): Promise<string> {
   if (screen.length > MAX_SCREEN_CHARS)
     throw new RangeError(
       `the screen is too large to mask (${screen.length} characters; the most is ${MAX_SCREEN_CHARS})`,
     );
+  // A big screen is masked in slices: the event loop gets the thread back between the readings (never inside one).
+  // `scope` stays valid across the yields: `Redaction.read` holds it open until the function it was given resolves.
+  const pause = async (): Promise<void> => {
+    if (yieldToLoop !== undefined && screen.length > SLICE_CHARS) await yieldToLoop();
+  };
   const rows = screen.split('\n');
   const hidden = rows.map(row => Array.from({ length: row.length }, () => false));
   const whole = rows.map((row, index) => ({ row: index, start: 0, end: row.length }));
@@ -115,9 +131,11 @@ export function maskedScreen(scope: RedactionScope, screen: string): string {
     for (const pieces of [whole, content]) {
       const reading = readingOf(pieces, join);
       if (read.has(reading)) continue;
+      if (read.size > 0) await pause();
       read.add(reading);
       cover(scope, rows, pieces, join, hidden);
     }
+  await pause();
   const starred = rows.map((row, index) => {
     const marks = hidden[index] as boolean[];
     if (!marks.includes(true)) return row;
@@ -134,5 +152,6 @@ export function maskedScreen(scope: RedactionScope, screen: string): string {
   });
   // Last, over the whole screen: every value still standing whole (in a row, or across a real line break) gets its
   // marker. What the readings above covered is already `*` and cannot be matched again.
+  await pause();
   return scope.text(starred.join('\n'));
 }

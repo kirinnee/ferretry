@@ -8,7 +8,7 @@ import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { testHost, testProcessTable } from '@ferretry/kernel/testing';
 import should from 'should';
-import { endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
+import { checkEnvironmentSource, endedSeams, launchFactsSource } from '../../../daemon/host-assembly.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { autoResumeSwitch } from '../../../daemon/lib/service/auto-resume-answer.ts';
@@ -290,5 +290,26 @@ describe('launchFactsSource', () => {
     await applying;
 
     should(await pending).deepEqual(EXPECTED_FACTS);
+  });
+
+  it('should offer a runtime’s plain launch variables and only the NAMES of the ones that hold a stored secret', async () => {
+    const withEnv = {
+      ...claudeManifest,
+      accounts: [{ ...claudeManifest.accounts[0], launchEnv: { ACME_REGION: 'eu-west-1' } }],
+    };
+    const environment = checkEnvironmentSource(await kernelWith({ 'manifest.json': JSON.stringify(withEnv) }));
+
+    should(await environment('work')).deepEqual({
+      values: { ACME_REGION: 'eu-west-1' },
+      opaque: ['ANTHROPIC_API_KEY'],
+    });
+    should(JSON.stringify(await environment(CLAUDE_ID))).not.containEql('WORK_KEY');
+    should(await environment('other')).be.undefined();
+  });
+
+  it('should offer nothing for a manifest written before launch variables were published', async () => {
+    const environment = checkEnvironmentSource(await kernelWith({ 'manifest.json': JSON.stringify(claudeManifest) }));
+
+    should(await environment('work')).deepEqual({ values: {}, opaque: ['ANTHROPIC_API_KEY'] });
   });
 });

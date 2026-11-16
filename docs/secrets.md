@@ -243,8 +243,8 @@ Each surface has exactly one opening, the one place it has a reason to read insi
 | Fleet component sources (`config.write`, the `settings` control)                               | `file: ~/.ferretry/api-token` copied the admin token into a runtime's `CLAUDE.md` — the model's context; `directory: ~/.ferretry` copied `secrets.key`                                                         | an **error** in the configuration check (never in effect; an older accepted version is retired), and refused again by the provisioner on every link hop and the real path at apply time                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         | the fleet asset tree, `<fleet>/assets`, by real path |
 | Fleet component destinations (every apply, and the shared-history migration)                   | swap `<runtime>/skills` for a link to `~/.ferretry/state` after its check: the sweep moved `secrets.key` aside as a "stale skill" and deleted it at commit                                                     | every folder below a runtime is reached through a checked descriptor, never by path (Linux `/proc`; macOS `fchdir` descriptor calls, proved on every step); a link below the home refuses the apply, and a backup is deleted only from the folder it was moved aside in. Where descriptor reach cannot be loaded, nothing outside the daemon's own folders is moved aside or removed — those operations, and the shared-history migration as a whole, are skipped and named in the result ([agent-tools.md](agent-tools.md#component-destinations))                                                                                                                                                                                                                                                                                                             | none                                                 |
 | Conversation leases (`fleet/shared/<harness>/.leases`, every launch that names a conversation) | swap `.leases` (or the pool) for a link to `~/.ferretry`, then launch with `--resume api-token`: the lease JSON was renamed over the admin token, a later release deleted it, and `~/.ferretry/.lock` was made | the daemon's claim and the wrapper's `fy history claim` resolve one fence (`stateHomeFence`, owned by the fleet package: the homes and their pinned key files); the conversation id is parsed as one plain name at every boundary (letters, digits, `-`, `_`; a leading letter or digit; at most 128); `.leases` is opened through the guard — walked from the home without following a link, refused where it is a home or a key file by identity — and the lock, every lease read (a regular file only, never blocking, at most 64 KiB — a larger file is no lease; only `ENOENT` is none), write (a temporary made exclusively, renamed in the same held folder) and unlink reach their entry through that folder. Where descriptor reach or the lock's C call cannot be loaded, the lease is refused and the launch that named it says why; nothing else is | none                                                 |
-| Session files (`/v1/sessions/:id/fs/*`)                                                        | read any session's tree, and `~/.ferretry/*` through a session started in `~`                                                                                                                                  | another session (only its own and its sub-ferrets'), every path inside the home, and a hard-linked file, for an **agent**; a person is unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | that session's media folder (`scope=media`)          |
-| Starting a session (`POST /v1/sessions`, `fy new --cwd`)                                       | start a child whose working folder is `~/.ferretry`                                                                                                                                                            | a `cwd` inside the home, named or through a link, for an agent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | none                                                 |
+| Session files (`/v1/ferrets/:ferretId/fs/*`)                                                   | read any session's tree, and `~/.ferretry/*` through a session started in `~`                                                                                                                                  | another session (only its own and its sub-ferrets'), every path inside the home, and a hard-linked file, for an **agent**; a person is unchanged                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | that session's media folder (`scope=media`)          |
+| Starting a session (`POST /v1/ferrets`, `fy new --cwd`)                                        | start a child whose working folder is `~/.ferretry`                                                                                                                                                            | a `cwd` inside the home, named or through a link, for an agent                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  | none                                                 |
 
 **What it does not change.** It is the daemon's fence, not the disk's: a ferret's own shell runs as the same user and
 can still open `~/.ferretry` directly, which is the limit stated [above](#what-this-does-not-protect-against). What the
@@ -380,10 +380,11 @@ admin token. In order:
   credential (measured on Codex 0.156.1, whose default strips neither); that name stays while Codex runs ferrets.
 - **The yaml log switches are cleared, and the daemon's workers are told so.** The `yaml` library prints every token it
   parses when `LOG_TOKENS` or `LOG_STREAM` is set, and a config text can hold a credential, so `fy`, `fyd` and the
-  converter delete both first. That deletion does not reach a Bun macro (it runs when a module is transpiled, so in
-  source runs), a `new Worker(url)` given no options object, or a default-env `Bun.spawn` child: those get the original
-  native environment. So the daemon always starts its workers with an options object (which carries the cleared
-  environment), and the macros that parse the shipped catalogs clear the switches themselves.
+  converter delete both first. That deletion does not reach a `new Worker(url)` given no options object or a
+  default-env `Bun.spawn` child: those get the original native environment. So the daemon always starts its workers
+  with an options object (which carries the cleared environment). The shipped model catalogs and endpoint presets are
+  parsed when Logins' `built-ins.json` is written, never in a running daemon, and the script that writes it clears the
+  switches itself (Bun macros, which also ran in an environment of their own, are refused by `no-macros`).
 - **Restart ferrets to wall them.** A running ferret's `fy` presents its credential at once, because its pane
   already carries one. Its MCP server is the `fy` it started with and keeps the admin token until the pane
   restarts (`fy restart --all`), and a pane launched before the prefix needs the same restart.
@@ -405,6 +406,8 @@ There is one narrow exception, for a ferret's launch environment only. A variabl
 `${secret:NAME}` refuses the launch instead. MCP uses it for its sign-in variables, so a sign-out that
 lands while a ferret is starting does not stop that ferret. It names nothing a plain reference could not.
 Anywhere else, or inside a longer value, it is plain text.
+
+A second narrow reach, for `fy mcp check` only: a plugin whose manifest declares `permissions.profileSecrets` (MCP) may put into the ONE command it starts for a runtime, besides the secrets its own server entries name, exactly the names that runtime's profile references (Runtimes answers which, afresh each call; `VaultApi.childEnvironmentForRuntime`). The runtime's own launch already puts those secrets into the same server. It returns a sealed handle the kernel opens at exec time, never a value; any other name is refused by name, and nothing is kept after the call.
 
 ### A login's variables and a repository's own Claude settings
 
@@ -1234,7 +1237,7 @@ Every route is `caller: 'person'` ([grants.md](grants.md)).
 
 Each change is a kept `security.changed` record ([audit.md](audit.md)). None holds a username or a value.
 
-After merge (M2; the tool is not declared on 5.0 yet), a ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
+A ferret's suggestion of a rule (`account_propose` with `preapprove`) raises a card and a line in memory and nothing
 else: [agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule).
 
 ### The owner's command: `fy rules`
@@ -1524,7 +1527,8 @@ the first caller. It is the holder above with the same rules, held by the kernel
 - **Facts only come back.** The answer is a 2xx reply's parsed JSON, a status, `timeout`, `network`, `too_large`,
   `unreadable`, `vault_damaged` or a refusal. A reply that echoes the value is `unreadable`. A thrown error becomes a
   kind, so its message never leaves. The Vault is asked last, after every other check.
-- **Logged by name and host only.**
+- **Logged by name and host only.** The plugin's own log says so, and so does the security log: a `secrets.used`
+  entry names the secret, the plugin, the host and the outcome's kind, never a value ([audit.md](audit.md)).
 
 The Warden names its key in `warden.yaml`, as the owner writes it:
 
@@ -1534,11 +1538,74 @@ jev:
 ```
 
 `jev.key` takes only that one reference. An agent's write that adds it is held for the owner, like any new secret
-reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: the settings
-screen neither shows it nor saves it, and a save keeps the line as it is.
+reference. Without it the guard answers `not_set` and nothing leaves the machine. It is not a setting: a settings
+save never writes it and keeps the line as it is.
 
-GAP: a send writes no `secrets.used` entry to the security log, and the Warden's settings card still says whether the
-key is set from Speed-ups, not whether `warden.yaml` names it.
+The settings card says which of these a key is in. **Key set** means it is stored and `warden.yaml` names it. **Key not
+named** means it is stored but `warden.yaml` has no `jev.key` line, so nothing is sent; the card offers **Use stored
+key**, which writes that one reference (`POST /v1/warden/jev-key`, no body, no value) as the caller's own act: in effect
+when the caller is the owner, otherwise held for the owner and shown as "Waiting for your approval". The settings read
+says only `jevKey: named | not_named`.
+
+## A secret a plugin minted, placed on its request by the Vault
+
+A plugin that FILES a secret itself (MCP's sign-in access tokens, `permissions.mintedSecrets`) has no configuration that
+names it, so `kernel.secrets.resolve` and `send` refuse it as they refuse anything undeclared, and **no pattern of
+names turns a plugin into a reader**. What the plugin gets instead is a Vault operation:
+`vault.fetchMinted(name, request, placement?)` (non-core needers only). The Vault puts the value on ONE request and
+answers a SANITIZED reply, so the plugin never holds it.
+
+- **Only a value the plugin wrote.** The Vault's own mint ledger (`state/vault/mints.json`, ids and a per-write nonce,
+  never a value) records the plugin and the identity of its write whenever a plugin `put`s. A secret the owner put under a
+  matching name, one the owner replaced afterwards, one another plugin minted, and one a manifest only declares are all
+  refused and nothing is sent. A ledger that cannot be read refuses. **Authorization and value are one entry**: the Vault
+  opens the ciphertext entry ONCE (`SecretVault.openEntry`), checks THAT entry's write identity against the ledger and
+  sends exactly that entry's value. What a write that lands between the steps does: **it can never make the call send
+  the replacement.** A write by the owner or by another plugin made BEFORE the Vault opens the entry refuses the call
+  (the ledger no longer names that write); one that lands AFTER the open cannot change what is sent, and the call may
+  still send the value the plugin itself minted (the previous snapshot), which is not a replacement and not a leak. This is
+  snapshot semantics, not immediate revocation of an exchange already started.
+- **Only to a host the plugin's own `network` allows**, `https:` or `http:` to this machine, no userinfo. A request that
+  already carries the placement header, or a `Host` header, is refused (as `kernel.secrets.send`). A redirect is
+  answered, never followed. The request asks for an unencoded reply (`accept-encoding: identity`).
+- **The reply is built inside the Vault**, the holder of what was sent, never a raw `Response`: the status, a
+  `statusText`, an ALLOWLIST of headers (`content-type`, `mcp-session-id`, `mcp-protocol-version`, `www-authenticate`,
+  `retry-after`; everything else stays in the Vault) and a body. **The Vault does not list spellings; it decodes, checks
+  and drops** (`daemon/lib/secrets/echo-mask.ts`), against the value AS SENT (and the whole header value it travelled in):
+  1. **Only a body the Vault can parse is returned**: JSON (`application/json`, `+json`, UTF-8), or an event stream whose
+     `data` is parsed the same way. HTML, XML, plain text, NDJSON, binary and compressed bodies are DROPPED with
+     "The server’s answer is not JSON, so the Vault could not check it for the sign-in and kept it." (or the compressed /
+     not-valid-text / not-valid-JSON sentence). The body is read whole and parsed whole, so a value split across network
+     chunks is found.
+  2. **Every string is walked, keys and values, and each is read in every form the Vault can decode**: as it is, repeatedly
+     URI-decoded (partial and mixed-case `%xX` too, `+` as a space), HTML-entity decoded (`&#x..;`, `&#..;`, the named ASCII
+     ones), backslash-unescaped, hex runs decoded (either case), base64 / base64url runs decoded with whitespace folded
+     away (at every alignment), and NFKC-folded; the forms are decoded further, to a bound. Each form is compared
+     lower-cased with whitespace removed. If ANY form holds the value, the WHOLE string is replaced by `[redacted]`. A JSON
+     number is checked as its digits.
+  3. **`statusText` and every kept header value get the same check**, a string at a time (a string the check cannot
+     finish is replaced). An event's `event` and `id` are checked the same way, `retry` is kept only as digits, and a
+     comment or any other field is dropped. A `data` that is not JSON (an older transport's endpoint path) is checked as one
+     string.
+  4. **It fails closed**: a body that is not parseable, or past a bound (`maxBodyBytes`, 1 MiB by default, 4 MiB at most;
+     200 000 values; 64 levels of nesting; 1 024 decoded forms and 64 MiB of decoding work for one string) is dropped
+     with a sentence saying so, never clipped. The check uses the value AS SENT, so an owner replacing the secret while
+     the reply is in flight changes nothing. The reply is still a stranger's text: a caller scrubs it with the redactor
+     like any server's words before it keeps or shows it (a second layer, not the first).
+- **Declared GAP: a check's `PATH` and stored-secret variables.** A check fills `${VAR}` from the runtime's PLAIN launch
+  variables and the machine's home; `PATH` is not among them (the kernel offers no plugin the daemon's `PATH`, by design),
+  and a variable held in a stored secret is named, not filled. Closing it takes (1) a kernel `paths` offer that answers a
+  `which`-permitted plugin the inherited `PATH` (a doctrine decision, since it widens what plugins read), and (2) a
+  Vault operation that fills such a template INSIDE the Vault for one check child's argv, URL or header (the child
+  environment already takes `${secret:NAME}`; argv, URL and header do not), with the runtime publishing the variable to
+  secret-name mapping. Neither is a small additive offer, so neither is built here.
+- **Declared GAPs.** The check is "decode and look", not a proof. **A value split across TWO JSON strings** (or two
+  events) is not found, because no one string holds it. A cipher, a reversal, a hash, or any form none of the decoders
+  above produces is not found. A value shorter than four characters is searched for only as it is, never in a decoded form.
+  A string that reads as the value is replaced whole, so an ordinary field that happens to contain it is lost too (a
+  server that reflects the token into its own name has that name replaced, and a check says so). A large binary blob
+  inside JSON can pass a bound and drop the whole body. The Vault keeps the status and the allowlisted headers of a
+  dropped body.
 
 ## Device-held speed-up keys
 

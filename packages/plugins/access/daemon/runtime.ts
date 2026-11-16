@@ -28,6 +28,7 @@ import {
 } from '@ferretry/kernel/contract';
 import type { ConnectionsApi } from '@ferretry/plugin-connections/contract';
 import { epochMs, instantFromEpochMs, milliseconds } from '@ferretry/std';
+import { LiveWindowLedger, type LiveWindowView } from '@ferretry/std/live-window';
 import { z } from 'zod';
 import {
   type AccessApi,
@@ -73,6 +74,7 @@ import {
   verifyDeviceProof,
 } from './lib/proof/device-proof.ts';
 import { buzzPayload, clearPayload, HighPushCap, PairedPushDevices, PushService } from './lib/push/index.ts';
+import type { PushHealth } from './lib/push/health.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
 import { pushRoutes } from './lib/routes/push.ts';
 import { stepUpRoutes } from './lib/routes/step-up.ts';
@@ -125,6 +127,11 @@ const routeKey = (route: Pick<ApiRoute, 'method' | 'path'>): string => `${route.
 
 export class AccessRuntime {
   readonly #deps: AccessRuntimeDeps;
+  /**
+   * When a pairing code was live (see `PairingWindowPort`): owned HERE, not by the pairing service, so the port answers
+   * truthfully before the service has opened — nothing can have been minted then — and the service writes into it.
+   */
+  readonly #pairingWindow: LiveWindowLedger;
   readonly #stepUpRegistry: StepUpRegistry;
   readonly #connections: LiveDeviceConnections;
   readonly #verifier: PasskeyVerifier;
@@ -140,6 +147,7 @@ export class AccessRuntime {
 
   constructor(deps: AccessRuntimeDeps) {
     this.#deps = deps;
+    this.#pairingWindow = new LiveWindowLedger(() => deps.kernel.clock.nowMs());
     this.#stepUpRegistry = new StepUpRegistry(
       { nowMs: () => deps.kernel.clock.nowMs() },
       () => this.settings().stepUpWindowMinutes,
@@ -258,6 +266,7 @@ export class AccessRuntime {
         reach: () => this.#reach(kernel.log.warn.bind(kernel.log)),
         carriers: { current: () => this.#deps.connections()?.carriers() ?? [] },
         clock: { now: () => clock.nowMs() },
+        liveWindow: this.#pairingWindow,
         cryptography: new NodePairingCryptography(),
         devices: repository,
         credentials: registry,
@@ -382,6 +391,13 @@ export class AccessRuntime {
     if (parsed.success) this.#deps.kernel.events.publish(DevicesChanged, { device: parsed.data, change });
   }
 
+  /** What `fy doctor` says about pushes: the devices enrolled now and the newest push this run made. */
+  async pushHealth(): Promise<PushHealth> {
+    const { push } = await this.ready();
+    const latest = push.latestOutcome();
+    return { enrolled: (await push.list()).length, ...(latest === undefined ? {} : { latest }) };
+  }
+
   /** One handler per manifest route key; each waits for the services to open. */
   handler(key: string): RouteHandler {
     return async call => {
@@ -476,6 +492,14 @@ export class AccessRuntime {
 
   /** `step-up:device`: Gate's `StepUpWitness`, answered by Access's own step-up service (fail closed while none is open). */
   readonly witness: StepUpWitness = stepUpProvider(() => this.#current?.stepUp);
+
+  /**
+   * `PairingWindowPort`: whether a pairing code is, or was, live — yes or no, from the daemon's own ledger. No code, no id.
+   */
+  readonly pairingWindow: LiveWindowView = {
+    live: () => this.#pairingWindow.live(),
+    liveSince: sinceMs => this.#pairingWindow.liveSince(sinceMs),
+  };
 
   /** What other plugins may ask of Access (Catalogs' verifier, Agenda's buzz). */
   readonly port: AccessApi = {

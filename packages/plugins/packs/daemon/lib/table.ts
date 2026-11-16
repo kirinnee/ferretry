@@ -171,10 +171,17 @@ function newestLine(ferret: FerretSummary, lines: readonly SitrepLine[]): LastCa
     );
 }
 
-/** The card a ferret works on, from its card sitrep line (the reference it carries). */
+/** The card a ferret works on, from its card sitrep line: the reference it carries and the lane it sits in. */
 function cardOf(lines: readonly SitrepLine[]): PackRow['card'] {
   const line = lines.find(candidate => candidate.kind === 'card' && candidate.ref !== undefined);
-  return line?.ref === undefined ? undefined : { ref: line.ref };
+  return line?.ref === undefined
+    ? undefined
+    : { ref: line.ref, ...(line.lane === undefined ? {} : { lane: line.lane }) };
+}
+
+/** The card's PR, from the same card line. */
+function prOf(lines: readonly SitrepLine[]): PackRow['pr'] {
+  return lines.find(candidate => candidate.kind === 'card' && candidate.ref !== undefined)?.pr;
 }
 
 /** The text shown in place of an excerpt that could not be masked. */
@@ -228,6 +235,11 @@ export interface PackTableReads {
    * table then withholds its excerpts rather than show text it did not scrub.
    */
   redact(texts: readonly string[]): Promise<readonly string[]>;
+  /**
+   * The model a member is actually running (the harness's report, then its configured model; `FerretsApi.displayModel`),
+   * or `undefined` when it cannot say, and the row then shows the model it was started with.
+   */
+  model?(ferret: string): Promise<string | undefined>;
   readonly nowMs: number;
   readonly endedWindowMs?: number;
 }
@@ -250,6 +262,13 @@ export async function readPackTable(
       return undefined;
     }
   });
+  const models = await mapBounded(members, limits.concurrency, async ({ ferret }) => {
+    try {
+      return await reads.model?.(ferret.id);
+    } catch {
+      return undefined;
+    }
+  });
   const eligible = excerptEligible(members, limits);
   let remaining = limits.textBytes;
   const candidates = members.map((member, index) => {
@@ -267,16 +286,18 @@ export async function readPackTable(
     const state = packRowState(ferret.state, sitreps[index]?.blockers ?? 0);
     const parent = parentOf(ferret);
     const card = cardOf(lines);
+    const pr = prOf(lines);
     const last = lasts[index];
     return {
       id: ferret.id,
       name: ferret.name,
       ...(parent === undefined ? {} : { parent }),
       depth,
-      model: ferret.runtime ?? ferret.harness,
+      model: models[index] ?? ferret.model ?? 'default',
       state,
       ferretState: ferret.state,
       ...(card === undefined ? {} : { card }),
+      ...(pr === undefined ? {} : { pr }),
       ...(last === undefined ? {} : { last }),
       ...(state === 'ended' ? { endedAt: ferret.stateAt } : {}),
     };

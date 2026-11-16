@@ -17,9 +17,12 @@
 import type { ConfigCollectionDef, ConfigFileDef, DoctorFinding } from '@ferretry/kernel/contract';
 import { implementDaemon, type DaemonContext } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
+import { profileSecretNames } from './lib/service/profile-references.ts';
 import type { LoginView } from '@ferretry/plugin-logins/contract';
 import {
+  INSTRUCTION_ITEMS,
   MODEL_SET_ITEMS,
+  PROFILE_COMPONENTS_KEY,
   PROFILE_ITEMS,
   RUNTIME_ITEMS,
   RUNTIMES_CONFIG,
@@ -29,15 +32,20 @@ import {
   type ModelSetFile,
   type ProfileFile,
   type RuntimeFile,
+  type RuntimeCheckEnvironment,
   RuntimeHomeUnreadable,
+  type RuntimeFactsApi,
   type RuntimeHomesApi,
+  type RuntimeId,
   type RuntimesFile,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { fleetHomes } from './adapters/fleet-home-reader.ts';
+import { PROFILE_COMPONENT_SOURCE_HOOKS } from './adapters/profile-components.ts';
 import {
   endedSeams,
   fileAssembly,
+  checkEnvironmentSource,
   launchFactsSource,
   MANIFEST_REPAIR_JOB,
   manifestUnreadableProbe,
@@ -52,6 +60,7 @@ import { autoResumeAnswer, autoResumeSwitch, readAutoResume } from './lib/servic
 import { runtimeStartAnswer } from './lib/service/runtime-start-answer.ts';
 import { DisableExpiryWatch, earliestExpiry, keepUnpublished, runtimesBackOn } from './lib/service/disable-expiry.ts';
 import { loginUsers } from './lib/service/login-users.ts';
+import { fleetFromFiles } from './lib/service/fleet-from-files.ts';
 import { createProfileLayers } from './lib/service/profile-layers.ts';
 import { createRuntimesApi } from './lib/service/runtimes-api.ts';
 import { RuntimeEndSupervision, type RuntimeEndSeams } from './lib/service/runtime-end-supervision.ts';
@@ -72,7 +81,7 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish'>>;
+    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles'>>;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -109,6 +118,8 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /** What a published runtime's launch carries, for a consumer that fills `${VAR}` from it. Absent: nothing is offered. */
+  readonly checkEnvironment?: (runtime: string) => Promise<RuntimeCheckEnvironment | undefined>;
   /**
    * Whether the published fleet manifest exists and cannot be read. Asked once after start: when it is, the fleet is
    * published again from the configuration (the manifest is derived data). Absent: nothing to repair.
@@ -255,6 +266,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     repair,
     probe: () => {
@@ -390,6 +402,47 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         setTimer: (run, ms) => clock.after(milliseconds(ms), run),
       });
       void expiry.rearm();
+      // The fleet is published from the files as they stand (docs/config-files.md): once after start (below) and after
+      // every change to them, as v4 did after each configuration load. A hand edit, a conversion or a copied home
+      // therefore has its homes, wrappers and manifest (the runtime accounts MCP's inventory and Settings read) with no
+      // write through a route first. An unchanged fleet is left exactly as it is; a refusal is said and never thrown.
+      //
+      // Whatever a profile names is read too, so a change to a COMPONENT file wakes it as well: Runtimes' own instruction
+      // files directly, and each owner's (MCP, Skills, Claude Code and Codex settings and hooks) through the `watch` its
+      // component source offers, which the owner answers from its OWN configuration (no other plugin's file is read here,
+      // and nothing polls). The owners are looked at again before every publish, so one that starts late is heard from
+      // the next change on.
+      const heard = new WeakSet<object>();
+      const stopOwners: (() => void)[] = [];
+      const watchOwners = (): void => {
+        for (const hook of PROFILE_COMPONENT_SOURCE_HOOKS) {
+          try {
+            const source = ctx.hooks.provider(hook, PROFILE_COMPONENTS_KEY);
+            if (source === 'unavailable' || heard.has(source)) continue;
+            heard.add(source);
+            const stop = source.watch?.(() => {
+              fromFiles.soon();
+            });
+            if (stop !== undefined) stopOwners.push(stop);
+          } catch {
+            // An owner that cannot be looked up now is looked at again at the next publish.
+          }
+        }
+      };
+      ctx.kernel.lifecycle.onStop(() => {
+        for (const stop of stopOwners.splice(0)) stop();
+      });
+      const fromFiles = fleetFromFiles({
+        republish: async () => {
+          watchOwners();
+          return await assembly.catalog.publishFromFiles?.();
+        },
+        warn: message => {
+          ctx.kernel.log.warn(message);
+        },
+      });
+      for (const def of [RUNTIME_ITEMS, PROFILE_ITEMS, MODEL_SET_ITEMS, RUNTIMES_CONFIG, INSTRUCTION_ITEMS])
+        config.watch(def, fromFiles.soon);
       // A manifest the previous version wrote in a shape this one does not read is derived data: rebuilt (the apply keeps
       // the old file aside and says so), never left to refuse every start. It runs once after start AND whenever a launch
       // reader meets the damage later (it asks through the runner's single-flight kick; a healthy manifest never publishes).
@@ -403,6 +456,9 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           assembly.repair?.begin();
           if (!(await assembly.manifestUnreadable?.())) {
             assembly.repair?.release();
+            // A manifest that reads is still published from the files an owner wrote by hand (v4 published after the
+            // first load): a machine whose files were edited, or converted, has homes the moment it starts.
+            await fromFiles.now();
             return;
           }
           const failure = await assembly.catalog.republish?.({ rebuild: true }).then(
@@ -452,6 +508,12 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         },
       };
 
+      // What is published, read as `GET /v1/runtimes` and `GET /v1/runtimes/machine` read it (no caller: the machine's own view).
+      const facts: RuntimeFactsApi = {
+        catalog: async () => (await assembly.catalog.runtimes()).runtimes,
+        tools: async () => (await assembly.catalog.machine(undefined)).tools,
+      };
+
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
       const launchGate = new LaunchGate({ source: launchFacts });
 
@@ -461,7 +523,21 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           ...fleetSetupRoutes(assembly.setup),
           ...ferretRuntimeRoutes(assembly.runtime),
         },
-        provides: { runtimes: { ...api, ...layers, ...(assembly.homes ?? noHomes) } },
+        provides: {
+          runtimes: {
+            ...api,
+            ...layers,
+            ...(assembly.homes ?? noHomes),
+            // What `fy recommend` offers a start from: the catalogue's own runtimes and the machine's tools.
+            ...facts,
+            ...(assembly.checkEnvironment === undefined
+              ? {}
+              : {
+                  checkEnvironment: async (runtime: RuntimeId): Promise<RuntimeCheckEnvironment | undefined> =>
+                    await assembly.checkEnvironment?.(runtime),
+                }),
+          },
+        },
         doctor: {
           // The half builds without opening the fleet folder, so a broken fleet root shows here, not as a failed boot.
           'runtimes-config': async (): Promise<DoctorFinding> => {
@@ -488,7 +564,14 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         hooks: {
           // The login's compaction trigger, from the facts `start.decide` read (never its environment: docs/secrets.md).
           'launch.parts': () => [{ id: 'runtimes-compact-at', item: launchGate.parts }],
-          'logins.used-by:runtimes': loginUsers(() => config.collection(runtimeItems)),
+          'logins.used-by:runtimes': loginUsers(
+            () => config.collection(runtimeItems),
+            async change => {
+              // No preview to give: Logins then names the runtimes without a launch status.
+              if (assembly.catalog.runtimesAfterLoginChange === undefined) throw new Error('no preview here');
+              return await assembly.catalog.runtimesAfterLoginChange(change);
+            },
+          ),
           // Whether an automatic resume may spend (W2-a): the switch, then the ferret's runtime, each a no when in doubt.
           'auto-resume.decide': autoResumeAnswer({
             switchOn: () =>
@@ -499,17 +582,35 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
           }),
           // A start that names a runtime spends that runtime's login: its harness and login, or why it cannot start now.
           'runtime.start:runtimes': {
-            ...runtimeStartAnswer({ resolve: async id => await api.resolve(id), logins: ctx.needs.logins }),
+            ...runtimeStartAnswer({
+              resolve: async id => await api.resolve(id),
+              default: async () => await api.default(),
+              logins: ctx.needs.logins,
+            }),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
           // here; with no facts to read, a Claude start of a runtime is refused.
           'start.decide': launchGate.decide,
+          // The secret NAMES a runtime's profile binds (the manifest account's `secretEnv`), for the Vault to let a check
+          // put them into the one command it starts for that runtime. Names only; none when the fleet is unreadable.
+          'secrets.profile-references:profiles': {
+            references: async (runtime: string): Promise<readonly string[]> => {
+              try {
+                return profileSecretNames(await (assembly.homes ?? noHomes).homes(), runtime);
+              } catch {
+                return [];
+              }
+            },
+          },
         },
 
         subscribers: {
           'ferrets.changed': async change => await ending.onChanged(change),
           // A login switched off or on, or its `until` moved: the expiry timer reads the logins again.
-          'logins.changed': async () => await expiry.rearm(),
+          'logins.changed': async () => {
+            fromFiles.soon();
+            await expiry.rearm();
+          },
           // A login its budget starts or stops holding: the fleet is published again so its wrappers follow (docs/budgets.md).
           'usage.login-paused': async () => await republishForBudget(),
           'usage.login-resumed': async () => await republishForBudget(),

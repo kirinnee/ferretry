@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import type { CatalogSkillProvider } from '@ferretry/plugin-catalogs/contract';
 import {
   type FerretSkills,
   type FerretSkillsInventory,
@@ -8,12 +9,16 @@ import {
   type SkillsItem,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { CatalogSkillTree } from './adapters/catalog-skill-tree.ts';
+import { InstalledSkillAssets } from './adapters/installed-assets.ts';
 import { InstalledSkillFiles } from './adapters/installed-store.ts';
+import { ProjectSkillFolders } from './adapters/project-skill-folders.ts';
 import { ProjectSkillFiles } from './adapters/project-skill-files.ts';
 import { SkillFilesRouter } from './adapters/skill-files-router.ts';
 import { RootSkillFiles } from './adapters/skill-files.ts';
+import { skillsCatalogRuntime } from './lib/catalog-runtime.ts';
 import { composerSkills } from './lib/composer.ts';
-import { MAX_SKILL_MANIFEST_BYTES, MAX_SKILLS_PER_ROOT, SkillsInventoryService } from './lib/inventory.ts';
+import { MAX_SKILL_MANIFEST_BYTES, SkillsInventoryService } from './lib/inventory.ts';
 import { inventoryRoutes } from './routes.ts';
 import { skillParts } from './lib/launch-parts.ts';
 import { skillsComponentSource } from './lib/profile-component-source.ts';
@@ -26,9 +31,8 @@ import { skillReferenceProvider } from './lib/reference-catalog.ts';
  * Where the skills come from (S1):
  * - an ACCOUNT HOME's skills through Runtimes' bounded reader (`homes`, `home(id)`): a plain folder is `user`, a link the
  *   reader says is Ferretry's own is `ferretry`. A home is never a path Skills opens;
- * - the v4-installed skills straight from the fleet's `assets/skills/<name>` (Runtimes' `assetSkills`, source
- *   `ferretry`), so a link from a home into `assets/` is the same skill listed once, never followed. Unbound while the
- *   Runtimes provider offers no asset tree;
+ * - the v4-installed skills an account LAYERS: its home's link into the fleet's `assets/skills/<name>` is listed by the
+ *   home's reader as `ferretry`. The shared asset tree itself is never listed under an account that does not link it;
  * - the skill items a runtime's profile selects (`layers(runtime).skills`), resolved to Skills' own installed store;
  * - a REGISTERED PROJECT's `.claude/skills` and `.agents/skills`, through the kernel's read-only `imports` root scoped to
  *   that one folder, and a ferret's own folder through its `work` root.
@@ -95,11 +99,6 @@ export default implementDaemon(manifest, {
           name: project.name,
           path: project.path,
         })),
-      ferretry: async () => {
-        const assets = runtimes.current()?.assetSkills?.();
-        const listed = (await assets?.skills(MAX_SKILLS_PER_ROOT).catch(() => undefined)) ?? [];
-        return listed.map(entry => ({ manifest: entry.manifest, managed: true }));
-      },
       selected: selectedEntries,
     });
 
@@ -120,6 +119,53 @@ export default implementDaemon(manifest, {
     };
 
     const machine = new SkillsInventoryService(portsFor(routing()));
+
+    // ── what Catalogs asks of the skill kind (`catalog.items:skill`) ─────────────────────────────────────────────────
+    // The folders a project install may write to: a registered project and a live managed worktree, as MCP's.
+    const catalogRoots = async (): Promise<readonly string[]> => {
+      const worktrees = ((await ferrets.managedWorktrees?.()) ?? [])
+        .filter(row => row.removedAt === undefined && row.unresolved === undefined)
+        .map(row => row.path);
+      return [...new Set([...(await registeredRoots()), ...worktrees])];
+    };
+    const catalogItems: CatalogSkillProvider = {
+      kind: 'skill',
+      // Every skill the machine view lists, once per path (a skill linked into two homes is one folder).
+      sources: async () => {
+        const inventory = await machine.machine();
+        const entries = [
+          ...inventory.homes.flatMap(home => home.skills),
+          ...inventory.projects.flatMap(project => project.skills),
+        ];
+        return [...new Map(entries.map(entry => [entry.path, { path: entry.path, name: entry.name }])).values()];
+      },
+      tree: new CatalogSkillTree({
+        homes: publishedHomes,
+        home: id => runtimes.current()?.home(id),
+        roots: registeredRoots,
+        open: (folder, within) => kernel.roots.root('imports', { subfolder: folder, within }),
+      }),
+      projectRoots: catalogRoots,
+      project: new ProjectSkillFolders(catalogRoots, root =>
+        kernel.roots.root('project-files', { subfolder: root, within: root }),
+      ),
+      assets: new InstalledSkillAssets(store),
+      runtime: skillsCatalogRuntime({
+        runtimes: () => runtimes.current(),
+        items,
+        // The person's own install: the kernel decides from the ambient call (host, or a governed device holding
+        // fleet.configure); a ferret's credential never reaches the install route.
+        writeItem: async (name, patch, ifMatch) =>
+          await kernel.config.writeAsCaller(
+            SKILLS_CONFIG,
+            name,
+            { patch },
+            ifMatch === undefined ? undefined : { ifMatch },
+          ),
+        removeItem: async name => await kernel.config.remove(SKILLS_CONFIG, name),
+        store,
+      }),
+    };
 
     const api: SkillsApi = {
       inventory: async () => await machine.machine(),
@@ -147,11 +193,15 @@ export default implementDaemon(manifest, {
       routes: inventoryRoutes(api),
       provides: { skills: api },
       hooks: {
+        // Catalogs shares and installs skills through this one provider (its `catalog.items` hook, key `skill`).
+        'catalog.items:skill': catalogItems,
         // The composer's `/` and `$` menus: one provider, because Claude's `/name` and Codex's `$name` are one skill.
         'reference.catalog:/': skillReferenceProvider(api.forComposer),
         'reference.catalog:$': skillReferenceProvider(api.forComposer),
         // Runtimes' read of the `skills` components a profile names: this plugin's own items, live, no cache.
-        'runtimes.components.skills:components': skillsComponentSource(items),
+        'runtimes.components.skills:components': skillsComponentSource(items, listener =>
+          kernel.config.watch(SKILLS_CONFIG, listener),
+        ),
         // Skills' own installed skills (`installed/<name>/`) go to a launch only for an item the runtime's profile selects.
         'launch.parts': () => [
           {

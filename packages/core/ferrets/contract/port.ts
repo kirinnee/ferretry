@@ -2,7 +2,7 @@ import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferre
 import type { Instant, JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { LaunchOrigin } from './launch-origin.ts';
-import { CompactAtSchema } from './view/compact-at.ts';
+import { type CompactAt, CompactAtSchema } from './view/compact-at.ts';
 import {
   FerretCardIdSchema,
   type FerretRole,
@@ -159,6 +159,12 @@ export interface StartRequest {
   /** Start bound to an existing harness conversation (§6.2). */
   readonly harnessConversation?: string;
   readonly by: 'owner' | 'ferret' | 'pack' | 'board' | 'warden';
+  /**
+   * `fy start --detach` (v4's meaning): answer as soon as the ferret is recorded (`starting`); the launch carries on in the
+   * background and a launch that fails settles the ferret as a failed start, as any other does. A request-only fact: it is
+   * never written into the ferret's `details.json`.
+   */
+  readonly detach?: boolean;
   /** How to start it beyond who and where ({@link StartOptionsSchema}). */
   readonly options?: StartOptions;
 }
@@ -411,7 +417,7 @@ export interface FerretHarness {
   readonly transcript: BoundTranscriptReader;
   /**
    * Additive (G162): the seam's own ferret's transcript as raw bytes ({@link HarnessTranscriptBytes}), UNMASKED, for
-   * the ONE reader that parses records itself (Conversation's). Rejects 503 `plugin_unavailable` while the ferret's
+   * the reader that parses records itself (Conversation's; Logins' passive usage pass keeps only the normalized `rate_limits` fields and timestamps). Rejects 503 `plugin_unavailable` while the ferret's
    * harness is off; `undefined` when the harness proves none or offers no bytes. Bound: names no other ferret.
    */
   transcriptBytes?(): Promise<HarnessTranscriptBytes | undefined>;
@@ -486,12 +492,26 @@ export interface FerretTurnWritten {
 export interface FerretPrompt {
   /** The turn the observer last recorded; absent when none is recorded. */
   readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /**
+   * When the observer last CHANGED `turnState` (additive): the observer's own stored instant, ISO, on the daemon's clock.
+   * Never the registry's `stateAt`, which is stamped later by a separate write and cannot tell `needs-input` from
+   * `your-turn`. Absent whenever `turnState` is.
+   */
+  readonly turnStateAt?: string;
   /** The harness dialog's words behind a `needs-input`. */
   readonly prompt?: string;
   /** The tool-permission prompt behind a `needs-input`, as data. */
   readonly permissionRequest?: JsonValue;
   /** The harness's own dialog behind a `needs-input`, as data. */
   readonly dialog?: JsonValue;
+  /**
+   * The usage limit this ferret's login is read as spent on (additive, R1-D): present exactly while the session
+   * document says `rate_limited` AND carries the harness's own words for it (its quota's notice, or the usage-limit dialog
+   * it is parked on). It is the one place a reader outside Ferrets finds a spend limit only the pane announces, which no
+   * provider window shows. The notice is masked like every text here; `retryAt` is when the harness said the login is
+   * usable again, epoch milliseconds, absent when it gave none.
+   */
+  readonly limit?: { readonly notice: string; readonly spend: boolean; readonly retryAt?: number };
 }
 
 /** Why a move did not happen (today's `SessionMoveFailure` words and sentence). */
@@ -520,6 +540,14 @@ export interface MoveOptions {
   readonly movedBy?: string;
 }
 
+/** What one auto-resume pass did: how many ferrets came back, and which could not, each with the reason a person can act on. */
+export interface AutoResumeReport {
+  /** When the pass ran (an ISO instant). */
+  readonly at: string;
+  readonly resumed: number;
+  readonly skipped: readonly { readonly sessionId: string; readonly reason: string }[];
+}
+
 /** A ferret's whole status: its state, its turn, what plugins add, and its blockers from the Asks port. */
 export interface Sitrep {
   readonly ferret: FerretSummary;
@@ -529,14 +557,86 @@ export interface Sitrep {
 }
 
 /**
+ * What a ferret's own documents say about it that the insights index needs and its transcript cannot give (today's
+ * `createAnalyticsCandidateSource`): the model the operator SELECTED (never the one the harness observed, which is
+ * transcript evidence), the daemon's send counter, and the readings its state recorded. Every member is `null` when the
+ * document does not say; a null is "not stated", never zero. Read from `config.json` and `state.json`, so a ferret
+ * converted from v4 carries it exactly as it was.
+ */
+export interface FerretIngestEvidence {
+  readonly selectedModel: string | null;
+  readonly turns: number | null;
+  readonly startedAt: string | null;
+  readonly contextWindow: number | null;
+  readonly contextEndPercent: number | null;
+}
+
+/**
+ * A limit a LIVE ferret's pane proves its login has reached (today's `storagePaneLimits` row): the harness announced a
+ * usage or spend limit that the provider's own reading cannot see. One row per limited live ferret, derived from its
+ * state each time it is read and kept nowhere, so it ends the moment the ferret is released (the pane shows no limit
+ * any more, or it is stopped) or its reset time passes.
+ *
+ * `notice` is the harness's own sentence, read from a masked screen. `login` is the login the ferret launched on;
+ * `runtime` is the runtime it was started on, for a ferret whose record names no login.
+ */
+export interface FerretPaneLimit {
+  readonly ferret: FerretId;
+  readonly runtime?: string;
+  readonly login?: string;
+  readonly notice: string;
+  /** Whether it is a spend limit (money), as opposed to a usage window. */
+  readonly spend: boolean;
+  /** When the login is usable again, epoch milliseconds; absent when the harness gave no time. */
+  readonly retryAt?: number;
+}
+
+/**
+ * One name in a ferret's folder as {@link FerretsApi.listFolder} lists it. A name flagged `denied`, `ignored` or `escapes`
+ * is LISTED but never served (the file browser's own badges): a reader that offers it says so and offers nothing more.
+ * Never a size, a time, a link target or a path outside the ferret's folder.
+ */
+export interface FerretFolderEntry {
+  readonly name: string;
+  readonly type: 'file' | 'dir' | 'symlink';
+  /** On the unconditional denylist (secrets, `.git/`, `node_modules/`), or fenced from this reader. */
+  readonly denied?: boolean;
+  /** Gitignored. */
+  readonly ignored?: boolean;
+  /** A symlink resolving outside the ferret's folder, or broken. */
+  readonly escapes?: boolean;
+}
+
+/** One level of a ferret's folder: directories first, then files. */
+export interface FerretFolderListing {
+  /** The listed folder relative to the ferret's root; `''` is the root itself. */
+  readonly path: string;
+  readonly entries: readonly FerretFolderEntry[];
+  /** The folder held more names than one listing reports. */
+  readonly truncated?: boolean;
+}
+
+/**
  * The Ferrets port (§2.2): who each ferret is, its lineage, its state; start, stop and resume through the harness
  * and runner plugins. "A ferret touches only its own; a lead also its helpers'" is `mayTouch`, decided here and
  * nowhere else.
  */
+/** What an id-or-callsign reference addresses (see {@link FerretsApi.resolve}). */
+export type FerretAddress =
+  | { readonly kind: 'ferret'; readonly id: FerretId }
+  /** Two ferrets hold the name on one footing: refused with this sentence, never guessed between. */
+  | { readonly kind: 'ambiguous'; readonly message: string }
+  | { readonly kind: 'unknown' };
+
 export interface FerretsApi {
   /** The effective `limits.yaml` settings, read fresh on every call; Ferrets serves it (a consumer may still bind it optionally). */
   effectiveLimits?(): Promise<LimitsFile>;
   get(ferret: FerretId): Promise<FerretSummary | undefined>;
+  /**
+   * The ferret an id or a callsign (`:name`, case-insensitive) addresses: the ONE rule every surface that takes a ferret in a
+   * path applies. An exact id wins; a live holder of a name wins over a dormant one; two on one footing are `ambiguous`.
+   */
+  resolve(reference: string): Promise<FerretAddress>;
   list(filter?: {
     readonly state?: FerretState;
     readonly parent?: FerretId;
@@ -584,6 +684,18 @@ export interface FerretsApi {
    * Accounts gets it from the Board.
    */
   workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined>;
+  /**
+   * One folder of a ferret's work tree, listed the way the file browser lists it (`GET /v1/ferrets/:ferretId/fs`), so
+   * the composer's `@` menu offers exactly what the browser would. Additive, read only, names only.
+   *
+   * ALWAYS FENCED as an agent's read is: nothing inside the daemon's state home, no hard link, and `path` is resolved
+   * UNDER the ferret's root (a `..` segment, an absolute path or a link out of it is refused `403 escapes_root`; a
+   * gitignored or denylisted folder is refused `403 ignored` / `403 denied`; a missing one `404 not_found`, a file
+   * `400 not_a_directory`). With `caller` (a ferret acting), only itself and its helpers are reachable, by the same
+   * `mayTouch` rule as `harness`: anyone else is refused `403 forbidden`, before the folder is touched. `undefined` for
+   * a ferret this daemon does not know. A grant (`filesystem.use`) is the CALLER'S to ask: this member does not.
+   */
+  listFolder?(ferret: FerretId, path: string | undefined, caller?: FerretId): Promise<FerretFolderListing | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
   /**
    * What a finished ferret handed back with `signal done`: its `summary.md` as it wrote it (today's session
@@ -613,6 +725,25 @@ export interface FerretsApi {
    */
   agentControl(ferret: FerretId): Promise<AgentControl>;
   /**
+   * What the last "Auto-resume after restart" pass did (today's `machine.lastAutoResume`), for the Machine view's
+   * "Last restart" lines: `null` when none has run or it could not be read. Optional, so it is additive: a Ferrets
+   * that keeps none reads as no pass.
+   */
+  lastAutoResume?(): Promise<AutoResumeReport | null>;
+  /**
+   * The model a ferret is actually running, for display (today's `displayModel`): what the harness last reported, else the
+   * model it was configured with, else the wrapper's declared hint, else `default`. A launch option (`FerretSummary.model`)
+   * is only what was ASKED for: it goes stale after a switch inside the session. `undefined` for a ferret this daemon does
+   * not know. Optional, so it is additive: absent reads as the launch option.
+   */
+  displayModel?(ferret: FerretId): Promise<string | undefined>;
+  /**
+   * What the ferret's own documents say that the insights index needs (see {@link FerretIngestEvidence}): the selected
+   * model and the send counter. `undefined` for a ferret this daemon does not know or whose documents do not parse.
+   * Optional, so it is additive: absent reads as no evidence beyond the summary.
+   */
+  ingestEvidence?(ferret: FerretId): Promise<FerretIngestEvidence | undefined>;
+  /**
    * What a ferret spent, turn by turn, read through ITS harness (`Harness.usage`; Ferrets owns which harness a ferret
    * runs, so Usage never reaches one). Token counts only, never transcript text. `undefined` means PARTIAL: the ferret is
    * unknown, its harness is off, or the reader threw. It is never counted as zero; an empty list is a ferret that spent
@@ -639,6 +770,15 @@ export interface FerretsApi {
    */
   prompt?(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined>;
   /**
+   * A stopped ferret's last screen (additive): the frame kept when it stopped, MASKED AGAIN with the Vault's values at
+   * the moment of THIS read (a value added to the Vault after the capture is masked too), so the text is never the raw
+   * file. Same `mayTouch` rule as `harness`: a `caller` reaching beyond itself and its helpers is refused with a 403
+   * `forbidden`, before the file is read. `undefined` (never an error, never the raw text) for a ferret this daemon does
+   * not know, one that kept no frame, a store that is unreadable or damaged, and a frame that could not be masked.
+   * Read only.
+   */
+  lastSnapshot?(ferret: FerretId, caller?: FerretId): Promise<string | undefined>;
+  /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.
    */
@@ -648,6 +788,25 @@ export interface FerretsApi {
     options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
+  /**
+   * A ferret's OWN compaction trigger (additive; Conversation's compact-at setting): what its session config records, else
+   * what its start asked, else `undefined` (it follows its login's default). Same `mayTouch` rule as `harness`.
+   * `undefined` also for a ferret this daemon does not know.
+   */
+  compactAt?(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined>;
+  /**
+   * Records a ferret's OWN compaction trigger in its session config (`compactAt`), the field every launch and relaunch
+   * already reads; `undefined` drops it, so the login's default applies again. Additive and optional. The value is parsed
+   * with {@link CompactAtSchema} (the floor included) and anything it cannot parse is refused 400 `invalid_compact_at`;
+   * an unknown ferret is 404 `not-found`; a `caller` that may not touch the ferret is 403 `forbidden`. Every other
+   * field of the config is kept, and the write is atomic. Takes effect at the ferret's next launch.
+   */
+  setCompactAt?(ferret: FerretId, value: CompactAt | undefined, caller?: FerretId): Promise<void>;
+  /**
+   * Additive (usage and Packs read it): the limits live ferrets' panes prove, one row per limited ferret, derived from
+   * their state now (see {@link FerretPaneLimit}). A reader that wants them by login aggregates them (Usage owns that).
+   */
+  paneLimits?(): Promise<readonly FerretPaneLimit[]>;
 }
 
 export const FerretsPort = definePort<FerretsApi>('ferrets');

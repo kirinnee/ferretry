@@ -91,16 +91,16 @@ interface HarnessOptions {
 
 /** Fake carriers: records every dial and drive, and lets a test script each step. */
 const harness = (drive: Drive, options: HarnessOptions = {}) => {
-  const dials: { kind: string; address: string }[] = [];
+  const dials: { kind: string; address: string; daemonId: string }[] = [];
   const drives: { kind: string; deadlineMs: number; keepAlive: boolean }[] = [];
   const sessions: FakeSession[] = [];
   const sockets: { closed: number }[] = [];
   const built: { daemonId: string; kind: string }[] = options.built ?? [];
   const mirror = options.mirror ?? true;
   const carriers = {
-    rendezvousUrl: RENDEZVOUS,
-    dial: (kind, address) => {
-      dials.push({ kind, address });
+    rendezvous: async () => RENDEZVOUS,
+    dial: (kind, address, daemonId) => {
+      dials.push({ kind, address, daemonId });
       if (options.dialThrows?.(kind) === true) throw new Error('this carrier cannot address the publisher');
       const socket = {
         closed: 0,
@@ -188,10 +188,28 @@ describe('S4 the walk, the deadlines and the persisted address are not the carri
     });
     await transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
     expect(dials).toEqual([
-      { kind: 'direct', address: SEED.daemonUrl },
-      { kind: 'relay', address: RENDEZVOUS },
+      { kind: 'direct', address: SEED.daemonUrl, daemonId: SEED.daemonId },
+      { kind: 'relay', address: RENDEZVOUS, daemonId: SEED.daemonId },
     ]);
     expect(drives.map(drive => drive.deadlineMs)).toEqual([DIRECT_MEMBER_DEADLINE_MS, RELAY_MEMBER_DEADLINE_MS]);
+  });
+
+  it('B15 hands every dial the PUBLISHER’s daemon id, for a join and for a member session', async () => {
+    const joined = harness(async () => joinedAnswer);
+    await joined.transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+    expect(joined.dials.map(dial => dial.daemonId)).toEqual([SEED.daemonId]);
+    const opened = harness(async () => {
+      throw new RelaySessionError('closed', 1006);
+    });
+    await opened.transport.joinOptions({ seed: SEED, keys: KEYS });
+    expect(opened.dials.map(dial => dial.daemonId)).toEqual([SEED.daemonId, SEED.daemonId]);
+    const member = harness(async () => {
+      throw new RelaySessionError('closed', 1006);
+    });
+    const client = await member.transport.openClient(SUBSCRIPTION);
+    await client.request('/v1/shared/me', z.unknown()).catch(() => undefined);
+    expect(member.dials.length).toBeGreaterThan(0);
+    for (const dial of member.dials) expect(dial.daemonId).toBe(SEED.daemonId);
   });
 
   it('persists the publisher’s own address as the direct carrier, never a step address', async () => {
@@ -481,6 +499,7 @@ describe('R2-S1 this half holds the carrier to the deadline and decides finality
         { mirror: false },
       );
       const pending = transport.join({ seed: SEED, clientName: 'Browser', keys: KEYS });
+      await clock(0); // the walk first asks the carriers for the rendezvous, then dials
       // The direct leg's own deadline is the app's walk deadline.
       const timer = deadlines.mock.calls.find(call => call[1] === DIRECT_MEMBER_DEADLINE_MS);
       expect(timer).toBeDefined();
@@ -548,6 +567,7 @@ describe('R2-S1 this half holds the carrier to the deadline and decides finality
       );
       const client = await transport.openClient(SUBSCRIPTION);
       const pending = client.request('/v1/shared/me', z.unknown());
+      await clock(0); // the walk first asks the carriers for the rendezvous, then dials
       const timer = deadlines.mock.calls.find(call => call[1] === DIRECT_MEMBER_DEADLINE_MS);
       fire(timer);
       await pending;
@@ -705,10 +725,5 @@ describe('R2-S2 which 401 and which close mean the key is refused', () => {
   });
 });
 
-describe('GAP(connections): guarantees that need the real carrier (ported with Connections’ dial and drive)', () => {
-  it.todo(
-    'S1 the carrier’s own dial timeout: a dial that never opens is closed by the real carrier (this half’s deadline is covered above)',
-  );
-  it.todo('S1 a rendezvous that closes before it accepts the session is a transport failure, not a refusal');
-  it.todo('S1 the heartbeat keeps a member session alive, and a session the carrier dropped is no longer live');
-});
+// The real carrier's own guarantees (its dial address, the acceptance deadline, the heartbeat, a close before acceptance)
+// are proved against Connections' `memberCarriers` in packages/plugins/connections/tests/unit/app/member-carriers.test.ts.

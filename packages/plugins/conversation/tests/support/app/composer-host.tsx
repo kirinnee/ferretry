@@ -19,6 +19,8 @@ export function withClient(element: ReactElement, client: PluginClient = BARE_CL
 /** Today's suites opened a draft stream through a `DaemonStreamOpener`; this is that opener as the client's socket. */
 interface SuiteStreamRequest {
   readonly ferretId: string;
+  /** The stream's query: `{ item }` for an Agenda item's own draft, absent for the chat's. */
+  readonly query?: Readonly<Record<string, string>> | undefined;
   readonly onData: (
     data: { readonly kind: 'text'; readonly text: string } | { readonly kind: 'bytes'; readonly bytes: Uint8Array },
   ) => void;
@@ -33,10 +35,11 @@ export type SuiteStreamOpener = (request: SuiteStreamRequest) => SuiteStreamSess
 /** A suite's stream opener as the client's `socket`: frames in as text, the close as `"<code> <reason>"`. */
 export function socketOf(open: SuiteStreamOpener, keys: string[] = []): Pick<PluginClient, 'socket'> {
   return {
-    socket: (key, params, listeners) => {
+    socket: (key, params, listeners, query) => {
       keys.push(key);
       const session = open({
         ferretId: params.ferretId ?? '',
+        query,
         onData: data => listeners.onFrame(data.kind === 'text' ? data.text : data.bytes),
       });
       session.onStreamClosed(closed => listeners.onClose(`${closed.code} ${closed.reason}`));

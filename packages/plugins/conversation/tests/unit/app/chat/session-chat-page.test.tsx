@@ -1,11 +1,18 @@
-import { afterEach, describe, expect, test } from 'bun:test';
-import { createLiveActivityHub, deviceControls, PanelSlot } from '@ferretry/app';
-import { ensureDom, render, run } from '@ferretry/app/testing';
-import type { FerretLiveActivity } from '@ferretry/core-ferrets/contract';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
+import {
+  createLiveActivityHub,
+  deviceControls,
+  PanelSlot,
+  ReferenceSurfaceProvider,
+  writeMdComposePref,
+} from '@ferretry/app';
+import { ensureDom, render, run, runAsync, WithAppHooks } from '@ferretry/app/testing';
+import { FERRETS_FILE_OPEN_HOOK, FerretsChanged, type FerretLiveActivity } from '@ferretry/core-ferrets/contract';
 import type { ComponentProps } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT } from '../../../../contract/index.ts';
 import { HandoffSourceProvider } from '../../../../app/chat/handoff-message.tsx';
+import { unreadChatSession } from '../../../../app/chat/chat-session.ts';
 import { SessionChatPage } from '../../../../app/chat/session-chat-page.tsx';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
@@ -13,9 +20,32 @@ import { TranscriptUnboundNotice } from '../../../../app/chat/transcript-unbound
 import { Composer } from '../../../../app/composer/composer.tsx';
 import { QuestionForm } from '../../../../app/questions/question-form.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
+import { withClient } from '../../../support/app/composer-host.tsx';
 import { ferretView } from '../../../support/app/ferret-view.ts';
 
+import * as realSharedDraft from '../../../../app/composer/use-shared-draft.ts';
+
 ensureDom();
+
+/**
+ * The shared draft's clear can take up to a second to come back while this device's last keystroke is answered. A case
+ * holds it open here (a gate it releases itself); every other case goes straight to the real hook.
+ */
+// Taken before the mock replaces the module's binding, or the mock would call itself.
+const { useSharedDraft: realUseSharedDraft, ...otherSharedDraftExports } = realSharedDraft;
+const clearGate: { current: Promise<undefined> | undefined } = { current: undefined };
+mock.module('../../../../app/composer/use-shared-draft.ts', () => ({
+  ...otherSharedDraftExports,
+  useSharedDraft: (...args: Parameters<typeof realUseSharedDraft>) => {
+    const real = realUseSharedDraft(...args);
+    return {
+      ...real,
+      sendClear: (...rest: Parameters<typeof real.sendClear>) => {
+        return clearGate.current ?? real.sendClear(...rest);
+      },
+    };
+  },
+}));
 
 /**
  * THE CHAT: one ferret's conversation and the slots the rest of its screen is drawn in. Today's suite drove the whole
@@ -83,6 +113,17 @@ describe('SessionChatPage', () => {
     ]);
   });
 
+  test('embedded under an agenda item: only the conversation and composer — no toolbar, no side panels (no terminal, no passkey ask)', () => {
+    const page = draw({ embedded: true, session: ferretView('shared') });
+
+    expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
+    const slots = page.root.findAllByType(PanelSlot).map(slot => slot.props.slot);
+    expect(slots).not.toContain('ferret.toolbar');
+    expect(slots).not.toContain('ferret.side');
+    expect(slots).toContain('conversation.above-composer');
+  });
+
   test('offers the above-composer slot for this ferret, in the input column directly before the composer', () => {
     const page = draw();
 
@@ -94,6 +135,73 @@ describe('SessionChatPage', () => {
       slot: CONVERSATION_ABOVE_COMPOSER_SLOT,
       subject: 'shared',
     });
+  });
+
+  const aboveComposerProps = (page: ReturnType<typeof draw>) =>
+    page.root.findAll(node => node.type === PanelSlot && node.props.slot === CONVERSATION_ABOVE_COMPOSER_SLOT)[0]?.props
+      .props;
+
+  test('hands the above-composer slot the rows, the turn, what the ferret waits on and the send ledger ids', () => {
+    const page = draw({
+      entries: [
+        {
+          id: 'u1',
+          kind: 'user',
+          label: 'You',
+          text: 'read this',
+          send: {
+            sendId: 's1',
+            acceptedAt: '2026-11-04T11:00:00.000Z',
+            message: 'read this',
+            attachmentIds: [],
+            fate: 'delivered',
+          },
+        },
+        { id: 'a1', kind: 'assistant', label: 'Assistant', text: 'Done.' },
+      ] as unknown as TranscriptEntry[],
+      question: QUESTION,
+      sends: [{ sendId: 's1', acceptedAt: '2026-11-04T11:00:00.000Z', message: 'read this' }] as unknown as NonNullable<
+        PageProps['sends']
+      >,
+      session: ferretView('shared', { state: { status: 'awaiting_question', turnState: 'needs-input' } }),
+    });
+
+    expect(aboveComposerProps(page)).toEqual({
+      rows: [
+        { id: 'u1', kind: 'user', label: 'You', text: 'read this', send: { sendId: 's1' } },
+        { id: 'a1', kind: 'assistant', label: 'Assistant', text: 'Done.' },
+      ],
+      turn: { state: 'needs-input', live: true },
+      needsInput: {
+        question: {
+          questions: [{ question: 'Ship it?', multiSelect: false, options: [{ label: 'Yes' }, { label: 'No' }] }],
+        },
+      },
+      // The ledger's words stay in Conversation: only the id and the daemon's acceptance instant are offered.
+      sends: [{ sendId: 's1', acceptedAt: '2026-11-04T11:00:00.000Z' }],
+    });
+  });
+
+  test('a page given no ledger offers no sends', () => {
+    expect(aboveComposerProps(draw()).sends).toEqual([]);
+  });
+
+  test('the turn is live only when the ferret was read from the daemon and the latest refresh did not fail', () => {
+    // Read, no failure: live.
+    expect(aboveComposerProps(draw()).turn.live).toBe(true);
+    // Read, but the latest refresh failed: the turn on screen may be stale, so it is not live.
+    expect(aboveComposerProps(draw({ refreshError: 'Conversation issue: offline' })).turn.live).toBe(false);
+    // Never read (the page is drawn from the id alone): not live, and it claims no turn.
+    const unread = aboveComposerProps(draw({ session: unreadChatSession('shared') }));
+    expect(unread.turn).toEqual({ state: null, live: false });
+  });
+
+  test('an ended ferret offers nothing it was waiting on', () => {
+    const page = draw({
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'completed' } }),
+    });
+    expect(aboveComposerProps(page).needsInput).toEqual({});
   });
 
   test('keeps the slot above a pending question’s form too: a permission card is not hidden by a question', () => {
@@ -143,7 +251,117 @@ describe('SessionChatPage', () => {
     expect(source.daemon.daemonId).toBe('alpha');
     expect(source.sessionId).toBe('shared');
     expect(await source.read('turn-008')).toMatchObject({ name: 'turn-008', message: 'look at this' });
-    expect(client.calls).toMatchObject([{ route: HANDOFF, params: { ferretId: 'shared', name: 'turn-008' } }]);
+    expect(client.callsTo(HANDOFF)).toMatchObject([
+      { route: HANDOFF, params: { ferretId: 'shared', name: 'turn-008' } },
+    ]);
+  });
+
+  describe('references', () => {
+    const FLEET = 'GET /v1/ferrets';
+    const row = { id: 'other', name: 'torrey', state: 'idle', folder: '/repo' };
+    const opening = { open: () => true };
+    const surfaceOf = (page: ReturnType<typeof draw>) => page.root.findByType(ReferenceSurfaceProvider).props.surface;
+    const drawWithHook = (overrides: Partial<PageProps>, hook: unknown, client: FakeClient) => {
+      const page = render(
+        <WithAppHooks provided={hook === undefined ? {} : { [FERRETS_FILE_OPEN_HOOK]: hook }}>
+          <SessionChatPage
+            client={client}
+            daemonId="alpha"
+            entries={[]}
+            session={ferretView('shared')}
+            {...overrides}
+          />
+        </WithAppHooks>,
+      );
+      mounted.push(page);
+      return page;
+    };
+
+    test('proves :agent from the fleet this daemon lists, through the half’s own client', async () => {
+      const client = fakeClient({ [FLEET]: () => [row] });
+      const page = draw({}, client);
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(client.callsTo(FLEET)).toHaveLength(1);
+      expect(surfaceOf(page).agentReferenceResolver({ name: 'torrey' })).toEqual({
+        daemonId: 'alpha',
+        sessionId: 'other',
+        name: 'torrey',
+      });
+    });
+
+    test('proves no agent before the fleet is read', () => {
+      const page = draw({}, fakeClient({ [FLEET]: () => [row] }));
+
+      expect(surfaceOf(page).agentReferenceResolver).toBeUndefined();
+    });
+
+    test('opens an @file only where Ferrets gives an opener and a workspace shows Files', async () => {
+      const client = () => fakeClient({ [FLEET]: () => [row] });
+      const without = drawWithHook({}, undefined, client());
+      const wrongShape = drawWithHook({}, { open: 'no' }, client());
+      const embedded = drawWithHook({ embedded: true }, opening, client());
+      const full = drawWithHook({}, opening, client());
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      expect(surfaceOf(without).onCodeReferenceOpen).toBeUndefined();
+      expect(surfaceOf(wrongShape).onCodeReferenceOpen).toBeUndefined();
+      expect(surfaceOf(embedded).onCodeReferenceOpen).toBeUndefined();
+      expect(typeof surfaceOf(full).onCodeReferenceOpen).toBe('function');
+    });
+
+    test('keeps the surface and the file proof across working <-> idle, and the file proof across another ferret’s coming', async () => {
+      let rows = [{ id: 'shared', name: 'aniya', state: 'working', folder: '/repo' }, row];
+      const client = fakeClient({ [FLEET]: () => rows });
+      const page = drawWithHook({}, opening, client);
+      const wait = (ms: number) =>
+        runAsync(async () => {
+          await new Promise(resolve => setTimeout(resolve, ms));
+        });
+      await wait(0);
+      const first = surfaceOf(page);
+
+      // Act — any ferret going idle is a read, and moves nothing the proof reads
+      rows = rows.map(each => ({ ...each, state: 'idle' }));
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const idle = surfaceOf(page);
+      // A ferret comes: the callsigns change (the surface is rebuilt), this ferret's folder does not
+      rows = [...rows, { id: 'third', name: 'kim', state: 'working', folder: '/elsewhere' }];
+      client.emit(FerretsChanged.name, {});
+      await wait(1_100);
+      const grown = surfaceOf(page);
+
+      // Assert
+      expect(client.callsTo(FLEET)).toHaveLength(3);
+      expect(idle).toBe(first);
+      expect(grown).not.toBe(first);
+      expect(grown.agentReferenceResolver({ name: 'kim' })).not.toBeNull();
+      expect(grown.resolveFilePaths).toBe(first.resolveFilePaths);
+      expect(grown.onCodeReferenceOpen).toBe(first.onCodeReferenceOpen);
+    });
+
+    test('asks Ferrets to open the path in THIS ferret’s Files, and stays quiet when the path is refused', async () => {
+      const asked: Array<[string, string]> = [];
+      const refusing = { open: (ferret: string, path: string) => (asked.push([ferret, path]), path !== 'bad') };
+      const client = fakeClient({ [FLEET]: () => [row] });
+      const page = drawWithHook({}, refusing, client);
+      await runAsync(async () => {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+
+      run(() => surfaceOf(page).onCodeReferenceOpen({ path: 'src/a.ts' }));
+      run(() => surfaceOf(page).onCodeReferenceOpen({ path: 'bad' }));
+
+      expect(asked).toEqual([
+        ['shared', 'src/a.ts'],
+        ['shared', 'bad'],
+      ]);
+    });
   });
 
   test('a send returns the transcript to the tail and still refreshes the chat', () => {
@@ -153,6 +371,45 @@ describe('SessionChatPage', () => {
     run(() => page.root.findByType(Composer).props.onSent({ words: 'hi' }));
     expect(page.root.findByType(Transcript).props.pinSignal).toBe(1);
     expect(refreshed).toBe(1);
+  });
+
+  test('an ask’s reply is about that ask: its own draft, the !A3 prefix, and a receipt when it is sent (triage B17)', async () => {
+    const received: unknown[] = [];
+    const restored: string[] = [];
+    const sentBodies: string[] = [];
+    const client = fakeClient({
+      'POST /v1/ferrets/:ferretId/send': call => {
+        sentBodies.push(String((call.body as { message?: string } | undefined)?.message));
+        return { sendId: 's1', disposition: 'delivered' };
+      },
+    });
+    const page = draw(
+      {
+        ask: {
+          id: 'A3',
+          onReplied: sent => received.push(sent),
+          restore: 'take it back',
+          onRestored: () => restored.push('done'),
+        },
+      },
+      client,
+    );
+    const composer = page.root.findByType(Composer);
+    expect(composer.props.draftSlot).toBe('A3');
+    expect(composer.props.restore).toBe('take it back');
+    // The composer itself puts the words in the box once and says so.
+    expect(restored).toEqual(['done']);
+    run(() => composer.props.onSent({ words: 'hi', sendId: 's1', disposition: 'delivered' }));
+    expect(received).toEqual([{ words: 'hi', sendId: 's1', disposition: 'delivered' }]);
+    // The route's answer is not this test's subject: the request it was given is.
+    await composer.props.api.send('shared', { message: 'hi' }).catch(() => undefined);
+    expect(sentBodies.join('')).toContain('!A3');
+  });
+
+  test('without an ask the composer is the ferret’s own chat box: no item draft, no prefix', () => {
+    const page = draw();
+    expect(page.root.findByType(Composer).props.draftSlot).toBeUndefined();
+    expect(page.root.findByType(Composer).props.api).toBeUndefined();
   });
 
   test('caps transcript and composer with one measure so neither can disagree with the other', () => {
@@ -236,6 +493,90 @@ describe('the question the ferret is asking', () => {
     expect(refreshed).toBe(1);
   });
 
+  test('under an agenda item the reply box stays with the question’s form: the item is answered through the Agenda, not the chat', () => {
+    const page = draw({
+      ask: { id: 'A6' },
+      embedded: true,
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    });
+
+    expect(page.root.findAllByType(QuestionForm)).toHaveLength(1);
+    expect(page.root.findAllByType(Composer)).toHaveLength(1);
+  });
+
+  test('a form card’s Send, pressed for real, answers the form and sends no chat message, even while the ferret waits on its question', async () => {
+    const sent: unknown[] = [];
+    const replied: unknown[] = [];
+    let answered = 0;
+    const client = fakeClient({
+      'POST /v1/ferrets/:ferretId/send': call => {
+        sent.push(call.body);
+        return { sendId: 's1', disposition: 'delivered' };
+      },
+    });
+    const page = draw(
+      {
+        ask: { id: 'A6', answerForm: () => (answered += 1), formChanges: 3, onReplied: reply => replied.push(reply) },
+        embedded: true,
+        question: QUESTION,
+        session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+      },
+      client,
+    );
+
+    expect(page.root.findByType(Composer).props.allowEmptySend).toBe(true);
+    expect(page.root.findByType(Composer).props.clearErrorOn).toBe(3);
+    await runAsync(async () => page.root.findByType('form').props.onSubmit({ preventDefault() {} }));
+
+    expect(answered).toBe(1);
+    expect(sent).toEqual([]);
+    // A form's Send is an answer, not a reply: the Inbox is told nothing.
+    expect(replied).toEqual([]);
+  });
+
+  test('a Send pressed on form A6 answers A6 only, even when the page moves to form A7 of the same ferret before it ends', async () => {
+    const answeredOn: string[] = [];
+    const base: Partial<PageProps> = {
+      embedded: true,
+      question: QUESTION,
+      session: ferretView('shared', { state: { status: 'awaiting_question' } }),
+    };
+    const props = (id: string): PageProps => ({
+      client: fakeClient({}),
+      daemonId: 'alpha',
+      entries: [],
+      ...base,
+      ask: { id, answerForm: () => void answeredOn.push(id) },
+      session: base.session as PageProps['session'],
+    });
+    let release: () => void = () => undefined;
+    clearGate.current = new Promise<undefined>(resolve => {
+      release = () => resolve(undefined);
+    });
+    try {
+      const page = draw(props('A6'));
+      // The press happens while the shared draft's clear is still out; then the owner opens the next item of the same ferret.
+      // (The press is its own act, not part of an async one: an update inside an open async act waits for it to end.)
+      let pressed: Promise<void> = Promise.resolve();
+      run(() => {
+        pressed = page.root.findByType('form').props.onSubmit({ preventDefault() {} });
+      });
+      run(() => page.update(<SessionChatPage {...props('A7')} />));
+      release();
+      await runAsync(async () => await pressed);
+    } finally {
+      clearGate.current = undefined;
+    }
+
+    expect(answeredOn).toEqual(['A6']);
+  });
+
+  test('without a form the item’s reply box is still a reply to the item', () => {
+    const page = draw({ ask: { id: 'A6' }, embedded: true });
+    expect(page.root.findByType(Composer).props.allowEmptySend).toBeUndefined();
+  });
+
   test('a waiting status with no validated question is damaged evidence: no form, no composer, and no invented answer', () => {
     const page = draw({ question: null, session: ferretView('shared', { state: { status: 'awaiting_question' } }) });
     expect(page.root.findAllByProps({ 'data-question-unavailable': '' }).length).toBeGreaterThan(0);
@@ -270,17 +611,42 @@ describe('the issue line', () => {
     expect(issue.findByType('summary').props.className).toContain('truncate');
   });
 
-  test('shows an unprovable transcript as its own notice in place of the issue line, with Check again', () => {
+  test('shows an unprovable transcript as its own notice, with Check again', () => {
     let refreshed = 0;
     const page = draw({
       onRefresh: () => (refreshed += 1),
-      refreshError: 'Conversation issue: ferret shared has no transcript this daemon can prove is its own',
       transcriptUnbound: true,
     });
     expect(page.root.findAllByType(TranscriptUnboundNotice)).toHaveLength(1);
-    expect(page.root.findAllByProps({ 'data-session-issue': '' })).toHaveLength(0);
     run(() => page.root.findByType(TranscriptUnboundNotice).props.onCheckAgain());
     expect(refreshed).toBe(1);
+  });
+
+  test('shows a separate session failure ALONGSIDE the unprovable-transcript notice, never instead of it', () => {
+    const page = draw({
+      refreshError: 'Conversation issue: Session: permission denied',
+      session: unreadChatSession('shared'),
+      transcriptUnbound: true,
+    });
+    expect(page.root.findAllByType(TranscriptUnboundNotice)).toHaveLength(1);
+    const issue = page.root.findAllByProps({ 'data-session-issue': '' });
+    expect(issue).toHaveLength(1);
+    expect(textOf(issue[0] as ReactTestInstance)).toBe('Conversation issue: Session: permission denied');
+  });
+
+  test('disables the composer, and says why, for a ferret that was never read', () => {
+    const page = draw({
+      refreshError: 'Conversation issue: Session: permission denied',
+      session: unreadChatSession('shared'),
+    });
+    expect(page.root.findByType(Composer).props.disabled).toBe(true);
+    expect(textOf(page.root.findByProps({ 'data-composer-unread': '' }))).toContain('could not be read');
+  });
+
+  test('leaves the composer on, with no such note, for a ferret that was read', () => {
+    const page = draw();
+    expect(page.root.findByType(Composer).props.disabled).toBe(false);
+    expect(page.root.findAllByProps({ 'data-composer-unread': '' })).toHaveLength(0);
   });
 });
 
@@ -361,5 +727,66 @@ describe('search within the conversation', () => {
     const view = draw();
     controlF();
     expect(searchBars(view.root)).toBe(0);
+  });
+});
+
+describe('the ferret’s harness reaches the composer', () => {
+  // The plain textarea: the live editor has its own suites.
+  beforeEach(() => writeMdComposePref('off'));
+  afterEach(() => writeMdComposePref('on'));
+
+  const SKILL_ROUTE = 'GET /v1/ferrets/:ferretId/references';
+  const skillsClient = () =>
+    fakeClient(
+      {
+        [SKILL_ROUTE]: call => ({
+          ferret: call.params.ferretId,
+          prefix: call.query.prefix,
+          provided: true,
+          entries: [{ token: 'summary', label: '', detail: 'Give a fast recap' }],
+        }),
+      },
+      'alpha',
+    );
+
+  /** The page inside the half's client context, which is where its composer reads the ferret's skills. */
+  const drawWith = (session: PageProps['session'], client: FakeClient) => {
+    const page = render(
+      withClient(<SessionChatPage client={client} daemonId="alpha" entries={[]} session={session} />, client),
+    );
+    mounted.push(page);
+    return page;
+  };
+
+  /** Types `/summary` in the page's own composer and reads the menu's header and footer: what Enter would insert. */
+  const menuOffered = async (page: ReturnType<typeof draw>): Promise<string> => {
+    await runAsync(async () => {
+      page.root
+        .findByType('textarea')
+        .props.onChange({ currentTarget: { value: '/summary', selectionStart: 8, selectionEnd: 8 } });
+    });
+    // The skills read is asynchronous: wait for the menu (up to ~2 s) rather than one fixed tick, which a slow CI runner misses.
+    for (let tries = 0; tries < 100; tries += 1) {
+      if (page.root.findAllByProps({ className: 'fy-ac-foot' }).length > 0) break;
+      await runAsync(async () => await new Promise<void>(resolve => setTimeout(resolve, 20)));
+    }
+    return textOf(page.root.findByProps({ className: 'fy-ac-foot' }));
+  };
+
+  test('a Codex ferret’s picked skill inserts $name', async () => {
+    const page = drawWith(ferretView('shared', { config: { harness: 'codex' } }), skillsClient());
+    expect(page.root.findByType(Composer).props.harness).toBe('codex');
+    expect(await menuOffered(page)).toBe('↵ inserts $summary · ⇥ complete · esc');
+  });
+
+  test('a Claude ferret’s picked skill inserts /name', async () => {
+    const page = drawWith(ferretView('shared', { config: { harness: 'claude' } }), skillsClient());
+    expect(page.root.findByType(Composer).props.harness).toBe('claude');
+    expect(await menuOffered(page)).toBe('↵ inserts /summary · ⇥ complete · esc');
+  });
+
+  test('a ferret the chat could not read names no harness, so the menu offers what every harness accepts', () => {
+    const page = draw({ session: unreadChatSession('shared') });
+    expect(page.root.findByType(Composer).props.harness).toBeUndefined();
   });
 });

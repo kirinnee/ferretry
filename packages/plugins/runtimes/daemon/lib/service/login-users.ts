@@ -4,11 +4,15 @@
  *
  * Pure apart from the reading it is handed.
  */
-import type { LoginUsers } from '@ferretry/plugin-logins/contract';
+import type { LoginChange, LoginRuntimePreview, LoginUsers } from '@ferretry/plugin-logins/contract';
 import type { RuntimeFile } from '../../../contract/index.ts';
 
-export function loginUsers(runtimes: () => ReadonlyMap<string, RuntimeFile>): LoginUsers {
+export function loginUsers(
+  runtimes: () => ReadonlyMap<string, RuntimeFile>,
+  after?: (change: LoginChange) => Promise<readonly LoginRuntimePreview[]>,
+): LoginUsers {
   return {
+    ...(after === undefined ? {} : { after }),
     of: loginId =>
       [...runtimes()]
         .filter(([, file]) => file.login === loginId)

@@ -387,7 +387,7 @@ function verbWorld() {
   const half = cli.build?.({
     manifest,
     client: world.client,
-    io: { out: t => out.push(t), err: t => err.push(t), isTty: false },
+    io: { out: t => out.push(t.replace(/\n$/u, '')), err: t => err.push(t.replace(/\n$/u, '')), isTty: false },
   } as CliContext<Manifest> as never);
   if (half === undefined) throw new Error('the cli half is real');
   const verbs = half.verbs as Readonly<Record<string, (invocation: VerbInvocation) => Promise<number>>>;

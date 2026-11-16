@@ -54,6 +54,8 @@ export function registerReader(needs: ReaderNeeds) {
   return {
     reads,
     images,
+    /** The raw parsed tail of a ferret's transcript (unmasked, for the question watch's projection only). */
+    tail: async (ferret: string, limit: number) => await files.tail(ferret, limit),
     /** Closes the transcript handle held for one ferret that stopped or was removed. */
     release: (ferret: string) => files.release(ferret),
     /** Closes every harness transcript handle the reader holds. */

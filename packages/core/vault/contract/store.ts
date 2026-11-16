@@ -70,3 +70,31 @@ export function isVaultKeyText(text: string): boolean {
 
 /** Why the store could not be used (today's `SecretStoreFailure`). Any of them fails closed. */
 export type SecretStoreFailure = 'unreadable' | 'key_missing' | 'undecipherable' | 'full';
+
+/**
+ * WHO WROTE EACH SECRET'S CURRENT VALUE, for the secrets a non-core plugin mints (`state/vault/mints.json`): never a value.
+ * A record is the plugin's id and the identity of that one write (the entry's own random seal nonce, which is not a
+ * secret), so it holds only while the entry is still exactly that write: an owner's replacement or a delete and re-create
+ * seals a new nonce and ends it, and nothing has to remember to clear one. No pattern of names decides who minted a secret; this
+ * ledger does.
+ */
+export const MintsDocumentSchema = z.strictObject({
+  format: z.literal(1),
+  entries: z.record(
+    z
+      .string()
+      .regex(/^[A-Z][A-Z0-9_]*$/u)
+      .max(64),
+    z.strictObject({ by: z.string().min(1).max(64), write: z.string().min(1) }),
+  ),
+});
+export type MintsDocument = z.infer<typeof MintsDocumentSchema>;
+
+export const MintsFile = defineState({
+  name: 'mints',
+  path: 'mints.json',
+  store: 'json',
+  format: 1,
+  schema: MintsDocumentSchema,
+  mode: 0o600,
+});

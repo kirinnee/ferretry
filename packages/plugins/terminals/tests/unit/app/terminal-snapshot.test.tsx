@@ -262,7 +262,7 @@ describe('terminal snapshot view', () => {
       />,
     );
     expect(seen).toEqual([
-      { route: SNAPSHOT_ROUTE, init: { params: { ferretId: 'pane-session' }, query: { live: 'false' } } },
+      { route: SNAPSHOT_ROUTE, init: { params: { ferretId: 'pane-session' }, query: { live: 'false' }, quiet: true } },
     ]);
     expect(view.container.textContent).toContain('default reader frame');
     await view.unmount();

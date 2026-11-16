@@ -63,6 +63,7 @@ export const INPUT_REASONS = [
   'check_failures',
   'expired',
   'copy_gone',
+  'taken_over',
 ] as const;
 export const InputReasonSchema = z.enum(INPUT_REASONS);
 
@@ -188,5 +189,28 @@ export const InputRequestFiles = defineState({
   store: 'json',
   format: 1,
   schema: InputRequestRecordSchema,
+  mode: 0o600,
+});
+
+/**
+ * `state/vault/script-record.json`: WHERE PAGE SCRIPTS RAN on this machine, by host, and when one ran where its origin
+ * could not be read (`everywhere`). Times are epoch milliseconds. Host names only, never a page, a value or a URL.
+ * It is what a standing sign-in rule is held to across a daemon restart.
+ */
+export const ScriptRecordSchema = z.strictObject({
+  format: z.literal(1),
+  everywhere: z.number().int().nonnegative().optional(),
+  hosts: z.record(z.string().min(1).max(253), z.number().int().nonnegative()),
+});
+export type ScriptRecord = z.infer<typeof ScriptRecordSchema>;
+
+export const ScriptRecordFile = defineState({
+  name: 'script-record',
+  path: 'script-record.json',
+  store: 'json',
+  format: 1,
+  schema: ScriptRecordSchema,
+  // A file that cannot be read is read as "a script ran everywhere just now": no standing rule fills until it is repaired.
+  onDamaged: { narrower: 'reads as a page script on every place just now, so no standing sign-in rule fills' },
   mode: 0o600,
 });

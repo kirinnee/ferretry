@@ -127,6 +127,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason: 'a build-time script the app build runs to write dist/catalog; it never runs inside a daemon',
     },
     {
+      pkg: 'logins',
+      folder: 'scripts/built-ins.ts',
+      reason:
+        'a developer-run generator that writes daemon/lib/built-ins.json from the shipped YAML (and its --check); it never runs inside a daemon',
+    },
+    {
       pkg: 'connections',
       folder: 'daemon/adapters/webrtc/node-datachannel-engine.ts',
       reason: 'the WebRTC native engine (node-datachannel), loaded below the carrier rather than through a port',
@@ -195,9 +201,55 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       reason: 'fy at the person terminal: the hidden-read prompt and the pane session variables (lead ruling)',
     },
     {
+      pkg: 'browsers',
+      folder: 'cli/adapters/picture-file.ts',
+      reason:
+        'fy at the person terminal writes the screenshot to the file the person named, a path outside every declared root; the file holds only the picture bytes the daemon sent (owner-ruled gap: the CLI half has no file-write port)',
+    },
+    {
+      pkg: 'catalogs',
+      folder: 'cli/adapters/export-file.ts',
+      reason:
+        'fy at the person terminal writes the signed catalog file to the path the person named, outside every declared root: create-exclusive, or a temp file renamed over, a symbolic link refused; the file holds only what the daemon signed (v4 FileCatalogWriter; same owner-ruled gap as the Browsers screenshot: the CLI half has no file-write port)',
+    },
+    {
       pkg: 'terminals',
       folder: 'cli/adapters/attach/tmux-attacher.ts',
       reason: 'fy itself attaches the person terminal to tmux (lead ruling)',
+    },
+    // `fy history claim` (c58-36): the wrapper's claim before it `exec`s a resumed harness runs in the person's own
+    // terminal with no daemon, so the kernel's ports (which a CLI half does not get for these) cannot be the way to
+    // the files, the lock or the process table. Ruled by the lead (britnee, c58-36b): each file is one entry, and the
+    // reach is only Ferrets' own `conversation-leases` state tree (never a pool an agent writes). The daemon's twin
+    // (daemon/adapters/session/lifecycle/conversation-lease-*.ts) shares the on-disk protocol and only the contract.
+    {
+      pkg: 'ferrets',
+      folder: 'cli/adapters/history/file-lock.ts',
+      reason:
+        'the exclusive flock(2) on the pool lock file, through bun:ffi and the host platform name for the C library (integers only; the kernel drops the lock when its holder closes it or dies)',
+    },
+    {
+      pkg: 'ferrets',
+      folder: 'cli/adapters/history/host-process-starts.ts',
+      reason:
+        'tells one run of a pid from a later process that reuses the number: /proc/<pid>/stat on Linux, `ps -o lstart=` by absolute path elsewhere (v4 HostProcessStarts)',
+    },
+    {
+      pkg: 'ferrets',
+      folder: 'cli/adapters/history/state-lease-disk.ts',
+      reason:
+        'reads, lists and locks the conversation lease files in Ferrets own state tree, opened without following a link (the CliContext state port has no read, list or lock); writes and removes go through the state port; the wait for the lock uses the host clock and a timer',
+    },
+    {
+      pkg: 'ferrets',
+      folder: 'cli/adapters/history/host-lease-store.ts',
+      reason: 'binds the lease store to the real process table and wall clock for `fy history claim`',
+    },
+    {
+      pkg: 'ferrets',
+      folder: 'daemon/adapters/session/lifecycle/conversation-lease-disk.ts',
+      reason:
+        'the daemon half of the same lease files as `fy history claim`: reads a lease and opens the pool lock without following a link (the state port reads no capped, link-refusing lease and has no lock); writes, removes and lists go through the state port, and the clock, platform and process table are the kernel ports handed in',
     },
     {
       pkg: 'terminals',

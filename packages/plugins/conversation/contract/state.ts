@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { StoredRenderMetaSchema } from './wire-media.ts';
 import { FinderFileSchema, LinksFileSchema } from './wire-link.ts';
 import { QuestionSchema } from './wire-question.ts';
+import { PromptWaitRecordSchema } from './wire-prompt.ts';
 
 /** An opaque or secret file is bytes the kernel never parses: the schema types the port, it checks nothing. */
 const BYTES = z.instanceof(Uint8Array);
@@ -23,6 +24,23 @@ export const OUTBOX_STATE = defineState({ name: 'outbox', path: '*/outbox.jsonl'
 /** Lines are the answer ledger's receipts (`AnswerLineSchema`), last write per request wins. */
 export const ANSWERS_STATE = defineState({ name: 'answers', path: '*/answers.jsonl', store: 'jsonl', format: 1 });
 export const TURNS_STATE = defineState({ name: 'turns', path: '*/turns', store: 'opaque', format: 1 });
+/**
+ * The screen a STUCK send met, kept so the cause can be found afterwards: `<ferret>/stuck-frame-1.txt` is the newest,
+ * `-2` and `-3` the two before it, and nothing older is kept. One is written when a send is said stuck (`stuckAt`),
+ * from the runner's MASKED capture, `0600`, and it stays on this machine: no route serves it and no log or message
+ * carries its text — only its path is logged.
+ */
+const stuckFrame = (slot: 1 | 2 | 3) =>
+  defineState({
+    name: `stuck-frame-${slot}`,
+    path: `*/stuck-frame-${slot}.txt`,
+    store: 'opaque',
+    format: 1,
+    schema: BYTES,
+    mode: 0o600,
+  });
+/** Newest first. */
+export const STUCK_FRAME_STATES = [stuckFrame(1), stuckFrame(2), stuckFrame(3)] as const;
 export const QUESTION_STATE = defineState({
   name: 'question',
   path: '*/question.json',
@@ -47,6 +65,14 @@ export const QUESTION_ANSWERED_STATE = defineState({
   store: 'json',
   format: 1,
   schema: QuestionAnsweredSchema,
+});
+/** Where a ferret is in its waits on a permission prompt or a dialog, and the card held for it (`PromptWaitRecordSchema`). */
+export const PROMPT_WAIT_STATE = defineState({
+  name: 'prompt-wait',
+  path: '*/prompt-wait.json',
+  store: 'json',
+  format: 1,
+  schema: PromptWaitRecordSchema,
 });
 /** The hypermedia switch the owner set for one ferret; none means the mode's default (docs/hypermedia.md). */
 export const HypermediaSwitchSchema = z.strictObject({
@@ -143,8 +169,10 @@ export const CONVERSATION_STATE = [
   OUTBOX_STATE,
   ANSWERS_STATE,
   TURNS_STATE,
+  ...STUCK_FRAME_STATES,
   QUESTION_STATE,
   QUESTION_ANSWERED_STATE,
+  PROMPT_WAIT_STATE,
   HYPERMEDIA_STATE,
   DRAFTS_STATE,
   ATTACHMENT_ORIGINAL_STATE,

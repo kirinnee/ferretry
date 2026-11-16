@@ -52,6 +52,7 @@ const STATUS: Readonly<Record<SecureCopyError['code'], number>> = {
   capacity: 429,
   unavailable: 503,
   upstream_failed: 502,
+  taken_over: 409,
 };
 
 /** A refusal of the service, in the person's words and a code to branch on. */

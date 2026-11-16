@@ -19,6 +19,7 @@ import {
   type ProcessCalls,
   listSessionProcesses,
   processErrorText,
+  processForbiddenText,
   readSessionProcessOutput,
 } from '../../lib/session-processes.ts';
 import type { DaemonConnection, DaemonSessionScope } from '../../shell.ts';
@@ -48,7 +49,7 @@ export type ProcessListState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly list: SessionProcessList }
   | { readonly status: 'stale'; readonly list: SessionProcessList; readonly reason: string }
-  | { readonly status: 'forbidden' }
+  | { readonly status: 'forbidden'; readonly reason: string }
   | { readonly status: 'error'; readonly reason: string };
 
 export const processListOf = (state: ProcessListState): SessionProcessList | null =>
@@ -115,7 +116,7 @@ export function useSessionProcesses({
           const reason = processErrorText(cause);
           setHeld(current => {
             const prior = current.key === key ? processListOf(current.value) : null;
-            if (forbidden) return { key, value: { status: 'forbidden' } };
+            if (forbidden) return { key, value: { status: 'forbidden', reason: processForbiddenText(cause) } };
             return {
               key,
               value: prior === null ? { status: 'error', reason } : { status: 'stale', list: prior, reason },
@@ -151,7 +152,7 @@ export type ProcessOutputState =
   | { readonly status: 'loading' }
   | { readonly status: 'ready'; readonly output: HeldOutput }
   | { readonly status: 'stale'; readonly output: HeldOutput; readonly reason: string }
-  | { readonly status: 'forbidden' }
+  | { readonly status: 'forbidden'; readonly reason: string }
   | { readonly status: 'error'; readonly reason: string };
 
 export interface ProcessOutputOptions {
@@ -207,7 +208,7 @@ export function useProcessOutput({
           const reason = processErrorText(cause);
           if (isForbidden(cause)) {
             done = true;
-            setHeld({ key, value: { status: 'forbidden' } });
+            setHeld({ key, value: { status: 'forbidden', reason: processForbiddenText(cause) } });
           } else {
             setHeld({
               key,

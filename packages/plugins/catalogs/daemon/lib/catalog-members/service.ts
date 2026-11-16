@@ -90,6 +90,7 @@ import { pruneShares } from './prune.ts';
 import { CatalogMemberRefusal } from './refusal.ts';
 import { keyExpired, sweepMembers, type RemovedKey } from './sweep.ts';
 import { listedShares, memberView, shareView } from './views.ts';
+import { LiveWindowLedger, type LiveWindowView } from '@ferretry/std/live-window';
 
 export interface CatalogMemberDeps {
   readonly members: CatalogMembersStore;
@@ -211,11 +212,19 @@ export class CatalogMemberService {
   #state: State | undefined;
   #loading: Promise<void> | undefined;
   readonly #held = new Map<string, Held>();
+  /**
+   * WHEN A SHARE INVITE WAS LIVE (see {@link CatalogMemberService.window}): every share is opened here the moment it is live
+   * in the document and closed only once the write that ended it has COMMITTED (a pending or failed write can put the share
+   * back to joinable, so it stays open through it), whichever way it ended. An invite's link is a credential for exactly
+   * that long, and nothing a page can write says otherwise.
+   */
+  readonly #window: LiveWindowLedger;
   readonly #unfinishedRemovals = new Set<string>();
   readonly #compare: DigestComparison;
 
   constructor(private readonly deps: CatalogMemberDeps) {
     this.#compare = deps.compare ?? secretsMatch;
+    this.#window = new LiveWindowLedger(deps.now);
   }
 
   // ── Loading ────────────────────────────────────────────────────────────────────────────────────
@@ -235,6 +244,49 @@ export class CatalogMemberService {
   async #load(): Promise<void> {
     const [members, shares] = await Promise.all([this.deps.members.read(), this.deps.shares.read()]);
     this.#state ??= { members, shares };
+    // An invite still live on disk may have its link open in a page since before this process began.
+    this.#open(this.#state.shares);
+  }
+
+  /**
+   * WHAT AN AGENT'S BROWSER MAY ASK: whether a share invite is live, as yes or no, never which one. Until the shares have
+   * been read the answer is "yes" for every question (an unread document is not an empty one) and reading starts at once.
+   */
+  get window(): LiveWindowView {
+    const known = (): boolean => this.#state !== undefined;
+    const settle = (): void => {
+      if (!known()) void this.ready().catch(() => undefined);
+    };
+    return {
+      live: () => {
+        settle();
+        return !known() || this.#window.live();
+      },
+      liveSince: sinceMs => {
+        settle();
+        return !known() || this.#window.liveSince(sinceMs);
+      },
+    };
+  }
+
+  /**
+   * Opens the ledger for every live share of `shares`, from the document alone. It NEVER closes: closing is only for what
+   * is durably gone ({@link CatalogMemberService.#closeEnded}), because a write that has not committed can still roll the
+   * share back to joinable, and a link that was on a page then still has to be known about.
+   */
+  #open(shares: SharesDocument): void {
+    const now = this.deps.now();
+    for (const share of shares.shares) {
+      if (shareState(share, now) !== 'live') continue;
+      const deadline = Date.parse(share.expiresAt);
+      this.#window.open(share.shareId, Number.isFinite(deadline) ? deadline : Number.POSITIVE_INFINITY);
+    }
+  }
+
+  /** Closes the ledger for every share `committed` (a document that is on disk) says is not live. */
+  #closeEnded(committed: SharesDocument): void {
+    const now = this.deps.now();
+    for (const share of committed.shares) if (shareState(share, now) !== 'live') this.#window.close(share.shareId);
   }
 
   async #renamed(rename: MemberRename): Promise<void> {
@@ -1011,6 +1063,10 @@ export class CatalogMemberService {
   async #applyShares(requested: SharesDocument, before: SharesDocument): Promise<void> {
     const state = this.#loaded();
     const next = pruneShares(requested, this.deps.now());
+    // Opening is before the write, and so before any answer that carries a link. CLOSING is after it and only once it has
+    // committed: memory says "ended" while the write is pending or failing, and a failure puts the share back to joinable,
+    // so the link a page held stays known about the whole time (a failed or never-finishing write keeps it open until its deadline).
+    this.#open(requested);
     this.#state = { ...state, shares: next };
     try {
       await this.deps.shares.write(next);
@@ -1018,6 +1074,7 @@ export class CatalogMemberService {
       if (this.#state.shares === next) this.#state = { ...this.#state, shares: before };
       throw error;
     }
+    this.#closeEnded(next);
   }
 
   #usedBy(document: SharesDocument, shareId: string, use: StoredShare['usedBy'][number]): SharesDocument {

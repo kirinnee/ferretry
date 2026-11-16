@@ -66,9 +66,14 @@ function build(
     update?: unknown;
     permission?: unknown;
     dialog?: unknown;
+    /** The settings and hooks the launching runtime's profile selects; default: every configured item. */
+    selected?: (runtime: string | undefined) => Promise<{ settings: ReadonlySet<string>; hooks: ReadonlySet<string> }>;
+    /** Roots in place of the real ones (a stub that refuses or throws, for the doubt branches). */
+    roots?: ReturnType<typeof rootsPortFor>;
   } = {},
 ) {
-  const roots = rootsPortFor(
+  /** The roots the harness is built on; default: the kernel's own over the fixture home. */
+  const realRoots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),
     {
       home: join(fixture, 'fy-home'),
@@ -78,6 +83,7 @@ function build(
     ['agent-homes', 'harness-history'],
     () => undefined,
   );
+  const roots = options.roots ?? realRoots;
   const writeHome = async (relative: string, text: string) => {
     const home = roots.root('agent-homes', { subfolder: FERRET });
     const path = home.resolve(relative);
@@ -87,6 +93,7 @@ function build(
   const tmux: string[][] = [];
   const panes = new PaneDirectory();
   const harness = new ClaudeHarness({
+    selected: options.selected ?? (async () => ({ settings: EVERYTHING, hooks: EVERYTHING })),
     roots,
     config: (options.config ?? {
       file: () => ({ searchPaths: [], permissionMode: 'auto' }),
@@ -136,6 +143,9 @@ function build(
   };
   return { harness, roots, writeHome, tmux, panes };
 }
+
+/** Names every component: for the tests that are not about which components a runtime selects. */
+const EVERYTHING = { has: () => true } as unknown as ReadonlySet<string>;
 
 const spec = (more: Record<string, unknown> = {}): LaunchSpec =>
   ({
@@ -535,6 +545,63 @@ describe('ClaudeHarness', () => {
     expect(settings.env).toEqual({ LOG: '1', GUARD: '${secret:GUARD_VALUE}' });
   });
 
+  test('B02 only the settings and hooks the launching runtime’s profile selects reach its home; the rest stay out', async () => {
+    const config = {
+      file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+      collection: (definition: unknown) =>
+        definition === CLAUDE_CODE_SETTINGS
+          ? new Map([
+              ['guard', { settings: { env: { LOG: '1' } } }],
+              ['other', { settings: { env: { OTHER: '1' } } }],
+            ])
+          : definition === CLAUDE_CODE_HOOKS
+            ? new Map([
+                ['audit', { hooks: { PostToolUse: [{ command: 'echo audit' }] } }],
+                ['unselected', { hooks: { PreToolUse: [{ command: 'echo nope' }] } }],
+              ])
+            : new Map(),
+    };
+    const asked: (string | undefined)[] = [];
+    const { harness } = build({
+      config,
+      selected: async runtime => {
+        asked.push(runtime);
+        return { settings: new Set(['guard']), hooks: new Set(['audit']) };
+      },
+    });
+
+    await harness.prepareHome(spec({ runtime: 'work' }));
+
+    const settings = JSON.parse(await readFile(join(HOME, 'settings.json'), 'utf8')) as {
+      env?: Record<string, string>;
+      hooks?: Record<string, unknown>;
+    };
+    expect(asked).toEqual(['work']);
+    expect(settings.env).toEqual({ LOG: '1' });
+    expect(Object.keys(settings.hooks ?? {})).toEqual(['PostToolUse']);
+  });
+
+  test('B02 a runtime whose profile selects none gets none of the machine’s settings or hooks', async () => {
+    const { harness } = build({
+      config: {
+        file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+        collection: definition =>
+          definition === CLAUDE_CODE_SETTINGS
+            ? new Map([['guard', { settings: { env: { LOG: '1' } } }]])
+            : definition === CLAUDE_CODE_HOOKS
+              ? new Map([['audit', { hooks: { PostToolUse: [{ command: 'echo audit' }] } }]])
+              : new Map(),
+      },
+      selected: async () => ({ settings: new Set(), hooks: new Set() }),
+    });
+
+    await harness.prepareHome(spec({ runtime: 'bare' }));
+
+    const settings = JSON.parse(await readFile(join(HOME, 'settings.json'), 'utf8')) as Record<string, unknown>;
+    expect(settings.env).toBeUndefined();
+    expect(settings.hooks).toBeUndefined();
+  });
+
   describe(".claude.json is merged at every launch, never replaced (today's wrapper seed)", () => {
     const claudeJson = () => join(HOME, '.claude.json');
     type Document = Record<string, unknown> & { projects: Record<string, Record<string, unknown>> };
@@ -692,6 +759,90 @@ describe('ClaudeHarness', () => {
     expect(started.command).toContain('--resume');
     expect(started.command).toContain('older-conversation');
     expect(started.command).not.toContain('--session-id');
+  });
+
+  describe('hasConversation: false ONLY when the id is in no projects folder of this ferret home', () => {
+    /** Claude's own spelling of a folder name: every non-alphanumeric character as `-`. */
+    const spelled = (folder: string) => folder.replaceAll(/[^a-zA-Z0-9]/gu, '-');
+
+    test('no projects folder, or the id in none of its folders: proved absent (a converted ferret)', async () => {
+      const { harness, writeHome } = build();
+      expect(await harness.hasConversation(spec({ folder: '/work/repo.a' }), 'older')).toBe(false);
+      await writeHome('projects/-work-other/another.jsonl', '{}\n');
+      expect(await harness.hasConversation(spec({ folder: '/work/repo.a' }), 'older')).toBe(false);
+    });
+
+    test('found under Ferretry’s own spelling of the folder: true', async () => {
+      const { harness, writeHome } = build();
+      await writeHome('projects/-work-repo-a/older.jsonl', '{}\n');
+      expect(await harness.hasConversation(spec({ folder: '/work/repo.a' }), 'older')).toBe(true);
+    });
+
+    test('a folder reached through a link: Claude keys by the REAL path, so the id found there is never “absent”', async () => {
+      // `/work/linked` is a link to `/real/place`; Claude's cwd is the physical folder, so it wrote under that spelling.
+      const { harness, writeHome } = build();
+      await writeHome(`projects/${spelled('/real/place')}/older.jsonl`, '{}\n');
+      expect(await harness.hasConversation(spec({ folder: '/work/linked' }), 'older')).toBeUndefined();
+    });
+
+    test('a folder whose spelling is over 200 characters: Claude shortens it with a hash, so found there is never “absent”', async () => {
+      const long = `/work/${'deep/'.repeat(45)}repo`;
+      expect(spelled(long).length).toBeGreaterThan(200);
+      const { harness, writeHome } = build();
+      await writeHome(`projects/${spelled(long).slice(0, 200)}-1a2b3c4d/older.jsonl`, '{}\n');
+      expect(await harness.hasConversation(spec({ folder: long }), 'older')).toBeUndefined();
+    });
+
+    test('a link among the project folders, or projects that is not a folder, proves nothing', async () => {
+      const linked = build();
+      await mkdir(join(HOME, 'projects'), { recursive: true });
+      await symlink(join(fixture, 'elsewhere'), join(HOME, 'projects/-work-linked'));
+      expect(await linked.harness.hasConversation(spec(), 'older')).toBeUndefined();
+      await rm(join(HOME, 'projects'), { recursive: true });
+      await writeFile(join(HOME, 'projects'), 'not a folder');
+      expect(await linked.harness.hasConversation(spec(), 'older')).toBeUndefined();
+      await rm(join(HOME, 'projects'));
+      await mkdir(join(HOME, 'projects'));
+      // A plain file beside the folders is not a folder Claude keeps conversations in: skipped, still proved absent.
+      await writeFile(join(HOME, 'projects', 'stray.txt'), '');
+      expect(await linked.harness.hasConversation(spec(), 'older')).toBe(false);
+    });
+
+    test('more project folders than it lists proves nothing', async () => {
+      const { harness } = build();
+      for (let n = 0; n <= 1_000; n += 1) await mkdir(join(HOME, 'projects', `-work-${n}`), { recursive: true });
+      expect(await harness.hasConversation(spec(), 'older')).toBeUndefined();
+    });
+
+    test('an id that is not one plain name, a path the root refuses, or a root that throws: undefined, never false', async () => {
+      expect(await build().harness.hasConversation(spec(), '../x')).toBeUndefined();
+      const refusing = (refuse: (relative: string) => boolean) =>
+        ({
+          root: () => ({
+            resolve: (relative: string) =>
+              refuse(relative) ? { ok: false, error: 'outside' } : { ok: true, value: `/fenced/${relative}` },
+            lstat: async (path: string) => (path === '/fenced/projects' ? { kind: 'directory' } : undefined),
+            entries: async () => [{ name: '-work', kind: 'directory' }],
+          }),
+        }) as unknown as ReturnType<typeof rootsPortFor>;
+      // The projects folder itself refused.
+      expect(
+        await build({ roots: refusing(relative => relative === 'projects') }).harness.hasConversation(spec(), 'older'),
+      ).toBeUndefined();
+      // A conversation file inside a listed folder refused.
+      expect(
+        await build({ roots: refusing(relative => relative.endsWith('.jsonl')) }).harness.hasConversation(
+          spec(),
+          'older',
+        ),
+      ).toBeUndefined();
+      const throwing = {
+        root: () => {
+          throw new Error('the agent-homes root is unavailable');
+        },
+      } as unknown as ReturnType<typeof rootsPortFor>;
+      expect(await build({ roots: throwing }).harness.hasConversation(spec(), 'older')).toBeUndefined();
+    });
   });
 
   test('start says unavailable, and starts nothing, when claude is not there', async () => {
@@ -1546,6 +1697,43 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     await harness.start(spec({ effort: 'high' }), runner({}), {} as never);
 
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+  });
+
+  describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
+    const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
+    const launched = async (call: 'start' | 'resume', mode: 'interactive' | 'auto' | undefined) => {
+      const { harness } = build();
+      const started: { command?: readonly string[] } = {};
+      const more = mode === undefined ? {} : { mode };
+      const result =
+        call === 'start'
+          ? await harness.start(spec(more), runner(started), {} as never)
+          : await harness.resume(spec(more), runner(started), {} as never, 'a-conversation-1');
+      expect(result.ok).toBe(true);
+      return started.command ?? [];
+    };
+
+    for (const call of ['start', 'resume'] as const) {
+      test(`a ${call} of an interactive ferret keeps the question tool`, async () => {
+        expect(await launched(call, 'interactive')).not.toContain(NO_QUESTIONS);
+      });
+
+      test(`a ${call} of an auto ferret, or one with no mode, withholds it exactly once`, async () => {
+        for (const mode of ['auto', undefined] as const)
+          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
+      });
+    }
+
+    test('the mode never makes a launched ferret read as outdated: the recorded launch is current for either', async () => {
+      for (const mode of ['interactive', 'auto'] as const) {
+        const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+        const { harness } = build({ state });
+        await harness.start(spec({ mode }), runner({}), {} as never);
+        expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+        await harness.resume(spec({ mode }), runner({}), {} as never, 'a-conversation-1');
+        expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      }
+    });
   });
 
   test('F-0422 each change since the launch names its section, and only its section', async () => {

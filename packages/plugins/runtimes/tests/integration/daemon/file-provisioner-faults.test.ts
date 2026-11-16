@@ -163,7 +163,7 @@ describe('an apply that pools history', () => {
     expect(JSON.parse(await readFile(plan.manifestPath, 'utf8'))).toMatchObject({ version: 1 });
   });
 
-  it('skips a migration this host cannot make, names it, and lets the rest of the apply stand', async () => {
+  it('drops a migration this host cannot make quietly, and lets the rest of the apply stand', async () => {
     const world = await fleetWorld();
     const plan = planFor(world, [], { sharedHistoryRequests: [request(world)] });
     const provisioner = world.provisioner({
@@ -176,7 +176,9 @@ describe('an apply that pools history', () => {
 
     const result = await provisioner.apply(plan);
 
-    expect(result.skipped).toEqual([{ path: join(world.fleet, 'shared', 'claude'), reason: 'no safe move here' }]);
+    // v4 had a pooling, so a person never read about one that is missing: the migration is dropped quietly (da760292e9),
+    // not told as a skipped file.
+    expect(result.skipped).toBeUndefined();
     expect(result.sharedHistory).toEqual([]);
   });
 });

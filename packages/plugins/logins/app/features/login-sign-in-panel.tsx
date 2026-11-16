@@ -18,9 +18,11 @@ export interface LoginSignInPanelProps {
   /** The login's id. */
   readonly subject?: string;
   readonly pollMs?: number;
+  /** Told, with nothing, once the sign-in finished and the logins were re-read (Runtimes' Add runtime page). */
+  readonly onSignedIn?: () => void;
 }
 
-export function LoginSignInPanel({ client, harness, subject, pollMs }: LoginSignInPanelProps) {
+export function LoginSignInPanel({ client, harness, subject, pollMs, onSignedIn }: LoginSignInPanelProps) {
   const [list, setList] = useState<LoginList | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
 
@@ -62,7 +64,10 @@ export function LoginSignInPanel({ client, harness, subject, pollMs }: LoginSign
       login={login}
       machineName={list.machine}
       client={client}
-      onSignedIn={() => void reload()}
+      onSignedIn={() => {
+        void reload();
+        onSignedIn?.();
+      }}
       {...(pollMs === undefined ? {} : { pollMs })}
     />
   );

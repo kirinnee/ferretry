@@ -79,3 +79,21 @@ export function recordingClient(answer: (route: string, init: Call['init']) => u
   } as unknown as Pick<PluginClient, 'call'>;
   return { client, calls };
 }
+
+/** The copy a paste draws from, as the owner's card is told it: the handle's name and where it was read, never a value. */
+export const COPY_SOURCE = {
+  kind: 'sealed',
+  name: 'vercel',
+  from: { kind: 'command', program: 'vercel', path: '/usr/bin/vercel' },
+  length: 40,
+  capturedAt: '2026-11-10T00:00:00.000Z',
+} as const;
+
+/** A paste of a secure copy into a terminal: nothing to type, the owner allows it. */
+export function pasteRequest(patch: Partial<Record<string, unknown>> = {}): InputRequestView {
+  return terminalRequest({
+    prompt: 'the new Vercel token',
+    source: COPY_SOURCE,
+    ...patch,
+  });
+}

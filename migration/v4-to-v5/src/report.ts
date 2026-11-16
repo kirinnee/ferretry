@@ -1,3 +1,5 @@
+import { leftBehindLines } from './left-behind.ts';
+
 /**
  * What the conversion did, item by item. Counts, ids and names only: a report never holds a value from a state
  * file, and never a byte of a sealed one (a sealed file is named with its size).
@@ -33,8 +35,15 @@ export interface ConversionReport {
   readonly at: string;
   readonly dryRun: boolean;
   readonly steps: readonly StepReport[];
+  /**
+   * Links v4 itself made inside its account homes, shared history and wrappers (`fleet/homes`, `fleet/shared`,
+   * `fleet/bin`) that the conversion left alone: one line per link PATH, never what it points to. Absent when none.
+   */
+  readonly notes?: readonly string[];
   /** True only when every step converted or was declared not carried, and home.json was written. */
   readonly complete: boolean;
+  /** What the owner chose not to carry (ruling !A516); the same list migrate.sh shows before the owner confirms. */
+  readonly leftBehind: readonly string[];
 }
 
 export function summarise(report: ConversionReport): string {
@@ -47,5 +56,12 @@ export function summarise(report: ConversionReport): string {
   const verdict = report.complete
     ? 'complete: home.json written, v5 may start on this home'
     : 'NOT complete: home.json was not written, so v5 refuses this folder (by design)';
-  return [`v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`, ...lines].join('\n');
+  const notes = (report.notes ?? []).map(line => `  note: ${line}`);
+  return [
+    `v4 -> v5 conversion ${report.dryRun ? '(dry run) ' : ''}${verdict}`,
+    ...lines,
+    ...notes,
+    '',
+    ...leftBehindLines(report.from),
+  ].join('\n');
 }

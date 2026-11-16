@@ -16,6 +16,7 @@ import {
   LoginPaused,
   LoginResumed,
   type LoginPause,
+  type PaneLimitView,
   type Pause,
   pausePhrase,
   QUOTAS_STATE,
@@ -24,12 +25,18 @@ import {
   type UsageAccountView,
 } from '../contract/index.ts';
 import { FerretBudgetSessions, PausesStore, ToldStore } from './adapters/budget/ports.ts';
+import { aggregatePaneLimits } from './lib/usage/pane-limit.ts';
 import { HttpAnalyticsPricingFeed } from './adapters/analytics/pricing-feed-source.ts';
 import { openAnalyticsIndexStore } from './adapters/analytics/sqlite-analytics-store.ts';
 import { StatePricingConfiguration } from './adapters/pricing/pricing-state.ts';
 import { CachedUsageFeed } from './adapters/usage/cached-usage-feed.ts';
+import { StateCompactionHistory } from './adapters/usage/state-compaction-history.ts';
 import { AnalyticsTranscriptSpend } from './adapters/usage/provider-quota/analytics-spend.ts';
-import { effectiveAnalyticsPricing } from './lib/analytics/model-catalog-rates.ts';
+import { endedStatus, type WatchedOutcome } from './lib/analytics/ended-status.ts';
+import { JscStackSampler } from './adapters/performance/jsc-stack-sampler.ts';
+import { ProcessGauges } from './adapters/performance/process-gauges.ts';
+import { ProfileStackSampling } from './lib/performance/stack-sampling.ts';
+import { effectiveAnalyticsPricing, modelCatalogPricingRates } from './lib/analytics/model-catalog-rates.ts';
 import { AnalyticsIngestionService, type AnalyticsIngestCandidate } from './lib/analytics/ingestion.ts';
 import { type AnalyticsPricingRate, snapshotAnalyticsUsagePricing } from './lib/analytics/pricing.ts';
 import { AnalyticsPricingService } from './lib/analytics/pricing-service.ts';
@@ -39,7 +46,7 @@ import { SpendMeter } from './lib/budget/meter.ts';
 import { budgetAlternative, budgetedLogins } from './lib/budget/state.ts';
 import { budgetNoticeText } from './lib/budget/notice.ts';
 import { serialExecutor, type TurnUsageSource } from './lib/ports.ts';
-import { PerformanceProfiler, type ProcessReading } from './lib/performance/profiler.ts';
+import { PerformanceProfiler } from './lib/performance/profiler.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
 import { IDLE_DAEMON_BUDGETS } from './lib/performance/budgets.ts';
 import {
@@ -64,10 +71,10 @@ const INGEST_BACKSTOP = milliseconds(15 * 60_000);
 /** How long after a turn ended its ferret's last records are settled enough to read once. */
 const INGEST_SETTLE_MS = 30_000;
 
-const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
+/** How many ferrets' documents are read at once when the insights index lists its candidates. */
+const CANDIDATE_BATCH = 16;
 
-/** The terminal status the insights index records for a stopped ferret, from how its last turn ended. */
-const STATUS_OF_OUTCOME = { completed: 'completed', interrupted: 'stopped', failed: 'failed' } as const;
+const hostTimeZone = (): string => Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 /** The tighter of the two windows' headroom, in percent. */
 function headroomOf(row: UsageAccountView | undefined): number | undefined {
@@ -98,7 +105,8 @@ export default implementDaemon(manifest, {
 
     // ── pricing: the owner's rate catalog, plus list prices once Logins publishes them whole ──────────────────────────────
     const pricingConfiguration = new StatePricingConfiguration(kernel.state);
-    const catalogRates = async (): Promise<readonly AnalyticsPricingRate[]> => [];
+    const catalogRates = async (): Promise<readonly AnalyticsPricingRate[]> =>
+      modelCatalogPricingRates(await needs.logins.modelPrices());
     const pricingFeed = new HttpAnalyticsPricingFeed({
       fetcher: async (url, init) => await kernel.fetch.request(url, init),
       scheduleTimeout: (onTimeout, timeoutMs) => kernel.clock.after(milliseconds(timeoutMs), onTimeout),
@@ -119,11 +127,30 @@ export default implementDaemon(manifest, {
 
     // ── insights: one row per stopped ferret, in a cache the kernel drops and the daemon rebuilds ─────────────────────────
     const opened = openAnalyticsIndexStore(kernel.state.sqlite(INSIGHTS_STATE));
-    const outcomes = new Map<string, 'completed' | 'interrupted' | 'failed'>();
-    const candidateOf = (ferret: FerretSummary): AnalyticsIngestCandidate => ({
+    const outcomes = new Map<string, WatchedOutcome>();
+    // The ferret's own documents say which model it was started on and how many turns it took, and a ferret converted
+    // from v4 has no transcript this daemon can fold, so they are the only source of either. A running ferret is gated
+    // out of the index whatever it says, so only a stopped one is asked. v4 passed both through (`config.model`,
+    // `state.turn`); the transcript's own figures still win where a fold reads them (`deriveAnalyticsSessionRecord`).
+    const candidateOf = async (ferret: FerretSummary): Promise<AnalyticsIngestCandidate> => {
+      const evidence =
+        ferret.state === 'stopped' ? await needs.ferrets.ingestEvidence?.(ferret.id).catch(() => undefined) : undefined;
+      return {
+        ...candidateFrom(ferret),
+        selectedModel: evidence?.selectedModel ?? ferret.model ?? null,
+        ...(evidence === undefined
+          ? {}
+          : {
+              turns: evidence.turns,
+              startedAt: evidence.startedAt,
+              contextWindow: evidence.contextWindow,
+              contextEndPercent: evidence.contextEndPercent,
+            }),
+      };
+    };
+    const candidateFrom = (ferret: FerretSummary): AnalyticsIngestCandidate => ({
       id: ferret.id,
       agent: ferret.login ?? null,
-      selectedModel: null,
       harness: ferret.harness,
       mode: ferret.role,
       label: ferret.name,
@@ -131,11 +158,20 @@ export default implementDaemon(manifest, {
       parent: ferret.parent ?? null,
       createdAt: ferret.createdAt,
       finishedAt: ferret.state === 'stopped' ? ferret.stateAt : null,
-      status: ferret.state === 'stopped' ? STATUS_OF_OUTCOME[outcomes.get(ferret.id) ?? 'interrupted'] : 'running',
+      status: ferret.state === 'stopped' ? endedStatus(ferret.cause, outcomes.get(ferret.id)) : 'running',
     });
     let ingestSoon: (() => void) | undefined;
     const ingestion = new AnalyticsIngestionService({
-      candidates: { listCandidates: async () => (await needs.ferrets.list()).map(candidateOf) },
+      candidates: {
+        listCandidates: async () => {
+          // In bounded batches: each read is small, but a fleet of hundreds should not hold every one open at once.
+          const ferrets = await needs.ferrets.list();
+          const candidates: AnalyticsIngestCandidate[] = [];
+          for (let at = 0; at < ferrets.length; at += CANDIDATE_BATCH)
+            candidates.push(...(await Promise.all(ferrets.slice(at, at + CANDIDATE_BATCH).map(candidateOf))));
+          return candidates;
+        },
+      },
       folds: {
         foldFor: async (ferret, aliasGroups) =>
           foldAnalyticsTurns(await turnUsage.turns(ferret).catch(() => undefined), aliasGroups),
@@ -155,6 +191,7 @@ export default implementDaemon(manifest, {
 
     // ── budgets: measured each minute from each ferret's turns; a pause is a hold on a login ───────────────────────────────
     const sessions = new FerretBudgetSessions(needs.ferrets);
+    const compactionHistory = new StateCompactionHistory(kernel.state);
     const pauses = new PausesStore(kernel.state);
     const told = new ToldStore(kernel.state);
     const meter = new SpendMeter({
@@ -236,12 +273,46 @@ export default implementDaemon(manifest, {
       clock: { nowMs },
     });
 
+    // ── the limits live panes prove: read from Ferrets' session documents each time, kept nowhere ────────────────────────────
+    // A Ferrets that cannot say (the member is optional, or the read fails) proves no limit: the pane evidence only ever
+    // ADDS a limit the provider's own reading did not show, so its absence is never a reason to fail a feed.
+    const paneLimits = async (): Promise<readonly PaneLimitView[]> => {
+      const rows = (await needs.ferrets.paneLimits?.().catch(() => undefined)) ?? [];
+      return aggregatePaneLimits(rows, nowMs()).map(
+        ({ login, runtime, notice, spend, retryAt }): PaneLimitView => ({
+          ...(login === undefined ? {} : { login }),
+          ...(runtime === undefined ? {} : { runtime }),
+          notice,
+          spend,
+          ...(retryAt === undefined ? {} : { retryAt }),
+        }),
+      );
+    };
+
     // ── the feed: one reading per daemon, shared by every reader ───────────────────────────────────────────────────────────
     const inner = new CachedUsageFeed(
       [
         new CredentialUsageSource({
           enabled: async () => true,
           credentials: async () => (await needs.logins.list()).logins,
+          // The feed row of a login a pane proves spent says so (`atLimit`, `spend_limit`, `retryAt`).
+          limits: async () =>
+            new Map(
+              (await paneLimits()).flatMap(limit =>
+                limit.login === undefined
+                  ? []
+                  : [
+                      [
+                        limit.login,
+                        {
+                          notice: limit.notice,
+                          spend: limit.spend,
+                          ...(limit.retryAt === undefined ? {} : { retryAt: limit.retryAt }),
+                        },
+                      ] as const,
+                    ],
+              ),
+            ),
         }),
       ],
       { now: nowMs },
@@ -278,24 +349,19 @@ export default implementDaemon(manifest, {
 
     // ── performance: a window onto the daemon's own counters ───────────────────────────────────────────────────────────────
     const recorder = new PerformanceRecorder();
+    // "Hot functions": the runtime's own stack sampler, started by the first profile and drained for as long as the daemon runs.
+    const stackSampling = new ProfileStackSampling({
+      start: async () => await JscStackSampler.start(),
+      probe: recorder,
+      every: (intervalMs, tick) => kernel.clock.every(milliseconds(intervalMs), tick),
+    });
+    const startProfile = (seconds: number) => {
+      void stackSampling.ensure();
+      return profiler.start(seconds);
+    };
     const profiler = new PerformanceProfiler({
       recorder,
-      gauges: {
-        read: async (): Promise<ProcessReading> => {
-          const cpu = process.cpuUsage();
-          const memory = process.memoryUsage();
-          const resource = process.resourceUsage();
-          return {
-            cpuUserMicros: cpu.user,
-            cpuSystemMicros: cpu.system,
-            rssBytes: memory.rss,
-            heapUsedBytes: memory.heapUsed,
-            externalBytes: memory.external,
-            voluntaryContextSwitches: resource.voluntaryContextSwitches,
-            involuntaryContextSwitches: resource.involuntaryContextSwitches,
-          };
-        },
-      },
+      gauges: new ProcessGauges(kernel.selfCounters),
       workers: [],
       clock: { now: nowMs },
       timers: {
@@ -313,13 +379,19 @@ export default implementDaemon(manifest, {
         },
         limitations: () => [
           'The kernel does not yet hand Usage the routes, child processes, file operations or event-loop stalls it sees, so this report holds the process counters and the sampled work only.',
+          ...(platform() === 'linux'
+            ? []
+            : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),
+          ...(stackSampling.available
+            ? []
+            : ['The runtime has no stack sampler, or it has not started, so the CPU profile is empty.']),
         ],
       },
       budgets: IDLE_DAEMON_BUDGETS,
       newId: () => kernel.ids.mint('profile'),
     });
     const performance = performanceHandlers({
-      start: seconds => profiler.start(seconds),
+      start: startProfile,
       view: id => profiler.view(id),
     });
     const pricingRoutes = pricingHandlers(pricing);
@@ -441,6 +513,7 @@ export default implementDaemon(manifest, {
         usage: {
           headroomPercent: async login => headroomOf((await feedView(feed)).accounts.find(row => row.agent === login)),
           feed: async read => await feedView(read.watched ? feed : scraped),
+          paneLimits,
           pauses: () => Object.keys(budget.holds()).flatMap(login => pauseOf(login) ?? []),
           pauseOf: login => pauseOf(login),
           budgets: async () => budgetsView(),
@@ -460,7 +533,7 @@ export default implementDaemon(manifest, {
           patchPricing: async patch => await pricing.patch(patch),
           previewPricing: async request => await pricing.preview(request),
           applyPricing: async request => await pricing.apply(request),
-          startProfile: seconds => profiler.start(seconds),
+          startProfile,
           profile: id => profiler.view(id),
         },
       },
@@ -481,6 +554,12 @@ export default implementDaemon(manifest, {
           }
           return { allow: true };
         },
+        // Logins' list and check show each login's standing against its budget; Logins cannot see Usage (Usage
+        // needs Logins), so it asks here, and gets the very standing `GET /v1/usage/budgets` answers.
+        'logins.budget:usage': { view: login => budget.view(login) },
+        // Ferrets' live readout estimates a running compaction from how long this daemon's finished ones took, and
+        // keeps each finished one here: the history is Usage's file (RULING #27, Q6), the readout only asks.
+        'ferrets.compaction-history:usage': compactionHistory,
         // A turn ended: its ferret may now be finished, so a pass is owed after the records settle.
         'turn.ended': payload => {
           outcomes.set(payload.ferret, payload.outcome);

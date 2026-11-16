@@ -14,7 +14,15 @@ import {
 } from '@ferretry/kernel/contract';
 import { err, type Instant, instantFromEpochMs, ok, type Result } from '@ferretry/std';
 import type { LoginStartResolution, RuntimeStartResolution, RuntimeStartSource } from '../hooks.ts';
-import type { FerretState, FerretSummary, HarnessKey, LoginKindKey, PackId } from '../ids.ts';
+import { type CompactAt, CompactAtSchema } from '../view/compact-at.ts';
+import {
+  type FerretState,
+  type FerretSummary,
+  FerretSummarySchema,
+  type HarnessKey,
+  type LoginKindKey,
+  type PackId,
+} from '../ids.ts';
 import {
   type AttachRefusal,
   type DeliveryOutcome,
@@ -57,7 +65,11 @@ import {
   type Started,
 } from '../kinds.ts';
 import type {
+  AutoResumeReport,
+  FerretIngestEvidence,
+  FerretPaneLimit,
   FerretPrompt,
+  FerretAddress,
   FerretsApi,
   ManagedWorktreeSummary,
   ResumeOptions,
@@ -708,9 +720,27 @@ export function loginKindConformance(
 
 // ─── the Ferrets port and work folders ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One ferret's summary, as `GET /v1/ferrets/:ferretId` serves it: every default is a valid one, and the result is
+ * parsed by the contract's own schema, so a test fixture a route could not serve fails here rather than hiding a drift.
+ */
+export const ferretSummary = (over: Readonly<Record<string, unknown>> & { readonly id: string }): FerretSummary =>
+  FerretSummarySchema.parse({
+    name: over.id,
+    role: 'lead',
+    harness: 'claude-code',
+    runner: 'tmux',
+    folder: '/work/project',
+    state: 'idle',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    stateAt: '2026-11-01T00:00:00.000Z',
+    ...over,
+  });
+
 /** An in-memory Ferrets port: lineage, `mayTouch`, start through nothing (records only). */
 export class FakeFerrets implements FerretsApi {
   readonly #ferrets = new Map<FerretId, FerretSummary>();
+  #paneLimits: readonly FerretPaneLimit[] = [];
   /** Every start request, stop and resume, in order, so a test can assert what reached the port. */
   readonly starts: StartRequest[] = [];
   readonly stops: { readonly ferret: FerretId; readonly how: 'polite' | 'now'; readonly reason?: string }[] = [];
@@ -732,12 +762,33 @@ export class FakeFerrets implements FerretsApi {
     this.#ferrets.set(full.id, full);
     return full;
   }
+  /** The limits `paneLimits()` answers: what live panes prove (none until set). */
+  setPaneLimits(limits: readonly FerretPaneLimit[]): void {
+    this.#paneLimits = [...limits];
+  }
+  async paneLimits(): Promise<readonly FerretPaneLimit[]> {
+    return this.#paneLimits;
+  }
   setState(ferret: FerretId, state: FerretState): void {
     const current = this.#ferrets.get(ferret);
     if (current !== undefined) this.#ferrets.set(ferret, { ...current, state });
   }
   async get(ferret: FerretId) {
     return this.#ferrets.get(ferret);
+  }
+  /** An exact id, else the one ferret holding the name (case-insensitive, a leading `:` dropped); two holders are ambiguous. */
+  async resolve(reference: string): Promise<FerretAddress> {
+    const exact = reference.trim();
+    if (this.#ferrets.has(exact as FerretId)) return { kind: 'ferret', id: exact as FerretId };
+    const name = exact.replace(/^:/u, '').toLowerCase();
+    const holders = [...this.#ferrets.values()].filter(f => name !== '' && f.name.toLowerCase() === name);
+    const [only] = holders;
+    if (only === undefined) return { kind: 'unknown' };
+    if (holders.length === 1) return { kind: 'ferret', id: only.id };
+    return {
+      kind: 'ambiguous',
+      message: `the name ${name} is held by ${holders.length} sessions: ${holders.map(h => h.id).join(', ')}`,
+    };
   }
   async list(filter: { readonly state?: FerretState; readonly parent?: FerretId; readonly pack?: PackId } = {}) {
     return [...this.#ferrets.values()].filter(
@@ -837,6 +888,25 @@ export class FakeFerrets implements FerretsApi {
       throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
     return this.#prompts.get(ferret) ?? {};
   }
+  readonly #compactAt = new Map<FerretId, CompactAt>();
+  /** As the real service: `undefined` for an unknown ferret or one that recorded none, a 403 for a caller that may not touch it. */
+  async compactAt(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined> {
+    if (!this.#ferrets.has(ferret)) return undefined;
+    if (caller !== undefined && !this.mayTouch(caller, ferret))
+      throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
+    return this.#compactAt.get(ferret);
+  }
+  /** As the real service: parsed with the schema (400), 404 for an unknown ferret, 403 for a caller that may not touch it. */
+  async setCompactAt(ferret: FerretId, value: CompactAt | undefined, caller?: FerretId): Promise<void> {
+    if (!this.#ferrets.has(ferret)) throw new ApiError(404, `no ferret ${ferret}`, 'not-found');
+    if (caller !== undefined && !this.mayTouch(caller, ferret))
+      throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
+    const parsed = value === undefined ? undefined : CompactAtSchema.safeParse(value);
+    if (parsed !== undefined && !parsed.success)
+      throw new ApiError(400, parsed.error.issues[0]?.message ?? 'not a compact-at value', 'invalid_compact_at');
+    if (parsed === undefined) this.#compactAt.delete(ferret);
+    else this.#compactAt.set(ferret, parsed.data);
+  }
   readonly #controls = new Map<FerretId, Partial<AgentControl>>();
   /** TEST ONLY: what one ferret may control, over today's defaults. */
   setAgentControl(ferret: FerretId, control: Partial<AgentControl>): void {
@@ -845,6 +915,14 @@ export class FakeFerrets implements FerretsApi {
   async agentControl(ferret: FerretId): Promise<AgentControl> {
     if (!this.#ferrets.has(ferret)) return NO_AGENT_CONTROL;
     return { ...DEFAULT_AGENT_CONTROL, ...this.#controls.get(ferret) };
+  }
+  #autoResume: AutoResumeReport | null = null;
+  /** TEST ONLY: what the last auto-resume pass did, as the Machine view reads it; `null` (the default) is no pass yet. */
+  setLastAutoResume(report: AutoResumeReport | null): void {
+    this.#autoResume = report;
+  }
+  async lastAutoResume(): Promise<AutoResumeReport | null> {
+    return this.#autoResume;
   }
   readonly #turns = new Map<FerretId, readonly TurnUsage[]>();
   /** TEST ONLY: the turns one ferret's harness reports; a ferret with none planted reads as spending nothing. */
@@ -856,6 +934,21 @@ export class FakeFerrets implements FerretsApi {
     this.#unreadable.add(ferret);
   }
   readonly #unreadable = new Set<FerretId>();
+  readonly #evidence = new Map<FerretId, FerretIngestEvidence>();
+  /** TEST ONLY: what one ferret's own documents say for the insights index (its selected model, its send counter). */
+  setIngestEvidence(ferret: FerretId, evidence: Partial<FerretIngestEvidence>): void {
+    this.#evidence.set(ferret, {
+      selectedModel: null,
+      turns: null,
+      startedAt: null,
+      contextWindow: null,
+      contextEndPercent: null,
+      ...evidence,
+    });
+  }
+  async ingestEvidence(ferret: FerretId): Promise<FerretIngestEvidence | undefined> {
+    return this.#evidence.get(ferret);
+  }
   async turnUsage(ferret: FerretId, since?: Instant): Promise<readonly TurnUsage[] | undefined> {
     if (!this.#ferrets.has(ferret) || this.#unreadable.has(ferret)) return undefined;
     const turns = this.#turns.get(ferret) ?? [];

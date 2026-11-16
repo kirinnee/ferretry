@@ -4,8 +4,9 @@ import manifest from '../../manifest.ts';
 describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
-    // Today's 38, and the composer's reference menus (lead decision Q6).
-    expect(routes).toHaveLength(39);
+    // Today's 38, the composer's reference menus (lead decision Q6), and the ferret's hypermedia switch
+    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th.
+    expect(routes).toHaveLength(40);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);
@@ -45,8 +46,9 @@ describe('conversation manifest', () => {
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
     }
   });
-  test('takes the question source, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments and ask.delivery; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
+  test('takes the question and prompt sources, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments, ask.delivery, ask.owner-chat and reference.catalog for the : and @ menus; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
+      'ask.sources',
       'ask.sources',
       'sitrep.lines',
       'ferret.changed',
@@ -54,10 +56,17 @@ describe('conversation manifest', () => {
       'launch.parts',
       'opening.attachments',
       'ask.delivery',
+      'ask.owner-chat',
+      'reference.catalog',
+      'reference.catalog',
     ]);
+    expect(manifest.hooks.takes[9]?.key).toBe(':');
+    expect(manifest.hooks.takes[10]?.key).toBe('@');
     expect(manifest.hooks.takes[0]?.key).toBe('question');
-    expect(manifest.hooks.takes[5]?.key).toBe('opening');
-    expect(manifest.hooks.takes[6]?.key).toBe('ferret');
+    expect(manifest.hooks.takes[1]?.key).toBe('prompt');
+    expect(manifest.hooks.takes[6]?.key).toBe('opening');
+    expect(manifest.hooks.takes[7]?.key).toBe('ferret');
+    expect(manifest.hooks.takes[8]?.key).toBe('conversation');
     expect(manifest.hooks.offers.map(offer => offer.hook.name)).toEqual([
       'message.before-send',
       'turn.ended',

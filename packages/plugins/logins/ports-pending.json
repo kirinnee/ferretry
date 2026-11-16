@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "pending": ["logins"],
+  "pendingReasons": {
+    "logins": [
+      "[own] GAP(logins): the housekeeping worker (the Claude/Codex sign-in read, the worker protocol type test S176 and the built worker bundle diet S177 rest on it) is not built; Usage's S176/S177 are lint proxies until it lands (packages/plugins/usage/tests/unit/rows-secrets.test.ts); `fyd --check` does not yet show `workers housekeeping ready`. (owner nelly)",
+      "[tests] S176 and S177 (the credential worker guarantees) are skipped as unproved, not ported",
+      "[own] GAP(logins): `fy login add --from-env` reads only the exact variable names the presets declare (`contract/preset-env-names.json`), so a provider the shell tells only through a `PREFIX_*` detect family is not detected; name it instead.",
+      "[own] the budget editor (Usage's) and v4's one-click provider form (it asks only for the key) are not ported; a tile in the provider grid opens a form that lists every variable of the preset",
+      "[own] GAP(logins): two ferrets on one Codex login whose access token is due in the same instant can both spend its single-use refresh token (Codex has no cross-process lock around a refresh), so one gets refresh_token_reused; the same as v4, not made worse by the credential link (docs/secrets.md, harness sign-ins)"
+    ]
+  }
+}

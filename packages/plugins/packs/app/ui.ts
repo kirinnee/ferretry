@@ -6,10 +6,9 @@
  *
  * The transcript card is drawn with `@ferretry/app`'s Markdown and reference surface, and with three small parts of its
  * own (`components/card-parts.tsx`: PeerName, MessageFooter, ToolGroup), because the chat's are Conversation's files. The
- * configuration-file editor the settings page saves through is answered `undefined` ({@link useConfigFiles}) and the page
- * says so instead of failing.
+ * configuration-file port the settings page saves through is not here: the page builds it from its own per-daemon client
+ * (`lib/config-files-client.ts`).
  */
-import type { ConfigFiles } from './lib/pack-config.ts';
 
 export { Markdown, useReferenceSurface } from '@ferretry/app';
 export { Badge, type BadgeTone, Button, cn, RouteLink } from '@ferretry/app/ui';
@@ -38,11 +37,3 @@ const browserClock: ShellClock = {
 export const shellClock: ShellClock = browserClock;
 
 export const useShellClock = (): ShellClock => browserClock;
-
-/**
- * The configuration-file read and the comment-preserving YAML editor the settings page saves `packs.yaml` through.
- * GAP: the shell hands plugin halves no configuration-file port yet, and the write it needs is the kernel's config
- * write port (D2 #16), not on this base. Until both are, this answers `undefined` and the settings page says to edit
- * `config/packs.yaml` by hand.
- */
-export const useConfigFiles = (): ConfigFiles | undefined => undefined;

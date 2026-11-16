@@ -15,15 +15,18 @@ import type {
 } from '@ferretry/core-ferrets/contract';
 import { AGENT_ORIGIN, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
-import type { StatePort } from '@ferretry/kernel/contract';
+import type { RouteHandler, StatePort } from '@ferretry/kernel/contract';
+import type { PluginClient } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant, Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
+import { ClientConversationGateway } from '../../../cli/lib/gateway.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { queuedPayloadInstruction, turnInstruction } from '../../../daemon/delivery/lib/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
+import { callOf } from '../../support/mount-call.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 
@@ -676,19 +679,46 @@ describe('BG-052 / BG-053 what a look cannot prove, it does not claim', () => {
     await host.stop();
   });
 
-  test('BG-052 a peer send that is never proved settles timed_out, and the sender’s notice is logged by id', async () => {
+  test('B13 a peer send that is never proved settles timed_out, and its sender is told once, in its own session', async () => {
     const { host, ferrets, api, stored, advance } = await conversation();
     ferrets.transcript = [otherEntry];
     await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer lost', sendId: 's-peer-lost' });
+    ferrets.typed.length = 0;
 
     await advance(200_000, 5_000);
 
     expect(await stored('s-peer-lost')).toMatchObject({ fate: 'timed_out', senderKind: 'agent' });
-    // The sender's notice is logged by ids and the fate: never a word of the message.
-    const notices = host.logs.filter(entry => entry.message === 'send.failed');
-    expect(notices).toHaveLength(1);
-    expect(notices[0]?.fields).toEqual({ ferret: F1, sendId: 's-peer-lost', sender: F2, fate: 'timed_out' });
+    // ONE daemon-authored notice, typed into the SENDER's pane (f2), under an id derived from the failed send.
+    const noticeId = 'send-failed:f1:s-peer-lost';
+    const told = ferrets.typed.filter(text => text.startsWith('Ferretry could not deliver your message to f1'));
+    expect(told).toHaveLength(1);
+    expect(told[0]).toContain('send s-peer-lost');
+    expect(await stored(noticeId, 'f2')).toMatchObject({
+      senderKind: 'daemon',
+      by: { kind: 'ferretry', feature: 'Delivery' },
+    });
+    expect((await stored(noticeId, 'f2'))?.from).toBeUndefined();
+    // The log still carries ids and the fate only, never a word of the message.
     expect(JSON.stringify(host.logs)).not.toContain('FIXTURE peer lost');
+    await host.stop();
+  });
+
+  test('B13 a notice that cannot be delivered ends there: it is never itself notified, and never typed twice', async () => {
+    const { host, ferrets, api, advance } = await conversation();
+    ferrets.transcript = [otherEntry];
+    await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer lost', sendId: 's-peer-lost' });
+    ferrets.typed.length = 0;
+    // The sender's pane takes nothing: its notice stays unproved forever.
+    ferrets.busy = true;
+    ferrets.queued.length = 0;
+
+    await advance(400_000, 5_000);
+
+    // No notice about a notice: nothing is ever addressed to f1 about the f2 notice, and f2 holds one notice id only.
+    expect(ferrets.typed).toEqual([]);
+    const notices = ferrets.queued.filter(entry => entry.text.includes('s-peer-lost'));
+    expect(notices.length).toBeLessThanOrEqual(1);
+    expect(ferrets.queued.some(entry => entry.text.includes('send-failed'))).toBe(false);
     await host.stop();
   });
 });
@@ -1269,6 +1299,126 @@ describe('ask.delivery:ferret answers an agenda ask through this same send path'
 
     expect((failure as Error).name).toBe('AskNotTypedError');
     expect(ferrets.typed).toEqual([]);
+    await host.stop();
+  });
+});
+
+/**
+ * `fy send` / `fy reply` through the real route: the CLI gateway's own call is handed to the daemon half's mounted
+ * handler (the shell's header forwarding and routing stand-in is the only fake), so what the route requires and what the
+ * CLI sends meet here. The 5.0 preview refused every `fy send` with "a send must carry x-fy-request-id".
+ */
+describe('a CLI send crosses the real send route', () => {
+  /** The plugin client the CLI holds, answered by the half's own handler: params, body and the one header a half may set. */
+  const cliClient = (half: ReturnType<NonNullable<typeof daemon.build>>): Pick<PluginClient, 'call'> => ({
+    call: (async (
+      key: string,
+      init?: { params?: Record<string, string>; body?: unknown; headers?: Record<string, string> },
+    ) => {
+      const handler = (half.routes as Readonly<Record<string, RouteHandler | undefined>>)[key];
+      if (handler === undefined) throw new Error(`the half serves no ${key}`);
+      const response = await handler(
+        callOf({ params: init?.params ?? {}, body: init?.body, headers: init?.headers ?? {} }),
+      );
+      return response.body === '' ? undefined : JSON.parse(response.body);
+    }) as unknown as PluginClient['call'],
+  });
+
+  test('fy send is accepted, and a retry under the same id is the same message, not a second one', async () => {
+    const { host, ferrets, built, row } = await conversation();
+    const half = built.half;
+    if (half === undefined) throw new Error('the conversation half was not built');
+    const client = cliClient(half);
+
+    const first = await new ClientConversationGateway(client, () => 'cli-send-1').send('f1', {
+      message: 'FIXTURE hello',
+    });
+    expect(first).toMatchObject({ ferret: 'f1', sendId: 'cli-send-1' });
+    expect(ferrets.typed).toEqual(['FIXTURE hello']);
+
+    // The answer was lost, so the CLI goes again with the id it chose: the daemon finds the first message.
+    const again = await new ClientConversationGateway(client, () => 'unused').send('f1', {
+      message: 'FIXTURE hello',
+      sendId: 'cli-send-1',
+    });
+    expect(again).toMatchObject({ ferret: 'f1', sendId: 'cli-send-1' });
+    expect(ferrets.typed).toEqual(['FIXTURE hello']);
+    expect(await row('cli-send-1')).toMatchObject({ message: 'FIXTURE hello' });
+    await host.stop();
+  });
+});
+
+describe('c58-16 an explicit retry types a send again only when the daemon proved it absent', () => {
+  /** A send the tracker proved absent and gave up on (`timed_out`, retryable), with the pane then asked the same question. */
+  const lost = async () => {
+    const world = await conversation();
+    world.ferrets.transcript = [otherEntry];
+    await world.api().send(F1, { kind: 'owner' }, { message: 'FIXTURE lost', sendId: 's-lost' });
+    await world.advance(180_000, 5_000);
+    expect(await world.stored('s-lost')).toMatchObject({ fate: 'timed_out', retryable: true });
+    return world;
+  };
+
+  test('c58-16 the port retries the send under its own id, as one more attempt, and answers the row', async () => {
+    const { host, ferrets, api, stored } = await lost();
+    const before = ferrets.typed.length;
+
+    const retried = await api().retrySend(F1, 's-lost');
+
+    expect(retried).toMatchObject({ ok: true, value: { sendId: 's-lost', fate: 'accepted' } });
+    expect(ferrets.typed.slice(before)).toEqual(['FIXTURE lost']);
+    expect(await stored('s-lost')).toMatchObject({ fate: 'accepted' });
+    await host.stop();
+  });
+
+  test('c58-16 the route retries the same send and answers its record', async () => {
+    const { host, ferrets } = await lost();
+    const before = ferrets.typed.length;
+
+    const answer = await host.request('POST', '/v1/ferrets/f1/sends/s-lost/retry', { as: owner(), body: {} });
+
+    expect(answer.status).toBe(200);
+    expect(ferrets.typed.slice(before)).toEqual(['FIXTURE lost']);
+    await host.stop();
+  });
+
+  test('c58-16 a send nobody made, and one already delivered, are refused in the tracker’s words and type nothing', async () => {
+    const { host, ferrets, api, advance } = await conversation();
+    ferrets.transcript = [userEntry('FIXTURE seen')];
+    await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE seen', sendId: 's-seen' });
+    await advance(30_000, 5_000);
+    const typed = ferrets.typed.length;
+
+    expect(await api().retrySend(F1, 's-none')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('has no send s-none') },
+    });
+    expect(await api().retrySend(F1, 's-seen')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('already delivered') },
+    });
+    const route = await host.request('POST', '/v1/ferrets/f1/sends/s-none/retry', { as: owner(), body: {} });
+    expect(route.status).toBe(409);
+    expect(ferrets.typed).toHaveLength(typed);
+    await host.stop();
+  });
+
+  test('c58-16 a send that may have landed is retried only when the caller forces it', async () => {
+    const { host, ferrets, api, stored, advance } = await conversation();
+    ferrets.transcript = [];
+    await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE unread', sendId: 's-unread' });
+    await advance(150_000, 5_000);
+    expect(await stored('s-unread')).toMatchObject({ fate: 'unaccounted' });
+    const typed = ferrets.typed.length;
+
+    expect(await api().retrySend(F1, 's-unread')).toMatchObject({
+      ok: false,
+      error: { code: 'send_refused', message: expect.stringContaining('may still have landed') },
+    });
+    expect(ferrets.typed).toHaveLength(typed);
+
+    expect(await api().retrySend(F1, 's-unread', true)).toMatchObject({ ok: true, value: { sendId: 's-unread' } });
+    expect(ferrets.typed.slice(typed)).toEqual(['FIXTURE unread']);
     await host.stop();
   });
 });

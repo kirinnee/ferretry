@@ -106,3 +106,20 @@ describe('the summary carries what the ferret was launched with', () => {
     expect(bare?.fast).toBeUndefined();
   });
 });
+
+describe('the summary names how interactive the ferret is (the Agents filter and Clear all from agent ferrets read it)', () => {
+  test('a converted ferret, whose record has no mode, shows the mode its details were started with', () => {
+    const registry = new FerretRegistry([record('a'), record('b'), record('c')]);
+    registry.putDetails('a' as FerretId, { options: { mode: 'auto' } });
+    registry.putDetails('b' as FerretId, { options: { mode: 'interactive' } });
+    expect(registry.summary('a' as FerretId)?.mode).toBe('auto');
+    expect(registry.summary('b' as FerretId)?.mode).toBe('interactive');
+    expect(registry.summary('c' as FerretId)?.mode).toBeUndefined();
+  });
+
+  test('the record’s own mode wins over the details', () => {
+    const registry = new FerretRegistry([{ ...record('a'), mode: 'interactive' }]);
+    registry.putDetails('a' as FerretId, { options: { mode: 'auto' } });
+    expect(registry.summary('a' as FerretId)?.mode).toBe('interactive');
+  });
+});

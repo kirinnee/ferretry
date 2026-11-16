@@ -1,11 +1,16 @@
 import { describe, expect, test } from 'bun:test';
 import type { AuditActor, AuditDetail } from '@ferretry/core-gate/contract';
+import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { PHONE_APPROVAL_UNAVAILABLE } from '@ferretry/core-vault/contract';
 import type { AccessApi } from '@ferretry/plugin-access/contract';
 import { fakeAccess } from '@ferretry/plugin-access/contract/testing';
 import type { UsesHandle } from '@ferretry/kernel/manifest';
 import { type PhoneApproval, PhoneApprovalSchema } from '../../../../contract/routes/index.ts';
 import { PhoneApprovalAuditAdapter } from '../../../../daemon/adapters/phone-approval/audit.ts';
+import {
+  AsksPhoneApprovalNotifier,
+  phoneApprovalTellSendId,
+} from '../../../../daemon/adapters/phone-approval/notifier.ts';
 import { AccessPhoneApprovalPush, phoneApprovalTag } from '../../../../daemon/adapters/phone-approval/push.ts';
 import { VaultPhoneLooks } from '../../../../daemon/adapters/phone-approval/vault-reach.ts';
 import type { AuditEntry } from '../../../../daemon/lib/local-ports.ts';
@@ -245,5 +250,33 @@ describe('the Vault’s looks, as an approval asks for them', () => {
       ['terminal', 'lizzette', 'build'],
       ['tainted', 'lizzette', 'browser', 5],
     ]);
+  });
+});
+
+describe('"Not me", told to the ferret through Asks', () => {
+  const WORDS = 'The owner did not expect this sign-in and said "Not me": stop signing in there, and do not ask again.';
+
+  test('the words go to that ferret under a send id of its own approval, and once per approval however often asked', async () => {
+    const asks = new FakeAsks();
+    const notifier = new AsksPhoneApprovalNotifier(asks);
+
+    await notifier.tell('lizzette', ID, WORDS);
+    await notifier.tell('lizzette', ID, WORDS);
+    await notifier.tell('lizzette', 'pa_ffffffffffffffffffffffff', WORDS);
+
+    expect(asks.told).toEqual([
+      { ferret: 'lizzette', text: WORDS, sendId: phoneApprovalTellSendId('lizzette', ID) },
+      { ferret: 'lizzette', text: WORDS, sendId: phoneApprovalTellSendId('lizzette', 'pa_ffffffffffffffffffffffff') },
+    ]);
+    expect(phoneApprovalTellSendId('lizzette', ID)).not.toBe(phoneApprovalTellSendId('other', ID));
+  });
+
+  test('a view with no tell tells nobody, and an Asks that refuses the tell never fails the approval', async () => {
+    await new AsksPhoneApprovalNotifier({}).tell('lizzette', ID, WORDS);
+    await new AsksPhoneApprovalNotifier({
+      tell: async () => {
+        throw new RangeError('tell: bad send id');
+      },
+    }).tell('lizzette', ID, WORDS);
   });
 });

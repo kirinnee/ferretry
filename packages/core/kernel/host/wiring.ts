@@ -6,6 +6,7 @@ import { platformRootPinner } from './adapters/pinned/index.ts';
 import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/process.ts';
 import { scratchPort } from './scratch.ts';
 import { nodeHostFacts } from './adapters/host-facts.ts';
+import { nodeSelfCounters } from './adapters/self-counters.ts';
 import { launchGuardFor } from './adapters/launch-guard.ts';
 import { NodeGzip } from './adapters/node-gzip.ts';
 import { updateHostFor } from './adapters/update-host.ts';
@@ -153,6 +154,10 @@ export function realAdapters(
     readonly childEnv?: Readonly<Record<string, string>>;
     /** The allow-listed non-secret names `git` and `gh` children get (see `toolEnvironment`). */
     readonly toolEnv?: Readonly<Record<string, string>>;
+    /** The two names `systemctl` / `systemd-run` children get to reach the user manager (see `managerEnvironment`). */
+    readonly managerEnv?: Readonly<Record<string, string>>;
+    /** The names a SEALED child (a secure copy's command capture) inherits (see `sealedEnvironment`). */
+    readonly sealedEnv?: Readonly<Record<string, string>>;
     /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
     readonly release?: string;
   },
@@ -167,7 +172,13 @@ export function realAdapters(
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
     config: configService(home, stateFs, clock, log.child('config'), options.binary),
-    spawn: bunSpawn(options.childEnv ?? {}, undefined, options.toolEnv ?? {}),
+    spawn: bunSpawn(
+      options.childEnv ?? {},
+      undefined,
+      options.toolEnv ?? {},
+      options.sealedEnv ?? {},
+      options.managerEnv ?? {},
+    ),
     fetch: globalFetch(),
     workers: bunWorkers(),
     websocket: bunWebSockets(),
@@ -181,6 +192,7 @@ export function realAdapters(
     pinner: platformRootPinner(),
     scratch: scratchPort(),
     hostFacts: nodeHostFacts({ launchGuard: launchGuardFor({ home }) }),
+    selfCounters: nodeSelfCounters(),
     // Today's Codex stopper's table: `/proc` on Linux, the kernel's own `ps` (system folders, then PATH) elsewhere.
     processTable: hostProcessTable({
       platform: process.platform,

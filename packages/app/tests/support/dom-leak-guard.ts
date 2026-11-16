@@ -1,4 +1,5 @@
 import { afterEach } from 'bun:test';
+import { resetInputModalityStore } from '../../src/ui/hooks/use-input-modality.ts';
 
 /**
  * A TEST LEAVES NOTHING BEHIND. Preloaded by `bunfig.unit.toml`.
@@ -20,6 +21,12 @@ import { afterEach } from 'bun:test';
  *    Response object"; the MCP launch-renewal files, which build native requests, silently lose their second
  *    token request; and once the native `AbortController` is back, its abort reason is a native
  *    `DOMException`, which is no `instanceof` happy-dom's (passkey-retry's G95 aborted read).
+ *    It also replaces `TransformStream` and `WritableStream`: a native `ReadableStream` piped through the DOM's
+ *    transform throws "The transform's 'readable' property must be a ReadableStream", which failed the Vault's
+ *    reply masking (echo-mask, minted-exchange) for no reason of its own.
+ *    The input-capability store (`useInputModality`) is the same kind of leak: it keeps the `matchMedia` lists it
+ *    first obtained, so a file that stubbed `matchMedia` while a component read it left a touch device behind, and
+ *    the composer's menu footer (hidden on touch) vanished from the next file's `/` menu.
  *    The native ones are captured here, before any DOM registers, and put back after every test. No unit
  *    DOM file reaches a network (each hands its component a fake).
  *
@@ -35,6 +42,9 @@ const network = [
   'AbortController',
   'AbortSignal',
   'DOMException',
+  'ReadableStream',
+  'TransformStream',
+  'WritableStream',
 ] as const;
 const natives = network.map(name => [name, Reflect.get(globalThis, name)] as const);
 
@@ -44,4 +54,7 @@ afterEach(async () => {
   // A file may stand in its own `document` (Connections' page-signal fakes have no body): only a real body is emptied.
   if (typeof document !== 'undefined') document?.body?.replaceChildren?.();
   for (const [name, native] of natives) Reflect.set(globalThis, name, native);
+  // The shared input-capability store keeps the first `matchMedia` answers it got: forget them (after the unmounts
+  // above, so no mounted reader is left subscribed to a store that restarts).
+  resetInputModalityStore();
 });

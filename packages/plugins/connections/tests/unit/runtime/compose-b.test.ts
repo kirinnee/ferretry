@@ -29,6 +29,11 @@ const noWorld = {
   },
 };
 
+/** The kernel's `paths.locate` answers later than the carrier's start: let that lookup and what follows it run. */
+const settled = async (): Promise<void> => {
+  await Bun.sleep(10);
+};
+
 describe('connections daemon half: tunnel and WebRTC composed', () => {
   test('every declared tunnel and webrtc route reaches its real handler, not plugin_unavailable', async () => {
     const host = await testHost({ plugins: [daemon], ...noWorld });
@@ -107,6 +112,7 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     const tunnel = half!.hooks['carriers:tunnel'] as Carrier;
     await tunnel.start(new FakeSessions(), controller.signal);
     await host.clock.advance(1);
+    await settled();
     const view = TunnelStatusViewSchema.parse(
       (await host.request('GET', '/v1/tunnel', { as: device('phone') })).json(),
     );
@@ -139,7 +145,7 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
         other = composeOtherConnections({
           kernel: { ...ctx.kernel, config: real.port('connections') },
           config: undefined,
-          host: kernelTunnelHost(),
+          host: kernelTunnelHost(ctx.kernel),
           publishTunnel: () => {},
         });
         return buildConnections(ctx, kernelConnectionBindings(ctx.kernel));
@@ -217,6 +223,85 @@ describe('connections daemon half: tunnel and WebRTC composed', () => {
     expect(opened?.surface.peer?.(headersFrom({}))).toBe('tunnel');
     // The Origin gate is the daemon's own browser origins (today's browserOrigins(config)), handed to the kernel.
     expect(opened?.surface.origins).toEqual([HOSTED_APP_ORIGIN]);
+    await world.stop();
+  });
+
+  /**
+   * B08: the default host (no injected locator) finds `cloudflared` through `kernel.paths.locate` — the operator's
+   * `FY_CLOUDFLARED`, else the bounded `which`. The hosted service says "off", so no listener opens and no child runs.
+   */
+  async function kernelLocatedWorld(world: {
+    readonly executables?: readonly string[];
+    readonly searchPath?: string;
+    readonly operatorVariables?: Record<string, string>;
+  }) {
+    let asked = 0;
+    let half: ReturnType<typeof buildConnections> | undefined;
+    const plugin = implementDaemon(manifest, {
+      build: ctx => (half = buildConnections(ctx, kernelConnectionBindings(ctx.kernel))),
+    });
+    const host = await testHost({
+      plugins: [plugin],
+      spawn: noWorld.spawn,
+      fetch: url => {
+        asked += 1;
+        return url.pathname === '/v1/tunnel-service'
+          ? Response.json({ version: 1, available: false })
+          : new Response('{}', { status: 404 });
+      },
+      ...world,
+      config: { 'connections.yaml': { tunnel: { enabled: true } } },
+    });
+    const controller = new AbortController();
+    const tunnel = half!.hooks['carriers:tunnel'] as Carrier;
+    await tunnel.start(new FakeSessions(), controller.signal);
+    await host.clock.advance(1);
+    await settled();
+    return {
+      asked: () => asked,
+      status: () => tunnel.status(),
+      stop: async () => {
+        controller.abort();
+        await host.stop();
+      },
+    };
+  }
+
+  test('B08 a cloudflared on the daemon PATH is found through the kernel, so the hosted service is asked', async () => {
+    const world = await kernelLocatedWorld({
+      executables: ['/opt/bin/cloudflared'],
+      searchPath: '/usr/bin:/opt/bin',
+    });
+    expect(world.asked()).toBeGreaterThan(0);
+    await world.stop();
+  });
+
+  test('B08 FY_CLOUDFLARED names the binary, and is read although the PATH holds none', async () => {
+    const world = await kernelLocatedWorld({
+      executables: ['/srv/tools/cloudflared'],
+      operatorVariables: { FY_CLOUDFLARED: '/srv/tools/cloudflared' },
+    });
+    expect(world.asked()).toBeGreaterThan(0);
+    await world.stop();
+  });
+
+  test('B08 a named FY_CLOUDFLARED that is no executable is refused in its own sentence and the PATH is NOT searched', async () => {
+    const world = await kernelLocatedWorld({
+      executables: ['/opt/bin/cloudflared'],
+      searchPath: '/opt/bin',
+      operatorVariables: { FY_CLOUDFLARED: '/srv/missing/cloudflared' },
+    });
+    expect(world.asked()).toBe(0);
+    expect(world.status().state).toBe('failed');
+    expect(JSON.stringify(world.status())).toContain('FY_CLOUDFLARED names /srv/missing/cloudflared');
+    await world.stop();
+  });
+
+  test('B08 no cloudflared anywhere says it is not on the PATH, asks nobody and runs nothing', async () => {
+    const world = await kernelLocatedWorld({ searchPath: '/usr/bin' });
+    expect(world.asked()).toBe(0);
+    expect(world.status().state).toBe('failed');
+    expect(JSON.stringify(world.status())).toContain('cloudflared is not on this daemon’s PATH');
     await world.stop();
   });
 

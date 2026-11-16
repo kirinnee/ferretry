@@ -11,6 +11,9 @@ import {
   CONVERSATION_ABOVE_COMPOSER_SLOT,
   CONVERSATION_SLOTS,
 } from '../../../../plugins/conversation/contract/slots.ts';
+import { ACCESS_DEVICE_NOTE_SLOT, ACCOUNTS_CONTRIBUTED_SLOTS } from '../../../../plugins/accounts/contract/slots.ts';
+import { LOGINS_CONTRIBUTED_SLOTS } from '../../../../plugins/logins/contract/slots.ts';
+import { ADD_RUNTIME_LOGIN_SLOT, RUNTIMES_SLOTS } from '../../../../plugins/runtimes/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -42,9 +45,16 @@ describe('the slots Ferrets offers', () => {
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('ferrets.')),
     );
-    // Runtimes' two account pickers, the Warden's, Conversation's and MCP's (Add MCP server) rows in the Actions ▾ menu, and Conversation's file search.
+    // Runtimes' two account pickers, the Warden's, Conversation's, MCP's (Add MCP server) and Catalogs' (Add skills) rows in the Actions ▾ menu, and Conversation's file search.
     expect([...contributed].sort()).toEqual(
-      [...FERRET_ACCOUNT_SLOTS, ACTIONS_ROW_SLOT, ACTIONS_ROW_SLOT, ACTIONS_ROW_SLOT, FILES_SEARCH_SLOT].sort(),
+      [
+        ...FERRET_ACCOUNT_SLOTS,
+        ACTIONS_ROW_SLOT,
+        ACTIONS_ROW_SLOT,
+        ACTIONS_ROW_SLOT,
+        ACTIONS_ROW_SLOT,
+        FILES_SEARCH_SLOT,
+      ].sort(),
     );
     for (const slot of contributed) expect(named).toContain(slot);
   });
@@ -101,12 +111,46 @@ describe('the slot Agenda offers and Conversation fills', () => {
   });
 });
 
-describe('the slot Conversation offers above its composer and Claude Code fills', () => {
-  test('Claude Code writes the name Conversation owns, and puts its two cards there in order', () => {
+describe('the slots Runtimes’ Add runtime page offers and Logins fills', () => {
+  test('Logins writes the two names Runtimes owns, and puts one panel in each', () => {
+    expect([...LOGINS_CONTRIBUTED_SLOTS]).toEqual([...RUNTIMES_SLOTS]);
+    for (const slot of RUNTIMES_SLOTS) {
+      expect(isSlotName(slot)).toBe(true);
+      expect(slot.startsWith('runtimes.')).toBe(true);
+      const contributors = (viewsOf(entries).panels.get(slot) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
+      expect(contributors).toEqual([
+        `logins.${slot === ADD_RUNTIME_LOGIN_SLOT ? 'add-runtime-login' : 'add-runtime-sign-in'}`,
+      ]);
+    }
+  });
+
+  test('every panel contributed to a runtimes.* slot is one of the slots Runtimes’ contract names', () => {
+    const named: readonly string[] = RUNTIMES_SLOTS;
+    const contributed = entries.flatMap(entry =>
+      (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('runtimes.')),
+    );
+    expect(contributed.length).toBe(2);
+    for (const slot of contributed) expect(named).toContain(slot);
+  });
+
+  test('Logins imports nothing of Runtimes: Runtimes needs Logins, so the two agree by name and this test pairs them', () => {
+    expect(Object.keys(entryOf('logins')?.manifest.needs ?? {})).not.toContain('runtimes');
+    expect(Object.keys(entryOf('logins')?.manifest.uses ?? {})).not.toContain('runtimes');
+    expect(Object.keys(entryOf('runtimes')?.manifest.needs ?? {})).toContain('logins');
+  });
+});
+
+describe('the slot Conversation offers above its composer and Claude Code, Agenda and Voice fill', () => {
+  test('Claude Code writes the name Conversation owns, puts its two cards there, and Agenda’s line and Voice’s auto-read follow them', () => {
     const contributors = (viewsOf(entries).panels.get(CONVERSATION_ABOVE_COMPOSER_SLOT) ?? []).map(
       panel => `${panel.plugin}.${panel.id}`,
     );
-    expect(contributors).toEqual(['claude-code.permission-request', 'claude-code.harness-dialog']);
+    expect(contributors).toEqual([
+      'claude-code.permission-request',
+      'claude-code.harness-dialog',
+      'agenda.ferret-agenda-line',
+      'voice.auto-read',
+    ]);
     expect(CONVERSATION_ABOVE_COMPOSER_SLOT).toBe('conversation.above-composer');
     expect(isSlotName(CONVERSATION_ABOVE_COMPOSER_SLOT)).toBe(true);
   });
@@ -124,5 +168,31 @@ describe('the slot Conversation offers above its composer and Claude Code fills'
   test('Claude Code imports nothing of Conversation: the two agree by name, and this test is the pairing', () => {
     expect(entryOf('claude-code')?.consumes).not.toContain('conversation');
     expect(Object.keys(entryOf('claude-code')?.manifest.needs ?? {})).toEqual(['ferrets']);
+  });
+});
+
+describe('the slot Access’s Add device page offers under each device’s Revoke and Accounts fills', () => {
+  test('Accounts writes the name Access owns, and puts its one panel there', () => {
+    expect([...ACCOUNTS_CONTRIBUTED_SLOTS]).toEqual([ACCESS_DEVICE_NOTE_SLOT]);
+    // The name Access's app half offers (its own test pins `DEVICE_NOTE_SLOT` to the same literal): a shell test may not
+    // import a half, so the agreed name is written here too.
+    expect(ACCESS_DEVICE_NOTE_SLOT).toBe('access.device-note');
+    expect(isSlotName(ACCESS_DEVICE_NOTE_SLOT)).toBe(true);
+    const contributors = (viewsOf(entries).panels.get(ACCESS_DEVICE_NOTE_SLOT) ?? []).map(
+      panel => `${panel.plugin}.${panel.id}`,
+    );
+    expect(contributors).toEqual(['accounts.device-rule-note']);
+  });
+
+  test('Accounts places no panel in any other access.* slot', () => {
+    const contributed = entries.flatMap(entry =>
+      (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('access.')),
+    );
+    expect(contributed).toEqual(['access.device-note']);
+  });
+
+  test('Access imports nothing of Accounts: the two agree by name, and this test is the pairing', () => {
+    expect(Object.keys(entryOf('access')?.manifest.needs ?? {})).not.toContain('accounts');
+    expect(Object.keys(entryOf('access')?.manifest.uses ?? {})).not.toContain('accounts');
   });
 });

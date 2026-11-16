@@ -1,5 +1,12 @@
 import { relative } from 'node:path';
-import type { BinaryNames, BoundAddress, ContractSurface, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type {
+  BinaryNames,
+  BoundAddress,
+  ContractSurface,
+  HostFactsPort,
+  SelfCountersPort,
+  UpdateHostPort,
+} from '../contract/ports.ts';
 import type { Instant } from '@ferretry/std';
 import { notBuiltSummary } from '../contract/doctor.ts';
 import { decideHome } from '../contract/home.ts';
@@ -30,7 +37,7 @@ import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
 import type { ConfigStatus } from './config/service.ts';
 import { type ConfigFileMove, configChangedPayload } from './config/state-change.ts';
-import { configFrameShown } from './config/bus-frame.ts';
+import { CONFIG_FILE_READ, configFrameShown } from './config/bus-frame.ts';
 import { CORE_IDS, type PluginId } from '../contract/ids.ts';
 import { beforeListen } from './before-listen.ts';
 import { type BootPhases, createBootPhases } from './boot-phases.ts';
@@ -39,6 +46,7 @@ import {
   Carriers,
   ConfigChanged,
   type DoctorCheck,
+  type DoctorFinding,
   DoctorChecks,
   PluginsChanged,
   SessionModes,
@@ -112,8 +120,10 @@ import { outboundSecretTransport } from './adapters/outbound-secret.ts';
 import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
+import { NO_SELF_COUNTERS, undeclaredSelfCounters } from './adapters/self-counters.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
+import { hostProgramLines } from './doctor-programs.ts';
 import { descriptorReachNote } from './descriptor-reach.ts';
 import { doctorReport } from './doctor-report.ts';
 import { createIdentitySigner, signerFor } from './session/signer.ts';
@@ -133,7 +143,7 @@ import type { HostStatePort, PrivatePin } from './state/state-port.ts';
 import { type PinReport, pinCreated, touchesPrivate } from './fence-guard.ts';
 import { openHome, probeHome } from './home.ts';
 import { composePrivateFiles, privacyRefusals } from '../manifest/privacy.ts';
-import { ensureInternalRootBases, ownFolderSpellings, rootsPortFor } from './roots.ts';
+import { ensureInternalRootBases, ensureWorktreesBase, ownFolderSpellings, rootsPortFor } from './roots.ts';
 import { NO_PROCESS_TABLE, type ProcessTable, processesPortFor } from './processes.ts';
 import { PinRegistry } from './pins.ts';
 import { FsError, type SessionRootPinner, unsupportedPlatform } from '../contract/pinned.ts';
@@ -198,13 +208,6 @@ export interface HostConfig {
  */
 const PRIVATE_RECHECK_MS = DEFAULT_RECHECK_MS;
 
-/** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
-const CONFIG_FILE_READ = (() => {
-  const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
-  if (found === undefined) throw new Error('the kernel manifest declares no GET /v1/config/file');
-  return found;
-})();
-
 /** Gate's judge of a plugin's own loosening config write, as the config service asks it. */
 export type ConfigJudge = (input: {
   readonly plugin: string;
@@ -248,6 +251,8 @@ export interface HostAdapters {
   readonly operatorVariable?: (name: string) => string | undefined;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** `kernel.selfCounters` (this process's `/proc/self/{io,stat}`). Absent: every read refuses. */
+  readonly selfCounters?: SelfCountersPort;
   /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
   readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
@@ -324,6 +329,10 @@ export interface DoctorLine {
   readonly check?: string;
   /** What to do about it, when the check said. */
   readonly fix?: string;
+  /** The report's row name, when it is not "<plugin>: <check>" (see `DoctorFinding.name`). */
+  readonly name?: string;
+  readonly requirement?: DoctorFinding['requirement'];
+  readonly notApplicable?: true;
 }
 
 export interface RunningHost {
@@ -832,6 +841,16 @@ async function bootLocked(
               adapters.executable,
             ),
     });
+  /** The host's own program rows (`doctor-programs.ts`): a lookup on this daemon's `PATH`, nothing launched. */
+  const programLines = async (): Promise<readonly DoctorLine[]> =>
+    // No probe wired (a test host that gave none): nothing could be looked up, so no row says anything.
+    adapters.executable === undefined
+      ? []
+      : await hostProgramLines({
+          which: async name => await ownerPaths.which(name),
+          platform: process.platform,
+          binary: options.binaries?.client ?? PRODUCT_BINARIES.client,
+        });
   /** A plugin's own `resolvers` section, read at each call (unset during build: nothing resolves yet). */
   const resolversOf =
     (id: string): ResolverOf =>
@@ -952,6 +971,10 @@ async function bootLocked(
         manifest.permissions?.hostFacts === true
           ? (adapters.hostFacts ?? NO_HOST_FACTS)
           : undeclaredHostFacts(manifest.id, adapters.hostFacts ?? NO_HOST_FACTS),
+      selfCounters:
+        manifest.permissions?.selfCounters === true
+          ? (adapters.selfCounters ?? NO_SELF_COUNTERS)
+          : undeclaredSelfCounters(manifest.id, (adapters.selfCounters ?? NO_SELF_COUNTERS).platform),
       // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
       processes: processesPortFor(
         manifest.id,
@@ -970,6 +993,8 @@ async function bootLocked(
           mayReach: (hostname, host) => hostPermitted(declaredNetwork, items, hostname, resolversOf(manifest.id), host),
           transport: outboundSecretTransport(fetchPort, clock),
           log: scopedLog(adapters.logSink, manifest.id),
+          // Gate writes it into the security log (`secrets.used`): the name and host, never the value.
+          sent: note => bound.admission?.secretSent?.({ plugin: manifest.id, ...note }),
         },
       ),
       signer: signerFor(manifest.id, sessionSigner),
@@ -1030,7 +1055,19 @@ async function bootLocked(
       continue;
     }
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>());
+    const needer = neederOf(
+      manifest,
+      () => config.credentialRecordReferences?.(manifest.id) ?? new Set<string>(),
+      // What a provider acting for this plugin may reach: the kernel's own network decision for it, resolvers included.
+      (hostname, host) =>
+        hostPermitted(
+          effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+          items,
+          hostname,
+          resolversOf(manifest.id),
+          host,
+        ),
+    );
     let missing: string | undefined;
     for (const [key, token] of Object.entries(manifest.needs ?? {})) {
       const provider = providerHalf(token);
@@ -1059,7 +1096,12 @@ async function bootLocked(
       { home, plugin: manifest.id },
       manifest.permissions?.roots ?? [],
     );
-    for (const refused of roots)
+    const worktreesBase = await ensureWorktreesBase(
+      adapters.fs,
+      { plugin: manifest.id, worktrees: options.worktrees ?? `${home}-worktrees` },
+      manifest.permissions?.roots ?? [],
+    );
+    for (const refused of worktreesBase === undefined ? roots : [...roots, worktreesBase])
       log.warn('a root base was refused and left as it is', {
         plugin: manifest.id,
         root: refused.name,
@@ -1278,6 +1320,7 @@ async function bootLocked(
         ...bootNotes,
         ...pastBudgetLines(home, pastBudget.current),
         ...(await doctorLines(records, hooks, jobs, data.refused)),
+        ...(await programLines()),
       ]),
     liveness: () => ({
       status: phase === 'started' ? 'ok' : 'starting',
@@ -1494,6 +1537,7 @@ async function bootLocked(
       ...bootNotes,
       ...pastBudgetLines(home, pastBudget.current),
       ...(await doctorLines(records, hooks, jobs, data.refused)),
+      ...(await programLines()),
     ],
     stop: () => stopHost(),
   };
@@ -1654,7 +1698,15 @@ async function doctorLines(
   for (const check of checks) {
     try {
       const finding = await check.item.run();
-      lines.push({ plugin: check.id, state: finding.state, detail: finding.detail });
+      lines.push({
+        plugin: check.id,
+        state: finding.state,
+        detail: finding.detail,
+        ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+        ...(finding.name === undefined ? {} : { name: finding.name }),
+        ...(finding.requirement === undefined ? {} : { requirement: finding.requirement }),
+        ...(finding.notApplicable === undefined ? {} : { notApplicable: true as const }),
+      });
     } catch {
       lines.push({ plugin: check.id, state: 'fail', detail: `The check ${check.item.title} failed to run.` });
     }
@@ -1685,6 +1737,9 @@ async function doctorLines(
           state: finding.state,
           detail: finding.detail,
           ...(finding.fix === undefined ? {} : { fix: finding.fix }),
+          ...(finding.name === undefined ? {} : { name: finding.name }),
+          ...(finding.requirement === undefined ? {} : { requirement: finding.requirement }),
+          ...(finding.notApplicable === undefined ? {} : { notApplicable: true as const }),
         });
       } catch {
         lines.push({ plugin: id, check, state: 'fail', detail: `The check ${check} failed to run.` });

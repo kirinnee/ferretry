@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, test } from 'bun:test';
 import { LoginChangesPort, LoginsUsedBy } from '@ferretry/plugin-logins/contract';
 import { AutoResumeDecide, LaunchParts, RuntimeStart, StartDecide } from '@ferretry/core-ferrets/contract';
+import { ProfileSecrets } from '@ferretry/core-vault/contract';
 import { ITEM_NAME_PATTERN as StdItemNamePattern } from '@ferretry/std';
 import {
   INSTRUCTION_ITEMS,
@@ -28,11 +29,10 @@ import manifest from '../../manifest.ts';
 
 describe('runtimes contract', () => {
   test('keeps runtimes and onboarding pending until real assembly and screens are ported', () => {
-    const pending = JSON.parse(
-      readFileSync(new URL('../../../../../ports-pending.json', import.meta.url), 'utf8'),
-    ).pending;
-    expect(pending).toContain('runtimes');
-    expect(pending).toContain('onboarding');
+    const listed = (plugin: string): string[] =>
+      JSON.parse(readFileSync(new URL(`../../../${plugin}/ports-pending.json`, import.meta.url), 'utf8')).pending;
+    expect(listed('runtimes')).toContain('runtimes');
+    expect(listed('onboarding')).toContain('onboarding');
   });
 
   test('every Runtimes collection names its items by the one shared item-name pattern, never a copy of it', () => {
@@ -167,6 +167,7 @@ describe('runtimes contract', () => {
       { hook: StartDecide },
       { hook: RuntimeStart, key: 'runtimes' },
       { hook: LaunchParts },
+      { hook: ProfileSecrets, key: 'profiles' },
     ]);
     expect(manifest.needs.loginChanges).toBe(LoginChangesPort);
     expect(LoginsUsedBy.takers).toEqual(['runtimes']);
@@ -238,12 +239,15 @@ describe('runtimes contract', () => {
     expect(runtimeFileLoosens(undefined, file('a'))).toEqual([]);
   });
 
-  test('a removed runtime file is judged by what it was and never thrown on: it loosens nothing, shell or not', () => {
+  test('B01 a removed runtime file is judged by what it was and never thrown on: it is held (the budget is unseen), shell or not', () => {
     const file = (login: string, shell?: string) =>
       RuntimeFileSchema.parse({ login, profile: 'p', ...(shell ? { shell } : {}) });
     expect(() => runtimeFileLoosens(file('work'), undefined)).not.toThrow();
-    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([]);
-    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toEqual([]);
+    // fails closed like a re-point: the file cannot see Logins' budgets, so every removal is held, as v4 held one off a budgeted login
+    expect(runtimeFileLoosens(file('work'), undefined)).toEqual([
+      'a runtime is removed from login "work", which may leave a budget that counts and stops it',
+    ]);
+    expect(runtimeFileLoosens(file('work', 'dev'), undefined)).toHaveLength(1);
     expect(runtimeFileLoosens(undefined, undefined)).toEqual([]);
     // the same function still holds what it held: a re-point and a shell newly entered
     expect(runtimeFileLoosens(file('work'), file('play'))).toHaveLength(1);

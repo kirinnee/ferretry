@@ -114,6 +114,12 @@ const links = {
   ],
 };
 
+/** Valid FAKE keys (v5 checks their shape): an Ed25519 SPKI around 32 filler bytes, and 32 filler bytes for the box key. */
+const FAKE_MEMBER_KEY = Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.alloc(32, 7)]).toString(
+  'base64url',
+);
+const FAKE_BOX_KEY = Buffer.alloc(32, 9).toString('base64url');
+
 const members = (labels: readonly string[] = ['Fake Friend']) => ({
   schemaVersion: 1,
   members: labels.map((label, index) => ({
@@ -126,8 +132,8 @@ const members = (labels: readonly string[] = ['Fake Friend']) => ({
         ? [
             {
               keyId: KEY,
-              memberKey: 'FAKE-MEMBER-PUBLIC-KEY',
-              boxKey: 'FAKE-BOX-PUBLIC-KEY',
+              memberKey: FAKE_MEMBER_KEY,
+              boxKey: FAKE_BOX_KEY,
               clientName: 'Fake browser',
               joinedAt: AT,
               passkeyCount: 1,
@@ -148,9 +154,9 @@ const shares = {
       catalogIds: [CAT],
       createdAt: AT,
       expiresAt: LATER,
-      uses: 'single',
+      uses: { kind: 'single' },
       used: 1,
-      state: 'used',
+      state: 'spent',
       usedBy: [{ clientName: 'Fake browser', keyId: KEY, at: AT }],
       successes: [1],
     },
@@ -256,9 +262,13 @@ const written = async (path: string) => {
   return value;
 };
 const exists = async (path: string) => (await stat(join(f.to, path)).catch(() => undefined)) !== undefined;
-const without = <T extends { schemaVersion: number }>(v4: T) => {
+/**
+ * What v5 keeps on disk: the kernel's `format: 1` stamp (stripped on read) AND the daemon's own `schemaVersion: 1`, which
+ * the daemon schemas still require in the body (`document.ts` `schemaVersion: z.literal(1)`). v4's catalogs.json said 3.
+ */
+const landed = <T extends { schemaVersion: number }>(v4: T) => {
   const { schemaVersion: _v, ...body } = v4;
-  return { format: 1, ...body };
+  return { format: 1, schemaVersion: 1, ...body };
 };
 
 test('the step takes the catalogs slot after Warden, with the skill folders its install records name right after', () => {
@@ -274,15 +284,15 @@ test('every catalog file keeps every value; only the envelope changes and the bl
   const report = await catalogsStep.run(f.ctx());
   expect(report.status).toBe('converted');
 
-  expect(await written(V5_CATALOGS)).toEqual(without(catalogs()));
-  expect(await written(V5_CATALOG_LINKS)).toEqual(without(links));
-  expect(await written(V5_CATALOG_MEMBERS)).toEqual(without(members()));
-  expect(await written(V5_CATALOG_SHARES)).toEqual(without(shares));
-  expect(await written(V5_CATALOG_MEMBER_PASSKEYS)).toEqual(without(memberPasskeys));
+  expect(await written(V5_CATALOGS)).toEqual(landed(catalogs()));
+  expect(await written(V5_CATALOG_LINKS)).toEqual(landed(links));
+  expect(await written(V5_CATALOG_MEMBERS)).toEqual(landed(members()));
+  expect(await written(V5_CATALOG_SHARES)).toEqual(landed(shares));
+  expect(await written(V5_CATALOG_MEMBER_PASSKEYS)).toEqual(landed(memberPasskeys));
   expect(await readFile(join(f.to, V5_CATALOG_BLOBS, `${BLOB_HEX}.json`), 'utf8')).toBe(BLOB_TEXT);
   // The pins, publishers and revisions are kept: nothing auto-updates; a former runtime name is the current one.
   expect(await written(V5_CATALOG_INSTALLS)).toEqual({
-    ...without(catalogInstalls),
+    ...landed(catalogInstalls),
     installs: [
       { ...catalogInstalls.installs[0], target: { scope: 'runtime', runtime: 'new-name', profile: 'default' } },
     ],
@@ -316,6 +326,58 @@ test('every catalog file keeps every value; only the envelope changes and the bl
     { file: V5_CATALOG_LINK_KEYS, bytes: (await stat(join(f.to, V5_CATALOG_LINK_KEYS))).size },
   ]);
   expect(JSON.stringify(report)).not.toContain('FAKE-');
+});
+
+test('every converted catalogs file is read by v5’s own state port and daemon schemas (the converted home is usable)', async () => {
+  await fullHome();
+  expect((await vaultStep.run(f.ctx())).status).toBe('converted');
+  expect((await catalogsStep.run(f.ctx())).status).toBe('converted');
+  // The real 5.0 readers, in a subprocess that imports nothing from this tool (the migration package may not reach the
+  // daemon's lib): the kernel state port over the disk, then exactly what `daemon/index.ts` `documentStore` does, with the
+  // daemon's own strict schemas; passkeys through the real `StatePasskeyStore`.
+  const script = join(f.root, 'read-catalogs.ts');
+  await writeFile(
+    script,
+    `
+const [repo, home, keyId] = process.argv.slice(2);
+const { state } = await import(repo + '/packages/core/kernel/host/index.ts');
+const manifest = (await import(repo + '/packages/plugins/catalogs/manifest.ts')).default;
+const { CatalogsDocumentSchema } = await import(repo + '/packages/plugins/catalogs/daemon/lib/shared-catalogs/document.ts');
+const { LinksDocumentSchema } = await import(repo + '/packages/plugins/catalogs/daemon/lib/catalog-links/document.ts');
+const members = await import(repo + '/packages/plugins/catalogs/daemon/lib/catalog-members/document.ts');
+const { CatalogInstallStateSchema } = await import(repo + '/packages/plugins/catalogs/daemon/lib/catalog-installs/store.ts');
+const { StatePasskeyStore } = await import(repo + '/packages/plugins/catalogs/daemon/adapters/member-passkey-store.ts');
+const defs = Object.fromEntries(manifest.data.state.map(def => [def.name, def]));
+const port = state.createStatePort({ home, pluginId: 'catalogs', fs: state.createNodeHostFs(), files: manifest.data.state });
+const schemas = {
+  catalogs: CatalogsDocumentSchema,
+  links: LinksDocumentSchema,
+  members: members.MembersDocumentSchema,
+  shares: members.SharesDocumentSchema,
+  installs: CatalogInstallStateSchema,
+};
+const out = {};
+for (const [name, schema] of Object.entries(schemas)) {
+  const read = await port.read(defs[name]);
+  if (!read.ok) { out[name] = 'unreadable: ' + read.error.sentence; continue; }
+  const parsed = schema.safeParse(read.value);
+  out[name] = parsed.success ? 'ok' : parsed.error.issues.slice(0, 3).map(i => i.path.join('.') + ': ' + i.message).join('; ');
+}
+try { out.passkeys = (await new StatePasskeyStore(port, defs['member-passkeys']).list(keyId)).length; } catch (e) { out.passkeys = 'refused: ' + e.message; }
+console.log(JSON.stringify(out));
+`,
+  );
+  const child = Bun.spawn(['bun', script, REPO, f.to, KEY], { cwd: REPO, stdout: 'pipe', stderr: 'pipe' });
+  const [text, error] = [await new Response(child.stdout).text(), await new Response(child.stderr).text()];
+  expect({ code: await child.exited, error }).toEqual({ code: 0, error: '' });
+  expect(JSON.parse(text)).toEqual({
+    catalogs: 'ok',
+    links: 'ok',
+    members: 'ok',
+    shares: 'ok',
+    installs: 'ok',
+    passkeys: 1,
+  });
 });
 
 test('the link keys move unopened and v5’s own sealed-document reader opens them with the moved vault key', async () => {
@@ -398,7 +460,7 @@ test('catalogs.json version 2 is upgraded as v4 does; version 1 is refused with 
   await f.put('state/catalogs/catalogs.json', catalogs(2));
   const report = await catalogsStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(await written(V5_CATALOGS)).toEqual(without(catalogs(2)));
+  expect(await written(V5_CATALOGS)).toEqual(landed(catalogs(2)));
   expect(report.note).toContain('schema version 2');
 
   await f.clean();

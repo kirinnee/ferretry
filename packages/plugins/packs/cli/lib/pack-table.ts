@@ -6,7 +6,7 @@ export interface ICellColour {
   amber(cell: string): string;
 }
 
-const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'CARD', 'LAST'];
+const HEADER: readonly string[] = ['FERRET', 'MODEL', 'STATE', 'CARD', 'PR', 'LAST'];
 const STATE_COLUMN = 2;
 
 /** `3m`, `2h`, `5d`: the coarsest whole unit, `now` under a minute. */
@@ -25,6 +25,15 @@ const stateCell = (row: PackRow, nowMs: number): string =>
 const cardCell = (row: PackRow): string =>
   row.card === undefined ? '-' : [row.card.ref, row.card.lane].filter(part => part !== undefined).join(' ');
 
+/** `#42 CI passing` for an open PR, `#42 merged` once CI no longer matters, `-` without one. */
+export function prCell(pr: PackRow['pr']): string {
+  if (pr === undefined) return '-';
+  const live = pr.state === 'open' || pr.state === 'unknown';
+  return [`#${pr.number}`, pr.draft && live ? 'draft' : undefined, live ? `CI ${pr.checks}` : pr.state]
+    .filter(part => part !== undefined)
+    .join(' ');
+}
+
 const lastCell = (row: PackRow, nowMs: number): string =>
   row.last === undefined ? '-' : `[${sinceLabel(nowMs, row.last.at)}] ${row.last.text}`;
 
@@ -41,6 +50,7 @@ export function renderPackTable(table: PackTable, nowMs: number, colour: ICellCo
     row.model,
     stateCell(row, nowMs),
     cardCell(row),
+    prCell(row.pr),
     lastCell(row, nowMs),
   ]);
   const widths = HEADER.map((title, column) =>

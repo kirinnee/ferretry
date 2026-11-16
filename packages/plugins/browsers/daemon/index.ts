@@ -1,26 +1,33 @@
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { type DaemonContext, type DaemonHalf, implementDaemon } from '@ferretry/kernel/manifest';
-import { type BrowsersConfig, PageChanged } from '../contract/index.ts';
+import { type DaemonContext, type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
+import { type BrowsersApi, type BrowsersConfig, PageChanged } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { withAddressRuleKernel, withAddressRuleTools } from './address-rule.ts';
+import { protectionWindows } from './protection/windows.ts';
 import { type BrowserSessionLauncher, BrowserSessionService } from './pages/service.ts';
-import { type BrowserStreamOpener, pageRoutes, streamSocket } from './pages/routes.ts';
+import { type BrowserStreamOpener, type FerretBrowserGuard, pageRoutes, streamSocket } from './pages/routes.ts';
 import { BrowsersReferenceMenu } from './pages/reference-menu.ts';
 import { BrowserProxyTester, resolveBrowserProxy } from './proxy/index.ts';
 import { TunnelProxyProbe } from './proxy/adapters/probe.ts';
 import { proxyRoutes } from './proxy/routes.ts';
 import { KernelFrameClock } from './stream/frame-clock.ts';
+import { allOf, scopeDelivery, sealedDelivery } from './stream/delivery.ts';
 import { heldViewerHost } from './stream/held-host.ts';
+import { ViewerScope } from './stream/viewer-scope.ts';
 import { BrowserViewerStream } from './stream/viewer-stream.ts';
 import { pageTarget, TypedIdentities } from './target/index.ts';
 import { VaultPageApprovals } from './target/tools/phone-approvals.ts';
 import { nodeStagedFiles } from './tools/adapters/staged-files.ts';
-import { SurfaceControl } from './tools/control.ts';
+import { forgetsClosedPages, SurfaceControl } from './tools/control.ts';
 import { rootFiles } from './tools/files.ts';
-import { controlRoutes, toolHandlers } from './tools/index.ts';
+import { controlRoutes, refusing, toolHandlers } from './tools/index.ts';
 import { pageToolHost } from './tools/page-host.ts';
 import { agentControlPolicy } from './tools/agent-control.ts';
 import { BrowserTools } from './tools/service.ts';
+import { SealedPages } from './sealed/page-guards.ts';
+import { SealedGate } from './sealed/gate.ts';
+import { secureCopyReach } from './sealed/reach.ts';
 import type { RecordedSurfaceEvent } from './tools/types.ts';
 import { processHost } from './adapters/host.ts';
 import { KernelDetachedLauncher } from './open-url/launcher.ts';
@@ -30,6 +37,7 @@ import { closeLeftoverBrowsers, spawnTerminate } from './leftovers.ts';
 import { BrowserLoginWindowService } from './worker/control/adapters/login-window.ts';
 import { ProcListenerProver } from './worker/control/adapters/listener-prover.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
+import { loopbackFirewallDoctor } from './proxy/firewall/doctor.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
@@ -73,7 +81,10 @@ export function buildBrowsers(
   ctx: DaemonContext<typeof manifest>,
   seams: BrowsersSeams = {},
 ): DaemonHalf<typeof manifest> {
-  const { kernel } = ctx;
+  // ONE address rule at the kernel seam (./address-rule.ts): every piece below reads and writes under this kernel, so
+  // no address, title, snapshot, error message, log line or event it returns can carry a pairing-shaped fragment.
+  // A delegating view, not a copy: every other port stays the kernel's own, read live.
+  const kernel = withAddressRuleKernel(ctx.kernel);
   const vault = ctx.needs.vault;
   const host = processHost();
   const config = (): BrowsersConfig | undefined =>
@@ -93,6 +104,13 @@ export function buildBrowsers(
     executable: which('Xvfb'),
     authorityDirectory: profile.displayDirectory,
     processes,
+  });
+  // The daemon's own facts about when a credential was live and which origins are the app's (docs/pairing.md, "Never show
+  // it to an agent"): every agent content act is held to them, by the guard at the tool and route boundaries.
+  const protection = protectionWindows({
+    now: () => kernel.clock.nowMs(),
+    connections: () => ctx.uses.connections.current(),
+    windows: [() => ctx.uses.pairingWindow.current(), () => ctx.uses.shareWindow.current()],
   });
   // The worker is a process of its own, as today (lead decision, port-browsers r1): the compiled worker beside the
   // daemon, or Node over the source entry, started through kernel.spawn under a name permissions.spawn declares.
@@ -144,6 +162,34 @@ export function buildBrowsers(
   // Who each page signs in, in memory only (I154): ONE ledger, cleared by the runtime whenever an act may have changed
   // it, whoever made it (I155), and read and written by every browser tool.
   const identities = seams.identities ?? new TypedIdentities(() => kernel.clock.nowMs());
+
+  // Which page a ferret's viewer may still see: a permission whose withdrawal (a takeover, a page closing) is synchronous, so
+  // a frame in flight or waiting in a congested socket is invalid the moment it happens. Asks THE rule, `ferretGuard` below.
+  const viewerScope = new ViewerScope({
+    may: async (ferret, page) =>
+      await ferretGuard.check(ferret, ferret, page).then(
+        () => true,
+        () => false,
+      ),
+    after: (delay, action) => kernel.clock.after(milliseconds(delay), action),
+  });
+  // Who holds each page, journaled; built first because a page closing (below) ends what is held on it.
+  const history = new Map<string, RecordedSurfaceEvent[]>();
+  const control = new SurfaceControl(
+    {
+      publish: async (sessionId, type, data) => {
+        history.set(sessionId, [...(history.get(sessionId) ?? []), { type, data }]);
+        const change = PAGE_CHANGES[type];
+        const page = (data as { readonly id?: unknown }).id;
+        // A person taking a page over withdraws every ferret's permission to watch it, before anything else happens.
+        if (type === 'surface.takeover' && typeof page === 'string') viewerScope.revoke(sessionId, page);
+        if (change !== undefined && typeof page === 'string')
+          kernel.events.publish(PageChanged, { ferret: sessionId, page, change });
+      },
+      history: async sessionId => history.get(sessionId) ?? [],
+    },
+    { now: () => kernel.clock.nowMs() },
+  );
   const pages = new BrowserSessionService(
     {
       get: async sessionId => {
@@ -158,15 +204,29 @@ export function buildBrowsers(
       after: (delay, action) => ({ cancel: kernel.clock.after(milliseconds(delay), action) }),
     },
     identities,
-    // A page closed, however it closed (a tool, the toolbar, the session's end, the browser stopping): a wake-up.
-    {
-      closed: (sessionId, pageId) =>
-        kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' }),
-    },
+    // A page closed, however it closed (a tool, the viewer, the toolbar, the session's end, the browser stopping): what a
+    // person held on it ends, and the workspace is woken.
+    forgetsClosedPages(control, (sessionId, pageId) => {
+      viewerScope.revoke(sessionId, pageId);
+      kernel.events.publish(PageChanged, { ferret: sessionId, page: pageId, change: 'closed' });
+    }),
   );
-  const viewerHost = heldViewerHost(kernel, pages);
-  const stream: BrowserStreamOpener = async (sessionId, downstream) => {
+  // Which pages hold a sealed value, and whether a clipboard capture is running: told by Accounts (secure copy's reach), asked by the tools.
+  const sealed = new SealedPages({ after: (delay, action) => kernel.clock.after(milliseconds(delay), action) });
+  // The ONE gate every agent path to a page's words or pixels asks: the tools, the HTTP action route and the viewer socket.
+  const gate = new SealedGate({
+    sealed,
+    mask: async text => await kernel.redaction.read(scope => scope.text(text)),
+  });
+  const stream: BrowserStreamOpener = async (sessionId, downstream, who) => {
     let viewer: BrowserViewerStream | undefined;
+    // ONE delivery guard for an agent's viewer, both rules in it: no picture while a value is sealed, and only the ferret's
+    // own free page. The host asks it as each frame arrives and leaves; the stream before every send, retry and chunk.
+    const delivery =
+      who.agent && who.ferret !== undefined
+        ? allOf([sealedDelivery(gate), scopeDelivery(viewerScope, who.ferret)])
+        : undefined;
+    const viewerHost = heldViewerHost(kernel, pages, { mayType: who.mayType, delivery });
     return {
       open: async () => {
         viewer = await BrowserViewerStream.connect(
@@ -174,6 +234,7 @@ export function buildBrowsers(
           sessionId,
           downstream,
           new KernelFrameClock(kernel.clock),
+          delivery === undefined ? {} : { delivery },
         );
       },
       fromClient: frame => viewer?.fromClient(frame),
@@ -207,21 +268,6 @@ export function buildBrowsers(
     now: () => kernel.clock.nowMs(),
   });
 
-  // ── surface control and the tools ────────────────────────────────────────────────────────────────────────────
-  const history = new Map<string, RecordedSurfaceEvent[]>();
-  const control = new SurfaceControl(
-    {
-      publish: async (sessionId, type, data) => {
-        history.set(sessionId, [...(history.get(sessionId) ?? []), { type, data }]);
-        const change = PAGE_CHANGES[type];
-        const page = (data as { readonly id?: unknown }).id;
-        if (change !== undefined && typeof page === 'string')
-          kernel.events.publish(PageChanged, { ferret: sessionId, page, change });
-      },
-      history: async sessionId => history.get(sessionId) ?? [],
-    },
-    { now: () => kernel.clock.nowMs() },
-  );
   // "What agents may control" is read from core's AgentControlPort on every call; unbound, or an answer that is not a
   // plain yes, refuses (fail closed). ONE policy for the browser tools and the page target.
   const policy = agentControlPolicy(() => ctx.uses.agentControl.current());
@@ -232,6 +278,7 @@ export function buildBrowsers(
     policy,
     files: rootFiles(kernel.roots, nodeStagedFiles(host.uploadDirectory, kernel.clock)),
     binaryName: 'fy',
+    protection,
     typedIdentities: identities,
     // Where page scripts ran and what a ferret did to a page, told to the Vault's sign-in lock (lead DECISIONS-2 #5,
     // I98–I100; today's `scriptedOrigins` and `loginActs`).
@@ -240,7 +287,18 @@ export function buildBrowsers(
       scriptedOn: scriptHost => vault.scriptedOn?.(scriptHost),
     },
     pageActs: { acted: (sessionId, script) => vault.pageActed?.(sessionId as FerretId, script) },
+    sealed: gate,
+    // A takeover ends a secure paste still waiting for that page (the Vault refuses it now, P2-5).
+    takeovers: { landed: async (sessionId, keys) => await vault.pageTakenOver?.(sessionId as FerretId, keys) },
   });
+  // A ferret on its whole-browser routes and the viewer socket passes the one rule its page tools pass (a refusal keeps its
+  // code), and is shown only its own pages.
+  const ferretGuard: FerretBrowserGuard = {
+    check: async (ferret, target, pageId) =>
+      await refusing(async () => await tools.guardFerretBrowser(ferret, target, pageId)),
+    owned: async (ferret, target, rows) =>
+      await tools.ferretOwnedPages(ferret, target, rows as Parameters<typeof tools.ferretOwnedPages>[2]),
+  };
   // The `page` input target and the four tools that type into a page or hand it over, on the same checks as the rest.
   const target = pageTarget({
     kernel,
@@ -269,37 +327,58 @@ export function buildBrowsers(
     await loginRuntime.close().catch(() => undefined);
   });
 
+  // ── secure copy's reach (docs/secure-copy.md), for Accounts alone ─────────────────────────────────────────────
+  const secureCopy = secureCopyReach({ tools, pages, gate });
+
   return {
     routes: {
-      ...pageRoutes(kernel, login, pages),
+      ...pageRoutes(kernel, login, pages, ferretGuard, protection, gate),
       ...proxyRoutes({ tester, state: () => pages.overview() }),
       ...controlRoutes(tools),
       ...systemOpenRoutes(openUrl),
     },
-    sockets: { 'GET /v1/sessions/:sessionId/browser/stream': streamSocket(pages, stream) },
-    tools: { ...toolHandlers(tools), ...target.tools },
+    sockets: {
+      'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(kernel.redaction, pages, stream, ferretGuard, gate),
+    },
+    doctor: {
+      // GAP (card F1931 finding 10, above): every launch takes random ports, so there is nothing fixed to fence and no
+      // row — exactly as today's report left the row out for random ports. When Runtimes serves `browserPorts`, this
+      // reads `readLoopbackFirewall` there and the row appears.
+      'loopback-firewall': loopbackFirewallDoctor(async () => undefined),
+    },
+    tools: withAddressRuleTools({ ...toolHandlers(tools), ...target.tools }),
     provides: {
-      browsers: {
-        state: async () => pages.overview(),
-        // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
-        // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
-        // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks
-        // `AgentControlPort` and refuses with `agentControlRefusal('browser')` (GAP in ports-pending.json, accounts).
-        pagesOf: async ferret => {
-          const status = await pages.status(ferret);
-          return status.pages.map(page => ({
-            id: page.id,
-            ...(page.name === undefined ? {} : { name: page.name }),
-            ...(page.incognito === true ? { incognito: true as const } : {}),
-          }));
-        },
-        // The Warden's remedy for a browser left under a ferret's pane: its tree read again now, through Terminals.
-        closeLeftoverBrowsers: async ferret =>
-          await closeLeftoverBrowsers(ferret, {
-            terminals: () => ctx.uses.terminals.current(),
-            terminate: spawnTerminate(kernel.spawn),
-          }),
-      },
+      browsers: perNeeder(
+        (needer): BrowsersApi => ({
+          // For Accounts alone: its `account_hint {name}` names the site the ferret's own page is on. The gate is asked
+          // inside the tool service, live on every call (never a switch read once and kept).
+          ...(needer.id === 'accounts'
+            ? {
+                copy: secureCopy,
+                pageAddressOf: async (ferret: FerretId, name: string) => await tools.pageAddressOf(ferret, name),
+              }
+            : {}),
+          state: async () => pages.overview(),
+          // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
+          // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
+          // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks
+          // `AgentControlPort` and refuses with `agentControlRefusal('browser')`: that is `pageAddressOf`, just below.
+          pagesOf: async ferret => {
+            const status = await pages.status(ferret);
+            return status.pages.map(page => ({
+              id: page.id,
+              ...(page.name === undefined ? {} : { name: page.name }),
+              ...(page.incognito === true ? { incognito: true as const } : {}),
+            }));
+          },
+          // The Warden's remedy for a browser left under a ferret's pane: its tree read again now, through Terminals.
+          closeLeftoverBrowsers: async ferret =>
+            await closeLeftoverBrowsers(ferret, {
+              terminals: () => ctx.uses.terminals.current(),
+              terminate: spawnTerminate(kernel.spawn),
+            }),
+        }),
+      ),
     },
     hooks: {
       'input.targets:page': target.adapter,

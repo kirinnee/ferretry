@@ -10,9 +10,9 @@
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
 import { Ellipsis } from 'lucide-react';
-import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useLayoutMode } from '../../shell.ts';
+import { type PopoverPlace, placePopover, useLayoutMode } from '../../shell.ts';
 import { revisionStamp, shortAgo, versionCount } from '../../lib/agenda-revisions.ts';
 import { snoozePicks } from '../../lib/agenda-snooze.ts';
 import { BottomSheet } from '../../shell.ts';
@@ -36,17 +36,70 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
   const trigger = useRef<HTMLButtonElement | null>(null);
   const panel = useRef<HTMLDivElement | null>(null);
 
-  // The popover: focus its first control, and a press anywhere outside closes it. (The sheet owns its own focus and
-  // scrim.)
+  // The popover: a press anywhere outside closes it. The popover is drawn on the page body (below), so "outside" is
+  // outside the ⋯ button's wrapper AND outside the popover itself. (The sheet owns its own focus and scrim.)
   useEffect(() => {
     if (!open || sheet) return undefined;
-    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     const onPointer = (event: PointerEvent): void => {
-      if (event.target instanceof Node && root.current?.contains(event.target) !== true) onOpenChange(false);
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (root.current?.contains(target) === true || panel.current?.contains(target) === true) return;
+      onOpenChange(false);
     };
     document.addEventListener('pointerdown', onPointer);
     return () => document.removeEventListener('pointerdown', onPointer);
   }, [open, sheet, onOpenChange]);
+
+  // WHERE THE POPOVER SITS. It is fixed on the page body, placed from ⋯'s box and its own measured size: under ⋯ with
+  // its right edge on ⋯'s, flipped above when the room below is short, and always inside the window. It follows ⋯
+  // through a scroll of whatever holds the item and through a resize. Before the first measure it is hidden, so it
+  // never flashes at the wrong place.
+  const [place, setPlace] = useState<PopoverPlace | null>(null);
+  // The page body this menu's wrapper sits in, once it is mounted in a real document: where the popover is drawn. A
+  // renderer with no document (a test renderer's instances have no owner document) draws it where it is.
+  const [pageBody, setPageBody] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => setPageBody(root.current?.ownerDocument?.body ?? null), []);
+  useLayoutEffect(() => {
+    if (!open || sheet) {
+      setPlace(null);
+      return undefined;
+    }
+    const measure = (): void => {
+      const anchor = trigger.current?.getBoundingClientRect();
+      const box = panel.current?.getBoundingClientRect();
+      if (anchor === undefined || box === undefined || panel.current === null) return;
+      // The menu's own height, not the capped one it was last given: a flip must not depend on its own answer.
+      const size = { width: box.width, height: Math.max(box.height, panel.current.scrollHeight) };
+      const next = placePopover(anchor, size, { width: window.innerWidth, height: window.innerHeight });
+      setPlace(current =>
+        current?.left === next.left && current.top === next.top && current.maxHeight === next.maxHeight
+          ? current
+          : next,
+      );
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    document.addEventListener('scroll', measure, true);
+    return () => {
+      window.removeEventListener('resize', measure);
+      document.removeEventListener('scroll', measure, true);
+    };
+  }, [open, sheet]);
+
+  // FOCUS GOES IN ONCE THE POPOVER IS PLACED. Until the first placement it is `visibility: hidden`, and a browser refuses
+  // focus into hidden content, so this waits for the placed, visible popover (the commit after `place` is set) and moves
+  // focus to its first control exactly once per opening.
+  const focusedIn = useRef(false);
+  const placed = place !== null;
+  useEffect(() => {
+    if (!open || sheet) {
+      focusedIn.current = false;
+      return;
+    }
+    if (!placed || focusedIn.current) return;
+    focusedIn.current = true;
+    panel.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+  }, [open, sheet, placed]);
 
   // A choice that closes the menu (a version picked, Changes, Merge with…) takes the focused control away with it: put
   // focus back on ⋯ so a keyboard is still in the item. A press outside keeps its own target, which already has focus.
@@ -74,6 +127,25 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
     </div>
   );
 
+  const popover = (() => {
+    const drawn = (
+      <div
+        aria-label={label}
+        className="fy-item-menu__popover"
+        data-agenda-menu="popover"
+        id={menuId}
+        ref={panel}
+        role="dialog"
+        style={
+          place === null ? { visibility: 'hidden' } : { left: place.left, top: place.top, maxHeight: place.maxHeight }
+        }
+      >
+        {body}
+      </div>
+    );
+    return pageBody === null ? drawn : createPortal(drawn, pageBody);
+  })();
+
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: Esc is the popover's own key; the controls inside are real buttons
     <div className="fy-item-menu" onKeyDown={onKeyDown} ref={root}>
@@ -91,39 +163,32 @@ export function AgendaItemMenu({ open, onOpenChange, label = 'Item options', chi
       >
         <Ellipsis aria-hidden="true" size={18} />
       </button>
-      {sheet ? (
-        typeof document === 'undefined' ? null : (
-          createPortal(
-            <BottomSheet
-              closeLabel="Close the item options"
-              id={menuId}
-              labelledBy={titleId}
-              onClose={() => onOpenChange(false)}
-              open={open}
-              zIndexClass="z-50"
-            >
-              <div className="fy-item-menu__sheet" data-agenda-menu="sheet">
-                <h2 className="fy-item-menu__title" id={titleId}>
-                  {label}
-                </h2>
-                {body}
-              </div>
-            </BottomSheet>,
-            document.body,
-          )
-        )
-      ) : open ? (
-        <div
-          aria-label={label}
-          className="fy-item-menu__popover"
-          data-agenda-menu="popover"
-          id={menuId}
-          ref={panel}
-          role="dialog"
-        >
-          {body}
-        </div>
-      ) : null}
+      {sheet
+        ? typeof document === 'undefined'
+          ? null
+          : createPortal(
+              <BottomSheet
+                closeLabel="Close the item options"
+                id={menuId}
+                labelledBy={titleId}
+                onClose={() => onOpenChange(false)}
+                open={open}
+                zIndexClass="z-40"
+              >
+                <div className="fy-item-menu__sheet" data-agenda-menu="sheet">
+                  <h2 className="fy-item-menu__title" id={titleId}>
+                    {label}
+                  </h2>
+                  {body}
+                </div>
+              </BottomSheet>,
+              document.body,
+            )
+        : open
+          ? // On the page body, `position: fixed`: the card's `overflow` cannot clip it and no neighbouring column can
+            // paint over it (the nav, the ferret list), whatever width the column it opened from has.
+            popover
+          : null}
     </div>
   );
 }

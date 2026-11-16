@@ -9,8 +9,10 @@ import {
   type RestartStatus,
   RestartsFile,
 } from '../../../../contract/index.ts';
+import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
+import { RUNTIME_START_KEY, RuntimeStart } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
-import { as, host } from './route-fixture.ts';
+import { as, fakeLogins, host } from './route-fixture.ts';
 
 /**
  * R-0323, R-0128, R-0023 (today's `mounts/session-restart.ts`): restart ferrets on the same login with their
@@ -22,7 +24,15 @@ const ask = async (h: TestHost, body: unknown, who?: string) =>
 
 async function running() {
   const runner = new FakeRunner();
-  const h = await host([], { harness: new FakeHarness(), runner });
+  const harness = new FakeHarness();
+  // How each stop was asked for: a restart must END the harness, never leave it alive in its pane.
+  const stops: string[] = [];
+  const stop = harness.stop.bind(harness);
+  harness.stop = async (ferret, handle, using, how) => {
+    stops.push(how);
+    await stop(ferret, handle, using, how);
+  };
+  const h = await host([], { harness, runner });
   const start = async (name: string): Promise<string> => {
     const answer = await h.request('POST', '/v1/ferrets', {
       body: { name, folder: `/work/${name}` },
@@ -31,7 +41,7 @@ async function running() {
     expect(answer.status).toBe(201);
     return answer.json<{ id: string }>().id;
   };
-  return { h, runner, start };
+  return { h, runner, start, stops };
 }
 const history = (h: TestHost, id: string): string[] =>
   (h.state('ferrets').raw(FerretHistoryFiles, id) as string)
@@ -41,7 +51,7 @@ const history = (h: TestHost, id: string): string[] =>
 
 describe('restarting ferrets', () => {
   test('R-0323 a ferret on a declared wait is restarted now: stopped and resumed on the same harness', async () => {
-    const { h, runner, start } = await running();
+    const { h, runner, start, stops } = await running();
     const id = await start('aniya');
     await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting', condition: 'CI' } });
     expect(runner.starts).toBe(1);
@@ -53,7 +63,11 @@ describe('restarting ferrets', () => {
     // It is a fresh process on the same conversation: working, and no longer on the wait it had.
     expect(view.state).toBe('working');
     expect(view.waiting).toBeUndefined();
-    expect(history(h, id)).toEqual(['session.waiting', 'session.stopped', 'session.resumed', 'session.restarted']);
+    // Stopped NOW: Claude Code answers one polite Ctrl-C at an idle prompt with "Press Ctrl-C again to exit".
+    expect(stops).toEqual(['now']);
+    // One relaunch that replaced the live pane (`session.resumed` says `replacedLiveTerminal`), as a move's is: no
+    // separate stop, which is what let a restart stop a harness it then could not start (proof run 7).
+    expect(history(h, id)).toEqual(['session.waiting', 'session.resumed', 'session.restarted']);
     await h.stop();
   });
 
@@ -137,7 +151,7 @@ describe('restarting ferrets', () => {
       // One fresh process, and it is the stale ferret's: the current one was never touched.
       expect(runner.starts).toBe(3);
       expect(history(h, current)).toEqual(['session.waiting']);
-      expect(history(h, old)).toEqual(['session.waiting', 'session.stopped', 'session.resumed', 'session.restarted']);
+      expect(history(h, old)).toEqual(['session.waiting', 'session.resumed', 'session.restarted']);
       // The relaunch recorded what it told, so the ferret is current now and a second request has nothing to do.
       const status = (await h.request('GET', '/v1/restarts')).json<RestartStatus>();
       expect(status.outdated).toEqual([]);
@@ -356,6 +370,88 @@ describe('who may restart', () => {
     const id = await start('aniya');
     const cleared = await h.request('DELETE', '/v1/restarts', as(id));
     expect(cleared.status).toBe(403);
+    await h.stop();
+  });
+});
+
+describe('a restart proves the runtime can start BEFORE it stops the old harness', () => {
+  const SIGN_IN = 'runtime rt was not started: Login codex-main needs sign-in';
+  /** A Runtimes stand-in whose one runtime `rt` needs sign-in until the test signs it in. */
+  const runtimes = (login: { signedIn: boolean }) =>
+    implementDaemon(
+      definePlugin({
+        id: 'runtimes',
+        title: 'Runtimes (fake)',
+        version: '5.0.0',
+        api: 5,
+        core: false,
+        kinds: [],
+        hooks: { takes: [{ hook: RuntimeStart, key: RUNTIME_START_KEY }] },
+      }),
+      {
+        build: () => ({
+          hooks: {
+            'runtime.start:runtimes': {
+              login: async () => ({ ok: true }),
+              resolve: async () =>
+                login.signedIn
+                  ? { ok: true, harness: 'claude-code', login: 'fake-login' }
+                  : { ok: false, sentence: SIGN_IN },
+            },
+          },
+        }),
+      },
+    );
+
+  test('run 7: a ferret whose login needs sign-in keeps its harness running; the restart waits and then goes', async () => {
+    const login = { signedIn: true };
+    const runner = new FakeRunner();
+    const harness = new FakeHarness();
+    const stops: string[] = [];
+    const stop = harness.stop.bind(harness);
+    harness.stop = async (ferret, handle, using, how) => {
+      stops.push(how);
+      await stop(ferret, handle, using, how);
+    };
+    const h = await host([], { harness, runner, plugins: [runtimes(login), fakeLogins()] });
+    const started = await h.request('POST', '/v1/ferrets', {
+      body: { name: 'wells', folder: '/work/wells', runtime: 'rt' },
+      headers: { 'x-fy-request-id': randomUUID() },
+    });
+    expect(started.status).toBe(201);
+    const id = started.json<{ id: string }>().id;
+    await h.request('POST', `/v1/ferrets/${id}/signal`, { body: { kind: 'waiting', condition: 'CI' } });
+    const before = (await h.request('GET', `/v1/ferrets/${id}`)).json<FerretSummary>();
+
+    login.signedIn = false;
+    const blocked = await ask(h, { scope: 'ids', ids: ['wells'] });
+    expect(blocked.status).toBe(200);
+    expect(blocked.json<RestartResult>()).toMatchObject({
+      restarted: [],
+      queued: [{ id, name: 'wells', reason: 'blocked' }],
+      failed: [],
+    });
+    // The old harness was never stopped: same pane, still live, the ferret not stopped.
+    expect(stops).toEqual([]);
+    const during = (await h.request('GET', `/v1/ferrets/${id}`)).json<FerretSummary>();
+    expect(during.state).not.toBe('stopped');
+    expect(during.state).toBe(before.state);
+    expect(runner.starts).toBe(1);
+    // Said once in its history, with the reason the owner can act on; nothing says it was stopped.
+    expect(history(h, id)).toEqual(['session.waiting', 'session.restart_blocked']);
+    expect((h.state('ferrets').raw(FerretHistoryFiles, id) as string).includes('needs sign-in')).toBe(true);
+    // Still waiting, durably, as blocked.
+    const status = (await h.request('GET', '/v1/restarts')).json<RestartStatus>();
+    expect(status.queued.map(entry => [entry.id, entry.reason])).toEqual([[id, 'blocked']]);
+
+    // The owner signs the login in: the next restart goes, stopping the old harness outright first.
+    login.signedIn = true;
+    const done = await ask(h, { scope: 'ids', ids: ['wells'] });
+    expect(done.json<RestartResult>()).toMatchObject({ restarted: [{ id, name: 'wells' }], queued: [], failed: [] });
+    expect(stops).toEqual(['now']);
+    expect(runner.starts).toBe(2);
+    expect(history(h, id).filter(type => type === 'session.restart_blocked')).toHaveLength(1);
+    expect(history(h, id).at(-1)).toBe('session.restarted');
     await h.stop();
   });
 });

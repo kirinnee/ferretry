@@ -498,6 +498,27 @@ export async function privateGuardOf(
 }
 
 /**
+ * The guard of a root built from the places as they are NOW: the index is made to look again (whatever its look interval
+ * says) before the guard is read. A hit against the kept snapshot is confirmed with it: the snapshot may be up to a look
+ * interval old, and in that time a private file that was removed can free an inode that a NEW entry (a folder an apply
+ * stages, a file a write makes) then reuses, so the stale key names an entry that is not a private place. A place that is
+ * still there is in the fresh snapshot, so a real hit is still a hit; only a stale one goes away. Throws when the home
+ * cannot be looked at (the caller answers "held", as it does for every doubt).
+ */
+export async function privateGuardLookedAtNow(
+  fs: HostFs,
+  home: string,
+  base: string,
+  privateFiles: readonly string[],
+  recheckMs = 0,
+  watcher?: TruncationWatcher,
+): Promise<PrivateGuard> {
+  const real = await fs.realpath(absolute(home, 'the home'));
+  await indexOf(fs, real, privateFiles, recheckMs, watcher).renew();
+  return await privateGuardOf(fs, home, base, privateFiles, recheckMs, watcher);
+}
+
+/**
  * Whether `real` is a private place or inside one, by identity: the entry itself first, then every folder up to and
  * including the root's `base`, as {@link fencedReal} walks. A path that cannot be looked at is refused.
  */

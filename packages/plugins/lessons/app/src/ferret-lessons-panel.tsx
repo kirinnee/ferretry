@@ -50,7 +50,10 @@ export function FerretLessonsPanel({
   };
 
   return (
-    <div className="flex min-w-0 flex-col gap-2" data-ferret-lessons="">
+    <div
+      className="flex min-w-0 flex-col gap-2 max-md:flex-row max-md:items-center max-md:gap-3"
+      data-ferret-lessons=""
+    >
       <label className="flex min-h-[44px] cursor-pointer items-center gap-2 text-ui">
         <input
           type="checkbox"

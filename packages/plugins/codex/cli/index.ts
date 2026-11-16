@@ -1,4 +1,4 @@
-import { implementCli, type VerbHandler, type VerbInvocation } from '@ferretry/kernel/manifest';
+import { configItemVerbs, implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { type HarnessCliView, VersionSchema } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { renderStatus } from './lib/render.ts';
@@ -17,21 +17,17 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
 };
 
-/**
- * The item verbs (`settings`) edit config collections, and the item-kind service that serves them has
- * no route in this build. Said plainly rather than pretended.
- */
-const itemVerb =
-  (io: { err(text: string): void }, what: string): VerbHandler =>
-  async () => {
-    io.err(
-      `Codex ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`,
-    );
-    return 69;
-  };
-
 export default implementCli(manifest, {
-  build: ({ client, io }) => {
+  build: ({ client, io, readText, confirm }) => {
+    const settings = configItemVerbs({
+      collection: 'codex/settings',
+      noun: 'Codex settings item',
+      verbPrefix: 'harness codex settings',
+      client,
+      io,
+      readText,
+      confirm,
+    });
     const view = async (): Promise<HarnessCliView> => await client.call<HarnessCliView>(GET_UPDATE);
     return {
       verbs: {
@@ -75,11 +71,11 @@ export default implementCli(manifest, {
           io.out(`Updating Codex${command}. This can take a few minutes; follow it with: fy harness codex status\n`);
           return 0;
         },
-        'harness codex settings ls': itemVerb(io, 'settings'),
-        'harness codex settings show': itemVerb(io, 'settings'),
-        'harness codex settings add': itemVerb(io, 'settings'),
-        'harness codex settings edit': itemVerb(io, 'settings'),
-        'harness codex settings rm': itemVerb(io, 'settings'),
+        'harness codex settings ls': settings.ls,
+        'harness codex settings show': settings.show,
+        'harness codex settings add': settings.add,
+        'harness codex settings edit': settings.edit,
+        'harness codex settings rm': settings.rm,
       },
     };
   },

@@ -17,7 +17,7 @@ import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSche
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
-import { storedEnvironmentIssue } from './secret-shape.ts';
+import { nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -46,6 +46,7 @@ export const LoginStatusReasonSchema = z.enum([
   'not_checked_yet',
   'api_key',
   'from_environment',
+  'host_terminal',
   'credential_unreadable',
   'access_expired_refreshable',
   'access_expiring',
@@ -484,6 +485,17 @@ const refuseUnsafeEnvironment = (ctx: {
         params: { rawSecret: true },
         continue: true,
       });
+    } else if (nameLooksLikeKey(name)) {
+      // A key typed into the NAME box is a key all the same: it would be written in plain and shown on every device.
+      // Neither the name nor a path holding it is carried, so the refusal cannot repeat the key.
+      ctx.issues.push({
+        code: 'custom',
+        message: `A variable name looks like a key: a name is a label, so keep the key in the secret store and write \${secret:NAME} as the value`,
+        input: undefined,
+        path: [],
+        params: { rawSecret: true },
+        continue: true,
+      });
     } else if (!POSIX_ENV_NAME.test(name)) {
       ctx.issues.push({
         code: 'custom',
@@ -552,12 +564,17 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
     return;
   }
   for (const [name, value] of Object.entries(ctx.value)) {
+    // A name that looks like a key is never repeated, in the message or in the path: the refusal would carry the key.
+    const keyName = nameLooksLikeKey(name);
+    const label = keyName ? 'A variable' : `"${name}"`;
+    const path = keyName ? [] : [name];
+    const input = keyName ? undefined : name;
     if (typeof value !== 'string') {
       ctx.issues.push({
         code: 'custom',
-        message: `"${name}": env must be a map of NAME: value`,
-        input: name,
-        path: [name],
+        message: `${label}: env must be a map of NAME: value`,
+        input,
+        path,
         params: { rawSecret: true },
       });
       continue;
@@ -565,9 +582,9 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
     if (value.length > MAX_ENVIRONMENT_VALUE) {
       ctx.issues.push({
         code: 'custom',
-        message: `"${name}" is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
-        input: name,
-        path: [name],
+        message: `${label} is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
+        input,
+        path,
         params: { rawSecret: true },
       });
       continue;
@@ -578,10 +595,10 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
       code: 'custom',
       message:
         issue === 'secret'
-          ? `"${name}" holds a secret: save it in the secret store and write \${secret:NAME} here instead`
-          : `"${name}" is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
-      input: name,
-      path: [name],
+          ? `${label} holds a secret: save it in the secret store and write \${secret:NAME} here instead`
+          : `${label} is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
+      input,
+      path,
       params: { rawSecret: true },
     });
   }
@@ -643,6 +660,20 @@ export const LoginChangeSchema = z.discriminatedUnion('kind', [
 ]);
 export type LoginChange = z.infer<typeof LoginChangeSchema>;
 
+/**
+ * One runtime on a login as it would be once a change landed: whether it can launch and, when it cannot, the sentence
+ * that says why (a switched-off login, a login that needs sign-in). Names the runtime and nothing of its configuration.
+ * Everything but the name is absent when the plugin that owns runtimes could not say.
+ */
+export const LoginRuntimePreviewSchema = z.strictObject({
+  name: NonEmptyStringSchema,
+  harness: HarnessKindSchema.optional(),
+  /** An agent runtime, as against an interactive one. */
+  agent: z.boolean().optional(),
+  launch: z.strictObject({ available: z.boolean(), reason: NonEmptyStringSchema.optional() }).optional(),
+});
+export type LoginRuntimePreview = z.infer<typeof LoginRuntimePreviewSchema>;
+
 /** A change held for review: what it does, in sentences, and when the hold ends. */
 export const LoginChangeViewSchema = z.strictObject({
   id: NonEmptyStringSchema,
@@ -652,6 +683,10 @@ export const LoginChangeViewSchema = z.strictObject({
   consequences: z.array(NonEmptyStringSchema).readonly(),
   /** Secret NAMES (never values) that only a removed login referred to: left in the store, said aloud. */
   orphanedSecrets: z.array(NonEmptyStringSchema).readonly().optional(),
+  /** The login files applying it writes, as paths under the config folder (`logins/<id>.yaml`). Absent when it writes none. */
+  saves: z.array(NonEmptyStringSchema).readonly().optional(),
+  /** The runtimes on the login as the change leaves them, when it touches a login a runtime may be using. */
+  runtimes: z.array(LoginRuntimePreviewSchema).readonly().optional(),
   expiresAt: InstantSchema,
   state: z.enum(['pending', 'consumed']),
 });
@@ -1406,6 +1441,28 @@ export const CatalogPriceSchema = z.strictObject({
   verified: z.string().regex(YYYY_MM_DD),
 });
 
+/**
+ * What Usage reads to price a session at list price (`LoginsApi.modelPrices`): each catalog in effect, each half's models
+ * THAT STATE A PRICE with the whole of it, and Claude Code's tier slots as bare model ids (`opus` -> the model it is
+ * pinned to). No label, no login, no credential: a catalog is public data.
+ */
+export const ModelPriceHalfSchema = z.strictObject({
+  models: z.array(z.strictObject({ id: ModelIdSchema, price: CatalogPriceSchema })).readonly(),
+  tiers: z
+    .strictObject({
+      opus: ModelIdSchema.optional(),
+      sonnet: ModelIdSchema.optional(),
+      haiku: ModelIdSchema.optional(),
+    })
+    .optional(),
+});
+export const ModelPriceCatalogSchema = z.strictObject({
+  id: z.string().min(1),
+  claude: ModelPriceHalfSchema.optional(),
+  codex: ModelPriceHalfSchema.optional(),
+});
+export type ModelPriceCatalog = z.infer<typeof ModelPriceCatalogSchema>;
+
 export const CatalogModelSchema = z.strictObject({
   id: ModelIdSchema,
   label: z.string().min(1).max(80),
@@ -1453,6 +1510,38 @@ export const ModelCatalogFileSchema = z.strictObject({
 });
 export type ModelCatalogFile = z.infer<typeof ModelCatalogFileSchema>;
 
+/**
+ * What `LoginsApi.modelSources` answers: every catalog in effect WHOLE (the models a runtime on a login offers, with the
+ * words a picker shows), the slice of each preset that says which catalog a login reads and which variables are the
+ * person's own, and what the last read of a local server found. Public catalog data only: no login, key, variable value
+ * or credential is in it (a preset's variables are named, never valued).
+ */
+export const ModelCatalogSourcesSchema = z.strictObject({
+  catalogs: z.record(
+    z.string().min(1),
+    ModelCatalogFileSchema.extend({
+      id: z.string().min(1),
+      origin: z.enum(['built-in', 'published', 'file']),
+    }),
+  ),
+  presets: z
+    .array(
+      z.strictObject({
+        id: z.string().min(1),
+        /** The catalog a login made from the preset reads, by id. */
+        catalog: z.string().min(1).optional(),
+        /** The variable NAMES each half takes: the ones a catalog pin never replaces. */
+        variables: z.strictObject({
+          claude: z.array(z.string().min(1)).readonly().optional(),
+          codex: z.array(z.string().min(1)).readonly().optional(),
+        }),
+      }),
+    )
+    .readonly(),
+  local: z.strictObject({ ollama: LocalModelsSchema.optional() }).optional(),
+});
+export type ModelCatalogSourcesView = z.infer<typeof ModelCatalogSourcesSchema>;
+
 // ── State (state/logins/models.json) ─────────────────────────────────────────────────────────────────────────────
 
 /** What the last published-catalog check and local-model read left behind. Never a credential. */
@@ -1469,3 +1558,15 @@ export const ModelsStateSchema = z.strictObject({
   local: LocalModelsSchema.optional(),
 });
 export type ModelsState = z.infer<typeof ModelsStateSchema>;
+
+// ── State (state/logins/passive-assignments.json) ────────────────────────────────────────────────────────────────
+
+/**
+ * Which login Logins last saw each Codex ferret on, and since when: the instant a reading of that ferret's rollout
+ * starts to be that login's. Ids only; never a credential.
+ */
+export const PassiveAssignmentsStateSchema = z.strictObject({
+  format: z.literal(1),
+  ferrets: z.record(NonEmpty, z.strictObject({ login: NonEmpty, since: z.number().int().nonnegative() })),
+});
+export type PassiveAssignmentsState = z.infer<typeof PassiveAssignmentsStateSchema>;

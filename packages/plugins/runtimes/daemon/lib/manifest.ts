@@ -155,6 +155,13 @@ const accountShape = {
    */
   secretEnv: z.record(NonEmptyString, SecretTemplateSchema).default({}),
   /**
+   * The environment variables this runtime's login and profile set whose value names NO secret, as the launch carries
+   * them (a base URL, a region, a flag). What an MCP check fills a server's `${VAR}` from, as the harness does. Absent
+   * when there are none; a variable that names a secret is `secretEnv`'s and appears nowhere here. A manifest written
+   * before this field existed still parses.
+   */
+  launchEnv: z.record(NonEmptyString, z.string()).optional(),
+  /**
    * LEGACY, read and never written: v4 4.291.9 to 4.291.11 published the names of the variables whose whole value is a
    * bare `$OTHER` reference here, for a start refusal this version no longer has (a project's `.claude` env wins over a
    * login's: docs/secrets.md). A manifest an earlier version wrote must still parse, so the field is tolerated and ignored.

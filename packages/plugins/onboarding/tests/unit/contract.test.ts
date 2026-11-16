@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { routeTable } from '@ferretry/app';
 import { StepAnswerRequestSchema } from '../../contract/index.ts';
 import { fakeOnboarding, onboardingConformance } from '../../contract/testing/index.ts';
 import manifest from '../../manifest.ts';
@@ -32,5 +33,22 @@ describe('onboarding contract', () => {
     const answer = manifest.actions.routes.find(route => route.key === 'POST /v1/onboarding/steps/:plugin/:stepId');
     expect(answer?.caller).toBe('person');
     expect('hooks' in manifest).toBe(false);
+  });
+});
+
+describe('the machine setup address', () => {
+  test('setup-export v4’s /d/<machine>/setup is the steps page, so an old link or bookmark is never "Nothing is here"', () => {
+    const screens = (manifest.ui?.screens ?? []).map(screen => ({
+      plugin: manifest.id,
+      id: screen.id,
+      path: screen.path,
+      label: screen.id,
+    }));
+    const table = routeTable(screens);
+    const steps = table.parse('/d/d1/onboarding/steps');
+    const old = table.parse('/d/d1/setup');
+    expect(steps).toMatchObject({ kind: 'screen', daemon: 'd1', screen: { id: 'steps' } });
+    expect(old).toMatchObject({ kind: 'screen', daemon: 'd1', screen: { id: 'setup' } });
+    expect(table.parse('/d/d1/setup/extra').kind).toBe('not-found');
   });
 });

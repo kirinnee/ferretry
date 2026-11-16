@@ -1,18 +1,13 @@
 /**
- * STAND-INS for the contracts Packs reads but does not own (§2.3: Packs `uses` Usage and Runtimes, both optional).
+ * What Packs reads about logins, quota and runtimes, as the narrow shapes it judges readiness from.
  *
- * `@ferretry/plugin-usage/contract` is empty on this base (the skeleton slice has not filled it), so the usage facts
- * Packs reads are declared here, structurally, exactly as today's `FleetCredentialView` carried them. The generator
- * matches ports by name: when Usage's contract lands, replace this file's `UsagePort` with an import of it in the
- * manifest and keep these shapes as the narrow view Packs wants.
+ * The ports themselves are the providers' own: Packs `uses` Runtimes (`RuntimesApi`: the catalog and tools), Logins
+ * (`LoginsApi`: each login's status, windows and budget, and the model catalogs) and Usage (`UsageApi`: the feed, which
+ * carries the limits a ferret's pane proved). `daemon/adapters/fleet-facts.ts` reads them; nothing here is a port.
  *
- * Runtimes' real port is imported (`RuntimesPort`, `RuntimeId`); what it does not yet offer — the runtime CATALOG
- * (with each runtime's model list and wrapper) and the machine's tools — is read through {@link RuntimeFactsApi}, an
- * additive pair of methods the daemon half asks of the provider when it has them (see the port-packs report).
+ * The login facts Packs reads are declared here, structurally, exactly as today's `FleetCredentialView` carried them;
+ * Logins' own `LoginView` is assignable to them. They are views, never ports: the generator matches ports by name.
  */
-import { definePort } from '@ferretry/kernel/contract';
-import type { MachineTool, RuntimeView } from '@ferretry/plugin-runtimes/contract';
-
 // ─── usage facts ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 export interface UsageWindowFacts {
@@ -65,20 +60,15 @@ export interface PaneLimit {
   readonly retryAt?: number | undefined;
 }
 
-export interface UsageQuotaApi {
+/**
+ * What Packs reads of the limits live ferrets prove (and, structurally, each login's sign-in, quota and budget). It is
+ * NOT a port: a port is matched by name, and a second shape under the name `usage` is handed the real Usage plugin's
+ * object, which has none of these methods. The facts come from the Logins and Ferrets ports
+ * (`daemon/adapters/login-quota.ts`).
+ */
+export interface PackQuotaSource {
   /** Every login with its quota windows and budget, as the app shows them. */
-  logins(): Promise<readonly PackCredentialFacts[]>;
+  credentials(): Promise<readonly PackCredentialFacts[]>;
   /** Logins the panes say are out of quota, by login id. */
   paneLimits(): Promise<ReadonlyMap<string, PaneLimit>>;
-}
-export const UsagePort = definePort<UsageQuotaApi>('usage');
-
-// ─── runtime facts ───────────────────────────────────────────────────────────────────────────────────────────────
-
-/** What Packs asks of the Runtimes provider beyond `RuntimesApi`: the catalog and the tools. */
-export interface RuntimeFactsApi {
-  /** Every runtime with its models, wrapper and login, as `GET /v1/runtimes` answers. */
-  catalog(): Promise<readonly RuntimeView[]>;
-  /** The harness CLIs on this machine and whether each is installed. */
-  tools(): Promise<readonly MachineTool[]>;
 }
