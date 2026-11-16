@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'bun:test';
+import { RuntimeControlError, type RuntimeControlFailure } from '@ferretry/core-ferrets/contract';
+import { ferretStanding } from '@ferretry/core-gate/contract/testing';
+import { ApiError } from '@ferretry/kernel/contract';
 import type { RuntimesAssembly } from '../../../daemon/index.ts';
-import {
-  SessionRuntimeError,
-  type FerretRuntimeSubsystem,
-  type SessionRuntimeFailure,
-} from '../../../daemon/routes/ferret-runtime.ts';
+import type { FerretRuntimeSubsystem } from '../../../daemon/routes/ferret-runtime.ts';
 import { hostRuntimes } from './support.ts';
 
-const hosted = async (runtime?: FerretRuntimeSubsystem) =>
+/** What a stub answers with: the route only restates it, so the tests need not build a whole ferret view. */
+interface Stub {
+  models(caller: string | undefined, id: string): Promise<unknown>;
+  control(caller: string | undefined, id: string, request: unknown, requestId: string): Promise<unknown>;
+}
+
+const hosted = async (runtime?: Stub) =>
   await hostRuntimes({
     catalog: {} as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],
-    runtime,
+    runtime: runtime as FerretRuntimeSubsystem | undefined,
   });
 
 describe('per-ferret runtime route mounts', () => {
@@ -19,7 +24,7 @@ describe('per-ferret runtime route mounts', () => {
     const ids: string[] = [];
     const catalog = { harness: 'codex', source: 'codex-app-server', choices: [] };
     const { host } = await hosted({
-      models: async id => {
+      models: async (_caller, id) => {
         ids.push(id);
         return catalog;
       },
@@ -56,7 +61,7 @@ describe('per-ferret runtime route mounts', () => {
       expect((await host.request('POST', path, { body, headers: { 'x-fy-request-id': 'request-1' } })).status).toBe(
         200,
       );
-      expect(calls.at(-1)).toEqual(['ferret-1', body, 'request-1']);
+      expect(calls.at(-1)).toEqual([undefined, 'ferret-1', body, 'request-1']);
     }
     expect(
       (await host.request('POST', path, { body: { action: 'effort' }, headers: { 'x-fy-request-id': 'request-2' } }))
@@ -66,7 +71,7 @@ describe('per-ferret runtime route mounts', () => {
   });
 
   it('R-0365 preserves the copied refusal status and code taxonomy', async () => {
-    const failures: readonly [SessionRuntimeFailure, number, string][] = [
+    const failures: readonly [RuntimeControlFailure, number, string][] = [
       ['invalid', 400, 'invalid_request'],
       ['not_found', 404, 'not-found'],
       ['refused', 409, 'runtime_control_refused'],
@@ -79,7 +84,7 @@ describe('per-ferret runtime route mounts', () => {
     for (const [failure, status, code] of failures) {
       const { host } = await hosted({
         models: async () => {
-          throw new SessionRuntimeError(failure, 'refused');
+          throw new RuntimeControlError(failure, 'refused');
         },
         control: async () => ({}),
       });
@@ -87,6 +92,48 @@ describe('per-ferret runtime route mounts', () => {
       expect(response.status).toBe(status);
       expect(response.json<{ code: string }>().code).toBe(code);
     }
+  });
+
+  it('hands the caller on, so Ferrets can decide who may switch whose ferret: a person is nobody, a ferret is itself', async () => {
+    const callers: (string | undefined)[] = [];
+    const hostedFerrets = await hosted({
+      models: async caller => {
+        callers.push(caller);
+        return {};
+      },
+      control: async caller => {
+        callers.push(caller);
+        return {};
+      },
+    });
+    const headers = { 'x-fy-request-id': 'r-1' };
+    await hostedFerrets.host.request('GET', '/v1/ferrets/f-2/runtime-models');
+    await hostedFerrets.host.request('POST', '/v1/ferrets/f-2/runtime', { body: { action: 'compact' }, headers });
+    hostedFerrets.as(ferretStanding('f1' as never));
+    await hostedFerrets.host.request('GET', '/v1/ferrets/f-2/runtime-models');
+    await hostedFerrets.host.request('POST', '/v1/ferrets/f-2/runtime', { body: { action: 'compact' }, headers });
+    expect(callers).toEqual([undefined, undefined, 'f1', 'f1']);
+  });
+
+  it('answers a ferret that may not touch the target with the refusal Ferrets raised, not a taxonomy of its own', async () => {
+    const { host, as } = await hosted({
+      models: async () => {
+        throw new ApiError(403, 'a ferret acts only on itself and its helpers', 'forbidden');
+      },
+      control: async () => {
+        throw new ApiError(403, 'a ferret acts only on itself and its helpers', 'forbidden');
+      },
+    });
+    as(ferretStanding('f1' as never));
+    const models = await host.request('GET', '/v1/ferrets/f-2/runtime-models');
+    expect(models.status).toBe(403);
+    expect(models.json<{ code: string }>().code).toBe('forbidden');
+    const control = await host.request('POST', '/v1/ferrets/f-2/runtime', {
+      body: { action: 'compact' },
+      headers: { 'x-fy-request-id': 'r-2' },
+    });
+    expect(control.status).toBe(403);
+    expect(control.json<{ code: string }>().code).toBe('forbidden');
   });
 
   it('R-0171 refuses unavailable assembly and invalid path parameters without guessing', async () => {

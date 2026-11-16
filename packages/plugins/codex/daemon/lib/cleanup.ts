@@ -40,6 +40,8 @@ export class CodexPickerCleanup {
     private readonly pane: CodexPickerPanePort,
     private readonly sleeper: SleepPort,
     private readonly policy: PickerCleanupPolicy = defaultPickerCleanupPolicy,
+    /** Whether a resolved pane id is one a key may be addressed to (a tmux pane id by default). */
+    private readonly addressable: (paneId: string) => boolean = isAddressablePaneId,
   ) {}
 
   /**
@@ -54,7 +56,7 @@ export class CodexPickerCleanup {
   async dismiss(session: string): Promise<PickerCleanupOutcome> {
     try {
       const paneId = await this.pane.resolvePaneId(session);
-      if (!isAddressablePaneId(paneId)) {
+      if (!this.addressable(paneId)) {
         return { kind: 'unconfirmed', reason: `tmux returned "${paneId}", which is not a pane cleanup can address` };
       }
       for (let attempts = 0; ; ) {

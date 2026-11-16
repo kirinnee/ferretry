@@ -1,3 +1,5 @@
+import { RuntimeControlError, type FerretsApi, type RuntimeControlFailure } from '@ferretry/core-ferrets/contract';
+import { ferretOf } from '@ferretry/core-gate/contract';
 import {
   ApiError,
   decodeParameter,
@@ -7,39 +9,24 @@ import {
   type CallContext,
   type RouteHandler,
 } from '@ferretry/kernel/contract';
-import { RuntimeControlRequestSchema, type RuntimeControlRequest } from '../../contract/index.ts';
+import { RuntimeControlRequestSchema } from '../../contract/index.ts';
 import { parseBody } from './body.ts';
 
 const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
-export type SessionRuntimeFailure =
-  | 'invalid'
-  | 'not_found'
-  | 'refused'
-  | 'unsupported'
-  | 'catalog_unavailable'
-  | 'conflict'
-  | 'unsettled'
-  | 'failed';
-export class SessionRuntimeError extends Error {
-  constructor(
-    readonly failure: SessionRuntimeFailure,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'SessionRuntimeError';
-  }
-}
-/** Copied runtime mount seam. PENDING(ferrets): no runtime control/catalog operations exist in FerretsPort. */
-export interface FerretRuntimeSubsystem {
-  models(id: string): Promise<unknown>;
-  control(id: string, request: RuntimeControlRequest, requestId: string): Promise<unknown>;
-}
+
+/**
+ * What these two routes serve: Ferrets' own `runtimeControl` (the model, effort and fast-mode control of a running ferret,
+ * over its harness). The route restates the caller (a ferret's token, or the admin token with a ferret behind it, or nobody
+ * for a person) and the refusals; WHO MAY SWITCH WHOSE is Ferrets' rule, applied inside the call.
+ */
+export type FerretRuntimeSubsystem = NonNullable<FerretsApi['runtimeControl']>;
+
 const unavailableFerretRuntime: FerretRuntimeSubsystem = {
   models: async () => {
-    throw new SessionRuntimeError('catalog_unavailable', 'Runtime model discovery is not connected to Ferrets yet.');
+    throw new RuntimeControlError('catalog_unavailable', 'Runtime model discovery is not offered by this Ferrets.');
   },
   control: async () => {
-    throw new SessionRuntimeError('refused', 'Runtime controls are not connected to Ferrets yet.');
+    throw new RuntimeControlError('refused', 'Runtime controls are not offered by this Ferrets.');
   },
 };
 
@@ -77,7 +64,7 @@ const unavailableFerretRuntime: FerretRuntimeSubsystem = {
  * raises it: "the harness cannot express this" is a fact about sessions, true whichever transport
  * asked, while "that is a 422" is a fact about HTTP and belongs here and nowhere else.
  */
-const REFUSALS: Readonly<Record<SessionRuntimeFailure, { readonly status: number; readonly code: string }>> = {
+const REFUSALS: Readonly<Record<RuntimeControlFailure, { readonly status: number; readonly code: string }>> = {
   invalid: { status: 400, code: 'invalid_request' },
   not_found: { status: 404, code: 'not-found' },
   refused: { status: 409, code: 'runtime_control_refused' },
@@ -98,7 +85,7 @@ const REFUSALS: Readonly<Record<SessionRuntimeFailure, { readonly status: number
 
 /** Restates a runtime refusal in the HTTP vocabulary. */
 function refuse(error: unknown): never {
-  if (error instanceof SessionRuntimeError) {
+  if (error instanceof RuntimeControlError) {
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
@@ -134,7 +121,7 @@ function requestId(context: CallContext): string {
 
 /** What this session may be switched to, as its own account advertises it. */
 async function models(subsystem: FerretRuntimeSubsystem, context: CallContext): Promise<ApiResponse> {
-  const catalog = await subsystem.models(pathFerretId(context)).catch(refuse);
+  const catalog = await subsystem.models(ferretOf(context), pathFerretId(context)).catch(refuse);
   return jsonResponse(catalog);
 }
 
@@ -142,7 +129,7 @@ async function models(subsystem: FerretRuntimeSubsystem, context: CallContext): 
 async function control(subsystem: FerretRuntimeSubsystem, context: CallContext): Promise<ApiResponse> {
   const sessionId = pathFerretId(context);
   const request = await parseBody(context.request, RuntimeControlRequestSchema);
-  const view = await subsystem.control(sessionId, request, requestId(context)).catch(refuse);
+  const view = await subsystem.control(ferretOf(context), sessionId, request, requestId(context)).catch(refuse);
   return jsonResponse(view);
 }
 
