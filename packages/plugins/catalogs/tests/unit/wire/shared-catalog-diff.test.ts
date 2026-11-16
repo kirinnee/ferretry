@@ -437,13 +437,17 @@ describe('the work one answer may spend', () => {
   });
 
   it('bounds an item of many files that each need more than the limit, by steps and not by clock', () => {
-    const [before, after] = pathological(150, CATALOG_DIFF_MAX_EDITS / 2 + 1);
-    const budget = newDiffBudget();
+    // Small on purpose: every file is over the per-file limit (so each would cost far more than the whole budget),
+    // and the budget is a 32nd of the real one, so the bound is hit after a few thousand steps and 16 files stand
+    // for 150. What is bounded is the same at any size, because the answer is bounded by the budget alone.
+    const [before, after] = pathological(16, CATALOG_DIFF_MAX_EDITS / 2 + 1);
+    const start = CATALOG_DIFF_MAX_STEPS / 32;
+    const budget = { remaining: start };
     const changes = catalogItemChanges(before, after, budget);
-    expect(changes.entries).toHaveLength(150);
+    expect(changes.entries).toHaveLength(16);
     expect(changes.entries.every(candidate => candidate.tooLarge === true)).toBe(true);
     expect(changes.truncated).toBe(true);
-    expect(CATALOG_DIFF_MAX_STEPS - budget.remaining).toBeLessThanOrEqual(CATALOG_DIFF_MAX_STEPS + 1);
+    expect(start - budget.remaining).toBeLessThanOrEqual(start + 1);
   });
 
   it('charges every line a run of equal lines walks past, not only the diagonals', () => {
