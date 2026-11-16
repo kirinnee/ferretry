@@ -824,6 +824,26 @@ describe('materialiseFleet', () => {
       should(JSON.stringify(only(result, `${HOME_B}/config.toml`))).not.containEql('projects');
     });
 
+    it('should default a machine that names no agent permissions to Skip, and materialise bypass wrappers for it', () => {
+      // Arrange — a fresh machine: nothing in `machine` names agentPermissions (a v4 home without it parses the same way)
+      const model = modelOf({
+        runtimes: {
+          'claude-agent': { credential: 'claude-you', profile: 'default', agent: true },
+          'codex-agent': { credential: 'codex-work', profile: 'default', agent: true },
+        },
+      });
+
+      // Act
+      const result = plan(model);
+
+      // Assert — the model says what ferrets really run: Skip, never Auto
+      should(model.machine.agentPermissions).equal('skip');
+      should(wrapperOf(result, 'claude-agent')).containEql(`'--permission-mode' 'bypassPermissions'`);
+      should(wrapperOf(result, 'claude-agent')).not.containEql(`'--permission-mode' 'auto'`);
+      should(wrapperOf(result, 'codex-agent')).containEql(`'-c' 'approval_policy="never"'`);
+      should(wrapperOf(result, 'codex-agent')).containEql(`'-c' 'sandbox_mode="danger-full-access"'`);
+    });
+
     it('should refuse to launch a Claude agent in Auto mode on a Claude that does not accept it (O4)', () => {
       // Act
       const result = plan(agents('auto'), { acceptsAutoPermissionMode: false });
