@@ -139,24 +139,50 @@ export function readDeclared(packageRoots: readonly string[], read: (path: strin
     entries.push(...parsed.entries);
     problems.push(...parsed.problems);
   }
-  // One path may carry two kinds (a seam that is also `oversize`), never the same kind twice, and never from two packages.
+  // One path may carry `oversize` beside ONE of composition|registry, never the same kind twice, never from two packages,
+  // and never both composition and registry: a registry row would hand a protected seam the one-line-add exemption.
   const seen = new Map<string, CompositionEntry>();
+  const guardedKind = new Map<string, CompositionEntry>();
   for (const entry of entries) {
+    const where = `${compositionFileOf(entry.owner)}:${entry.line}`;
     const key = `${entry.kind}\0${entry.path}`;
     const first = seen.get(key);
     if (first === undefined) seen.set(key, entry);
     else
       problems.push({
-        where: `${compositionFileOf(entry.owner)}:${entry.line}`,
+        where,
         message: `"${entry.path}" is already declared as ${entry.kind} in ${compositionFileOf(first.owner)}:${first.line}`,
+      });
+    if (entry.kind === 'oversize') continue;
+    const other = guardedKind.get(entry.path);
+    if (other === undefined) guardedKind.set(entry.path, entry);
+    else if (other.kind !== entry.kind)
+      problems.push({
+        where,
+        message: `"${entry.path}" is declared as both ${other.kind} (${compositionFileOf(other.owner)}:${other.line}) and ${entry.kind}: a path is one or the other, because a registry row would exempt a protected seam from the Contract change`,
       });
   }
   return { entries, problems };
 }
 
 /** The declared paths the guard watches: compositions and registries (oversize is the size check's, not this guard's). */
-export const guarded = (entries: readonly CompositionEntry[]): ReadonlyMap<string, CompositionEntry> =>
-  new Map(entries.filter(entry => entry.kind !== 'oversize').map(entry => [entry.path, entry] as const));
+export const guarded = (entries: readonly CompositionEntry[]): ReadonlyMap<string, CompositionEntry> => {
+  const map = new Map<string, CompositionEntry>();
+  for (const entry of entries) {
+    if (entry.kind === 'oversize') continue;
+    // `composition` always wins: no later kind (nor input order) may replace a seam with a weaker declaration.
+    if (map.get(entry.path)?.kind === 'composition') continue;
+    map.set(entry.path, entry);
+  }
+  return map;
+};
+
+/** The longest an `oversize` declaration may run from the day it is read: the docs promise ~45 days, then a decision. */
+export const MAX_OVERSIZE_DAYS = 45;
+const DAY_MS = 86_400_000;
+const addDays = (date: string, days: number): string =>
+  new Date(Date.parse(date) + days * DAY_MS).toISOString().slice(0, 10);
+const runDate = (): string => new Date().toISOString().slice(0, 10);
 
 /**
  * What the validator finds beyond the format: a declared path that is not a file, and a declaration that sits outside its
@@ -167,10 +193,17 @@ export function checkPaths(
   declared: Declared,
   packageRoots: readonly string[],
   exists: (path: string) => boolean,
+  today: string = runDate(),
 ): readonly CompositionProblem[] {
   const problems = [...declared.problems];
+  const latest = addDays(today, MAX_OVERSIZE_DAYS);
   for (const entry of declared.entries) {
     const where = `${compositionFileOf(entry.owner)}:${entry.line}`;
+    if (entry.kind === 'oversize' && DATE.test(entry.expires) && entry.expires > latest)
+      problems.push({
+        where,
+        message: `"${entry.path}" expires on ${entry.expires}, more than ${MAX_OVERSIZE_DAYS} days after ${today}: an oversize declaration runs at most ${MAX_OVERSIZE_DAYS} days (until ${latest}), then it comes back for a decision`,
+      });
     if (!exists(entry.path)) problems.push({ where, message: `"${entry.path}" does not exist` });
     if (entry.owner === '' && packageRoots.some(root => entry.path.startsWith(`${root}/`)))
       problems.push({
