@@ -589,6 +589,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               resolve: async id => await api.resolve(id),
               default: async () => await api.default(),
               logins: ctx.needs.logins,
+              // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
+              catalog: facts.catalog,
             }),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read
