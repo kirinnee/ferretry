@@ -211,7 +211,7 @@ function beyondEdit(candidate: AgendaCandidate, request: AddRequest, card: TaskR
     [filled(request.terms), 'terms'],
     [request.why !== request.subject, 'a reason of its own (--why)'],
     [request.howToResolve !== item.howToResolve, 'its own way to resolve it (--resolve)'],
-    [tiedElsewhere, card === undefined ? '' : `the card ${refKey(card)}`],
+    [tiedElsewhere, card === undefined ? '' : `the task ${refKey(card)}`],
     [request.offerClose === true && item.offerClose !== true, 'the Done button (--offer-close)'],
   ];
   return found.filter(([present]) => present).map(([, words]) => words);

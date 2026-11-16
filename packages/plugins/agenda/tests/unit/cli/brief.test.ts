@@ -410,9 +410,9 @@ describe('agenda brief card title and ask', () => {
   it('should refuse an add with no title, saying how to give one', () => {
     // Act + Assert
     should(() => composeAddRequest(['Approve the plan'], {})).throw(
-      'give the card a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
+      'give the item a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
     );
-    should(() => composeAddRequest(['Approve the plan'], { title: '   ' })).throw(/give the card a title/u);
+    should(() => composeAddRequest(['Approve the plan'], { title: '   ' })).throw(/give the item a title/u);
   });
 
   it('should refuse a title past the 60-character hard limit', () => {
@@ -637,7 +637,7 @@ describe('agenda brief up answer', () => {
 
 describe('agenda brief answer limit', () => {
   const refusal =
-    'a card offers at most 3 answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.';
+    'an item offers at most 3 answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.';
 
   it('should refuse more than three --option labels', () => {
     // Act + Assert
@@ -717,7 +717,7 @@ describe('a confirmation of a held configuration change (--confirms)', () => {
   it('should refuse the flags that would choose the card’s own answers', () => {
     // Arrange / Act / Assert
     should(() => add(['Allow it?'], { confirms: 'warden.yaml', kind: 'yesno' })).throw(
-      "--confirms writes the card's answers itself (Allow, Deny, Discard change): drop --kind",
+      "--confirms writes the item's answers itself (Allow, Deny, Discard change): drop --kind",
     );
     should(() =>
       add(['Allow it?'], { confirms: 'warden.yaml', option: ['a', 'b'], question: ['which?'], up: 'Skip' }),

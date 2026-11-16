@@ -85,7 +85,7 @@ export const mergeWords = (choice: MergeChoice, viewed: AgendaId): MergeWords =>
   const name = (item: AgendaItem): string => (item.id === viewed ? 'this item' : `${ASK_REFERENCE_SIGIL}${item.id}`);
   const absorbed = name(choice.absorbed);
   const survivor = name(choice.survivor);
-  const closes = `${absorbed} closes; ${survivor} keeps its ask. Both conversations and all cards are kept.`;
+  const closes = `${absorbed} closes; ${survivor} keeps its ask. Both conversations and all tasks are kept.`;
   return {
     question: `Merge ${absorbed} into ${survivor}?`,
     outcome: closes.charAt(0).toUpperCase() + closes.slice(1),

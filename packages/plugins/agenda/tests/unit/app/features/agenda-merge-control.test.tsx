@@ -136,7 +136,7 @@ describe('Merge with…', () => {
     const confirm = must(root.querySelector('[data-agenda-merge-confirm]'), 'confirm step');
     expect(confirm.textContent).toBe(
       'Merge ^A2 into this item?' +
-        '^A2 closes; this item keeps its ask. Both conversations and all cards are kept.' +
+        '^A2 closes; this item keeps its ask. Both conversations and all tasks are kept.' +
         'Keep ^A2 instead' +
         'CancelMerge',
     );
@@ -168,7 +168,7 @@ describe('Merge with…', () => {
     await click(root, 'input[type="checkbox"]');
     const words = root.querySelector('[data-agenda-merge-confirm]')?.textContent;
     expect(words).toContain('Merge this item into ^A2?');
-    expect(words).toContain('This item closes; ^A2 keeps its ask. Both conversations and all cards are kept.');
+    expect(words).toContain('This item closes; ^A2 keeps its ask. Both conversations and all tasks are kept.');
     await click(root, '[data-agenda-merge-go]');
     expect(sent).toEqual([{ survivor: 'A2', absorbed: 'A5' }]);
   });

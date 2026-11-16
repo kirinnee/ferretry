@@ -228,7 +228,7 @@ describe('agenda controller add', () => {
     const { controller, gateway } = build(SESSION);
 
     // Act + Assert
-    await should(controller.add(['approve the deploy'], {})).be.rejectedWith(/give the card a title: --title/u);
+    await should(controller.add(['approve the deploy'], {})).be.rejectedWith(/give the item a title: --title/u);
     should(gateway.read).be.empty();
   });
 
@@ -775,7 +775,7 @@ describe('agenda controller add — related work', () => {
       id: 'A3',
       title: 'pick a relay',
       state: 'needs you',
-      cards: [],
+      tasks: [],
     });
     should((failure as Error).message).containEql('--new "<why none fits>"');
   });
@@ -951,7 +951,7 @@ describe('agenda controller add — what it refuses before anything is raised', 
       .catch((error: unknown) => error);
 
     // Assert
-    should((failure as Error).message).equal('pass --task <card> or --related <card>, not both');
+    should((failure as Error).message).equal('pass --task <task> or --related <task>, not both');
     should(gateway.applied).be.empty();
   });
 

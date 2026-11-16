@@ -354,7 +354,7 @@ describe('what it needs from you', () => {
   test('gives every card ask its own heading, and the board’s How to test when the host has it', async () => {
     await draw(full, { howToTestFor: id => (id === 'F12' ? '1. Open the badge.\n2. See it is blue.' : null) });
     const ask = one('[data-agenda-card-ask]');
-    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Card &F12: your answer for the card');
+    expect(ask.querySelector('[data-agenda-card-ask-title]')?.textContent).toBe('Task &F12: your answer for the task');
     const steps = must(ask.querySelector('[data-agenda-card-ask-test]'), 'the test steps');
     expect(steps.textContent).toContain('How to test');
     expect(steps.textContent).toContain('Open the badge.');

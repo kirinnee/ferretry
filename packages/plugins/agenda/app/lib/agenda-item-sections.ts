@@ -207,7 +207,7 @@ const historyWords = (entry: AgendaHistoryEntry, ferret: string): string => {
     case 'replied':
       return 'You replied';
     case 'gate-answered':
-      return entry.note === undefined ? 'You answered a card ask' : `You answered the card ask ${entry.note}`;
+      return entry.note === undefined ? 'You answered a task ask' : `You answered the task ask ${entry.note}`;
   }
 };
 

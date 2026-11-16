@@ -3,6 +3,10 @@ import type { ReactElement, ReactNode } from 'react';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { StackPager } from './stack-pager.tsx';
 
+/** The head's style hooks: class names in the stylesheet, not words an owner reads. */
+const HEAD_CLASS = 'fy-card-head';
+const SNOOZE_CLASS = 'fy-card-head__snooze';
+
 interface CardHeadPager {
   readonly index: number;
   readonly total: number;
@@ -70,7 +74,7 @@ export function CardHead({
 }: CardHeadProps): ReactElement {
   return (
     <div
-      className={`fy-item-view__bar fy-card-head${className === undefined ? '' : ` ${className}`}`}
+      className={`fy-item-view__bar ${HEAD_CLASS}${className === undefined ? '' : ` ${className}`}`}
       data-card-head=""
     >
       {title}
@@ -97,7 +101,7 @@ export function CardHead({
             {...(snooze.now === undefined ? {} : { now: snooze.now })}
             disabled={snooze.disabled ?? false}
             onSnooze={snooze.onSnooze}
-            triggerClass={`${TIGHT} fy-card-head__snooze`}
+            triggerClass={`${TIGHT} ${SNOOZE_CLASS}`}
           />
         )}
         {menu}
