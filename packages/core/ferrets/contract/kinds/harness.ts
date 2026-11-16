@@ -135,6 +135,16 @@ export interface ConversationFinder {
   list(folder?: FencedPath): Promise<readonly FoundConversation[]>;
 }
 
+/**
+ * One conversation of the owner's own history (`~/.claude`, `~/.codex`) a harness is asked to make its own copy of:
+ * `source` is the transcript's path BELOW that history folder (`projects/<folder>/<id>.jsonl`,
+ * `sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`), never an absolute path.
+ */
+export interface ConversationImport {
+  readonly id: string;
+  readonly source: string;
+}
+
 // ─── transcript tail (U5): what the turn watch and the live readout read from a conversation ─────────────────────────
 
 /**
@@ -313,6 +323,15 @@ export interface Harness {
    * so; on `true` or `undefined` it resumes as before. Absent: every resume is attempted as asked.
    */
   hasConversation?(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined>;
+  /**
+   * Additive (shared history, copy-on-link): copies ONE conversation of the OWNER'S OWN history into this harness's shared
+   * history pool, at the same relative path, so a ferret started on it resumes the copy (`hasConversation` finds it there).
+   * The harness reads the owner's history through its own read-only `harness-history` root and writes only its own pool:
+   * the original is never written, linked or locked, and a name already in the pool is never overwritten (the answer is
+   * still `ok`: it is there). Refused, with one plain sentence, for a source that is not this harness's transcript of that
+   * id, a file too large to copy, or a harness whose pool is off. Absent: the harness cannot hold a copy.
+   */
+  importConversation?(input: ConversationImport): Promise<Result<void, { readonly reason: string }>>;
   /**
    * Additive (codex-resume-id): the conversation this ferret's LAST launch is PROVED to have written, for a harness that
    * names its own conversation after launch (Codex), so Ferrets can record it and a later resume names it. Proved means

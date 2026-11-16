@@ -625,9 +625,9 @@ test('a REAL v4 shape: provisioner, shared-history and wrapper links are left al
     // ... the harness-homes step walked the account and counted every link in it and in the shared pool, carried none ...
     const homes = stepOf(result, 'harness-homes');
     expect(homes?.status).toBe('converted');
-    expect(homes?.kept).toContainEqual({ what: 'links omitted (no v5 policy)', count: 7 });
+    expect(homes?.kept).toContainEqual({ what: 'links omitted (the v5 harness makes its own)', count: 7 });
     expect(homes?.kept).toContainEqual({
-      what: 'runtime homes copied as opaque folders (no conversation resumes from them in v5)',
+      what: 'runtime homes copied as opaque folders',
       count: 1,
     });
     expect((await filesUnder(f.to)).some(path => path.endsWith('projects/own.jsonl'))).toBe(true);

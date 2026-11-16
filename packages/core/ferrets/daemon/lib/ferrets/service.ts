@@ -26,6 +26,7 @@ import type {
   FerretEndCause,
   AskedQuestionFile,
   FerretHarness,
+  ConversationImport,
   FormKey,
   HarnessForm,
   RunnerFormCapture,
@@ -855,6 +856,23 @@ export class FerretsService implements FerretsApi {
 
   harnesses(): readonly HarnessKey[] {
     return this.ports.harnessKeys();
+  }
+
+  /** The harness's own copy of one conversation of the owner's history, in its shared pool (`Harness.importConversation`). */
+  async importConversation(
+    key: HarnessKey,
+    input: ConversationImport,
+  ): Promise<Result<void, { readonly reason: string }>> {
+    const harness = this.ports.harness(key);
+    if (harness === undefined)
+      return err({ reason: `The ${key} harness is off, so its conversation cannot be copied.` });
+    if (harness.importConversation === undefined)
+      return err({ reason: `The ${key} harness keeps no shared copy of a conversation.` });
+    try {
+      return await harness.importConversation(input);
+    } catch {
+      return err({ reason: 'The conversation could not be copied.' });
+    }
   }
 
   /** What each harness that offers any holds of past conversations; one that fails offers none. */

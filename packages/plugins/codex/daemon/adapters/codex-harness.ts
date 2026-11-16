@@ -24,12 +24,19 @@ import type {
   Started,
   StartRefusal,
 } from '@ferretry/core-ferrets/contract';
-import { historyFilesOver, materializeSkills } from '@ferretry/core-ferrets/contract';
+import { historyFilesOver, LaunchRefusal, materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
 import { settingsDocument, settingsFlags } from '../lib/settings.ts';
-import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
+import {
+  CODEX_HISTORY_ENTRIES,
+  CODEX_LAUNCH_SETTINGS,
+  CODEX_POOL_SQLITE,
+  CODEX_SETTINGS,
+  type HarnessConfig,
+  type SettingsItem,
+} from '../../contract/index.ts';
 import {
   CODEX_CONFIG_DEFAULTS,
   codexFixedArguments,
@@ -140,20 +147,24 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   };
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
-  /** `CODEX_HOME` is set by an `env` prefix: the Vault's environment is an opaque handle this code cannot add to. */
+  /**
+   * `CODEX_HOME` (and, for a pooled ferret, `CODEX_SQLITE_HOME`) is set by an `env` prefix: the Vault's environment is an
+   * opaque handle this code cannot add to.
+   */
   const command = async (
     spec: LaunchSpec,
+    executable: string,
     permissionMode: HarnessConfig['permissionMode'],
+    sqliteHome: string | undefined,
     resume?: string,
-  ): Promise<Result<readonly string[], StartRefusal>> => {
-    const location = await locate();
-    if (location.outcome !== 'located') return err('unavailable');
+  ): Promise<readonly string[]> => {
     const items = await settingsNow(spec.runtime);
-    return ok([
+    return [
       'env',
       `CODEX_HOME=${spec.home}`,
+      ...(sqliteHome === undefined ? [] : [`CODEX_SQLITE_HOME=${sqliteHome}`]),
       ...buildCodexLaunchArgv({
-        executable: location.path,
+        executable,
         settingsFlags: settingsFlags(items),
         harnessFlags: [
           ...codexPermissionArguments(permissionMode),
@@ -165,7 +176,43 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
         ...(spec.model === undefined ? {} : { model: spec.model }),
         ...(spec.effort === undefined ? {} : { effort: spec.effort }),
       }),
-    ]);
+    ];
+  };
+
+  /**
+   * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
+   * the plugin's one pool, an entry that was a real folder is moved in first, and the answer is the pool's `sqlite` folder
+   * (Codex's database of conversations, `CODEX_SQLITE_HOME`) when `sessions` is pooled too. Never a reason to refuse a
+   * launch when no leaf moved: the original history is used with one sentence. An interrupted merge refuses until retried.
+   */
+  /** Pooling is a convenience: saying so in the log can never fail a launch. */
+  const say = (message: string): void => {
+    try {
+      kernel.log.warn(message);
+    } catch {
+      /* a composition without a log says nothing */
+    }
+  };
+  const poolHistory = async (ferret: FerretId): Promise<string | undefined> => {
+    const pooled = await poolHomeHistory({ roots: kernel.roots, ferret, entries: CODEX_HISTORY_ENTRIES });
+    if (pooled.conflicts.length > 0)
+      say(
+        `Ferret ${ferret}: ${pooled.conflicts.length} file(s) it already had were kept in the pool's .conflicts folder because the shared pool already held a file of that name.`,
+      );
+    if (pooled.sentence !== undefined) say(pooled.sentence);
+    // The database indexes the rollouts: shared only with the rollouts it indexes.
+    if (!pooled.linked.includes('sessions')) return undefined;
+    try {
+      const pool = kernel.roots.historyPool();
+      const sqlite = pool.resolve(CODEX_POOL_SQLITE);
+      if (!sqlite.ok) throw new Error('the shared database path could not be placed');
+      await pool.makeDirectory(sqlite.value, { mode: 0o700 });
+      return sqlite.value;
+    } catch {
+      throw new LaunchRefusal(
+        'The shared Codex history database could not be prepared, so this ferret was not started; start it again to retry.',
+      );
+    }
   };
 
   const launch = async (
@@ -176,15 +223,17 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   ): Promise<Result<Started, StartRefusal>> => {
     // ONE read of the permission mode per launch: the argv and the record describe the same setting.
     const permissionMode = permissionModeNow();
-    const argv = await command(spec, permissionMode, harnessConversation);
-    if (!argv.ok) return argv;
+    const location = await locate();
+    if (location.outcome !== 'located') return err('unavailable');
     await ensureHome(spec);
+    const sqliteHome = await poolHistory(spec.ferret);
+    const argv = await command(spec, location.path, permissionMode, sqliteHome, harnessConversation);
     await rollouts.launched(spec, harnessConversation);
     await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =
       harnessConversation === undefined
-        ? await runner.start({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env })
-        : await runner.resume({ ferret: spec.ferret, command: argv.value, cwd: spec.folder, env }, harnessConversation);
+        ? await runner.start({ ferret: spec.ferret, command: argv, cwd: spec.folder, env })
+        : await runner.resume({ ferret: spec.ferret, command: argv, cwd: spec.folder, env }, harnessConversation);
     if (!running.ok) return running;
     // Codex mints its own conversation id after launch; Conversation finds it, so none is claimed here.
     return ok({ running: running.value, ...(harnessConversation === undefined ? {} : { harnessConversation }) });
@@ -309,6 +358,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
 
     async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
       const root = await ensureHome(spec);
+      await poolHistory(spec.ferret);
       await placeCredential(root, spec);
       // The selected skills: Skills' shared folders linked into `skills/`, the rest swept; Codex's own `.system` stays.
       await materializeSkills(root, spec.parts, CODEX_OWNED_SKILLS);
@@ -344,6 +394,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
     // A ferret converted from v4 names a conversation whose rollout was left behind: proved absent, Ferrets starts anew.
     hasConversation: async (spec, harnessConversation) => await rollouts.has(spec.ferret, harnessConversation),
+    importConversation: async input => await rollouts.import(input),
     // Codex names its conversation after launch: the one this launch provably wrote, so Ferrets records it for a resume.
     provedConversation: async ferret => await rollouts.provedConversation(ferret),
 
@@ -440,7 +491,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     /**
      * The past conversations Codex holds, as read-only trees for Conversation's index: the owner's own `~/.codex` (read in
      * place through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never
-     * followed, so a home whose history is a link into a pool lists nothing here. Nothing is written.
+     * followed, so a pooled home lists nothing itself; the pool source lists its transcripts once. Nothing is written.
      */
     async historySources(): Promise<readonly HarnessHistorySource[]> {
       const sources: HarnessHistorySource[] = [];
@@ -451,6 +502,11 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
           label: 'owner',
           files: historyFilesOver(kernel.roots.root('harness-history', { subfolder: historyHome })),
         });
+      try {
+        sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(kernel.roots.historyPool()) });
+      } catch {
+        // A composition without pooling still offers the owner's and individual homes' history.
+      }
       const homes = kernel.roots.root('agent-homes');
       const top = homes.resolve('');
       if (!top.ok) return sources;
