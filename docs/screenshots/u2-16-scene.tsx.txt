@@ -1,0 +1,61 @@
+/**
+ * u2-16 screenshot scene (side branch only, never merged): the REAL Info › Usage panel over a scripted client, with
+ * fake data only. The live read states 124,000 of 200,000 tokens (62%), so the panel says "124K of 200K tokens" and
+ * hints the exact counts on the Context row.
+ */
+import { createRoot } from 'react-dom/client';
+import { DaemonUsageStore, daemonUsagePort } from '../../app/lib/usage-store.ts';
+import { FerretUsageInfoPanel } from '../../app/shell/info-usage.tsx';
+import { fakeClient } from '../unit/app/support/client.ts';
+import { rawResponse, rawRow } from '../unit/app/support/analytics-rows.ts';
+
+const params = new URLSearchParams(window.location.search);
+document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+
+const NOW = 1_700_000_000_000;
+const client = fakeClient({
+  'GET /v1/usage/insights': () =>
+    rawResponse([
+      rawRow({
+        id: 'f1',
+        contextEndPercent: 20,
+        turns: 3,
+        inputTokens: 1_000,
+        outputTokens: 200,
+        cachedInputTokens: 160,
+        equivalentApiCostUsdMicros: 43_510_000,
+      }),
+    ]),
+  'GET /v1/usage': {
+    at: '2026-08-01T09:00:00.000Z',
+    stale: false,
+    accounts: [
+      {
+        agent: 'Marin',
+        fiveHourPercent: 42,
+        weeklyPercent: 10,
+        fiveHourResetAt: NOW + 47 * 60_000,
+        atLimit: false,
+        authOk: true,
+      },
+    ],
+  },
+  'GET /v1/ferrets/:ferretId/live': { turns: 41, contextPercent: 62, contextWindow: 200_000, contextTokens: 124_000 },
+});
+const store = new DaemonUsageStore(daemonUsagePort(client), { pollMs: 60_000, isHidden: () => true });
+
+const root = document.getElementById('root');
+if (root === null) throw new Error('no #root');
+createRoot(root).render(
+  <div style={{ width: 360, margin: 24 }} className="rounded-md border border-line bg-bg text-fg">
+    <FerretUsageInfoPanel client={client} store={store} now={() => NOW} subject="f1" />
+    <p id="hint-caption" className="px-3 pb-3 text-cell text-muted" />
+  </div>,
+);
+
+// A native tooltip never shows in a screenshot: print the Context row's real `title` under the panel instead.
+setInterval(() => {
+  const hint = document.querySelector('[data-info-row="Context"]')?.getAttribute('title');
+  const caption = document.getElementById('hint-caption');
+  if (caption !== null && hint != null) caption.textContent = `Context row hover hint (its title attribute): ${hint}`;
+}, 100);
