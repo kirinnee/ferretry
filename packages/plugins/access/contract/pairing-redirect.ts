@@ -1,9 +1,11 @@
+import { z } from 'zod';
+
 /**
  * The redirect page `fy pair --open` leaves in the state home for a few seconds, and how anything that
  * finds one afterwards recognises it as ours.
  *
- * ONE FACT, TWO PROGRAMS. The CLI creates the page and the daemon sweeps up after a CLI that was killed
- * mid-window; they share no package, so each would otherwise hold its own spelling of the directory name
+ * ONE FACT, TWO PROGRAMS. The daemon makes the page (the CLI sends it, so it is pinned in the fence before it is
+ * written) and sweeps up after a CLI that was killed mid-window; they share no package, so each would otherwise hold its own spelling of the directory name
  * and one of them would one day delete a directory the other never made, or miss one it did. The names
  * and the age live here, and `docs/pairing.md` is the prose that owns the reason.
  *
@@ -44,3 +46,22 @@ export const isPairingRedirectDirectoryName = (name: string): boolean => DIRECTO
 /** Whether a page last written at `writtenAtMs` is a leftover at `nowMs`. A future time is never stale. */
 export const isPairingRedirectStale = (writtenAtMs: number, nowMs: number): boolean =>
   nowMs - writtenAtMs > PAIRING_REDIRECT_STALE_AFTER_MS;
+
+/** The longest page the daemon will write: the real one is about 300 bytes, so this is a bound, not a budget. */
+export const PAIRING_REDIRECT_PAGE_MAX_BYTES = 4_096 as const;
+
+/**
+ * `POST /v1/pair/redirect`: the DAEMON writes the page, so it is pinned by identity before the write returns.
+ * A file the CLI's own state port makes is pinned only at the fence index's next look (within 250 ms), and this one
+ * holds a live pairing code.
+ */
+export const PairingRedirectRequestSchema = z.strictObject({
+  page: z.string().min(1).max(PAIRING_REDIRECT_PAGE_MAX_BYTES),
+});
+export type PairingRedirectRequest = z.infer<typeof PairingRedirectRequestSchema>;
+
+/** The directory the daemon made, below `pairing-redirects`; the page is {@link PAIRING_REDIRECT_FILE_NAME} inside it. */
+export const PairingRedirectResponseSchema = z.strictObject({
+  directory: z.string().refine(isPairingRedirectDirectoryName, 'not a pairing redirect directory'),
+});
+export type PairingRedirectResponse = z.infer<typeof PairingRedirectResponseSchema>;

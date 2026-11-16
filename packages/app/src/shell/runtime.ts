@@ -102,6 +102,16 @@ type Connection =
   | { readonly kind: 'refused' }
   | { readonly kind: 'connected'; readonly client: DaemonClient; readonly transport: DaemonTransport };
 
+/** Every compiled package's standing on one daemon as one string: equal strings mean no half could now answer differently. */
+function standingsKey(surfaces: readonly SurfaceEntry[], standing: (id: string) => Standing): string {
+  return surfaces
+    .map(entry => {
+      const s = standing(entry.id);
+      return s.state === 'allowed' ? `${entry.id}:allowed` : `${entry.id}:${s.reason}:${s.via ?? ''}`;
+    })
+    .join('\n');
+}
+
 export class ShellRuntime {
   readonly appVersion: string;
   readonly surfaces: readonly SurfaceEntry[];
@@ -524,12 +534,19 @@ export class ShellRuntime {
       surfaces: this.surfaces,
       ...(handler === undefined ? {} : { passkey: { daemon: paired, handler } }),
     });
-    // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks; the clients stay.
-    // It is also a re-read trigger for the machine's grants, the first read included.
+    // An inventory change (start, a reconnect, `kernel.plugins-changed`) rebuilds the halves and hooks ONLY when some
+    // package's standing moved: a re-read that answered the same keeps them, so no view remounts (a rebuilt half is a
+    // new component type to React). The clients stay either way. It is also a re-read trigger for the machine's
+    // grants, the first read included.
     this.#grants.attach(paired.daemon, client);
+    let heldStandings: string | undefined;
     client.onChange(() => {
-      this.#halves.clearDaemon(paired.daemon);
-      this.#hooks.clearDaemon(paired.daemon);
+      const standings = standingsKey(this.surfaces, id => client.standing(id));
+      if (standings !== heldStandings) {
+        heldStandings = standings;
+        this.#halves.clearDaemon(paired.daemon);
+        this.#hooks.clearDaemon(paired.daemon);
+      }
       this.#grants.refresh(paired.daemon);
       this.#changed();
     });

@@ -102,6 +102,14 @@ export default definePlugin({
         audit: SKIP_READ,
         guard: GUARD_NONE,
       }),
+      // The daemon makes `fy pair --open`'s redirect page, so it is pinned before the write returns (docs/pairing.md).
+      route('POST /v1/pair/redirect', {
+        minimum: 'admin-token',
+        caller: 'person',
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE,
+      }),
       route('GET /v1/passkeys', {
         minimum: 'operator',
         caller: 'person',

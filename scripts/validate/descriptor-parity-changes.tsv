@@ -89,6 +89,7 @@ route	GET /v1/ferrets/:ferretId/mcp	added	session routes renamed /v1/sessions/:s
 route	GET /v1/onboarding	added	new in 5.0: no table of today's to copy (design §2.3)
 route	POST /v1/onboarding/steps/:plugin/:stepId	added	new in 5.0: no table of today's to copy (design §2.3)
 route	POST /v1/onboarding/reset	added	new in 5.0: no table of today's to copy (design §2.3)
+route	POST /v1/pair/redirect	added	new in 5.0: the daemon makes the `fy pair --open` redirect page (host admin credential only, no-store) so the page that holds a live pairing code is pinned in the fence before the write returns; v4's CLI wrote it through a state port built without the pin
 route	GET /v1/runtimes/machine	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/runtimes/components	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
 route	GET /v1/runtimes/profiles	added	moved to the owning plugin's route prefix /v1/<id>/… (design §3.2); descriptor fields unchanged
