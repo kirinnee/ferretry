@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import { DaemonCallError } from '@ferretry/app';
 import { ensureDom, mount, type Mounted, runAsync, WithSlotPanels } from '@ferretry/app/testing';
 import type { EventDef } from '@ferretry/kernel/contract';
 import { ChatScreen } from '../../../../app/chat/chat-screen.tsx';
@@ -376,5 +377,199 @@ describe('the toolbar turn word, as the screen feeds it', () => {
     await waitFor(() => client.callsTo(PROMPT).length > 0, 'the read');
     await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
     expect(word(view)).toBeNull();
+  });
+});
+
+describe('the live event stream, as the screen wires it', () => {
+  const PROMPT = 'GET /v1/ferrets/:ferretId/prompt';
+  const EVENTS = 'GET /v1/events';
+
+  interface OpenedStream {
+    readonly key: string;
+    readonly params: Readonly<Record<string, string>>;
+    readonly query: Readonly<Record<string, string>> | undefined;
+    readonly listeners: { onFrame: (frame: string) => void; onClose: (reason: string, code?: number) => void };
+    closed: boolean;
+  }
+
+  /** Gives the client a socket the suite drives by hand: the journal streams opened, and the frames and closes it delivers (the composer's own draft stream is opened too, and is not listed). */
+  const withSocket = (client: FakeClient): OpenedStream[] => {
+    const opened: OpenedStream[] = [];
+    Object.assign(client, {
+      socket: (
+        key: string,
+        params: Readonly<Record<string, string>>,
+        listeners: OpenedStream['listeners'],
+        query?: Readonly<Record<string, string>>,
+      ) => {
+        const stream: OpenedStream = { key, params, query, listeners, closed: false };
+        if (key === EVENTS) opened.push(stream);
+        return {
+          send: () => undefined,
+          close: () => {
+            stream.closed = true;
+          },
+        };
+      },
+    });
+    return opened;
+  };
+
+  const liveFrame = (live: Record<string, unknown>, ferret = 'shared') =>
+    JSON.stringify({ kind: 'live', live: { sessionId: ferret, at: '2026-11-16T10:00:00.000Z', ...live } });
+  const RUNNING = {
+    compaction: { phase: 'running', startedAt: '2026-11-16T09:59:50.000Z', expectedMs: 60_000, basis: 'typical' },
+  };
+
+  const openWithToolbar = async (client: FakeClient) => {
+    const view = await mount(
+      <ConversationClientProvider client={client}>
+        <WithSlotPanels
+          slots={{
+            'ferret.toolbar': [
+              {
+                plugin: 'probe',
+                id: 'turn',
+                view: props => <TurnPanel subject={props['subject'] as string | undefined} />,
+              },
+            ],
+          }}
+        >
+          <ChatScreen params={{ ferret: 'shared' }} />
+        </WithSlotPanels>
+      </ConversationClientProvider>,
+    );
+    views.push(view);
+    return view;
+  };
+
+  test('opens the journal socket for the ferret on screen, asking for the live readout and the transcript signal', async () => {
+    const client = daemon(() => '');
+    const opened = withSocket(client);
+    const view = await open(client, 'shared');
+    await waitFor(() => opened.length > 0, 'the stream to open');
+
+    expect(opened).toHaveLength(1);
+    expect(opened[0]?.key).toBe(EVENTS);
+    expect(opened[0]?.query).toEqual({ sessionId: 'shared', live: '1', transcript: '1' });
+
+    await view.unmount();
+    views.splice(views.indexOf(view), 1);
+    expect(opened[0]?.closed).toBe(true);
+  });
+
+  test('a live frame reaches the page: the compaction chip shows, the toolbar says Compacting, and both clear with the sample', async () => {
+    const client = daemon(() => '');
+    client.on(VIEW, call => ferretSummary(call.params['ferretId'] ?? '', { state: 'working' }));
+    client.on(PROMPT, () => ({ turnState: 'working' }));
+    const opened = withSocket(client);
+    const view = await openWithToolbar(client);
+    await waitFor(() => opened.length > 0 && view.container.querySelector('[data-ferret-turn]') !== null, 'the page');
+    expect(view.container.querySelector('[data-compaction]')).toBeNull();
+
+    await runAsync(async () => opened[0]?.listeners.onFrame(liveFrame(RUNNING)));
+    await waitFor(
+      () => view.container.querySelector('[data-compaction="running"]') !== null,
+      'the compaction chip',
+      () => view.container.textContent ?? '',
+    );
+    expect(view.container.querySelector('[data-ferret-turn]')?.textContent).toBe('Compacting');
+
+    // A sample for another ferret is never this page's; one without the compaction takes it away.
+    await runAsync(async () => opened[0]?.listeners.onFrame(liveFrame(RUNNING, 'other')));
+    expect(view.container.querySelector('[data-ferret-turn]')?.textContent).toBe('Compacting');
+    await runAsync(async () => opened[0]?.listeners.onFrame(liveFrame({})));
+    await waitFor(
+      () => view.container.querySelector('[data-compaction="running"]') === null,
+      'the chip to clear',
+      () => view.container.textContent ?? '',
+    );
+    expect(view.container.querySelector('[data-ferret-turn]')?.textContent).toBe('Working');
+  });
+
+  test('a transcript frame for this ferret reads again at once; another ferret’s, and a frame it cannot read, do not', async () => {
+    let text = '[10:11:12] assistant/message: first';
+    const client = daemon(() => text);
+    const opened = withSocket(client);
+    const view = await open(client, 'shared');
+    await waitFor(() => view.container.textContent?.includes('first') === true, 'the first read');
+    const before = client.callsTo(LOG_PAGE).length;
+    const moved = (ferret: string) =>
+      JSON.stringify({ kind: 'transcript', transcript: { sessionId: ferret, at: '2026-11-16T10:00:00.000Z' } });
+
+    text = '[10:11:13] assistant/message: second';
+    await runAsync(async () => {
+      opened[0]?.listeners.onFrame(moved('other'));
+      opened[0]?.listeners.onFrame('not json');
+      opened[0]?.listeners.onFrame(JSON.stringify({ kind: 'transcript', transcript: { nope: true } }));
+    });
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 60)));
+    expect(client.callsTo(LOG_PAGE).length).toBe(before);
+
+    await runAsync(async () => opened[0]?.listeners.onFrame(moved('shared')));
+    await waitFor(() => view.container.textContent?.includes('second') === true, 'the nudged read');
+    expect(client.callsTo(LOG_PAGE).length).toBeGreaterThan(before);
+  });
+
+  test('a dropped stream is opened again after a pause; a refusal is not', async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const pauses: (() => void)[] = [];
+    // Only the stream's own five-second pause is held; every other timer runs as it would.
+    globalThis.setTimeout = ((callback: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 5_000 ? (pauses.push(callback), 0) : realSetTimeout(callback, ms, ...rest)) as typeof setTimeout;
+    try {
+      const client = daemon(() => '');
+      const opened = withSocket(client);
+      await open(client, 'shared');
+      await waitFor(() => opened.length === 1, 'the first stream');
+
+      await runAsync(async () => opened[0]?.listeners.onClose('gone', 1006));
+      expect(pauses).toHaveLength(1);
+      await runAsync(async () => pauses.shift()?.());
+      expect(opened).toHaveLength(2);
+
+      await runAsync(async () => opened[1]?.listeners.onClose('refused', 1008));
+      expect(pauses).toHaveLength(0);
+      expect(opened).toHaveLength(2);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+  });
+
+  test('a lost carrier keeps the last good view and says nothing; a refusal still says what failed', async () => {
+    let failing: Error | null = null;
+    const client = daemon(() => '[10:11:12] assistant/message: Still on screen.');
+    client.on(VIEW, call => {
+      if (failing !== null) throw failing;
+      return ferretSummary(call.params['ferretId'] ?? '', { state: 'idle' });
+    });
+    const emit = withEvents(client);
+    const view = await open(client, 'shared');
+    await waitFor(() => view.container.textContent?.includes('Still on screen.') === true, 'the first read');
+    const issue = () => view.container.querySelector('[data-session-error]')?.textContent;
+    const state = () => view.container.querySelector('[data-session-state]')?.getAttribute('data-session-state');
+
+    // The carrier dies: the call never got an answer.
+    failing = new DaemonCallError(0, 'carrier_lost', 'the carrier closed', undefined, true);
+    const reads = client.callsTo(VIEW).length;
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    await waitFor(() => client.callsTo(VIEW).length > reads, 'the read that fails');
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 60)));
+    expect(issue()).toBe('');
+    expect(state()).toBe('connected');
+    expect(view.container.textContent).toContain('Still on screen.');
+
+    // The daemon answers and refuses: that is news, and the view still stays.
+    failing = new DaemonCallError(500, 'broken', 'the daemon broke');
+    const again = client.callsTo(VIEW).length;
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    await waitFor(() => client.callsTo(VIEW).length > again, 'the refused read');
+    await waitFor(
+      () => (issue() ?? '') !== '',
+      'the issue line',
+      () => view.container.textContent ?? '',
+    );
+    expect(issue()).toContain('the daemon broke');
+    expect(view.container.textContent).toContain('Still on screen.');
   });
 });
