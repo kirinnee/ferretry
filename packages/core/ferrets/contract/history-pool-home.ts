@@ -68,7 +68,7 @@ export async function poolHomeHistory(input: {
   try {
     pool = roots.historyPool();
   } catch (error) {
-    return unpooledAll(entries, error);
+    return unpooledAll(error);
   }
   const homePath = fenced(home, '');
 
@@ -107,7 +107,7 @@ export async function poolHomeHistory(input: {
   };
 }
 
-const unpooledAll = (entries: readonly HistoryPoolEntry[], error: unknown): PooledHome => ({
+const unpooledAll = (error: unknown): PooledHome => ({
   linked: [],
   moved: 0,
   conflicts: [],

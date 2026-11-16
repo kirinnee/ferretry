@@ -1,6 +1,6 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { ConfigFileDef, ConfigPort, RootHandle, StatePort } from '@ferretry/kernel/contract';
-import { err, type Instant, ok, type Result } from '@ferretry/std';
+import { err, type Instant, type Result } from '@ferretry/std';
 import {
   CONVERSATION_CONFIG,
   type ConversationConfig,

@@ -197,7 +197,7 @@ describe('links', () => {
         linkedAt: '2026-02-02T00:00:00.000Z' as Instant,
         copied: true,
       },
-    ]);
+    ] as unknown as typeof stored.links);
     // The copy is asked of the harness for the file the computer holds, whether or not the caller asked for one.
     expect(copies).toEqual([{ id: ID, source: `.claude/projects/-work-app/${ID}.jsonl` }]);
     expect(kept).toEqual([['login-page', ID]]);
