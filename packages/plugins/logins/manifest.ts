@@ -345,7 +345,9 @@ export default definePlugin({
 
   onboarding: [{ id: 'login', title: 'Sign in', order: 30 }],
   doctor: ['logins-store'],
-  // The free usage read of a sign-in runs on this thread, so a token never exists on the daemon's (S175–S177).
+  // The free usage read of a sign-in runs on this thread: its code reads, parses and uses the token, and only facts come
+  // back. The kernel's grant service on main serves the file read and the request, so the blob and the Bearer header
+  // pass through main's heap as locals of that service, which never logs, answers or keeps them (S175–S177).
   workers: ['housekeeping'],
 
   permissions: {

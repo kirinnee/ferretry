@@ -191,6 +191,43 @@ describe('the housekeeping client', () => {
     expect(await next).toEqual(READ);
   });
 
+  test('a thread that cannot start, or refuses the post, fails the job by the fixed sentence and leaves nothing waiting', async () => {
+    const timers: { cancelled: boolean }[] = [];
+    const clock = {
+      nowMs: () => NOW,
+      after: (_delay: unknown, _fn: () => void) => {
+        const timer = { cancelled: false };
+        timers.push(timer);
+        return () => {
+          timer.cancelled = true;
+        };
+      },
+    };
+    const refused = housekeepingClient({
+      workers: {
+        start: () => {
+          throw new Error(`refused ${TOKEN}`);
+        },
+      },
+      clock,
+    });
+    const startFailure = await rejection(refused.activeUsage('claude', 'a'));
+    expect(startFailure).toBe(HOUSEKEEPING_FAILED);
+    expect(startFailure.includes(TOKEN)).toBe(false);
+    expect(timers).toEqual([]);
+
+    const worker = new ScriptedWorker();
+    worker.post = () => {
+      throw new Error('channel closed');
+    };
+    const posting = housekeepingClient({ workers: { start: () => worker }, clock });
+    expect(await rejection(posting.activeUsage('claude', 'b'))).toBe(HOUSEKEEPING_FAILED);
+    // The timer was cleared, and a late answer for the dropped job finds nothing waiting.
+    expect(timers.map(timer => timer.cancelled)).toEqual([true]);
+    worker.say({ type: 'result', id: 0, ok: true, value: READ });
+    await posting.stop();
+  });
+
   test('stop ends the thread and fails what waits; a stopped client starts nothing; stopping twice is harmless', async () => {
     const f = fixture({ terminate: async () => Promise.reject(new Error('already gone')) });
     const waiting = f.client.activeUsage('claude', 'a');

@@ -1,6 +1,8 @@
 /**
- * The daemon's end of the housekeeping worker: the free usage read of a sign-in is a JOB on one worker thread, so the
- * sign-in's token is read, sent to its provider and dropped on that thread and never exists on the daemon's.
+ * The daemon's end of the housekeeping worker: the free usage read of a sign-in is a JOB on one worker thread. The
+ * worker's code reads the sign-in, parses it and uses the token, and only facts come back. The kernel's grant service
+ * on main serves the worker's file read and its request, so the sign-in blob and the Bearer header pass through main's
+ * heap as locals of that service, which never logs, answers or keeps them.
  *
  * The thread is started on first use with exactly two grants: the `credentials` root (READ-ONLY) and the two provider
  * hosts the manifest declares. It is not a sandbox (GAP, see `WorkerStartOptions`): the repository's lints and the
@@ -102,17 +104,26 @@ export function housekeepingClient(ports: HousekeepingPorts): HousekeepingClient
     activeUsage: (harness, file) =>
       new Promise<ActiveUsageRead>((resolve, reject) => {
         if (stopped) return reject(new Error(HOUSEKEEPING_FAILED));
-        const handle = thread();
         const id = next++;
-        const cancel = ports.clock.after(milliseconds(JOB_TIMEOUT_MS), () => {
+        let cancel: (() => void) | undefined;
+        try {
+          // Starting a thread and posting to it can throw (a refused grant, a thread that just ended): that is a
+          // failed job like any other, and nothing is left waiting.
+          const handle = thread();
+          cancel = ports.clock.after(milliseconds(JOB_TIMEOUT_MS), () => {
+            waiting.delete(id);
+            reject(new Error(HOUSEKEEPING_FAILED));
+            // A read that overran may be stuck inside the thread: end it, so the next job starts a clean one.
+            void end(handle);
+          });
+          waiting.set(id, { resolve, reject, cancel });
+          const job: ActiveUsageJob = { kind: 'credential.active', harness, file, nowMs: ports.clock.nowMs() };
+          handle.post({ type: 'job', id, job } satisfies HousekeepingRequest);
+        } catch {
           waiting.delete(id);
+          cancel?.();
           reject(new Error(HOUSEKEEPING_FAILED));
-          // A read that overran may be stuck inside the thread: end it, so the next job starts a clean one.
-          void end(handle);
-        });
-        waiting.set(id, { resolve, reject, cancel });
-        const job: ActiveUsageJob = { kind: 'credential.active', harness, file, nowMs: ports.clock.nowMs() };
-        handle.post({ type: 'job', id, job } satisfies HousekeepingRequest);
+        }
       }),
     stop: async () => {
       stopped = true;

@@ -4,6 +4,7 @@
   "pendingReasons": {
     "logins": [
       "[own] GAP(logins): `fy login add --from-env` reads only the exact variable names the presets declare (`contract/preset-env-names.json`), so a provider the shell tells only through a `PREFIX_*` detect family is not detected; name it instead.",
+      "[own] GAP(logins): worker grants are served on main, so the sign-in blob and its bearer header transit the daemon's heap per read (kernel: a worker-owned read/fetch is not built)",
       "[own] the budget editor (Usage's) and v4's one-click provider form (it asks only for the key) are not ported; a tile in the provider grid opens a form that lists every variable of the preset"
     ]
   }

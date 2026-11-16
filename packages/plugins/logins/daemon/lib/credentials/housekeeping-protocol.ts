@@ -6,7 +6,7 @@
  *
  * NOTHING HERE CAN CARRY CREDENTIAL MATERIAL. A job names a store by its path inside the `credentials` root, and an
  * answer is facts: a status, an expiry, a truncated digest, a usage reading. No type in this file has a field a blob or
- * a token could travel in, and a type test holds that (`tests/unit/credentials/housekeeping-protocol.test.ts`). A
+ * a token could travel in, and a type test holds that (`tests/integration/rows/secrets-rows.test.ts`). A
  * failure is a member of {@link HousekeepingFailure}, never a caught error's message, because a JSON parser's message
  * can quote the very bytes it failed on.
  *

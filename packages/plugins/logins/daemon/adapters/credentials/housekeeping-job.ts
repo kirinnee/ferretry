@@ -3,8 +3,10 @@
  * `credentials` root and the fetch to the manifest's hosts). The worker program (`daemon/worker/housekeeping.worker.ts`)
  * only wires the real grants into this; everything it decides is here, where an integration test drives it.
  *
- * A login's token is read, used for one request and dropped inside one job, so it never exists in the main thread's
- * heap, and only facts are posted back. A job that throws is answered with a fixed word, never with what it threw.
+ * This code reads the login's sign-in, parses it, uses the token for one request and drops it inside one job, and only
+ * facts are posted back. The kernel's grant service on main serves the file read and the request, so the blob and the
+ * Bearer header pass through main's heap as locals of that service, which never logs, answers or keeps them. A job
+ * that throws is answered with a fixed word, never with what it threw.
  */
 import type { Clock, FetchPort } from '@ferretry/kernel/contract';
 import type {
