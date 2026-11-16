@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ok } from '@ferretry/std';
 import {
   ConversationIdSchema,
+  ConversationLeaseHeldError,
   ConversationLeaseStore,
   type ConversationLeaseOutcome,
   type HistoryHarness,
@@ -12,6 +13,7 @@ import {
   ConversationLeases,
   registryLeaseSessions,
 } from '../../../../daemon/lib/session/lifecycle/conversation-leases.ts';
+import type { FerretLaunchLeases } from '../../../../daemon/lib/ferrets/launch-leases.ts';
 import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { MemoryLeaseDisk } from '../../../support/daemon/memory-lease-disk.ts';
@@ -236,6 +238,64 @@ describe('a pane whose conversation cannot be held', () => {
     expect(resumed.ok).toBe(false);
     expect(f.registry.get(f.id)?.handle).toBeDefined();
     expect(f.disk.lease('claude', OLD)?.holder.session).toBe(f.id);
+  });
+});
+
+describe('a lease store that cannot answer, or a writer that arrives while the pane opens', () => {
+  const stubbed = (stub: Partial<FerretLaunchLeases>) => {
+    const f = built({ resumable: true });
+    const service = new FerretsService(f.registry, f.tokens, {
+      ...f.ports,
+      runner: () => f.runner,
+      leases: {
+        claimConversation: async () => {},
+        moveConversationToPane: async () => {},
+        release: async () => {},
+        ...stub,
+      },
+    });
+    return { ...f, service };
+  };
+
+  test('should refuse the launch, opening no pane, when whether the conversation is held cannot be checked', async () => {
+    // Arrange
+    const f = stubbed({
+      claimConversation: async () => {
+        throw new Error('the lease folder is unreadable at /secret/path');
+      },
+    });
+
+    // Act
+    const resumed = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+
+    // Assert — a plain reason, never the store's own text
+    expect(resumed).toMatchObject({ ok: false, error: { code: 'failed' } });
+    if (!resumed.ok) expect(resumed.error.reason).not.toContain('/secret/path');
+    expect(f.runner.starts).toBe(0);
+  });
+
+  test('should stop the pane and say who holds the conversation when another writer took it while the pane opened', async () => {
+    // Arrange
+    const f = stubbed({
+      moveConversationToPane: async () => {
+        throw new ConversationLeaseHeldError({
+          v: 1,
+          harness: 'claude',
+          conversation: ConversationIdSchema.parse(OLD),
+          holder: { pid: 9, session: OTHER },
+          since: '2026-11-16T09:00:00.000Z',
+        });
+      },
+    });
+
+    // Act
+    const resumed = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+
+    // Assert
+    expect(resumed).toMatchObject({ ok: false, error: { code: 'refused' } });
+    if (!resumed.ok) expect(resumed.error.reason).toContain(`session ${OTHER}`);
+    expect(await f.runner.alive('%1' as RunnerHandle)).toBe(false);
+    expect(f.registry.get(f.id)?.state).toBe('stopped');
   });
 });
 
