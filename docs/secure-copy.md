@@ -17,7 +17,7 @@ does not promise.
 
 > **State on 5.0 (units 1 and 2).** Capturing a command's stdout, a page element or a page's clipboard, the masking,
 > `secure_copy` / `secure_list` / `secure_discard` / `secure_paste`, pasting into a terminal, a page field or the secret store, the
-> owner's rules and the app's **Allow paste** card are all wired. So are the guards that keep a value out of the agent's context
+> owner's rules and the app's **Allow paste** input are all wired. So are the guards that keep a value out of the agent's context
 > even in a form the mask cannot recognise: [pages that hold a value](#pages-that-hold-a-value) are closed to an agent's read,
 > script, log, picture and text wait while the copy lives (for the agent's **HTTP action route and viewer stream** too, not only
 > its tools), a picture or script of any page whose text shows a live copy is withheld, a page's other words (a dialog, a
@@ -59,7 +59,7 @@ They are **per-needer**, and the precise rule is not "everyone but Accounts is s
   stdout to the sealing service, which stores it and never forwards it).
 - **Every other plugin** gets fresh Vault objects without `captureCommand` or `maskCopy`, and Browsers' port without `copy`.
 - `pageTakenOver` (Browsers' report that a person took a page over, which ends waiting pastes) goes to Browsers and core callers
-  only: any other plugin could only cancel cards with it.
+  only: any other plugin could only cancel inputs with it.
 
 ## Capturing
 
@@ -201,13 +201,13 @@ Masking cannot take back what the agent already read. So a capture says, honestl
   protected**: the agent is told so in plain words and should tell the owner to rotate it. `clean` means
   it was not found in what was read; `unknown` means the transcript could not be read. **GAP on 5.0:** Ferrets publishes no
   transcript FILE to search, so every capture answers `unknown`, never `clean`; and `unknown` is treated as exposed: **no rule
-  pastes it unasked** (the owner is asked on a card), and an `unknown` copy is never green: its card is **amber** and says
+  pastes it unasked** (the owner is asked on an input), and an `unknown` copy is never green: its input is **amber** and says
   "Ferretry could not check whether the ferret already saw this value, so it may not be protected; consider rotating it if it
   matters." It says what is not known and never claims that anything leaked.
 - **`exposure.pageReadBeforeCapture`**: the agent read, screenshotted or evaluated that very document of the
   page before the copy, so the value may be in its context already. **Not built yet:** recording each such act inside the
   page's queue. **Until then it is not recorded, so a page copy always says `true`: the agent MAY have read the page** (the
-  conservative answer, and the one under which no rule pastes it unasked). Its card is **amber** too ("The ferret may have read
+  conservative answer, and the one under which no rule pastes it unasked). Its input is **amber** too ("The ferret may have read
   this value on the page before it was sealed, so it may not be protected"), for the same reason: confidentiality was never established.
 
 The agent instruction teaches the rule that makes this work: **capture before you read**.
@@ -216,42 +216,42 @@ The agent instruction teaches the rule that makes this work: **capture before yo
 
 `secure.paste` names a handle and where it goes: a terminal the agent opened, one field on a page the agent
 opened (`{ kind: "browser", name, ref | selector }`), or the secret store. The daemon raises an **input request** whose
-value comes from the copy (`InputRaise.source`), so the card, the daemon-observed destination facts,
+value comes from the copy (`InputRaise.source`), so the input, the daemon-observed destination facts,
 `observedDigest`, the single guarded write, the quarantine and the audit are all the input bridge's own
 ([input requests](input-requests.md)):
 
-- **A paste is always a `secret`**, whatever the agent said, and its card says what is pasted and where it
+- **A paste is always a `secret`**, whatever the agent said, and its input says what is pasted and where it
   came from: "Allow pasting sealed:vercel (40 characters from gh) into the terminal. You type nothing."
 - **The owner allows it; there is nothing to type.** The deliver body is `{ sealed: true }`: it names no copy
   and no value, and the daemon pastes the copy the REQUEST names. A typed value or a saved login on a paste
-  card is refused, and so is `sealed` on an ordinary card. `fy input answer ^A7` allows it at the machine
-  (no prompt, so it also works from a pipe); the app's card shows **Allow paste** and no field.
-- **A card is for ONE capture.** It pins the copy's `capturedAt` (a capture is always later than the copy its name held
+  input is refused, and so is `sealed` on an ordinary input. `fy input answer ^A7` allows it at the machine
+  (no prompt, so it also works from a pipe); the app's input shows **Allow paste** and no field.
+- **An input is for ONE capture.** It pins the copy's `capturedAt` (a capture is always later than the copy its name held
   before), and the write opens the copy only if that capture still holds the name. A copy discarded and captured again under
-  the same name while the card waits is another value: allowing the old card ends it as `copy_gone`, typing nothing.
-- **The card shows what the daemon saw, never the value**: the handle, how many characters and what kind of source ("40
+  the same name while the input waits is another value: allowing the old input ends it as `copy_gone`, typing nothing.
+- **The input shows what the daemon saw, never the value**: the handle, how many characters and what kind of source ("40
   characters · what a command printed"), where it came from, where it goes and, for a page, the field's observed type and
   name with the ferret's own label kept apart as the claim it is. A paste that **replaces** a secret says so in its own
   box, and its approval is a destructive button ("Replace secret"). The generic "typing is hidden" line is not repeated on a
-  paste card: it says once that you type nothing.
+  paste input: it says once that you type nothing.
 - **The copy is opened once, at the write**, after every check that can refuse without typing. A copy that
-  was discarded or expired since the card was raised ends the request as `copy_gone`, with nothing typed;
+  was discarded or expired since the input was raised ends the request as `copy_gone`, with nothing typed;
   so does a paste still waiting when the daemon restarts, because a restart forgets every copy. A copy with
   a line break or a control character is refused for a terminal ("this would press keys").
 - **Risk flag**: as for any terminal secret, and never green when the ferret had already seen the value
   ("The ferret saw this value before it was sealed, so it is not protected; consider rotating it.") or when it may have
   (a transcript that could not be searched, a page it may have read first: amber, "may not be protected").
-- **Into a page field** it is one field of the input bridge's page request: the card says "into a field on
+- **Into a page field** it is one field of the input bridge's page request: the input says "into a field on
   <host>", the daemon observes the field and the page's origin, the write is the bridge's own guarded one, and
   the page is held afterwards like any typed secret (pictures refused while held). It needs the `browser`
   switch, as any page tool does, and allowing it from a device needs `browser.use` too. A rule for
-  `browser:<origin>` names the TOP page, so it pastes unasked only where the card would be green for every field:
+  `browser:<origin>` names the TOP page, so it pastes unasked only where the input would be green for every field:
   a visible, uncovered password field of that page itself (not a frame from another site), on https, with no
-  challenge showing. Anything the card would flag waits for the owner.
+  challenge showing. Anything the input would flag waits for the owner.
   **The protection is installed in the write's own turn, before the first byte**: the target observes the page's host and every
   frame's origin first, THEN repeats the copy-live and takeover check as the last thing awaited, and the Vault repeats the
   copy check synchronously once more right before the protection (a copy discarded, expired or captured again in between ends
-  the card as `copy_gone` with nothing typed); the protection is bound to the capture the card is for (`capturedAt`), so it can
+  the input as `copy_gone` with nothing typed); the protection is bound to the capture the input is for (`capturedAt`), so it can
   never reopen another capture under the name. Accounts closes the origins and masks the value there, and a destination that cannot be protected (an
   origin that cannot be read, a frame that cannot be told, a terminal whose masks are full) is **refused with nothing typed**. It
   is never lifted for a write that failed or may have landed (the page may hold the value). It then lasts for the copy's life, as
@@ -262,17 +262,17 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   ferret's own page, nobody holding it). The Vault asks again at the raise and **again right before the write**, through the
   `input.secure-copy` hook Accounts provides, and a third time **inside the destination page's queue, immediately before the
   write** (the last thing asked, after the copy was opened and the attempt journalled and the page held: a person can take a
-  page over in any of those gaps, and nothing looked at earlier can see it). A paste card that is waiting when a person takes
+  page over in any of those gaps, and nothing looked at earlier can see it). A paste input that is waiting when a person takes
   the page over is **refused at once** (Browsers tells the Vault of the takeover, and the Vault ends every waiting paste into
-  that page as `refused`/`taken_over`, closing its card and telling the ferret), and one that is allowed anyway ends
+  that page as `refused`/`taken_over`, closing its input and telling the ferret), and one that is allowed anyway ends
   `refused` (`taken_over`) at the check; both type nothing, whether the owner or a rule would have allowed it. A takeover
   caught before the copy was opened (the raise, the proactive refusal, the check at the open) never opens it; one caught only
   at the last check inside the page's queue has already opened it into the daemon's memory, and still types nothing. The
-  same turn also asks whether **the copy is still live and still the capture the card was raised for**. That live-copy check at
+  same turn also asks whether **the copy is still live and still the capture the input was raised for**. That live-copy check at
   the write is enforced by exactly three destinations, each inside its own serialized turn right before it commits: a page
   (its queue), a terminal (just before its guarded write) and a named secret (the store's write turn, see below). A copy
   discarded, expired or captured again while the attempt was journalled, the page held or the write queued ends `cancelled`
-  (`copy_gone`), nothing typed, and no value is returned to anyone to decide it (the daemon's own record of the capture answers). The app settles the card (refreshes it and takes Allow away) instead of offering another try. After a handback
+  (`copy_gone`), nothing typed, and no value is returned to anyone to decide it (the daemon's own record of the capture answers). The app settles the input (refreshes it and takes Allow away) instead of offering another try. After a handback
   the ferret raises it again.
 - **Audit**: `input.delivered` with `source: sealed` and the copy's name, never the value. Each tool call is one `agent.tool`
   record with the copy's length, the transcript answer, the program's base name and which route (never the value).
@@ -287,7 +287,7 @@ without ever reading it. It is the same input request, with the store as the des
   other secrets in Settings or with `fy secret set`.
 - **The daemon observes the store, never a value**: the name and whether it exists. A new name is green; an
   existing one is amber ("This replaces the value the secret holds now; the old value is gone for good.").
-  If the name appeared or went between the card and the write, the write is refused as `target_changed`
+  If the name appeared or went between the input and the write, the write is refused as `target_changed`
   and nothing is stored. The check and the write are one turn of the store's own, which every writer shares
   (the secrets routes, an import, an MCP sign-in refresh), so nothing lands between them and no write is lost.
   A full or unreadable store refuses before writing, so nothing is uncertain and a rule's use is given back.
@@ -308,7 +308,7 @@ without ever reading it. It is the same input request, with the store as the des
   scrollback. Revoke the old credential when you replace it.
 - **A paste is the only way a ferret writes the store.** The secrets routes (`POST /v1/secrets`,
   `DELETE /v1/secrets/:name`, saved logins, copy-in and copy-out) refuse a ferret outright, so `fy secret set`
-  from inside a ferret is answered with a sentence pointing here, and the owner's card is the only way in.
+  from inside a ferret is answered with a sentence pointing here, and the owner's input is the only way in.
   The owner's own `fy` at a shell and the app's secret form are not refused. The refusal reads the caller
   the daemon derived, so it holds against an honest or confused agent; one that forges its identity is the
   per-session token work, separately ([secrets](secrets.md) threat model).
@@ -348,30 +348,30 @@ profile on`) is listed for every paired device under Settings › Secure copy �
   one (`DELETE /v1/copy-rules/stages/:stage`) are narrowing routes: they ask the grant and a proven device, never a
   passkey, whatever "ask again for each act" says.
 - **Matching** runs on what the DAEMON observed: the program the copy was captured from, and the program
-  reading the terminal as the KERNEL proves it (`program` in the card's facts: the one program every process of the
+  reading the terminal as the KERNEL proves it (`program` in the input's facts: the one program every process of the
   terminal's foreground group runs, in line mode: [who reads the terminal](input-requests.md#who-reads-the-terminal)). The name
   `ps` or tmux shows is never enough: a ferret's shell can call itself `vercel` (`printf vercel > /proc/$/comm`),
   so a terminal whose program is not proved matches no rule and the owner is asked. A match
-  pastes at once, still as one guarded write, with the card raised and closed so it shows in the log, and the
+  pastes at once, still as one guarded write, with the input raised and closed so it shows in the log, and the
   audit actor is the rule. A rule's use is taken synchronously, so two pastes can never both spend its last
-  use. A write that typed nothing gives the use back and leaves the card for the owner; a write that may have
+  use. A write that typed nothing gives the use back and leaves the input for the owner; a write that may have
   typed (uncertain) spends it. A use is recorded in memory even when the rules file cannot be written.
-- **Only where typing is hidden.** Nobody sees the card of a pre-approved paste, so a rule pastes unasked only
-  into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the card
+- **Only where typing is hidden.** Nobody sees the input of a pre-approved paste, so a rule pastes unasked only
+  into a terminal with echo off (or a page's password field). Anywhere the value would show on screen, the input
   waits for the owner even under a matching rule.
 - **Never a copy the ferret saw, or may have.** A copy whose value was in the ferret's transcript is not protected, and one
   whose transcript could not be searched (`unknown`) or whose page the ferret read first (`pageReadBeforeCapture`) may be, so
-  its paste always waits for the owner; the card says so for a copy it was `found` in.
+  its paste always waits for the owner; the input says so for a copy it was `found` in.
 - **A program run by its path never matches.** A rule names a bare program (`gh`), the one the daemon's PATH
   finds. A copy captured from `./gh` or `/tmp/x/gh` keeps that path as its source, because it may be a file the
   ferret made to print a value of its choosing, so no rule matches it and the owner is asked.
-- **The card names the file that printed it (GAP on 5.0: not yet).** The design: the child runner finds the program once, on
-  the command's own PATH, runs that very file, and the copy records its path (`from.path`), so the card, `fy input answer` and
+- **The input names the file that printed it (GAP on 5.0: not yet).** The design: the child runner finds the program once, on
+  the command's own PATH, runs that very file, and the copy records its path (`from.path`), so the input, `fy input answer` and
   `fy copy ls` show WHICH `gh` printed the value. The Vault's runner locates no program yet, so a command copy has no path and
   matches no rule; what follows describes the check the rule makes once a path exists. A program given by a path is walked on the disk itself, every `..` and symlink as the kernel takes
   them, so neither a symlinked folder nor a link inside the path can point it at another file. A rule matches the
   bare name only for a program the daemon found AND that this account cannot change. It is `replaceable` (and every
-  paste of it asks the owner, whose card shows the path) when any part of its path, or of the real file behind it,
+  paste of it asks the owner, whose input shows the path) when any part of its path, or of the real file behind it,
   up to `/`, is OWNED by the account the daemon and every ferret run as, or is a folder anyone may write without the
   sticky bit. Ownership, not permission bits: an owner can `chmod` its way back in. EVERY hop is checked: the path is
   walked one part at a time as the kernel walks it, so a root-owned link that points through a link the account
@@ -387,14 +387,14 @@ profile on`) is listed for every paired device under Settings › Secure copy �
   anything, and a rule for one matches whatever arguments the ferret gives it.
 - **The secret store is never written by a rule** unless that rule names the exact secret NAME: `secret:<NAME>`
   has no pattern and no wildcard, so a rule for `VERCEL_TOKEN` never writes `VERCEL_TOKEN_2`.
-- **A plan**: `secure.preapprove` raises ONE card listing the pastes the agent plans, each with its route and
+- **A plan**: `secure.preapprove` raises ONE input listing the pastes the agent plans, each with its route and
   the agent's reason (shown as its words). The owner allows some or all with `fy plan approve <id> 1 3`
   (`fy copy plan approve` is the same command; none declines; it stages and waits for the passkey in the app like any
-  plan), or ticks them on the card, a permission card whose own Allow and Decline answer it (the
+  plan), or ticks them on the input, a permission input whose own Allow and Decline answer it (the
   generic agenda answer is refused). Each allowed item becomes a rule for that session allowing one paste until
-  the plan's expiry, which the card states (two hours by default, a day at most: a longer route is the owner's to add as a
-  rule). Two answers arriving together make the rules once. Closing the card approves nothing. A paste plan is now a
-  [task plan](#task-plans) of paste lines only, answered the same way: allowing any line needs the plan's bound
+  the plan's expiry, which the input states (two hours by default, a day at most: a longer route is the owner's to add as a
+  rule). Two answers arriving together make the rules once. Closing the input approves nothing. A paste plan is now a
+  [sign-in plan](#sign-in-plans) of paste lines only, answered the same way: allowing any line needs the plan's bound
   passkey (owner ruling on !A244), and the old one-step `POST …/copy-plans/:pid/approve` only declines now (a tick is
   `409 needs_passkey`).
 - **A plan's rules live in memory only.** They are kept apart from the owner's own rules, never written to the rules
@@ -405,18 +405,20 @@ profile on`) is listed for every paired device under Settings › Secure copy �
   `fy copy rules`) and the profile-targets setting: routes, counts and one switch, never a value. These stay on disk
   across a restart. One that cannot be read is NO rules: every paste then asks the owner.
 
-### Task plans
+<a id="task-plans"></a>
 
-> **The app draws the plan card, and the daemon reports `task-plan.1`.** The daemon raises, resolves, stages,
-> approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the card
-> (`packages/pwa/src/features/secure-copy/task-plan-card.tsx`) and the shared matcher fills under an approved line
-> ([input requests › Task plan fills](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance)).
-> The agent tool `task_plan` is NOT listed in MCP on 5.0 yet (it returns after merge, M2); once it is, the owner answers with `fy plan` (R3a-3) or on the card.
-> `secure.preapprove` still raises paste-only task plans. An app that doesn't know `task-plan.1` draws a plan with
-> paste lines as the old copy-plan card; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
+### Sign-in plans
+
+> **The app draws the sign-in plan, and the daemon reports `task-plan.1`.** The daemon raises, resolves, stages,
+> approves and revokes plans (`packages/daemon/src/lib/task-plans/`); the app shows the input
+> (in the Accounts app, `packages/plugins/accounts/app/features/secure-copy/`) and the shared matcher fills under an approved line
+> ([input requests › Sign-in plan fills](input-requests.md#sign-in-plan-fills-a-sign-in-the-owner-approved-in-advance)).
+> The agent tool `signin_plan` is NOT listed in MCP on 5.0 yet (it returns after merge, M2); once it is, the owner answers with `fy plan` (R3a-3) or on the input.
+> `secure.preapprove` still raises paste-only sign-in plans. An app that doesn't know `task-plan.1` draws a plan with
+> paste lines as the old copy-plan input; on a daemon of this build its Allow is refused (`409 needs_passkey`), and its
 > Decline still works.
 
-A task plan widens the paste plan. One card holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
+A sign-in plan widens the paste plan. One input holds up to 10 lines, each with 1–5 uses (1 by default), for 2 hours
 by default (5 minutes to 1 day). A line is one of three kinds:
 
 - a **sign-in** (`kind: sign-in`): Ferretry types an account's username and password on a page, and a code only
@@ -430,7 +432,7 @@ The rules the contract fixes:
 
 - **A line names only what the owner saved.** That is a sign-in id (`si_…`), or a host or `tool@host` the owner
   already saved, as a lookup key. A line never carries an origin, a URL, a program path or a value. Two lines for
-  one sign-in are refused. The daemon resolves each line against Accounts and draws the card from what it found.
+  one sign-in are refused. The daemon resolves each line against Accounts and draws the input from what it found.
 - **The owner only narrows.** They tick lines and pick one of the daemon's candidate accounts (needed when there
   are two or more). They tick codes only where the ferret asked for them and the account can make them. They can't
   raise uses, lengthen the plan or add a field (`taskPlanSelection`). One account can be ticked on only one line, even when one
@@ -446,18 +448,18 @@ The rules the contract fixes:
   on !A244): any ticked line, paste or sign-in, is staged and bound.
 - **The ferret learns nothing about secret fields.** Its view (`taskPlanAgentView`) has each line's state, the
   picked account's name and uses left. It has no `can`, `history`, flags, reasons or code tick. When a plan doesn't
-  fill a card, the ferret gets one sentence for every reason. The owner's card gets the reason as a fixed sentence
+  fill an input, the ferret gets one sentence for every reason. The owner's input gets the reason as a fixed sentence
   (`grantMissLine`).
-- **The old tool keeps working.** `secure.preapprove { items }` reads as a task plan of one-use paste lines
+- **The old tool keeps working.** `secure.preapprove { items }` reads as a sign-in plan of one-use paste lines
   (`taskPlanCallOf`). Its answer is projected back to the old plan shape (`copyPlanOf`). An old item number is
   never a line number: `taskPlanLineOfCopyItem` maps it back, so "approve item 0" can't land on a sign-in line.
-- **The app ships first.** An input card a plan fills carries a `plan` actor and a `preapproval` note, and an
+- **The app ships first.** An input a plan fills carries a `plan` actor and a `preapproval` note, and an
   older app's strict parse refuses them. So the daemon reports `task-plan.1` only because the app draws the plan
-  card; a machine whose daemon doesn't report it gets today's copy-plan card and no fills.
+  input; a machine whose daemon doesn't report it gets today's copy-plan input and no fills.
 
-#### The plan card in the app
+#### The sign-in plan in the app
 
-The card is drawn only from the `taskPlan` ref the daemon sets on the agenda item (`AgendaItem.taskPlan`), never from
+The input is drawn only from the `taskPlan` ref the daemon sets on the agenda item (`AgendaItem.taskPlan`), never from
 a ferret's words: a plain item with the same text is a plain item.
 
 - **Lines, grouped by account.** Each line says what it does and for how many uses, with the ferret's reason small
@@ -466,35 +468,35 @@ a ferret's words: a plain item with the same text is a plain item.
   amber. Ticking the automatic 2FA code is red with the login-code warning; the tick is hidden when the ferret didn't
   ask for a code, hidden until an account is picked on a picker line, and disabled ("No automatic codes for this
   account") when the picked account can't make them. A disabled Allow says why ("Tick at least one line…").
-- **"You'll still be asked."** Every plan card lists what a plan never covers, from the one protocol list a rule sheet
+- **"You'll still be asked."** Every sign-in plan lists what a plan never covers, from the one protocol list a rule sheet
   shares (`stillAskedFor('plan')`): push approvals, security keys and passkeys, captchas, sign-ins not in Accounts or
   through another account, a paste that would replace a secret the store already holds, ssh, scp, npm or docker login,
   gh and any program but `sudo`, `su` and `doas`, SMS and email codes, and anything after a line stopped.
-- **The honest-client line**, on every plan card: "This stops misuse through a ferret's tools and page text; it can't
+- **The honest-client line**, on every sign-in plan: "This stops misuse through a ferret's tools and page text; it can't
   stop a ferret that reads Ferretry's own files."
 - **The passkey.** A sign-in tick asks the daemon to stage the selection, then runs the `approve-task-plan` passkey bound
   to that stage. The dialog lists the DAEMON's `summary` lines under "This approves exactly:", never text a ferret
   wrote. Dismissing the passkey drops the stage (`DELETE …/approval/:stage`); nothing is approved.
-- **Staged at the machine.** A selection `fy plan approve` made shows on the same card as "Asked at the machine by
+- **Staged at the machine.** A selection `fy plan approve` made shows on the same input as "Asked at the machine by
   `fy` at HH:MM: lines 1, 3. If you didn't just run this, Deny." with _Confirm with passkey_ and _Deny_, and every warning the
   ticked lines would carry (root, no history, a code). The list is the daemon's own summary of that stage. Only a stage
   the machine made is shown this way. A merged passkey prompt (several acts at once) never claims to cover "exactly
   what is listed, once": only a prompt bound to one act says so.
 - **Approved, settled, stopped.** An approved line shows its uses left and when it ends, with _Revoke_ per line and
-  for the plan. A plan that is declined, expired, revoked or ended says so in one line. The approved card and Settings name the account
-  each line was approved for and flag a ticked code; every settled card keeps the honest-client line, and "Answered at"
+  for the plan. A plan that is declined, expired, revoked or ended says so in one line. The approved input and Settings name the account
+  each line was approved for and flag a ticked code; every settled input keeps the honest-client line, and "Answered at"
   is the time the owner answered.
-- **A device without `secrets.use`** can't read the plan: the card says so once, stops retrying, and keeps the paste-plan
-  card for the item's `copyPlan`.
+- **A device without `secrets.use`** can't read the plan: the input says so once, stops retrying, and keeps the paste-plan
+  input for the item's `copyPlan`.
 - **At the machine, `fy plan ls`** prints each line with the same flags under it, in the protocol's words: a terminal
   line's root (`taskPlanRootWords`, "this gives the ferret root on kirin-box"), a code the ferret asked for
   (`AUTOMATED_CODE_WARNING`, said as "with --totp N: …" while the line waits) and a first fill
   (`TASK_PLAN_FIRST_FILL_WORDS`), then the honest-client line. `fy plan approve <id> <lines> --totp N` ticks a code
   only with `--i-understand-one-factor`, the same rule and words as `fy rules` (`AUTOMATED_CODE_ACK_WORDS` is its
   help); either flag without the other is refused before anything is read.
-- **Settings › Secure copy › Task plans** lists the live plans with the same revoke. **A link opens a card:**
+- **Settings › Secure copy › Sign-in plans** lists the live plans with the same revoke. **A link opens an input:**
   `<app>/#agenda/<id>?session=<sid>` (printed by `fy plan approve`, and opened by `--open`) goes to that agenda item on
-  the machine that runs the session. The fragment never reaches a daemon; it only picks the card.
+  the machine that runs the session. The fragment never reaches a daemon; it only picks the input.
 - **Names come from the secrets-gated routes only.** Account labels and usernames reach the app through the plan
   routes, which also need `secrets.use`; a device denied the accounts sees none of them.
 
@@ -506,19 +508,19 @@ a ferret's words: a plain item with the same text is a plain item.
   the owner's own default for the project, folder or site preselected (never the ferret's hint) or nothing. A line is
   `unavailable` when it is not in Accounts, signs in through a provider ("ClickUp via Google"), or is a terminal tool
   other than `sudo`, `su` or `doas`. Two lines that resolve to one sign-in, or a sign-in of the other kind, are
-  refused with no card. The ferret's reason is masked by the vault redactor before it is kept, shown or audited.
+  refused with no input. The ferret's reason is masked by the vault redactor before it is kept, shown or audited.
   At most 3 plans wait and 3 are in force per session, and a session raises at most 6 an hour. A proposal takes its
   place against these caps before it awaits anything, so proposals sent together can't all pass; a refused one gives
   its place back.
-- **One card, raised only by the daemon.** The card carries the `taskPlan` ref (and the paste-plan ref when the plan
+- **One input, raised only by the daemon.** The input carries the `taskPlan` ref (and the paste-plan ref when the plan
   has paste lines, so an older app answers those as it always did). A ferret's agenda add has no field for either,
-  and the agenda refuses a plain answer to the card (`use_input_form`): only the plan routes answer it. Every card
+  and the agenda refuses a plain answer to the input (`use_input_form`): only the plan routes answer it. Every input
   says: "This stops misuse through a ferret's tools and page text; it can't stop a ferret
   that reads Ferretry's own files."
 - **Stage, passkey, commit.** `POST /v1/ferrets/:ferretId/task-plans/:planId/approval` with the ticks and picks. Nothing
   ticked declines the plan, at once and with no passkey. Any ticked line, a paste line included (owner ruling on
   !A244), is STAGED (`201`, `{ stage: "tps_…", summary, expiresAt }`): the daemon snapshots its pins from Accounts now (a
-  sign-in removed, moved to another account or with other login domains than the card showed is refused) and holds
+  sign-in removed, moved to another account or with other login domains than the input showed is refused) and holds
   the canonical bytes for 2 minutes. One stage per plan: a new one drops the old. The app runs the passkey for
   `approve-task-plan` with the stage as its subject (`POST /v1/step-up/options` binds the challenge to that
   stage's subject; an unknown or finished stage is `404 stage_not_found`), then sends
@@ -528,20 +530,20 @@ a ferret's words: a plain item with the same text is a plain item.
   and its sign-in grants are made together, or the plan stays pending. No device with a passkey: `409
 passkey_required` ("Add a passkey in Settings › Security first"); only declining works without one.
 - **At the machine.** `fy` stages the same way, then `POST …/approval/:stage/confirm-in-app` shows the selection on
-  the plan's OWN card (`machineStage`) for the passkey in the app; no second card is raised. Only a stage the machine
+  the plan's OWN input (`machineStage`) for the passkey in the app; no second input is raised. Only a stage the machine
   made can be shown this way, so "Asked at the machine" is always true; a paired device commits its own stage directly. `GET …/approval/:stage`
   answers `waiting`, `approved`, `denied` or `expired`, and carries `codes`: the staged lines that also type the
   6-digit code, so the app's red code warning never depends on the (clipped) summary text. The machine reads and drops only the stages it made; a
   paired device, where the passkey lives, answers any. `DELETE …/approval/:stage` drops one, approving nothing.
 - **Revoke, one tap, no passkey.** `POST …/task-plans/:pid/revoke` with `{ lines }` ends those lines, or every line
   with none; a plan still waiting is declined whole. Its pastes and grants go at once. A plan also ends at its
-  expiry and when its session ends, its card closed. Plans live in RAM: a restart forgets them, their pastes and
+  expiry and when its session ends, its input closed. Plans live in RAM: a restart forgets them, their pastes and
   their grants. No route edits a plan; more lines are a new plan.
 - **Owner only, twice.** Every plan route is `caller: 'person'`, so a ferret's session credential is refused
   `owner_only` before a body is read; the service refuses an agent caller again. `GET /v1/task-plans` and
   `GET …/task-plans/:pid` are the owner's reads. A plan names your accounts (labels, usernames, places), so every
   route that answers a plan or a stage's summary also needs `secrets.use`, as `GET /v1/accounts` does.
-- **The kept paste-plan routes** answer from task plans: `GET /v1/copy-plans` lists the waiting plans with paste
+- **The kept paste-plan routes** answer from sign-in plans: `GET /v1/copy-plans` lists the waiting plans with paste
   lines, as paste plans of those lines only, and `POST …/copy-plans/:pid/approve { items }` reads each item through
   `taskPlanLineOfCopyItem`. An item a plan doesn't have is `400`; a sign-in line can never be ticked this way.
 - **Audit, never a value.** The service writes `security.changed` itself: `task-plan-raised` (one record per line:
@@ -554,13 +556,13 @@ passkey_required` ("Add a passkey in Settings › Security first"); only declini
 > This stops a ferret putting the password anywhere else, or granting itself a rule, through Ferretry. It can't stop a
 > ferret that reads Ferretry's own files, and any ferret may use this sign-in while the rule lasts.
 
-That is `SIGN_IN_RULE_HONEST_LIMIT`, verbatim, the honest-client line of every rule. A rule is one owner-signed permission to fill one sign-in for any ferret until it ends; its sheet, card and Settings list
+That is `SIGN_IN_RULE_HONEST_LIMIT`, verbatim, the honest-client line of every rule. A rule is one owner-signed permission to fill one sign-in for any ferret until it ends; its sheet, input and Settings list
 are described in [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules). On this screen: the sheet
 starts with nothing ticked when a ferret suggested it, the code needs its own red acknowledgement and is never carried
 over on resume or renew, a terminal rule is password-only with the root warning, and approving always asks for the
-passkey. The owner's input card a rule filled says "Filled under your standing sign-in rule on <site>." (the same
-`grantFilledLineFor` sentence a plan fill's history uses); its agenda card closes in a tap fill's words, because every
-ferret can read every agenda. A rule that did not apply shows one plain line on the owner's card and none on the
+passkey. The owner's input a rule filled says "Filled under your standing sign-in rule on <site>." (the same
+`grantFilledLineFor` sentence a plan fill's history uses); its agenda item closes in a tap fill's words, because every
+ferret can read every agenda. A rule that did not apply shows one plain line on the owner's input and none on the
 ferret's.
 
 ## Programs in your own profile
@@ -587,7 +589,7 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
   profile does not name is never matched. The write itself checks again that the same profile program, by name and
   by store file, still holds the terminal, or nothing is typed. Names are judged in any case: a rule for `Sudo` is
   a rule for sudo.
-- **What it never allows:** a program proved through your profile earns no green card, no short lock and no one-tap
+- **What it never allows:** a program proved through your profile earns no green input, no short lock and no one-tap
   saved login; it only lets a rule you wrote match. The proof is the daemon's own and is never sent to the app.
 - **Who may turn it on:** the owner only, and only with a passkey bound to what it widens (secrev-1334 M2, under
   !A244), from every caller, the machine included. Turning it on is **staged** (`POST /v1/copy-rules/settings/stages`,
@@ -612,7 +614,7 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
   kept as `security.changed` (`copy-rule-settings`).
 - **A rule into a shell or an interpreter** (bash, sh, zsh, fish, csh, tcsh, busybox, nu, pwsh, python, pypy, node,
   bun, perl, ruby, php, lua, …) is warned about when you add it (Settings, `fy copy rules add`), on the rule's row,
-  in `fy copy rules ls`, and on a ferret's paste plan card: such a program runs whatever it reads.
+  in `fy copy rules ls`, and on a ferret's paste plan input: such a program runs whatever it reads.
 - **GAP: Linux only.** No reading of a macOS process's executable is wired, so nothing is proved through a profile
   there.
 
@@ -648,7 +650,7 @@ Settings › Secure copy › "Paste rules may target programs in my own profile"
 | Phase | What                                                                                                                                                                                                                                                                                                                         | State on 5.0                                                             |
 | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
 | SC1   | The contract, the in-memory store, command capture, masking, the exposure check (transcript `unknown`), `secure_*` agent tools                                                                                                                                                                                               | **unit 1: wired**                                                        |
-| SC2a  | Paste to a terminal prompt, pre-approval rules, `fy copy`, **Allow paste** on the input card                                                                                                                                                                                                                                 | **unit 1: wired** (rules never match a command copy: no path yet)        |
+| SC2a  | Paste to a terminal prompt, pre-approval rules, `fy copy`, **Allow paste** on the input                                                                                                                                                                                                                                      | **unit 1: wired** (rules never match a command copy: no path yet)        |
 | SC2b  | Paste to the secret store, with the exact-NAME rule                                                                                                                                                                                                                                                                          | **unit 1: wired**                                                        |
 | SC3a  | Paste to a field on a page; a page a person has taken over takes no paste                                                                                                                                                                                                                                                    | **unit 1: wired**                                                        |
 | SC3b  | Copy from a page element, with takeover refused in the queue; `pageReadBeforeCapture` (always `true` until reads are recorded)                                                                                                                                                                                               | **unit 1: wired**; picture refusal **unit 2: wired**; recording **next** |
