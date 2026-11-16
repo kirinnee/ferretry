@@ -69,6 +69,24 @@ Leases live at `fleet/shared/<harness>/.leases`.
   the kernel creates with `0700`, and `at` is the top level of one ferret home. `credentialHomeLinkVerdict` is
   unchanged for every other caller. `docs/secrets.md` gets the row; the threat it adds is "a ferret can read another
   ferret's transcripts", which is exactly the owner's ask and what v4 did.
+- **Kernel door, as built (PR 2, `rebuild/c58-hist-kernel-door`; the contract is `docs/secrets.md`, "A harness's history pool
+  in every ferret's home").** It differs from the sketch above in these ways:
+  - The permission is `permissions.historyPool: { state, entries }`: `state` is the NAME of the plugin's own opaque
+    `history-pool/*` state def (one plain folder, not deeper), and `entries` is the closed list of `{ name, kind }`, with
+    `kind` `'folder'` or `'file'` so the kernel knows whether to make a `0700` folder or an empty `0600` file on first use.
+    `reachFaults` (build graph and boot) refuses an illegal declaration and one without the `agent-homes` root.
+  - Refusals are a closed `HistoryPoolError.refusal`: `not_internal`, `not_permitted`, `denied`, `not_listed`, `not_own`,
+    `not_home`, `exists`, plus the roots' own `RootError` for disk facts (`outside`, `link_escape`, `changed`,
+    `hard_link`, `no_descriptor_reach`). `denied` is checked before `not_listed` and holds whatever the manifest declares;
+    beyond the fixed names it also refuses any name that looks like a credential (`credential`, `secret`, `token`, `oauth`,
+    `passw`) and compares case-insensitively.
+  - It is on `RootHandle` (not `RootsPort`), beside `linkCredential`: it writes into the handle's root through the same
+    checked descriptors. It takes the home as a `FencedPath` of an unscoped handle (`<root>/<ferret>`) or the base of a handle
+    scoped to one ferret; a home that is not exactly one folder below the top of `agent-homes` is `not_home`.
+  - The kernel ensures the pool itself (folder and entry, owner-only) inside the call, after every refusal; there is no
+    separate ensure member. A caller that needs the pool before any home exists makes it with its own state port.
+  - **macOS:** the held-folder steps have no `symlinkat` yet, so a host with no `/proc/self/fd` refuses
+    `no_descriptor_reach`. PR 3 pools on Linux; macOS pooling needs a `symlinkat` step in `FolderSteps` first (open point 4).
 - **Existing homes.** A home whose entry is already a real folder (a 5.0 ferret that ran before this) has its files
   moved into the pool by rename (same device); a name already in the pool is kept as
   `history-pool/.conflicts/<ferret>/…` and named in the result, never overwritten. Then the link is made.
@@ -135,3 +153,4 @@ Each PR: Sonnet builder, one gpt-6.1-sol high review, at most 2 fix rounds.
 - The migrator copies 19 GB; a hard-link or rename import would be faster and use no extra disk. Separate card.
 - Codex `resume <id>` of a copied rollout that its SQLite does not list yet must be proven against the real binary in
   PR 3 (pooled SQLite should index it; if not, the copy also inserts nothing and the PR says so).
+- macOS pooling needs a descriptor-relative `symlinkat` in `FolderSteps` (PR 2 refuses `no_descriptor_reach` there).

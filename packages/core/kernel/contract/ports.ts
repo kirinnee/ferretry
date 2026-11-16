@@ -920,6 +920,31 @@ export interface RootHandle {
    * A link made stays until its holder removes it: revoking the credential stops new links only (a declared GAP).
    */
   linkCredential(credential: SharedCredential, to: FencedPath): Promise<void>;
+  /**
+   * THE HISTORY-POOL DOOR. Makes `<home>/<entry>` a symlink to the REAL path of `<pool>/<entry>`, where `<pool>` is the
+   * caller's OWN declared history pool (`permissions.historyPool`: an opaque `state/<plugin>/history-pool/*` tree, outside
+   * every root) and the kernel, not the caller, names the target. Only on `agent-homes` (any other root: `not_internal`).
+   * It exists so every ferret on a harness reads and continues any other ferret's conversations (v4's behaviour): the one
+   * thing it adds is exactly that, and nothing else in a home is shared by it.
+   *
+   * Refused, with a closed reason (`HistoryPoolError.refusal`) and nothing written: the manifest lacks
+   * `permissions.historyPool` (`not_permitted`); `entry` is on the kernel's fixed deny list or is not one plain, non-hidden
+   * name (`denied`: `.credentials.json`, `.claude.json`, `settings*.json`, `auth.json`, `config.toml`, `CLAUDE.md`,
+   * `AGENTS.md`, `skills`, `plugins`, anything starting with `.`, a `/`, a NUL, `..`) whatever the manifest declares; `entry`
+   * is legal but not in the manifest's closed list (`not_listed`); `home` is not exactly one ferret home folder at the top
+   * of `agent-homes` (`not_home`); the pool is not the caller's own opaque, non-private state tree (`not_own`); anything
+   * is already at `<home>/<entry>` (`exists`: never an overwrite — the caller moves a real folder aside first with
+   * `rename`). The home must already exist and be reached with no link on the way (`link_escape`); this call never makes
+   * one. A host that reaches an open folder by no descriptor path (macOS today) refuses `no_descriptor_reach`: the link is
+   * made only through the held, checked folder, never by a path a swapped parent could redirect.
+   *
+   * The pool folder and the entry in it are made on first use, by the kernel, through checked no-follow descriptors: a
+   * `0700` folder (`kind: 'folder'`) or an empty `0600` file (`kind: 'file'`), and an entry already in the pool must be that
+   * kind (a link or the wrong kind is `changed`). A link made is checked to land on the pool entry's real path before it
+   * stays; otherwise it is taken back and refused `changed`. A link made stays until its holder removes it (`unlink`):
+   * revoking `permissions.historyPool` stops new links only (a declared GAP, `docs/secrets.md`).
+   */
+  linkHistory(home: FencedPath, entry: string): Promise<void>;
   /** A folder made (or narrowed) to `0700`, refused when a link or a file is at the name. */
   ensurePrivateDirectory(path: FencedPath): Promise<void>;
   /**

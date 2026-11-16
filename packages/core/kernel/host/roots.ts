@@ -83,6 +83,16 @@ import {
 } from './shared-trees.ts';
 import { type OwnFolderSpellings, PROCESS_FOLDER_ROOTS, processFolderAllowed } from './processes.ts';
 import { type ProjectUse, projectFilesScope, projectPathRefusal } from '../manifest/project-files.ts';
+import { poolStateFolder } from '../manifest/history-pool.ts';
+import type { HistoryPoolPermission } from '../manifest/types.ts';
+import {
+  historyEntryFor,
+  historyRoot,
+  isFerretHome,
+  poolCredentialVerdict,
+  poolEntryFolder,
+  refuseHistory,
+} from './history-pool.ts';
 import {
   anchorWalk,
   chainFault,
@@ -1369,6 +1379,18 @@ interface HandleSetup {
   readonly daemonUid?: number;
   /** The manifest's `permissions.projectFiles`: the relative set a `project-files` handle may reach. */
   readonly projectFiles?: readonly string[];
+  /** The history-pool door (`linkHistory`): given to an `agent-homes` handle only. */
+  readonly history?: HistoryDoor;
+}
+
+/** What `RootHandle.linkHistory` needs beyond the handle: the caller's declaration, its state files, and the root's top folder. */
+interface HistoryDoor {
+  /** The manifest's `permissions.historyPool`; absent, every `linkHistory` is refused `not_permitted`. */
+  readonly permission: HistoryPoolPermission | undefined;
+  /** The plugin's declared state files: the pool must be one of its own opaque trees. */
+  readonly stateFiles: readonly StateFileDef[];
+  /** `agent-homes`' own folder (`<home>/state/<plugin>/agent-homes`): a ferret home is exactly one folder below it. */
+  readonly top: string;
 }
 
 /** What a held owner's root needs to judge every walk beneath it: the disk, the home it must not reach, the proven stores. */
@@ -1951,6 +1973,12 @@ function rootHandle(setup: HandleSetup): RootHandle {
     await pinned(full);
     return made;
   };
+  /** The pool's own folder (`<home>/state/<plugin>/<pool folder>`) when this handle's plugin declared one, else `undefined`. */
+  const historyPoolBase = (): string | undefined => {
+    const door = setup.history;
+    const folder = door?.permission === undefined ? undefined : poolStateFolder(door.permission, door.stateFiles);
+    return folder === undefined ? undefined : join(pluginStateFolder(home, plugin), folder);
+  };
   const readOnly = READ_ONLY_ROOTS.has(name);
   const projectRoot = name === 'project-files';
   /**
@@ -2449,6 +2477,9 @@ function rootHandle(setup: HandleSetup): RootHandle {
         };
         const reached = await lookAgain();
         const placed = await realParent(to, true);
+        // The history pool is never a credential's place or source (a sign-in is shared with a ferret, never pooled).
+        const pool = historyPoolBase();
+        if (poolCredentialVerdict(pool, [placed.full, reached.real]) !== undefined) refuse('link_escape');
         // No link on the way: the folder `to` names, as this root names it, is the very folder reached.
         if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
           refuse('link_escape');
@@ -2498,6 +2529,57 @@ function rootHandle(setup: HandleSetup): RootHandle {
         throw error;
       }
       claim.spend();
+    },
+    linkHistory: async (ferretHome: FencedPath, entryName: string) => {
+      // The destination and the permission first, then the name: nothing about the disk is asked until all of them hold.
+      if (!historyRoot(name)) return refuseHistory('not_internal');
+      writable();
+      const door = setup.history;
+      const permission = door?.permission;
+      const declared = historyEntryFor(permission, entryName);
+      // The pool is the plugin's OWN opaque `<folder>/*` state tree and nothing that holds a private place: the kernel
+      // names the target from the declaration, never from anything the caller passed.
+      const pooled =
+        door === undefined || permission === undefined
+          ? undefined
+          : poolEntryFolder(permission, door.stateFiles, entryName);
+      if (door === undefined || pooled === undefined || holdsPrivate(plugin, pooled, privateFiles.files))
+        return refuseHistory('not_own');
+      // `home` is exactly one ferret home, at the top of `agent-homes`.
+      const root = base();
+      if (root === undefined) return refuse('outside');
+      const lexical = lexicalInRoot(home, root, ownerRoot, ferretHome);
+      if (!lexical.ok) return refuse(lexical.error);
+      if (!isFerretHome(door.top, lexical.value)) return refuseHistory('not_home');
+      const placed = await real(ferretHome);
+      // No link on the way: the folder `home` names, as this root names it, is the very folder reached.
+      if (relative(placed.scope.base.real, placed.full) !== relative(absolute(root, 'a root'), lexical.value))
+        refuse('link_escape');
+      // The home must already be there: this call never makes one (`outside`).
+      const made = await openFolderMaking(placed.scope, placed.full, 0o700, false);
+      try {
+        // The link is made only through the held, checked folder: a host with no descriptor path to it refuses.
+        if (made.folder.entryPath(entryName) === undefined) return refuse('no_descriptor_reach');
+        const leafAt = await entry(placed.scope, made.folder, made.real, entryName);
+        await refuseHeldName(placed.scope, join(made.real, entryName));
+        if ((await fs.identity(leafAt)) !== undefined) return refuseHistory('exists');
+        // Every refusal is behind us. The pool folder and its entry are made now (first use), `0700` / `0600`.
+        const target = await ensureHistoryEntry(fs, home, plugin, pooled, declared.kind, immutable, privateFiles);
+        if ((await fs.identity(leafAt)) !== undefined) return refuseHistory('exists');
+        await fs.symlink(target, leafAt).catch((error: unknown) => {
+          if (errnoOf(error) === 'EEXIST') return refuseHistory('exists');
+          return refuse('changed');
+        });
+        // PROVED before it stays: the entry at the name is a link, and followed it lands on the pool entry's real path.
+        const landed = await fs.realpath(leafAt).catch(() => undefined);
+        const itself = await fs.identity(leafAt).catch(() => undefined);
+        if (landed !== target || itself?.kind !== 'link') {
+          await fs.unlink(leafAt).catch(() => undefined);
+          refuse('changed');
+        }
+      } finally {
+        await made.folder.close();
+      }
     },
     ensurePrivateDirectory: async path => {
       writable();
@@ -2917,6 +2999,8 @@ export interface RootsOptions {
   readonly shareCredentials?: readonly string[];
   /** The manifest's `permissions.projectFiles`, for the `project-files` root; absent, every name of it is refused. */
   readonly projectFiles?: readonly string[];
+  /** The manifest's `permissions.historyPool` (`RootHandle.linkHistory`); absent, every history link is refused. */
+  readonly historyPool?: HistoryPoolPermission;
   /** The plugin's declared state files: a shared named tree must be one of its own opaque ones. */
   readonly stateFiles?: readonly StateFileDef[];
   /**
@@ -3122,6 +3206,15 @@ export function rootsPortFor(
         ...(options.setMode === true ? { setMode: true } : {}),
         ...(daemonUid === undefined ? {} : { daemonUid }),
         ...(options.projectFiles === undefined ? {} : { projectFiles: options.projectFiles }),
+        ...(name === 'agent-homes' && internal !== undefined
+          ? {
+              history: {
+                permission: options.historyPool,
+                stateFiles: options.stateFiles ?? [],
+                top: absolute(internal, 'a root'),
+              },
+            }
+          : {}),
       });
     },
   };
@@ -3161,6 +3254,51 @@ async function privateChain(
     if (fault !== undefined) return err(chainProblem(component, fault, entry));
   }
   return ok(undefined);
+}
+
+/**
+ * The pool entry `linkHistory` points at, made on first use and answered by its REAL path: `<home>/state/<plugin>/<folder>`
+ * (`folder` = `history-pool/projects`), reached exactly as a shared tree is — anchored at the home, the plugin's state
+ * folder exactly where it is named with no link from the home down — and made THROUGH checked, no-follow folder
+ * descriptors one folder at a time. A folder is `0700`; a file is an empty `0600` made exclusively. What is already there
+ * must be the declared kind with no link on the way (a file with a second name is refused): anything else is refused
+ * and left as it was.
+ */
+async function ensureHistoryEntry(
+  fs: HostFs,
+  home: string,
+  plugin: string,
+  folder: string,
+  kind: 'folder' | 'file',
+  immutable: () => Promise<readonly string[]>,
+  privateFiles: PrivatePlaces,
+): Promise<string> {
+  const stateBase = absolute(pluginStateFolder(home, plugin), 'a state folder');
+  const resolved = await resolveChecked(fs, home, stateBase, false, join(stateBase, folder), home, privateFiles);
+  if (!resolved.ok) return refuse(resolved.error);
+  const expected = join(resolved.value.base.real, folder);
+  if (resolved.value.full !== expected) return refuse('link_escape');
+  const scope: Scope = { fs, base: resolved.value.base, ownerRoot: false, immutable };
+  const pool = await openFolderMaking(scope, dirname(expected), 0o700, true);
+  try {
+    if (kind === 'folder') {
+      const child = await openFolderMaking(scope, expected, 0o700, true);
+      await child.folder.close();
+      return expected;
+    }
+    const at = await entry(scope, pool.folder, pool.real, basename(expected));
+    if ((await fs.identity(at)) === undefined)
+      await fs.writeNew(at, '', 0o600).catch((error: unknown) => {
+        if (errnoOf(error) !== 'EEXIST') return refuse('changed');
+      });
+    const found = await fs.identity(at);
+    if (found?.kind !== 'file') return refuse('changed');
+    const problem = await fileProblem(scope, expected, found);
+    if (problem !== undefined) return refuse(problem);
+    return expected;
+  } finally {
+    await pool.folder.close();
+  }
 }
 
 /** A shared tree's folder must exist, be a folder, and pass its source's own checks NOW (at mint, as at every copy). */
