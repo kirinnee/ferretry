@@ -42,6 +42,9 @@ const utf8Bytes = (text: string): string =>
 
 /** Throws {@link QrEncodeError} for a value too long to encode, rather than encoding a truncated credential. */
 export function localQr(text: string): QrMatrix {
+  // A TypeError, not a QrEncodeError: a caller that handed over a non-string has a bug to fix, not a value to
+  // degrade, so `tryQrModules` rethrows it. `utf8Bytes` would otherwise encode `undefined` as zero bytes.
+  if (typeof text !== 'string') throw new TypeError('a QR symbol encodes text');
   if (text === '') throw new QrEncodeError('a QR symbol needs something to encode');
   const code = qrcode(0, 'M');
   code.addData(utf8Bytes(text), 'Byte');

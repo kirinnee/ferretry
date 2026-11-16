@@ -26,6 +26,24 @@ describe('S14 localQr: the one local encoder', () => {
     expect(() => localQr('')).toThrow(QrEncodeError);
   });
 
+  it('refuses a non-string with a TypeError, never an empty symbol and never a QrEncodeError', () => {
+    // `undefined` used to encode as zero bytes and come back as a blank symbol.
+    const refuse = (value: unknown): unknown => {
+      try {
+        localQr(value as string);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+    for (const value of [undefined, null, 42, {}, ['x']]) {
+      const error = refuse(value);
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error).not.toBeInstanceOf(QrEncodeError);
+      expect((error as TypeError).message).toBe('a QR symbol encodes text');
+    }
+  });
+
   it('refuses rather than truncates a value no symbol can hold', () => {
     expect(() => localQr('x'.repeat(5000))).toThrow('refusing rather than truncating');
   });
