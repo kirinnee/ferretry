@@ -440,6 +440,35 @@ describe('fy job: the signal deadline', () => {
     should(h.exits).deepEqual([75]);
   });
 
+  it('should detach and end when the signal lands while attach is still looking the job up', async () => {
+    // Arrange
+    const h = harness(answers(call => call.route.endsWith('/jobs/:jobId')));
+    const running = h.sut.attach(invocation(['build']));
+    await Promise.resolve();
+
+    // Act
+    h.signals.handler?.('SIGTERM');
+
+    // Assert
+    should(await running).equal(75);
+    should(h.exits).deepEqual([75]);
+    should(h.io.errors.join('')).containEql('detached from job build (build)');
+  });
+
+  it('should report a failed lookup as an error, not a detach, when no signal was heard (attach and wait)', async () => {
+    // Arrange
+    const h = harness(call => {
+      if (call.route.endsWith('/jobs/:jobId')) throw new Error('no such job');
+      return {};
+    });
+
+    // Act + Assert
+    should(await h.sut.attach(invocation(['build']))).equal(1);
+    should(await h.sut.wait(invocation(['build']))).equal(1);
+    should(h.exits).deepEqual([]);
+    should(h.io.errors.join('')).containEql('no such job');
+  });
+
   it('should leave the process to end by itself when no signal was heard', async () => {
     // Arrange
     const h = harness(call => {

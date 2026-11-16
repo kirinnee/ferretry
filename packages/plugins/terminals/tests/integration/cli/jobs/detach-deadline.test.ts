@@ -16,8 +16,10 @@ async function termed(verb: 'attach' | 'wait') {
   });
   const sent = Date.now();
   child.kill('SIGTERM');
-  const timeout = new Promise<'alive'>(resolve => setTimeout(() => resolve('alive'), 3_000));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<'alive'>(resolve => (timer = setTimeout(() => resolve('alive'), 3_000)));
   const result = await Promise.race([ended, timeout]);
+  clearTimeout(timer);
   if (result === 'alive') child.kill('SIGKILL');
   return { code: result, ms: Date.now() - sent, errors };
 }
