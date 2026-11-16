@@ -33,7 +33,7 @@ import { ConversationLines, FerretLines, SourceChips } from './conversation-card
 import { noRuntimeSentence, type RuntimeField, Segmented } from './conversation-picker.tsx';
 import { DATE_FILTERS, type DateFilter } from './conversation-picker-model.ts';
 import { keepConversations, readConversationPreview, readLinkableConversations } from './conversations-api.ts';
-import { guarded } from './link-ui.tsx';
+import { guarded } from './link-refusal.ts';
 import { harnessKeyOf } from './link-words.ts';
 
 /** How many matches one search shows, newest first. */

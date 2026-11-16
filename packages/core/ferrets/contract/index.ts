@@ -14,6 +14,7 @@ export {
   WorkFoldersPort,
 } from '@ferretry/kernel/contract';
 export * from './app-hooks.ts';
+export * from './callsign.ts';
 export * from './agent-address.ts';
 export * from './file-reference.ts';
 export * from './instructions-report.ts';

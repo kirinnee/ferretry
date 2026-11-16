@@ -8,7 +8,7 @@
 
 import { PanelSlot, statusLabel, useSlotHasPanels } from '@ferretry/app';
 import { MOVE_ACCOUNT_SLOT, type MoveAccountSlotProps } from '@ferretry/core-ferrets/contract';
-import { Button, cn } from '@ferretry/app/ui';
+import { Button, cn, SetupNote } from '@ferretry/app/ui';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { CONVERSATION_LAUNCH_MAX, type KeepResult, type LinkableConversation } from '../../contract/index.ts';
 
@@ -32,7 +32,7 @@ import {
   visibleConversations,
 } from './conversation-picker-model.ts';
 import { keepConversations, readLinkableConversations } from './conversations-api.ts';
-import { guarded, LinkNote } from './link-ui.tsx';
+import { guarded } from './link-refusal.ts';
 import { HARNESS_NAMES, type HarnessKey } from './link-words.ts';
 
 /** The most rows one listing read asks for; the picker filters them here. */
@@ -180,20 +180,20 @@ export function ConversationPicker({
     );
   if (listing.kind === 'refused')
     return (
-      <LinkNote live tone="warn" name="conversations-refused" title="Couldn’t read your conversations">
+      <SetupNote live tone="warn" name="conversations-refused" title="Couldn’t read your conversations">
         <span>{listing.sentence}</span>
         <div className="mt-2">
           <Button type="button" size="sm" data-conversations-retry="" onClick={() => void load()}>
             Try again
           </Button>
         </div>
-      </LinkNote>
+      </SetupNote>
     );
   if (listing.rows.length === 0)
     return (
-      <LinkNote name="conversations-empty">
+      <SetupNote name="conversations-empty">
         <span>No {name} conversations on this machine.</span>
-      </LinkNote>
+      </SetupNote>
     );
 
   const at = now();
@@ -426,7 +426,7 @@ function ConversationRow({
 /** What the keep did: the ferrets it made, and each conversation it refused with why. */
 function KeepSummary({ result }: { readonly result: KeepResult }) {
   return (
-    <LinkNote
+    <SetupNote
       live
       tone={result.refused.length === 0 ? 'ok' : 'warn'}
       name="conversations-result"
@@ -450,7 +450,7 @@ function KeepSummary({ result }: { readonly result: KeepResult }) {
           ))}
         </ul>
       )}
-    </LinkNote>
+    </SetupNote>
   );
 }
 

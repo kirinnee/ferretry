@@ -150,11 +150,10 @@ export function buildBrowsers(
         listenerProver,
         stageDirectory: host.stageDirectory,
         // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
-        // - `ports`/`checkFirewall`: 5.0 serves Browsers no read of the machine's `browserPorts` or
-        //   `browserFirewallFailure` (no file of Runtimes holds them in 5.0, so a machine-settings change that moves
-        //   either is refused, and no contract serves them), so every launch takes random
-        //   ports. That fails safe: nothing is bound at a fixed port, so there is nothing for the loopback firewall to
-        //   fence and nothing for its check to refuse.
+        // - `ports`/`checkFirewall`: Browsers has no read of the machine's `browserPorts` or `browserFirewallFailure`
+        //   (Runtimes carries none, and Browsers must not depend on Runtimes to get them), so every launch takes random
+        //   ports. That fails safe: nothing is bound at a fixed port, so there is nothing for the loopback firewall to fence
+        //   and nothing for its check to refuse.
         // - `limits`: there is no kernel ferret-limits port that wraps a program in the shared browser slice, so the
         //   agent Chrome runs outside the shared browser memory slice docs/ferret-limits.md promises.
       },
@@ -341,9 +340,9 @@ export function buildBrowsers(
       'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(kernel.redaction, pages, stream, ferretGuard, gate),
     },
     doctor: {
-      // GAP (card F1931 finding 10, above): every launch takes random ports, so there is nothing fixed to fence and no
-      // row — exactly as today's report left the row out for random ports. When Runtimes serves `browserPorts`, this
-      // reads `readLoopbackFirewall` there and the row appears.
+      // GAP (ports-pending, Browsers): no row yet. Browsers cannot read the machine's `browserPorts` (Runtimes carries none
+      // today, and Browsers must not depend on Runtimes to get it), so it shows nothing rather than guess. Wire the row
+      // (`readLoopbackFirewall` over the marker) when Runtimes carries `browserPorts`, without Browsers depending on Runtimes.
       'loopback-firewall': loopbackFirewallDoctor(async () => undefined),
     },
     tools: withAddressRuleTools({ ...toolHandlers(tools), ...target.tools }),
@@ -359,6 +358,11 @@ export function buildBrowsers(
               }
             : {}),
           state: async () => pages.overview(),
+          // For Logins alone: whether this host shares its loopback ports with other local users. GAP (ports-pending,
+          // Browsers): Browsers cannot read the machine's `browserPorts`, so it says `shared: true`, which fails closed (no
+          // automatic move to the fixed link). Wire the real fact when Runtimes carries `browserPorts`, without Browsers
+          // depending on Runtimes (a hook/slot Runtimes fills, or Logins asking Runtimes directly).
+          ...(needer.id === 'logins' ? { browserPorts: async () => ({ shared: true }) } : {}),
           // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
           // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
           // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks

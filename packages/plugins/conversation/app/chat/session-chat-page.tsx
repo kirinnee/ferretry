@@ -47,7 +47,7 @@ import {
   questionAnswerApi,
 } from '../questions/question-form.tsx';
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
-import { displayCallsign } from '../transcript/callsign.ts';
+import { displayCallsign } from '@ferretry/core-ferrets/contract';
 import { sessionTurn, UNREAD_PANE } from '../transcript/session-activity.ts';
 import { aboveComposerProps } from './above-composer-props.ts';
 import { readHandoff } from './chat-reads.ts';

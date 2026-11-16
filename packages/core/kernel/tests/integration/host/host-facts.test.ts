@@ -126,6 +126,16 @@ describe('TT nodeHostFacts on a fixture tree', () => {
     expect(await facts.procWorkingDirectory(44)).toBeUndefined();
   });
 
+  test('the working folder: a failure that is not "no answer" is rethrown, not swallowed', async () => {
+    const root = await mkdtemp(`${tmpdir()}/fy-facts-`);
+    roots.push(root);
+    const proc = `${root}/proc`;
+    // A `cwd` that is a plain directory, not a link: readlink answers EINVAL, which is no process-gone answer.
+    await mkdir(`${proc}/45/cwd`, { recursive: true });
+    const facts = nodeHostFacts({ proc, sys: `${root}/sys` });
+    await expect(facts.procWorkingDirectory(45)).rejects.toMatchObject({ code: 'EINVAL' });
+  });
+
   test('cgroup and block-device reads; a partition reads its parent disk’s scheduler', async () => {
     const facts = await tree();
     expect(await facts.cgroupFile('user.slice', 'cpu.weight')).toBe('100\n');

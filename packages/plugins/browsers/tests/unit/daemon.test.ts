@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { AgentControlKind, AgentControlReader, FerretId } from '@ferretry/kernel/contract';
-import { implementDaemon } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer } from '@ferretry/kernel/manifest';
 import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
 import { BrowsersPort } from '../../contract/port.ts';
@@ -55,6 +55,13 @@ async function built(
   return { host, tabs, identities, vault };
 }
 
+/** A needer of the Browsers port, named as the kernel names the plugin that asks. */
+const needer = (id: string): Needer => ({
+  id,
+  permissions: { network: [], spawn: [], secrets: [] } as unknown as Needer['permissions'],
+  ownedSecretReferences: () => new Set(),
+});
+
 /**
  * The daemon half as the kernel builds it: every route, socket and tool the manifest declares has its handler, and
  * building it starts nothing — no Chrome, no worker thread, no timer — until a page is opened.
@@ -78,16 +85,30 @@ describe('the browsers daemon half', () => {
     should(state.json()).containEql({ state: 'stopped' });
   });
 
-  it('should provide no browserPorts reading while it has no read of the machine’s ports (GAP), so Logins treats the host as shared', async () => {
+  it('should tell Logins alone the host is shared while it has no read of the machine’s ports (GAP), so no other needer is told', async () => {
     // Arrange
     host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
 
     // Act
-    const browsers = host.provided(BrowsersPort);
+    const forLogins = host.provided(BrowsersPort, needer('logins'));
+    const forOthers = host.provided(BrowsersPort, needer('accounts'));
 
-    // Assert — absent, never a guess: an absent method fails closed for its user (lead decision 19, L2).
-    should(browsers.browserPorts).be.undefined();
-    should(typeof browsers.pagesOf).equal('function');
+    // Assert — a fact it cannot read is answered `shared: true`, never a guess that a host is private (fails closed, lead
+    // decision 19, L2).
+    should(await forLogins.browserPorts?.()).deepEqual({ shared: true });
+    should(forOthers.browserPorts).be.undefined();
+    should(typeof forOthers.pagesOf).equal('function');
+  });
+
+  it('should show no loopback-firewall row in the doctor while it has no read of the machine’s ports (GAP)', async () => {
+    // Arrange
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
+
+    // Act
+    const finding = await host.doctor('browsers', 'loopback-firewall');
+
+    // Assert
+    should(finding).be.undefined();
   });
 
   it('should type into the ferret’s own page through browser_type, as one type act on the page, and answer Done', async () => {

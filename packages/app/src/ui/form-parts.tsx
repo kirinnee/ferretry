@@ -6,7 +6,7 @@
 
 import { LoaderCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { Button } from '../../ui.ts';
+import { Button } from './primitives.tsx';
 
 export function FormField({
   id,
