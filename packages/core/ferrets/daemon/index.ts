@@ -78,7 +78,11 @@ import { LedgerNameClaimStore, stateClaimLedger } from './adapters/names/name-cl
 import { StateCallsignCounters } from './adapters/names/state-callsign-counters.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../contract/agent-address.ts';
 import { FerretRegistry } from './lib/registry/registry.ts';
-import { FerretSessionLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
+import { heldLifecycleLauncher } from './adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
+import { ConversationLeaseStateDisk } from './adapters/session/lifecycle/conversation-lease-disk.ts';
+import { processIncarnationFor } from './adapters/session/lifecycle/process-incarnation.ts';
+import { ConversationLeaseStore } from '../contract/conversation-lease.ts';
+import { ConversationLeases, registryLeaseSessions } from './lib/session/lifecycle/conversation-leases.ts';
 import { FerretTokenDirectory, type TokenEntry } from './lib/tokens/tokens.ts';
 import { DirectoryCutOff } from './lib/tokens/cut-off-mark.ts';
 import { instructionsAnswer } from './lib/agent-control/instructions.ts';
@@ -330,14 +334,28 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // The lifecycle's pane launcher: a thin adapter over Ferrets' own launch and stop (the held variants, the lifecycle
     // holds the ferret's key on the shared queue), so a lifecycle opens a pane through the ONE launch path. `service` is
     // built below; every call here is made after it exists.
-    launcher: new FerretSessionLifecycleLauncher({
-      launch: async ferret => await service.launchHeld(ferret),
-      stop: async (ferret, how, reason, cause) => await service.stopHeld(ferret, how, reason, cause),
+    launcher: heldLifecycleLauncher(() => service, {
       handleOf: ferret => registry.get(ferret)?.handle as RunnerHandle | undefined,
       runner: runnerOf,
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
       nowMs: () => kernel.clock.nowMs(),
     }),
+    // One live writer per harness conversation, claimed before a pane exists. The disk is the daemon's twin of what
+    // `fy history claim` reads and locks (the same files and the same `flock`), so a wrapper's claim in a pane and this
+    // one decide against one set of leases; the holder is this daemon's pid plus the session.
+    leases: new ConversationLeases(
+      new ConversationLeaseStore(
+        new ConversationLeaseStateDisk(
+          kernel.state,
+          processIncarnationFor(kernel.hostFacts, kernel.spawn),
+          { nowMs: () => kernel.clock.nowMs(), sleep: async ms => await kernel.clock.sleep(milliseconds(ms)) },
+          kernel.hostFacts.platform,
+        ),
+        () => new Date(kernel.clock.nowMs()),
+      ),
+      registryLeaseSessions(registry, async id => await sessionStore.readState(id)),
+      process.pid,
+    ),
     roots: kernel.roots,
     storage: sessionStore,
     clock: { now: () => kernel.clock.now() },
@@ -359,7 +377,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
     },
     log,
-  } satisfies SessionFilesDeps & Required<Pick<SessionFilesDeps, 'tokenCutOff' | 'launcher'>>;
+  } satisfies SessionFilesDeps & Required<Pick<SessionFilesDeps, 'tokenCutOff' | 'launcher' | 'leases'>>;
   const sessionFiles = new SessionFiles(sessionFilesDeps);
   // Every held ferret gets its session document once the records and the store's archive are loaded, before any start
   // or resume reads the fleet's lineage (which refuses while an indexed ferret has none). Each stamp waits for it.
