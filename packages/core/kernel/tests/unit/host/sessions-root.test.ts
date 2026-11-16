@@ -777,6 +777,14 @@ describe('K1 the sessions root scoped to <ferret>/media (F-0327): held no-follow
     await expect(s.root.readText(resolved(s.root, 'leak.txt'))).rejects.toThrow();
   });
 
+  test('a file that is a link to another file INSIDE the media folder refuses too, as it does for attachments', async () => {
+    const s = await scoped();
+    await writeFile(`${s.media}/real.txt`, 'FIXTURE-REAL');
+    await symlink(`${s.media}/real.txt`, `${s.media}/alias.txt`);
+    expect(await s.root.readText(resolved(s.root, 'real.txt'))).toBe('FIXTURE-REAL');
+    await expect(s.root.readText(resolved(s.root, 'alias.txt'))).rejects.toThrow();
+  });
+
   test('a folder that is a link to the session folder refuses, so a sibling of media is never reached', async () => {
     const s = await scoped();
     await writeFile(`${s.media}/../environment.json`, 'FIXTURE-CREDENTIAL');
