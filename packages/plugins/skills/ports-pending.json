@@ -3,7 +3,6 @@
   "pending": ["skills"],
   "pendingReasons": {
     "skills": [
-      "[cross: catalogs] Skill rows in the ferret panel: Publish / Uninstall / “installed from” in a skill row’s ⋯ are Catalogs’ rows; they need a per-row contribution on Skills’ panel (Skills offers only the header slot `skills.add`, where Catalogs draws “+ Add skills”)",
       "[kernel: imports scoped folder link] GAP(kernel): a host with the C library's descriptor calls but not the working-directory bracket lists the `imports` root's scoped folder by path once the folder is proven (reads and stats still go by descriptor): a folder swapped for a link after the `within` lstat walk and before the look, inside ONE call, lets one listing answer the outside folder's names (no size, inode or file text); a swap between two calls is refused at the next call, and the doctor says so once at boot; a host that reaches an open folder by neither /proc/self/fd nor the calls refuses the read `no_descriptor_reach` instead; it closes when such a host loads the bracket: packages/core/kernel/host/roots.ts"
     ]
   },

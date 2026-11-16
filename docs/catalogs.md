@@ -1360,6 +1360,11 @@ In 5.0 the page is Catalogs' (`plugins/catalogs/app/features/add-skills/`, scree
 Catalogs contributes the **+ Add skills** button to it; the ferret's folder, harness, runtime and where its skills come
 from ride in the query. The page below is otherwise as it was, less the "from this machine" group.
 
+Skills also offers the slot `skills.row` at the end of each skill's first line (after **Open**), with that skill's name,
+invocation, SKILL.md path and scope. Catalogs contributes there the "from Ines · v2" chip and a **⋯** with Publish and
+Uninstall (`CatalogItemRow` in its `controls` form; `app/views/skills-row.tsx`). Every row of one daemon shares one read
+of the installs and catalogs (`catalog-rows-store.ts`), so a Skills tab asks the daemon twice, not twice per skill.
+
 The Skills tab has one **+ Add skills** button by its "N active in this session" line. It goes to a page of its own,
 **Add skills** at `/d/<daemon>/session/<id>/skills` (`features/context-rail/add-skills-page.tsx`), with **Back to the
 session** and **Refresh** at the top; the install review stays a sheet over it. The page:

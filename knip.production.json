@@ -136,12 +136,7 @@
     "packages/plugins/catalogs": {
       "entry": ["worker/src/adapters/link-store-worker.ts"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/features/catalogs/catalog-item-row.tsx",
-        "app/features/catalogs/catalog-add-toast.tsx",
-        "app/features/shared/shared-entry.tsx"
-      ],
-      "ignoreDependencies": ["react-dom"]
+      "ignore": ["app/features/shared/shared-entry.tsx"]
     },
     "packages/plugins/conversation": {
       "entry": ["app/surfaces.tsx"],

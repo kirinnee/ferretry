@@ -21,6 +21,7 @@ import { daemonSharingPath } from '../lib/routes.ts';
 import { useInstallHost } from './catalogs-views.tsx';
 
 export { createAddSkillsRowPanel } from './add-skills-row.tsx';
+export { createSkillsRowPanel } from './skills-row.tsx';
 
 const THIS_DAEMON = 'this';
 

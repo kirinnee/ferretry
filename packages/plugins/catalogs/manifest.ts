@@ -9,7 +9,7 @@ import { AccessPort } from '@ferretry/plugin-access/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
-import { SKILLS_ADD_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
+import { SKILLS_ADD_SLOT, SKILLS_ROW_SLOT, SkillsPort } from '@ferretry/plugin-skills/contract';
 import {
   AUDIT,
   CATALOGS_WORDS,
@@ -773,6 +773,8 @@ export default definePlugin({
     panels: [
       panel(SKILLS_ADD_SLOT, { id: 'add-skills', order: 10 }),
       panel(ACTIONS_ROW_SLOT, { id: 'add-skills-row', order: 20 }),
+      // Publish, Uninstall and "installed from" on each skill's row: Skills offers `skills.row`, Catalogs draws into it.
+      panel(SKILLS_ROW_SLOT, { id: 'skills-row', order: 10 }),
     ],
     screens: [
       screen('sharing', { path: 'sharing/:tab?', nav: { label: 'Sharing', icon: 'share-2', order: 20 } }),
