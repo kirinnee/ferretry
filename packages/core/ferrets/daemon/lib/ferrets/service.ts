@@ -1079,7 +1079,9 @@ export class FerretsService implements FerretsApi {
     // harness starts: a swap in between (a link into the state home put where the project was) cannot be launched in.
     const bound = await this.bindLaunchFolder(folder.value, origin, birthOf(origin));
     if (!bound.ok) return bound;
-    const role = request.role ?? (request.parent === undefined ? 'lead' : 'helper');
+    // ONE RULE: a ferret with a parent is never a lead (v4 derived the role from the parent alone). A start that POSTs
+    // `role: lead` beside a parent is recorded as a helper, so lead-only instruction sections never reach a sub-ferret.
+    const role = request.parent !== undefined ? 'helper' : (request.role ?? 'lead');
     const decision = await this.ports.decide({
       ferret: id,
       name,
