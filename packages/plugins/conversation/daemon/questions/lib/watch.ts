@@ -1,6 +1,6 @@
 import type { AskedQuestionFile, TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import type { Question } from '../../../contract/index.ts';
-import type { PendingQuestion } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent } from '../../seams/transcript-types.ts';
 import { parseAskedQuestion } from './asked.ts';
 import { projectStructuredQuestion } from './projection.ts';

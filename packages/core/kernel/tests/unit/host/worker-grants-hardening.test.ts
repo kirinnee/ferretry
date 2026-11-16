@@ -84,6 +84,11 @@ async function harness(options: { hang?: boolean } = {}) {
     },
   };
   let now = 0;
+  // The channel reads the clock once per message it takes in (and once more per refusal), so the count of reads
+  // says exactly how many messages it has handled: a test can wait on that instead of on real time.
+  let reads = 0;
+  const waiting: Array<() => void> = [];
+  const waitingFlood: Array<() => void> = [];
   const flooded: string[] = [];
   const lifecycle = new PluginLifecycle();
   let stopHandlers = 0;
@@ -97,8 +102,15 @@ async function harness(options: { hang?: boolean } = {}) {
       declaresNetwork: true,
       mayReach: (hostname, host) =>
         hostPermitted(declared, () => ({ programs: [], hosts: [] }), hostname, undefined, host),
-      nowMs: () => now,
-      flooded: plugin => flooded.push(plugin),
+      nowMs: () => {
+        reads += 1;
+        for (const waiter of waiting.splice(0)) waiter();
+        return now;
+      },
+      flooded: plugin => {
+        flooded.push(plugin);
+        for (const waiter of waitingFlood.splice(0)) waiter();
+      },
     },
     {
       onStop: fn => {
@@ -133,6 +145,18 @@ async function harness(options: { hang?: boolean } = {}) {
     }
     await settle();
   };
+  /**
+   * Resolves once the channel has read the clock `total` times in all, i.e. once it has handled that many messages
+   * (only valid while none of them is refused, since a refusal reads the clock twice). No timer: the fake clock
+   * stays the only clock, so an `advance` after this can never land in the middle of a flood still being delivered.
+   */
+  const handled = async (total: number): Promise<void> => {
+    while (reads < total) await new Promise<void>(resolve => waiting.push(resolve));
+  };
+  /** Resolves once the channel has reported a flood (after it closed). Event-driven, like `handled`. */
+  const untilFlooded = async (): Promise<void> => {
+    while (flooded.length === 0) await new Promise<void>(resolve => waitingFlood.push(resolve));
+  };
   return {
     store,
     seen,
@@ -146,6 +170,8 @@ async function harness(options: { hang?: boolean } = {}) {
     start,
     settle,
     settleUntil,
+    handled,
+    untilFlooded,
     advance: (ms: number) => {
       now += ms;
     },
@@ -231,9 +257,12 @@ describe('worker grants hardening: a flood ends the channel', () => {
   test('refusals spread over separate windows do not end the channel', async () => {
     const h = await harness();
     const { port } = h.start();
+    const perRound = MAX_GRANT_REFUSALS_PER_WINDOW - 10;
     for (let round = 0; round < 3; round += 1) {
-      for (let i = 0; i < MAX_GRANT_REFUSALS_PER_WINDOW - 10; i += 1) port.postMessage({ id: i, kind: 'nonsense' });
-      await h.settle();
+      for (let i = 0; i < perRound; i += 1) port.postMessage({ id: i, kind: 'nonsense' });
+      // A refused message reads the clock twice (message count, then refusal count). Wait on that, not on real
+      // time, so the fake clock moves only after the whole round has been handled in its own window.
+      await h.handled(2 * perRound * (round + 1));
       h.advance(GRANT_REFUSAL_WINDOW_MS);
     }
     port.postMessage(fetchOf(5000));
@@ -333,14 +362,17 @@ describe('worker grants hardening: every message is bounded, handlers do not pil
   test('n1 the count is per window: a passed window starts afresh, the next one still ends the channel', async () => {
     const h = await harness();
     const { port } = h.start();
+    const perRound = MAX_GRANT_MESSAGES_PER_WINDOW - 10;
     for (let round = 0; round < 2; round += 1) {
-      for (let i = 0; i < MAX_GRANT_MESSAGES_PER_WINDOW - 10; i += 1) port.postMessage({ kind: 'cancel', id: i });
-      await h.settle();
+      for (let i = 0; i < perRound; i += 1) port.postMessage({ kind: 'cancel', id: i });
+      // Wait until the channel has handled this round's last message (not a real 40 ms): only then may the fake
+      // clock move, or the tail of round 0 would be counted in round 1's window.
+      await h.handled(perRound * (round + 1));
       if (round === 0) h.advance(GRANT_REFUSAL_WINDOW_MS);
     }
     expect(h.flooded).toEqual([]);
     for (let i = 0; i < 20; i += 1) port.postMessage({ kind: 'cancel', id: i });
-    await h.settle();
+    await h.untilFlooded();
     expect(h.flooded).toEqual(['logins']);
   });
 

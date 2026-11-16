@@ -31,7 +31,13 @@ describe('the screens a Claude home pre-answers', () => {
       });
 
       // Assert: set by `env` before claude runs; the overlay a project's own env must beat carries none
-      should(argv.slice(0, 3)).eql(['env', 'CLAUDE_CONFIG_DIR=/h/f1', 'DISABLE_AUTOUPDATER=1']);
+      should(argv.slice(0, 5)).eql([
+        'env',
+        '-u',
+        'CLAUDE_CODE_CHILD_SESSION',
+        'CLAUDE_CONFIG_DIR=/h/f1',
+        'DISABLE_AUTOUPDATER=1',
+      ]);
       should(JSON.parse(home(permissionMode).overlay)).not.have.property('env');
     }
   });

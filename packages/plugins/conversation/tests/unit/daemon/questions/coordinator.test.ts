@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionState, SessionView } from '../../../../daemon/seams/protocol.ts';
+import type { SessionState, SessionView } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../daemon/seams/keyed-serial-executor.ts';
 import {
