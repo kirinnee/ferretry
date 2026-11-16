@@ -60,6 +60,16 @@ describe('the Catalogs client by route key', () => {
     expect(calls).toEqual([]);
   });
 
+  it('reads Access’s paired-devices list by GET only, for this device’s id', async () => {
+    calls.length = 0;
+    const client = catalogClientOf(recording({ devices: [], hostLocal: true }));
+    await client.request('/v1/pair/devices', z.unknown());
+    expect(calls.map(call => call.route)).toEqual(['GET /v1/pair/devices']);
+    await expect(client.request('/v1/pair/devices', z.unknown(), { method: 'DELETE' })).rejects.toThrow(
+      'declares no route',
+    );
+  });
+
   it('reads the NAMES of secrets (a value is never listed) and nothing else beyond its own routes', async () => {
     calls.length = 0;
     const client = catalogClientOf(recording({ health: 'ready', secrets: [{ name: 'ACME' }] }));

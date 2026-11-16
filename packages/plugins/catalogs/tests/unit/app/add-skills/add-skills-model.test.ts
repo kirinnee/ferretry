@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'bun:test';
+import { beforeAll, describe, expect, it } from 'bun:test';
 import {
+  ALL_CHIP,
   accountSentence,
+  catalogChips,
+  filterRows,
   installPlan,
   landedSentence,
   likelyNewFolder,
@@ -13,7 +16,9 @@ import {
   unreachableLine,
   updatedLine,
 } from '../../../../app/features/add-skills/add-skills-model.ts';
+import { cardState } from '../../../../app/features/shared/shared-screens-model.ts';
 import { installRecord } from '../support/catalog-views.ts';
+import { okAttempt, otherCatalogView, type SharedItemFixture, sharedItemFixture } from '../support/shared-screens.ts';
 
 const projects = [
   { name: 'root', path: '/work' },
@@ -72,5 +77,51 @@ describe('S-0010 where the Add skills page puts a skill, and how it says so', ()
     );
     expect(unreachableLine(['A'])).toBe('Could not reach A, so the list may be out of date.');
     expect(unreachableLine(['A', 'B', 'C'])).toBe('Could not reach A, B and C, so the list may be out of date.');
+  });
+});
+
+let shared: SharedItemFixture;
+beforeAll(async () => {
+  shared = await sharedItemFixture();
+});
+
+describe('which catalog a skill is from', () => {
+  const stateOf = (...views: ReturnType<typeof otherCatalogView>[]) => {
+    const state = cardState(okAttempt({ ...shared.browse, catalogs: views }));
+    if (state.kind !== 'ok') throw new Error('expected an ok card');
+    return state;
+  };
+  const rowsOf = (...views: ReturnType<typeof otherCatalogView>[]) =>
+    skillRows(stateOf(...views), 'pub', 'Studio', new Map());
+
+  it('keeps the catalog on each row, apart from the publisher', () => {
+    expect(rowsOf(shared.view)[0]).toMatchObject({
+      catalogKey: `pub/${shared.view.catalogId}`,
+      catalogName: "Kirin's catalog",
+      publisher: 'Studio',
+    });
+  });
+
+  it('offers All and one chip per catalog, counting what the search kept', () => {
+    const all = rowsOf(shared.view, otherCatalogView(shared));
+    expect(catalogChips(all, all).map(chip => [chip.key === ALL_CHIP ? 'all' : chip.label, chip.count])).toEqual([
+      ['all', 2],
+      ["Kirin's catalog", 1],
+      ['Design catalog', 1],
+    ]);
+    expect(catalogChips(all, filterRows(all, 'ocr-tools')).map(chip => chip.count)).toEqual([1, 0, 1]);
+  });
+
+  it('offers no chips for one catalog, and names two catalogs of one name with their publisher', () => {
+    expect(catalogChips(rowsOf(shared.view), rowsOf(shared.view))).toEqual([]);
+    const same = [
+      ...rowsOf(shared.view),
+      ...skillRows(stateOf(otherCatalogView(shared, "Kirin's catalog")), 'other', 'Guild', new Map()),
+    ];
+    expect(catalogChips(same, same).map(chip => chip.label)).toEqual([
+      'All catalogs',
+      "Kirin's catalog (Studio)",
+      "Kirin's catalog (Guild)",
+    ]);
   });
 });

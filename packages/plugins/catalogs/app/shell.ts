@@ -37,9 +37,6 @@ export function grantRefusalNotice(error: unknown): GrantRefusalNotice | null {
   return { refusal, detail: error.message };
 }
 
-/** GAP(access): the id of THIS device (`GET /v1/paired-devices`, Access's) is not read; the command keeps its placeholder. */
-export const readThisDeviceId = (): Promise<string | null> => Promise.resolve(null);
-
 // ─── the sentence for a refused change ───────────────────────────────────────────────────────────────────────────
 
 const NO_ANSWER = 'This machine didn’t answer. Check it is awake and try again.';

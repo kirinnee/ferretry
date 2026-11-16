@@ -7,7 +7,7 @@ import { CircleAlert, Lock } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import type { DaemonConnection } from '../../lib/machine.ts';
 import { useDaemonClient } from '../../lib/client-context.tsx';
-import { readThisDeviceId } from '../../shell.ts';
+import { readThisDeviceId } from '../../lib/this-device.ts';
 import { BottomSheet } from '@ferretry/app/ui';
 import { Button } from '@ferretry/app/ui';
 import type { CatalogClientFactory } from './catalogs-api.ts';
@@ -70,7 +70,7 @@ export function SharingOffPanel({
     if (connection === undefined) return;
     let live = true;
     void createClient(connection)
-      .then(async () => await readThisDeviceId())
+      .then(async client => await readThisDeviceId(client))
       .then(view => {
         if (live) setDeviceId(view);
       })
