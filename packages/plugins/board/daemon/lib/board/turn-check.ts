@@ -100,7 +100,7 @@ export function mutatingWork(events: readonly TranscriptEvent[], binary: string)
 
 /** The words of the nudge. Short on purpose: it starts a turn. */
 export const boardCheckMessage = (binary: string): string =>
-  `${BOARD_CHECK_OPENING} Create one (${binary} task create …) or record why not: ${binary} task skip "<why>"`;
+  `${BOARD_CHECK_OPENING} Create one (${binary} card new …) or record why not: ${binary} card skip "<why>"`;
 
 /** The send id of the one nudge a session may get in an hour. */
 export const boardCheckSendId = (ferret: string, now: number): string =>
