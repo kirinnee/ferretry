@@ -53,12 +53,12 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
  * never shown. `before` is the word before `word`; a flag glued to its value with `=` is read from `word` itself.
  */
 function valueOfNonPointerCredentialFlag(before: string | undefined, word: string): boolean {
-  const glued = /^(-{1,2}[A-Za-z0-9][^=\s]*)=(.*)$/su.exec(word);
+  const glued = /^(-{1,2}[A-Za-z][A-Za-z0-9_-]*)=(.*)$/su.exec(word);
   const flag = glued === null ? before : glued[1];
   const value = glued === null ? word : (glued[2] ?? '');
   return (
     flag !== undefined &&
-    FLAG_ONLY.test(flag) &&
+    FLAG_NAME.test(flag) &&
     !POINTER_FLAG.test(flag) &&
     PLACE.test(value) &&
     (SHOWN_TESTS.namesSecret(flag) || /^-{1,2}auth/iu.test(flag))
@@ -114,6 +114,9 @@ const PLACE = /^(?:(?:~|\.|\.\.)\/[^/]|\/[^/]+\/[^/])/u;
 
 /** A mark a value has and a place has not: a pointer, a query, a fragment, a user, a scheme or a pair. */
 const NOT_IN_A_PLACE = /[\s${}#?@:=]/u;
+
+/** A plain flag name and nothing else (`--token`, `--api-key`, `-k`): letters, digits, `_` and `-`, never a pair or a header. */
+const FLAG_NAME = /^-{1,2}[A-Za-z][A-Za-z0-9_-]*$/u;
 
 /** A flag word on its own (`--token-file`, `-k`): no `=`, so its value is the word AFTER it. */
 const FLAG_ONLY = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
