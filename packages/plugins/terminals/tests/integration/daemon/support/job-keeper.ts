@@ -44,8 +44,8 @@ class TableProof implements ProcessProof {
     return this.harnesses.get(pid);
   }
   /** What a pid runs; absent, a real proof reads the host's /proc and a table one answers a `fy job attach` line. */
-  readonly argvs = new Map<number, string>();
-  async argvOf(pid: number): Promise<string | undefined> {
+  readonly argvs = new Map<number, string | undefined | 'unknown'>();
+  async argvOf(pid: number): Promise<string | undefined | 'unknown'> {
     if (this.argvs.has(pid)) return this.argvs.get(pid);
     if (!this.real) return this.starts.has(pid) ? `fy job attach ${pid}` : undefined;
     const raw = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');

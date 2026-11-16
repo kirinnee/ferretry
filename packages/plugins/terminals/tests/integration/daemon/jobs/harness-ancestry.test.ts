@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -43,5 +43,42 @@ void child;
     // Assert
     should(found?.pid).equal(harness.pid);
     should(found?.start).match(/^\d+$/u);
+  });
+});
+
+describe('finding the harness: what the walk does with a process tree it cannot fully read', () => {
+  /** A fake /proc: `<pid>/stat` names the parent, `<pid>/cmdline` the command (absent when `command` is undefined). */
+  function fakeProc(rows: ReadonlyArray<{ pid: number; ppid: number; command?: string }>): string {
+    const root = mkdtempSync(join(tmpdir(), 'fy-proc-'));
+    cleanups.push(() => rmSync(root, { recursive: true, force: true }));
+    for (const row of rows) {
+      mkdirSync(join(root, String(row.pid)));
+      writeFileSync(join(root, String(row.pid), 'stat'), `${row.pid} (x) S ${row.ppid} ${'0 '.repeat(30)}`);
+      if (row.command !== undefined) writeFileSync(join(root, String(row.pid), 'cmdline'), row.command);
+    }
+    return root;
+  }
+
+  it('should find nothing for a process that cannot be read', async () => {
+    should(await harnessAncestor(5, fakeProc([]))).be.undefined();
+  });
+
+  it('should find nothing when the walk reaches init without meeting a harness', async () => {
+    const root = fakeProc([{ pid: 5, ppid: 1 }]);
+    should(await harnessAncestor(5, root)).be.undefined();
+  });
+
+  it('should find nothing when a parent’s command line cannot be read', async () => {
+    const root = fakeProc([
+      { pid: 5, ppid: 6 },
+      { pid: 6, ppid: 2 },
+    ]);
+    should(await harnessAncestor(5, root)).be.undefined();
+  });
+
+  it('should give up on a tree deeper than it will walk', async () => {
+    const rows = Array.from({ length: 40 }, (_, index) => ({ pid: 10 + index, ppid: 11 + index, command: 'sh\0' }));
+    rows.push({ pid: 50, ppid: 2, command: 'sh\0' });
+    should(await harnessAncestor(10, fakeProc(rows))).be.undefined();
   });
 });

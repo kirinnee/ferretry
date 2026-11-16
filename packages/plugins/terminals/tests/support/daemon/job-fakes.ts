@@ -88,7 +88,7 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
   /** The harness each attachment pid sits under, as the host would find it when the attachment registers. */
   const harnesses = new Map<number, { readonly pid: number; readonly start: string }>();
   /** What `argvOf` answers for a pid (default: a `fy job attach` line); `'unknown'` = unreadable. */
-  const argvs = new Map<number, string | 'unknown'>();
+  const argvs = new Map<number, string | undefined | 'unknown'>();
   let counter = 0;
   const service = new JobService(
     files,

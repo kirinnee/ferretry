@@ -214,3 +214,42 @@ describe('JobService stop when the wrapper does not finish in time', () => {
     should(files.exits.has(`f1/${job.id}`)).be.false();
   });
 });
+
+describe('JobService attachments: what registers and what is swept', () => {
+  it('should refuse a pid that is no longer a process, one that is not `fy job attach`, and one it cannot read', async () => {
+    const { service, starts, argvs } = memoryService();
+    const job = await service.start('f1', { command: 'a' }, person);
+    starts.set(300, 'start-300');
+    argvs.set(300, undefined);
+    starts.set(301, 'start-301');
+    argvs.set(301, 'sleep 299');
+    starts.set(302, 'start-302');
+    argvs.set(302, 'unknown');
+
+    await should(service.registerAttachment('f1', { jobId: job.id, pid: 300 })).be.rejectedWith(
+      /not a running process/u,
+    );
+    await should(service.registerAttachment('f1', { jobId: job.id, pid: 301 })).be.rejectedWith(
+      /not a `fy job attach` process/u,
+    );
+    await should(service.registerAttachment('f1', { jobId: job.id, pid: 302 })).be.rejectedWith(
+      /not a `fy job attach` process/u,
+    );
+  });
+
+  it('should sweep an attachment whose harness is gone, once, and leave a harness-less one alone', async () => {
+    const { service, starts, harnesses } = memoryService();
+    const job = await service.start('f1', { command: 'a' }, person);
+    starts.set(310, 'start-310');
+    starts.set(311, 'start-311');
+    starts.set(900, 'harness-start');
+    harnesses.set(310, { pid: 900, start: 'harness-start' });
+    await service.registerAttachment('f1', { jobId: job.id, pid: 310 });
+    await service.registerAttachment('f1', { jobId: job.id, pid: 311 });
+
+    should(await service.sweepOrphans()).equal(0);
+    starts.delete(900);
+    should(await service.sweepOrphans()).equal(1);
+    should(await service.sweepOrphans()).equal(0);
+  });
+});
