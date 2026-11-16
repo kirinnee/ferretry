@@ -19,6 +19,7 @@ import {
   onProcessExit,
 } from '../../../../cli/adapters/pair/browser-opener.ts';
 import { PAIRING_REDIRECT_DIRECTORY_PREFIX, PairingRedirectsFile } from '../../../../contract/index.ts';
+import { stateRedirectWriter } from '../../../../daemon/adapters/pairing/redirect-writer.ts';
 import { CODE, PAIR_URL } from './fixtures';
 
 /** Lets every promise already queued settle, the way the event loop would between two events. */
@@ -204,7 +205,9 @@ function launcherWorld(platform = 'linux') {
       } as unknown as ChildProcess;
     }) as unknown as typeof spawn,
     stateHome: '/unused',
-    createPage: page => createPairingRedirectPage(state, page),
+    // The daemon makes the page (`POST /v1/pair/redirect`); here its own writer runs over the same in-memory state.
+    createPage: page =>
+      createPairingRedirectPage({ state, make: made => stateRedirectWriter(state).write(made) }, page),
     retentionMs: 10_000,
     schedule: (run, ms) => void timers.push({ run, ms }),
     onExit: run => void exits.push(run),

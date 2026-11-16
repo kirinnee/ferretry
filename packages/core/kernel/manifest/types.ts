@@ -428,9 +428,10 @@ export interface PublicFileDecl {
  * a private file CREATED (or replaced) later THROUGH THE DAEMON's state port or internal roots is pinned before that
  * write returns: those writers ask the index to look again first, so a first write has no window. Root calls made
  * after the write returns are covered; a root call already running alongside the write is not. A private file made
- * OUTSIDE the daemon is pinned only at the index's next look, within 250 ms (as in v4): a file the CLI's own state
- * port makes (Access's `fy pair --open` redirect page under `pairing-redirects`), and a file a child process makes
- * inside a private folder. An entry met through any root under another name, a bind mount included, is refused
+ * OUTSIDE the daemon is pinned only at the index's next look, within 250 ms (as in v4): a file a child process makes
+ * inside a private folder. (A file the CLI's own state port makes is built without the pin, so a private file is never
+ * made there: Access's `fy pair --open` redirect page under `pairing-redirects` is made by the daemon,
+ * `POST /v1/pair/redirect`.) An entry met through any root under another name, a bind mount included, is refused
  * `fenced` (fail closed). A look that cannot be made fails closed too: the write rejects with `private_unpinned` and
  * every root refuses until a look can be made, and the daemon says once "A private file of <plugin> could not be
  * pinned, so no folder is opened until it can be: <reason>." (again after a private write's look has succeeded in

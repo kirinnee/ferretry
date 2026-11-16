@@ -185,34 +185,38 @@ export const holdProcessOpen = (run: () => void, ms: number): void => {
   setTimeout(run, ms);
 };
 
-/** What `--open` needs of the CLI's own state: the kernel's scoped StatePort members, nothing wider. */
-export type PairingRedirectCliStatePort = Pick<
-  StatePort,
-  'write' | 'pathOf' | 'remove' | 'removeEmptyDirectory' | 'createPrivateDirectory'
->;
+/**
+ * What `--open` needs of the CLI's own state: the kernel's scoped StatePort members, nothing wider. It never WRITES the
+ * page: a file the CLI's own state port makes is pinned only at the fence index's next look, and this one holds a live
+ * pairing code, so the daemon makes it ({@link MakePairingRedirectPage}).
+ */
+export type PairingRedirectCliStatePort = Pick<StatePort, 'pathOf' | 'remove' | 'removeEmptyDirectory'>;
 
-/** Creates only inside a fresh private directory of the declared tree, so a stale name is never overwritten. */
+/** Asks the daemon to make the page (`POST /v1/pair/redirect`, pinned before it answers); answers the directory it made. */
+type MakePairingRedirectPage = (page: string) => Promise<string>;
+
+/** What the shipped opener is given: the state it removes the page through, and the daemon that makes it. */
+export interface PairingRedirectCli {
+  readonly state: PairingRedirectCliStatePort;
+  readonly make: MakePairingRedirectPage;
+}
+
+/** The daemon makes the page inside a fresh private directory of the declared tree; this finds it and can remove it. */
 export async function createPairingRedirectPage(
-  ready: PairingRedirectCliStatePort,
+  ready: PairingRedirectCli,
   page: string,
 ): Promise<{
   readonly file: string;
   discard(): Promise<void>;
 }> {
-  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  const suffix = Array.from(crypto.getRandomValues(new Uint8Array(6)), byte => alphabet[byte % alphabet.length]).join(
-    '',
-  );
-  const directory = `${PAIRING_REDIRECT_DIRECTORY_PREFIX}${suffix}`;
+  const directory = await ready.make(page);
   const name = `${directory}/${PAIRING_REDIRECT_FILE_NAME}`;
-  await ready.createPrivateDirectory(PairingRedirectsFile, directory);
   const discard = async () => {
-    await ready.remove(PairingRedirectsFile, name);
-    await ready.removeEmptyDirectory(PairingRedirectsFile, directory);
+    await ready.state.remove(PairingRedirectsFile, name);
+    await ready.state.removeEmptyDirectory(PairingRedirectsFile, directory);
   };
   try {
-    await ready.write(PairingRedirectsFile, new TextEncoder().encode(page), name);
-    return { file: ready.pathOf(PairingRedirectsFile, name), discard };
+    return { file: ready.state.pathOf(PairingRedirectsFile, name), discard };
   } catch (error) {
     await discard().catch(() => undefined);
     throw error;
@@ -220,7 +224,7 @@ export async function createPairingRedirectPage(
 }
 
 /** The shipped opener uses the same declared opaque tree as the daemon sweep; absent ports refuse --open. */
-export const desktopBrowserOpener = (stateHome: string, ready?: PairingRedirectCliStatePort): IBrowserOpener => {
+export const desktopBrowserOpener = (stateHome: string, ready?: PairingRedirectCli): IBrowserOpener => {
   if (ready === undefined) return { open: async () => false };
   return new DesktopBrowserOpener({
     platform: process.platform,
