@@ -71,14 +71,19 @@ export function modeSwitchDefaults(mode: FerretRecord['mode']): Readonly<Record<
 }
 
 /**
- * Whether the pane is a sub-ferret (`FY_SUB_FERRET`), from the record's `role`: a helper is one, a lead is not. The
+ * Whether the pane is a sub-ferret (`FY_SUB_FERRET`), from the record's `role` and `parent`: a helper is one, and so is
+ * any ferret with a parent (a start can POST `role: lead` beside the parent it is forced to have), a lead with none is
+ * not. The same rule as `needsHelperAdmission` (ferrets/helper-admission.ts), and the one every daemon limit reads. The
  * wrapper reads it to swap the lead's Notify and Board rules for the Sub-ferret section and to leave the Agenda section
  * out. The ONE spelling, put in the environment AFTER the parts, so no part or login file can move it: it is the
- * record's own fact. It follows `role` (not `parent`) so a helper started with no parent (a Pack's clean-up builder) is
- * limited the same way, and `role` defaults to `helper` whenever a start names a parent.
+ * record's own fact. A helper started with no parent (a Pack's clean-up builder) is limited the same way, and `role`
+ * defaults to `helper` whenever a start names a parent.
  */
-export function subFerretSwitch(role: FerretRecord['role']): Readonly<Record<string, string>> {
-  return { [SUB_FERRET_ENV]: role === 'helper' ? '1' : '0' };
+export function subFerretSwitch(
+  role: FerretRecord['role'],
+  parent?: FerretRecord['parent'],
+): Readonly<Record<string, string>> {
+  return { [SUB_FERRET_ENV]: role === 'helper' || parent !== undefined ? '1' : '0' };
 }
 
 /** The launch variables a launch records: the section switches and the mode, as the launch put them in its environment. */

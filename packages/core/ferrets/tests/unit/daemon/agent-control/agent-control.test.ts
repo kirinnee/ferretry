@@ -322,7 +322,16 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     expect(lead.handed.at(-1)?.FY_SUB_FERRET).toBe('0');
   });
 
-  test('c58-o16b the switch is one of the launch variables a launch records, so a change of it reads as Restart-needed', () => {
+  test('c58-o16c a ferret with a parent is a sub-ferret even when its role says lead: the switch follows the same rule as the limits', async () => {
+    expect(subFerretSwitch('lead', ferretId('lead'))).toEqual({ FY_SUB_FERRET: '1' });
+    expect(subFerretSwitch('lead', undefined)).toEqual({ FY_SUB_FERRET: '0' });
+    expect(subFerretSwitch('helper', undefined)).toEqual({ FY_SUB_FERRET: '1' });
+    const posted = launching(persisted(), {}, 'auto', { role: 'lead', parent: ferretId('lead') });
+    await posted.service.resume(posted.id, undefined, { origin: PERSON_ORIGIN });
+    expect(posted.handed.at(-1)?.FY_SUB_FERRET).toBe('1');
+  });
+
+  test('c58-o16b the switch is one of the launch variables a launch records, and it follows role and parent', () => {
     expect([...LAUNCH_SWITCH_VARIABLES]).toContain('FY_SUB_FERRET');
     expect(recordedSwitches({ FY_SUB_FERRET: '1', FY_SESSION_TOKEN: 'never' })).toEqual({ FY_SUB_FERRET: '1' });
     expect(subFerretSwitch('helper')).toEqual({ FY_SUB_FERRET: '1' });

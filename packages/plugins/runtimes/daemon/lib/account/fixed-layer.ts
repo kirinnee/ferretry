@@ -497,7 +497,7 @@ export const BOARD_INSTRUCTION = (fy: string): string =>
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
- * writes {@link SUB_FERRET_ENV} `1` from the session's `parent`, and the wrapper then swaps the notify and
+ * writes {@link SUB_FERRET_ENV} `1` for `role: helper` or a `parent`, and the wrapper then swaps the notify and
  * board rules for {@link SUB_FERRET_INSTRUCTION} and leaves out the agenda section: the daemon refuses a
  * sub-ferret the agenda and the board's moves, so a prompt that taught them would only teach refusals.
  */
