@@ -7,7 +7,7 @@ import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
-import { CODEX_LAUNCH_SETTINGS } from '../../contract/index.ts';
+import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
 import {
   CODEX_QUESTIONS_FEATURE,
   CODEX_QUESTIONS_OFF,
@@ -75,6 +75,8 @@ const harnessOver = (
   questionTool?: boolean,
   /** A settings component the runtime selects (`config/codex/settings/`): its document is merged into `config.toml`. */
   settings?: Record<string, unknown>,
+  /** The settings items (`config/codex/settings/`) in the config, with any launch flags they carry. */
+  items: ReadonlyMap<string, unknown> = new Map(),
 ) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
@@ -84,9 +86,6 @@ const harnessOver = (
     selected: selectEverything,
     kernel: {
       roots,
-      ...(settings === undefined
-        ? {}
-        : { config: { collection: () => new Map([['features', { settings }]]) } as unknown as KernelPorts['config'] }),
       state: {
         // Only the launch-settings record is of interest: the rollouts write their own beside it.
         write: async (definition: unknown, record: unknown) => {
@@ -96,6 +95,15 @@ const harnessOver = (
       log: { warn: () => undefined } as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
+      config: {
+        collection: (definition: unknown) =>
+          definition === CODEX_SETTINGS
+            ? new Map<string, unknown>([
+                ...items,
+                ...(settings === undefined ? [] : [['features', { settings }] as const]),
+              ])
+            : new Map(),
+      } as never,
     },
     ...(permissionMode === undefined ? {} : { permissionMode: () => permissionMode }),
     locate: async () => location,
@@ -201,6 +209,82 @@ describe('the Codex harness', () => {
     should(command).eql(plain.seen[0]?.spec.command);
     should(command.some(argument => argument.includes('allowedTools') || argument.includes('/fy/state/'))).be.false();
     should(command).containEql('sandbox_mode="workspace-write"');
+  });
+
+  describe('the settings items’ launch flags (any flag, owner decision !A525)', () => {
+    const items = new Map<string, unknown>([
+      ['b-search', { settings: {}, flags: ['--search', '-c', 'model_verbosity="low"'] }],
+      ['a-risky', { settings: {}, flags: ['--full-auto', '-c', 'approval_policy="never"', '--some-future-flag'] }],
+    ]);
+
+    it('reach the argv as separate words, in item name order, before the launch’s own arguments', async () => {
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf({ model: 'gpt-5.6-codex' }), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+      const at = command.indexOf('--some-future-flag');
+
+      should(command.slice(at, at + 3)).eql(['--some-future-flag', '--search', '-cmodel_verbosity="low"']);
+      should(at).be.below(command.indexOf('--model'));
+      should(command.indexOf('--model')).be.below(command.indexOf('--no-alt-screen'));
+    });
+
+    it('lose to the launch on a permission switch: the item’s sandbox and approval flags never reach the argv', async () => {
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf(), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command).not.containEql('--full-auto');
+      should(command).not.containEql('approval_policy="never"');
+      should(command.filter(argument => argument.startsWith('approval_policy='))).eql(['approval_policy="on-request"']);
+    });
+
+    it('cannot loosen the launch: its permission is passed as explicit flags, exactly one of each, after the items’ flags', async () => {
+      const spelled = new Map<string, unknown>([
+        ['a', { settings: {}, flags: ['-sdanger-full-access', '-anever', '--yolo', '-pwork', '--some-future-flag'] }],
+      ]);
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, spelled);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf(), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command.filter(word => /^(--ask-for-approval|--sandbox|-s|-a|-p|--yolo|--profile)/u.test(word))).eql([
+        '--ask-for-approval=on-request',
+        '--sandbox=workspace-write',
+      ]);
+      should(command.indexOf('--some-future-flag')).be.below(command.indexOf('--ask-for-approval=on-request'));
+    });
+
+    it('reach a resume too, after the conversation id', async () => {
+      const { harness } = harnessOver(LOCATED, 'auto', undefined, undefined, items);
+      const { runner, seen } = fakeRunner();
+      await harness.resume(specOf(), runner, ENV, 'conv-1');
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command.slice(command.indexOf('resume'), command.indexOf('resume') + 3)).eql([
+        'resume',
+        'conv-1',
+        '--some-future-flag',
+      ]);
+    });
+
+    it('add nothing when no item carries a flag', async () => {
+      const { harness } = harnessOver(
+        LOCATED,
+        'auto',
+        undefined,
+        undefined,
+        new Map([['plain', { settings: { model: 'm' } }]]),
+      );
+      const bare = harnessOver(LOCATED, 'auto');
+      const withItem = fakeRunner();
+      const without = fakeRunner();
+      await harness.start(specOf(), withItem.runner, ENV);
+      await bare.harness.start(specOf(), without.runner, ENV);
+
+      should(withItem.seen[0]?.spec.command).eql(without.seen[0]?.spec.command);
+    });
   });
 
   it('!A525 a harness file that says no permission mode launches Codex with approval never and the full-access sandbox', async () => {
