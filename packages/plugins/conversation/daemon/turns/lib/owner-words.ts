@@ -1,6 +1,6 @@
-import type { QueueAuthor, QueuedMessage } from '../../seams/protocol.ts';
+import type { QueueAuthor, QueuedMessage } from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { SendRecord } from '../../delivery/lib/types.ts';
+import type { SendRecord } from '../../seams/ledger-types.ts';
 
 /** One turn document of a ferret (`turn-NNN.md`) and, when Ferretry wrote one beside it, who the document is from. */
 export interface TurnDocument {

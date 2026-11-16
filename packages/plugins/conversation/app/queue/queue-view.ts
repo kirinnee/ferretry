@@ -5,7 +5,7 @@
 // a network or a clock.
 
 import { relativeTime } from '@ferretry/app';
-import type { QueuedMessage } from '../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { type OutboxEntry, WAITING_REASON } from '../composer/send-outbox.ts';
 import { WAIT_REASON_COPY } from './send-queue.ts';
 

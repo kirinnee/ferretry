@@ -3,7 +3,7 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { absolute } from '../host/fence-guard.ts';
 import { insideFence } from '../contract/home.ts';
-import { isKernelMadeRoot } from '../host/internal-roots.ts';
+import { isKernelMadeRoot } from '../contract/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
   internalRootRelative,
@@ -38,7 +38,8 @@ import {
   placedLinkMoveVerdict,
   SharedCredentials,
 } from '../host/shared-credentials.ts';
-import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
+import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
+import { historyEntryFor, historyRoot, isFerretHome, poolEntryFolder, refuseHistory } from '../host/history-pool.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
 import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
@@ -1797,6 +1798,57 @@ async function start(world: World): Promise<TestHost> {
               throw error;
             }
             claim.spend();
+          },
+          // The same rules as production (`linkHistory` in `host/roots.ts`), over the flat world, in the same order: the
+          // root, the permission, the entry, the pool, the home, then the disk-shaped checks. The pool is the plugin's own
+          // state tree in the test store (`<folder>/<entry>`); the link points at `/state/<plugin>/<folder>/<entry>`.
+          linkHistory: async (ferretHome, entryName) => {
+            if (!historyRoot(name)) return refuseHistory('not_internal');
+            const permission = manifest.permissions?.historyPool;
+            const declared = historyEntryFor(permission, entryName);
+            const pooled =
+              permission === undefined ? undefined : poolEntryFolder(permission, manifest.data?.state ?? [], entryName);
+            if (pooled === undefined || holdsPrivate(manifest.id, pooled, privateFiles))
+              return refuseHistory('not_own');
+            if (prefix === undefined) throw new RootError('outside');
+            // (the scope's own folder is the path itself: `ownPath` names a LEAF of the scope, as production's `lexicalInRoot` does not)
+            const place = ferretHome === prefix ? prefix : ownPath(ferretHome);
+            if (!isFerretHome('/agent-homes', place)) return refuseHistory('not_home');
+            // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
+            const steps = place.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
+            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+            // The home must already be there (this call never makes one).
+            if (world.roots.has(place) || !testFolderExists(place)) throw new RootError('outside');
+            if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
+            const leaf = `${place}/${entryName}`;
+            // (production asks `refuseHeldName` first: a name that is an ALIAS of a private place, by identity, is `fenced`. The
+            // flat world has no identities, so it answers `exists` — a declared testing-host gap, as for `linkCredential`.)
+            if (world.roots.has(leaf) || testLinks.has(leaf) || testFolderExists(leaf)) return refuseHistory('exists');
+            // Every refusal is behind us: the pool folder and its entry are made now, owner-only.
+            let state = world.states.get(manifest.id);
+            if (state === undefined) {
+              state = new MemoryStateFolder(() => clock.nowMs());
+              world.states.set(manifest.id, state);
+            }
+            const poolFolder = pooled.slice(0, pooled.lastIndexOf('/'));
+            // As production (`reachHistoryEntry`): what is already in the pool is judged by name BEFORE anything is made. A
+            // link at the pool folder or at the entry is `link_escape` (nothing is followed); a file where the pool folder
+            // belongs is `changed`, and the testing host never invents a folder beside it.
+            if (state.symlinks.has(poolFolder)) throw new RootError('link_escape');
+            if (state.files.has(poolFolder) || state.bytes.has(poolFolder)) throw new RootError('changed');
+            if (state.directories.has(poolFolder) && state.symlinks.has(pooled)) throw new RootError('link_escape');
+            if (!state.directories.has(poolFolder))
+              state.directories.set(poolFolder, { mode: 0o700, modifiedMs: clock.nowMs() });
+            if (declared.kind === 'folder') {
+              if (state.files.has(pooled) || state.bytes.has(pooled) || state.symlinks.has(pooled))
+                throw new RootError('changed');
+              if (!state.directories.has(pooled))
+                state.directories.set(pooled, { mode: 0o700, modifiedMs: clock.nowMs() });
+            } else {
+              if (state.directories.has(pooled) || state.symlinks.has(pooled)) throw new RootError('changed');
+              if (!state.files.has(pooled) && !state.bytes.has(pooled)) state.bytes.set(pooled, new Uint8Array());
+            }
+            testLinks.set(leaf, `/state/${manifest.id}/${pooled}`);
           },
           copyTree: async (source, from, to, copyOptions) => {
             // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import { conversationConformance, fakeConversation } from '../../contract/testing/index.ts';
+import { QueuedMessageSchema, SendRequestSchema } from '@ferretry/core-mailbox/contract';
 import {
   AnswerRequestSchema,
   AttachmentViewSchema,
@@ -9,10 +10,8 @@ import {
   DraftClientFrameSchema,
   DraftEditSchema,
   KeepRequestSchema,
-  QueuedMessageSchema,
   RenderIdSchema,
   RenderSaveRequestSchema,
-  SendRequestSchema,
   TranscriptImageDownloadSchema,
   WorkSearchQuerySchema,
 } from '../../contract/index.ts';

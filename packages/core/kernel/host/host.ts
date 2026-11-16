@@ -885,6 +885,8 @@ async function bootLocked(
         ...(manifest.permissions?.shareCredentials === undefined
           ? {}
           : { shareCredentials: manifest.permissions.shareCredentials }),
+        // The history-pool door (`RootHandle.linkHistory`): only a manifest that declares it links, and only to its own pool.
+        ...(manifest.permissions?.historyPool === undefined ? {} : { historyPool: manifest.permissions.historyPool }),
         setMode: manifest.permissions?.setMode === true,
         ...(manifest.permissions?.projectFiles === undefined
           ? {}
