@@ -39,23 +39,23 @@ Open route rows: 368. Descriptor proven: 350. Not proven: 18 (loosened 2, unpair
 | R-0159 | `GET /v1/sessions/:sessionId/log-search` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0160 | `GET /v1/sessions/:sessionId/logs` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
 | R-0169 | `GET /v1/sessions/:sessionId/relaunch-settings` | descriptor proven | maybe: packages/core/ferrets/daemon/features/moves.feature.ts:63; ports-pending names /v1/ferrets/:ferretId/relaunch-settings |
-| R-0172 | `GET /v1/sessions/:sessionId/sends` | descriptor proven | maybe: packages/plugins/conversation/daemon/queue/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
-| R-0173 | `GET /v1/sessions/:sessionId/sends/:sendId` | descriptor proven | maybe: packages/plugins/conversation/daemon/queue/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
+| R-0172 | `GET /v1/sessions/:sessionId/sends` | descriptor proven | maybe: packages/core/mailbox/daemon/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
+| R-0173 | `GET /v1/sessions/:sessionId/sends/:sendId` | descriptor proven | maybe: packages/core/mailbox/daemon/adapters/send-path-delivery.ts:53; "sends" sits beside a pending/GAP marker (key not a literal) |
 | R-0211 | `GET /v1/worktrees/removal` | descriptor proven | no-marker: packages/core/ferrets/daemon/lib/runtime/mounts/worktrees.ts:131 |
 | R-0226 | `PATCH /v1/sessions/:sessionId/compact-at` | descriptor proven | stub: traced by review: conversation host: compact-at get/set are pending() (503 conversation_terminal_unavailable) |
 | R-0227 | `PATCH /v1/sessions/:sessionId/hypermedia` | descriptor proven | not-found: no handler literal for the key in daemon source (built by a helper); check by hand |
-| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:91; "answer" sits beside a pending/GAP marker (key not a literal) |
+| R-0335 | `POST /v1/sessions/:sessionId/answer` | descriptor proven | maybe: packages/plugins/conversation/daemon/host.ts:37; "answer" sits beside a pending/GAP marker (key not a literal) |
 | R-0339 | `POST /v1/sessions/:sessionId/composer` | descriptor proven | stub: traced by review: conversation host: composer is pending() |
 | R-0341 | `POST /v1/sessions/:sessionId/conversion-preview` | descriptor proven | maybe: packages/core/ferrets/daemon/features/moves.feature.ts:64; the file carries pending/GAP markers at 47 |
 | R-0343 | `POST /v1/sessions/:sessionId/dialog` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:130 |
 | R-0344 | `POST /v1/sessions/:sessionId/fork` | descriptor proven | maybe: packages/core/ferrets/daemon/features/moves.feature.ts:59; the file carries pending/GAP markers at 47 |
 | R-0345 | `POST /v1/sessions/:sessionId/handover` | descriptor proven | stub: traced by review: ferrets session-handover refuses every request until its seams land |
 | R-0346 | `POST /v1/sessions/:sessionId/handover/cancel` | descriptor proven | maybe: packages/core/ferrets/daemon/features/moves.feature.ts:62; the file carries pending/GAP markers at 47 |
-| R-0350 | `POST /v1/sessions/:sessionId/interrupt` | descriptor proven | maybe: packages/plugins/conversation/daemon/harness-seam.ts:45; "interrupt" sits beside a pending/GAP marker (key not a literal) |
+| R-0350 | `POST /v1/sessions/:sessionId/interrupt` | descriptor proven | maybe: packages/core/mailbox/daemon/send-half.ts:532; "interrupt" sits beside a pending/GAP marker (key not a literal) |
 | R-0355 | `POST /v1/sessions/:sessionId/migrate` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0356 | `POST /v1/sessions/:sessionId/migrate/ask-to-stop-jobs` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… and migrate to move (design §1.4; migrat* is refused); descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0357 | `POST /v1/sessions/:sessionId/permission` | descriptor proven | no-marker: packages/plugins/claude-code/daemon/index.ts:129 |
-| R-0366 | `POST /v1/sessions/:sessionId/send` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:55; "send" sits beside a pending/GAP marker (key not a literal) |
+| R-0366 | `POST /v1/sessions/:sessionId/send` | descriptor proven | maybe: packages/core/mailbox/daemon/adapters/send-path-delivery.ts:10; "send" sits beside a pending/GAP marker (key not a literal) |
 | R-0367 | `POST /v1/sessions/:sessionId/sends/:sendId/cancel` | descriptor proven | stub: traced by review: conversation host: send cancel is pending() |
 | R-0368 | `POST /v1/sessions/:sessionId/sends/:sendId/enter` | descriptor proven | stub: traced by review: conversation host: send enter (submit) is pending() |
 | R-0369 | `POST /v1/sessions/:sessionId/sends/:sendId/retry` | descriptor proven | stub: traced by review: conversation host: send retry is pending() |
@@ -235,7 +235,7 @@ Open route rows: 368. Descriptor proven: 350. Not proven: 18 (loosened 2, unpair
 | R-0414 | `PUT /v1/accounts/sign-ins/:signIn` | descriptor proven | maybe: packages/plugins/accounts/daemon/routes/accounts.ts:400; the file carries pending/GAP markers at 263, 372, 373, 376, 395, 418 |
 | R-0420 | `PUT /v1/copy-rules/settings` | descriptor proven | maybe: packages/plugins/accounts/daemon/lib/secure-copy/rules.ts:131; "settings" sits beside a pending/GAP marker (key not a literal) |
 | R-0421 | `PUT /v1/secrets/logins/:id` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: today's one-release shim over the account store; 5.0 counterpart PUT /v1/accounts/:id; zero backward compatibility, S84, ruling #33 | no-route: no single 5.0 route derivable, so no handler to scan |
-| R-0027 | `DELETE /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:58; "queue" sits beside a pending/GAP marker (key not a literal) |
+| R-0027 | `DELETE /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/core/mailbox/daemon/lib/delivery/service.ts:59; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0098 | `GET /v1/imports/conversations` | descriptor proven | stub: traced by review: conversation reading: harnesses is harnessPending (503) |
 | R-0099 | `GET /v1/imports/conversations/:harness/:conversationId/preview` | descriptor proven | stub: traced by review: conversation reading: harnesses is harnessPending (503) |
 | R-0100 | `GET /v1/imports/history` | descriptor proven | maybe: packages/plugins/conversation/daemon/links/routes.ts:62; the file carries pending/GAP markers at 70 |
@@ -245,10 +245,10 @@ Open route rows: 368. Descriptor proven: 350. Not proven: 18 (loosened 2, unpair
 | R-0129 | `GET /v1/search` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:44; the file carries pending/GAP markers at 27, 124 |
 | R-0143 | `GET /v1/sessions/:sessionId/attachments/:attachmentId` | descriptor proven | no-marker: packages/plugins/conversation/daemon/attachments/index.ts:37 |
 | R-0163 | `GET /v1/sessions/:sessionId/messages` | descriptor proven | stub: traced by review: conversation reading: transcripts is harnessPending (503) |
-| R-0168 | `GET /v1/sessions/:sessionId/queue` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:58; "queue" sits beside a pending/GAP marker (key not a literal) |
+| R-0168 | `GET /v1/sessions/:sessionId/queue` | descriptor proven | maybe: packages/core/mailbox/daemon/lib/delivery/service.ts:59; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0174 | `GET /v1/sessions/:sessionId/shared-draft` | descriptor proven | maybe: packages/plugins/conversation/daemon/drafts/lib/stream.ts:276; "shareddraft" sits beside a pending/GAP marker (key not a literal) |
 | R-0186 | `GET /v1/sessions/:sessionId/transcript-images/:handle` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:43; the file carries pending/GAP markers at 27, 124 |
-| R-0230 | `PATCH /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/plugins/conversation/daemon/delivery/lib/service.ts:58; "queue" sits beside a pending/GAP marker (key not a literal) |
+| R-0230 | `PATCH /v1/sessions/:sessionId/queue/:messageId` | descriptor proven | maybe: packages/core/mailbox/daemon/lib/delivery/service.ts:59; "queue" sits beside a pending/GAP marker (key not a literal) |
 | R-0298 | `POST /v1/imports/conversations/adopt` | not proven (unpaired): route removed in 5.0 (recorded), no single counterpart derivable: imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged | no-route: no single 5.0 route derivable, so no handler to scan |
 | R-0322 | `POST /v1/renders` | descriptor proven | no-marker: packages/plugins/conversation/daemon/renders/index.ts:25 |
 | R-0324 | `POST /v1/search/related` | descriptor proven | maybe: packages/plugins/conversation/daemon/index.ts:45; the file carries pending/GAP markers at 27, 124 |
