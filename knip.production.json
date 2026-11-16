@@ -38,7 +38,7 @@
       ]
     },
     "packages/core/ferrets": {
-      "entry": ["app/views/*.tsx"],
+      "entry": ["app/views/*.tsx", "daemon/features/*.feature.ts"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "daemon/adapters/session/lifecycle/process-incarnation.ts",

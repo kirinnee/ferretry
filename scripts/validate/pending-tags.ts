@@ -49,6 +49,14 @@ export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
  */
 export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
+    'knip.production.json#workspaces["packages/core/ferrets"].entry:daemon/features/*.feature.ts',
+    'a Ferrets feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.',
+  ],
+  [
+    'knip.json#workspaces["packages/core/ferrets"].entry:daemon/features/*.feature.ts',
+    'a Ferrets feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.',
+  ],
+  [
     'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:sherpa-glue',
     'sherpa-glue is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the sherpa worker is unlisted to knip by nature.',
   ],

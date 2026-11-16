@@ -41,7 +41,12 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/core/ferrets": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "app/views/*.tsx"],
+      "entry": [
+        "tests/**/*.test.{ts,tsx}",
+        "tests/**/fixtures/**/*.{ts,tsx}",
+        "app/views/*.tsx",
+        "daemon/features/*.feature.ts"
+      ],
       "project": ["**/*.{ts,tsx}"],
       "ignore": [
         "daemon/lib/session/events/service.ts",

@@ -50,6 +50,34 @@ follows the same internal conventions (three layers, test tiers, lint gates) —
 deliberate deviation from the upstream diene template's one-repo-per-package rule, because
 Ferretry is one product, not a template fleet.
 
+## A feature is a file, not an edit to the composition root
+
+A plugin's daemon `build()` keeps composition (stores, ports, the service, shared guards) and **loses
+the per-feature wiring**: where many features would each add a route, a socket, a job or a port
+member to one big file, the plugin has a folder of feature files instead. A new feature adds ONE file
+and edits no shared one. Ferrets is the first plugin on this shape
+(`packages/core/ferrets/daemon/features/`):
+
+- **One file per feature**, named `<name>.feature.ts`, default-exporting `{ id, register(f) }`
+  (`FerretsFeature`). `register` builds the feature from the shared composition `f`
+  (`FerretsContext`: the kernel, the registry, the service, the session store and the shared guards
+  such as `pathFerret` and `mayAct`), adds its jobs through `f.kernel.jobs`, and returns what it
+  serves: `{ routes, sockets, port }`.
+- **No list to edit.** `scripts/gen/registries.ts` lists every `daemon/features/*.feature.ts` into the
+  git-ignored `daemon/generated/features.ts` (the same generator that writes the plugin registries,
+  re-run by install, build, test and typecheck), and `build()` registers that list through
+  `registerFeatures`. A route, a socket or a port member two features both serve, or two features with
+  one id, throws at boot naming both; `tests/unit/daemon/features/registration.test.ts` pins that the
+  features serve exactly the routes and sockets the manifest declares.
+- **A feature never imports another.** Something two features share, or something the service's ports
+  call lazily, goes in `FerretsContext` (built once in `index.ts`) or in `LateBindings` (a value a
+  feature assigns and the composition reads when a call is made).
+- **Features register in file-name order**, so a feature may not depend on another's registration
+  side effects, and two jobs started by the same boot have no order between them.
+
+Other plugins adopt the same folder when a feature there would otherwise edit its root; the generator
+picks up any package with a `daemon/features/*.feature.ts`.
+
 ## The PWA renders on the client only
 
 `packages/pwa` is client-rendered. Its app root, when it is assembled, **must mount with
