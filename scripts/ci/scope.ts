@@ -32,12 +32,15 @@
  *
  * `selectScope` is pure; the git and file-system reads are below it, and every failure there ends in FULL.
  */
-import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { changedFiles } from './changed-files.ts';
 import { importsAndOpaqueOf, resolveSpecifier } from '../gen/lib/imports.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
 import { declarationOf, readersOf, repoFiles, resolveDeclaration } from './scope-readers.ts';
+
+// The PR's own diff is read by `changed-files.ts` (the one-folder check reads it too); kept exported from here.
+export { changedFiles };
 
 /** The only base a scoped run exists for. */
 export const SCOPED_BASE_REF = 'rebuild/5.0-after';
@@ -235,27 +238,6 @@ export function describe(decision: Decision, pluginCount: number): string[] {
 }
 
 // ─── reading the repository ───────────────────────────────────────────────────────────────────────────────────────
-
-const git = (root: string, args: readonly string[]): { ok: boolean; out: string } => {
-  const run = spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-  return { ok: run.status === 0, out: run.stdout ?? '' };
-};
-
-/** `git diff --name-only --no-renames <base>...<head>`; undefined with the reason when the merge-base is missing. */
-export function changedFiles(
-  root: string,
-  base: string,
-  head: string,
-): { readonly files: string[] } | { readonly error: string } {
-  if (!/^[0-9a-f]{7,64}$/.test(base) || !/^[0-9a-f]{7,64}$/.test(head))
-    return { error: 'the base or head sha is missing' };
-  const mergeBase = git(root, ['merge-base', base, head]);
-  if (!mergeBase.ok || mergeBase.out.trim() === '')
-    return { error: `no merge-base of ${base} and ${head} in this checkout` };
-  const diff = git(root, ['diff', '--name-only', '--no-renames', '-z', `${base}...${head}`]);
-  if (!diff.ok) return { error: `git diff ${base}...${head} failed` };
-  return { files: diff.out.split('\0').filter(file => file !== '') };
-}
 
 interface PackageJson {
   readonly name?: string;

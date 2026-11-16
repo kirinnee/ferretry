@@ -9,6 +9,7 @@ import {
   type RestartRequest,
   type RestartResult,
   type RestartStatus,
+  startFingerprintText,
 } from '../../contract/index.ts';
 import type { IRestartGateway } from './restart/ports.ts';
 import type { ListedFerret } from './session/display.ts';
@@ -164,7 +165,7 @@ export class ClientSessionApi
     const recovered = await this.client
       .call<{ id: string }>(FERRET_ROUTES.recoverStart, {
         params: { requestId },
-        query: { payload: createHash('sha256').update(payload, 'utf8').digest('hex') },
+        query: { payload: createHash('sha256').update(startFingerprintText(payload), 'utf8').digest('hex') },
       })
       .catch(() => undefined);
     if (recovered === undefined) throw originalError;

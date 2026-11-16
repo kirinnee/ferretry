@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { readingVerbs } from '../../../cli/reading/verbs.ts';
 
-const harness = (answers: Record<string, unknown> = {}) => {
+const harness = (answers: Record<string, unknown> = {}, clock?: { nowMs(): number }) => {
   const calls: Array<{ route: string; init?: unknown }> = [];
   const out: string[] = [];
   const err: string[] = [];
@@ -14,6 +14,7 @@ const harness = (answers: Record<string, unknown> = {}) => {
       subscribe: () => () => undefined,
     },
     io: { out: (text: string) => void out.push(text), err: (text: string) => void err.push(text), isTty: false },
+    ...(clock === undefined ? {} : { clock }),
   } as never);
   return { verbs, calls, out, err };
 };
@@ -181,6 +182,37 @@ describe('the reading verbs', () => {
     expect(text).toContain('(also in your own history)');
     expect(text).toContain('take notes for the meeting');
     expect(text).toContain('Still reading your conversation history');
+  });
+
+  test('link --since <n>d|h|w goes to the wire as the ISO instant that long ago (v4’s sinceInstant), by the shell’s clock', async () => {
+    const now = Date.parse('2026-03-10T12:00:00.000Z');
+    const empty = { 'GET /v1/links/conversations': { conversations: [], matched: 0, skipped: 0 } };
+    for (const [typed, instant] of [
+      ['7d', '2026-03-03T12:00:00.000Z'],
+      ['3h', '2026-03-10T09:00:00.000Z'],
+      ['2w', '2026-02-24T12:00:00.000Z'],
+    ] as const) {
+      const { verbs, calls } = harness(empty, { nowMs: () => now });
+      expect(await run(verbs['link [query...]'], ['login'], { since: typed, harness: 'codex' })).toBe(0);
+      expect(calls[0]?.init).toEqual({ query: { q: 'login', harness: 'codex', since: instant } });
+    }
+  });
+
+  test('link --since says so, exit 1 and asking nothing, when the shell gives no clock; without --since no clock is needed', async () => {
+    const { verbs, calls, err } = harness({
+      'GET /v1/links/conversations': { conversations: [], matched: 0, skipped: 0 },
+    });
+    expect(await run(verbs['link [query...]'], [], { since: '1d' })).toBe(1);
+    expect(err.join('')).toContain('--since needs the shell’s clock');
+    expect(calls).toEqual([]);
+    expect(await run(verbs['link [query...]'], [], {})).toBe(0);
+  });
+
+  test('link --since refuses anything but <n>d, <n>h or <n>w in v4’s words, exit 2, and asks nothing', async () => {
+    const { verbs, calls, err } = harness();
+    expect(await run(verbs['link [query...]'], [], { since: 'soon' })).toBe(2);
+    expect(err.join('')).toContain('--since takes <n>d, <n>h or <n>w (e.g. 7d), not "soon"');
+    expect(calls).toEqual([]);
   });
 
   test('G41 transcript pages rows and prints the next cursor', async () => {

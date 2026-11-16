@@ -227,5 +227,6 @@ export default definePlugin({
   // to start while no folder for its ferret is handed to Pack mode, and the probe and the clean-up ferret run through
   // Runtimes and Ferrets.
   // Jev's ranking went with `fy new` (it ranked only `new --auto`), so nothing here calls out or spends.
-  permissions: { roots: [], network: [], spawn: [], secrets: [] },
+  // `checkDirectory`: the temporary-folder check resolves each temporary root through its links, read-only.
+  permissions: { roots: [], network: [], spawn: [], secrets: [], checkDirectory: true },
 });

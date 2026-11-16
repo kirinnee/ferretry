@@ -38,6 +38,23 @@ export const StartRequestsFile = defineState({
   schema: StartRequestsSchema,
 });
 
+/**
+ * The text a start's digest is taken over: the body the client sent, minus the request-only admission override
+ * `allowScratch` (it decides whether a start is let through, never WHICH start it is, so the same request id sent again
+ * with it flipped is a replay, not a conflict). One function for the client's recovery digest and the daemon's, so they
+ * cannot disagree. A body without it is returned byte for byte; one that is not a JSON object is left as it came.
+ */
+export function startFingerprintText(text: string): string {
+  try {
+    const body: unknown = JSON.parse(text);
+    if (typeof body !== 'object' || body === null || Array.isArray(body) || !('allowScratch' in body)) return text;
+    const { allowScratch: _override, ...rest } = body as Record<string, unknown>;
+    return JSON.stringify(rest);
+  } catch {
+    return text;
+  }
+}
+
 /** What a request id already says about a start: nothing, the same body (replay), or another body (conflict). */
 export type StartRequestLookup =
   | { readonly kind: 'none' }

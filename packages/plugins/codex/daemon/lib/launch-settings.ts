@@ -7,7 +7,7 @@ import {
 import { canonicalJson } from '@ferretry/std';
 import type { CodexLaunchSettingsRecord, HarnessConfig, SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments } from './fixed-layer.ts';
-import { settingsDocument } from './settings.ts';
+import { settingsDocument, settingsFlags } from './settings.ts';
 
 /**
  * WHAT A CODEX LAUNCH RAN UNDER, AS FINGERPRINTS (W2-c; today's `FileLaunchSettingsDigest`, `fyd.ts:8020`).
@@ -41,13 +41,16 @@ export function codexLaunchSettingsRecord(
   items: ReadonlyMap<string, SettingsItem>,
   runtime?: string,
 ): CodexLaunchSettingsRecord {
+  const document = settingsDocument(items);
+  const flags = settingsFlags(items);
   return {
     format: 1,
     ...(runtime === undefined ? {} : { runtime }),
     sections: {
       'permission-mode': fingerprint(permissionMode),
       'fixed-layer': fingerprint(codexFixedArguments(permissionMode, FOLDER_STAND_IN)),
-      settings: fingerprint(settingsDocument(items)),
+      // The flags are part of what the item runs the launch under; a document with none keeps the digest it always had.
+      settings: fingerprint(flags.length === 0 ? document : { document, flags }),
     },
   };
 }
