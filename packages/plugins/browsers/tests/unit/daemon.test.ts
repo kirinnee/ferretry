@@ -3,13 +3,10 @@ import { FakeGate, ferretStanding, ownerStanding, StandInAdmission } from '@ferr
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
 import type { AgentControlKind, AgentControlReader, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon, type Needer } from '@ferretry/kernel/manifest';
-import { fakeRuntimes, type FakeRuntimes } from '@ferretry/plugin-runtimes/contract/testing';
 import { ferret, type TestCaller, type TestHost, testHost } from '@ferretry/kernel/testing';
 import should from 'should';
 import { BrowsersPort } from '../../contract/port.ts';
 import daemon, { buildBrowsers } from '../../daemon/index.ts';
-import type { LoopbackMarkerReader } from '../../daemon/proxy/firewall/state.ts';
-import type { LoopbackFirewallMarker } from '../../daemon/proxy/wire/ports.ts';
 import { TypedIdentities } from '../../daemon/target/sign-in/identities.ts';
 import { Tabs } from '../support/tabs.ts';
 
@@ -66,24 +63,6 @@ const needer = (id: string): Needer => ({
 });
 
 /**
- * The daemon half over a Runtimes that serves the machine's ports (or none), with the marker and the uid it judges them
- * by stood in, so no test reads `/run` or depends on who runs it. No marker by default.
- */
-async function firewallHost(
-  runtimes: FakeRuntimes | undefined,
-  seams: { readonly marker?: LoopbackMarkerReader; readonly uid?: () => number | undefined } = {},
-): Promise<TestHost> {
-  const half = implementDaemon(daemon.manifest, {
-    build: ctx => buildBrowsers(ctx, { marker: { read: async () => undefined }, uid: () => 1000, ...seams }),
-  });
-  return await testHost({
-    plugins: [half],
-    uses: runtimes === undefined ? {} : { runtimes },
-    fakes: { vault: new FakeVault(), gate: new FakeGate() },
-  });
-}
-
-/**
  * The daemon half as the kernel builds it: every route, socket and tool the manifest declares has its handler, and
  * building it starts nothing — no Chrome, no worker thread, no timer — until a page is opened.
  */
@@ -106,166 +85,30 @@ describe('the browsers daemon half', () => {
     should(state.json()).containEql({ state: 'stopped' });
   });
 
-  it('should offer the browserPorts fact to Logins alone, so no other needer is told whether the host shares its ports', async () => {
+  it('should tell Logins alone the host is shared while it has no read of the machine’s ports (GAP), so no other needer is told', async () => {
     // Arrange
-    const runtimes = fakeRuntimes();
-    host = await firewallHost(runtimes);
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
 
     // Act
     const forLogins = host.provided(BrowsersPort, needer('logins'));
     const forOthers = host.provided(BrowsersPort, needer('accounts'));
 
-    // Assert
-    should(typeof forLogins.browserPorts).equal('function');
+    // Assert — a fact it cannot read is answered `shared: true`, never a guess that a host is private (fails closed, lead
+    // decision 19, L2).
+    should(await forLogins.browserPorts?.()).deepEqual({ shared: true });
     should(forOthers.browserPorts).be.undefined();
     should(typeof forOthers.pagesOf).equal('function');
   });
 
-  it('should say the host is not shared while the machine’s ports are random, and shared for per-user and explicit ports', async () => {
+  it('should show no loopback-firewall row in the doctor while it has no read of the machine’s ports (GAP)', async () => {
     // Arrange
-    const runtimes = fakeRuntimes();
-    host = await firewallHost(runtimes);
-    const logins = host.provided(BrowsersPort, needer('logins'));
-
-    // Act
-    const random = await logins.browserPorts?.();
-    runtimes.setMachineBrowserPorts({ browserPorts: 'per-user', browserFirewallFailure: 'warn' });
-    const perUser = await logins.browserPorts?.();
-    runtimes.setMachineBrowserPorts({
-      browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
-      browserFirewallFailure: 'warn',
-    });
-    const explicit = await logins.browserPorts?.();
-
-    // Assert — read live on every ask, never kept.
-    should(random).deepEqual({ shared: false });
-    should(perUser).deepEqual({ shared: true });
-    should(explicit).deepEqual({ shared: true });
-  });
-
-  it('should say the host is shared when Runtimes is off or cannot say (fails closed)', async () => {
-    // Arrange
-    const runtimes = fakeRuntimes();
-    runtimes.machineBrowserPorts = async () => {
-      throw new Error('the catalogue cannot be opened');
-    };
-    const unreadable = await firewallHost(runtimes);
-    const off = await firewallHost(undefined);
-
-    // Act
-    const whenUnreadable = await unreadable.provided(BrowsersPort, needer('logins')).browserPorts?.();
-    const whenOff = await off.provided(BrowsersPort, needer('logins')).browserPorts?.();
-    await unreadable.stop();
-    host = off;
-
-    // Assert
-    should(whenUnreadable).deepEqual({ shared: true });
-    should(whenOff).deepEqual({ shared: true });
-  });
-
-  it('should say the host is shared, and show no doctor row, while a healthy Runtimes holds no browserPorts setting (it refuses to say)', async () => {
-    // Arrange — the real Runtimes rejects like this while no file of it carries the setting (the schema default is nobody's choice).
-    const runtimes = fakeRuntimes();
-    runtimes.machineBrowserPorts = async () => {
-      throw new Error(
-        'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
-      );
-    };
-    let markerReads = 0;
-    host = await firewallHost(runtimes, {
-      marker: {
-        read: async () => {
-          markerReads += 1;
-          return undefined;
-        },
-      },
-    });
-
-    // Act
-    const shared = await host.provided(BrowsersPort, needer('logins')).browserPorts?.();
-    const finding = await host.doctor('browsers', 'loopback-firewall');
-
-    // Assert — Logins keeps its shared-host refusal (no automatic move to the fixed link), and no row is made up.
-    should(shared).deepEqual({ shared: true });
-    should(finding).be.undefined();
-    should(markerReads).equal(0);
-  });
-
-  it('should say nothing in the loopback-firewall doctor row while the machine’s ports are random, and read no marker', async () => {
-    // Arrange
-    const runtimes = fakeRuntimes();
-    let markerReads = 0;
-    host = await firewallHost(runtimes, {
-      marker: {
-        read: async () => {
-          markerReads += 1;
-          return undefined;
-        },
-      },
-    });
+    host = await testHost({ plugins: [daemon], fakes: { vault: new FakeVault(), gate: new FakeGate() } });
 
     // Act
     const finding = await host.doctor('browsers', 'loopback-firewall');
 
     // Assert
     should(finding).be.undefined();
-    should(markerReads).equal(0);
-  });
-
-  it('should warn in the doctor row, with the remedy for this uid, when the ports are fixed and no rule is installed', async () => {
-    // Arrange
-    const runtimes = fakeRuntimes();
-    runtimes.setMachineBrowserPorts({ browserPorts: 'per-user', browserFirewallFailure: 'warn' });
-    host = await firewallHost(runtimes, { uid: () => 1001 });
-
-    // Act
-    const finding = await host.doctor('browsers', 'loopback-firewall');
-
-    // Assert
-    should(finding).containEql({ name: 'loopback firewall', requirement: 'capability', state: 'warn' });
-    should(finding?.fix).containEql('add `user 1001` to /etc/ferretry/loopback-firewall.conf');
-  });
-
-  it('should show the marker’s verdict for this uid in the doctor row: applied is ok, a failed check is a warning, and it is read afresh', async () => {
-    // Arrange
-    const runtimes = fakeRuntimes();
-    runtimes.setMachineBrowserPorts({ browserPorts: 'per-user', browserFirewallFailure: 'warn' });
-    let marker: LoopbackFirewallMarker | undefined;
-    host = await firewallHost(runtimes, { uid: () => 1001, marker: { read: async () => marker } });
-    const fresh = host.clock.now();
-    const listed = [{ uid: 1001, ports: [20004, 20005, 20006] as [number, number, number] }];
-    const written = { version: 1 as const, appliedAt: fresh, base: 20000, entries: listed, verifiedAt: fresh };
-
-    // Act
-    marker = { ...written, perUser: { '1001': 'ok' } };
-    const applied = await host.doctor('browsers', 'loopback-firewall');
-    marker = { ...written, perUser: { '1001': 'failed' } };
-    const failed = await host.doctor('browsers', 'loopback-firewall');
-
-    // Assert
-    should(applied).containEql({ state: 'ok', detail: 'applied' });
-    should(failed).containEql({
-      state: 'warn',
-      detail: 'the last check reached this account’s ports from another user',
-    });
-  });
-
-  it('should say nothing in the doctor row on a host with no uids, or when Runtimes is off', async () => {
-    // Arrange
-    const runtimes = fakeRuntimes();
-    runtimes.setMachineBrowserPorts({ browserPorts: 'per-user', browserFirewallFailure: 'warn' });
-    const noUids = await firewallHost(runtimes, { uid: () => undefined });
-    const off = await firewallHost(undefined, { uid: () => 1001 });
-
-    // Act
-    const withoutUids = await noUids.doctor('browsers', 'loopback-firewall');
-    const withoutRuntimes = await off.doctor('browsers', 'loopback-firewall');
-    await noUids.stop();
-    host = off;
-
-    // Assert
-    should(withoutUids).be.undefined();
-    should(withoutRuntimes).be.undefined();
   });
 
   it('should type into the ferret’s own page through browser_type, as one type act on the page, and answer Done', async () => {

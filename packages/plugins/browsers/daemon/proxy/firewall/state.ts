@@ -7,12 +7,15 @@ import {
   resolveBrowserPorts,
 } from '../wire/ports.ts';
 
-const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
-const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';
+/** @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
+export const LOOPBACK_FIREWALL_SERVICE = 'ferretry-loopback-firewall';
+/** @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
+export const LOOPBACK_FIREWALL_VERIFY_TIMER = 'ferretry-loopback-firewall-verify.timer';
 
-/** How often the daemon re-reads the marker, and how old a verification may be before it counts as not running. @pending browsers: GAP(daemon): the loopback firewall's check-before-start (`LoopbackFirewallWatch`, `firewallRefusal`, the five-minute tick and the `browserFirewallFailure` policy) is ported and tested but the launcher binds no fixed ports and runs no check before a start, so nothing consumes it yet */
+/** How often the daemon re-reads the marker, and how old a verification may be before it counts as not running. @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
 export const LOOPBACK_FIREWALL_CHECK_MS = 5 * 60_000;
-const LOOPBACK_FIREWALL_VERIFIED_MAX_AGE_MS = 15 * 60_000;
+/** @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
+export const LOOPBACK_FIREWALL_VERIFIED_MAX_AGE_MS = 15 * 60_000;
 
 /** The marker as the host holds it: parsed, or `undefined` when there is none or it is not one. */
 export interface LoopbackMarkerReader {
@@ -73,8 +76,6 @@ export async function readLoopbackFirewall(
 }
 
 /**
- * @pending browsers: GAP(daemon): the loopback firewall's check-before-start (`LoopbackFirewallWatch`, `firewallRefusal`, the five-minute tick and the `browserFirewallFailure` policy) is ported and tested but the launcher binds no fixed ports and runs no check before a start, so nothing consumes it yet
- *
  * The sentence that declines a browser START, or `undefined` when it may go ahead: only the `refuse` policy
  * while this account's own check shows `failed`. A browser that is already running is never touched.
  */
@@ -87,8 +88,6 @@ export function firewallRefusal(
 }
 
 /**
- * @pending browsers: GAP(daemon): the loopback firewall's check-before-start (`LoopbackFirewallWatch`, `firewallRefusal`, the five-minute tick and the `browserFirewallFailure` policy) is ported and tested but the launcher binds no fixed ports and runs no check before a start, so nothing consumes it yet
- *
  * Reads the firewall and says so ONCE per change: at the browser start and on every tick of the five-minute
  * check, but a state that stays the same is silent. The first reading speaks only when it is not `applied`.
  */

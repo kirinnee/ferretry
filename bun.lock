@@ -278,7 +278,6 @@
         "@ferretry/plugin-catalogs": "workspace:*",
         "@ferretry/plugin-connections": "workspace:*",
         "@ferretry/plugin-conversation": "workspace:*",
-        "@ferretry/plugin-runtimes": "workspace:*",
         "@ferretry/plugin-terminals": "workspace:*",
         "@ferretry/std": "workspace:*",
         "lucide-react": "^0.468.0",

@@ -24,8 +24,6 @@ export interface BrowserHost {
   /** A program on this host's PATH (or on `path`) at the moment of use, or `undefined`. */
   which(name: string, path?: string): string | undefined;
   exists(path: string): boolean;
-  /** The uid this daemon runs as, or `undefined` where the platform has no uids. */
-  uid(): number | undefined;
   /** The browser worker program: the compiled worker beside the daemon, or the source entry run under Node. */
   workerProgram(): BrowserWorkerProgram;
 }
@@ -92,7 +90,6 @@ export function processHost(source: Readonly<Record<string, string | undefined>>
     arch: process.arch,
     which: (name, path) => Bun.which(name, { PATH: path ?? environment.PATH ?? '' }) ?? undefined,
     exists: path => existsSync(path),
-    uid: () => process.getuid?.(),
     // Beside the daemon both as invoked and as resolved: a Homebrew or Nix install reaches it through a symlink whose
     // directory holds no worker (today's `browserWorkerProgram`).
     workerProgram: () => {

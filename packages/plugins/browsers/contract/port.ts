@@ -140,8 +140,9 @@ export interface BrowsersApi {
    * `random` (today's `FleetLoginService` reading). Logins takes it as an optional use (lead decision 19, L2); an
    * absent method means the host is treated as shared, which fails closed.
    *
-   * Provided to Logins alone, from Runtimes' read-only `machineBrowserPorts`; Runtimes off or unable to say answers
-   * `shared: true`.
+   * GAP (ports-pending, Browsers): Provided to Logins alone, and it always answers `shared: true` (fails closed):
+   * Browsers has no read of the machine's `browserPorts` and must not depend on Runtimes to get one. The real fact
+   * arrives when Runtimes carries `browserPorts`, without Browsers depending on Runtimes.
    */
   browserPorts?(): Promise<{ readonly shared: boolean }>;
   /**

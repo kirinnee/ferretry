@@ -12,8 +12,8 @@ export type LoopbackFirewallState = z.infer<typeof LoopbackFirewallStateSchema>;
  * What the daemon does when its own account's firewall check FAILED. `warn` (the default) only says so; `refuse` also
  * declines to START the browser on a fixed port (a browser already running is left alone).
  */
-/** @pending browsers: GAP(daemon): the loopback firewall's check-before-start (`LoopbackFirewallWatch`, `firewallRefusal`, the five-minute tick and the `browserFirewallFailure` policy) is ported and tested but the launcher binds no fixed ports and runs no check before a start, so nothing consumes it yet */
+/** @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
 export const BROWSER_FIREWALL_FAILURE_POLICIES = ['warn', 'refuse'] as const;
-/** @pending browsers: GAP(daemon): the loopback firewall's check-before-start (`LoopbackFirewallWatch`, `firewallRefusal`, the five-minute tick and the `browserFirewallFailure` policy) is ported and tested but the launcher binds no fixed ports and runs no check before a start, so nothing consumes it yet */
+/** @pending browsers: GAP(daemon): daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet */
 export const BrowserFirewallFailureSchema = z.enum(BROWSER_FIREWALL_FAILURE_POLICIES);
 export type BrowserFirewallFailure = z.infer<typeof BrowserFirewallFailureSchema>;
