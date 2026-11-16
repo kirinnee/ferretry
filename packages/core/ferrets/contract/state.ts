@@ -181,6 +181,16 @@ export const AutoResumeSummaryFile = defineState({
   format: 1,
 });
 export const RestartsFile = defineState({ name: 'restarts', path: 'restarts.json', store: 'json', format: 1 });
+/**
+ * `monitor-tick.json` (today's monitor record): what the declared-wait monitor loop last did and whether it is running,
+ * published after every tick, a failed one included, so a loop that stopped never looks like a fleet with nothing parked.
+ */
+export const MonitorTickFile = defineState({
+  name: 'monitor-tick',
+  path: 'monitor-tick.json',
+  store: 'json',
+  format: 1,
+});
 // ─── worktrees.json (today's managed worktree registry, `lib/worktrees/registry.ts`) ────────────────────────────
 
 export const ManagedWorktreeRecordSchema = z.strictObject({
@@ -250,6 +260,22 @@ export const LimitsAppliedFile = defineState({
   format: 1,
 });
 export const FerretIndexFile = defineState({ name: 'index', path: 'index.sqlite', store: 'sqlite-cache', format: 1 });
+
+/**
+ * `conversation-leases/<harness>/<conversation>.lease`, one small JSON lease per harness conversation that has a live
+ * writer, and `conversation-leases/<harness>/pool.lock`, the file a claim's read-decide-write is held under (§9.3).
+ * An opaque named tree that `fy history claim` (no daemon needed) and the daemon's launches both reach through the one
+ * lease store (`./conversation-lease.ts`): it is under the state home, never in a pool an agent writes, and no path in
+ * it is ever named by a caller.
+ */
+export const ConversationLeaseFiles = defineState({
+  name: 'conversation-leases',
+  path: 'conversation-leases/*',
+  store: 'opaque',
+  format: 1,
+  schema: z.instanceof(Uint8Array),
+  mode: 0o600,
+});
 
 // ─── limits.yaml (today's `protocol/src/lib/limits.ts`) ───────────────────────────────────────────────────────────
 

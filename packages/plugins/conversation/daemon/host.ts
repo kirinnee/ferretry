@@ -87,6 +87,9 @@ import type { TranscriptEvent } from './seams/transcript-types.ts';
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { agendaAnswers } from './questions/lib/agenda-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
+import { PromptAsks } from './prompts/adapters/prompt-asks.ts';
+import { StatePromptRecords } from './prompts/adapters/state-prompt-records.ts';
+import type { PromptRead } from './prompts/lib/prompt-wait.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
@@ -95,6 +98,7 @@ import { answerOf } from './queue/lib/answer.ts';
 import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
+import { SessionCompactAtError, SessionCompactAtService } from './turns/compact-at/lib/service.ts';
 import { StateHypermediaSwitch } from './hypermedia/adapters/index.ts';
 import { hypermediaDefault, SessionHypermediaService, sessionHypermediaRoutes } from './hypermedia/lib/index.ts';
 import {
@@ -117,10 +121,6 @@ import { parseSessionId, type SessionId, tryParseSessionId } from './seams/ferre
 import type { ClockPort } from './seams/ports.ts';
 import type { SessionHandoff, SessionView } from './seams/protocol.ts';
 
-/** Said by every route that needs the ferret's terminal and is not connected to it: an explicit send retry, the compact-at setting. */
-const TERMINAL_PENDING =
-  "This needs the ferret's terminal, and Conversation is not connected to it yet. Drive the ferret from its terminal for now.";
-
 /**
  * The note Ferrets ends every revive's turn document with (its `turnProtocolReminder` default). Taken off the words a hand-off
  * shows, because it is the daemon's, not the owner's. GAP: Ferrets owns this fact and offers no read of it, so it is
@@ -128,13 +128,15 @@ const TERMINAL_PENDING =
  */
 const TURN_PROTOCOL_REMINDER = 'Continue using the same completion and interaction protocol.';
 
-const pending = (sentence: string = TERMINAL_PENDING): never => {
+const pending = (sentence: string): never => {
   throw new ApiError(503, sentence, 'conversation_terminal_unavailable');
 };
-const pendingRefusal = (): ConversationRefusal => ({
-  code: 'conversation_terminal_unavailable',
-  message: TERMINAL_PENDING,
-});
+
+/** A ferret nobody knows has no setting to read (the port answers `undefined`); anything else is a real failure. */
+const compactAtAbsent = (error: unknown): undefined => {
+  if (error instanceof SessionCompactAtError && error.reason === 'not-found') return undefined;
+  throw error;
+};
 
 /** Said by a repeat of a send that was typed and not proven: it is not typed again, and the answer names it. */
 const UNCONFIRMED_AGAIN =
@@ -312,6 +314,8 @@ export interface ConversationAHalf {
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
   /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
   readonly questions: { look(ferret: string): void; forget(ferret: string): void };
+  /** Ferrets said a ferret changed state: its pane is read for a prompt on the next 2 s sweep, and no other ferret's is. */
+  promptChanged(ferret: string): void;
   stop(): void;
 }
 
@@ -320,8 +324,8 @@ export interface ConversationAHalf {
  * kernel's state, clock, events and ids. A send and an interrupt go through Ferrets' harness seam, which answers a
  * closed refusal for a send and presses the harness's own stop key (`deps.gate` can still hold either back, 503).
  * The composer actions, a send's cancel and Enter, and answering a question's form (the structured-question drive over
- * the harness's form seam) are wired too. What is not (a send's explicit retry, the harness's own compact-at setting) is
- * wired to a refusal that says so; the queue, the ledger reads, the shared draft and its stream are real.
+ * the harness's form seam) are wired too, and so are a send's explicit retry (the send tracker's re-attempt, which only
+ * types what the daemon proved absent) and the compact-at setting (recorded by Ferrets, applied at the next launch).
  */
 export function buildConversationA(deps: {
   readonly kernel: KernelPorts;
@@ -352,6 +356,15 @@ export function buildConversationA(deps: {
         : `conversation could not raise the agenda card of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
     ),
   );
+  /** The Agenda's card for a ferret parked on a permission prompt or a dialog (Asks' source `prompt`). */
+  const promptAsks = new PromptAsks(
+    asks,
+    async ferret => (await ferrets.prompt?.(parseSessionId(ferret))) as PromptRead | undefined,
+    new StatePromptRecords(kernel.state),
+    message => kernel.log.warn(message),
+  );
+  /** Said once until the ferret list reads again, not on every 2 s look. */
+  let promptRosterFailing = false;
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
     (what: string) =>
@@ -866,6 +879,8 @@ export function buildConversationA(deps: {
     readonly senderSessionId?: string | undefined;
     /** The Warden is speaking (`ConversationCaller` `warden`): typed bare, recorded as the daemon's own. */
     readonly warden?: true;
+    /** Agenda's turn-end check is speaking (`ConversationCaller` `agenda`): typed bare, recorded as the daemon's own. */
+    readonly agenda?: true;
     /**
      * The daemon itself is the sender (a failed-send notice): recorded as the daemon's own under the Delivery feature,
      * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
@@ -970,13 +985,14 @@ export function buildConversationA(deps: {
       attempt: 1,
       attemptAt: at,
       senderKind:
-        request.warden === true || request.notice === true
+        request.warden === true || request.notice === true || request.agenda === true
           ? 'daemon'
           : request.senderSessionId === undefined
             ? 'human'
             : 'agent',
       // The Warden's words are Ferretry's own, shown as such (the sender chip reads `by`), as today's remedies were.
       ...(request.warden === true ? { by: { kind: 'ferretry' as const, feature: 'Warden' } } : {}),
+      ...(request.agenda === true ? { by: { kind: 'ferretry' as const, feature: 'Agenda' } } : {}),
       ...(request.notice === true ? { by: { kind: 'ferretry' as const, feature: 'Delivery' } } : {}),
       ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
       ...(fromName === undefined ? {} : { fromName }),
@@ -1031,7 +1047,16 @@ export function buildConversationA(deps: {
   };
   const typeLocked = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
     // A ferret that has stopped has no pane to type into: the message revives it (see {@link reviveLocked}).
-    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) return await reviveLocked(ferret, request);
+    if (TERMINAL_SEND_STATUSES.has((await readTarget(ferret)).status)) {
+      // Agenda's own words never revive: a nudge is no reason to start a ferret the owner (or its own end) stopped. Refused
+      // before any record, so nothing is typed, nothing is kept, and nothing is recorded under the owner's name.
+      if (request.agenda === true)
+        throw new SessionSendError(
+          'refused',
+          'the ferret is stopped and an Agenda message never revives it, so nothing was typed',
+        );
+      return await reviveLocked(ferret, request);
+    }
     // Opened BEFORE the record: an unknown ferret or a seam that is off types nothing and keeps nothing. No caller goes
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
@@ -1049,11 +1074,13 @@ export function buildConversationA(deps: {
       text,
       request.warden === true
         ? { kind: 'ferretry', feature: 'Warden' }
-        : request.notice === true
-          ? { kind: 'ferretry', feature: 'Delivery' }
-          : request.senderSessionId === undefined
-            ? undefined
-            : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
+        : request.agenda === true
+          ? { kind: 'ferretry', feature: 'Agenda' }
+          : request.notice === true
+            ? { kind: 'ferretry', feature: 'Delivery' }
+            : request.senderSessionId === undefined
+              ? undefined
+              : { kind: 'ferret', ...(fromName === undefined ? {} : { name: fromName }) },
     );
     // What the transcript will hold is the message, or the pointer typed for it.
     const accepted = await accepting(ferret, request, text, fromName, {
@@ -1361,6 +1388,18 @@ export function buildConversationA(deps: {
             questionAsksReconciled = true;
           }, askFailure('reconcile'));
         } else await questionAsks.settle();
+        // A pane is read only for a ferret Ferrets reported changed, one owed a card, or once after boot: never every tick.
+        await ferrets.list().then(
+          async roster => {
+            promptRosterFailing = false;
+            await promptAsks.sweep(roster.map(ferret => ({ id: ferret.id, state: ferret.state })));
+          },
+          error => {
+            if (!promptRosterFailing)
+              kernel.log.warn(`conversation could not list the ferrets for their prompts: ${String(error)}`);
+            promptRosterFailing = true;
+          },
+        );
         await questionWatch.sweep();
       })()
         .catch(() => undefined)
@@ -1381,6 +1420,35 @@ export function buildConversationA(deps: {
       };
     },
     write: async (ferret, enabled, at) => await hypermediaSwitch.write(ferret, enabled, at),
+    now: () => kernel.clock.now(),
+  });
+
+  // The ferret's own compaction trigger is Ferrets' to record (its session config, which every launch and relaunch reads);
+  // Conversation judges the value, words what it means for a running ferret and asks Ferrets to write it. The model's
+  // window and the login's default are not reachable from here: a value the model cannot honour is dropped at launch.
+  const compactAtSetting = new SessionCompactAtService({
+    // The caller is the ferret behind the call, when it is one: Ferrets applies its `mayTouch` rule to the read and the
+    // write, and the read comes first, so a refused caller never reaches the store.
+    facts: async (ferret, caller) => {
+      const id = tryParseSessionId(ferret);
+      const summary = id === undefined ? undefined : await ferrets.get(id);
+      if (summary === undefined) return undefined;
+      return {
+        own: await ferrets.compactAt?.(summary.id, caller === undefined ? undefined : parseSessionId(caller)),
+        accountDefault: undefined,
+        window: undefined,
+        running: summary.state !== 'stopped',
+      };
+    },
+    write: async (ferret, value, _at, caller) => {
+      if (ferrets.setCompactAt === undefined)
+        throw new ApiError(503, 'Ferrets cannot record the compact-at setting right now.', 'plugin_unavailable');
+      await ferrets.setCompactAt(
+        parseSessionId(ferret),
+        value,
+        caller === undefined ? undefined : parseSessionId(caller),
+      );
+    },
     now: () => kernel.clock.now(),
   });
 
@@ -1412,7 +1480,10 @@ export function buildConversationA(deps: {
         editQueued: async (id, messageId, text) =>
           await queue.edit(parseSessionId(id), messageId, text).catch(queueFailure),
         cancelQueued: async (id, messageId) => await queue.cancel(parseSessionId(id), messageId).catch(queueFailure),
-        retry: async () => pending(),
+        retry: async (id, sendId, force) =>
+          sendRecordView(
+            await sendActs.reattempt(parseSessionId(id), sendId, { by: 'person', force }).catch(sendActRefusal),
+          ),
         cancel: async (id, sendId) =>
           sendRecordView(await sendActs.cancel(parseSessionId(id), sendId).catch(sendActRefusal)),
         submit: async (id, sendId) =>
@@ -1426,7 +1497,10 @@ export function buildConversationA(deps: {
       sentDraftClearer(drafts),
     ),
     ...sessionAnswerRoutes({ question: askedQuestion, answer: answerQuestion }),
-    ...sessionCompactAtRoutes({ get: async () => pending(), set: async () => pending() }),
+    ...sessionCompactAtRoutes({
+      get: async (ferret, caller) => await compactAtSetting.get(ferret, caller),
+      set: async (ferret, wanted, caller) => await compactAtSetting.set(ferret, wanted, caller),
+    }),
     ...sessionHypermediaRoutes({
       read: async ferret => await hypermedia.read(ferret),
       set: async (ferret, enabled) => await hypermedia.set(ferret, enabled),
@@ -1462,6 +1536,7 @@ export function buildConversationA(deps: {
             // The route and the port follow one rule: a ferret is the message's SENDER, never a different target's rule.
             ...(caller.kind === 'ferret' ? { senderSessionId: caller.ferret } : {}),
             ...(caller.kind === 'warden' ? { warden: true as const } : {}),
+            ...(caller.kind === 'agenda' ? { agenda: true as const } : {}),
           }),
         );
       } catch (error) {
@@ -1521,7 +1596,17 @@ export function buildConversationA(deps: {
       await lookFirst(ferret);
       return sendRecordFor(await ledger.list(ferret), await queue.list(ferret), sendId);
     },
-    retrySend: async () => err(pendingRefusal()),
+    retrySend: async (ferret, sendId, force) => {
+      try {
+        return ok(
+          sendRecordView(
+            await sendActs.reattempt(ferret, sendId, { by: 'person', force: force === true }).catch(sendActRefusal),
+          ),
+        );
+      } catch (error) {
+        return err(actRefusal(error));
+      }
+    },
     cancelSend: async (ferret, sendId) => {
       try {
         return ok(sendRecordView(await sendActs.cancel(ferret, sendId).catch(sendActRefusal)));
@@ -1571,8 +1656,20 @@ export function buildConversationA(deps: {
         });
       }
     },
-    compactAt: async () => undefined,
-    setCompactAt: async () => err(pendingRefusal()),
+    compactAt: async ferret => await compactAtSetting.get(ferret).catch(compactAtAbsent),
+    setCompactAt: async (ferret, patch) => {
+      try {
+        return ok(await compactAtSetting.set(ferret, patch.compactAt));
+      } catch (error) {
+        if (error instanceof SessionCompactAtError)
+          return err({
+            code: error.reason === 'not-found' ? 'not-found' : 'invalid_compact_at',
+            message: error.message,
+          });
+        if (error instanceof ApiError) return err({ code: error.code ?? 'compact_at_refused', message: error.message });
+        throw error;
+      }
+    },
     draft: async (ferret, slot) => await drafts.read(ferret, slot === 'chat' ? undefined : slot),
     editDraft: async (ferret, slot, edit) => {
       try {
@@ -1621,6 +1718,7 @@ export function buildConversationA(deps: {
       // Only the question that was stored when the withdrawal began: a newer one is its own.
       if (stored.ok && stored.value !== undefined) await closeQuestionAsk(ferret, stored.value.toolUseId, 'withdrawn');
     },
+    promptChanged: ferret => promptAsks.changed(ferret),
     questions: {
       look: ferret => void questionWatch.look(ferret).catch(() => undefined),
       forget: ferret => questionWatch.forget(ferret),

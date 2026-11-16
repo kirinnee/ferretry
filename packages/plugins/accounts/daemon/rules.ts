@@ -15,9 +15,10 @@
  * - the passkeys-changed signal and pairing's purge: Access's `DevicesChanged` subscriber is the one live path.
  */
 import { gateAuditSink } from './adapters/gate-audit.ts';
-import { workFolderOf } from './adapters/pending-reads.ts';
+import { stampedProjectOfFerret, workFolderOf } from './adapters/pending-reads.ts';
 import { machineName } from './adapters/host.ts';
 import { PhoneApprovalAuditAdapter } from './adapters/phone-approval/audit.ts';
+import { AsksPhoneApprovalNotifier } from './adapters/phone-approval/notifier.ts';
 import { AccessPhoneApprovalPush } from './adapters/phone-approval/push.ts';
 import { VaultPhoneLooks } from './adapters/phone-approval/vault-reach.ts';
 import { accountSecurity } from './adapters/access-security.ts';
@@ -25,7 +26,7 @@ import { randomUUID } from 'node:crypto';
 import type { FerretId, StateFileDef } from '@ferretry/kernel/contract';
 import { milliseconds, seconds } from '@ferretry/std';
 import type { DaemonContext } from '@ferretry/kernel/manifest';
-import { AccountKeySchema } from '../contract/routes/index.ts';
+import { type AccountId, type AccountKey, AccountKeySchema } from '../contract/routes/index.ts';
 import type manifest from '../manifest.ts';
 import { FilePasteRuleStore, FileSignInRuleStore, kernelStateDocument } from './adapters/index.ts';
 import type { AccountsCore } from './accounts.ts';
@@ -34,7 +35,12 @@ import { LoginEntryError } from './lib/accounts.ts';
 import { holdsOwner } from './lib/owner-hold.ts';
 import type { AuditSink } from './lib/local-ports.ts';
 import { PhoneApprovalService } from './lib/phone-approval/service.ts';
+import { proposalTools } from './lib/proposal-tools.ts';
 import { LoginRecipeService } from './lib/secrets/login-recipes.ts';
+import { SignInGrantLedger } from './lib/sign-in-grants/ledger.ts';
+import { PlanSignInGrants, type SignInGrantSource } from './lib/sign-in-grants/plans.ts';
+import { RuleSignInGrants } from './lib/sign-in-grants/rules.ts';
+import { CombinedSignInGrants } from './lib/sign-in-grants/sources.ts';
 import {
   PageCopyRecords,
   PasteRuleService,
@@ -73,6 +79,8 @@ export interface RulesHalf extends HalfB {
   readonly ownerHold: (ferret: string) => boolean;
   /** The recipe masking half a's routes and `account_hint` serve through (I133). */
   readonly recipes: RecipeMasking;
+  /** What the owner approved in advance (plan lines and standing rules), provided to the Vault as `input.saved`'s `grants`. */
+  readonly grants: SignInGrantSource;
 }
 
 const stateFile = (ctx: AccountsContext, name: string): StateFileDef => {
@@ -132,16 +140,14 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     redact,
     audit,
   });
+  const keyOf = async (account: AccountId): Promise<AccountKey | undefined> => {
+    const key = AccountKeySchema.safeParse((await accounts.seedTarget(account).catch(() => undefined))?.key);
+    return key.success ? key.data : undefined;
+  };
   const plans = new TaskPlanService({
     agenda: new TaskPlanAsksAdapter(asks),
     rules: pasteRules,
-    accounts: {
-      listing: async () => await accounts.list(),
-      keyOf: async account => {
-        const key = AccountKeySchema.safeParse((await accounts.seedTarget(account).catch(() => undefined))?.key);
-        return key.success ? key.data : undefined;
-      },
-    },
+    accounts: { listing: async () => await accounts.list(), keyOf },
     passkeys: security.passkeys,
     redact,
     // Asks takes no reply note on a raised ask yet: the plan's own words stay in its context.
@@ -173,6 +179,25 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     passkeys: { subscribe: () => () => undefined },
     devices: new SignInRuleDevicePurge(),
   });
+  // WHAT THE OWNER APPROVED IN ADVANCE, as the Vault's fill path reads it (docs/input-requests.md): the ticked plan lines and
+  // the standing rules through ONE matcher and ONE ledger (so the hourly rate counts both). The Vault gets it only through
+  // `input.saved`; no route or tool holds it. The project a rule scoped to a project covers is the session's STAMPED
+  // board: the one on the ferret's record from its start (Ferrets' `get`), never one resolved from the folder by the
+  // Board, which a rule must never read. Unfiled, unknown or unreadable is no project, so such a rule does not fill.
+  const ledger = new SignInGrantLedger();
+  const grants = new CombinedSignInGrants(
+    new PlanSignInGrants(plans, keyOf, ledger),
+    new RuleSignInGrants({
+      rules,
+      ledger,
+      keys: keyOf,
+      terminal: terminalRules,
+      stampedProject: async sessionId => await stampedProjectOfFerret(ctx.uses.ferrets, sessionId),
+      clock,
+      warn: message => kernel.log.warn(`sign-in rules: ${message}`),
+    }),
+    ledger,
+  );
   // An orderly stop writes a suspension or a use whose write failed earlier (S118, S123); what a crash before any
   // write lands still loses is declared (docs/secrets.md).
   kernel.lifecycle.onStop(async () => await rules.flush());
@@ -194,6 +219,8 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     observer: looks,
     asks: new PhoneApprovalAsksAdapter(ctx.needs.asks),
     push: new AccessPhoneApprovalPush(ctx.uses.access),
+    // "Not me" reaches the ferret's terminal through Asks' `tell`, which the view handed to Accounts carries.
+    notifier: new AsksPhoneApprovalNotifier(ctx.needs.asks),
     audit: new PhoneApprovalAuditAdapter(audit),
     clock,
     timers: { after: async ms => await kernel.clock.sleep(milliseconds(ms)) },
@@ -236,6 +263,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
     copies,
     secureCopyHook,
     secureCopyTools: tools,
+    proposalTools: proposalTools({ recipes, suggestions, plans, redact }),
     sessionEnded: ferret => {
       copies.drop(ferret);
       pageRecords.drop(ferret);
@@ -250,6 +278,7 @@ export function buildRules(ctx: AccountsContext, core: AccountsCore): RulesHalf 
   return {
     ...half,
     recipes,
+    grants,
     ownerHold: ferret =>
       holdsOwner(
         {

@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { chmod, link, lstat, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { FakeRedaction } from '@ferretry/core-vault/contract/testing';
+import type { SecretName } from '@ferretry/core-vault/contract';
 import { diskSessionsRoot } from '@ferretry/kernel/testing';
+import type { FerretId } from '../../../../../contract/index.ts';
+import { LastSnapshotReading } from '../../../../../daemon/lib/session/snapshot/index.ts';
 import {
   FileLastSnapshotStore,
   LAST_SNAPSHOT_MAX_BYTES,
@@ -39,6 +43,32 @@ describe('F-0326 the last-snapshot file on the sessions root', () => {
     // Atomic: the temp file the publish wrote through is never left behind.
     expect(await readdir(folder)).toEqual(['last-snapshot.txt']);
     expect(await store.read(FERRET)).toEqual({ kind: 'read', text: 'second frame\n' });
+  });
+
+  test('C58-15 the reader masks the stored file AGAIN: a value added to the Vault after the capture is masked on read, and a damaged file answers nothing', async () => {
+    // Arrange: the frame was kept while the Vault held only OLD; LATER was plain text then.
+    const OLD = 'sk-fixture-old-0123456789abcdef';
+    const LATER = 'sk-fixture-later-fedcba9876543210';
+    const { folder, store } = await fresh();
+    const vault = new Map<SecretName, string>([['OLD' as SecretName, OLD]]);
+    const reading = new LastSnapshotReading({ store: () => store, redaction: new FakeRedaction(vault) });
+    await store.write(FERRET, `$ env\nOLD=${'*'.repeat(OLD.length)}\nTOKEN=${LATER}\n> `);
+    expect(await readFile(`${folder}/last-snapshot.txt`, 'utf8')).toContain(LATER);
+    expect(await reading.read(FERRET as unknown as FerretId)).toContain(LATER);
+
+    // Act: the owner stores LATER in the Vault.
+    vault.set('TOKEN' as SecretName, LATER);
+    const out = await reading.read(FERRET as unknown as FerretId);
+
+    // Assert: masked in what is handed on (the file itself is untouched), and a file that is damaged answers nothing.
+    expect(out).not.toContain(LATER);
+    expect(out).toContain('$ env');
+    expect(await readFile(`${folder}/last-snapshot.txt`, 'utf8')).toContain(LATER);
+    await writeFile(`${folder}/last-snapshot.txt`, Buffer.from([0xff, 0xfe, 0xfd]), { mode: 0o600 });
+    expect(await reading.read(FERRET as unknown as FerretId)).toBeUndefined();
+    await rm(`${folder}/last-snapshot.txt`);
+    await symlink('environment.json', `${folder}/last-snapshot.txt`);
+    expect(await reading.read(FERRET as unknown as FerretId)).toBeUndefined();
   });
 
   test('F-0326 a link at the name is refused: nothing is written through it, and a read never follows it', async () => {

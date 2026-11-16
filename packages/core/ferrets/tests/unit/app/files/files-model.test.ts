@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { isOpenablePath } from '../../../../contract/file-reference.ts';
 import {
   UNOPENABLE_NAME_REASON,
   crumbs,
@@ -6,7 +7,6 @@ import {
   formatBytes,
   isMarkdownPath,
   isPlumbingMeta,
-  isOpenablePath,
   joinRel,
   normalizeRel,
   parseUnifiedDiff,

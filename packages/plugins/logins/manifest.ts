@@ -1,16 +1,20 @@
 import { appAction, definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { HOSTED_APP_ORIGIN } from '@ferretry/kernel/contract';
 import { audit, cap } from '@ferretry/core-gate/contract';
-import { Logins } from '@ferretry/core-ferrets/contract';
+import { FerretsPort, Logins } from '@ferretry/core-ferrets/contract';
 import { VaultPort } from '@ferretry/core-vault/contract';
 import { BrowsersPort } from '@ferretry/plugin-browsers/contract';
+import { PRESET_ENV_NAMES } from './contract/preset-env-names.ts';
 import {
+  ADD_RUNTIME_LOGIN_SLOT,
+  ADD_RUNTIME_SIGN_IN_SLOT,
   ENDPOINTS_CONFIG,
   LOGIN_KINDS,
   LOGINS_AUDIT,
   LOGINS_CONFIG,
   LOGINS_CREDENTIALS,
   LOGINS_MODELS,
+  LOGINS_PASSIVE_ASSIGNMENTS,
   LOGINS_READ_MODELS,
   LOGINS_WORDS,
   LoginChanged,
@@ -43,7 +47,7 @@ export default definePlugin({
   words: LOGINS_WORDS,
 
   needs: { vault: VaultPort },
-  uses: { browsers: BrowsersPort },
+  uses: { browsers: BrowsersPort, ferrets: FerretsPort },
   provides: { logins: LoginsPort, loginChanges: LoginChangesPort },
 
   actions: {
@@ -314,6 +318,9 @@ export default definePlugin({
       panel('daemon.status', { id: 'quota-readout', order: 30 }),
       // The first-run step's body (Onboarding's steps screen offers this slot): the sign-ins view.
       panel('onboarding.step', { id: 'onboarding-step', order: 30 }),
+      // Runtimes' Add runtime page offers these two (its contract/slots.ts): a login is added and signed in right there.
+      panel(ADD_RUNTIME_LOGIN_SLOT, { id: 'add-runtime-login', order: 10 }),
+      panel(ADD_RUNTIME_SIGN_IN_SLOT, { id: 'add-runtime-sign-in', order: 10 }),
     ],
     settings: [settingsTab('logins', { group: 'agents', label: 'Logins', order: 25 })],
   },
@@ -323,7 +330,7 @@ export default definePlugin({
     private: ['credentials'],
   },
   data: {
-    state: [LOGINS_CREDENTIALS, LOGINS_MODELS],
+    state: [LOGINS_CREDENTIALS, LOGINS_MODELS, LOGINS_PASSIVE_ASSIGNMENTS],
     config: [LOGINS_CONFIG, ENDPOINTS_CONFIG, MODELS_CONFIG],
     readModels: LOGINS_READ_MODELS,
     publishes: [LoginSignedIn, LoginChanged, ModelsChanged],
@@ -363,6 +370,8 @@ export default definePlugin({
       '127.0.0.1',
     ],
     spawn: ['claude', 'codex', 'ollama', 'lsof', 'ss', 'ps'],
+    // `fy login add --from-env` reads these shell variables and no others: the names the presets declare.
+    cliEnvReads: PRESET_ENV_NAMES,
     secrets: [],
   },
 });

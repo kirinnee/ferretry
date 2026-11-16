@@ -43,11 +43,38 @@ describe('createAgendaRuntime', () => {
     runtime.ferrets.stop();
   });
 
-  it('marks an opened ask seen, and does not mind when the mark does not land', async () => {
+  it('disposes: its transport events are released and its ferret reads stop; a client with no events has nothing to release', async () => {
+    const released: unknown[] = [];
+    const { client: base } = build();
+    const client = {
+      ...base,
+      subscribe: ((event: unknown) => {
+        released.push(event);
+        return () => {
+          released.splice(released.indexOf(event), 1);
+        };
+      }) as never,
+    };
+    const runtime = createAgendaRuntime(client);
+    expect(released).toEqual([AsksChanged, FerretsChanged]);
+    runtime.dispose();
+    expect(released).toEqual([]);
+    runtime.dispose();
+    await expect(runtime.ferrets.refresh()).rejects.toThrow('List refresh was cleared');
+
+    const quiet = createAgendaRuntime({ call: build().client.call });
+    quiet.dispose();
+  });
+
+  it('posts no seen mark of its own: opening an ask is told to the `agenda.item-opened` hook (use-item-opened)', async () => {
     const { client, calls } = build();
     const runtime = createAgendaRuntime(client);
-    await runtime.itemOpened('f1', 'A1');
-    expect(calls.map(call => call.route)).toContain('POST /v1/push/seen');
+    expect('itemOpened' in runtime).toBe(false);
+    // The clear port reaches this machine's own client and no other.
+    expect(runtime.clearPort.clientFor({ daemonId: runtime.connection.daemonId } as never)).toBe(client);
+    expect(runtime.clearPort.clientFor({ daemonId: 'elsewhere' } as never)).toBeUndefined();
+    await settle();
+    expect(calls.map(call => call.route)).not.toContain('POST /v1/push/seen');
     runtime.ferrets.stop();
   });
 });

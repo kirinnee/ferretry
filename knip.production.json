@@ -42,7 +42,6 @@
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
         "daemon/adapters/session/lifecycle/process-incarnation.ts",
-        "daemon/adapters/session/resume/tmux-resume-launcher.ts",
         "daemon/lib/session/health/watched-panes.ts",
         "daemon/lib/session/events/index.ts",
         "daemon/lib/session/events/service.ts",
@@ -69,17 +68,6 @@
         "daemon/adapters/session/archive/index.ts",
         "daemon/lib/session/directory/session-directory.ts",
         "daemon/adapters/session/session-address-candidates.ts",
-        "daemon/lib/session/monitor/index.ts",
-        "daemon/lib/session/monitor/policy.ts",
-        "daemon/lib/session/monitor/service.ts",
-        "daemon/lib/session/monitor/settings.ts",
-        "daemon/lib/session/monitor/types.ts",
-        "daemon/adapters/session/monitor/index.ts",
-        "daemon/adapters/session/monitor/atomic-json.ts",
-        "daemon/adapters/session/monitor/file-wait-heartbeat.ts",
-        "daemon/adapters/session/monitor/monitor-tick-runner.ts",
-        "daemon/adapters/session/monitor/send-monitor-nudge.ts",
-        "daemon/adapters/session/monitor/storage-monitor-waits.ts",
         "daemon/adapters/session/signal/index.ts",
         "daemon/adapters/session/signal/file-signal-artifacts.ts",
         "daemon/adapters/session/signal/launcher-signal-terminal.ts",
@@ -95,18 +83,10 @@
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "app/components/agenda-message.tsx",
         "app/hooks/use-agenda-replies.ts",
-        "app/hooks/use-agenda.ts",
-        "app/hooks/use-answered-suggestion-sweep.ts",
         "app/lib/answer-chip.ts",
-        "app/lib/item-conversation.ts",
-        "app/lib/permission-request.ts",
-        "app/features/permission-request/approval-card.tsx",
         "app/features/agenda/agenda-inbox-composer.tsx",
-        "app/features/agenda/agenda-nav.tsx",
         "app/features/agenda/agenda-replies-notice.tsx",
-        "app/features/agenda/agenda.tsx",
         "app/lib/agenda-source-refs.ts"
       ]
     },
@@ -129,12 +109,7 @@
     "packages/plugins/projects": {
       "entry": ["app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/hooks/use-project-scope.ts",
-        "app/lib/project-scope.ts",
-        "app/hooks/use-work-project-names.ts",
-        "app/lib/work-project-names.ts"
-      ]
+      "ignore": ["app/hooks/use-project-scope.ts", "app/lib/project-scope.ts"]
     },
     "packages/plugins/runtimes": {
       "entry": ["app/views/*.tsx"],
@@ -151,8 +126,7 @@
     },
     "packages/plugins/updates": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/lib/changelog.ts", "app/lib/install-prompt.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/warden": {
       "entry": ["app/views/*.tsx"],
@@ -176,11 +150,7 @@
     "packages/plugins/conversation": {
       "entry": ["app/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/render/fy-render-workspace-media.ts",
-        "app/render/workspace-path.ts",
-        "daemon/questions/lib/projection.ts"
-      ]
+      "ignore": ["daemon/questions/lib/projection.ts"]
     },
     "packages/plugins/mcp": {
       "entry": ["app/views/surfaces.tsx"],
@@ -192,8 +162,7 @@
     },
     "packages/plugins/accounts": {
       "entry": [],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["daemon/lib/sign-in-grants/**"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/shells": {
       "entry": ["app/views/*.tsx"],
@@ -225,7 +194,6 @@
         "app/features/onboarding/device-kind.ts",
         "app/harness/pair-from-menu.tsx",
         "app/lib/device-preference.ts",
-        "app/lib/push-seen.ts",
         "cli/lib/grants/commands.ts",
         "cli/lib/grants/controller.ts",
         "cli/lib/grants/gateway.ts",
@@ -240,11 +208,7 @@
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
       "ignore": [
-        "app/components/auto-read-chip.tsx",
-        "app/hooks/use-auto-read.ts",
         "app/lib/stt/speed-bench-report.ts",
-        "app/lib/voice-chat/auto-read.ts",
-        "app/lib/voice-chat/reply-picker.ts",
         "app/lib/voice-chat/turn-endpointer-scoring.ts",
         "app/lib/voice-chat/turn-endpointer.ts",
         "daemon/lib/speedups/index.ts",

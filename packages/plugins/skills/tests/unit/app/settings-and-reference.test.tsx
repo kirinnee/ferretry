@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import { FerretWorkspaceActionsProvider } from '@ferretry/app';
 import { createSkillReference, proveSkill } from '../../../app/views/skill-reference.tsx';
 import { createSkillsSettings } from '../../../app/views/skills-settings.tsx';
 import { asView, click, closeAll, pageText, q, settle, show } from './dom-support.tsx';
@@ -55,6 +56,72 @@ describe('DOM tests: a /name or $name reference', () => {
     await settle(() => q('a') !== null, 'the link');
     expect(q('a')?.textContent).toBe('/deploy');
     expect(q('a')?.getAttribute('href')).toBe('/d/studio/settings/skills');
+  });
+
+  describe('inside a ferret workspace', () => {
+    const inWorkspace = (
+      shown: string[],
+      daemon: string,
+      ferret: string,
+      reference: Record<string, string>,
+      client: typeof proved.client,
+    ) => {
+      const Reference = asView(createSkillReference(client, '/'));
+      return (
+        <FerretWorkspaceActionsProvider
+          canControl
+          daemon={daemon}
+          ferret={ferret}
+          showPanel={panel => shown.push(panel)}
+        >
+          <Reference value={{ name: '/deploy', ...reference }} />
+        </FerretWorkspaceActionsProvider>
+      );
+    };
+    const clickLink = async () => {
+      await settle(() => q('a') !== null, 'the link');
+      await click(q('a'), 'the link');
+    };
+
+    it('brings the Skills panel on screen when the reference names this workspace’s daemon', async () => {
+      const shown: string[] = [];
+      await show(inWorkspace(shown, 'studio', 'f1', { daemon: 'studio' }, proved.client));
+      await clickLink();
+      expect(shown).toEqual(['skills']);
+      expect(q('a')?.getAttribute('title')).toBe('Show the /deploy skill in the Skills panel');
+      expect(q('a')?.getAttribute('href')).toBe('/d/studio/settings/skills');
+    });
+
+    it('does the same for a reference written in this workspace’s own ferret', async () => {
+      const shown: string[] = [];
+      const world = scripted({
+        [FERRET_SKILLS]: {
+          harness: 'claude-code',
+          skills: [{ name: 'deploy', description: 'd', scope: 'global', origin: 'both' }],
+        },
+      });
+      await show(inWorkspace(shown, 'studio', 'f1', { daemon: 'studio', ferretId: 'f1' }, world.client));
+      await clickLink();
+      expect(shown).toEqual(['skills']);
+    });
+
+    it('keeps the Settings link for another daemon, and for a reference written in another ferret', async () => {
+      const shown: string[] = [];
+      await show(inWorkspace(shown, 'other', 'f1', { daemon: 'studio' }, proved.client));
+      await clickLink();
+      expect(shown).toEqual([]);
+      expect(q('a')?.getAttribute('title')).toBe('Open the /deploy skill in Settings › Skills');
+      await closeAll();
+      const world = scripted({
+        [FERRET_SKILLS]: {
+          harness: 'claude-code',
+          skills: [{ name: 'deploy', description: 'd', scope: 'global', origin: 'both' }],
+        },
+      });
+      await show(inWorkspace(shown, 'studio', 'f1', { daemon: 'studio', ferretId: 'f2' }, world.client));
+      await clickLink();
+      expect(shown).toEqual([]);
+    });
   });
 
   it('is plain text while it is still being asked, and for a name the daemon does not list', async () => {

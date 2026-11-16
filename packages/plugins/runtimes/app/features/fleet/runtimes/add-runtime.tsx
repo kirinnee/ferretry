@@ -1,8 +1,8 @@
 /**
  * Add a runtime (docs/design/account-model.md §4.4): ONE FORM on one page — **Login**, **Profile**,
  * **Name** — and one Create button. No stepper, and nothing opens a stepper of its own: a missing login
- * is added IN PLACE ("+ Add a new login" opens a sign-in or the provider grid right under the list) and
- * comes back picked; profiles are built in Settings › Profiles, linked from here.
+ * is added IN PLACE ("+ Add a new login" opens Logins' add-login panel right under the list, through the slot
+ * this page offers) and comes back picked, and a login that needs sign-in is signed in under it the same way; profiles are built in Settings › Profiles, linked from here.
  *
  * Edge cases, each where the prototype shows it: no logins at all (E12), a login that needs sign-in,
  * which can be signed in here or later (E13), profiles that do not apply to the login's harness (E14),
@@ -10,7 +10,7 @@
  */
 
 import type { MachineView } from '../../../../contract/index.ts';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 import { cn } from '../../../ui.ts';
 import { Badge, Button } from '../../../ui.ts';
@@ -28,6 +28,7 @@ import { LoginScopeChip } from '../../../components/login-scope-chip.tsx';
 import { AccountStatus } from '../shell/account-status.tsx';
 import { type AccountChanges, ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import { currentDaemon, followInApp, tabHref } from '../shell/machine-route.ts';
+import { AddLoginSlot, SignInSlot } from './add-runtime-login-slots.tsx';
 import type { MachineData } from './machine-data.ts';
 import {
   harnessInstalled,
@@ -134,6 +135,7 @@ function Part({
 export function AddRuntime({ data, reload, changes, machine, machineName, online, onFinish }: AddRuntimeProps) {
   const [draft, setDraft] = useState<AddRuntimeDraft>(EMPTY);
   const [made, setMade] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
   const credentials = data.credentials.logins;
   const runtimes = data.runtimes.runtimes;
   const credential = credentials.find(candidate => candidate.id === draft.credentialId);
@@ -145,6 +147,13 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
   const set = (patch: Partial<AddRuntimeDraft>): void => setDraft(current => ({ ...current, ...patch }));
   const pickLogin = (id: string): void =>
     setDraft(current => ({ ...current, credentialId: id, profile: null, addAnother: false, runs: null }));
+  // A login added in place: re-read the machine so it is listed, close the panel, and come back with it picked.
+  const added = (id: string): void => {
+    void reload().then(() => {
+      setAdding(false);
+      pickLogin(id);
+    });
+  };
 
   const back = (
     <div>
@@ -264,30 +273,19 @@ export function AddRuntime({ data, reload, changes, machine, machineName, online
             );
           })
         )}
-        {/* A login is not added or signed in here: Logins' Sign-ins tab draws both — this link lands on
-            its list, and a login that needs sign-in links straight to that login's page there. */}
-        <a
-          href={tabHref(currentDaemon(), machineName, 'sign-ins')}
-          onClick={followInApp}
-          data-add-row="login"
-          className="kt-panel flex min-h-control w-full min-w-0 items-center gap-3 p-panel text-left text-row font-semibold text-fg no-underline hover:border-accent hover:no-underline"
-        >
-          <Plus size={16} aria-hidden="true" className="shrink-0 text-accent" />
-          <span className="min-w-0 flex-1">Add a new login in Sign-ins</span>
-          <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
-        </a>
+        {/* A login is added and signed in right here: Logins contributes both panels to the two slots this
+            page offers (add-runtime-login-slots.tsx), and without them each falls back to the Sign-ins link. */}
+        <AddLoginSlot machineName={machineName} open={adding} onOpenChange={setAdding} onAdded={added} />
         {credential?.status.word === 'needs_sign_in' ? (
-          <p className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
+          <div className="m-0 text-cell leading-base text-muted" data-add-runtime-needs-sign-in="">
             This login needs sign-in before you launch.{' '}
-            <a
-              href={tabHref(currentDaemon(), machineName, 'sign-ins', credential.id)}
-              onClick={followInApp}
-              className="font-semibold text-accent underline"
-              data-add-runtime-sign-in=""
-            >
-              Sign in
-            </a>
-          </p>
+            <SignInSlot
+              machineName={machineName}
+              login={credential.id}
+              harness={credential.harness}
+              onSignedIn={() => void reload()}
+            />
+          </div>
         ) : null}
       </Part>
 

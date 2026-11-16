@@ -16,11 +16,14 @@ import { agendaItemPushTag, type PushSeenResponse } from '../../contract/index.t
 import { type ClearRegistration, closeShownTags, type DaemonConnection, type DaemonId } from '../shell-pairing.ts';
 import { pushScopePath } from './push-scope.ts';
 
+/** The machine an item was opened on: only its id is read (the client behind the hook is already that machine's). */
+export type OpenedMachine = Pick<DaemonConnection, 'daemonId'>;
+
 export interface AgendaItemOpenedPorts {
   /** This browser's push registration for one machine, or `null` when it has none. */
   readonly registration: (daemon: DaemonId) => Promise<Pick<ClearRegistration, 'getNotifications'> | null>;
   /** Says the item was opened: `postAgendaItemSeen` over the app’s daemon fetch. */
-  readonly seen: (daemon: DaemonConnection, sessionId: string, agendaId: string) => Promise<PushSeenResponse>;
+  readonly seen: (daemon: OpenedMachine, sessionId: string, agendaId: string) => Promise<PushSeenResponse>;
   /** The page's clock: the moment of the open, which the daemon's answer may close lines up to. */
   readonly now?: () => number;
 }
@@ -38,7 +41,7 @@ export interface AgendaItemOpened {
  */
 export const agendaItemOpenedHandler = (
   ports: AgendaItemOpenedPorts,
-): ((daemon: DaemonConnection, sessionId: string, agendaId: string) => Promise<AgendaItemOpened>) => {
+): ((daemon: OpenedMachine, sessionId: string, agendaId: string) => Promise<AgendaItemOpened>) => {
   return async (daemon, sessionId, agendaId) => {
     // Captured at the open, not at the answer: a line shown after it is newer than anything this open saw.
     const openedAt = (ports.now ?? Date.now)();

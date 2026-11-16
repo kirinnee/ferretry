@@ -84,9 +84,12 @@ test('R-0151 file query scope, rev, format and required path are validated inste
     expect(answer.status).toBe(400);
     expect(answer.json<{ code: string }>().code).toBe(code);
   }
-  // The media folder is kept in the daemon's own state, which this walk never serves: today's answer when none is kept.
+  // The daemon now keeps each ferret's media folder (F-0327), so `scope=media` is wired and reads through the same pin
+  // as the work root: the default test pinner cannot hold a root open, so it answers the one "unsupported" refusal
+  // (never the working tree's bytes, never a plain read).
   const media = await h.request('GET', '/v1/ferrets/lead/fs/file', { query: { path: 'a.txt', scope: 'media' } });
-  expect(media.status).toBe(404);
+  expect(media.status).toBe(501);
+  expect(media.json<{ code: string }>().code).toBe('unsupported');
   expect(media.body).not.toContain('hello');
 });
 

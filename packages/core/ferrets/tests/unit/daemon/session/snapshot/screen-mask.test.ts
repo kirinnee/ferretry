@@ -272,3 +272,96 @@ describe('F-0326 #U4 the masker stays inside the stop bound on a big, busy scree
     expect(took).toBeLessThan(2000);
   });
 });
+
+describe('C58-15 a big screen is masked in slices that give the event loop back', () => {
+  /** Rows of filler to push a screen past the slice size (16,384 characters). */
+  const FILLER_ROW = 'a line of ordinary terminal output with no secret in it at all'.padEnd(78, '.');
+  const filler = (rows: number): string[] => Array.from({ length: rows }, () => FILLER_ROW);
+  const counting = () => {
+    const state = { yields: 0 };
+    return {
+      state,
+      pause: async () => {
+        state.yields += 1;
+        await Promise.resolve();
+      },
+    };
+  };
+
+  test('C58-15 a big screen yields between its readings, and masks exactly what it masks without yielding', async () => {
+    // Arrange: a value broken under a ⎿ indent, in the middle of a screen well past the slice size.
+    const rows = [...filler(150), ...hardBroken('  ⎿  ', '     ', LONG), ...filler(150)];
+    const screen = rows.join('\n');
+    expect(screen.length).toBeGreaterThan(16_384);
+    const { state, pause } = counting();
+
+    // Act
+    const sliced = await vault({ TOKEN: LONG }).read(scope => maskedScreen(scope, screen, pause));
+    const whole = await mask(screen, { TOKEN: LONG });
+
+    // Assert: six readings (3 joins × whole rows and content), so five yields between them, one before the row check, one before the final pass.
+    expect(state.yields).toBe(7);
+    expect(sliced).toBe(whole);
+    noPieceOf(LONG, sliced);
+  });
+
+  test('C58-15 a screen that draws no gutter reads each join once, so it yields fewer times', async () => {
+    const screen = filler(300).join('\n');
+    const { state, pause } = counting();
+
+    await vault({ TOKEN: SHORT }).read(scope => maskedScreen(scope, screen, pause));
+
+    // Three readings: two yields between them, one before the row check, one before the final pass.
+    expect(state.yields).toBe(4);
+  });
+
+  test('C58-15 a value that a yield separates from its other half is still masked in every row', async () => {
+    // Arrange: a value tmux wrapped at the pane edge (no gutter), the yield running between the readings that see it.
+    const half = Math.floor(SHORT.length / 2);
+    const wrapped = [
+      ...filler(150),
+      `${FILLER_ROW.slice(0, 40)}${SHORT.slice(0, half)}`,
+      SHORT.slice(half),
+      ...filler(150),
+    ];
+    const screen = wrapped.join('\n');
+    const { pause } = counting();
+
+    // Act
+    const out = await vault({ TOKEN: SHORT }).read(scope => maskedScreen(scope, screen, pause));
+
+    // Assert
+    noPieceOf(SHORT, out);
+    expect(out.split('\n').length).toBe(wrapped.length);
+  });
+
+  test('C58-15 a screen no longer than a slice never yields, and with no yield bound it never needs one', async () => {
+    const { state, pause } = counting();
+    const small = `${SHORT}\n> `;
+
+    await vault({ TOKEN: SHORT }).read(scope => maskedScreen(scope, small, pause));
+    const bigNoYield = await vault({ TOKEN: SHORT }).read(scope =>
+      maskedScreen(scope, `${SHORT}\n${filler(300).join('\n')}`),
+    );
+
+    expect(state.yields).toBe(0);
+    expect(bigNoYield).not.toContain(SHORT);
+  });
+
+  test('C58-15 a yield that fails fails the masking: nothing is handed on unmasked', async () => {
+    const screen = `${SHORT}\n${filler(300).join('\n')}`;
+
+    const result = await vault({ TOKEN: SHORT })
+      .read(scope =>
+        maskedScreen(scope, screen, async () => {
+          throw new Error('the loop is gone');
+        }),
+      )
+      .then(
+        () => 'handed on',
+        () => 'refused',
+      );
+
+    expect(result).toBe('refused');
+  });
+});

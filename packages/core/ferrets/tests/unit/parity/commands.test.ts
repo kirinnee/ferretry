@@ -77,6 +77,8 @@ const STARTED = { id: 'lead' };
 
 /** Each row this file proves, with the 5.0 verb it lives at (the TSV's `name5`, without the binary's name). */
 const ROWS: readonly (readonly [id: string, v5: string])[] = [
+  ['V-0282', 'history'],
+  ['V-0283', 'history claim [words...]'],
   ['V-0290', 'instructions'],
   ['V-0329', 'ferret move <id>'],
   ['V-0334', 'new [words...]'],
@@ -1079,6 +1081,25 @@ describe('commands parity', () => {
       expect(two.err.join('\n')).toContain('pass only one of --base, --from-head');
       expect(await two.verb('worktree fork <branch>', [])).toBe(2);
       expect(two.calls).toEqual([]);
+    });
+  });
+
+  describe('history', () => {
+    test('V-0282 fy history typed bare prints what the group offers and exits 2, asking the daemon nothing', async () => {
+      const { verb, out, calls } = run();
+      expect(await verb('history')).toBe(2);
+      expect(out.join('\n')).toContain('fy history claim --harness <claude|codex> --pid <pid>');
+      expect(out.join('\n')).toContain('exit 75');
+      expect(calls).toEqual([]);
+    });
+
+    test('V-0283 fy history claim reads the wrapper words, and a caller mistake is 2 or 1, never the held status 75', async () => {
+      const { verb, err, calls } = run();
+      expect(await verb('history claim [words...]', [], { harness: 'claude' })).toBe(2);
+      expect(err.join('\n')).toContain('--pid is required');
+      expect(await verb('history claim [words...]', [], { harness: 'claude', pid: '42' })).toBe(1);
+      expect(err.join('\n')).toContain('no state home');
+      expect(calls).toEqual([]);
     });
   });
 });

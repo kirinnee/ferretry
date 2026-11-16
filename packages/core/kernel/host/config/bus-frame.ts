@@ -14,6 +14,14 @@ import type { Admission } from '../../contract/bound.ts';
 import { ConfigChanged } from '../../contract/kernel.ts';
 import type { ApiRequest } from '../../contract/http.ts';
 import type { ScopedRoute } from '../../contract/route.ts';
+import kernelManifest from '../../plugin.ts';
+
+/** The kernel's own `GET /v1/config/file` declaration: what a `kernel.config-changed` frame is asked about as. */
+export const CONFIG_FILE_READ: ScopedRoute = (() => {
+  const found = kernelManifest.actions?.routes?.find(declared => declared.key === 'GET /v1/config/file');
+  if (found === undefined) throw new Error('the kernel manifest declares no GET /v1/config/file');
+  return found;
+})();
 
 export function configFrameShown(
   admission: Admission | undefined,

@@ -55,3 +55,11 @@ for (const [shape, literal] of [
     expect(said).toContain('${secret:NAME}');
   });
 }
+
+test('a login file holding only the ${secret:NAME} reference `fy login add` writes is accepted', async () => {
+  const issues = await issuesFor(
+    'harness: claude-code\nstore: environment\nenv:\n  ANTHROPIC_AUTH_TOKEN: ${secret:ZAI_API_KEY}\n',
+  );
+
+  expect(issues).toEqual([]);
+});

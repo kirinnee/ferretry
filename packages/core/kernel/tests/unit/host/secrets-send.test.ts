@@ -319,6 +319,30 @@ describe('the rule under both hosts (ownSecretsPort over outboundSecretTransport
     ).toEqual(['api.jev.test', 'localhost']);
   });
 
+  test('c58-22 a send tells the security log its name, host and outcome kind; a throwing security log never changes the answer', async () => {
+    const told: unknown[] = [];
+    const ports = (sent: (note: { secret: string; host: string; outcome: string }) => void) =>
+      ownSecretsPort(
+        ['A_KEY'],
+        () => new Set(['A_KEY']),
+        () => ({ resolve: async () => VALUE }),
+        {
+          hosts: ['api.jev.test'],
+          mayReach: () => true,
+          transport: { send: async () => ({ kind: 'status', status: 401 }) },
+          log: capture(),
+          sent,
+        },
+      );
+    expect(await ports(note => void told.push(note)).send('A_KEY', POST)).toEqual({ kind: 'status', status: 401 });
+    expect(told).toEqual([{ secret: 'A_KEY', host: 'api.jev.test', outcome: 'status' }]);
+    expect(JSON.stringify(told)).not.toContain(VALUE);
+    const broken = ports(() => {
+      throw new Error(`audit down ${VALUE}`);
+    });
+    expect(await broken.send('A_KEY', POST)).toEqual({ kind: 'status', status: 401 });
+  });
+
   test('a transport that throws is network, and its message never leaves', async () => {
     const log = capture();
     const port = ownSecretsPort(

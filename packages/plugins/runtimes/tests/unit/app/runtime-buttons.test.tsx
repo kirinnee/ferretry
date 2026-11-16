@@ -87,6 +87,64 @@ describe('RuntimeButtons', () => {
     await view.unmount();
   });
 
+  it('tells the form which runtimes can run a session: nothing decided before the roster is read, then the list once', async () => {
+    const state: Harness = { value: '', chosen: null };
+    const told: (readonly string[] | null)[] = [];
+    const store = storeOf('claude-a', 'codex-b');
+    const onOffered = (wrappers: readonly string[] | null): void => void told.push(wrappers);
+    const element = () => <RuntimeButtons {...host(store, state).props} onOffered={onOffered} />;
+    const view = await mount(element());
+    await settle();
+    await view.render(element());
+    await settle();
+    expect(told[0]).toBeNull();
+    expect(told.at(-1)).toEqual(['claude-a', 'codex-b']);
+    expect(told.filter(wrappers => wrappers !== null)).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('takes the offer back while the roster is read again, and while that read failed: a cached list is never settled', async () => {
+    const state: Harness = { value: '', chosen: null };
+    const told: (readonly string[] | null)[] = [];
+    let reads = 0;
+    let resolveRead: (accounts: string[]) => void = () => undefined;
+    let rejectRead: (reason: Error) => void = () => undefined;
+    const store = new AccountPickerStore({
+      catalog: () => {
+        reads += 1;
+        if (reads === 1) return Promise.resolve({ accounts: [pickerAccount({ wrapper: 'claude-a' })] });
+        return new Promise((resolve, reject) => {
+          resolveRead = accounts => resolve({ accounts: accounts.map(wrapper => pickerAccount({ wrapper })) });
+          rejectRead = reject;
+        });
+      },
+      health: async () => ({ health: healthMap(pickerHealth('login-claude-a')), error: null }),
+      checkHealth: async () => ({ health: new Map(), error: null }),
+    });
+    const onOffered = (wrappers: readonly string[] | null): void => void told.push(wrappers);
+    const element = () => <RuntimeButtons {...host(store, state).props} onOffered={onOffered} />;
+    const view = await mount(element());
+    await settle();
+    expect(told.at(-1)).toEqual(['claude-a']);
+
+    await interact(async () => store.reread());
+    await settle();
+    // The old single runtime is still on screen, but it is not the machine's answer to the read in flight.
+    expect(view.container.querySelectorAll('[data-runtime-option]')).toHaveLength(1);
+    expect(told.at(-1)).toBeNull();
+
+    await interact(async () => resolveRead(['claude-a', 'claude-b']));
+    await settle();
+    expect(told.at(-1)).toEqual(['claude-a', 'claude-b']);
+
+    await interact(async () => store.reread());
+    await settle();
+    await interact(async () => rejectRead(new Error('roster unavailable')));
+    await settle();
+    expect(told.at(-1)).toBeNull();
+    await view.unmount();
+  });
+
   it('shows health only for a login whose status was read, and quota only when the feed has a row', async () => {
     const state: Harness = { value: 'claude-a', chosen: null };
     const store = storeOf('claude-a', 'codex-b');

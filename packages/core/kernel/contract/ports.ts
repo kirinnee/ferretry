@@ -1029,9 +1029,9 @@ export interface RootsPort {
        * descriptor: the anchor opened once, each component below it opened from its parent's descriptor without following
        * (`O_DIRECTORY | O_NOFOLLOW`), and the leaf acted on through the last one, so a folder swapped for a link after the
        * check reaches nothing. An `imports` READ (a file, a stat, a listing) reaches its folder the same way, so a folder
-       * swapped for a link at any step of ONE call reads nothing outside it; only a host with neither a descriptor path
-       * nor the C library's calls lists and stats by path behind the link walk, and a host with the calls but not the
-       * working-directory bracket lists by path (a listing there can answer an outside folder's names; file reads are
+       * swapped for a link at any step of ONE call reads nothing outside it; a host with neither a descriptor path
+       * nor the C library's calls refuses the read `no_descriptor_reach` (it never reads by path), and a host with the
+       * calls but not the working-directory bracket lists by path (a listing there can answer an outside folder's names; file reads are
        * still refused by the spelling and identity proofs). An anchor that is not the folder or its ancestor, or one given to a root that takes no
        * absolute folder, names no folder: every call is refused `outside`. A caller that scopes `project-files` to a
        * project the person named passes THAT folder (or the folder it is reached from, when it is a link such as

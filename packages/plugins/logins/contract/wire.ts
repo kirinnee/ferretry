@@ -17,7 +17,7 @@ import { type Brand, InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSche
 import { z } from 'zod';
 import { HarnessKeySchema } from '@ferretry/core-ferrets/contract';
 import { malformedSecretReference } from '@ferretry/core-vault/contract';
-import { storedEnvironmentIssue } from './secret-shape.ts';
+import { nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
 const HarnessKindSchema = HarnessKeySchema;
 const NonEmpty = z.string().min(1);
@@ -485,6 +485,17 @@ const refuseUnsafeEnvironment = (ctx: {
         params: { rawSecret: true },
         continue: true,
       });
+    } else if (nameLooksLikeKey(name)) {
+      // A key typed into the NAME box is a key all the same: it would be written in plain and shown on every device.
+      // Neither the name nor a path holding it is carried, so the refusal cannot repeat the key.
+      ctx.issues.push({
+        code: 'custom',
+        message: `A variable name looks like a key: a name is a label, so keep the key in the secret store and write \${secret:NAME} as the value`,
+        input: undefined,
+        path: [],
+        params: { rawSecret: true },
+        continue: true,
+      });
     } else if (!POSIX_ENV_NAME.test(name)) {
       ctx.issues.push({
         code: 'custom',
@@ -553,12 +564,17 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
     return;
   }
   for (const [name, value] of Object.entries(ctx.value)) {
+    // A name that looks like a key is never repeated, in the message or in the path: the refusal would carry the key.
+    const keyName = nameLooksLikeKey(name);
+    const label = keyName ? 'A variable' : `"${name}"`;
+    const path = keyName ? [] : [name];
+    const input = keyName ? undefined : name;
     if (typeof value !== 'string') {
       ctx.issues.push({
         code: 'custom',
-        message: `"${name}": env must be a map of NAME: value`,
-        input: name,
-        path: [name],
+        message: `${label}: env must be a map of NAME: value`,
+        input,
+        path,
         params: { rawSecret: true },
       });
       continue;
@@ -566,9 +582,9 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
     if (value.length > MAX_ENVIRONMENT_VALUE) {
       ctx.issues.push({
         code: 'custom',
-        message: `"${name}" is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
-        input: name,
-        path: [name],
+        message: `${label} is longer than ${MAX_ENVIRONMENT_VALUE} characters: keep a long value in the secret store and write \${secret:NAME} here`,
+        input,
+        path,
         params: { rawSecret: true },
       });
       continue;
@@ -579,10 +595,10 @@ const refuseStoredSecrets = (ctx: { readonly value: unknown; readonly issues: z.
       code: 'custom',
       message:
         issue === 'secret'
-          ? `"${name}" holds a secret: save it in the secret store and write \${secret:NAME} here instead`
-          : `"${name}" is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
-      input: name,
-      path: [name],
+          ? `${label} holds a secret: save it in the secret store and write \${secret:NAME} here instead`
+          : `${label} is an address holding a ${issue === 'userinfo' ? 'password' : 'key in its query string'}: write the address without it and keep it in the secret store`,
+      input,
+      path,
       params: { rawSecret: true },
     });
   }
@@ -1542,3 +1558,15 @@ export const ModelsStateSchema = z.strictObject({
   local: LocalModelsSchema.optional(),
 });
 export type ModelsState = z.infer<typeof ModelsStateSchema>;
+
+// ── State (state/logins/passive-assignments.json) ────────────────────────────────────────────────────────────────
+
+/**
+ * Which login Logins last saw each Codex ferret on, and since when: the instant a reading of that ferret's rollout
+ * starts to be that login's. Ids only; never a credential.
+ */
+export const PassiveAssignmentsStateSchema = z.strictObject({
+  format: z.literal(1),
+  ferrets: z.record(NonEmpty, z.strictObject({ login: NonEmpty, since: z.number().int().nonnegative() })),
+});
+export type PassiveAssignmentsState = z.infer<typeof PassiveAssignmentsStateSchema>;

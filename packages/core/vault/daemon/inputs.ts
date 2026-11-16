@@ -6,18 +6,24 @@ import { milliseconds } from '@ferretry/std';
 import {
   InputAskRefSchema,
   InputPhoneApprovals,
+  InputSavedLogins,
   InputSecureCopies,
   type InputTargetAdapter,
   InputRequestFiles,
   InputTargets,
   PHONE_APPROVAL_KEY,
   type PhoneApprovalProvider,
+  SAVED_LOGINS_KEY,
+  type SavedLoginsProvider,
   SECURE_COPY_KEY,
   type SecureCopyProvider,
 } from '../contract/index.ts';
 import { INPUT_ASK_SOURCE, InputAgentNotifierAdapter, InputAsksAdapter } from './adapters/inputs/asks.ts';
 import { InputGateAudit } from './adapters/inputs/audit.ts';
 import { PhoneApprovalReach } from './adapters/inputs/phone-reach.ts';
+import { SignInGrantsThroughHook } from './adapters/inputs/grants.ts';
+import { ScriptRecordOnState } from './adapters/inputs/script-record.ts';
+import { SavedLoginsThroughHook } from './adapters/inputs/saved-logins.ts';
 import { SecureCopiesThroughHook } from './adapters/inputs/secure-copy.ts';
 import { type BoundInputHolds, HeardActs, InputHoldsOverService } from './adapters/inputs/holds.ts';
 import { InputStateJournal } from './adapters/inputs/journal.ts';
@@ -57,8 +63,8 @@ export interface InputsDeps {
   /** Where a paste "as the secret NAME" is kept; absent: such a paste is unsupported. */
   readonly secretStore?: SecretStoreDirectory;
   /**
-   * Saved logins, sign-ins, secure copies, paste rules and approved sign-ins: Accounts' (the proposed `input.saved`
-   * hook). Each is optional exactly as today; absent, the card offers nothing saved and every value is typed.
+   * A test seam over the saved logins, the card order, sign-in facts, paste rules and approved sign-ins, which are
+   * Accounts' (`input.saved`, `input.secure-copy`); what is passed here wins over the hook. Absent, the hook answers.
    */
   readonly accounts?: {
     readonly logins?: InputLoginPort;
@@ -84,6 +90,11 @@ export interface Inputs {
   readonly phoneReach: PhoneApprovalReach;
   /** Where page scripts ran across the machine (`VaultApi.scriptRunning` / `scriptedOn`, I98). */
   readonly scripts: MachineScripts;
+  /**
+   * What the owner approved in advance (Accounts', through `input.saved`): told of every script Browsers runs, so no
+   * standing rule fills while one runs and every rule pinned where one ran is stopped.
+   */
+  readonly grants: SignInGrantSource;
   /** The owner's input routes, by the keys `manifest.ts` declares: Vault's build spreads them into its `routes`. */
   readonly routes: ReturnType<typeof inputRequestRoutes>;
   /** The agent tools, by the names `manifest.ts` declares (`input_wait`): spread into Vault's `tools`. */
@@ -103,13 +114,13 @@ const INPUT_ASK_SOURCE_SPEC: AskSourceSpec = {
 
 /** The part of `build(ctx)` the input bridge reads. */
 export interface InputsContext {
-  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs' | 'identity'>;
+  readonly kernel: Pick<KernelPorts, 'clock' | 'state' | 'jobs' | 'identity' | 'log'>;
   readonly needs: { readonly asks: AsksApi; readonly gate: Pick<GateApi, 'audit'> };
   readonly hooks: Pick<HookInvoker, 'provider'>;
 }
 
 export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
-  const { clock, state, jobs } = ctx.kernel;
+  const { clock, state, jobs, log } = ctx.kernel;
   const provider = (kind: 'terminal' | 'page'): InputTargetAdapter | undefined => {
     const found = ctx.hooks.provider(InputTargets, kind);
     return found === 'unavailable' ? undefined : found;
@@ -137,7 +148,24 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     return found === 'unavailable' ? undefined : found;
   };
   const copies = new SecureCopiesThroughHook(secureCopy);
-  const accounts = { sealed: copies, rules: copies, ...(deps.accounts ?? {}) };
+  // Saved logins, the card's order and what the daemon saw after a submit are Accounts' too, provided as `input.saved`
+  // and looked up on every call: an Accounts that is off offers nothing saved and every value is typed (fail closed).
+  const savedLogins = (): SavedLoginsProvider | undefined => {
+    const found = ctx.hooks.provider(InputSavedLogins, SAVED_LOGINS_KEY);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const saved = new SavedLoginsThroughHook(savedLogins);
+  // The sign-ins the owner approved in advance are Accounts' as well (`SavedLoginsProvider.grants`), looked up on every call.
+  const grants = new SignInGrantsThroughHook(savedLogins);
+  const accounts = {
+    sealed: copies,
+    rules: copies,
+    logins: saved,
+    choice: saved,
+    loginFacts: saved,
+    grants,
+    ...(deps.accounts ?? {}),
+  };
   // The sign-in lock's ears: the acts the kernel tells `InputHolds.observed` after each completed act (HeardActs).
   // Its own looks after a submit go through the targets' own reads (`where`, `text`, `promptLine`); a target that
   // offers none answers "cannot tell", so no sign-in fact is kept for it.
@@ -148,7 +176,12 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     sleep: async ms => await clock.sleep(milliseconds(ms)),
   });
   // Where page scripts ran across the machine, as Browsers tells it (VaultApi.scriptRunning / scriptedOn).
-  const scripts = new MachineScripts(() => clock.nowMs());
+  // Kept in the Vault's own state, so a standing rule is held to a script that ran before a daemon restart too; read by the restore job.
+  const scripts = new MachineScripts(
+    () => clock.nowMs(),
+    new ScriptRecordOnState(state),
+    sentence => log.warn(sentence),
+  );
   const acts = new HeardActs(observer, () => [...service.openSessions(), ...deps.quarantine.sessions()]);
   const service: InputRequestService = new InputRequestService({
     observer: acts.view(observer),
@@ -179,12 +212,19 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     ...(accounts.choice === undefined ? {} : { choice: accounts.choice }),
     ...(accounts.sealed === undefined ? {} : { sealed: accounts.sealed }),
     ...(accounts.rules === undefined ? {} : { rules: accounts.rules }),
-    ...(accounts.grants === undefined ? {} : { grants: accounts.grants }),
+    grants: accounts.grants,
     // A terminal's saved-login key names this machine (`program@host`): today's `hostname()`, the kernel's daemon name.
     hostName: deps.hostName ?? ctx.kernel.identity.daemonName,
   });
   // Every hold comes back before any request does (I82); then the sweep runs on its own interval.
-  jobs.add({ id: 'inputs-restore', schedule: { onceAfterStart: true }, run: async () => await service.restore() });
+  jobs.add({
+    id: 'inputs-restore',
+    schedule: { onceAfterStart: true },
+    run: async () => {
+      await scripts.load();
+      await service.restore();
+    },
+  });
   jobs.add({
     id: 'inputs-sweep',
     schedule: { every: milliseconds(INPUT_REQUEST_SWEEP_MS) },
@@ -196,6 +236,7 @@ export function buildInputs(ctx: InputsContext, deps: InputsDeps): Inputs {
     identities,
     observer,
     scripts,
+    grants: accounts.grants,
     routes: inputRequestRoutes(service),
     tools: inputTools(service, phone),
     phone,

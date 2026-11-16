@@ -390,7 +390,8 @@ export interface RuntimeWrapperInput {
 /**
  * The arguments that may name a conversation, per harness: the shell `case` patterns a wrapper looks
  * for before it pays for a `fy history claim`. Wider than what names one — `--resume` alone opens a
- * picker — because `fy` decides exactly (`conversationFromArguments` in `./shared-history.ts`);
+ * picker — because `fy` decides exactly (Ferrets' `fy history claim`, `conversationFromArguments` in
+ * `core/ferrets/contract/conversation-lease.ts`);
  * this only keeps an ordinary launch from running it.
  */
 const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {

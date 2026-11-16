@@ -63,7 +63,6 @@
         "daemon/lib/session/live/index.ts",
         "daemon/adapters/session/archive/index.ts",
         "daemon/lib/session/directory/session-directory.ts",
-        "daemon/lib/session/monitor/types.ts",
         "daemon/lib/session/runtime-control/index.ts",
         "daemon/lib/session/runtime-control/service.ts"
       ]
@@ -88,11 +87,7 @@
     "packages/plugins/projects": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx"],
       "project": ["**/*.{ts,tsx}"],
-      "ignore": [
-        "app/hooks/use-project-scope.ts",
-        "app/hooks/use-work-project-names.ts",
-        "app/lib/work-project-names.ts"
-      ]
+      "ignore": ["app/hooks/use-project-scope.ts"]
     },
     "packages/plugins/runtimes": {
       "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
@@ -107,7 +102,7 @@
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/connections": {
-      "entry": ["tests/**/*.test.{ts,tsx}", "worker/src/adapters/worker.ts"],
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/**/fixtures/**/*.{ts,tsx}", "worker/src/adapters/worker.ts"],
       "project": ["**/*.{ts,tsx}"]
     },
     "packages/plugins/catalogs": {

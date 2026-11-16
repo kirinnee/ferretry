@@ -1,4 +1,4 @@
-import type { AgentAddressCandidate } from '../../lib/protocol/agent-address.ts';
+import type { AgentAddressCandidate } from '../../../contract/agent-address.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
 const field = (document: unknown, key: string): string | undefined => {

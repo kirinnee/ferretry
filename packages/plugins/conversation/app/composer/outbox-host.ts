@@ -20,7 +20,8 @@ import { documentOutbox, outboxSender } from './send-outbox-wiring.ts';
 
 export function OutboxHost({ daemon, client }: BackgroundViewProps): null {
   useEffect(
-    () => documentOutbox(daemon).offer(outboxSender(daemonConnection(daemon), composerApi(client), client)),
+    () =>
+      documentOutbox(daemon).offer(outboxSender(daemonConnection(daemon), composerApi(client), client), client.feed),
     [daemon, client],
   );
   return null;

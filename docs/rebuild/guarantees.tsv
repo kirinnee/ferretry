@@ -355,7 +355,7 @@ I30	kept	vault	-	behaviour as written	input-requests	I30
 I31	kept	vault	-	behaviour as written	input-requests	I31
 I32	kept	vault	-	behaviour as written	input-requests	I32
 I33	kept	vault	-	behaviour as written	input-requests	I33
-I34	kept	accounts	-	behaviour as written	input-requests	I34
+I34	kept	vault	accounts	behaviour as written	input-requests	I34
 I35	kept	vault	-	behaviour as written	input-requests	I35
 I36	kept	vault	-	behaviour as written	input-requests	I36
 I37	kept	vault	-	behaviour as written	input-requests	I37
@@ -484,14 +484,14 @@ I159	kept	accounts	-	`signInMatches`, `offer.primary`	input-requests	I159
 I160	kept	vault	-	behaviour as written	input-requests	I160
 I161	kept	vault	accounts	`savedForFields`, `bad_request`	input-requests	I161
 I162	kept	vault	-	behaviour as written	input-requests	I162
-I163	kept	accounts	-	behaviour as written	input-requests	I163
-I164	kept	accounts	-	`elsewhere`	input-requests	I164
+I163	kept	vault	accounts	behaviour as written	input-requests	I163
+I164	kept	vault	accounts	`elsewhere`	input-requests	I164
 I165	kept	accounts	-	`secretHint`	input-requests	I165
 I166	kept	vault	-	behaviour as written	input-requests	I166
 I167	kept	vault	-	`factorAskWords`	input-requests	I167
-I168	kept	accounts	-	`codeTargetProblem`	input-requests	I168
+I168	kept	vault	accounts	`codeTargetProblem`	input-requests	I168
 I169	kept	vault	-	`bad_request`	input-requests	I169
-I170	kept	accounts	-	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
+I170	kept	vault	accounts	`fill(account, 'totp', now, { factor })`, `input.delivered`	input-requests	I170
 I171	kept	vault	-	`LoginObserver.codeTyped`, `verified`	input-requests	I171
 I172	kept	vault	-	behaviour as written	input-requests	I172
 I173	kept	accounts	-	`TwoFactorSeedSaved.typed`	input-requests	I173

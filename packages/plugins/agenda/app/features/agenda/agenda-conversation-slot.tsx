@@ -38,17 +38,15 @@ function AgendaConversationSlot({
 /**
  * THE CONVERSATION UNDER ONE INBOX CARD: the slot above, told what the Inbox needs to hear. A message about the card that
  * the conversation accepted marks the item replied at once (`lib/agenda-replied.ts`), and the words of a reply the owner
- * took back with Undo go into the box once. The reference (`!A5`) and the item's own draft are the conversation's, from the ask.
+ * took back with Undo go into the box once. The conversation is the CARD's machine's (`card.daemonId`), never the page's: the Inbox lists every machine's cards. The reference (`!A5`) and the item's own draft are the conversation's, from the ask.
  * A FORM CARD's Send answers the form: the page hands `answerForm` (the picks and the words as one answer) and the card
  * is told when a pick changes, so the box's Send is the form's whatever the ferret's chat is doing.
  */
 export function AgendaCardConversation({
-  daemon,
   card,
   inbox,
   answerForm,
 }: {
-  readonly daemon: string;
   readonly card: InboxCard;
   readonly inbox: Pick<AgendaInbox, 'replied' | 'repliedState'>;
   readonly answerForm?: (() => void) | undefined;
@@ -58,7 +56,7 @@ export function AgendaCardConversation({
   return (
     <AgendaConversationSlot
       ask={card.item.id}
-      daemon={daemon}
+      daemon={card.daemonId}
       ferret={card.view.config.id}
       onReplied={sent => void inbox.replied.mark(card, sent)}
       onRestored={() => void inbox.replied.takeRestore(card.key)}

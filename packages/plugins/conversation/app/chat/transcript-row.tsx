@@ -14,7 +14,6 @@ import { stripFraming } from './message-framing.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import type { SendReceipt } from './send-receipt-model.ts';
 import type { AgentRunMark, TranscriptEntry } from './transcript-entries.ts';
-import { AgendaMessageOr, useAgendaChatReply } from './seam.ts';
 import {
   BoardNudgeRow,
   FerretryMessageRow,
@@ -43,7 +42,7 @@ import {
   type SendRetry,
   type SendSubmit,
 } from './ledger-message.tsx';
-import { RowSlot } from './row-slots.tsx';
+import { RowBodySlot, RowSlot } from './row-slots.tsx';
 import { CONVERSATION_ROW_ACTIONS_SLOT } from '../../contract/index.ts';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
@@ -257,7 +256,7 @@ function OwnSendRow({
               source={source}
             />
           ) : (
-            <OwnWords onItsWay={travelling} text={travelling ? record.message : entry.text} />
+            <OwnWords id={entry.id} onItsWay={travelling} text={travelling ? record.message : entry.text} />
           )}
           <OutboxFiles record={record} />
           {boundary === undefined ? null : (
@@ -411,7 +410,7 @@ function OwnMessageRow({
       {...rhythm}
     >
       <span className="sr-only">You said:</span>
-      {children ?? <EntryBody entry={entry} prose={<OwnWords text={entry.text} />} speaker="user" />}
+      {children ?? <EntryBody entry={entry} prose={<OwnWords id={entry.id} text={entry.text} />} speaker="user" />}
       <MessageFooter
         answered={answered}
         clock={clockOfInstant(record?.acceptedAt, { now: Date.now() }) ?? clockOfInstant(entry.at, { now: Date.now() })}
@@ -428,14 +427,20 @@ function OwnMessageRow({
 }
 
 /**
- * The reader's own words, literal — or, when the daemon worded them about agenda items (an answer from a card, a
- * reply naming `!A45`), the compact agenda card that reads them (`agenda-message.tsx`).
+ * The reader's own words, literal — or whatever the panels of `conversation.row-body` draw for them: Agenda's compact
+ * card when the daemon worded them about agenda items (an answer from a card, a reply naming `!A45`). One component
+ * either way, so the bubble stays ONE element from sent to answered (a send on its way is offered with `onItsWay`).
  */
-function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly onItsWay?: boolean }) {
-  // Still on its way: worded as the ferret will receive it, so a reply about an open item (`!A5 …`) shows as its
-  // agenda card at once. One component either way, so the bubble stays ONE element from sent to answered.
-  const worded = useAgendaChatReply(text);
-  return <AgendaMessageOr fallback={<p>{stripFraming(text).body}</p>} text={onItsWay ? worded : text} />;
+function OwnWords({
+  id,
+  text,
+  onItsWay = false,
+}: {
+  readonly id: string;
+  readonly text: string;
+  readonly onItsWay?: boolean;
+}) {
+  return <RowBodySlot fallback={<p>{stripFraming(text).body}</p>} id={id} onItsWay={onItsWay} text={text} />;
 }
 
 /**

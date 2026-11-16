@@ -184,6 +184,8 @@ const WardenConfigViewSchema = z.object({
   warnings: z.array(z.string()),
   login: WardenLoginSchema.optional(),
   held: z.array(z.string()).optional(),
+  /** Set by the subsystem from `warden.yaml`, which the sweep service never reads (it holds no `jev`). */
+  jevKey: z.enum(['named', 'not_named']).optional(),
 });
 export type WardenConfigView = z.infer<typeof WardenConfigViewSchema>;
 const WardenVerdictSpawnSchema = z.object({

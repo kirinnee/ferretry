@@ -5,6 +5,7 @@ import {
   type ConversationApi,
   conversationFor,
   LinkKept,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   SearchSources,
@@ -19,7 +20,9 @@ import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { addressedByCallsign } from './seams/ferret-address.ts';
 import { maskedBody } from './seams/masked-body.ts';
+import { AgentsReferenceMenu } from './references/agents-menu.ts';
 import { referenceCatalogRoute } from './references/catalog.ts';
+import { FilesReferenceMenu } from './references/files-menu.ts';
 
 const unavailable =
   (sentence: string): RouteHandler =>
@@ -144,6 +147,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
             form: true,
             apply: answer => a.applyQuestionAnswer(answer),
           },
+          // A ferret parked on a permission prompt or a dialog is a card the owner cannot answer here: the console does.
+          'ask.sources:prompt': { schema: PromptAskRefSchema, title: 'Prompt', form: false },
           // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
           'launch.parts': () => [
             {
@@ -160,6 +165,10 @@ export const conversationDaemon = (gate: HarnessGate) =>
           'opening.attachments:opening': openingAttachmentsSource(),
           'ask.delivery:ferret': askDeliveryOf(api),
           'ask.owner-chat:conversation': a.ownerChat,
+          // The composer's `:` (fleet callsigns) and `@` (one folder of the ferret's files) menus, each declaring the demand
+          // its own read route asks (fleet, filesystem); the route asks it of the caller before they run.
+          'reference.catalog::': new AgentsReferenceMenu(ctx.needs.ferrets),
+          'reference.catalog:@': new FilesReferenceMenu(ctx.needs.ferrets),
           'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
           // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
           'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),
@@ -168,6 +177,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
             release: ferret => b.release(ferret),
             look: (ferret, phase) => a.turns.look(ferret, phase),
             lookQuestion: ferret => a.questions.look(ferret),
+            lookPrompt: ferret => a.promptChanged(ferret),
             forget: ferret => a.turns.forget(ferret),
             withdrawQuestion: ferret =>
               void a

@@ -3,9 +3,11 @@
  * drawing once, and each row mounts the panels contributed to a Conversation slot with its entry. Outside a chat that
  * provided them (a test, a harness) the slots draw nothing, exactly as a slot no plugin contributed to.
  */
-import { PanelSlot } from '@ferretry/app';
+import { PanelReplace, PanelSlot } from '@ferretry/app';
 import { createContext, type ReactNode, useContext, useMemo } from 'react';
 import {
+  CONVERSATION_ROW_BODY_SLOT,
+  type ConversationRowBodyProps,
   type ConversationRowEntry,
   type ConversationRowProps,
   type ConversationRowToolCall,
@@ -54,6 +56,8 @@ export function rowSlotEntry(entry: TranscriptEntry): ConversationRowEntry | nul
     text: entry.text,
     ...(entry.at === undefined ? {} : { at: entry.at }),
     ...(entry.label === undefined ? {} : { label: entry.label }),
+    ...(entry.send === undefined ? {} : { send: { sendId: entry.send.sendId } }),
+    ...(entry.peer === undefined ? {} : { peer: true as const }),
     ...(tools.length === 0 ? {} : { tools }),
   };
 }
@@ -100,6 +104,40 @@ function rowSlotTools(entry: TranscriptEntry): readonly ConversationRowToolCall[
     });
   }
   return offered;
+}
+
+/**
+ * A person's own words, drawn by the panels of `conversation.row-body` instead of `fallback` (the chat's plain words),
+ * which stays when no panel is contributed, when none can be drawn and outside a chat. `id` names the row (a hand-over
+ * a row carries has none: it says so); `onItsWay` is the one case a row of this device only is offered to a slot (see
+ * `ConversationRowBodyProps`).
+ */
+export function RowBodySlot({
+  id,
+  text,
+  onItsWay = false,
+  fallback,
+}: {
+  readonly id: string;
+  readonly text: string;
+  readonly onItsWay?: boolean;
+  readonly fallback: ReactNode;
+}) {
+  const place = useContext(RowSlotContext);
+  if (place === null) return <>{fallback}</>;
+  const props: Omit<ConversationRowBodyProps, 'fallback'> = {
+    entry: { id, kind: 'user', text },
+    ...(onItsWay ? { onItsWay: true } : {}),
+  };
+  return (
+    <PanelReplace
+      daemon={place.daemon}
+      fallback={fallback}
+      props={{ ...props }}
+      slot={CONVERSATION_ROW_BODY_SLOT}
+      subject={place.ferret}
+    />
+  );
 }
 
 /** Every panel contributed to `slot`, for this row; none for a row that is only on this device. */

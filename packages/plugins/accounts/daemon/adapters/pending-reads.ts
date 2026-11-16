@@ -1,9 +1,10 @@
 import type { FerretsApi } from '@ferretry/core-ferrets/contract';
-import type { FerretId } from '@ferretry/kernel/contract';
+import { agentControlRefusal, ApiError, type FerretId } from '@ferretry/kernel/contract';
 import type { UsesHandle } from '@ferretry/kernel/manifest';
 import type { BoardApi } from '@ferretry/plugin-board/contract';
-import type { BrowserPageRef, BrowsersApi } from '@ferretry/plugin-browsers/contract';
+import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
+import { stampedProjectOf } from '../lib/sign-in-grants/rules.ts';
 import type { ProjectInfo } from '../lib/sign-in-context.ts';
 
 /**
@@ -13,30 +14,28 @@ import type { ProjectInfo } from '../lib/sign-in-context.ts';
  */
 
 /**
- * TODO(contract): a page's address (Browsers porter; daemon-side, read under the page hold).
+ * The address of the page `name` that `ferret` holds (`scheme://host[:port]`), or `undefined` (Browsers off or offering
+ * none, no such page, a page that is a person's or held, a page with no web address).
  *
- * GAP(browsers), #42 SF2: the address MUST be read through Browsers and gated on the ferret's "What agents may control ›
- * Browsers" switch, NEVER by adding `url` to `pagesOf` as it is: `pagesOf` knows no caller and asks no switch, so a
- * `url` there hands an agent the host of its page while Browsers is off (today `account.hint` with a `name` was
- * refused with `forbidden` and the Browsers sentence, rebuild-ref agent-tools/service.ts:356-359). The shape that
- * keeps "no check in Accounts": a Browsers-owned `pageUrlFor(ferret, name)` that asks `AgentControlPort` and refuses
- * with `agentControlRefusal('browser')`, and Accounts passing that refusal through instead of `.catch(() => undefined)`.
- * Until then no address is offered, so `account_hint {name}` asks for the site and leaks nothing.
+ * THE ADDRESS IS BROWSERS' TO GIVE, and gated there on the ferret's "What agents may control › Browsers" switch (#42 SF2):
+ * Browsers refuses with `agentControlRefusal('browser')` while it is off, and that refusal is PASSED THROUGH here, never
+ * swallowed, so `account_hint {name}` says why. There is no check in Accounts, and no address is ever read from `pagesOf`
+ * (which asks no switch). Only a refusal is let through: any other failure is "no address".
  */
-type PageWithUrl = BrowserPageRef & { readonly url?: string };
-
-/** The address of the page `name` that `ferret` holds, or `undefined` (no such page, or no URL offered yet). */
-export async function pageUrlOf(
+export async function pageAddressOf(
   browsers: UsesHandle<BrowsersApi>,
   ferret: string,
   name: string,
 ): Promise<string | undefined> {
-  const pages = await browsers
-    .current()
-    ?.pagesOf(ferret as FerretId)
-    .catch(() => undefined);
-  const page = pages?.find(each => each.name === name) as PageWithUrl | undefined;
-  return page?.url;
+  const api = browsers.current();
+  if (api?.pageAddressOf === undefined) return undefined;
+  try {
+    return await api.pageAddressOf(ferret as FerretId, name);
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 403 && error.message === agentControlRefusal('browser'))
+      throw error;
+    return undefined;
+  }
 }
 
 /**
@@ -49,6 +48,28 @@ export async function workFolderOf(ferrets: UsesHandle<FerretsApi>, ferret: stri
     ?.workFolder(ferret as FerretId)
     .catch(() => undefined);
   return place?.folder;
+}
+
+/**
+ * The board a ferret was STAMPED with at its start, as Ferrets' own record keeps it (`FerretSummary.projectId`, resolved
+ * once at start and kept), for a standing rule scoped to a project: never a value from the request, the page or the ferret,
+ * and never the board the Board resolves from the folder when none was stamped. `undefined` for an unfiled or unknown
+ * ferret, a record from before boards existed, Ferrets off or a read that fails, so the rule does not fill and the
+ * person is asked.
+ */
+export async function stampedProjectOfFerret(
+  ferrets: UsesHandle<FerretsApi>,
+  ferret: string,
+): Promise<string | undefined> {
+  return await stampedProjectOf(
+    {
+      read: async sessionId => {
+        const record = await ferrets.current()?.get(sessionId as FerretId);
+        return record === undefined ? null : { cwd: record.folder, projectId: record.projectId };
+      },
+    },
+    ferret,
+  );
 }
 
 /**

@@ -25,41 +25,65 @@ export interface RuleClient {
 /** The part of the owner's list the sweep reads: each open suggestion's id. */
 const SuggestionIdsSchema = z.object({ suggestions: z.array(z.object({ id: z.string().min(1) })) });
 
+/** The suggestions the cards hold, by machine. */
+const suggestionsOf = (cards: readonly InboxCard[]): ReadonlyMap<DaemonId, readonly string[]> => {
+  const wanted = new Map<DaemonId, string[]>();
+  for (const card of cards) {
+    const suggestion = card.item.signInRuleSuggestion?.suggestion;
+    if (suggestion !== undefined) wanted.set(card.daemonId, [...(wanted.get(card.daemonId) ?? []), suggestion]);
+  }
+  return wanted;
+};
+
+/** What the cards hold, as a key: a sweep is read again only when it changes. */
+export const suggestionsKey = (cards: readonly InboxCard[]): string =>
+  JSON.stringify([...suggestionsOf(cards)].sort(([a], [b]) => a.localeCompare(b)));
+
+/**
+ * One sweep over `cards`: for each machine that holds a suggestion card, reads its owner list and marks the ones it no
+ * longer holds as answered. Returns the cancel that drops a read still in flight. The Inbox page (the hook below) and the
+ * Agenda nav count (`agenda-nav-badge.ts`) both run it, so the count leaves an answered suggestion out wherever it is read.
+ */
+export function sweepAnsweredSuggestions(
+  cards: readonly InboxCard[],
+  connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined,
+  createClient: (connection: DaemonConnection) => Promise<RuleClient>,
+  answered: AnsweredSuggestions = answeredSuggestions,
+): () => void {
+  let current = true;
+  for (const [daemonId, suggestions] of suggestionsOf(cards)) {
+    const connection = connectionFor(daemonId);
+    if (connection === undefined) continue;
+    void createClient(connection)
+      .then(async client => await client.request(SIGN_IN_RULE_SUGGESTIONS_PATH, SuggestionIdsSchema))
+      .then(
+        list => {
+          if (!current) return;
+          const open = new Set(list.suggestions.map(each => each.id));
+          answered.mark(
+            daemonId,
+            suggestions.filter(each => !open.has(each)),
+          );
+        },
+        () => undefined,
+      );
+  }
+  return () => {
+    current = false;
+  };
+}
+
 export function useAnsweredSuggestionSweep(
   cards: readonly InboxCard[],
   connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined,
   createClient: (connection: DaemonConnection) => Promise<RuleClient>,
   answered: AnsweredSuggestions = answeredSuggestions,
 ): void {
-  const wanted = new Map<DaemonId, string[]>();
-  for (const card of cards) {
-    const suggestion = card.item.signInRuleSuggestion?.suggestion;
-    if (suggestion !== undefined) wanted.set(card.daemonId, [...(wanted.get(card.daemonId) ?? []), suggestion]);
-  }
-  const key = JSON.stringify([...wanted].sort(([a], [b]) => a.localeCompare(b)));
+  const key = suggestionsKey(cards);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` is the cards' suggestions, read once per change
-  useEffect(() => {
-    let current = true;
-    for (const [daemonId, suggestions] of wanted) {
-      const connection = connectionFor(daemonId);
-      if (connection === undefined) continue;
-      void createClient(connection)
-        .then(async client => await client.request(SIGN_IN_RULE_SUGGESTIONS_PATH, SuggestionIdsSchema))
-        .then(
-          list => {
-            if (!current) return;
-            const open = new Set(list.suggestions.map(each => each.id));
-            answered.mark(
-              daemonId,
-              suggestions.filter(each => !open.has(each)),
-            );
-          },
-          () => undefined,
-        );
-    }
-    return () => {
-      current = false;
-    };
-  }, [key, createClient, connectionFor, answered]);
+  useEffect(
+    () => sweepAnsweredSuggestions(cards, connectionFor, createClient, answered),
+    [key, createClient, connectionFor, answered],
+  );
 }

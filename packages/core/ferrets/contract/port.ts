@@ -2,7 +2,7 @@ import { defineEvent, definePort, type FerretId, type RefusalCode } from '@ferre
 import type { Instant, JsonValue, Result } from '@ferretry/std';
 import { z } from 'zod';
 import type { LaunchOrigin } from './launch-origin.ts';
-import { CompactAtSchema } from './view/compact-at.ts';
+import { type CompactAt, CompactAtSchema } from './view/compact-at.ts';
 import {
   FerretCardIdSchema,
   type FerretRole,
@@ -417,7 +417,7 @@ export interface FerretHarness {
   readonly transcript: BoundTranscriptReader;
   /**
    * Additive (G162): the seam's own ferret's transcript as raw bytes ({@link HarnessTranscriptBytes}), UNMASKED, for
-   * the ONE reader that parses records itself (Conversation's). Rejects 503 `plugin_unavailable` while the ferret's
+   * the reader that parses records itself (Conversation's; Logins' passive usage pass keeps only the normalized `rate_limits` fields and timestamps). Rejects 503 `plugin_unavailable` while the ferret's
    * harness is off; `undefined` when the harness proves none or offers no bytes. Bound: names no other ferret.
    */
   transcriptBytes?(): Promise<HarnessTranscriptBytes | undefined>;
@@ -492,6 +492,12 @@ export interface FerretTurnWritten {
 export interface FerretPrompt {
   /** The turn the observer last recorded; absent when none is recorded. */
   readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /**
+   * When the observer last CHANGED `turnState` (additive): the observer's own stored instant, ISO, on the daemon's clock.
+   * Never the registry's `stateAt`, which is stamped later by a separate write and cannot tell `needs-input` from
+   * `your-turn`. Absent whenever `turnState` is.
+   */
+  readonly turnStateAt?: string;
   /** The harness dialog's words behind a `needs-input`. */
   readonly prompt?: string;
   /** The tool-permission prompt behind a `needs-input`, as data. */
@@ -586,6 +592,31 @@ export interface FerretPaneLimit {
 }
 
 /**
+ * One name in a ferret's folder as {@link FerretsApi.listFolder} lists it. A name flagged `denied`, `ignored` or `escapes`
+ * is LISTED but never served (the file browser's own badges): a reader that offers it says so and offers nothing more.
+ * Never a size, a time, a link target or a path outside the ferret's folder.
+ */
+export interface FerretFolderEntry {
+  readonly name: string;
+  readonly type: 'file' | 'dir' | 'symlink';
+  /** On the unconditional denylist (secrets, `.git/`, `node_modules/`), or fenced from this reader. */
+  readonly denied?: boolean;
+  /** Gitignored. */
+  readonly ignored?: boolean;
+  /** A symlink resolving outside the ferret's folder, or broken. */
+  readonly escapes?: boolean;
+}
+
+/** One level of a ferret's folder: directories first, then files. */
+export interface FerretFolderListing {
+  /** The listed folder relative to the ferret's root; `''` is the root itself. */
+  readonly path: string;
+  readonly entries: readonly FerretFolderEntry[];
+  /** The folder held more names than one listing reports. */
+  readonly truncated?: boolean;
+}
+
+/**
  * The Ferrets port (§2.2): who each ferret is, its lineage, its state; start, stop and resume through the harness
  * and runner plugins. "A ferret touches only its own; a lead also its helpers'" is `mayTouch`, decided here and
  * nowhere else.
@@ -653,6 +684,18 @@ export interface FerretsApi {
    * Accounts gets it from the Board.
    */
   workFolder(ferret: FerretId): Promise<{ readonly folder: string } | undefined>;
+  /**
+   * One folder of a ferret's work tree, listed the way the file browser lists it (`GET /v1/ferrets/:ferretId/fs`), so
+   * the composer's `@` menu offers exactly what the browser would. Additive, read only, names only.
+   *
+   * ALWAYS FENCED as an agent's read is: nothing inside the daemon's state home, no hard link, and `path` is resolved
+   * UNDER the ferret's root (a `..` segment, an absolute path or a link out of it is refused `403 escapes_root`; a
+   * gitignored or denylisted folder is refused `403 ignored` / `403 denied`; a missing one `404 not_found`, a file
+   * `400 not_a_directory`). With `caller` (a ferret acting), only itself and its helpers are reachable, by the same
+   * `mayTouch` rule as `harness`: anyone else is refused `403 forbidden`, before the folder is touched. `undefined` for
+   * a ferret this daemon does not know. A grant (`filesystem.use`) is the CALLER'S to ask: this member does not.
+   */
+  listFolder?(ferret: FerretId, path: string | undefined, caller?: FerretId): Promise<FerretFolderListing | undefined>;
   sitrep(ferret: FerretId): Promise<Sitrep | undefined>;
   /**
    * What a finished ferret handed back with `signal done`: its `summary.md` as it wrote it (today's session
@@ -727,6 +770,15 @@ export interface FerretsApi {
    */
   prompt?(ferret: FerretId, caller?: FerretId): Promise<FerretPrompt | undefined>;
   /**
+   * A stopped ferret's last screen (additive): the frame kept when it stopped, MASKED AGAIN with the Vault's values at
+   * the moment of THIS read (a value added to the Vault after the capture is masked too), so the text is never the raw
+   * file. Same `mayTouch` rule as `harness`: a `caller` reaching beyond itself and its helpers is refused with a 403
+   * `forbidden`, before the file is read. `undefined` (never an error, never the raw text) for a ferret this daemon does
+   * not know, one that kept no frame, a store that is unreadable or damaged, and a frame that could not be masked.
+   * Read only.
+   */
+  lastSnapshot?(ferret: FerretId, caller?: FerretId): Promise<string | undefined>;
+  /**
    * Moves a ferret onto another runtime (decision #19, additive; today's move of a session): the moves module's flow, whose
    * relaunch is a resume that replaces the live pane through the ordinary launch. Same `mayTouch` rule as above.
    */
@@ -736,6 +788,20 @@ export interface FerretsApi {
     options: MoveOptions,
     caller?: FerretId,
   ): Promise<Result<FerretSummary, MoveFailure>>;
+  /**
+   * A ferret's OWN compaction trigger (additive; Conversation's compact-at setting): what its session config records, else
+   * what its start asked, else `undefined` (it follows its login's default). Same `mayTouch` rule as `harness`.
+   * `undefined` also for a ferret this daemon does not know.
+   */
+  compactAt?(ferret: FerretId, caller?: FerretId): Promise<CompactAt | undefined>;
+  /**
+   * Records a ferret's OWN compaction trigger in its session config (`compactAt`), the field every launch and relaunch
+   * already reads; `undefined` drops it, so the login's default applies again. Additive and optional. The value is parsed
+   * with {@link CompactAtSchema} (the floor included) and anything it cannot parse is refused 400 `invalid_compact_at`;
+   * an unknown ferret is 404 `not-found`; a `caller` that may not touch the ferret is 403 `forbidden`. Every other
+   * field of the config is kept, and the write is atomic. Takes effect at the ferret's next launch.
+   */
+  setCompactAt?(ferret: FerretId, value: CompactAt | undefined, caller?: FerretId): Promise<void>;
   /**
    * Additive (usage and Packs read it): the limits live ferrets' panes prove, one row per limited ferret, derived from
    * their state now (see {@link FerretPaneLimit}). A reader that wants them by login aggregates them (Usage owns that).

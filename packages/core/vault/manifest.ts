@@ -11,8 +11,10 @@ import {
   InputAskRefSchema,
   InputHoldsPort,
   InputPhoneApprovals,
+  InputSavedLogins,
   InputSecureCopies,
   InputRequestFiles,
+  ScriptRecordFile,
   InputTargets,
   OutputGuardPort,
   RedactionPort,
@@ -239,7 +241,7 @@ export default definePlugin({
   data: {
     // biome-ignore lint/suspicious/noExplicitAny: the leaf cast Gate, Asks and Ferrets use for a typed config def
     config: [VaultConfigFile as ConfigDef<any>],
-    state: [VaultFile, VaultKeyFile, MintsFile, HoldsFile, InputRequestFiles],
+    state: [VaultFile, VaultKeyFile, MintsFile, HoldsFile, InputRequestFiles, ScriptRecordFile],
     publishes: [SecretsChanged, HoldsChanged],
     subscribes: [AsksChanged, FerretsChanged],
   },
@@ -248,6 +250,7 @@ export default definePlugin({
       { hook: InputTargets },
       { hook: InputPhoneApprovals },
       { hook: InputSecureCopies },
+      { hook: InputSavedLogins },
       { hook: RedactionSources },
       { hook: ProfileSecrets },
     ],

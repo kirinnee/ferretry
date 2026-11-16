@@ -41,12 +41,14 @@ import {
   type ModelCatalogsView,
   type ModelPriceCatalog,
   ModelsStateSchema,
+  PassiveAssignmentsStateSchema,
   type ProviderPresetCatalog,
   LOGIN_NAME,
 } from './wire.ts';
 
 export * from './wire.ts';
-export { hasTokenShape, storedEnvironmentIssue } from './secret-shape.ts';
+export * from './slots.ts';
+export { hasTokenShape, nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
 /** The five login kinds this plugin takes under Ferrets' `logins` hook (§4.4). */
 export const LOGIN_KINDS = ['anthropic', 'openai', 'api-key', 'proxy', 'endpoint'] as const;
@@ -259,6 +261,15 @@ export const LOGINS_MODELS = defineState({
   store: 'json',
   format: 1,
   schema: ModelsStateSchema,
+});
+
+/** Which login each Codex ferret was last seen on, and since when (the passive usage reading's attribution). */
+export const LOGINS_PASSIVE_ASSIGNMENTS = defineState({
+  name: 'passive-assignments',
+  path: 'passive-assignments.json',
+  store: 'json',
+  format: 1,
+  schema: PassiveAssignmentsStateSchema,
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────

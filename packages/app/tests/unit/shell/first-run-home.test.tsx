@@ -100,8 +100,33 @@ describe('S14 first run', () => {
     go('/app/');
     const view = await mount(setup({ paired: true, withOnboarding: true }));
     await settle();
-    expect(window.location.pathname).toBe('/app/');
+    expect(window.location.pathname).not.toBe('/onboarding');
     expect(view.container.querySelector('[data-testid="first-run"]')).toBeNull();
+    await view.unmount();
+  });
+
+  test('c58-07 opening the app on a paired device with a selected daemon lands on that machine, replacing the entry', async () => {
+    go('/app/');
+    const before = window.history.length;
+    const view = await mount(setup({ paired: true, withOnboarding: true }));
+    await settle();
+    expect(window.location.pathname).toBe('/d/d1');
+    expect(window.history.length).toBe(before);
+    expect(view.container.querySelector('h1')?.textContent).toContain('laptop');
+    await view.unmount();
+  });
+
+  test('c58-07 reaching the list on purpose from inside the app stays on the list', async () => {
+    go('/nowhere');
+    const view = await mount(setup({ paired: true, withOnboarding: true }));
+    await settle();
+    expect(window.location.pathname).toBe('/nowhere');
+    await interact(() => {
+      view.container.querySelector<HTMLAnchorElement>('a[href="/app/"]')?.click();
+    });
+    await settle();
+    expect(window.location.pathname).toBe('/app/');
+    expect(view.container.querySelector('h1')?.textContent).toBe('Daemons');
     expect(view.container.textContent).toContain('laptop');
     await view.unmount();
   });

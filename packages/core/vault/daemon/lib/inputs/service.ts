@@ -69,7 +69,7 @@ import { clearJobOf } from './borrowed-grants.ts';
 import type { GrantReservation } from './borrowed-grants.ts';
 import { type GrantMatch, type GrantSighting, matchSignInGrant, type SignInGrant } from './borrowed-grants.ts';
 import type { ScriptedOriginsView, SignInGrantSource } from './borrowed-grants.ts';
-import { GRANT_MISS_CONTEXT_LINE, grantStops } from './borrowed-grants.ts';
+import { GRANT_MISS_CONTEXT_LINE, grantStops, mergeScriptedOrigins, scriptedSince } from './borrowed-grants.ts';
 import { digestFacts } from './digest.ts';
 import type { EphemeralValues } from './ephemeral-values.ts';
 import { InputRequestError } from './errors.ts';
@@ -701,8 +701,11 @@ export class InputRequestService {
   }
 
   /** The grants of this session whose pinned keys hold this target's key: in force first, the soonest to expire first. */
-  private grantsAt(sessionId: string, matchKey: string | undefined): readonly SignInGrant[] {
-    const grants = this.deps.grants;
+  private grantsAt(
+    sessionId: string,
+    matchKey: string | undefined,
+    grants: SignInGrantSource | undefined = this.deps.grants,
+  ): readonly SignInGrant[] {
     if (grants === undefined || matchKey === undefined || !grants.enabled()) return [];
     const here = grants.of(sessionId).filter(grant => grant.pins.placeKeys.includes(matchKey));
     return [...here.filter(grant => grant.state === 'in-force'), ...here.filter(grant => grant.state !== 'in-force')];
@@ -740,9 +743,10 @@ export class InputRequestService {
    * ledger; it is given back only when nothing may have been typed. Total: a fill that cannot be tried is a normal card.
    */
   private async underGrant(held: Held, facts: InputTargetFacts, raise: InputRaise): Promise<void> {
-    const grants = this.deps.grants;
+    // Bound once for the whole fill: reserve, write and settle all happen on one instance, whatever Accounts does meanwhile.
+    const grants = this.deps.grants?.bound?.() ?? this.deps.grants;
     const { sessionId } = held.request;
-    const here = this.grantsAt(sessionId, held.matchKey);
+    const here = this.grantsAt(sessionId, held.matchKey, grants);
     // A card raised quiet whose grant ended (revoked, expired) while it was raised is the owner's again, at once. Only
     // a card a PLAN line was about says so: a ferret reads its agenda, and must learn nothing about a rule.
     if (grants === undefined || here.length === 0)
@@ -807,9 +811,12 @@ export class InputRequestService {
               const at = this.deps.clock.now();
               const now = grants.of(sessionId).find(each => each.id === grant.id);
               return (
+                // Accounts was turned off, restarted or replaced since the source was bound: it is not asked again.
+                grants.current?.() !== false &&
                 now !== undefined &&
                 now.state !== 'stopped' &&
                 now.expiresAt > at &&
+                !this.scriptedUnderRule(now) &&
                 grants.holds(now, { sessionId, project, roles: match.fills, now: at })
               );
             },
@@ -836,6 +843,21 @@ export class InputRequestService {
       if (chosen !== undefined) await this.grantMissed(held, chosen, undefined).catch(() => undefined);
       else await this.unquiet(held, this.quietForPlan.has(held.request.id) ? GRANT_MISS_CONTEXT_LINE : undefined);
     }
+  }
+
+  /**
+   * Whether the Vault's own record of page scripts bars a standing rule on a page right now: an agent script is running
+   * anywhere, or one ran on the rule's login domains (or somewhere unreadable) since the rule was approved. The last
+   * check before the write, whatever the source says: Accounts' own record is RAM, and is empty after it was off or a
+   * plugin restart. A plan line and a terminal rule are not about page scripts.
+   */
+  private scriptedUnderRule(grant: SignInGrant): boolean {
+    if (grant.source !== 'rule' || grant.surface !== 'page') return false;
+    const machine = this.deps.scripts?.scriptedOrigins();
+    return (
+      machine !== undefined &&
+      (machine.running === true || scriptedSince(machine, grant.pins.placeKeys, grant.approvedAt))
+    );
   }
 
   /**
@@ -965,7 +987,9 @@ export class InputRequestService {
       keys,
       // Any page script the ferret EVER ran in this session: stricter than "on this document".
       scripted: this.tainted(sessionId, Number.POSITIVE_INFINITY),
-      scriptedOrigins: source.scriptedOrigins(),
+      // The source's own account and the Vault's (Browsers' reports, which outlive a plugin restart): a script that ran
+      // while Accounts was off or restarting is still a script that ran.
+      scriptedOrigins: mergeScriptedOrigins(source.scriptedOrigins(), this.deps.scripts?.scriptedOrigins()),
       ...(project === undefined ? {} : { project }),
       ...(held.hint === undefined ? {} : { hint: held.hint }),
       now: this.deps.clock.now(),

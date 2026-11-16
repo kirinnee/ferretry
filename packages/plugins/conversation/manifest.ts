@@ -35,6 +35,7 @@ import {
   QueueChanged,
   QuestionAnswered,
   QuestionAsked,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
@@ -68,6 +69,7 @@ import {
   OpeningAttachments,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
+import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -105,6 +107,9 @@ export default definePlugin({
   ],
 
   needs: { ferrets: FerretsPort, asks: AsksPort },
+  // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
+  // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
+  uses: { claudeCode: ClaudeCodePort },
   provides: { conversation: ConversationPort },
 
   actions: {
@@ -475,8 +480,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
-      // `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
+      // The chat offers three slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row,
+      // `conversation.row-body` in place of a person's own words (Agenda's card) and `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
       // a tool row's shell commands) and the ferret as subject — Voice's read-aloud and Packs' card draw there. It mounts `ferret.toolbar` and
       // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
@@ -518,6 +523,7 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
+      { hook: AskSources, key: 'prompt', schema: PromptAskRefSchema },
       { hook: SitrepLines, priority: 50 },
       // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
       { hook: FerretChanged },
@@ -534,6 +540,11 @@ export default definePlugin({
       // The owner's chat as `fy agenda log` copies it onto an item: this plugin's own queue and send ledger. The one
       // provider of this hook (`takers: ['conversation']`).
       { hook: AskOwnerChats, key: ASK_OWNER_CHAT_KEY },
+      // The composer's `:` (the ferrets, by callsign) and `@` (one folder of the ferret's files) menus: the facts are
+      // Ferrets', read through its port, and the composer's reference catalog is this plugin's own (a core piece may not
+      // take a plugin's hook, so Ferrets cannot provide them).
+      { hook: ReferenceCatalog, key: ':' },
+      { hook: ReferenceCatalog, key: '@' },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

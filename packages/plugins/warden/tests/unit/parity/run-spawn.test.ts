@@ -27,6 +27,7 @@ function recordingSubsystem(): { readonly subsystem: WardenSubsystem; readonly r
     report: unreached,
     config: unreached,
     updateConfig: unreached,
+    nameJevKey: unreached,
     agenda: unreached,
     investigate: unreached,
     leave: unreached,

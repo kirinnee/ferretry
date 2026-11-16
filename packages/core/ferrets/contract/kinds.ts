@@ -34,6 +34,13 @@ export interface LaunchSpec {
   readonly model?: string;
   readonly effort?: string;
   /**
+   * The ferret's mode (the record's own): an `interactive` ferret has an owner at the pane and so keeps the harness's
+   * question tool; an `auto` one has nobody to answer, so the tool is withheld. ABSENT is unattended (`auto`), the rule
+   * the Runtimes wrappers have always applied (`FY_SESSION_MODE` unset). Set by Ferrets from the record on every launch
+   * (a start, a resume, Restart CLI, a move, a revive), so every launch of one ferret decides the tool the same way.
+   */
+  readonly mode?: 'interactive' | 'auto';
+  /**
    * This ferret's OWN compaction choice, in tokens or `auto` (its session config, else its start options). A
    * `launch.parts` taker resolves it against the login's default and the model's window; ABSENT means the login's default.
    */
@@ -719,10 +726,12 @@ export class HarnessTranscriptReplaced extends Error {
 
 /**
  * The transcript a harness PROVED to be one ferret's own, as RAW bytes, for the one reader that parses records itself
- * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its ONE consumer, Conversation's
+ * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its consumer, Conversation's
  * reader, masks every answer it cuts from these bytes through the kernel's read-scoped redaction (Conversation's
- * `reads.ts`), exactly as v4's reader masked what it read from the file. No other plugin calls `transcriptBytes`
- * (a consumer-check test pins it), and it never names the file's path.
+ * `reads.ts`), exactly as v4's reader masked what it read from the file. Logins is the one other trusted consumer,
+ * because it keeps only the normalized rate_limits fields and timestamps (a Codex login's passive usage reading), so no
+ * message text ever leaves the bytes. No other plugin calls `transcriptBytes` (a consumer-check test pins it), and it
+ * never names the file's path.
  */
 export interface HarnessTranscriptBytes {
   /** Which parser speaks these bytes. */

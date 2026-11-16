@@ -11,6 +11,7 @@ import {
   AutoResumeDecide,
   AutoResumeFile,
   AutoResumeSummaryFile,
+  ConversationLeaseFiles,
   FerretChanged,
   FerretStopping,
   FerretStarted,
@@ -52,6 +53,7 @@ import {
   StartRequestsFile,
   FerretSummaryFiles,
   FerretWaitFiles,
+  MonitorTickFile,
 } from './contract/index.ts';
 
 /**
@@ -457,6 +459,28 @@ export default definePlugin({
           { flag: '--preview', help: 'with --convert: show what the conversion would carry and change nothing' },
           { flag: '--request-id <id>', help: 'stable idempotency key for an explicit retry of this move' },
           { flag: '--json', help: 'print the moved session as JSON' },
+        ],
+      }),
+      // V-0282 / V-0283: the wrapper's claim before it `exec`s a resumed harness (one live writer per conversation, §9.3).
+      verb('history', {
+        summary: 'the conversations every runtime of a harness shares',
+        args: [],
+        options: [],
+      }),
+      verb('history claim [words...]', {
+        summary: 'claim a conversation for one writer before a harness resumes it; refused while another is writing it',
+        args: [
+          {
+            name: 'words',
+            help: 'the conversation id, or with --from-arguments the harness arguments to read it from',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          { flag: '--harness <harness>', help: 'the harness the conversation belongs to (claude or codex)' },
+          { flag: '--pid <pid>', help: 'the process that will write the conversation (a wrapper passes $$)' },
+          { flag: '--from-arguments', help: 'read the conversation id from the harness arguments that follow' },
         ],
       }),
       verb('ps', {
@@ -876,6 +900,7 @@ export default definePlugin({
   },
   data: {
     state: [
+      ConversationLeaseFiles,
       FerretFiles,
       FerretHistoryFiles,
       FerretTokensFile,
@@ -901,6 +926,7 @@ export default definePlugin({
       TransferPlanFiles,
       MoveInflightFiles,
       FerretWaitFiles,
+      MonitorTickFile,
       FerretLaunchEnvironmentFiles,
       FerretLaunchSectionsFiles,
     ],
@@ -937,6 +963,8 @@ export default definePlugin({
   permissions: {
     roots: ['worktrees', 'work', 'harness-history', 'sessions'],
     spawn: ['git', 'ps'],
+    // `fy history claim` names the runtime it is claiming for in the refusal another claimant reads (FY_RUNTIME).
+    cliEnvReads: ['FY_RUNTIME'],
     hostFacts: true,
     checkDirectory: true,
   },

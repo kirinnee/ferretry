@@ -23,6 +23,7 @@ import {
   type RecordedCall,
   type RouteParameters,
   type ScopedRoute,
+  type SecretSendNote,
   type SessionPrincipal,
 } from '@ferretry/kernel/contract';
 import { epochMs, type Instant } from '@ferretry/std';
@@ -63,7 +64,7 @@ import {
   type WardenRemedyDecision,
   type WardenRemedyGrant,
 } from '../../../contract/index.ts';
-import { recordedCallDraft } from '../audit/recorder.ts';
+import { recordedCallDraft, secretSentDraft } from '../audit/recorder.ts';
 import { judgeLooseningWrite } from '../policy/config-judge.ts';
 import { judgeConfigAccess } from '../policy/config-access.ts';
 import type { FailClosedStepUps } from '../step-up/witness.ts';
@@ -219,6 +220,18 @@ export class GateAdmission implements Admission {
       if (draft !== undefined) this.deps.recorded?.(draft);
     } catch {
       // The audit log reports its own failures; the answer is already decided.
+    }
+  }
+
+  /**
+   * Told by the kernel for every secret a plugin's request carried (`kernel.secrets.send`): `secrets.used`, by the
+   * secret's name, the plugin and the host (`secretSentDraft`) — never a value. Fired and forgotten like `recorded`.
+   */
+  secretSent(note: SecretSendNote): void {
+    try {
+      this.deps.recorded?.(secretSentDraft(note));
+    } catch {
+      // The audit log reports its own failures; the send is already answered.
     }
   }
 

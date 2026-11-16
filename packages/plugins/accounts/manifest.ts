@@ -8,6 +8,7 @@ import { BoardPort } from '@ferretry/plugin-board/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
 import {
   InputPhoneApprovals,
+  InputSavedLogins,
   InputSecureCopies,
   RedactionSources,
   SealedDocumentsPort,
@@ -15,10 +16,11 @@ import {
 } from '@ferretry/core-vault/contract';
 import { LOGIN_SECRETS } from './contract/routes/sealed.ts';
 import { AgentControlPort, type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
-import { definePlugin, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
+import { definePlugin, panel, renderer, route, settingsTab, tool, verb } from '@ferretry/kernel/manifest';
 import {
   ACCOUNTS_WORDS,
   AccountsConfigSchema,
+  ACCESS_DEVICE_NOTE_SLOT,
   AccountsPort,
   AUDIT,
   CONFIGURE,
@@ -601,9 +603,21 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: 'ask the owner to paste sealed:<name> into a terminal, a page field or a saved secret',
       }),
-      // AFTER MERGE (lizzette 2026-11-11: M2 moves after merge): account_propose and task_plan are declared here again once
-      // each is built. Until then they are NOT listed, because the CLI builds the agents' MCP tool list from this array and
-      // a listed tool that answers "not built" is a lie (docs/design/rebuild-parity.tsv T-0002, T-0043: still open).
+      // ASKING TOOLS: each raises one card for the owner and changes nothing the owner has not allowed. A ferret's own call
+      // only (a person's route has no agenda to raise on); each parses its own call (the contract's
+      // `AccountProposeCallSchema`, `TaskPlanCallSchema`).
+      tool('account_propose', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: "propose a sign-in's recipe and/or suggest a standing rule; the owner decides",
+      }),
+      tool('task_plan', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: 'ask the owner once to pre-approve the sign-ins and pastes your work needs',
+      }),
     ],
     cli: [
       verb('copy ls', {
@@ -1029,6 +1043,9 @@ export default definePlugin({
       settingsTab('secure-copy', { group: 'sites', label: 'Secure copy', order: 41 }),
     ],
     renderers: [renderer('ask', { source: 'sign-in-approval' })],
+    // Access's Add device page offers this slot under each paired device's Revoke (its app half's device-note-slot.ts):
+    // how many standing sign-in rules the device's passkey approved, because revoking it suspends them.
+    panels: [panel(ACCESS_DEVICE_NOTE_SLOT, { id: 'device-rule-note', order: 10 })],
   },
 
   /** Never reached by a ferret, through any root: the sealed login secrets and the account records (`PrivacyDecl`). */
@@ -1066,6 +1083,8 @@ export default definePlugin({
       { hook: InputPhoneApprovals, key: 'phone' },
       /** The Vault's paste draws on the copies, the owner's paste rules and the takeover check, all Accounts'. */
       { hook: InputSecureCopies, key: 'copy' },
+      /** The Vault's input card offers saved logins, Save-as, the card order and sign-in facts from the account store. */
+      { hook: InputSavedLogins, key: 'saved' },
       { hook: AskSources, key: 'sign-in-approval' satisfies string as SourceKey, schema: SignInApprovalRefSchema },
       /** Access issues a passkey challenge for a staged act only through the plugin that staged it (G83): each act is Accounts'. */
       { hook: StepUpStages, key: 'add-2fa-key' },

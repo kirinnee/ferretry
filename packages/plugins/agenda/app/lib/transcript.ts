@@ -14,6 +14,8 @@ export interface LedgerSendRecord {
   readonly attachmentIds?: readonly string[];
   readonly held?: true;
   readonly withdrawn?: true;
+  /** The words sit typed in the agent's composer and were not submitted. */
+  readonly typedNotSent?: true;
 }
 
 /** One row of the chat. */
