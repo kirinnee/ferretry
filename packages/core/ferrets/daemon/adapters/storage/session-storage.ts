@@ -1045,8 +1045,9 @@ export class DaemonStorage {
       const current = this.applySessionInspection(inspection);
       const position = read.journal.lines.length;
       await this.state.append(FerretHistoryFiles, entry, id);
-      // The journal as it is now, which the row this append makes describes exactly (it was read to its end above).
-      const journalVersion = await this.journalEtag(id);
+      // No journal version is recorded here: another writer can append to this journal (another queue) between our
+      // append and a version read, and the row would then vouch for N lines while the file holds N+1. The next full
+      // read of the journal records its version safely.
       const session: IndexedSession = {
         id,
         status: current?.status,
@@ -1055,7 +1056,7 @@ export class DaemonStorage {
         lastSequence: event.sequence,
         journalLine: position + 2,
         journal: journalFingerprint(position + 1),
-        journalVersion,
+        journalVersion: undefined,
       };
       const pointer: EventPointer = {
         sessionId: id,

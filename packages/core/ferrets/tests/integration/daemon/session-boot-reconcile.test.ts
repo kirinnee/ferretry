@@ -41,6 +41,8 @@ async function restarted() {
     await first.storage.writeState(id, sessionState(id));
     for (let n = 0; n < EVENTS; n++) await first.storage.append(id, 'note', { n });
   }
+  // An append records no journal version (another writer may land a line in between); the next full read does.
+  await first.storage.reconcile();
   const reads = new Map<string, number>();
   const second = await memoryStorage({ folder: first.folder, wrapState: counting(reads) });
   return { ...second, reads, rows: () => [A, B, C].map(id => second.storage.findSession(id)) };
@@ -110,6 +112,44 @@ describe('a reconcile after a restart', () => {
     // Assert
     should([...reads]).eql([[A, 1]]);
     should(rows()).eql(before);
+  });
+
+  it('should read a journal another writer appended to in the middle of an append through the storage', async () => {
+    // Arrange — a second writer (another queue) lands a line right after the storage's append, before anything else
+    // reads the journal's version.
+    const reads = new Map<string, number>();
+    const folder = new MemoryStateFolder();
+    const behind = folder.port(SESSION_STORE_FILES);
+    let armed = false;
+    const { storage } = await memoryStorage({
+      folder,
+      wrapState: port => ({
+        ...counting(reads)(port),
+        append: async (file, line, name) => {
+          await port.append(file, line, name);
+          if (armed && file === FerretHistoryFiles && name === A) {
+            armed = false;
+            const event = createSessionEvent(A, EVENTS + 1, T0, 'note', { behind: EVENTS + 2 });
+            await behind.append(FerretHistoryFiles, encodeSessionEvent(event), A);
+          }
+        },
+      }),
+    });
+    await storage.writeConfig(A, sessionConfig(A));
+    await storage.writeState(A, sessionState(A));
+    for (let n = 0; n < EVENTS; n++) await storage.append(A, 'note', { n });
+    armed = true;
+    await storage.append(A, 'note', { n: EVENTS });
+    reads.clear();
+
+    // Act
+    const result = await storage.reconcile();
+
+    // Assert — the row records no version, so the journal is read, and the line behind is counted.
+    should(reads.get(A)).equal(1);
+    should(result.eventCount).equal(EVENTS + 2);
+    should(storage.findSession(A)?.lastSequence).equal(EVENTS + 2);
+    should(storage.findSession(A)?.journalVersion).not.be.undefined();
   });
 
   it('should still report a journal that vanished, as a read of it did before', async () => {

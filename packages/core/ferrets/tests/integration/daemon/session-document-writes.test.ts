@@ -58,6 +58,8 @@ async function indexed(events: number, wrapState?: (port: StatePort) => StatePor
   await world.storage.writeConfig(ID, sessionConfig(ID));
   await world.storage.writeState(ID, sessionState(ID));
   for (let n = 0; n < events; n++) await world.storage.append(ID, 'note', { n });
+  // An append records no journal version; the first full read of the journal does.
+  await world.storage.syncSession(ID);
   calls.length = 0;
   return { ...world, calls };
 }
@@ -94,7 +96,7 @@ describe('a config or state write to a session whose journal is indexed', () => 
     should(calls.at(-1)).equal('replaceSession');
   });
 
-  it('should keep refreshing across appends: an append leaves the journal the index describes', async () => {
+  it('should re-index once after an append (it records no journal version), then refresh again', async () => {
     // Arrange
     const { storage, calls } = await indexed(3);
     await storage.append(ID, 'note', { n: 3 });
@@ -102,9 +104,10 @@ describe('a config or state write to a session whose journal is indexed', () => 
 
     // Act
     await storage.writeState(ID, sessionState(ID, { status: 'thinking' }));
+    await storage.writeState(ID, sessionState(ID, { status: 'waiting' }));
 
-    // Assert
-    should(calls).eql(['refreshSession']);
+    // Assert — the first write reads the journal in full and records its version; the next one needs no read.
+    should(calls).eql(['replaceSession', 'refreshSession']);
     should(storage.findSession(ID)?.lastSequence).equal(4);
   });
 
