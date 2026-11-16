@@ -239,9 +239,9 @@ describe('editing the lanes', () => {
 
     // Assert
     const summary = (id: string) => view.container.querySelector(`[data-lane-triggers="${id}"] summary`)?.textContent;
-    expect(summary('implement')).toBe('Moves a card in when: work starts');
-    expect(summary('todo')).toBe('Moves a card in when: nothing (you move it by hand)');
-    expect(summary('review')).toBe('Moves a card in when: a PR opens, a PR is ready, the ferret says done');
+    expect(summary('implement')).toBe('Moves a task in when: work starts');
+    expect(summary('todo')).toBe('Moves a task in when: nothing (you move it by hand)');
+    expect(summary('review')).toBe('Moves a task in when: a PR opens, a PR is ready, the ferret says done');
   });
 
   it('names categories and the owner gate in plain words', async () => {
@@ -260,7 +260,7 @@ describe('editing the lanes', () => {
     // Assert
     expect(options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
     expect(view.container.querySelector('[data-lane-row="implement"] input[type="checkbox"]')).toBeNull();
-    expect(closedGate.getAttribute('title')).toBe('The owner must move cards into this lane.');
+    expect(closedGate.getAttribute('title')).toBe('The owner must move tasks into this lane.');
     expect(view.container.textContent).toContain('Stale after');
   });
 
@@ -620,7 +620,7 @@ describe('deleting a lane', () => {
     expect(targets).not.toContain('implement');
     expect(targets).toContain('review');
 
-    await choose(byLabel(view, 'Where its cards go'), 'review');
+    await choose(byLabel(view, 'Where its tasks go'), 'review');
     expect(confirm.disabled).toBe(false);
   });
 
@@ -629,7 +629,7 @@ describe('deleting a lane', () => {
     const actions = recorder();
     const view = await show(editor(laneSetFor(), actions));
     await click(byLabel(view, 'Delete Implement'));
-    await choose(byLabel(view, 'Where its cards go'), 'review');
+    await choose(byLabel(view, 'Where its tasks go'), 'review');
 
     // Act
     await click(buttonSaying(view, 'Delete lane'));
@@ -770,11 +770,11 @@ describe('a ferret’s change waiting for the owner', () => {
     // Assert
     const warnings = must(banner.querySelector('[data-lane-warnings]'), 'the warnings');
     expect(warnings.textContent).toContain(
-      `Accepting it removes ${verify.name}, which waits for the owner, and sends its cards into the closed lane, which closes them`,
+      `Accepting it removes ${verify.name}, which waits for the owner, and sends its tasks into the closed lane, which closes them`,
     );
     expect(actions.calls).toEqual([]);
     expect(must(banner.querySelector('[data-lane-confirm]'), 'the confirm').textContent).toContain(
-      'cards move and may close',
+      'tasks move and may close',
     );
 
     // Act: the second tap accepts.

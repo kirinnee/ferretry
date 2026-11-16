@@ -94,7 +94,7 @@ describe('laneChangeCard', () => {
         'koen proposes new lanes for Ferretry. The board keeps its lanes until you accept. Accepting it:',
         '',
         '- makes Plan/Design automatic: it would stop waiting for the owner',
-        '- removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
+        '- removes Released, which waits for the owner, and sends its tasks into the closed lane, which closes them',
       ].join('\n'),
     );
     // Accept → stays plain; Edit ← is recommended, so it is the highlighted one.
@@ -125,7 +125,7 @@ describe('laneChangeCard', () => {
 
     // Act + Assert
     should(laneChangeCard('Ferretry', crowded, emptied).why).endWith(
-      '\n\n- removes 14 lanes that wait for the owner (Owner review 00 … Owner review 13), and sends their cards into the closed lane, which closes them',
+      '\n\n- removes 14 lanes that wait for the owner (Owner review 00 … Owner review 13), and sends their tasks into the closed lane, which closes them',
     );
   });
 

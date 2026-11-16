@@ -205,7 +205,7 @@ const cardProgress = (runtime: BoardRuntime): AppComponent<PanelProps> =>
     const id = (subject ?? '').toUpperCase();
     const state = useBoardCard(runtime.store, THIS_MACHINE, id);
     if (state.task === null)
-      return state.missing ? <p role="status">No card {id}.</p> : <p role="status">Reading {id}…</p>;
+      return state.missing ? <p role="status">No task {id}.</p> : <p role="status">Reading {id}…</p>;
     const parts = writtenProgressParts(state.task.progress);
     if (parts.length === 0) return <p role="status">{formatCardRef({ id })} has no progress yet.</p>;
     return (
@@ -226,8 +226,8 @@ const boardSettings = (): AppComponent<SettingsProps> =>
     return (
       <section aria-label="Board" data-settings="board">
         <p>
-          The board shows the work you asked for as cards in lanes. Ferretry watches the pull requests a card links
-          through GitHub and moves the card when one is opened, passes, merges or ships.
+          The board shows the work you asked for as tasks in lanes. Ferretry watches the pull requests a task links
+          through GitHub and moves the task when one is opened, passes, merges or ships.
         </p>
         <p>
           The watch is on by default and polls about once a minute. To change it, edit <code>github</code> in{' '}

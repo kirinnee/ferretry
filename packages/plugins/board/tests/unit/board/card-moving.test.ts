@@ -87,7 +87,7 @@ describe('an answer to a `card` entry that is not a gate’s', () => {
       at: '2026-11-07T09:00:00.000Z',
     } as never);
 
-    should(outcome).match({ refused: /not a card’s gate/u });
+    should(outcome).match({ refused: /not a task’s gate/u });
   });
 });
 

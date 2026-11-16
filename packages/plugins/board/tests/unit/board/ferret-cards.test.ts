@@ -119,7 +119,7 @@ const stored = (ports: ServiceWorld, id: string): Card => ports.store.cards.get(
 describe('what a start card is called and asks', () => {
   it("should take the session's name, else the brief's own title", () => {
     // Act / Assert
-    should(cardTitle('board-u7 spawn and signal cards now please', 'ignored')).equal('board-u7 Spawn and Signal Cards');
+    should(cardTitle('board-u7 spawn and signal tasks now please', 'ignored')).equal('board-u7 Spawn and Signal Tasks');
     should(cardTitle(undefined, '# Fix the tunnel credit burst\nmore')).equal('Fix the Tunnel Credit Burst');
     should(cardTitle(undefined, 'You are a ferret.')).match(/^Task [0-9a-z]{4}$/u);
   });
@@ -133,13 +133,13 @@ describe('what a start card is called and asks', () => {
   it('should name the card and its board in the footer line', () => {
     // Act / Assert
     should(cardFooterLine('F413', 'Ferretry', 'fy')).equal(
-      'Your card is &F413 on the Ferretry board; the daemon moves it for you (`fy task note` adds progress).',
+      'Your task is &F413 on the Ferretry board; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
-      'Your card is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy task note` adds progress).',
+      'Your task is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', undefined, 'ferret')).equal(
-      "Your card is &F413 on the project's board; the daemon moves it for you (`ferret task note` adds progress).",
+      "Your task is &F413 on the project's board; the daemon moves it for you (`ferret task note` adds progress).",
     );
   });
 });
@@ -288,7 +288,7 @@ describe('a session started with a brief', () => {
       // Assert
       should(outcome).deepEqual({
         notes: [
-          'No card was made for the helper: the Ferretry board is off and you hold no card for this work. `fy new --card <id>` hands it one.',
+          'No task was made for the helper: the Ferretry board is off and you hold no task for this work. `fy new --card <id>` hands it one.',
         ],
       });
       should(opened).deepEqual({ notes: [] });
@@ -304,7 +304,7 @@ describe('a session started with a brief', () => {
 
       // Assert
       should(outcome.delegation).be.undefined();
-      should(outcome.notes[0]).startWith('No card was made for the helper: the Home board is off');
+      should(outcome.notes[0]).startWith('No task was made for the helper: the Home board is off');
     });
 
     it("should still make the helper's card under the card its lead holds", async () => {
@@ -339,7 +339,7 @@ describe('a session started with a brief', () => {
 
       // Assert
       for (const outcome of outcomes) {
-        should(outcome.notes[0]).startWith('No card was made for the helper: the Ferretry board is off');
+        should(outcome.notes[0]).startWith('No task was made for the helper: the Ferretry board is off');
       }
       should(ports.store.cards.size).equal(3);
     });
@@ -365,7 +365,7 @@ describe('a session started with a brief', () => {
       // Assert
       for (const outcome of [bare, underFerretryCard]) {
         should(outcome.delegation).be.undefined();
-        should(outcome.notes[0]).startWith('No card was made for the helper: the Home board is off');
+        should(outcome.notes[0]).startWith('No task was made for the helper: the Home board is off');
       }
       should(ports.store.cards.size).equal(1);
     });
@@ -404,7 +404,7 @@ describe('a session started with a brief', () => {
 
       // Assert
       should(opened).deepEqual({
-        notes: ['No card was made for the helper: the Home board is off and you hold no card on it for this work.'],
+        notes: ['No task was made for the helper: the Home board is off and you hold no task on it for this work.'],
       });
       should([...ports.store.cards.keys()]).deepEqual(['F1']);
     });
@@ -461,7 +461,7 @@ describe('a session started with a brief', () => {
       focus.anchors.set('lead', { id: 'F1' });
 
       // Act
-      const { delegation, notes } = await delegate(subject, 'Your card is &F138. Build the thing; see also &F1.');
+      const { delegation, notes } = await delegate(subject, 'Your task is &F138. Build the thing; see also &F1.');
 
       // Assert
       should(delegation).match({ parent: { id: 'F138' }, parentFrom: 'brief' });
@@ -502,7 +502,7 @@ describe('a session started with a brief', () => {
       should(delegation?.parent).be.null();
       should(delegation).not.have.property('parentFrom');
       should(notes).deepEqual([
-        "The helper's card has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--card <id>`) says where your helpers' cards go next time.",
+        "The helper's task has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--card <id>`) says where your helpers' tasks go next time.",
       ]);
       should(opened.card?.parent).be.null();
       should(stored(ports, 'F2').parent).be.null();
@@ -684,7 +684,7 @@ describe('a session started with a brief', () => {
       const dropped = await subject.delegate('lead', { brief: 'x', card: 'F3' }, true);
 
       // Assert
-      should(missing.refusal).match(/no card &F99/u);
+      should(missing.refusal).match(/no task &F99/u);
       should(foreign.refusal).be.a.String();
       should(dropped.refusal).match(/&F3 is dropped/u);
       should(missing.delegation).be.undefined();
@@ -733,7 +733,7 @@ describe('a session started with a brief', () => {
       should(foreign.delegation).be.undefined();
       should(foreign.refusal).be.a.String();
       should(sideways.delegation).be.undefined();
-      should(missing.refusal).match(/no card &F99/u);
+      should(missing.refusal).match(/no task &F99/u);
       should(ports.store.writes).be.empty();
     });
 
@@ -749,7 +749,7 @@ describe('a session started with a brief', () => {
       // Assert
       should(refusal).be.undefined();
       should(delegation).match({ id: 'F9', byOwner: true });
-      should(missing.refusal).match(/no card &F99/u);
+      should(missing.refusal).match(/no task &F99/u);
       should(opened.card).match({ id: 'F9', owner: 'lead', assignee: 'child' });
       should(stored(ports, 'F9').history.find(event => event.type === 'assigned')?.actor).match({ kind: 'owner' });
     });
@@ -1017,7 +1017,7 @@ describe('a session started with a brief', () => {
 
       // Assert
       should(taken.refusal).be.a.String();
-      should(warnings.join('\n')).match(/could not stop child after a refused card: tmux would not answer/u);
+      should(warnings.join('\n')).match(/could not stop child after a refused task: tmux would not answer/u);
     });
   });
 
@@ -1035,7 +1035,7 @@ describe('a session started with a brief', () => {
     // Assert
     should(outcome.delegation).be.undefined();
     should(outcome.refusal).be.undefined();
-    should(outcome.notes).deepEqual(['No card was made for the helper: the board is unreadable']);
+    should(outcome.notes).deepEqual(['No task was made for the helper: the board is unreadable']);
   });
 
   it('should say where the card really is when the child runs on another board than the brief said', async () => {
@@ -1107,7 +1107,7 @@ describe('a session started with a brief', () => {
 
     // Assert
     const hint =
-      'Notes has no lanes yet, so the card is on the Unfiled board: propose them with `fy board lanes propose --template <template>`, then refile the card to Notes.';
+      'Notes has no lanes yet, so the task is on the Unfiled board: propose them with `fy board lanes propose --template <template>`, then refile the task to Notes.';
     should(opened.card?.projectId).equal(UNFILED_PROJECT_ID);
     should(opened.notes).deepEqual([hint]);
     should(quiet.warnings).deepEqual([`&F1: ${hint}`]);
@@ -1135,9 +1135,9 @@ describe('a session started with a brief', () => {
     should(adopted).deepEqual(['worker:worker', 'worker:worker']);
     should(opened.card?.projectId).equal(OTHER_PROJECT);
     should(opened.notes).deepEqual([
-      'Home was registered as a project, so the card is on its board; its lanes were proposed for the owner to confirm (an ask).',
+      'Home was registered as a project, so the task is on its board; its lanes were proposed for the owner to confirm (an ask).',
     ]);
-    should(again.notes).deepEqual(['Home was registered as a project, so the card is on its board.']);
+    should(again.notes).deepEqual(['Home was registered as a project, so the task is on its board.']);
     should(fresh.proposals).be.empty();
   });
 
@@ -1186,9 +1186,9 @@ describe('a session started with a brief', () => {
 
     // Assert
     should(opened.card).be.undefined();
-    should(opened.notes[0]).startWith('No card was made for worker:');
+    should(opened.notes[0]).startWith('No task was made for worker:');
     should(delegated.delegation).be.undefined();
-    should(delegated.notes[0]).startWith('No card was made for the helper:');
+    should(delegated.notes[0]).startWith('No task was made for the helper:');
     should(warnings).have.length(2);
   });
 });
@@ -1224,6 +1224,6 @@ describe("a ferret's done on the board", () => {
     // Assert
     should(nothing).be.null();
     should(forbidden).be.null();
-    should(refused.warnings[0]).startWith("could not record stranger's done on its card: only");
+    should(refused.warnings[0]).startWith("could not record stranger's done on its task: only");
   });
 });

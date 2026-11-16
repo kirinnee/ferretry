@@ -26,14 +26,14 @@ export const NO_HELPERS: HelperDirectory = {
 
 /** What a helper may still do on the board: its own card, and every card in its own subtree. */
 const HELPER_MAY_ON_BOARD =
-  'note on, set the progress and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree';
+  'note on, set the progress and How to test of, and link a PR or branch to your own task, and drop or reassign tasks in your own subtree';
 
 /** The sentence a refused helper reads: what it may not do, what it MAY do instead, and the command that reaches who can do the rest. */
 const helperRefusalMessage = (doing: string, may: string, leadAddress: string, claim?: string): string =>
   `You are a helper, so you can't ${doing}. You may ${may}. ${
     claim === undefined
       ? `For anything else ask your lead: fy send ${leadAddress} "…"`
-      : `Your lead holds this card: claim it first: ${claim}`
+      : `Your lead holds this task: claim it first: ${claim}`
   }`;
 
 /**

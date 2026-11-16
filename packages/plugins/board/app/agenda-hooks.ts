@@ -47,9 +47,9 @@ interface CardView {
 }
 
 const refused = (message: string, status = 0): Write<never> => ({ ok: false, status, message });
-const NOT_A_CARD = 'that is not a card id';
-const UNREAD = 'the card could not be read';
-const NO_DONE = 'the board has no Done for this card';
+const NOT_A_CARD = 'that is not a task id';
+const UNREAD = 'the task could not be read';
+const NO_DONE = 'the board has no Done for this task';
 
 const cardIdOf = (written: string): CardId | undefined => {
   const parsed = CardIdSchema.safeParse(written.trim().toUpperCase());
@@ -106,7 +106,7 @@ const cardAnswer = (runtime: BoardRuntime) => {
     const plan = planMove(state.laneSet, state.task.laneId, done.laneId);
     if (plan.kind === 'stay') return { ok: true };
     if (plan.kind === 'refused') return refused(plan.message);
-    if (plan.kind === 'ask-reason') return refused('Moving a card back needs a reason.');
+    if (plan.kind === 'ask-reason') return refused('Moving a task back needs a reason.');
     const moved = await actions.moveCard(
       { daemonId: THIS_MACHINE.daemonId, id, laneId: state.task.laneId, laneSet: state.laneSet },
       plan.to,

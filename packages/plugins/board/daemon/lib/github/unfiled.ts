@@ -122,7 +122,7 @@ export class UnfiledRefiler {
       this.warned.delete('run');
       return refiled;
     } catch (error) {
-      this.warnOnce('run', `Unfiled board: could not look for cards to refile: ${detail(error)}`);
+      this.warnOnce('run', `Unfiled board: could not look for tasks to refile: ${detail(error)}`);
       return [];
     }
   }
@@ -149,7 +149,7 @@ export class UnfiledRefiler {
       targets.push({
         card,
         projectId,
-        reason: `${formatCardRef(card)}'s ferret ${card.owner} works in ${name}, so the card belongs on its board`,
+        reason: `${formatCardRef(card)}'s ferret ${card.owner} works in ${name}, so the task belongs on its board`,
       });
     }
     return targets;
@@ -201,7 +201,7 @@ export class UnfiledRefiler {
     }
     this.warnOnce(
       `lanes:${target.projectId}`,
-      `Unfiled board: could not propose lanes for project ${target.projectId}, so its cards stay Unfiled for now`,
+      `Unfiled board: could not propose lanes for project ${target.projectId}, so its tasks stay Unfiled for now`,
     );
     return false;
   }

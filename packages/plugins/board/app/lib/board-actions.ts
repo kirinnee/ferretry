@@ -173,7 +173,7 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
           status: 0,
           message:
             problem.code === 'reason-required'
-              ? 'Moving a card back needs a reason.'
+              ? 'Moving a task back needs a reason.'
               : problem.code === 'no-lane-set'
                 ? 'This project has no confirmed lanes to move between.'
                 : `Lane ${to} is not on this project's board.`,

@@ -196,9 +196,9 @@ describe('deleting needs a place for the cards', () => {
 
   it('says so, live, when a lane is dropped with no relocation', () => {
     const dropped: LaneDraft = { ...start(), lanes: start().lanes.filter(lane => lane.id !== 'review') };
-    expect(messages(dropped)).toContain('Lane "Review/CI" was removed: choose where its cards go.');
+    expect(messages(dropped)).toContain('Lane "Review/CI" was removed: choose where its tasks go.');
     const placed: LaneDraft = { ...dropped, relocate: { review: 'implement' } };
-    expect(messages(placed)).not.toContain('Lane "Review/CI" was removed: choose where its cards go.');
+    expect(messages(placed)).not.toContain('Lane "Review/CI" was removed: choose where its tasks go.');
   });
 });
 
@@ -289,7 +289,7 @@ describe('what a refused write says', () => {
     expect(say('version-conflict')).toContain('changed since you opened');
     expect(say('owner-only')).toContain('Only the owner');
     expect(say('already-confirmed')).toContain('already confirmed');
-    expect(say('relocation-missing')).toContain('place for its cards');
+    expect(say('relocation-missing')).toContain('place for its tasks');
     expect(say('no-machine')).toContain('no longer paired');
     expect(say(null)).toBe('daemon said so');
     expect(say('weird')).toBe('daemon said so');

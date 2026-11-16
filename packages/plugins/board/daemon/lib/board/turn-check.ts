@@ -30,7 +30,7 @@ import { BoardError } from './errors.ts';
  * The first words of every nudge: how a later turn knows the nudge started it. A plain sentence, never a tag:
  * who sent it is the queue item's metadata, not text the owner reads.
  */
-const BOARD_CHECK_OPENING = 'You changed code this turn without a card.';
+const BOARD_CHECK_OPENING = 'You changed code this turn without a task.';
 
 /** How many transcript events back the turn is looked for. A longer turn is read in part. */
 export const BOARD_CHECK_TAIL = 400;

@@ -78,8 +78,8 @@ describe('starting a ferret on a card', () => {
     should(started).have.length(1);
     should(started[0]?.card.id).equal('F1');
     should(started[0]?.name).equal('Board store');
-    should(started[0]?.prompt).startWith('The owner asked you to take over card &F1.');
-    should(started[0]?.prompt).containEql('Your card: &F1');
+    should(started[0]?.prompt).startWith('The owner asked you to take over task &F1.');
+    should(started[0]?.prompt).containEql('Your task: &F1');
     should(started[0]?.prompt).containEql('build the board');
   });
 
@@ -141,8 +141,8 @@ describe('starting a ferret on a card', () => {
 
     // Assert
     should((closed as BoardError).code).equal('invalid');
-    should((closed as BoardError).message).equal('This card was closed; reopen it first.');
-    should((dropped as BoardError).message).equal('This card was closed; reopen it first.');
+    should((closed as BoardError).message).equal('This task was closed; reopen it first.');
+    should((dropped as BoardError).message).equal('This task was closed; reopen it first.');
     should(closedCard.started).eql([]);
     should(droppedCard.started).eql([]);
   });
@@ -158,7 +158,7 @@ describe('starting a ferret on a card', () => {
 
     // Assert
     should(first.started).be.true();
-    should((stale as BoardError).message).equal('This card was closed; reopen it first.');
+    should((stale as BoardError).message).equal('This task was closed; reopen it first.');
     should(started).have.length(1);
   });
 
@@ -317,7 +317,7 @@ describe('starting a ferret on a card', () => {
     const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
-    should((failure as BoardError).message).equal('This card was closed; reopen it first.');
+    should((failure as BoardError).message).equal('This task was closed; reopen it first.');
     should(stopped).have.length(1);
     should(stopped[0]?.ferret).equal('late');
   });
@@ -339,7 +339,7 @@ describe('starting a ferret on a card', () => {
     const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
-    should((failure as BoardError).message).equal('This card was closed; reopen it first.');
+    should((failure as BoardError).message).equal('This task was closed; reopen it first.');
     should(stopped.map(entry => entry.ferret)).eql(['late']);
   });
 
@@ -359,7 +359,7 @@ describe('starting a ferret on a card', () => {
     const failure = await startOnCard(ports, ID, OWNER).catch((error: unknown) => error);
 
     // Assert
-    should((failure as BoardError).message).equal('This card was closed; reopen it first.');
+    should((failure as BoardError).message).equal('This task was closed; reopen it first.');
     should(stopped.map(entry => entry.ferret)).eql(['late']);
   });
 
@@ -576,7 +576,7 @@ describe('the brief of a ferret started on a card', () => {
     // Arrange
     const row = card({
       summary: 'Store the board',
-      premise: 'cards get lost',
+      premise: 'tasks get lost',
       context: 'see the relay',
       howToTest: 'run the suite',
       progress: { now: 'half way', doneSoFar: '- the route', next: '' },
@@ -587,7 +587,7 @@ describe('the brief of a ferret started on a card', () => {
 
     // Assert
     should(brief).containEql('Summary:\nStore the board');
-    should(brief).containEql('Why it exists:\ncards get lost');
+    should(brief).containEql('Why it exists:\ntasks get lost');
     should(brief).containEql('Context:\nsee the relay');
     should(brief).containEql('How to test:\nrun the suite');
     should(brief).containEql('Progress:\nNow:\nhalf way\n\nDone so far:\n- the route');

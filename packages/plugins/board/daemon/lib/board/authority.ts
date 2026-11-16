@@ -187,7 +187,7 @@ export const claimRefusalMessage = (card: Pick<Card, 'id' | 'owner' | 'assignee'
   if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy task assign ${ref} <ferret>\``;
   if (caller.ferret === effectiveAssignee(card)) return `${ref} is already yours`;
   if (caller.ferret === card.owner) return `you own ${ref}: take it with \`fy task assign ${ref} ${caller.ferret}\``;
-  return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a card held by a ferret outside your lineage is theirs: ask your lead`;
+  return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a task held by a ferret outside your lineage is theirs: ask your lead`;
 };
 
 const STANDING_WORDS: Readonly<Record<BoardStanding, string>> = {
@@ -219,8 +219,8 @@ const OPERATION_WORDS: Readonly<Record<BoardOperation, string>> = {
   order: 'reorder',
   snooze: 'snooze',
   replan: 'retitle or rewrite the brief of',
-  reparent: 'move under another card',
-  adopt: 'add a child card under',
+  reparent: 'move under another task',
+  adopt: 'add a child task under',
   override: 'override a dependency of',
   'pass-gate': 'pass the owner gate of',
   trigger: 'trigger a move of',

@@ -87,7 +87,7 @@ export class CardStartRefused extends Error {
 /** What the owner's start came to; `started: false` means a live ferret already holds the card and nothing was started. */
 export type CardStarted = CardStartResponse;
 
-const GONE = 'This card was closed; reopen it first.';
+const GONE = 'This task was closed; reopen it first.';
 
 /** Whether the card was closed or dropped: nothing is started on it. */
 function closed(card: CardView, laneSet: LaneSet | null): boolean {
@@ -125,7 +125,7 @@ const prLine = (pr: PrLink): string => `PR #${String(pr.number)} ${pr.url} (${pr
 
 const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
   const lines = [
-    `Your card: ${formatCardRef(card)} — ${card.title}`,
+    `Your task: ${formatCardRef(card)} — ${card.title}`,
     `Lane: ${laneNameIn(laneSet, card.laneId)}`,
     '',
     `The ask, verbatim (${card.ask.source}):`,
@@ -142,7 +142,7 @@ const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
   if (links.length > 0) lines.push('', 'Links:', ...links.map(link => `- ${link}`));
   lines.push(
     '',
-    'Last on the card:',
+    'Last on the task:',
     ...card.history.slice(-FOCUS_HISTORY_LINES).map(
       event =>
         `- ${event.at}  ${describeCardEvent(
@@ -159,7 +159,7 @@ const focusCardBrief = (card: CardView, laneSet: LaneSet | null): string => {
 export function startOnCardBrief(card: CardView, laneSet: LaneSet | null, bin: string): string {
   const ref = formatCardRef(card);
   return [
-    `The owner asked you to take over card ${ref}. Its last ferret has finished, so nobody else is working on it. Read what is already done, then carry on from there.`,
+    `The owner asked you to take over task ${ref}. Its last ferret has finished, so nobody else is working on it. Read what is already done, then carry on from there.`,
     ...section('Summary', card.summary),
     ...section(
       'Progress',
@@ -184,7 +184,7 @@ export async function startOnCard(
   key?: string,
 ): Promise<CardStarted> {
   if (caller.kind !== 'owner') {
-    throw new BoardError('forbidden', 'only the owner may start a ferret on a card from here', ['owner-human']);
+    throw new BoardError('forbidden', 'only the owner may start a ferret on a task from here', ['owner-human']);
   }
   const kept = key === undefined ? undefined : `${id}:${key}`;
   return await ports.exclusive(id, async () => {

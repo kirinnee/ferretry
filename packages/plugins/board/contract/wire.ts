@@ -337,7 +337,7 @@ const MovedEventSchema = z
       context.addIssue({ code: 'custom', message: 'an automatic move names its trigger', path: ['trigger'] });
     }
     if (value.auto === true && value.actor.kind !== 'daemon') {
-      context.addIssue({ code: 'custom', message: 'only the daemon moves a card automatically', path: ['auto'] });
+      context.addIssue({ code: 'custom', message: 'only the daemon moves a task automatically', path: ['auto'] });
     }
     if (value.reportedBy !== undefined && (value.trigger === undefined || !isExternalTrigger(value.trigger))) {
       context.addIssue({ code: 'custom', message: 'only an external trigger is reported', path: ['reportedBy'] });
@@ -571,13 +571,13 @@ const refKey = (ref: CardRef): string => `${ref.machineId ?? ''}/${ref.id}`;
 
 const refineCard = (value: CardCoherence, context: z.RefinementCtx): void => {
   if (!value.id.startsWith(cardIdPrefix(value.kind))) {
-    context.addIssue({ code: 'custom', message: 'card id prefix must match its kind', path: ['id'] });
+    context.addIssue({ code: 'custom', message: 'task id prefix must match its kind', path: ['id'] });
   }
   if (value.parent !== null && namesSelf(value, value.parent)) {
-    context.addIssue({ code: 'custom', message: 'a card is not its own parent', path: ['parent'] });
+    context.addIssue({ code: 'custom', message: 'a task is not its own parent', path: ['parent'] });
   }
   if (value.dependsOn.some(dependency => namesSelf(value, dependency.task))) {
-    context.addIssue({ code: 'custom', message: 'a card does not depend on itself', path: ['dependsOn'] });
+    context.addIssue({ code: 'custom', message: 'a task does not depend on itself', path: ['dependsOn'] });
   }
   if (new Set(value.dependsOn.map(dependency => refKey(dependency.task))).size !== value.dependsOn.length) {
     context.addIssue({ code: 'custom', message: 'each dependency is listed once', path: ['dependsOn'] });
@@ -779,7 +779,7 @@ export const BoardResponseSchema = z
       context.addIssue({ code: 'custom', message: "the lane set is the project's own", path: ['laneSet'] });
     }
     if (value.cards.some(card => card.projectId !== value.projectId)) {
-      context.addIssue({ code: 'custom', message: "a project's board holds its own cards", path: ['cards'] });
+      context.addIssue({ code: 'custom', message: "a project's board holds its own tasks", path: ['cards'] });
     }
   });
 export type BoardResponse = z.infer<typeof BoardResponseSchema>;
@@ -1043,7 +1043,7 @@ export const LaneSetActionRequestSchema = z.discriminatedUnion('action', [
         if (to !== undefined && !kept.has(to)) {
           context.addIssue({
             code: 'custom',
-            message: `cards go to a lane of the new set, not ${to}`,
+            message: `tasks go to a lane of the new set, not ${to}`,
             path: ['relocate'],
           });
         }

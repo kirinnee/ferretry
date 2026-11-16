@@ -89,6 +89,10 @@ describe('the former path of a task route', () => {
     expect(formerPath('GET /v1/board/ids')).toBe('GET /v1/board/ids');
   });
 
+  test('swaps every `:taskId` in a key, not only the first', () => {
+    expect(formerPath('POST /v1/board/tasks/:taskId/link/:taskId')).toBe('POST /v1/board/cards/:cardId/link/:cardId');
+  });
+
   test('puts one handler under both keys', () => {
     const handler = () => 'same';
     const both = withFormerPaths({ 'GET /v1/board/tasks/:taskId': handler });

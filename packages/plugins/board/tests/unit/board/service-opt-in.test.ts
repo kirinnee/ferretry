@@ -18,7 +18,7 @@ import {
 import { card, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT, type ServiceWorld, world } from './support.ts';
 
 const lead: BoardCaller = { kind: 'ferret', ferret: 'lead' };
-const OWNER_WANTS_A_CARD = 'put the login redesign on the board as a card so I can follow it';
+const OWNER_WANTS_A_CARD = 'put the login redesign on the board as a task so I can follow it';
 
 /** Each board's switch and the ferrets' answered items, as the opt-in rule reads them; counts what it read. */
 class FakeOptIn implements BoardOptIn {
@@ -101,7 +101,7 @@ describe('the board is opt-in', () => {
 
     // Assert
     should(error.code).equal('forbidden');
-    should(error.message).startWith('The ferretry board is off, so this work needs no card');
+    should(error.message).startWith('The ferretry board is off, so this work needs no task');
     should(error.message).containEql('fy agenda add -k yesno "Track this on the board?"');
     should(ports.store.cards.size).equal(0);
   });
@@ -243,7 +243,7 @@ describe('the board is opt-in', () => {
     const error = await refusal(service.create(create({ approval: 'A12' }), lead));
 
     // Assert
-    should(error.message).containEql('The approval does not count: ^A12 already made &F4; one Yes makes one card.');
+    should(error.message).containEql('The approval does not count: ^A12 already made &F4; one Yes makes one task.');
   });
 
   it("should refuse another ferret's Yes and a No", async () => {

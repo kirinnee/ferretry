@@ -216,7 +216,7 @@ describe('adopting an orphaned card', () => {
 
       // Assert
       should(error.code).equal('forbidden');
-      should(error.message).containEql("You are a helper, so you can't adopt cards");
+      should(error.message).containEql("You are a helper, so you can't adopt tasks");
       unchanged(ports);
     });
 

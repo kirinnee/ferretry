@@ -78,7 +78,7 @@ export const approvalProblem = (
   }
   if (ask.answer?.by !== 'owner') return `${ref} was not answered by the owner`;
   if (ask.answer.choice?.trim().toLowerCase() !== YES) return `the owner did not answer Yes to ${ref}`;
-  if (usedBy !== undefined) return `${ref} already made &${usedBy.id}; one Yes makes one card`;
+  if (usedBy !== undefined) return `${ref} already made &${usedBy.id}; one Yes makes one task`;
   return null;
 };
 
@@ -88,7 +88,7 @@ export const approvalProblem = (
  */
 export const offBoardRefusal = (board: string, problem?: string): string =>
   [
-    `The ${board} board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …).`,
+    `The ${board} board is off, so this work needs no task: put only what the owner must decide or do on your agenda (fy agenda add …).`,
     problem === undefined ? undefined : `The approval does not count: ${problem}.`,
     `To track it anyway, ask first: ${TRACK_ASK_COMMAND} — then, once the owner says Yes, fy task new … --approval <ask>.`,
   ]

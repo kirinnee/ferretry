@@ -216,7 +216,7 @@ const describe = (event: CardEvent, context: HistoryContext): Pick<HistoryRow, '
       return {
         text:
           event.to === null
-            ? `made it a top-level card (was under ${event.from === null ? 'nothing' : refText(event.from)})`
+            ? `made it a top-level task (was under ${event.from === null ? 'nothing' : refText(event.from)})`
             : `moved it under ${refText(event.to)}${event.from === null ? ' (was top level)' : ` (was under ${refText(event.from)})`}`,
         detail: event.reason,
         minor: false,

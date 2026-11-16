@@ -93,7 +93,7 @@ export const gateCheckMessage = (duplicates: readonly DuplicateGateItem[], binar
   duplicates
     .map(
       ({ card, gateItem, item }) =>
-        `&${card} already asks the owner on ${ASK_REFERENCE_SIGIL}${gateItem}, which carries the card: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ${ASK_REFERENCE_SIGIL}${item}: ${binary} ask dismiss ${item}`,
+        `&${card} already asks the owner on ${ASK_REFERENCE_SIGIL}${gateItem}, which carries the task: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ${ASK_REFERENCE_SIGIL}${item}: ${binary} ask dismiss ${item}`,
     )
     .join('\n');
 

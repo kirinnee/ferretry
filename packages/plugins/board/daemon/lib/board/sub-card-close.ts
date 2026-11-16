@@ -9,7 +9,7 @@
 import { type Card, categoryOf, isSubCard, type Lane, type LaneSet } from '../../../contract/index.ts';
 
 /** The history reason of a sub-card whose PRs shipped. */
-export const SUB_CARD_SHIPPED_REASON = 'sub-card shipped; the parent carries the test';
+export const SUB_CARD_SHIPPED_REASON = 'sub-task shipped; the parent carries the test';
 
 /** The history reason of a sub-card whose ferret finished or ended with no PR to ship. */
 export const SUB_CARD_HELPER_REASON = 'helper finished';
