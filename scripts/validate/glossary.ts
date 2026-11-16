@@ -26,7 +26,17 @@ export const PHRASE_EXCEPTIONS: ReadonlyMap<string, string> = new Map([
     'its own credential',
     "the ferret's own session credential that `fy session revoke-credential` (V-0434, R-0364) cuts off, today's verb name kept by parity; not a Vault secret (use, never read)",
   ],
+  ['payment card', 'a real payment instrument, not a piece of work (O18 rename, owner !A539)'],
+  ['credit card', 'a real payment instrument, not a piece of work (O18 rename, owner !A539)'],
+  ['card number', 'the digits of a real payment instrument, not a piece of work (O18 rename, owner !A539)'],
 ]);
+
+/**
+ * "Instead of" words that are COUNTED by the `vocabulary` check and not refused here: an only-down ratchet, not a
+ * ban, until every package has reached zero (O18, owner !A539). old word → the word that replaces it. The last unit
+ * of O18 empties this map, and the word is then as strict as every other one. Every other word stays strict now.
+ */
+export const RATCHETED_WORDS: ReadonlyMap<string, string> = new Map([['card', 'task']]);
 
 const BOUNDARY_BEFORE = '(^|[^\\p{L}\\p{N}_-])';
 const BOUNDARY_AFTER = '(?=$|[^\\p{L}\\p{N}_-])';
@@ -65,6 +75,7 @@ export function glossaryFindings(where: string, text: string, index: ReadonlyMap
   const findings: Finding[] = [];
   const read = withoutExceptions(text);
   for (const [old, word] of index) {
+    if (RATCHETED_WORDS.has(old)) continue; // counted by `vocabulary`, which fails only when a count grows
     const pattern = new RegExp(`${BOUNDARY_BEFORE}${escapeRegExp(old)}${BOUNDARY_AFTER}`, 'iu');
     if (pattern.test(read))
       findings.push({ check: 'glossary', where, message: `says "${old}"; the word is "${word}"` });

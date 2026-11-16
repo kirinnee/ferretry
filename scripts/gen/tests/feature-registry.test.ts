@@ -57,3 +57,28 @@ describe('feature registry', () => {
     expect(after.get(path)).not.toBe(before.get(path));
   });
 });
+
+describe('feature registry: a feature in its own folder', () => {
+  test('lists <f>/<f>.feature.ts beside the flat files, by path, and skips any other file in a subfolder', async () => {
+    const f = ws({
+      'daemon/features/alpha.feature.ts': feature,
+      'daemon/features/queue/queue.feature.ts': feature,
+      'daemon/features/queue/helper.feature.ts': feature,
+      'daemon/features/queue/parts.ts': 'export const parts = 1;\n',
+      'daemon/features/zeta.feature.ts': feature,
+    });
+    const text = (await generated(f)).get(path) ?? '';
+    const imports = [...text.matchAll(/from '([^']+)'/g)].map(match => match[1]);
+    expect(imports).toEqual([
+      '../features/alpha.feature.ts',
+      '../features/queue/queue.feature.ts',
+      '../features/zeta.feature.ts',
+    ]);
+    expect(text).toContain('  feature_alpha,\n  feature_queue_queue,\n  feature_zeta,\n');
+  });
+
+  test('a package whose only feature is in its own folder still gets a registry', async () => {
+    const f = ws({ 'daemon/features/queue/queue.feature.ts': feature });
+    expect((await generated(f)).get(path)).toContain('../features/queue/queue.feature.ts');
+  });
+});

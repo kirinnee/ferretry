@@ -419,7 +419,7 @@ Every push names a page, and the worker opens a page even when one does not:
   under `/push/<daemonId>/`. So the app asks for each machine's worker update at every start
   (`containerPushEnrolment.reconcile`). Without that, a phone enrolled before a fix kept the old tap.
 
-`packages/plugins/agenda/tests/integration/app/notification-open.test.ts` proves each case in Chromium, through the
+`packages/app/tests/integration/notification-open.test.ts` proves each case in Chromium, through the
 built worker.
 
 Every notification carries the Ferretry mark: `icons/icon-192.png` as its icon, and `icons/badge-96.png`
