@@ -158,7 +158,7 @@ const KINDS: Record<string, { offers: string[]; adds: string[] }> = {
   conversation: { offers: ['hooks `message.before-send`, `turn.ended`'], adds: ['ask source `question`', 'view'] },
   agenda: { offers: [], adds: ['view'] },
   projects: { offers: [], adds: ['view', 'command'] },
-  board: { offers: ['hook `task.moving` (decide)'], adds: ['ask source `card`', 'view'] },
+  board: { offers: ['hook `task.moving` (decide)'], adds: ["Board's ask source", 'view'] },
   packs: { offers: [], adds: ['view'] },
   warden: { offers: [], adds: ['view'] },
   usage: { offers: [], adds: ['view'] },
@@ -196,7 +196,7 @@ const FOLDS: Record<string, string[]> = {
   ],
   asks: [
     '#1558 agenda one-shots: fold',
-    '#1552 (B165, "the agenda asks, the card shows"): lands day 0; this port deletes its compat bits (`gateAttached` mirror, synthesized rows)',
+    '#1552 (B165, "the agenda asks, the task shows"): lands day 0; this port deletes its compat bits (`gateAttached` mirror, synthesized rows)',
     "F640 stack #1425 → #1427 → #1426 re-cut as an Accounts approval raised through Asks (`source: 'sign-in-approval'`); #1479 closed as duplicate",
     '`c52/pr-19a` notification ledger rewrite: dropped',
   ],
@@ -467,7 +467,7 @@ ${unplaced.length ? unplaced.map(p => `- ${sub(p.path)}`).join('\n') : 'None: ev
 
 ## Shared old folders and where they were split (§8 overlaps)
 
-\`session\` (sub-module by sub-module: identity/launch/lifecycle -> ferrets, send/queue/turn/question/transcript/reads -> conversation, console/attach/processes -> terminals, permission/dialog/harness -> claude-code+codex, agenda-mode -> agenda); \`runtime\` (mounts by mount name, boot/config -> kernel, carriers -> connections); \`agenda\` (store/answer -> asks, views/nudges/buzz -> agenda); \`secrets\` (vault half vs accounts half); \`fleet\` (ferrets/runtimes/logins/onboarding); \`relay\` package (session layer -> kernel, rendezvous/tunnel -> connections, link-store -> catalogs); \`input-requests\` (vault core, terminal/page targets -> terminals/browsers, login/phone parts -> accounts); \`step-up\` (plumbing gate, ceremonies and stores access); \`task-plans\` -> board (the accounts task-plan route/card pieces are placed with accounts by name); \`speedups\` -> packs (voice also: lead to confirm which half); \`local-skill-installs\` -> catalogs (skills also by name in the app); \`session-mcp\`, \`agent-files\` -> claude-code+codex (mcp also needs the MCP half).
+\`session\` (sub-module by sub-module: identity/launch/lifecycle -> ferrets, send/queue/turn/question/transcript/reads -> conversation, console/attach/processes -> terminals, permission/dialog/harness -> claude-code+codex, agenda-mode -> agenda); \`runtime\` (mounts by mount name, boot/config -> kernel, carriers -> connections); \`agenda\` (store/answer -> asks, views/nudges/buzz -> agenda); \`secrets\` (vault half vs accounts half); \`fleet\` (ferrets/runtimes/logins/onboarding); \`relay\` package (session layer -> kernel, rendezvous/tunnel -> connections, link-store -> catalogs); \`input-requests\` (vault core, terminal/page targets -> terminals/browsers, login/phone parts -> accounts); \`step-up\` (plumbing gate, ceremonies and stores access); \`task-plans\` -> board (the accounts task-plan route/input pieces are placed with accounts by name); \`speedups\` -> packs (voice also: lead to confirm which half); \`local-skill-installs\` -> catalogs (skills also by name in the app); \`session-mcp\`, \`agent-files\` -> claude-code+codex (mcp also needs the MCP half).
 
 ## Contradictions and gaps found in the design
 
