@@ -56,6 +56,8 @@ export interface TurnWatchDeps {
   /** The ferret's registry state follows a recorded turn (`FerretsService.turnObserved`). */
   readonly turnObserved: (ferret: FerretId, turn: SessionTurnState) => Promise<void>;
   readonly clock: { now(): string };
+  /** Whether the ferret's owner stores a question that is open now (the `turn.question-open` provider); `false` with none. */
+  readonly questionOpen?: (ferret: FerretId) => Promise<boolean>;
   /** Runs `tick` every `intervalMs` until the answer is called (`kernel.clock.every`). */
   readonly every: (intervalMs: number, tick: () => void) => () => void;
   /** Hands the event loop back between two panes (`kernel.clock`). */
@@ -211,6 +213,13 @@ export function buildTurnWatch(deps: TurnWatchDeps): {
                 : { ...session, state: { ...session.state, status: 'stopped' as const } };
             }),
           yieldToLoop: deps.yieldToLoop,
+          // An open question is a person being asked: the look reads it as `needs-input`, as it does a recorded one.
+          ...(deps.questionOpen === undefined
+            ? {}
+            : {
+                questionOpen: (id: SessionId) =>
+                  deps.questionOpen?.(id as unknown as FerretId) ?? Promise.resolve(false),
+              }),
           // A damaged document is said ONCE, not on every look that meets it again (until its damage changes).
           failureKey: turnWatchFailureKey,
           failed: (id, error) =>

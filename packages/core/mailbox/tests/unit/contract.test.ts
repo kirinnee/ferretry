@@ -11,12 +11,20 @@ import {
 import manifest from '../../manifest.ts';
 
 describe('the Mailbox package', () => {
-  test('is a core piece that offers its slots and serves nothing yet', () => {
+  test('is a core piece that offers its slots and serves the send path: twelve routes, no screen of its own', () => {
     expect(manifest.id).toBe('mailbox');
     expect(manifest.core).toBe(true);
     expect(manifest.hooks?.offers?.map(offer => offer.hook)).toEqual([MailboxHosts, DeliveryWays]);
-    expect(Object.keys(manifest)).not.toContain('actions');
+    expect(manifest.actions.routes).toHaveLength(12);
     expect(MailboxPort.name).toBe('mailbox');
+  });
+
+  test('a retry and the composer are a person’s alone: the descriptors say caller person, the rest take any caller', () => {
+    const caller = (key: string) => manifest.actions.routes.find(route => route.key === key)?.caller;
+    expect(caller('POST /v1/ferrets/:ferretId/sends/:sendId/retry')).toBe('person');
+    expect(caller('POST /v1/ferrets/:ferretId/composer')).toBe('person');
+    expect(caller('POST /v1/ferrets/:ferretId/send')).toBe('any');
+    expect(caller('POST /v1/ferrets/:ferretId/sends/:sendId/cancel')).toBe('any');
   });
 
   test('mailbox.host is a security-path provide hook: only Conversation may fill it, under one key', () => {
