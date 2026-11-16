@@ -9,6 +9,16 @@
  *   - every other frame (the journal's own events and idle proofs) is not the chat's and is ignored. A frame that does
  *     not parse is dropped: the reads are the truth, the stream is only a hurry-up.
  *
+ * NO JOURNAL REPLAY. A bare `GET /v1/events?sessionId=` replays the ferret's whole journal (a page of 1 000 events at a
+ * time) before it goes live, and the chat reads none of those events: it wants only the `live` and `transcript` frames, which
+ * the daemon sends after the replay and which do not depend on the cursor. Over a relay, for a long session, that replay
+ * is megabytes on every chat open. There is no cheaper way to ask for "from now": `tail` is the fleet stream's and is
+ * refused with a session id, the summary the chat reads carries no journal cursor, and the per-ferret events route only
+ * pages forward from a cursor, so finding the latest one would itself read the whole journal. So the chat opens at the
+ * end of the journal: `after` is the largest safe integer ({@link FROM_NOW}), the daemon's replay finds nothing past it
+ * and sends no `event` frame, and a live journal event (always numbered below it) is dropped by the daemon's own
+ * duplicate check rather than sent.
+ *
  * A stream that ends is opened again after a pause unless the daemon refused it (`1008`, `4403`): a refusal is not a
  * drop, and dialling again would only be refused again. While there is no stream a compaction can no longer be
  * vouched for, so it is withdrawn from the sample rather than left saying "Compacting" forever.
@@ -23,6 +33,9 @@ const EVENTS_SOCKET = 'GET /v1/events';
 
 /** The pause before a dropped stream is opened again. */
 const LIVE_STREAM_RETRY_MS = 5_000;
+
+/** The cursor that starts the stream past every journal event: no replay and no `event` frames, only `live` and `transcript`. */
+const FROM_NOW = String(Number.MAX_SAFE_INTEGER);
 
 /** Close codes that are the daemon (or the carrier) saying no, not a drop. */
 const REFUSAL_CLOSE_CODES: ReadonlySet<number> = new Set([1008, 4403]);
@@ -105,7 +118,7 @@ export function useLiveFerretStream(
             timer = setTimeout(open, LIVE_STREAM_RETRY_MS);
           },
         },
-        { sessionId: ferretId, live: '1', transcript: '1' },
+        { sessionId: ferretId, after: FROM_NOW, live: '1', transcript: '1' },
       );
       closeStream = () => {
         ended = true;

@@ -451,11 +451,73 @@ describe('the live event stream, as the screen wires it', () => {
 
     expect(opened).toHaveLength(1);
     expect(opened[0]?.key).toBe(EVENTS);
-    expect(opened[0]?.query).toEqual({ sessionId: 'shared', live: '1', transcript: '1' });
+    expect(opened[0]?.query).toEqual({
+      sessionId: 'shared',
+      after: String(Number.MAX_SAFE_INTEGER),
+      live: '1',
+      transcript: '1',
+    });
 
     await view.unmount();
     views.splice(views.indexOf(view), 1);
     expect(opened[0]?.closed).toBe(true);
+  });
+
+  test('a chat open asks for only new frames: a cursor past every journal event, never the journal from the start', async () => {
+    const client = daemon(() => '');
+    const opened = withSocket(client);
+    await open(client, 'shared');
+    await waitFor(() => opened.length > 0, 'the stream to open');
+
+    const query = opened[0]?.query ?? {};
+    // Past any sequence a journal can reach, so the daemon's replay is empty; "0" or no `after` would replay it all.
+    expect(Number(query['after'])).toBe(Number.MAX_SAFE_INTEGER);
+    expect(Number.isSafeInteger(Number(query['after']))).toBe(true);
+    // `tail` is the fleet stream's: with a session id the daemon refuses it.
+    expect(query).not.toHaveProperty('tail');
+  });
+
+  test('journal events and idle proofs on the stream change nothing, and a reconnect asks from now again', async () => {
+    const realSetTimeout = globalThis.setTimeout;
+    const pauses: (() => void)[] = [];
+    globalThis.setTimeout = ((callback: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 5_000 ? (pauses.push(callback), 0) : realSetTimeout(callback, ms, ...rest)) as typeof setTimeout;
+    try {
+      const client = daemon(() => '[10:11:12] assistant/message: Quiet.');
+      const opened = withSocket(client);
+      const view = await open(client, 'shared');
+      await waitFor(() => opened.length === 1 && view.container.textContent?.includes('Quiet.') === true, 'the page');
+      const reads = client.callsTo(LOG_PAGE).length;
+
+      await runAsync(async () => {
+        opened[0]?.listeners.onFrame(
+          JSON.stringify({
+            kind: 'event',
+            event: {
+              sequence: 3,
+              time: '2026-11-16T10:00:00.000Z',
+              sessionId: 'shared',
+              type: 'turn',
+              source: 'x',
+              data: {},
+            },
+          }),
+        );
+        opened[0]?.listeners.onFrame(
+          JSON.stringify({ kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 'shared', after: 3 } }),
+        );
+      });
+      await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 60)));
+      expect(client.callsTo(LOG_PAGE).length).toBe(reads);
+      expect(view.container.querySelector('[data-compaction]')).toBeNull();
+
+      await runAsync(async () => opened[0]?.listeners.onClose('gone', 1006));
+      await runAsync(async () => pauses.shift()?.());
+      expect(opened).toHaveLength(2);
+      expect(opened[1]?.query).toEqual(opened[0]?.query);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
   });
 
   test('a live frame reaches the page: the compaction chip shows, the toolbar says Compacting, and both clear with the sample', async () => {
