@@ -9,13 +9,19 @@ import {
   MACHINE_AGENDA_ACTED_AUDIT,
   BUZZES,
   MODES,
+  NUDGES,
   SEEN,
   cap,
 } from './contract/index.ts';
 import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretChanged, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
-import { CONVERSATION_ROW_BODY_SLOT, ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
+import {
+  CONVERSATION_ROW_BODY_SLOT,
+  ConversationPort,
+  ReferenceCatalog,
+  TurnEnded,
+} from '@ferretry/plugin-conversation/contract';
 
 import type { VerbArgDecl, VerbOptionDecl } from '@ferretry/kernel/manifest';
 
@@ -433,7 +439,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [SEEN, BUZZES, MODES],
+    state: [SEEN, BUZZES, MODES, NUDGES],
     config: [AGENDA_CONFIG],
     readModels: ['open', 'daemon-agenda', 'mode'],
     publishes: [AgendaModeChanged, AgendaBuzzed],
@@ -446,6 +452,8 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: FerretChanged },
+      // A ferret's round ended: the turn-end check reads its last reply (Conversation's `turn.ended`).
+      { hook: TurnEnded },
       { hook: ReferenceCatalog, key: '!' },
       { hook: ArchiveKeeps },
       { hook: LaunchParts },

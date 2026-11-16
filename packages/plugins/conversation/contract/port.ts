@@ -49,16 +49,19 @@ export interface ConversationRefusal {
 /**
  * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamps the caller of a ROUTE; a caller of
  * THIS port is bound by the kernel instead: Conversation provides through `perNeeder`, so each consumer holds a facade
- * built from its own manifest id ({@link conversationFor}), and `warden` is accepted only from the Warden's plugin. Any
+ * built from its own manifest id ({@link conversationFor}), and `warden` is accepted only from the Warden's plugin (`agenda`, only from Agenda's). Any
  * other consumer naming it is refused `forbidden` before anything is read or typed.
  * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
  * (`senderKind: 'daemon'`, `by` Ferretry's Warden), never as the owner's own message and never as a ferret's:
  * a notice is not kept, retried or counted as the owner's.
+ * `agenda` is the same for Agenda's turn-end check (its nudge words, built inside Agenda from fixed text): accepted only
+ * from the Agenda's plugin, typed bare and recorded as the DAEMON's (`senderKind: 'daemon'`, by Ferretry's Agenda).
  */
 export type ConversationCaller =
   | { readonly kind: 'owner' }
   | { readonly kind: 'ferret'; readonly ferret: FerretId }
-  | { readonly kind: 'warden' };
+  | { readonly kind: 'warden' }
+  | { readonly kind: 'agenda' };
 
 /**
  * What other plugins and the app read and ask of Conversation (§2.3): messages, the queue, turns, questions,
