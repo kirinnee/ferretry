@@ -168,21 +168,12 @@ channel` is settled by the tracker exactly as she wrote it.
 
 ### Where it lives
 
-**Owner's question: "this is all part of core right?"**
+**Owner ruling (2026-11-15, !A536): the mailbox is core.** It lives in its own core package, `packages/core/mailbox` (`core: true`), **not** inside `core/ferrets`, so the one-folder rule holds and the core ferrets' hot files stay untouched.
 
-**Answer: it behaves like core, but it should live in one plugin folder: `packages/plugins/conversation`.**
-
-| Option                                      | Good                                                                                                                                          | Bad                                                                                                                                                                                                                                                                                          |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A. Conversation plugin** (recommended)    | Already owns send, the queue, the ledger, receipts and the queue screens. Every sender already calls it. A mailbox change is a one-folder PR. | Not "core" on paper (`core: false`), so in principle a machine could run without it. In practice nothing can message an agent without it, so this is a label, not a risk.                                                                                                                    |
-| **B. Move it into `packages/core/ferrets`** | Guaranteed always on; any package could reach it.                                                                                             | Moves about 5,000 lines (`daemon/queue` + `daemon/delivery`) into the most shared code. `scripts/ci/one-folder.ts:5-6` records the core ferrets daemon index and service being touched by 7–53 PRs a week. Every later mailbox fix would need "Outside files" reasons. Biggest blast radius. |
-
-**The one-folder rule** (`CLAUDE.md`, `scripts/ci/one-folder.ts`): a feature lives in its own plugin folder. With option
-A, almost every unit below stays inside `packages/plugins/conversation`. The few outside files are named per unit.
-
-The **harness side** stays where it already is: Codex's `inject` in the codex plugin, Claude's transcript receipt in
-the claude-code plugin, the MCP channel pump in the mcp plugin, typing in the terminals plugin. The mailbox only
-**chooses** between them.
+- **Mailbox (core):** the queue, the deliverer, the send ledger and the batching/lane policy: whatever decides WHEN and HOW a message reaches an agent. Its contract (`@ferretry/core-mailbox/contract`) has send/enqueue, the queue view, cancel/retry, the events Conversation listens to, and a generic `deliveryWay` registration slot.
+- **Conversation (plugin):** only the chat UI. It calls the core mailbox API and imports only its contract.
+- **Harness plugins (claude-code, codex):** register their delivery way (channel, `codex queue`) through the core slot; the mailbox only chooses between them. The pane-side harness delivery facade now in Ferrets `service.ts` moves into that slot too (H5 unit U5), and M3 builds on it.
+- **Data:** the files stay where they are (`state/conversation/<ferret>/queue.jsonl`, `sends.jsonl`); the kernel scopes state by package id, so Conversation keeps opening them and hands the mailbox a store and a ledger through the `mailbox.host` slot. Moving them under `mailbox` (a kernel `stateFolder` field) is a possible later unit.
 
 ## 3. The mailbox UI
 
@@ -275,7 +266,7 @@ Suggested models (Routing): M1 and M3 are high impact (they change how every mes
 
 ## Decisions for the owner
 
-- **D1 — Where it lives.** Recommend: Conversation plugin (option A), not `packages/core`.
+- **D1 — Where it lives.** DECIDED by the owner (2026-11-15, !A536): its own core package, `packages/core/mailbox`. See Where it lives.
 - **D2 — Owner's own words via the Claude channel?** Recommend **no**: keep them typed, so they show as "You" in the
   chat and stay one message per bubble. Channel messages arrive as tagged channel events, not as your turn.
 - **D3 — The question hook.** Claude's "asking you a question" signal is a `PreToolUse` hook
