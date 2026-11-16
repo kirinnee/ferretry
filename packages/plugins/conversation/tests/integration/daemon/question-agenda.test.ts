@@ -13,7 +13,7 @@ import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, QuestionSchema } from '../../../contract/index.ts';
 import { memoryStatePort } from '../../support/state.ts';
 import type { HarnessGate } from '@ferretry/core-mailbox/contract';
-import { buildConversationA } from '../../../daemon/host.ts';
+import { buildConversationA } from '../../support/conversation-half.ts';
 import { QUESTION_WATCH_MS } from '../../../daemon/questions/lib/watch.ts';
 import type { TranscriptEvent } from '../../../daemon/seams/transcript-types.ts';
 

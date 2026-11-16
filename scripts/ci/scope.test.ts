@@ -446,6 +446,19 @@ test('decide reads the CI environment: a push, a dispatch, a label list that is 
   expect(JSON.parse(readFileSync(join(dir, 'scope.json'), 'utf8')).mode).toBe('full');
 });
 
+test('a dot-directory inside a package (a test’s temporary folder) is never walked', async () => {
+  const fx = fixture([{ id: 'target' }, { id: 'holder' }]);
+  fixtures.push(fx);
+  // A test's temporary probe inside a package: it may vanish mid-walk, and it is never package source.
+  fx.write(
+    'packages/plugins/holder/.fy-worker-contract-x/src/probe.ts',
+    "import '@ferretry/plugin-target/contract';\n",
+  );
+  fx.write('packages/plugins/holder/.tmp/probe.ts', "import '@ferretry/plugin-target/contract';\n");
+  const result = await readGraph(fx.root);
+  expect([...(result.dependsOn.get('@ferretry/plugin-holder') ?? [])]).toEqual([]);
+});
+
 // ─── the REAL imports: a relative path into a sibling plugin is an edge ─────────────────────────────────────────
 
 const edgesOf = (graph: Awaited<ReturnType<typeof readGraph>>, id: string): string[] =>

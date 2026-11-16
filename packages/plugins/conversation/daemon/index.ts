@@ -1,28 +1,16 @@
 import { ApiError, type RouteHandler, type SocketAccept } from '@ferretry/kernel/contract';
-import { askDeliveryOf } from './delivery/adapters/ask-delivery.ts';
-import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
-import {
-  type ConversationApi,
-  conversationFor,
-  LinkKept,
-  PromptAskRefSchema,
-  QuestionSchema,
-  ReferenceCatalog,
-  SearchSources,
-} from '../contract/index.ts';
+import { type DaemonHalf, implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
+import { type HarnessGate, HARNESS_OPEN } from '@ferretry/core-mailbox/contract';
+import { type ConversationApi, conversationFor } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
-import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
-import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
-import { buildConversationA } from './host.ts';
-import { type HarnessGate, HARNESS_OPEN } from '@ferretry/core-mailbox/contract';
-import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
-import { buildReading } from './reading.ts';
+import { composeConversation } from './features/compose.ts';
+import type { ConversationContext } from './features/types.ts';
+import features from './generated/features.ts';
 import { addressedByCallsign } from './seams/ferret-address.ts';
 import { maskedBody } from './seams/masked-body.ts';
-import { AgentsReferenceMenu } from './references/agents-menu.ts';
-import { referenceCatalogRoute } from './references/catalog.ts';
-import { FilesReferenceMenu } from './references/files-menu.ts';
+
+type Half = DaemonHalf<typeof manifest>;
 
 const unavailable =
   (sentence: string): RouteHandler =>
@@ -30,29 +18,7 @@ const unavailable =
     throw new ApiError(503, sentence, 'plugin_unavailable');
   };
 
-/**
- * The `guard: 'secrets'` routes that already build their answer inside their own redaction read (the transcript reads
- * and the work search), or serve bytes no mask may touch (a transcript image). Every other such route is wrapped in
- * {@link maskedBody}.
- */
-const SCRUBS_ITS_OWN_BODY: ReadonlySet<string> = new Set([
-  'GET /v1/ferrets/:ferretId/logs',
-  'GET /v1/ferrets/:ferretId/log-page',
-  'GET /v1/ferrets/:ferretId/log-search',
-  'GET /v1/ferrets/:ferretId/messages',
-  'GET /v1/ferrets/:ferretId/transcript-images/:handle',
-  'GET /v1/search',
-  'POST /v1/search/related',
-]);
-
-/**
- * Fields a masked route serves as they are stored, beyond bytes and digests. A render's `payload` is the picture
- * itself, named by its sha256 (its id and its etag): a mask would change what that id names and break the picture, and
- * today never masked renders. Its `meta` (the alt text) is masked, exactly as `GET /v1/renders/:id/meta` masks it.
- */
-const VERBATIM_FIELDS: Readonly<Record<string, readonly string[]>> = { 'GET /v1/renders/:id': ['payload'] };
-
-/** One handler per key the manifest declares: the one a part serves, or the fallback. */
+/** One handler per key the manifest declares: the one a feature serves, or the fallback. */
 function declared<K extends string, H>(
   keys: readonly K[],
   served: Readonly<Record<string, H>>,
@@ -64,60 +30,47 @@ function declared<K extends string, H>(
 }
 
 /**
- * Conversation's daemon half (§2.3): what you say to a ferret and what it says back. Part a (this file's `host.ts`)
- * owns messages, the queue, turns, questions and drafts; part b (`./reading.ts`: reader, links, attachments, renders, search) is built over the same ports. A declared route that
- * neither part serves yet answers 503 with its sentence, never a missing route.
+ * Conversation's daemon half (§2.3): what you say to a ferret and what it says back. Each feature lives in its own file
+ * under `./features/` (`<feature>.feature.ts`, listed by the generator into `./generated/features.ts`) and adds its own
+ * routes, sockets, tools, hooks, subscribers and port members; this file composes them and keeps what is shared by all:
+ * the callsign addressing and the secret mask every `guard: 'secrets'` route gets (unless its feature scrubs its own
+ * body). A declared route that no feature serves yet answers 503 with its sentence, never a missing route.
  */
 export const conversationDaemon = (gate: HarnessGate) =>
   implementDaemon(manifest, {
     // The PDF unlock thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
     workers: { 'pdf-decrypt': PDF_WORKER_URL },
     build: ctx => {
-      const b = buildReading({
-        kernel: ctx.kernel,
-        ferrets: ctx.needs.ferrets,
-        asks: ctx.needs.asks,
-        onKept: (ferret, link) => ctx.kernel.events.publish(LinkKept, { ferret, link }),
-        workSources: () => ctx.hooks.contributions(SearchSources).map(contribution => contribution.item),
-      });
-      const a = buildConversationA({
+      const context: ConversationContext = {
+        daemon: ctx,
         kernel: ctx.kernel,
         ferrets: ctx.needs.ferrets,
         asks: ctx.needs.asks,
         hooks: ctx.hooks,
-        gate,
         mailbox: ctx.needs.mailbox,
-        // The stored originals a send hands to the agent (part b owns the store).
-        attachments: { download: (ferret, id) => b.download(ferret, id) },
-        // A Codex ferret's question is in its transcript (part b reads it).
-        questionEvents: (ferret, limit) => b.questionEvents(ferret, limit),
-      });
-      ctx.kernel.lifecycle.onStop(() => {
-        a.stop();
-        b.stop();
-      });
-
-      const served: Readonly<Record<string, RouteHandler | undefined>> = {
-        ...a.routes,
-        ...b.routes,
-        'GET /v1/ferrets/:ferretId/references': referenceCatalogRoute({
-          providerOf: prefix => ctx.hooks.provider(ReferenceCatalog, prefix),
-          ferrets: ctx.needs.ferrets,
-        }),
+        gate,
+        clock: { now: () => ctx.kernel.clock.now() },
+        late: {},
       };
+      const served = composeConversation(features, context);
+      ctx.kernel.lifecycle.onStop(served.stop);
+
       const routes = declared(
         manifest.actions.routes.map(route => route.key),
         Object.fromEntries(
           manifest.actions.routes.flatMap(route => {
-            const declaredHandler = served[route.key];
+            const declaredHandler = served.routes[route.key];
             if (declaredHandler === undefined) return [];
             // A path that names a ferret takes its callsign as well as its id.
             const handler = route.key.includes(':ferretId')
               ? addressedByCallsign(ctx.needs.ferrets, declaredHandler)
               : declaredHandler;
-            const masks = route.guard === 'secrets' && !SCRUBS_ITS_OWN_BODY.has(route.key);
+            const masks = route.guard === 'secrets' && !served.scrubsItsOwnBody.has(route.key);
             return [
-              [route.key, masks ? maskedBody(ctx.kernel.redaction, handler, VERBATIM_FIELDS[route.key]) : handler],
+              [
+                route.key,
+                masks ? maskedBody(ctx.kernel.redaction, handler, served.verbatimFields[route.key]) : handler,
+              ],
             ];
           }),
         ),
@@ -125,85 +78,24 @@ export const conversationDaemon = (gate: HarnessGate) =>
       );
       const sockets = declared(
         manifest.actions.sockets.map(socket => socket.key),
-        a.sockets,
+        served.sockets,
         (key): SocketAccept => {
           throw new Error(`Conversation declares the socket ${key} and builds none`);
         },
       );
 
-      const api: ConversationApi = { ...b.api, ...a.api };
+      // What the features serve is keyed by strings, so the manifest's own key types are asserted here and the key sets
+      // are pinned by `tests/unit/daemon/features.test.ts` (and the kernel refuses a declared tool, hook or subscriber
+      // nobody serves when it boots). Every member of the port is some feature's.
+      const api = served.port as ConversationApi;
 
       return {
         routes,
         sockets,
-        tools: {
-          search_work: b.tools.search_work,
-          ...a.tools,
-        },
+        tools: served.tools as Half['tools'],
         provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
-        hooks: {
-          // The owner's answer on the Agenda is typed into the ferret's own question form BEFORE the card counts as answered.
-          'ask.sources:question': {
-            schema: QuestionSchema,
-            title: 'Question',
-            form: true,
-            apply: answer => a.applyQuestionAnswer(answer),
-          },
-          // A ferret parked on a permission prompt or a dialog is a card the owner cannot answer here: the console does.
-          'ask.sources:prompt': { schema: PromptAskRefSchema, title: 'Prompt', form: false },
-          // What a launch says about hypermedia: only a switch the owner set, so a ferret with none keeps its mode default.
-          'launch.parts': () => [
-            {
-              id: 'conversation-hypermedia',
-              item: {
-                parts: async spec => [
-                  { kind: 'env' as const, env: hypermediaLaunchEnvironment(await a.hypermediaRecorded(spec.ferret)) },
-                ],
-              },
-            },
-          ],
-          // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
-          // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
-          'opening.attachments:opening': openingAttachmentsSource(),
-          // Ferrets' turn watch asks once per look whether a question is open: the stored `question.json` answers.
-          'turn.question-open:question': { isOpen: async ferret => (await api.question(ferret)) !== undefined },
-          'ask.delivery:ferret': askDeliveryOf(api),
-          'ask.owner-chat:conversation': a.ownerChat,
-          // Where the Mailbox keeps a ferret's queue and send ledger: the files stay in this plugin's folder.
-          'mailbox.host:ferret': a.mailboxHost,
-          // The composer's `:` (fleet callsigns) and `@` (one folder of the ferret's files) menus, each declaring the demand
-          // its own read route asks (fleet, filesystem); the route asks it of the caller before they run.
-          'reference.catalog::': new AgentsReferenceMenu(ctx.needs.ferrets),
-          'reference.catalog:@': new FilesReferenceMenu(ctx.needs.ferrets),
-          'sitrep.lines': () => [{ id: 'conversation', item: a.sitrep }],
-          // A stop is being attempted: the unlocked attachments are zeroed before it can fail.
-          'ferret.stopping': followFerretStopping({ release: ferret => b.release(ferret) }),
-          // A ferret stopped or is gone: its unlocked attachments are zeroed first; every change is a turn look.
-          'ferret.changed': followFerretChanges({
-            release: ferret => b.release(ferret),
-            look: (ferret, phase) => a.turns.look(ferret, phase),
-            lookQuestion: ferret => a.questions.look(ferret),
-            lookPrompt: ferret => a.promptChanged(ferret),
-            forget: ferret => a.turns.forget(ferret),
-            withdrawQuestion: ferret =>
-              void a
-                .withdrawQuestion(ferret)
-                .catch((error: unknown) =>
-                  ctx.kernel.log.warn(`conversation could not withdraw the question of ${ferret}: ${String(error)}`),
-                ),
-            warn: message => ctx.kernel.log.warn(message),
-          }),
-        },
-        subscribers: {
-          // An ask was answered: the draft of its item goes with it (a chat reply keeps the draft).
-          'asks.answered': async payload => {
-            await a.onAskAnswered(payload);
-          },
-          // The board changed: a question card it refused for now (it was full) is asked for again.
-          'asks.changed': async () => {
-            await a.onAsksChanged();
-          },
-        },
+        hooks: served.hooks as Half['hooks'],
+        subscribers: served.subscribers as Half['subscribers'],
       };
     },
   });
