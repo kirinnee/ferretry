@@ -4,7 +4,7 @@ import { defineConfig } from '../../../contract/index.ts';
 import { type AnyConfigDef, ConfigPathClaimError } from '../../../host/config/claims.ts';
 import { schemaFileName } from '../../../host/config/schemas.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
-import { configHarness, HOME, loginsDef, manualClock, captureLog, updatesDef } from './support.ts';
+import { configHarness, HOME, loginsDef, manualClock, captureLog, testEtag, updatesDef } from './support.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 
 const limitOf = (h: ReturnType<typeof configHarness>) =>
@@ -140,9 +140,11 @@ describe('config files: held loosening', () => {
   });
 
   test('R-0274 confirm and discard compare the FULL etag: a file swapped after the review for one with the same 12-character prefix is touched by neither', async () => {
-    // Two texts whose sha256 agree on the first 12 hex characters (found by a birthday search on 48 bits).
-    const reviewed = 'limit: 6\nnote: a2641039\n';
-    const unseen = 'limit: 999999\nnote: b896126\n';
+    // Two texts whose etags under TEST_ETAG_KEY (the harness's key) agree on the first 12 hex characters (a birthday search on 48 bits).
+    const reviewed = 'limit: 6\nnote: a8776176\n';
+    const unseen = 'limit: 999999\nnote: b2234749\n';
+    expect(testEtag(unseen).slice(0, 12)).toBe(testEtag(reviewed).slice(0, 12));
+    expect(testEtag(unseen)).not.toBe(testEtag(reviewed));
     const h = configHarness();
     await h.files.write('updates', updatesDef, undefined, 'limit: 5\n');
     h.fs.seed(h.path('updates.yaml'), reviewed);

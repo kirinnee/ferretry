@@ -30,7 +30,6 @@
  * about to replace.
  */
 import { addedSecretReferenceSentences, secretReferencesIn } from '../secrets.ts';
-import { createHash } from 'node:crypto';
 import { type Duration, milliseconds } from '@ferretry/std';
 import type {
   Cancel,
@@ -61,6 +60,7 @@ import {
   claimOf,
 } from './claims.ts';
 import { checkConfigText, type ConfigIssue, type ConfigRefusal, writeRefusal } from './check.ts';
+import { configEtagger, ephemeralConfigEtagKey } from './etag.ts';
 import { type ConfigCheckMemo, createConfigCheckMemo } from './check-memo.ts';
 import {
   type AcceptedConfig,
@@ -204,6 +204,11 @@ export interface ConfigFilesOptions {
   readonly log: Log;
   /** The binary's name, for the sentences that name a command. */
   readonly binary: string;
+  /**
+   * The key of every etag (`configEtagKey`, derived from the daemon's identity so it is the same after a restart);
+   * absent, one that lives as long as this service (`ephemeralConfigEtagKey`): a restart then reads every etag afresh.
+   */
+  readonly etagKey?: Uint8Array;
   /** The kernel's state port, which must declare {@link acceptedConfigFile}; absent, one is made over `fs`. */
   readonly state?: StatePort;
   /** Where the checks the loads make are kept; absent, a fresh one. A test hands one in to see what is kept. */
@@ -361,8 +366,6 @@ interface Settled {
   readonly diskEtag: string;
 }
 
-const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
-
 const idOf = (path: string, etag: string): string => `${path}@${etag}`;
 
 const issueKey = (issue: ConfigIssue): string =>
@@ -378,6 +381,8 @@ export function createConfigFiles(options: ConfigFilesOptions): ConfigFiles {
   const state: StatePort =
     options.state ?? createStatePort({ home, pluginId: 'kernel', files: [acceptedConfigFile], fs });
   const declarations = [...options.defs];
+  /** Every etag this service makes or compares: keyed, so no reader can test a guess at a hidden value (`./etag.ts`). */
+  const digest = configEtagger(options.etagKey ?? ephemeralConfigEtagKey());
   /** The write-set intent record's own port (the kernel's state folder): only this service reads or writes it. */
   const journalState: StatePort = createStatePort({ home, pluginId: 'kernel', files: [configWriteSetFile], fs });
   /** Said once per damaged record, not on every load. */
