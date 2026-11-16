@@ -723,8 +723,13 @@ export function buildConversationA(deps: {
           if (record.senderKind === 'agent' && record.from !== undefined)
             await failureNotifier
               .notifyStuck(record.from, recipient, record, waitedMs)
-              .catch((error: unknown) =>
-                kernel.log.warn(`the sender of stuck send ${record.sendId} could not be told: ${String(error)}`),
+              // Ids only: a refusal's sentence can quote the sender's own draft, and a log line never carries screen text.
+              .catch(() =>
+                kernel.log.warn('the sender of a stuck send could not be told', {
+                  ferret: recipient,
+                  sendId: record.sendId,
+                  sender: record.from ?? 'unknown',
+                }),
               );
         },
       },
