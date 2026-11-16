@@ -1,7 +1,6 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { FerretIdSchema, HarnessKeySchema } from '../ids.ts';
-import { DECIDE_ASK_TIMEOUT_MS } from './decide-timeout.ts';
 
 /**
  * What `auto-resume.decide` takers are asked (W2-a, RULING #27 Q5) before the daemon spends anything bringing back a
@@ -31,6 +30,4 @@ export type AutoResumeDecideInput = z.infer<typeof AutoResumeDecideInputSchema>;
 export const AutoResumeDecide = defineHook('auto-resume.decide', {
   mode: 'decide',
   input: AutoResumeDecideInputSchema,
-  // Both questions read a file in Runtimes (the switch, the runtime's manifest); a miss here skips the resume (fails closed).
-  timeoutMs: DECIDE_ASK_TIMEOUT_MS,
 });

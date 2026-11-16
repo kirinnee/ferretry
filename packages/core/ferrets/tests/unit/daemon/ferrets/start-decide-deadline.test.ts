@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { Log } from '@ferretry/kernel/contract';
 import { HookEngine } from '@ferretry/kernel/host';
 import { definePlugin } from '@ferretry/kernel/manifest';
-import { AutoResumeDecide, StartDecide, type StartDecideInput } from '../../../../contract/index.ts';
+import { StartDecide, type StartDecideInput } from '../../../../contract/index.ts';
 import { DECIDE_ASK_TIMEOUT_MS } from '../../../../contract/hooks/decide-timeout.ts';
 import manifest from '../../../../manifest.ts';
 
@@ -62,7 +62,7 @@ const runtimes = definePlugin({
   api: 5,
   core: false,
   kinds: [],
-  hooks: { takes: [{ hook: StartDecide }, { hook: AutoResumeDecide }] },
+  hooks: { takes: [{ hook: StartDecide }] },
 });
 
 const start: StartDecideInput = {
@@ -86,25 +86,14 @@ function world(delayMs: number | 'never') {
       : new Promise<T>(resolve => {
           clock.after(delayMs, () => resolve(answer));
         });
-  engine.attach(
-    'runtimes',
-    { 'start.decide': () => slow({ allow: true }), 'auto-resume.decide': () => slow({ allow: true }) },
-    'live',
-  );
+  engine.attach('runtimes', { 'start.decide': () => slow({ allow: true }) }, 'live');
   return { engine, clock };
 }
 
-describe('start.decide and auto-resume.decide wait for a slow taker', () => {
+describe('start.decide waits for a slow taker', () => {
   test('a Runtimes answer that takes 1 s (5x the old 200 ms default) is still a yes', async () => {
     const { engine, clock } = world(1_000);
     const asked = engine.decide(StartDecide, start);
-    await clock.advance(1_000);
-    expect(await asked).toEqual({ allow: true });
-  });
-
-  test('the same slow answer is a yes for an automatic resume (a miss there skips the resume)', async () => {
-    const { engine, clock } = world(1_000);
-    const asked = engine.decide(AutoResumeDecide, { ask: 'switch' });
     await clock.advance(1_000);
     expect(await asked).toEqual({ allow: true });
   });
@@ -127,6 +116,5 @@ describe('start.decide and auto-resume.decide wait for a slow taker', () => {
     expect(DECIDE_ASK_TIMEOUT_MS).toBeGreaterThanOrEqual(5_000);
     expect(DECIDE_ASK_TIMEOUT_MS).toBeLessThanOrEqual(30_000);
     expect(StartDecide.timeoutMs).toBe(DECIDE_ASK_TIMEOUT_MS);
-    expect(AutoResumeDecide.timeoutMs).toBe(DECIDE_ASK_TIMEOUT_MS);
   });
 });
