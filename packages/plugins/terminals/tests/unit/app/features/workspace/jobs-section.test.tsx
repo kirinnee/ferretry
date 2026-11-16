@@ -84,3 +84,49 @@ describe('the background jobs section', () => {
     expect(view.container.innerHTML).toBe('');
   });
 });
+
+describe('job ages and failures', () => {
+  it('should count an age in hours and days', () => {
+    expect(jobAgeText(job({}), NOW + 3 * 3_600_000)).toBe('3h');
+    expect(jobAgeText(job({}), NOW + 4 * 86_400_000)).toBe('4d');
+  });
+
+  it('should keep the last answer and say so when the list can no longer be read, and say when a log cannot be read', async () => {
+    const mounted: { unmount: () => Promise<void> }[] = [];
+    let failList = false;
+    const flaky = {
+      call: async <Answer,>(route: string): Promise<Answer> => {
+        if (route.endsWith('/output')) throw new Error('log gone');
+        if (failList) throw new Error('daemon away');
+        return {
+          sessionId: 'agent-session',
+          jobs: [job({})],
+          limits: {
+            runningPerFerret: 8,
+            runningGlobal: 48,
+            running: 1,
+            retentionDays: 7,
+            retainedFinishedPerFerret: 50,
+          },
+        } as Answer;
+      },
+    };
+    const view = await mount(<JobsSection client={flaky} now={() => NOW} pollMs={5} scope={scope} />);
+    mounted.push(view);
+    const settle = async () =>
+      await interact(async () => {
+        await new Promise(resolve => setTimeout(resolve, 30));
+      });
+    await settle();
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('[data-job] button'), 'a job row').click(),
+    );
+    await settle();
+    expect(view.container.textContent).toContain('Could not read the log — log gone');
+    failList = true;
+    await settle();
+    expect(view.container.textContent).toContain('Showing the last answer — daemon away');
+    expect(view.container.textContent).toContain('bun test');
+    await view.unmount();
+  });
+});

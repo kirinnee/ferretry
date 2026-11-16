@@ -20,11 +20,6 @@ export const JOB_EXIT_TIMED_OUT = 124;
 /** The job ended without leaving an exit record (the host or the tmux server went away under it). */
 export const JOB_EXIT_LOST = 70;
 
-/** The exit code a shell would report for a process a signal ended: 128 + the signal's number. */
-export function signalExitCode(signalNumber: number): number {
-  return 128 + signalNumber;
-}
-
 // ─── limits ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** Running jobs one ferret may hold. Jobs do NOT use terminal slots: they are their own tmux sessions with their own cap. */
@@ -171,7 +166,6 @@ export type AttachmentEntry = z.infer<typeof AttachmentEntrySchema>;
 /** The kernel stamps `format` on write and strips it on read, so the schema holds only the entries. */
 export const AttachmentsStateSchema = z.object({ entries: z.array(AttachmentEntrySchema).default([]) });
 export type AttachmentsState = z.infer<typeof AttachmentsStateSchema>;
-
 
 // ─── attachments ──────────────────────────────────────────────────────────────────────────────────────────────────
 

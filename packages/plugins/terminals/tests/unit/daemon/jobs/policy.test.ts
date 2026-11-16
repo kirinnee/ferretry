@@ -8,16 +8,14 @@ import {
 } from '../../../../contract/index.ts';
 import {
   attachExitCode,
-  checkJobCapacity,
+  jobCapacityRefusal,
   defaultJobName,
   findJob,
   JOB_WRAPPER_SCRIPT,
-  JobPolicyError,
   jobPaneArgv,
   jobsToDelete,
   jobState,
   jobTmuxSessionName,
-  signalOfCode,
 } from '../../../../daemon/lib/jobs/policy.ts';
 
 const DAY = 86_400_000;
@@ -29,7 +27,7 @@ describe('job names', () => {
     should(defaultJobName('bun test', new Set())).equal('bun');
   });
 
-  it('should make a clean name from anything and a unique one among the ferret\'s jobs', () => {
+  it("should make a clean name from anything and a unique one among the ferret's jobs", () => {
     should(defaultJobName('9lives', new Set())).equal('job-9lives');
     should(defaultJobName('  ', new Set())).equal('job');
     should(defaultJobName('make', new Set(['make', 'make-2']))).equal('make-3');
@@ -57,16 +55,15 @@ describe('job names', () => {
 
 describe('job caps', () => {
   it('should allow a job under both caps', () => {
-    should(() => checkJobCapacity({ ferret: JOB_MAX_RUNNING_PER_FERRET - 1, global: 3 })).not.throw();
+    should(jobCapacityRefusal({ ferret: JOB_MAX_RUNNING_PER_FERRET - 1, global: 3 })).be.undefined();
   });
 
   it('should refuse past the per-ferret cap, saying which and what to do', () => {
-    should(() => checkJobCapacity({ ferret: JOB_MAX_RUNNING_PER_FERRET, global: 3 })).throw(JobPolicyError);
-    should(() => checkJobCapacity({ ferret: JOB_MAX_RUNNING_PER_FERRET, global: 3 })).throw(/fy job stop/u);
+    should(jobCapacityRefusal({ ferret: JOB_MAX_RUNNING_PER_FERRET, global: 3 })).match(/fy job stop/u);
   });
 
   it('should refuse past the machine cap', () => {
-    should(() => checkJobCapacity({ ferret: 0, global: JOB_MAX_RUNNING_GLOBAL })).throw(/the machine already has/u);
+    should(jobCapacityRefusal({ ferret: 0, global: JOB_MAX_RUNNING_GLOBAL })).match(/the machine already has/u);
   });
 });
 
@@ -78,9 +75,15 @@ describe('job retention', () => {
   });
 
   it('should delete what ended before the window', () => {
-    should(jobsToDelete([{ id: 'old', endedAtMs: now - (JOB_RETENTION_DAYS + 1) * DAY }, { id: 'new', endedAtMs: now }], now)).deepEqual([
-      'old',
-    ]);
+    should(
+      jobsToDelete(
+        [
+          { id: 'old', endedAtMs: now - (JOB_RETENTION_DAYS + 1) * DAY },
+          { id: 'new', endedAtMs: now },
+        ],
+        now,
+      ),
+    ).deepEqual(['old']);
   });
 
   it('should keep only the newest N finished jobs even inside the window', () => {
@@ -88,7 +91,10 @@ describe('job retention', () => {
       id: `j${index}`,
       endedAtMs: now - index * 1_000,
     }));
-    should(jobsToDelete(finished, now)).deepEqual([`j${JOB_RETENTION_FINISHED_PER_FERRET}`, `j${JOB_RETENTION_FINISHED_PER_FERRET + 1}`]);
+    should(jobsToDelete(finished, now)).deepEqual([
+      `j${JOB_RETENTION_FINISHED_PER_FERRET}`,
+      `j${JOB_RETENTION_FINISHED_PER_FERRET + 1}`,
+    ]);
   });
 });
 
@@ -100,18 +106,11 @@ describe('job state and exit codes', () => {
     should(jobState(undefined, false)).equal('lost');
   });
 
-  it('should attach-exit with the job\'s code, capped to a byte, and the lost code when none was recorded', () => {
+  it("should attach-exit with the job's code, capped to a byte, and the lost code when none was recorded", () => {
     should(attachExitCode('exited', exit(3), 70)).equal(3);
     should(attachExitCode('exited', exit(143), 70)).equal(143);
     should(attachExitCode('exited', exit(1000), 70)).equal(255);
     should(attachExitCode('lost', undefined, 70)).equal(70);
-  });
-
-  it('should read 129–192 as a signal death and nothing else', () => {
-    should(signalOfCode(143)).equal(15);
-    should(signalOfCode(128)).be.undefined();
-    should(signalOfCode(1)).be.undefined();
-    should(signalOfCode(193)).be.undefined();
   });
 });
 
@@ -120,7 +119,7 @@ describe('the pane wrapper', () => {
     should(JOB_WRAPPER_SCRIPT.trimEnd().endsWith(';')).be.false();
   });
 
-  it('should pass the folder, the login shell and the command as the shell\'s own positional words', () => {
+  it("should pass the folder, the login shell and the command as the shell's own positional words", () => {
     should(jobPaneArgv({ dir: '/state/j', shell: '/bin/zsh', command: 'echo "$HOME"; ls' })).deepEqual([
       '/bin/sh',
       '-c',

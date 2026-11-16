@@ -277,3 +277,64 @@ describe('fy job wait, stop, logs and ls', () => {
     should(lines[2]).containEql('2d');
   });
 });
+
+describe('fy job: the edges', () => {
+  it('should detach, not wait on, a signal that comes while waiting', async () => {
+    let asks = 0;
+    const again = harness(() => {
+      asks += 1;
+      if (asks === 2) again.signals.handler?.('SIGHUP');
+      return job();
+    });
+    should(await again.sut.wait(invocation(['build']))).equal(75);
+    should(again.io.errors.join('')).containEql('detached from job');
+  });
+
+  it('should say a job did not stop in time when it still runs after the stop', async () => {
+    const { sut, io } = harness(() => job());
+    should(await sut.stopJob(invocation(['build']))).equal(1);
+    should(io.errors.join('')).containEql('did not stop in time');
+  });
+
+  it('should list as JSON and say when there are no jobs', async () => {
+    const view = {
+      sessionId: 's1',
+      jobs: [job()],
+      limits: { runningPerFerret: 8, runningGlobal: 48, running: 1, retentionDays: 7, retainedFinishedPerFerret: 50 },
+    };
+    const json = harness(() => view);
+    should(await json.sut.ls(invocation([], { json: true }))).equal(0);
+    should(JSON.parse(json.io.printed.join('')).jobs).have.length(1);
+    const none = harness(() => ({ ...view, jobs: [] }));
+    should(await none.sut.ls(invocation([]))).equal(0);
+    should(none.io.printed.join('')).equal('no jobs\n');
+  });
+
+  it('should hide the older finished jobs and say how to see them, and show them with --all', async () => {
+    const finished = Array.from({ length: 12 }, (_, index) =>
+      job({ id: `${String(index).padStart(12, 'c')}`, name: `done-${index}`, state: 'exited', exitCode: 0 }),
+    );
+    const view = {
+      sessionId: 's1',
+      jobs: finished,
+      limits: { runningPerFerret: 8, runningGlobal: 48, running: 0, retentionDays: 7, retainedFinishedPerFerret: 50 },
+    };
+    const some = harness(() => view);
+    await some.sut.ls(invocation([]));
+    should(some.io.printed.join('')).containEql('(2 older finished jobs hidden: fy job ls --all)');
+    const all = harness(() => view);
+    await all.sut.ls(invocation([], { all: true }));
+    should(all.io.printed.join('')).not.containEql('hidden');
+  });
+
+  it('should still stream when the daemon will not take its registration', async () => {
+    const { sut, io } = harness(call => {
+      if (call.route === 'POST /v1/ferrets/:ferretId/job-attachments') throw new Error('refused');
+      if (call.route.endsWith('/output'))
+        return chunk('ok\n', 3, { ended: true, job: job({ state: 'exited', exitCode: 0 }) });
+      return job();
+    });
+    should(await sut.attach(invocation(['build']))).equal(0);
+    should(io.printed.join('')).equal('ok\n');
+  });
+});

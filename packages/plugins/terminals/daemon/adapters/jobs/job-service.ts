@@ -29,16 +29,20 @@ import {
   withoutEntry,
   withoutStale,
 } from '../../lib/jobs/attachments.ts';
-import type { AttachmentStore, JobFilesPort, JobRuntimePort, ProcessProof, RunningJob } from '../../lib/jobs/contracts.ts';
+import type {
+  AttachmentStore,
+  JobFilesPort,
+  JobRuntimePort,
+  ProcessProof,
+  RunningJob,
+} from '../../lib/jobs/contracts.ts';
 import {
-  checkJobCapacity,
+  jobCapacityRefusal,
   defaultJobName,
   findJob,
   JOB_STOP_GRACE_SECONDS,
-  JobPolicyError,
   jobsToDelete,
   jobState,
-  signalOfCode,
 } from '../../lib/jobs/policy.ts';
 
 export class JobServiceError extends Error {
@@ -56,7 +60,11 @@ export interface JobServiceOptions {
   readonly isDirectory: (path: string) => Promise<boolean>;
   readonly sleep: (ms: number) => Promise<void>;
   /** Told when a job started or was stopped (the daemon log line). */
-  readonly onEvent?: (event: { readonly kind: 'started' | 'stopped' | 'removed'; readonly sessionId: string; readonly jobId: string }) => void;
+  readonly onEvent?: (event: {
+    readonly kind: 'started' | 'stopped' | 'removed';
+    readonly sessionId: string;
+    readonly jobId: string;
+  }) => void;
 }
 
 interface Row {
@@ -88,7 +96,7 @@ export class JobService {
 
   private async session(reference: string) {
     const session = await this.sessions.resolve(reference);
-    if (!session || !session.cwd.startsWith('/')) throw new JobServiceError('not_found', 'job session not found');
+    if (!session?.cwd.startsWith('/')) throw new JobServiceError('not_found', 'job session not found');
     return session;
   }
 
@@ -157,7 +165,10 @@ export class JobService {
   /** One job by id or name. A name that several retained jobs share reads the running one, else the newest. */
   private async row(sessionId: string, key: string): Promise<Row> {
     const rows = (await this.rows(sessionId)).toSorted((a, b) => b.meta.startedAt.localeCompare(a.meta.startedAt));
-    const ordered = [...rows.filter(row => row.running !== undefined), ...rows.filter(row => row.running === undefined)];
+    const ordered = [
+      ...rows.filter(row => row.running !== undefined),
+      ...rows.filter(row => row.running === undefined),
+    ];
     const found = findJob(
       ordered.map(row => ({ id: row.meta.id, name: row.meta.name, row })),
       key,
@@ -186,8 +197,14 @@ export class JobService {
     const state = jobState(row.exit, row.running !== undefined);
     const finished = state !== 'running';
     let from = Math.min(Math.max(0, request.from ?? 0), size);
-    if (request.from === undefined && request.tail !== undefined) from = await this.tailStart(session.id, row.meta.id, size, request.tail, finished);
-    const bytes = await this.files.readOutput(session.id, row.meta.id, from, Math.min(JOB_OUTPUT_CHUNK_BYTES, size - from));
+    if (request.from === undefined && request.tail !== undefined)
+      from = await this.tailStart(session.id, row.meta.id, size, request.tail, finished);
+    const bytes = await this.files.readOutput(
+      session.id,
+      row.meta.id,
+      from,
+      Math.min(JOB_OUTPUT_CHUNK_BYTES, size - from),
+    );
     let end = bytes.byteLength;
     if (!(finished && from + end >= size)) {
       // Not the log's end, or the job still runs: stop after the last newline so a line is never split between polls.
@@ -196,7 +213,8 @@ export class JobService {
     }
     const next = from + end;
     const attachments = await this.liveAttachments(session.id);
-    const mine = request.attachment === undefined ? undefined : attachments.find(entry => entry.id === request.attachment);
+    const mine =
+      request.attachment === undefined ? undefined : attachments.find(entry => entry.id === request.attachment);
     return {
       text: new TextDecoder().decode(bytes.subarray(0, end)),
       next,
@@ -255,15 +273,11 @@ export class JobService {
     if (!(await this.options.isDirectory(cwd)))
       throw new JobServiceError('bad_request', `there is no folder ${cwd} to run a job in`);
     const [rows, running] = await Promise.all([this.rows(session.id), this.runtime.list()]);
-    try {
-      checkJobCapacity({
-        ferret: running.filter(job => job.owner === session.id).length,
-        global: running.length,
-      });
-    } catch (error) {
-      if (error instanceof JobPolicyError) throw new JobServiceError(error.code, error.message);
-      throw error;
-    }
+    const full = jobCapacityRefusal({
+      ferret: running.filter(job => job.owner === session.id).length,
+      global: running.length,
+    });
+    if (full !== undefined) throw new JobServiceError('capacity', full);
     const runningNames = new Set(rows.filter(row => row.running !== undefined).map(row => row.meta.name));
     if (input.name !== undefined && runningNames.has(input.name))
       throw new JobServiceError('conflict', `this ferret already has a running job named ${input.name}`);
@@ -316,11 +330,6 @@ export class JobService {
     return await this.get(session.id, row.meta.id);
   }
 
-  /** Whether the shell-style code of an ended job is a signal death (for display only). */
-  static signalOf(view: JobView): number | undefined {
-    return view.exitCode === undefined ? undefined : signalOfCode(view.exitCode);
-  }
-
   // ─── retention ──────────────────────────────────────────────────────────────────────────────────────────────────
 
   /** Deletes finished jobs past the retention window or beyond the newest N per ferret. Running jobs are never touched. */
@@ -353,7 +362,8 @@ export class JobService {
     const current = await this.attachments.read();
     if (current.entries.length === 0) return current;
     const starts = new Map<number, string | undefined | 'unknown'>();
-    for (const entry of current.entries) starts.set(entry.pid, await this.proof.startOf(entry.pid).catch(() => 'unknown' as const));
+    for (const entry of current.entries)
+      starts.set(entry.pid, await this.proof.startOf(entry.pid).catch(() => 'unknown' as const));
     const pruned = withoutStale(current, starts);
     if (pruned.entries.length === current.entries.length) return current;
     return await this.attachments.update(state => withoutStale(state, starts));

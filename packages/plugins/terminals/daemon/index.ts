@@ -119,7 +119,7 @@ import { JobService, JobServiceError } from './adapters/jobs/job-service.ts';
 import { StateJobFiles } from './adapters/jobs/job-files.ts';
 import { JobRuntimeError, TmuxJobRuntime } from './adapters/jobs/tmux-job-runtime.ts';
 import { EMPTY_ATTACHMENTS } from './lib/jobs/attachments.ts';
-import type { AttachmentStore } from './lib/jobs/contracts.ts';
+import type { AttachmentStore, JobFilesPort, JobRuntimePort } from './lib/jobs/contracts.ts';
 import { buildProcesses, type ProcessHostReads, type RunnerPane } from './processes.ts';
 import { processIncarnationFor } from './adapters/session/processes/process-incarnation.ts';
 
@@ -152,6 +152,8 @@ export interface TerminalsOverrides {
   };
   /** The host reads behind the pane proof and the Warden's looks (the daemon: `/proc` or `ps`, per platform). */
   readonly processHost?: ProcessHostReads;
+  /** The job keeper's files and tmux sessions (the daemon: the state tree and `TmuxJobRuntime` over `tmux`). */
+  readonly jobs?: { readonly files?: JobFilesPort; readonly runtime?: JobRuntimePort };
 }
 
 /**
@@ -626,8 +628,9 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     },
   };
   const jobService = new JobService(
-    new StateJobFiles(kernel.state, JobFiles),
-    new TmuxJobRuntime(tmux, loginShell, processes.limits, () => liveTerminalEnvironment(kernel)),
+    overrides.jobs?.files ?? new StateJobFiles(kernel.state, JobFiles),
+    overrides.jobs?.runtime ??
+      new TmuxJobRuntime(tmux, loginShell, processes.limits, () => liveTerminalEnvironment(kernel)),
     attachmentStore,
     {
       // Which process a pid is, by its start: undefined when none runs, 'unknown' when the host cannot say.

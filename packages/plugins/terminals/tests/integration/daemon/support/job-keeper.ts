@@ -9,10 +9,10 @@ import { type AttachmentsState, EMPTY_ATTACHMENTS } from '../../../../daemon/lib
 import type { AttachmentStore, ProcessProof } from '../../../../daemon/lib/jobs/contracts.ts';
 import { BunTmuxProcess } from './host-spawn.ts';
 
-const tree = defineState({ name: 'jobs', path: 'jobs/*', store: 'opaque', format: 1 });
+export const tree = defineState({ name: 'jobs', path: 'jobs/*', store: 'opaque', format: 1 });
 
 /** The slice of the kernel's state port a job tree uses, over a plain folder: the same operations, the same shapes. */
-function folderState(root: string) {
+export function folderState(root: string) {
   const at = (name: string): string => join(root, 'jobs', name);
   return {
     write: async (_def: unknown, value: unknown, name?: string) => {

@@ -10,23 +10,12 @@ import {
   JOB_RETENTION_FINISHED_PER_FERRET,
   type JobExit,
   type JobState,
-  signalExitCode,
 } from '../../../contract/index.ts';
 
 export const JOB_TMUX_PREFIX = 'fy-job-';
 /** The tmux option that marks a session as a job and names its ferret; terminal sweeps never read it. */
 export const JOB_OWNER_OPTION = '@fy_job_owner';
 export const JOB_ID_OPTION = '@fy_job_id';
-
-export class JobPolicyError extends Error {
-  constructor(
-    readonly code: 'bad_request' | 'capacity' | 'conflict',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'JobPolicyError';
-  }
-}
 
 // ─── names ────────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -70,20 +59,15 @@ export function findJob<T extends { readonly id: string; readonly name: string }
 // ─── caps ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
- * Whether one more job may start. Jobs are their own tmux sessions, so they do not take terminal slots; they have a cap
- * of their own per ferret and across the machine. A refusal says which one and what to do.
+ * Why one more job may NOT start, or nothing when it may. Jobs are their own tmux sessions, so they do not take terminal slots;
+ * they have a cap of their own per ferret and across the machine. A refusal says which one and what to do.
  */
-export function checkJobCapacity(running: { readonly ferret: number; readonly global: number }): void {
+export function jobCapacityRefusal(running: { readonly ferret: number; readonly global: number }): string | undefined {
   if (running.ferret >= JOB_MAX_RUNNING_PER_FERRET)
-    throw new JobPolicyError(
-      'capacity',
-      `this ferret already has ${running.ferret} running jobs (the limit is ${JOB_MAX_RUNNING_PER_FERRET}); wait for one or stop one with fy job stop`,
-    );
+    return `this ferret already has ${running.ferret} running jobs (the limit is ${JOB_MAX_RUNNING_PER_FERRET}); wait for one or stop one with fy job stop`;
   if (running.global >= JOB_MAX_RUNNING_GLOBAL)
-    throw new JobPolicyError(
-      'capacity',
-      `the machine already has ${running.global} running jobs (the limit is ${JOB_MAX_RUNNING_GLOBAL}); try again when some end`,
-    );
+    return `the machine already has ${running.global} running jobs (the limit is ${JOB_MAX_RUNNING_GLOBAL}); try again when some end`;
+  return undefined;
 }
 
 // ─── retention ────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -126,11 +110,6 @@ export function jobState(exit: JobExit | undefined, sessionAlive: boolean): JobS
 export function attachExitCode(state: JobState, exit: JobExit | undefined, lostCode: number): number {
   if (state === 'exited' && exit !== undefined) return Math.min(255, exit.code);
   return lostCode;
-}
-
-/** The signal number a shell-style code stands for, if it does (129–192). */
-export function signalOfCode(code: number): number | undefined {
-  return code > 128 && code <= signalExitCode(64) ? code - 128 : undefined;
 }
 
 // ─── the wrapper the pane runs ────────────────────────────────────────────────────────────────────────────────────
