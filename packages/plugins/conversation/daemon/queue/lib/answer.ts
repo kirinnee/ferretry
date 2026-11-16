@@ -33,6 +33,9 @@ export function answerOf(
       ...(reason === undefined || waiting?.waitBehind === undefined ? {} : { waitBehind: waiting.waitBehind }),
     };
   }
+  // KEPT, NOT TYPED: the box could not be proven empty, so the send waits for the tracker to type it once it reads clear.
+  if (record.untyped === true && record.fate === 'accepted')
+    return { disposition: 'queued', fate: 'accepted', waitReason: 'unreadable' };
   const disposition = record.held === true ? 'queued-for-revive' : dispositionOf(record.path, record.fate === 'queued');
   return { disposition, fate: record.fate };
 }
