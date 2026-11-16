@@ -32,7 +32,7 @@ Claims stay what they are: repo-relative paths on the card (`files`, max 256, ea
   files on a card it holds, like its status and How to test. The lead still claims at brief time.
 
 Known hot files are claimed like any other file. `fy task file --help`, `fy task create --help` and
-[board.md](../board.md#clashing-claims-queue-the-later-card) tell a lead to claim them when the work will touch them: `packages/daemon/bin/fyd.ts`,
+[board.md](../board.md#clashing-claims-queue-the-later-task) tell a lead to claim them when the work will touch them: `packages/daemon/bin/fyd.ts`,
 `packages/protocol/src/lib/daemon-features/index.ts`. The daemon does not guess claims a card did not make.
 
 ## 2. Detecting a clash

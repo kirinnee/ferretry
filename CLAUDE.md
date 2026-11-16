@@ -281,8 +281,8 @@ What is enforced, the defaults with a worked example and the one optional owner 
 [docs/ferret-limits.md](docs/ferret-limits.md).
 
 `packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
-repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
-GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.
+repository), tasks with lanes in six fixed categories, authority from ownership and lineage, staleness, the
+GitHub watcher that moves a task when its PR or release does, and the agenda and dependency links between tasks.
 The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
 old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
 
