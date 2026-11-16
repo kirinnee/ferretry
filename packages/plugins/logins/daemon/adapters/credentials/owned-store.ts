@@ -222,6 +222,21 @@ export class OwnedLoginStore {
   }
 
   /**
+   * The organisation type a Claude login's account file records (`oauthAccount.organizationType`): the ONE field read besides
+   * the email, and nothing else of the file (it sits beside tokens in some layouts, so no other key is ever looked at).
+   * Codex has none. Not kept: it is read once per publish.
+   */
+  async organizationType(source: CredentialEmailSource): Promise<string | undefined> {
+    if (source.harness === 'codex') return undefined;
+    try {
+      const root = asRecord(JSON.parse(await this.root.readText(this.#path(source.accountFile))) as unknown);
+      return nonEmpty(asRecord(root?.oauthAccount)?.organizationType);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Records a login's passive reading where `passiveUsage` reads it: `<its owned directory>/usage.json`, exactly the
    * file `fy statusline` writes for a Claude login (one JSON line, replaced whole, `0600`). A login this daemon does
    * not own has no such file, so nothing is written for it.

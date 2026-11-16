@@ -288,6 +288,12 @@ export interface ObservedHumanInput {
   readonly originatedAt?: string;
   readonly proofKey: string;
   readonly shapeVersion: number;
+  /**
+   * The `send_id` of the Ferretry channel message this input is, when it came through the channel (the wrapper's own
+   * attribute, kept when the wrapper is taken off). Only that send can be proven by it: two identical channel messages
+   * are told apart by it, never by their text.
+   */
+  readonly channelSendId?: string;
 }
 
 interface TranscriptParseInputCommon {

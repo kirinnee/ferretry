@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CHANNEL_INSTRUCTIONS } from './channel.ts';
 import { AGENT_TOOL_MAX_TOTAL_WAIT_MS, MCP_TOOLS } from './tools.ts';
 
 /**
@@ -39,6 +40,8 @@ export interface McpServerInfo {
   readonly version: string;
   /** What every agent is told about these tools when it connects (MCP `initialize` instructions): one line. */
   readonly instructions?: string;
+  /** Whether the launch gave Claude the channel flag: declares the `claude/channel` capability and says whose the messages are. */
+  readonly channel?: boolean;
 }
 
 type JsonRpcId = string | number | null;
@@ -234,6 +237,8 @@ export class McpServer {
   constructor(
     private readonly tools: McpToolsPort,
     private readonly info: McpServerInfo,
+    /** Called once when the client says it is initialized: the channel pump starts there, never before. */
+    private readonly onInitialized: () => void = () => {},
   ) {}
 
   /**
@@ -253,7 +258,10 @@ export class McpServer {
     const { id, method, params } = parsed.data;
     // A message with no id is a notification, and a notification is never answered — `initialized`
     // and `cancelled` included. A long call is bounded by its own timeout rather than cancelled.
-    if (id === undefined) return undefined;
+    if (id === undefined) {
+      if (method === 'notifications/initialized') this.onInitialized();
+      return undefined;
+    }
     switch (method) {
       case 'initialize':
         return { jsonrpc: '2.0', id, result: this.initialize(params) };
@@ -278,11 +286,18 @@ export class McpServer {
     const asked = InitializeParamsSchema.safeParse(params ?? {});
     const requested = asked.success ? asked.data.protocolVersion : undefined;
     const protocolVersion = MCP_PROTOCOL_VERSIONS.find(version => version === requested) ?? MCP_PROTOCOL_VERSIONS[0];
+    const instructions = [this.info.instructions, this.info.channel === true ? CHANNEL_INSTRUCTIONS : undefined]
+      .filter(part => part !== undefined)
+      .join(' ');
     return {
       protocolVersion,
-      capabilities: { tools: { listChanged: false } },
+      // The channel is declared only when the launch gave Claude the channel flag (see `ServeContext.channel`).
+      capabilities: {
+        tools: { listChanged: false },
+        ...(this.info.channel === true ? { experimental: { 'claude/channel': {} } } : {}),
+      },
       serverInfo: { name: this.info.name, version: this.info.version },
-      ...(this.info.instructions === undefined ? {} : { instructions: this.info.instructions }),
+      ...(instructions === '' ? {} : { instructions }),
     };
   }
 
