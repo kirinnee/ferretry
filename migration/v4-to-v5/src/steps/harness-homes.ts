@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { moveSealed } from '../sealed.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
 import { configs, info, json, runtimeIds, runtimeName } from '../v4/ferrets.ts';
-import { agentHomesRoot as targetRoot } from '../v5/harness-paths.ts';
+import { agentHomesRoot as targetRoot, historyPoolRoot } from '../v5/harness-paths.ts';
 import type { Step } from './index.ts';
 
 const Harness = z.enum(['claude', 'codex']);
@@ -44,22 +44,23 @@ async function named<Result>(where: string, why: string, work: () => Promise<Res
 
 export const harnessHomesStep: Step = {
   id: 'harness-homes',
-  title: 'Harness folders (copied as opaque files; chat history is left behind and NOT usable in v5)',
+  title:
+    'Harness folders (runtime homes copied as opaque files; the shared history pool written for the v5 harness to link)',
   owner: ['plugin-claude-code', 'plugin-codex'],
   reads: ['fleet/ids.json', 'fleet/manifest.json', 'fleet/homes/', 'fleet/shared/<claude|codex>/'],
   sealed: [],
   notCarried: [
     {
-      what: 'chat history (old conversations and transcripts) as usable conversations',
-      why: 'owner ruling !A516: left behind. The folders are copied as opaque files and never opened or linked into v5, so no conversation resumes from them; the originals stay in the v4 home',
+      what: 'links from a converted ferret home to the history pool',
+      why: 'this step only writes the pool (state/<claude-code|codex>/history-pool/) and never opens it; v5 links each ferret home to it when the ferret starts, which is what lets a converted ferret resume its conversation (!A516)',
     },
     {
       what: 'all harness-home symlinks (including pooled history and sign-in links)',
-      why: 'agent-homes declarations specify no v5 link policy; no link is read, followed or re-made; Logins owns sign-ins',
+      why: 'no link is read, followed or re-made; the v5 harness links history from the pool and Logins owns sign-ins',
     },
     {
       what: 'runtime-home to per-ferret-home association',
-      why: 'v5 declares opaque agent-homes/* but no runtime-to-ferret mapping; runtime UUID folders and the shared pool (_shared) are kept for the owner to connect',
+      why: 'v5 declares opaque agent-homes/* but no runtime-to-ferret mapping; runtime UUID folders are copied as they are, and the shared pool is written to the history pool for the v5 harness to link',
     },
     {
       what: 'harness homes outside fleet/homes or with no known harness',
@@ -67,7 +68,7 @@ export const harnessHomesStep: Step = {
     },
     {
       what: '.fy apply bookkeeping, .leases and .migration-progress',
-      why: 'generated or transient; v5 regenerates them',
+      why: "generated or transient; v5 regenerates them (v4's .leases is a lease store, not history, so the pool never gets it)",
     },
     {
       what: 'auth.json and .credentials.json in runtime homes',
@@ -166,9 +167,10 @@ export const harnessHomesStep: Step = {
         sealed.push({ file: to, bytes: source.size });
       };
 
-      // _shared cannot collide with a v4 runtime UUID. No links are invented to point at it.
+      // v4's pool becomes the v5 harness's ONE history pool, a folder beside agent-homes (never inside it). v4's
+      // `.leases` is a lease store, not history, so copyTree leaves it out. No links are made: the v5 harness links.
       for (const harness of ['claude', 'codex'] as const)
-        await copyTree(join(shared, harness), join(targetRoot(harness), '_shared'), false);
+        await copyTree(join(shared, harness), historyPoolRoot(harness), false);
       const presentHomes = (await info(homes)) === undefined ? [] : await readdir(homes, { withFileTypes: true });
       let carriedHomes = 0;
       let omittedHomes = 0;
@@ -219,14 +221,14 @@ export const harnessHomesStep: Step = {
         sealed,
         kept: [
           {
-            what: 'opaque harness files copied unopened (kept as files only, not usable conversations)',
+            what: 'harness files copied unopened (the history pool and runtime homes)',
             count: sealed.length,
           },
           {
-            what: 'runtime homes copied as opaque folders (no conversation resumes from them in v5)',
+            what: 'runtime homes copied as opaque folders',
             count: carriedHomes,
           },
-          { what: 'links omitted (no v5 policy)', count: links },
+          { what: 'links omitted (the v5 harness makes its own)', count: links },
           { what: 'homes omitted (no safe harness mapping)', count: omittedHomes },
         ],
       };

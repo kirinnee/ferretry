@@ -86,9 +86,9 @@ describe('the converter report', () => {
       if (line === undefined) throw new Error(`no summary line for ${id}`);
       return line;
     };
-    // Chat history: the harness folders are opaque files, never "conversations, for resume".
-    expect(stepLine('harness-homes')).toContain('chat history is left behind');
-    expect(stepLine('harness-homes')).toContain('NOT usable in v5');
+    // The history pool is written for the v5 harness to link; this step never claims a resumed conversation.
+    expect(stepLine('harness-homes')).toContain('history pool written for the v5 harness to link');
+    expect(stepLine('harness-homes')).not.toContain('NOT usable');
     expect(printed).not.toMatch(/conversations, for resume/i);
     // Security history: the Gate and Access lines name what is left out.
     expect(stepLine('gate')).toContain('kept-bucket history is left behind');
@@ -96,7 +96,7 @@ describe('the converter report', () => {
     // The JSON says it too, in each step's own not-carried list.
     const notCarried = (id: string): string =>
       (result.report.steps.find(step => step.id === id)?.notCarried ?? []).map(item => item.what).join(' | ');
-    expect(notCarried('harness-homes')).toContain('chat history');
+    expect(notCarried('harness-homes')).toContain('history pool');
     expect(notCarried('gate')).toContain('kept-bucket audit history');
     expect(notCarried('access')).toContain('grant audit history');
   });

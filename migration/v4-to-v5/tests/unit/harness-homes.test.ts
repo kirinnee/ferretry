@@ -34,7 +34,7 @@ test('copies opaque transcripts, sqlite and user state byte for byte with modes 
   await f.put('fleet/credentials/never-open/auth.json', { secret: 'FAKE-SECRET-SIGNIN' });
   const report = await harnessHomesStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  const copied = join(f.to, 'state/codex/agent-homes/_shared/sessions/rollout.jsonl');
+  const copied = join(f.to, 'state/codex/history-pool/sessions/rollout.jsonl');
   expect(await readFile(copied)).toEqual(bytes);
   const metadata = await stat(copied);
   expect(metadata.mode & 0o777).toBe(0o640);
@@ -42,7 +42,7 @@ test('copies opaque transcripts, sqlite and user state byte for byte with modes 
   expect(await readFile(join(f.to, 'state/codex/agent-homes', RUNTIME, '.claude.json'), 'utf8')).toContain(
     'FAKE-PRIVATE-STATE',
   );
-  expect(await stat(join(f.to, 'state/codex/agent-homes/_shared/sqlite/state.db'))).toBeDefined();
+  expect(await stat(join(f.to, 'state/codex/history-pool/sqlite/state.db'))).toBeDefined();
   expect(
     await stat(join(f.to, 'state/codex/agent-homes', RUNTIME, 'auth.json')).catch(() => undefined),
   ).toBeUndefined();
@@ -62,9 +62,7 @@ test('maps a former runtime name and copies the Claude pool without parsing it',
   const report = await harnessHomesStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect(await stat(join(f.to, 'state/claude-code/agent-homes', RUNTIME, '.claude.json'))).toBeDefined();
-  expect(
-    await stat(join(f.to, 'state/claude-code/agent-homes/_shared/projects/project/conversation.jsonl')),
-  ).toBeDefined();
+  expect(await stat(join(f.to, 'state/claude-code/history-pool/projects/project/conversation.jsonl'))).toBeDefined();
   expect(JSON.stringify(report)).not.toContain('FAKE-');
 });
 
@@ -99,9 +97,33 @@ test('unmapped runtime folders are explicit gaps and transient files are omitted
   const report = await harnessHomesStep.run(f.ctx());
   expect(report.status).toBe('converted');
   expect(report.kept.find(item => item.what.startsWith('homes omitted'))?.count).toBe(1);
-  expect(
-    await stat(join(f.to, 'state/claude-code/agent-homes/_shared/.leases')).catch(() => undefined),
-  ).toBeUndefined();
+  expect(await stat(join(f.to, 'state/claude-code/history-pool/.leases')).catch(() => undefined)).toBeUndefined();
+});
+
+test('writes each harness pool to its one history pool, beside agent-homes and never inside it', async () => {
+  const slug = '-home-owner-project';
+  const id = '33333333-3333-4333-8333-333333333333';
+  await f.put(`fleet/shared/claude/projects/${slug}/${id}.jsonl`, 'FAKE-CLAUDE-TRANSCRIPT');
+  await f.put('fleet/shared/claude/history.jsonl', 'FAKE-CLAUDE-HISTORY');
+  await f.put('fleet/shared/claude/.leases/conversation', { holder: 'FAKE-LEASE' });
+  await f.put('fleet/shared/codex/sessions/2026/11/01/rollout-fake.jsonl', 'FAKE-ROLLOUT');
+  await f.put('fleet/shared/codex/sqlite/state.db', 'FAKE-SQLITE');
+  await f.put('fleet/shared/codex/.leases/conversation', { holder: 'FAKE-LEASE' });
+  const report = await harnessHomesStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+  const claudePool = join(f.to, 'state/claude-code/history-pool');
+  const codexPool = join(f.to, 'state/codex/history-pool');
+  expect(await readFile(join(claudePool, 'projects', slug, `${id}.jsonl`), 'utf8')).toContain('FAKE-CLAUDE-TRANSCRIPT');
+  expect(await readFile(join(claudePool, 'history.jsonl'), 'utf8')).toContain('FAKE-CLAUDE-HISTORY');
+  expect(await readFile(join(codexPool, 'sessions/2026/11/01/rollout-fake.jsonl'), 'utf8')).toContain('FAKE-ROLLOUT');
+  expect(await readFile(join(codexPool, 'sqlite/state.db'), 'utf8')).toContain('FAKE-SQLITE');
+  // v4's lease store is not history: it is never written to the pool.
+  expect(await stat(join(claudePool, '.leases')).catch(() => undefined)).toBeUndefined();
+  expect(await stat(join(codexPool, '.leases')).catch(() => undefined)).toBeUndefined();
+  // Nothing is written as agent-homes/_shared any more.
+  for (const harness of ['claude-code', 'codex'])
+    expect(await stat(join(f.to, 'state', harness, 'agent-homes/_shared')).catch(() => undefined)).toBeUndefined();
+  expect(JSON.stringify(report)).not.toContain('FAKE-');
 });
 
 test('malformed metadata fails without exposing values', async () => {

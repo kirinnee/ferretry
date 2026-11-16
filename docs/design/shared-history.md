@@ -40,7 +40,7 @@ Leases live at `fleet/shared/<harness>/.leases`.
 
 - The kernel refuses every link inside `agent-homes` except `linkCredential` (`credentialHomeLinkVerdict`,
   `core/kernel/host/shared-credentials.ts`), so no plugin can pool today. Runtimes' apply skips pooling and says so.
-- The v4→5.0 migrator copies the v4 pool to `agent-homes/_shared` (`migration/v4-to-v5/src/steps/harness-homes.ts`),
+- Before PR 3 the v4→5.0 migrator copied the v4 pool to `agent-homes/_shared` (`migration/v4-to-v5/src/steps/harness-homes.ts`),
   but nothing links it, so a converted ferret's `hasConversation` proves the transcript absent and it **starts a new
   conversation** (`core/ferrets/daemon/lib/ferrets/service.ts`, !A516). The same happens to a conversation kept from
   the owner's own `~/.claude`: it lives outside the ferret's home.
