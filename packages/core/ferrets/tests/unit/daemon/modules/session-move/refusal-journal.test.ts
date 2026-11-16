@@ -7,6 +7,7 @@ describe('recordMoveRefusal', () => {
     const appended: unknown[][] = [];
     await recordMoveRefusal(
       { append: async (...args: unknown[]) => void appended.push(args) } as never,
+      { warn: () => {} },
       'wren' as never,
       { to: 'claude-two', verdict: 'unknown', cause: 'nothing observable', described: { items }, by: 'warden' },
     );
@@ -30,6 +31,26 @@ describe('recordMoveRefusal', () => {
           blockers: [{ title: 'a tool shell', detail: 'zsh -c …' }, { title: 'bare' }],
           by: 'warden',
         },
+      ],
+    ]);
+  });
+
+  test('a failed append is said once and swallowed, so the caller still throws its typed refusal', async () => {
+    const warnings: Array<[string, unknown]> = [];
+    await recordMoveRefusal(
+      {
+        append: async () => {
+          throw new Error('EIO');
+        },
+      } as never,
+      { warn: (message: string, fields?: unknown) => void warnings.push([message, fields]) },
+      'wren' as never,
+      { to: 'claude-two', verdict: 'unknown', cause: 'x', described: { items: [] }, by: 'owner' },
+    );
+    expect(warnings).toEqual([
+      [
+        'a refused move could not be journalled; it is still refused',
+        { session: 'wren', event: 'session.move_refused', error: 'EIO' },
       ],
     ]);
   });

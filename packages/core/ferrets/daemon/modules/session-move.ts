@@ -1,5 +1,5 @@
 import { isAbsolute, join, relative } from 'node:path';
-import type { Clock, FerretId, RootsPort, SpawnPort, StatePort } from '@ferretry/kernel/contract';
+import type { Clock, FerretId, Log, RootsPort, SpawnPort, StatePort } from '@ferretry/kernel/contract';
 import { jsonObject, milliseconds } from '@ferretry/std';
 import type { z } from 'zod';
 import type {
@@ -116,6 +116,8 @@ export interface SessionMoveNeeds {
   /** The machine's `/proc` facts, plus where a process is working. */
   readonly host: ProcessHostFacts;
   readonly clock: Clock;
+  /** Where a refusal that could not be journalled is said. */
+  readonly log: Pick<Log, 'warn'>;
   // ─── Ferrets' own ───
   readonly storage: DaemonStorage;
   readonly sessions: SessionDirectorySubsystem;
@@ -172,6 +174,8 @@ export type SessionMoveProvides = SessionMoveSubsystem & AgentJobControl;
  *  flow happens to use them is a call site nobody can check. */
 interface SessionMoveParts {
   readonly storage: DaemonStorage;
+  /** Where a refusal that could not be journalled is said. */
+  readonly log: Pick<Log, 'warn'>;
   /** Pids read wherever they are on the host, for following a stopped job out of its pane (`move/stop-jobs.ts`). */
   readonly processes: { lookup(pids: readonly number[]): Promise<ReadonlyMap<number, ProcRow>> };
   readonly sessions: SessionDirectorySubsystem;
@@ -765,7 +769,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     if (!decision.proceed) {
       // EVERY REFUSAL IS COUNTED. A 409 used to be recorded nowhere, so nobody could say how often the gate said no or
       // why. This is the only write a refusal makes: the session's config and record are untouched.
-      await recordMoveRefusal(parts.storage, id, {
+      await recordMoveRefusal(parts.storage, parts.log, id, {
         to: account.agent,
         verdict: report.worstVerdict,
         cause: decision.reason,
@@ -1123,6 +1127,7 @@ export const sessionMoveModule: SessionMoveModule = {
     // Hoisted so the handover and restart subsystems share this exact mover.
     const sessionMove = createSessionMoveSubsystem({
       storage: needs.storage,
+      log: needs.log,
       processes: new KernelProcessProbe(spawn, host, clock),
       sessions: needs.sessions,
       resume: needs.resume,
@@ -1219,6 +1224,7 @@ function blockersOf(described: {
  */
 export async function recordMoveRefusal(
   storage: Pick<DaemonStorage, 'append'>,
+  log: Pick<Log, 'warn'>,
   id: SessionId,
   refusal: {
     readonly to: string;
@@ -1228,11 +1234,21 @@ export async function recordMoveRefusal(
     readonly by: string;
   },
 ): Promise<void> {
-  await storage.append(id, 'session.move_refused', {
-    to: refusal.to,
-    verdict: refusal.verdict,
-    cause: refusal.cause,
-    blockers: blockersOf(refusal.described),
-    by: refusal.by,
-  });
+  try {
+    await storage.append(id, 'session.move_refused', {
+      to: refusal.to,
+      verdict: refusal.verdict,
+      cause: refusal.cause,
+      blockers: blockersOf(refusal.described),
+      by: refusal.by,
+    });
+  } catch (error) {
+    // A failed append never changes the outcome: the caller still throws the typed refusal, which the replay guard
+    // treats as re-presentable, so the same request is re-evaluated once the journal recovers.
+    log.warn('a refused move could not be journalled; it is still refused', {
+      session: id,
+      event: 'session.move_refused',
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
