@@ -1,7 +1,22 @@
-import { beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
+import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { type DaemonImplementation } from '@ferretry/kernel/manifest';
+import { type TestHost, testHost } from '@ferretry/kernel/testing';
+import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
 import type { Log } from '@ferretry/kernel/contract';
 import { config as hostConfig, state as hostState } from '@ferretry/kernel/host';
-import { MODEL_SET_ITEMS, PROFILE_ITEMS, RUNTIME_ITEMS, RUNTIMES_CONFIG } from '../../../contract/index.ts';
+import {
+  MODEL_SET_ITEMS,
+  PROFILE_ITEMS,
+  RUNTIME_ITEMS,
+  RUNTIMES_CONFIG,
+  RuntimesPort,
+} from '../../../contract/index.ts';
+import { hostAssembly, runtimesDaemon } from '../../../daemon/index.ts';
+import { cleanupWorlds, fleetWorld } from '../support/fleet-world.ts';
 import manifest from '../../../manifest.ts';
 
 /**
@@ -111,5 +126,91 @@ describe('storage parity: runtimes configuration files', () => {
     expect(write.outcome.kind).toBe('applied');
     expect(write.found).toEqual(['runtimes.yaml']);
     expect((await written(RUNTIMES_CONFIG, undefined, { agentPermissions: 'auto' })).outcome.kind).toBe('refused');
+  });
+});
+
+/**
+ * The fleet folder the composed daemon writes (`hostAssembly`, over the kernel's real `fleet` root on a temp home): what
+ * v4 laid out under `FY_HOME/fleet` and who writes it now. One apply makes it, so each row is read off the disk it made.
+ */
+describe('the fleet folder a real apply writes', () => {
+  afterEach(cleanupWorlds);
+
+  const CONFIG = {
+    runtimes: { 'claude-default': { login: 'claude-you', profile: 'default', agent: true } },
+    profiles: { default: { contents: ['modelSets/heavy'] } },
+    'model-sets': { heavy: { models: ['claude-opus-5-5'], default: 'claude-opus-5-5' } },
+  };
+  const put = (name: string) => ({
+    change: {
+      kind: 'runtime.put',
+      name,
+      credential: 'claude-you',
+      profile: 'default',
+      agent: true,
+      create: true,
+      addAnother: true,
+    },
+  });
+
+  async function compose() {
+    const world = await fleetWorld();
+    const logins = fakeLogins([sampleLogin('claude-you', { store: 'ferretry' })]);
+    logins.setLaunchStores([
+      {
+        id: 'claude-you',
+        variables: {
+          CLAUDE_SECURESTORAGE_CONFIG_DIR: join(dirname(world.fleet), 'state', 'logins', 'credentials', 'claude-you'),
+        },
+      },
+    ]);
+    const host = await testHost({
+      plugins: [
+        runtimesDaemon(ctx =>
+          hostAssembly({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never),
+        ) as DaemonImplementation<any>,
+      ],
+      fakes: { ferrets: new FakeFerrets(), logins, loginChanges: fakeLoginChanges() },
+      gate: new StandInAdmission(() => ownerStanding()),
+      config: CONFIG,
+      ownerHome: world.person,
+      executables: ['/fixture/bin/claude', '/fixture/bin/codex'],
+      searchPath: '/fixture/bin',
+      spawn: () => ({ code: 0, stdout: '', stderr: '' }) as never,
+    });
+    return { host, world };
+  }
+
+  async function apply(host: TestHost, body: unknown) {
+    const staged = await host.request('POST', '/v1/runtimes/proposals', { body });
+    expect(staged.status).toBe(200);
+    const { id } = staged.json<{ id: string }>();
+    return await host.request('POST', `/v1/runtimes/proposals/${id}/apply`, { body: {} });
+  }
+
+  test('F-0179 F-0009 F-0010 F-0195 F-0196 F-0197 F-0198 F-0186 F-0191 the fleet is FY_HOME/fleet: manifest.json, ids.json, homes/<id> and bin/<name> are what an apply leaves', async () => {
+    const { host, world } = await compose();
+    expect((await apply(host, put('claude-work'))).status).toBe(200);
+
+    expect(world.fleet).toBe(join(world.home, 'fleet'));
+    const manifest = JSON.parse(await readFile(join(world.fleet, 'manifest.json'), 'utf8')) as {
+      accounts: { id: string; home: string }[];
+    };
+    const ids = JSON.parse(await readFile(join(world.fleet, 'ids.json'), 'utf8')) as Record<string, unknown>;
+    expect(Object.keys(ids).length).toBeGreaterThan(0);
+    // One harness home per runtime, homes/<id>, and the manifest names the very folder.
+    expect((await readdir(join(world.fleet, 'homes'))).toSorted()).toEqual(manifest.accounts.map(a => a.id).toSorted());
+    for (const account of manifest.accounts) expect(account.home).toBe(join(world.fleet, 'homes', account.id));
+    expect((await readdir(join(world.fleet, 'bin'))).toSorted()).toEqual(['claude-default', 'claude-work']);
+    // The apply took the fleet claim to write all this and left none of it behind.
+    expect((await readdir(world.fleet)).filter(name => name.startsWith('.fy-fleet-apply'))).toEqual([]);
+  });
+
+  test('F-0008 F-0184 the fleet’s own skills are FY_HOME/fleet/assets/skills/<name>, read through the fleet root', async () => {
+    const { host, world } = await compose();
+    await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });
+    await writeFile(join(world.fleet, 'assets', 'skills', 'review', 'SKILL.md'), '# review\n');
+    const assets = host.provided(RuntimesPort).assetSkills?.();
+    expect((await assets?.skills(5))?.map(entry => entry.name)).toEqual(['review']);
   });
 });
