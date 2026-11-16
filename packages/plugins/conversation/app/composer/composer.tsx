@@ -18,6 +18,7 @@ import {
   Markdown,
   PanelSlot,
   useSlotHasPanels,
+  useAppHook,
   PendingLocationChip,
   type ReferenceSurface,
   registerComposerQuoteTarget,
@@ -35,7 +36,9 @@ import {
   useKeyboardOpen,
   type ViewerImage,
 } from '@ferretry/app/ui';
+import type { FerretContext } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { ACCESS_HOW_TO_ENABLE_LOCATION_HOOK, ACCESS_PROVIDED_APP_HOOKS } from '@ferretry/plugin-access/contract';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type ComposerAccount, type ComposerToolsProps, transformTextIndex } from '../../contract/index.ts';
@@ -73,7 +76,6 @@ import {
   type DaemonFerretScope,
   daemonFerretKey,
   daemonFerretScope,
-  type FerretContext,
   REINSERT_TRANSCRIPTION_EVENT,
   referencesOf,
   reinsertTranscriptionText,
@@ -472,6 +474,12 @@ export function Composer({
   // forgot every send and reloaded the sent words.
   const daemonId = daemonProp?.daemonId ?? clientDaemon ?? '';
   const daemon = useMemo(() => daemonConnection(daemonId), [daemonId]);
+  // "How to turn location back on" is Access's per-device guide (its `access.how-to-enable-location` hook): without
+  // Access on this machine the chip keeps its generic steps.
+  const locationSteps = useAppHook(daemonId, ACCESS_HOW_TO_ENABLE_LOCATION_HOOK, 'access');
+  const howToEnableLocation = ACCESS_PROVIDED_APP_HOOKS[ACCESS_HOW_TO_ENABLE_LOCATION_HOOK](locationSteps)
+    ? locationSteps
+    : undefined;
   const ownApi = useMemo(() => composerApi(client), [client]);
   const api = apiProp ?? ownApi;
   const isDetached = detached !== undefined;
@@ -1482,6 +1490,7 @@ export function Composer({
         <PendingLocationChip
           disabled={sending}
           draft={location}
+          {...(howToEnableLocation === undefined ? {} : { howToEnable: howToEnableLocation })}
           onPlace={place =>
             setLocation(current =>
               current?.kind === 'ready' ? { kind: 'ready', fix: { ...current.fix, place } } : current,
