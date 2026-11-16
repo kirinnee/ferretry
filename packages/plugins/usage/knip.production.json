@@ -5,7 +5,6 @@
     "app/lib/move-triggers.ts",
     "daemon/adapters/usage/index.ts",
     "daemon/adapters/usage/provider-quota/index.ts",
-    "daemon/lib/performance/fallbacks.ts",
     "daemon/lib/performance/sampler-tee.ts"
   ]
 }
