@@ -5,6 +5,7 @@ import {
   type CardResponse,
   formatCardRef,
   type LaneSet,
+  taskWire,
 } from '../../contract/index.ts';
 import { mergeProgress, parseProgressFile, type ProgressParts } from './board-progress.ts';
 import { explainingRefusals } from './board-refusal.ts';
@@ -202,14 +203,14 @@ export class BoardController {
           : resolveFerretRef(options.ferret, directory);
     const query = { ...buildBoardQuery(options, { projectId: scoped?.id, ferretId }), limit: BOARD_PAGE };
     const response = await this.gateway.board(query);
-    if (options.json === true) return this.deps.output.success(asJson(response));
+    if (options.json === true) return this.deps.output.success(asJson(taskWire.board(response)));
     const names = ferretNames(directory);
     const label = scoped?.name ?? 'all projects';
     const render = options.md === true ? renderBoardMarkdown : renderBoard;
     this.deps.output.success(render(response, listing.projects, names, label));
     if (query.visibility === 'public') {
       this.deps.output.success(
-        `public cards only: ${this.deps.binary} board --private shows the ferrets' own cards, --all shows both`,
+        `public tasks only: ${this.deps.binary} board --private shows the ferrets' own tasks, --all shows both`,
       );
     }
   }
@@ -222,7 +223,7 @@ export class BoardController {
       const shown = formatCardRef(card);
       return this.deps.output.success(
         patchYaml(cardPatchDocument(card), [
-          `${shown} — read every part, update what is out of date, then: ${this.deps.binary} card patch ${card.id} --file <this file>`,
+          `${shown} — read every part, update what is out of date, then: ${this.deps.binary} task patch ${card.id} --file <this file>`,
           'a key present replaces the field, an absent key leaves it, null empties it',
         ]),
       );
@@ -233,7 +234,7 @@ export class BoardController {
         : (await this.gateway.board({ project: card.projectId, state: 'all', limit: BOARD_PAGE })).cards.filter(
             each => each.parent?.id === card.id,
           );
-    if (options.json === true) return this.deps.output.success(asJson({ card, laneSet, children }));
+    if (options.json === true) return this.deps.output.success(asJson({ task: card, laneSet, children }));
     const names = ferretNames(await this.directory());
     this.deps.output.success(renderCard(card, laneSet, children, names));
   }
@@ -275,7 +276,7 @@ export class BoardController {
   }
 
   private async print(verb: BoardVerb, response: CardResponse, options: BoardCommonOptions): Promise<void> {
-    if (options.json === true) return this.deps.output.success(asJson(response));
+    if (options.json === true) return this.deps.output.success(asJson(taskWire.card(response)));
     const names = ferretNames(await this.directory());
     this.deps.output.success(renderActed(verb, response.card, response.laneSet, names));
     // A claim that clashed with another card's queued this one behind it (docs/design/clash-queue.md): say so.
@@ -307,9 +308,9 @@ export class BoardController {
         'note',
         ref,
         options,
-        buildNoteAction([`Also asked, filed here instead of a new card: ${title} — ${ask}`]),
+        buildNoteAction([`Also asked, filed here instead of a new task: ${title} — ${ask}`]),
       );
-      if (options.json !== true) this.deps.output.success(`Added to ${formatCardRef(ref)} instead of a new card`);
+      if (options.json !== true) this.deps.output.success(`Added to ${formatCardRef(ref)} instead of a new task`);
       return true;
     }
     const binary = this.deps.binary;
@@ -325,8 +326,8 @@ export class BoardController {
     this.deps.related.refuseStrong(response, {
       json: options.json,
       choices: [
-        `${binary} card new … --related F12   add this to that card as a note, creating nothing`,
-        `${binary} card new … --new          it really is separate; create it anyway`,
+        `${binary} task new … --related F12   add this to that task as a note, creating nothing`,
+        `${binary} task new … --new          it really is separate; create it anyway`,
       ],
     });
     // Nothing strong: the weaker matches are still worth a look, and adding to one beats a new card.
@@ -334,9 +335,9 @@ export class BoardController {
     if (cards.length > 0 && options.json !== true) {
       this.deps.output.diagnostic(
         [
-          'Related cards — prefer adding to one (a note, nothing created):',
+          'Related tasks — prefer adding to one (a note, nothing created):',
           ...this.deps.related.lines(cards).map(line => `  ${line}`),
-          `  ${binary} card new … --related F12`,
+          `  ${binary} task new … --related F12`,
         ].join('\n'),
       );
     }
@@ -377,7 +378,7 @@ export class BoardController {
     await this.print('create', latest, options);
     for (const problem of failed) {
       this.deps.output.diagnostic(
-        `${formatCardRef(created.card)} was created but the PR link failed — ${problem}\nlink it again: ${this.deps.binary} card link ${formatCardRef(created.card)} --pr <url>`,
+        `${formatCardRef(created.card)} was created but the PR link failed — ${problem}\nlink it again: ${this.deps.binary} task link ${formatCardRef(created.card)} --pr <url>`,
       );
     }
     if (failed.length > 0) refuse(`${String(failed.length)} PR link(s) did not attach`);
@@ -408,13 +409,13 @@ export class BoardController {
    */
   async skip(why: readonly string[], options: BoardCommonOptions) {
     const reason = why.join(' ').trim();
-    if (reason === '') refuse(`say why this work needs no card: ${this.deps.binary} card skip "<why>"`);
+    if (reason === '') refuse(`say why this work needs no task: ${this.deps.binary} task skip "<why>"`);
     const recorded = await explainingRefusals({ binary: this.deps.binary }, async () => {
       return await this.gateway.skip({ reason });
     });
     if (options.json === true) return this.deps.output.success(asJson(recorded));
     this.deps.output.success(
-      `no card for this work — ${recorded.skip.reason}. The board check stays quiet until you take a card.`,
+      `no task for this work — ${recorded.skip.reason}. The board check stays quiet until you take a task.`,
     );
   }
 
@@ -544,19 +545,19 @@ export class BoardController {
     const parsed = parseCardPatch(await this.deps.files.readText(path), source);
     if (!parsed.ok) {
       refuse(
-        `card patch ${formatCardRef(ref)} changed nothing:\n${parsed.problems.map(problem => `  ${problem}`).join('\n')}`,
+        `task patch ${formatCardRef(ref)} changed nothing:\n${parsed.problems.map(problem => `  ${problem}`).join('\n')}`,
       );
     }
     const { card } = await this.gateway.card(ref.id);
     const plan = composeCardPatch(card, parsed.patch);
     if (plan.kind === 'stale') {
       refuse(
-        `${formatCardRef(card)} changed since you read it, so nothing was written: read it again (${this.deps.binary} card show ${card.id} --yaml), update every part that is out of date, and patch it back`,
+        `${formatCardRef(card)} changed since you read it, so nothing was written: read it again (${this.deps.binary} task show ${card.id} --yaml), update every part that is out of date, and patch it back`,
       );
     }
     if (plan.kind === 'unchanged') {
       return this.deps.output.success(
-        `${formatCardRef(card)}: nothing changed, so nothing was sent (every value matches the card)`,
+        `${formatCardRef(card)}: nothing changed, so nothing was sent (every value matches the task)`,
       );
     }
     await this.perform('patch', ref, options, plan.request);
@@ -567,7 +568,7 @@ export class BoardController {
     options: BoardCommonOptions & { readonly project?: string; readonly lane?: string; readonly reason?: string },
   ) {
     const ref = requireCardRef(idText);
-    if (options.project === undefined) refuse('refile needs --project <name>: the board the card moves to');
+    if (options.project === undefined) refuse('refile needs --project <name>: the board the task moves to');
     const target = resolveBoardProject(options.project, await this.gateway.projects());
     const lane = options.lane === undefined ? undefined : resolveLaneRef(target.laneSet, options.lane);
     await this.perform(

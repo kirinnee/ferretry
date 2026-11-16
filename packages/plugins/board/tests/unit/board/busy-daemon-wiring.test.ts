@@ -121,7 +121,7 @@ describe('the board sweep reads the board afresh on every pass (G3)', () => {
     if (job === undefined) throw new Error('Board registers no board-sweep job');
     const made = await makeCard(world.host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await world.host.request('POST', `/v1/board/cards/${made.id}`, {
+      await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
         headers: as('owner'),
       });

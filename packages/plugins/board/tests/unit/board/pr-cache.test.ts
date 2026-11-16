@@ -547,7 +547,7 @@ describe('BoardService.recordPullRequests', () => {
     const outcome = await service.recordPullRequests('F1', update({ observed: [observed({ state: 'closed' })] }));
     should(outcome.nudges).have.length(1);
     should(ports.store.writes).have.length(1);
-    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F1'] } }]);
+    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F1'] } }]);
   });
 
   it('should write nothing and publish nothing when nothing changed', async () => {

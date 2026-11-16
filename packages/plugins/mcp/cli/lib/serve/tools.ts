@@ -881,25 +881,28 @@ const INSTRUCTIONS_TOOL: McpToolDefinition = {
   inputSchema: object({}),
 };
 
-/** The card progress tool (Board's `card_progress`; new in 5.0, no v4 row). */
+/** The task progress tool (Board's `task_progress`) and its old name `card_progress`, which takes the old `card` key. */
+const idOf = (word: string): Record<string, unknown> => ({
+  type: 'string',
+  pattern: '^[BFIC][1-9][0-9]{0,8}$',
+  description: `The ${word} id, like F12 (letter B, F, I or C, then a number).`,
+});
+const progress = (name: string, key: 'task' | 'card', description: string): McpToolDefinition => ({
+  name,
+  description,
+  inputSchema: object(
+    {
+      [key]: idOf(key),
+      now: { type: 'string', maxLength: 8_192 },
+      doneSoFar: { type: 'string', maxLength: 8_192 },
+      next: { type: 'string', maxLength: 8_192 },
+    },
+    [key],
+  ),
+});
 const CARD_TOOLS: readonly McpToolDefinition[] = [
-  {
-    name: 'card_progress',
-    description: 'Rewrite one card’s progress (now, doneSoFar, next).',
-    inputSchema: object(
-      {
-        card: {
-          type: 'string',
-          pattern: '^[BFIC][1-9][0-9]{0,8}$',
-          description: 'The card id, like F12 (letter B, F, I or C, then a number).',
-        },
-        now: { type: 'string', maxLength: 8_192 },
-        doneSoFar: { type: 'string', maxLength: 8_192 },
-        next: { type: 'string', maxLength: 8_192 },
-      },
-      ['card'],
-    ),
-  },
+  progress('task_progress', 'task', 'Rewrite one task’s progress (now, doneSoFar, next).'),
+  progress('card_progress', 'card', 'Old name of task_progress: rewrite one task’s progress (now, doneSoFar, next).'),
 ];
 
 /** Every tool this server lists, in the order a model reads them. */

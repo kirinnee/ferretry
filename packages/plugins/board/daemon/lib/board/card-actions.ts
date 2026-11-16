@@ -761,7 +761,7 @@ const edit = (
   if (action.revision !== undefined && cardRevision(card) !== action.revision) {
     throw new BoardError(
       'version-conflict',
-      `${formatCardRef(card)} changed since you read it: read it again (card show ${card.id} --yaml), update every part that is out of date, and patch it back`,
+      `${formatCardRef(card)} changed since you read it: read it again (task show ${card.id} --yaml), update every part that is out of date, and patch it back`,
     );
   }
   const changed = BoardEditableFieldSchema.options.filter(

@@ -133,13 +133,13 @@ describe('what a start card is called and asks', () => {
   it('should name the card and its board in the footer line', () => {
     // Act / Assert
     should(cardFooterLine('F413', 'Ferretry', 'fy')).equal(
-      'Your card is &F413 on the Ferretry board; the daemon moves it for you (`fy card note` adds progress).',
+      'Your card is &F413 on the Ferretry board; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', 'Ferretry', 'fy', { id: 'F85' })).equal(
-      'Your card is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy card note` adds progress).',
+      'Your card is &F413 on the Ferretry board, under &F85; the daemon moves it for you (`fy task note` adds progress).',
     );
     should(cardFooterLine('F413', undefined, 'ferret')).equal(
-      "Your card is &F413 on the project's board; the daemon moves it for you (`ferret card note` adds progress).",
+      "Your card is &F413 on the project's board; the daemon moves it for you (`ferret task note` adds progress).",
     );
   });
 });
@@ -502,7 +502,7 @@ describe('a session started with a brief', () => {
       should(delegation?.parent).be.null();
       should(delegation).not.have.property('parentFrom');
       should(notes).deepEqual([
-        "The helper's card has no parent, so it is at the top level of the board: `fy card reparent &F2 --parent <id>` moves it, and `fy card focus <id>` (or `--card <id>`) says where your helpers' cards go next time.",
+        "The helper's card has no parent, so it is at the top level of the board: `fy task reparent &F2 --parent <id>` moves it, and `fy task focus <id>` (or `--card <id>`) says where your helpers' cards go next time.",
       ]);
       should(opened.card?.parent).be.null();
       should(stored(ports, 'F2').parent).be.null();

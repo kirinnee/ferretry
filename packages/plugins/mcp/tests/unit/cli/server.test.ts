@@ -87,6 +87,7 @@ describe('McpServer — the tools', () => {
       'config_read',
       'lessons_suggest',
       'search_work',
+      'task_progress',
       'card_progress',
       'instructions',
       'input_wait',

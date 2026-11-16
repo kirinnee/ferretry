@@ -6,20 +6,20 @@
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
-  BoardMergeGateResponseSchema,
   BoardProjectSchema,
   type BoardProjectId,
   BoardProjectsResponseSchema,
   type BoardQueryInput,
-  BoardResponseSchema,
   type BoardSkipRequest,
   BoardSkipResponseSchema,
   BoardSwitchSchema,
   type CardActionRequestInput,
   type CardCreateRequestInput,
-  CardResponseSchema,
   type LaneSetActionRequestInput,
   LaneSetChangeResponseSchema,
+  readBoard,
+  readCard,
+  readMergeGate,
 } from '../../contract/index.ts';
 import type { BoardGateway, FerretDirectoryEntry, LaneGateway } from './ports.ts';
 import type { RelatedResponse } from './related.ts';
@@ -64,23 +64,21 @@ export class ClientBoardGateway implements BoardGateway {
   constructor(private readonly client: PluginClient) {}
 
   async board(query: BoardQueryInput) {
-    return BoardResponseSchema.parse(await this.client.call<unknown>('GET /v1/board', { query: queryOf(query) }));
+    return readBoard(await this.client.call<unknown>('GET /v1/board', { query: queryOf(query) }));
   }
 
   async card(id: string) {
-    return CardResponseSchema.parse(
-      await this.client.call<unknown>('GET /v1/board/cards/:cardId', { params: { cardId: id } }),
-    );
+    return readCard(await this.client.call<unknown>('GET /v1/board/tasks/:taskId', { params: { taskId: id } }));
   }
 
   async create(request: CardCreateRequestInput) {
-    return CardResponseSchema.parse(await this.client.call<unknown>('POST /v1/board/cards', { body: request }));
+    return readCard(await this.client.call<unknown>('POST /v1/board/tasks', { body: request }));
   }
 
   async act(id: string, request: CardActionRequestInput) {
-    return CardResponseSchema.parse(
-      await this.client.call<unknown>('POST /v1/board/cards/:cardId', {
-        params: { cardId: id },
+    return readCard(
+      await this.client.call<unknown>('POST /v1/board/tasks/:taskId', {
+        params: { taskId: id },
         body: request,
       }),
     );
@@ -99,9 +97,7 @@ export class ClientBoardGateway implements BoardGateway {
   }
 
   async mergeGate(pr: string) {
-    return BoardMergeGateResponseSchema.parse(
-      await this.client.call<unknown>('GET /v1/board/merge-gate', { query: { pr } }),
-    );
+    return readMergeGate(await this.client.call<unknown>('GET /v1/board/merge-gate', { query: { pr } }));
   }
 
   async related(request: { kind: 'card'; title: string; ask?: string }) {

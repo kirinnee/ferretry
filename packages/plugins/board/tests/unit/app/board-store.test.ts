@@ -19,7 +19,7 @@ import {
 
 const query = toServerQuery(NO_BOARD_FILTERS);
 const lanes = laneSetFor();
-const event = (cardIds: string[]) => ({ projectId: PROJECT, cardIds });
+const event = (taskIds: string[]) => ({ projectId: PROJECT, taskIds });
 
 const open = (port = fakePort(), environment = fakeEnvironment()) => {
   const store = new DaemonBoardStore(port, environment);
@@ -151,6 +151,15 @@ describe('DaemonBoardStore live updates', () => {
     expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement', 'F2:review']);
     expect(port.calls.filter(call => call.startsWith('card:'))).toEqual([`card:${laptop.daemonId}:F2`]);
     expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(boardReads);
+  });
+
+  it('reads a board.changed from a daemon one build behind, which still says cardIds', async () => {
+    const { store, port, served, key } = await live();
+    served.set('F2', card('F2', { laneId: 'review' }));
+    store.noteEvent(laptop.daemonId, { projectId: PROJECT, cardIds: ['F2'] });
+    await flush();
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement', 'F2:review']);
+    expect(port.calls.filter(call => call.startsWith('card:'))).toEqual([`card:${laptop.daemonId}:F2`]);
   });
 
   it('adds a new card, and takes out one the machine no longer has', async () => {

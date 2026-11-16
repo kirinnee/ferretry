@@ -27,7 +27,7 @@ const gateAnswer = (ask: { ferret?: string; id: string; entry: string }, choice:
 const atTryIt = async (world: Awaited<ReturnType<typeof boot>>) => {
   const made = await makeCard(world.host, { howToTest: 'Open the badge and look at its colour.' });
   for (const to of ['doing', 'to-test'])
-    await world.host.request('POST', `/v1/board/cards/${made.id}`, {
+    await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'move', to, reason: 'for the test' },
       headers: as('owner'),
     });
@@ -58,8 +58,8 @@ describe('D2 #12 Board talks to ferrets through Conversation', () => {
 
     expect(await world.apply(gateAnswer(ask, 'Not good', 'the badge is clipped'))).toBe('applied');
 
-    const read = await world.host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(read.json<{ card: { laneId: string } }>().card.laneId).not.toBe('to-test');
+    const read = await world.host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(read.json<{ task: { laneId: string } }>().task.laneId).not.toBe('to-test');
   });
 
   test('turn.ended runs the turn-end checks and never rejects, with Conversation on or off', async () => {
@@ -87,7 +87,7 @@ describe('ferret.started makes the started ferret’s card (today’s SessionCar
     });
 
     const board = await world.host.request('GET', '/v1/board', { headers: as('owner') });
-    const cards = board.json<{ cards: { title: string; ask?: { text: string } | null }[] }>().cards;
+    const cards = board.json<{ tasks: { title: string; ask?: { text: string } | null }[] }>().tasks;
     expect(cards.some(card => card.ask?.text === 'Make the badge green')).toBe(true);
   });
 
@@ -100,6 +100,6 @@ describe('ferret.started makes the started ferret’s card (today’s SessionCar
     await world.observe('ferret.started', { ...base, by: 'owner', label: 'ferretry-learning' });
 
     const board = await world.host.request('GET', '/v1/board', { headers: as('owner') });
-    expect(board.json<{ cards: unknown[] }>().cards).toHaveLength(0);
+    expect(board.json<{ tasks: unknown[] }>().tasks).toHaveLength(0);
   });
 });

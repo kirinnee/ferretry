@@ -37,7 +37,7 @@ const resolved = { brief: '', projectId: undefined, assignee: null };
 const minimal = { kind: 'feature', title: 'Rename widget', ask: 'rename it', askSource: 'chat://1' };
 
 describe('requireCardRef', () => {
-  it('should accept the & and the bare spelling of one card', () => {
+  it('should accept the & and the bare spelling of one task', () => {
     // Act + Assert
     for (const raw of ['&F412', 'F412', ' &f412 ']) {
       should(requireCardRef(raw)).eql({ id: 'F412' });
@@ -47,7 +47,7 @@ describe('requireCardRef', () => {
   it('should refuse junk and say which flag it was reading', () => {
     // Act + Assert
     for (const raw of ['', 'F', '412', 'X1', '&&F1', 'F1 F2']) {
-      should(() => requireCardRef(raw)).throw(/expected a card id like &F21/u);
+      should(() => requireCardRef(raw)).throw(/expected a task id like &F21/u);
     }
     should(() => requireCardRef('nope', '--parent id')).throw(/expected a --parent id like &F21, got "nope"/u);
   });
@@ -56,11 +56,11 @@ describe('requireCardRef', () => {
 describe('parseTerms', () => {
   it('should split on the first = and trim both sides', () => {
     // Act
-    const terms = parseTerms(['lane = a column = of cards', 'card=one task']);
+    const terms = parseTerms(['lane = a column = of tasks', 'card=one task']);
 
     // Assert
     should(terms).eql([
-      { term: 'lane', meaning: 'a column = of cards' },
+      { term: 'lane', meaning: 'a column = of tasks' },
       { term: 'card', meaning: 'one task' },
     ]);
   });
@@ -171,14 +171,14 @@ describe('buildBoardCreateRequest', () => {
   it('should carry How to test, and write a repeated --premise or --context as one bullet each', () => {
     // Act
     const request = buildBoardCreateRequest(
-      { ...minimal, premise: [' cards are hard to read ', '', 'Done has no test steps'], context: [' agenda v6 '] },
+      { ...minimal, premise: [' tasks are hard to read ', '', 'Done has no test steps'], context: [' agenda v6 '] },
       [],
       { ...resolved, howToTest: '1. Open the Board\n2. See the steps' },
     );
 
     // Assert
     should(request).containEql({
-      premise: '- cards are hard to read\n- Done has no test steps',
+      premise: '- tasks are hard to read\n- Done has no test steps',
       context: 'agenda v6',
       howToTest: '1. Open the Board\n2. See the steps',
     });
@@ -209,7 +209,7 @@ describe('buildBoardCreateRequest', () => {
       /--title is required \(or pass the title as the trailing words\)/u,
     );
     should(() => buildBoardCreateRequest({ ...minimal, title: 'one two three four five six' }, [], resolved)).throw(
-      /card title has 6 words/u,
+      /task title has 6 words/u,
     );
   });
 
@@ -240,7 +240,7 @@ describe('buildBoardCreateRequest', () => {
   it('should hand a request the wire schema rejects back as a refusal that names the field', () => {
     // Act + Assert
     should(() => buildBoardCreateRequest({ ...minimal, summary: 'two\nlines' }, [], resolved)).throw(
-      /cannot create this card: summary: one line/u,
+      /cannot create this task: summary: one line/u,
     );
   });
 });
@@ -379,7 +379,7 @@ describe('the action builders', () => {
     }
   });
 
-  it('should build a re-parent under a card, or to the top level with --none', () => {
+  it('should build a re-parent under a task, or to the top level with --none', () => {
     // Act + Assert
     should(buildReparentAction('&F85', undefined, undefined)).eql({ action: 'reparent', parent: { id: 'F85' } });
     should(buildReparentAction('f85', false, ' it fits ')).eql({
@@ -392,7 +392,7 @@ describe('the action builders', () => {
     should(() => buildReparentAction(undefined, undefined, undefined)).throw(
       /reparent needs --parent <id>, or --none/u,
     );
-    should(() => buildReparentAction('nonsense', undefined, undefined)).throw(/expected a card id like &F21/u);
+    should(() => buildReparentAction('nonsense', undefined, undefined)).throw(/expected a task id like &F21/u);
   });
 
   it('should build a file claim, and a release with --remove', () => {
@@ -424,13 +424,13 @@ describe('the action builders', () => {
     should(buildEditAction({ term: [] }, { brief: 'brief only' })).eql({ action: 'edit', brief: 'brief only' });
   });
 
-  it('should edit the progress whole, and point at card progress in the nothing-to-edit refusal', () => {
+  it('should edit the progress whole, and point at task progress in the nothing-to-edit refusal', () => {
     // Arrange
     const progress = { now: 'x', doneSoFar: '- y', next: '1. z' };
 
     // Act + Assert
     should(buildEditAction({}, { progress })).eql({ action: 'edit', progress });
-    should(() => buildEditAction({}, {})).throw(/card progress/u);
+    should(() => buildEditAction({}, {})).throw(/task progress/u);
   });
 
   it('should edit How to test alone, and premise and context as bullets or cleared', () => {
@@ -451,7 +451,7 @@ describe('the action builders', () => {
     // Act + Assert
     should(() => buildEditAction({})).throw(/nothing to edit: pass --title/u);
     should(() => buildEditAction({ term: [] })).throw(/nothing to edit/u);
-    should(() => buildEditAction({ title: 'one two three four five six' })).throw(/card title has 6 words/u);
+    should(() => buildEditAction({ title: 'one two three four five six' })).throw(/task title has 6 words/u);
     should(() => buildEditAction({ title: '   ' })).throw(/cannot edit/u);
   });
 
@@ -495,7 +495,7 @@ describe('buildBoardQuery', () => {
     });
   });
 
-  it('should refuse the deprecated waiting filters: a card never waits on the owner, its agenda does', () => {
+  it('should refuse the deprecated waiting filters: a task never waits on the owner, its agenda does', () => {
     // Act + Assert
     for (const activity of ['waiting', 'to_test', 'waiting_on_you'])
       should(() => buildBoardQuery({ activity }, everything)).throw(/--activity must be one of/u);
@@ -535,7 +535,7 @@ describe('buildBoardQuery', () => {
   });
 });
 
-describe('public and private cards', () => {
+describe('public and private tasks', () => {
   const everything = { projectId: undefined, ferretId: undefined };
 
   it('should send no visibility on create unless --private or --public is given', () => {
@@ -561,7 +561,7 @@ describe('public and private cards', () => {
     should(() => visibilityOf('secret')).throw(/--visibility must be one of public \| private/u);
   });
 
-  it('should build one edit action for visibility alone or beside card text', () => {
+  it('should build one edit action for visibility alone or beside task text', () => {
     // Act + Assert
     should(buildEditAction({ visibility: 'private' })).eql({ action: 'edit', visibility: 'private' });
     should(buildEditAction({ title: 'New title', visibility: ' public ' })).eql({
@@ -572,12 +572,12 @@ describe('public and private cards', () => {
     should(() => buildEditAction({ title: 'New title', visibility: 'secret' })).throw(/--visibility must be one of/u);
   });
 
-  it('should ask the board for public cards by default', () => {
+  it('should ask the board for public tasks by default', () => {
     // Act + Assert
     should(buildBoardQuery({}, everything).visibility).equal('public');
   });
 
-  it('should ask for private cards with --private and for both with --all', () => {
+  it('should ask for private tasks with --private and for both with --all', () => {
     // Act + Assert
     should(buildBoardQuery({ private: true }, everything).visibility).equal('private');
     should(buildBoardQuery({ all: true }, everything)).not.have.property('visibility');

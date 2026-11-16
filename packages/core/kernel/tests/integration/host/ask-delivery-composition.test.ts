@@ -133,7 +133,7 @@ describe('R-0333 M3: lineage, focus and home through the real Ferrets and Board'
       },
     });
     expect(card.status).toBe(200);
-    const cardId = card.json<{ card: { id: string } }>().card.id;
+    const cardId = card.json<{ task: { id: string } }>().task.id;
     w.as(lead.id);
     expect((await w.h.request('POST', `/v1/board/cards/${cardId}`, { body: { action: 'focus' } })).status).toBe(200);
 
@@ -155,7 +155,7 @@ describe('R-0333 M3: lineage, focus and home through the real Ferrets and Board'
         ask: { text: 'Ship the release.', source: 'owner' },
       },
     });
-    const cardId = card.json<{ card: { id: string } }>().card.id;
+    const cardId = card.json<{ task: { id: string } }>().task.id;
     for (const to of ['doing', 'to-test'])
       expect(
         (await w.h.request('POST', `/v1/board/cards/${cardId}`, { body: { action: 'move', to, reason: 'Gate check' } }))

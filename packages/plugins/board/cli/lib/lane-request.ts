@@ -59,7 +59,7 @@ export function buildEditRequest(current: LaneSet, options: LaneEditOptions): La
   const renamedAndRemoved = Object.keys(renames).filter(id => removed.has(id));
   if (renamedAndRemoved.length > 0) refuse(`${renamedAndRemoved.join(', ')} is both renamed and removed`);
   if (removed.size > 0 && options.into === undefined) {
-    refuse(`say where the cards of ${[...removed].join(', ')} go: --into <lane>`);
+    refuse(`say where the tasks of ${[...removed].join(', ')} go: --into <lane>`);
   }
   if (removed.size === 0 && options.into !== undefined) refuse('--into only goes with --remove');
   const into = options.into;

@@ -98,7 +98,7 @@ describe('fy board status, on and off', () => {
     const { controller, lines } = harness();
     await controller.status({ json: false });
     should(lines[0]).equal(
-      'Ferretry: board on — set by the owner (2026-11-01T12:00:00.000Z).\nFerrets here keep a card for their work.',
+      'Ferretry: board on — set by the owner (2026-11-01T12:00:00.000Z).\nFerrets here keep a task for their work.',
     );
   });
 
@@ -207,7 +207,7 @@ describe('rendering lanes', () => {
       .and.match(/plan\tPlan\/Design\t\(active, owner-gated\)/u);
   });
 
-  it('should say when a card belongs in each lane, from its category and what enters it', () => {
+  it('should say when a task belongs in each lane, from its category and what enters it', () => {
     const text = renderLaneSet(laneSet({ confirmedBy: 'owner' }), 'Ferretry');
     should(text)
       .match(/todo\tTodo\t\(backlog\)\tuse when: not started yet/u)
