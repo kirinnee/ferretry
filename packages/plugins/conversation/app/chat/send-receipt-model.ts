@@ -18,7 +18,7 @@
  */
 
 import type { SendReceiptKind } from '@ferretry/app';
-import { isUpdateUnconfirmed, sendBadge } from './send-badge.ts';
+import { isStuckSend, isUpdateUnconfirmed, sendBadge } from './send-badge.ts';
 import { effectiveQueueState } from '../queue/send-queue.ts';
 import { isSessionEndedTimeout, type LedgerSendRecord } from './send-ledger.ts';
 
@@ -124,6 +124,8 @@ const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => 
   const { detail } = sendBadge(record);
   const saved = outboxReceipt(record, detail);
   if (saved !== undefined) return saved;
+  // Before the queue's own words, as the badge does: a stuck send sits in the queue as `typing` throughout.
+  if (isStuckSend(record)) return { kind: 'sending', name: 'Not delivered yet', detail, chip: 'not delivered yet' };
   const queue = queueReceipt(record, detail);
   if (queue !== undefined) return queue;
   switch (record.fate) {
@@ -142,8 +144,6 @@ const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => 
     default:
       if (record.unread !== undefined)
         return { kind: 'unconfirmed', name: 'Status unknown', detail, chip: 'status unknown' };
-      if (record.stuckAt !== undefined)
-        return { kind: 'sending', name: 'Not delivered yet', detail, chip: 'not delivered yet' };
       if (record.typedNotSent === true)
         return { kind: 'typed', name: 'Typed, not sent', detail, chip: 'typed, not sent' };
       if (record.held === true) return { kind: 'held', name: 'Held', detail };
