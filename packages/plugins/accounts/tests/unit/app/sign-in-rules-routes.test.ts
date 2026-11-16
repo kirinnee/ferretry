@@ -19,6 +19,7 @@ import {
   narrowRule,
   RULE_NO_PASSKEY_DEVICE_WORDS,
   readEligibility,
+  readFerretProject,
   revokeRule,
   runMachineRuleConfirm,
   runRuleApproval,
@@ -61,6 +62,17 @@ describe('the routes', () => {
       `GET /v1/sign-in-rules/eligibility?signIn=${SITE_SIGN_IN}`,
       'GET /v1/sign-in-rules/suggestions',
     ]);
+  });
+
+  it('reads the board project of the asking ferret from its own record, and only a project id', async () => {
+    const project = '7f1c1a1e-6d0c-4f6e-9a8e-0d3f1f7d2a11';
+    const fake = ruleClient({ ferret: { projectId: project, name: 'Pip' } });
+    expect(await readFerretProject(fake.client, 'ses_abcdefghijklmnop')).toBe(project);
+    expect(fake.keys()).toEqual(['GET /v1/ferrets/ses_abcdefghijklmnop']);
+    // `unfiled`, no project and a record that cannot be read are all "no project": nothing is ever guessed.
+    expect(await readFerretProject(ruleClient({ ferret: { projectId: 'unfiled' } }).client, 'f')).toBeUndefined();
+    expect(await readFerretProject(ruleClient({ ferret: {} }).client, 'f')).toBeUndefined();
+    expect(await readFerretProject(ruleClient({ fail: () => refused('offline') }).client, 'f')).toBeUndefined();
   });
 
   it('narrows a rule by sending only what the owner took away', async () => {
