@@ -24,6 +24,13 @@ type Workflow = {
 };
 const load = (name: string) => Bun.YAML.parse(readFileSync(`.github/workflows/${name}.yaml`, 'utf8')) as Workflow;
 const ci = load('ci');
+// check-base.sh's anchor override exists for its own test only: a workflow that sets it moves the only-down baseline.
+for (const file of new Bun.Glob('.github/workflows/*.y{a,}ml').scanSync('.')) {
+  assert.ok(
+    !readFileSync(file, 'utf8').includes('FY_CHECK_BASE_TEST_ANCHOR'),
+    `${file} must not set FY_CHECK_BASE_TEST_ANCHOR`,
+  );
+}
 // The root typecheck covers this file under noUncheckedIndexedAccess. A job or field a fixture names must exist:
 // a missing one fails the fixture here, saying which, instead of being asserted away.
 const need = <T>(value: T | undefined, what: string): T => {

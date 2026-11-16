@@ -37,12 +37,12 @@ if [[ -f ${perf_pending} ]]; then
   done <"${perf_pending}"
 fi
 # THE RATCHET: the list may only SHRINK. Every listed path must also be on the BASE version of the list (CI's
-# FY_CHECK_BASE, scripts/ci/check-base.sh; origin/rebuild/5.0-after locally), so neither a new exemption nor a
+# FY_BUDGET_BASE, else FY_CHECK_BASE; scripts/ci/check-base.sh; origin/rebuild/5.0-after locally), so neither a new exemption nor a
 # re-added one gets in. A base with no list at all is the bootstrap (the change that introduces it): the current list
 # is accepted. A base that cannot be read for any other reason FAILS; it is never skipped.
-base_ref="${FY_CHECK_BASE:-origin/rebuild/5.0-after}"
+base_ref="${FY_BUDGET_BASE:-${FY_CHECK_BASE:-origin/rebuild/5.0-after}}"
 if ! git rev-parse --verify --quiet "${base_ref}^{commit}" >/dev/null; then
-  refuse "cannot read the base ${base_ref} to hold ${perf_pending} to its shrink-only ratchet (fetch it, or set FY_CHECK_BASE)"
+  refuse "cannot read the base ${base_ref} to hold ${perf_pending} to its shrink-only ratchet (fetch it, or set FY_BUDGET_BASE)"
 elif git cat-file -e "${base_ref}:${perf_pending}" 2>/dev/null; then
   declare -A pending_base=()
   while IFS= read -r entry; do
