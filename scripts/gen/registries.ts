@@ -463,10 +463,44 @@ export function featureRegistries(model: Model): ReadonlyMap<string, string> {
   return folderRegistries(model.ws.packages, FEATURE_REGISTRY);
 }
 
+/** `ids.port.ts` → `IdsApi`, `runtime-records.port.ts` → `RuntimeRecordsApi`: the interface a slice file exports. */
+const sliceApiName = (file: string): string =>
+  `${file.replace(/\.port\.ts$/, '').replace(/(^|-)(\w)/g, (_m, _dash, c: string) => c.toUpperCase())}Api`;
+
+/**
+ * Ferrets' port: `FerretsApi` is the composition of every `contract/ports/<slice>.port.ts` (each exports one
+ * `interface <Slice>Api`), so a new port member is a new or edited slice file and the composed interface is never edited.
+ * The generated file also re-exports each slice's TYPES, so `contract/port.ts` keeps exporting every type it ever did (types
+ * only: the manifest loader runs before this file exists, so no runtime path may go through it).
+ */
+const FERRETS_API_REGISTRY: FolderRegistrySpec = {
+  dir: 'contract/ports',
+  glob: '*.port.ts',
+  out: 'contract/generated/ferrets-api.ts',
+  prefix: 'port',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import type { ${sliceApiName(entry.file)} } from '${entry.importPath}';`),
+      '',
+      ...entries.map(entry => `export type * from '${entry.importPath}';`),
+      '',
+      '/** The Ferrets port: every slice under contract/ports/*.port.ts, composed. */',
+      `export interface FerretsApi extends ${entries.map(entry => sliceApiName(entry.file)).join(', ')} {}`,
+      '',
+    ].join('\n'),
+};
+
+/** `packages/core/ferrets/contract/generated/ferrets-api.ts`: the composed `FerretsApi` (see {@link FERRETS_API_REGISTRY}). */
+export function ferretsApiRegistries(model: Model): ReadonlyMap<string, string> {
+  return folderRegistries(model.ws.packages, FERRETS_API_REGISTRY);
+}
+
 /** The global registries, keyed by root-relative path. */
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
     ...featureRegistries(model),
+    ...ferretsApiRegistries(model),
     [
       GENERATED.plugins,
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),
