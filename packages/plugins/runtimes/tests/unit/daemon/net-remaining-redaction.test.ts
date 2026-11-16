@@ -152,6 +152,52 @@ describe('B2 (round 1): after a credential header, the next word is a value, wha
   });
 });
 
+describe('B2 (round 2): a scheme word counts only after a credential header', () => {
+  const SHOWN: readonly (readonly [string, readonly string[]])[] = [
+    ['a bare token word', ['--mode', 'token', '/etc/srv/app.json']],
+    ['a bare basic word', ['--auth', 'basic', '--config', '/etc/srv/app.json']],
+    ['a bare Bearer word', ['run', 'Bearer', 'hello']],
+    ['a scheme word after a header that is no credential', ['-H', 'Content-Type:', 'Bearer', 'hello']],
+  ];
+  for (const [name, words] of SHOWN) {
+    it(`should show ${name}, in both forms`, () => {
+      // Arrange
+      const command = `srv ${words.join(' ')}`;
+
+      // Act / Assert — the one string
+      should(commandWithheld(command)).be.false();
+      should(oneString(command).resolved).equal(command);
+      // Act / Assert — the args form
+      const views = viewsOf(words);
+      for (const view of views) should(view.withheld).be.false();
+      should(views[0]?.text).equal(command); // the resolved MCP line shows the command as written
+    });
+  }
+});
+
+describe('B2 (round 2): a header glued to a flag with = is still a credential header', () => {
+  const CASES: readonly (readonly [string, readonly string[], string])[] = [
+    [
+      '--header=Cookie:',
+      ['--header=Cookie:', 'session=9f8e7d6c5b4a39281706f5e4d3c2b1a0'],
+      '9f8e7d6c5b4a39281706f5e4d3c2b1a0',
+    ],
+    ['--header=X-Api-Key:', ['--header=X-Api-Key:', 'Qm9vZ2llV29vZ2llQm9vZ2ll42xK'], 'Qm9vZ2llV29vZ2llQm9vZ2ll42xK'],
+    [
+      '--header=Authorization:Bearer',
+      ['--header=Authorization:Bearer', 'Qm9vZ2llV29vZ2llQm9vZ2ll42xK'],
+      'Qm9vZ2llV29vZ2llQm9vZ2ll42xK',
+    ],
+    ['--header=Authorization:', ['--header=Authorization:', 'hunter2hunter2'], 'hunter2hunter2'],
+    ['-H=Cookie:', ['-H=Cookie:', 'session=9f8e7d6c5b4a39281706f5e4d3c2b1a0'], '9f8e7d6c5b4a39281706f5e4d3c2b1a0'],
+  ];
+  for (const [name, words, value] of CASES) {
+    it(`should withhold the value after ${name}, in both forms`, () => {
+      showsNoValueInBothForms(words.join(' '), words, value);
+    });
+  }
+});
+
 describe('B3: a broken document whose secret key is written in \\u escapes shows no value', () => {
   // `API_KEY` spelled out in escapes, whole and in part; the value is bare, so the document does not parse.
   const KEYS: readonly (readonly [string, string])[] = [

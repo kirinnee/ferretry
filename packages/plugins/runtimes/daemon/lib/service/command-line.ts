@@ -43,7 +43,7 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
   args.forEach((word, index) => {
     if (
       valueOfNonPointerCredentialFlag(args[index - 1], word) ||
-      valueOfCredentialHeader(args[index - 2], args[index - 1], word)
+      valueOfCredentialHeader(args[index - 2], args[index - 1], word, args[index - 3])
     )
       refused.add(index);
   });
@@ -73,33 +73,51 @@ const unquoted = (word: string): string => word.replace(/^["'`]+|["'`]+$/gu, '')
 
 const isCredentialHeader = (name: string): boolean => CREDENTIAL_HEADER.test(name) || SHOWN_TESTS.namesSecret(name);
 
+/** A word as a header test reads it: unquoted, and with the flag it is glued to by `=` taken off (`--header=Cookie:`). */
+const headerWord = (word: string | undefined): string => unquoted(word ?? '').replace(/^-{1,2}[A-Za-z][\w-]*=/u, '');
+
 /**
- * Whether `word` is the value of a credential header, or of a scheme word (`Bearer`, `Basic`, `Token`): what follows is a
- * value whatever it looks like (a path, a URL, quoted, in parentheses, after `=` or `@`), because a header names no place
- * and no scheme is followed by one. The header is read in the three ways a line holds it: the word before is `Header:`, the
- * two before are `Header` and `:`, or the word itself holds the pair (`Authorization:/V`, `Authorization` then `:/V`).
- * `before` is the word before `word`, `beforeThat` the one before it. The same rule as the one-string form's: it fails closed.
+ * Whether `word` is the value of a credential header, or of a scheme word (`Bearer`, `Basic`, `Token`) that follows one:
+ * what follows is a value whatever it looks like (a path, a URL, quoted, in parentheses, after `=` or `@`), because a header
+ * names no place and no scheme is followed by one. The header is read in the three ways a line holds it: the word before is
+ * `Header:`, the two before are `Header` and `:`, or the word itself holds the pair (`Authorization:/V`, `Authorization`
+ * then `:/V`). A scheme word counts ONLY right after such a header (`Header: Bearer`, `Header : Bearer`, `Header:Bearer`):
+ * a bare `token` or `Bearer` elsewhere is an ordinary word. A flag glued to the header by `=` is taken off first
+ * (`--header=Cookie:`). `before` is the word before `word`, `beforeThat` the one before it, `beforeThatThat` the one
+ * before that. The same rule as the one-string form's: it fails closed.
  */
-function valueOfCredentialHeader(beforeThat: string | undefined, before: string | undefined, word: string): boolean {
-  const previous = unquoted(before ?? '');
+function valueOfCredentialHeader(
+  beforeThat: string | undefined,
+  before: string | undefined,
+  word: string,
+  beforeThatThat?: string,
+): boolean {
+  const previous = headerWord(before);
+  const earlier = headerWord(beforeThat);
   const previousName = previous.endsWith(':') ? previous.slice(0, -1) : '';
   const gluedBefore = GLUED_HEADER.exec(previous);
   const gluedWord = GLUED_HEADER.exec(unquoted(word));
   const header = (name: string): boolean => HEADER_NAME.test(name) && isCredentialHeader(name);
+  // the word before a scheme word must be the header: `Header:`, `Header` `:`, or the scheme glued to it (`Header:Scheme`)
+  const schemeAfterHeader =
+    SCHEME_WORD.test(previous) &&
+    ((earlier.endsWith(':') && header(earlier.slice(0, -1))) ||
+      (earlier === ':' && header(headerWord(beforeThatThat))));
+  const gluedScheme = gluedBefore !== null && header(gluedBefore[1] ?? '') && SCHEME_WORD.test(gluedBefore[2] ?? '');
   return (
     // `Header:` then the value
     header(previousName) ||
     // `Header`, `:`, then the value
-    (previous === ':' && header(unquoted(beforeThat ?? ''))) ||
+    (previous === ':' && header(earlier)) ||
     // `Header` then `:value`
     (/^:[ \t]*\S/u.test(unquoted(word)) && header(previous)) ||
     // the pair in the word itself, its value a path or a URL
     (gluedWord !== null && header(gluedWord[1] ?? '') && ANY_PLACE.test(unquoted(gluedWord[2] ?? ''))) ||
-    // a scheme word (alone, or at the end of a glued pair), then the value
-    SCHEME_WORD.test(gluedBefore !== null && header(gluedBefore[1] ?? '') ? (gluedBefore[2] ?? '') : previous)
+    // a scheme word, only right after the header that it belongs to, then the value
+    schemeAfterHeader ||
+    gluedScheme
   );
 }
-
 /**
  * Whether `word` is a path-looking value given to a credential-named flag that is NOT a pointer flag (`--token ./V`,
  * `--password /a/b`, `--api-key /tmp/V`, `--auth-token=./V`): the write rule accepts a path under a credential name, but
