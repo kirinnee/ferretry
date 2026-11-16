@@ -408,7 +408,7 @@ function LaneRow({
               <ToggleTick on={triggers.includes(trigger)} />
               {TRIGGER_LABELS[trigger]}
               {isReportedTrigger(trigger) ? (
-                <span className="font-normal text-muted"> · reported with fy card trigger</span>
+                <span className="font-normal text-muted"> · reported with fy task trigger</span>
               ) : null}
             </button>
           ))}

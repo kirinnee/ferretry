@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 const lanes = laneSetFor();
-const changed = (...cardIds: string[]) => ({ projectId: PROJECT, cardIds });
+const changed = (...taskIds: string[]) => ({ projectId: PROJECT, taskIds });
 const names = ferretNamer(new Map([['mvuc7tsf-0c3d50df', 'nimbus']]));
 
 /** A store whose machine serves `cards` by id; the map is mutable so a test can move one, and `fail` ids refuse. */

@@ -149,7 +149,7 @@ describe('the board check words', () => {
 
     // Assert
     should(message).equal(
-      'You changed code this turn without a card. Create one (zz card new …) or record why not: zz card skip "<why>"',
+      'You changed code this turn without a card. Create one (zz task new …) or record why not: zz task skip "<why>"',
     );
   });
 

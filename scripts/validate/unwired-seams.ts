@@ -63,7 +63,13 @@ export interface RawSeam {
  * Seams that may enter the list although it only shrinks. The first baseline (a base ref with no `"unwired"` key)
  * needs no entry here: it is the one allowed growth. Add an entry only for a later correction, with its reason.
  */
-export const ONE_TIME_UNWIRED_ALLOWANCE: readonly { readonly seam: string; readonly reason: string }[] = [];
+export const ONE_TIME_UNWIRED_ALLOWANCE: readonly { readonly seam: string; readonly reason: string }[] = [
+  {
+    seam: 'hook:task.moving',
+    reason:
+      'the same seam as hook:card.moving, renamed with the Board noun (O18, owner !A539); nothing is newly unwired',
+  },
+];
 
 // ─── facts ────────────────────────────────────────────────────────────────────────────────────────────────────────
 

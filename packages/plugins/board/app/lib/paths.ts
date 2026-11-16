@@ -1,5 +1,5 @@
 /**
- * WHERE THE BOARD LIVES in the app: the addresses of this plugin's own screens (`board/:project?`, `card/:id`) and the
+ * WHERE THE BOARD LIVES in the app: the addresses of this plugin's own screens (`board/:project?`, `task/:id`) and the
  * few other screens a card links to. Those screens are per daemon, so an address is `/d/<daemon>/<screen path>`.
  *
  * This half is built once per daemon and knows its machine only as THIS_MACHINE, a placeholder; the daemon that
@@ -31,7 +31,7 @@ export const boardCardPath = (_daemonId: DaemonId | undefined, cardId: string): 
  * it the page is under the daemon the address bar is under.
  */
 export const cardPagePath = (cardId: string, daemon?: string): string =>
-  `${daemonAddress(daemon)}/card/${encodeURIComponent(cardId)}`;
+  `${daemonAddress(daemon)}/task/${encodeURIComponent(cardId)}`;
 /** A ferret's chat, owned by Conversation (`ferrets/:ferret/chat`). */
 export const ferretPath = (_daemonId: DaemonId | undefined, ferret: string): string =>
   `${daemonPrefix()}/ferrets/${encodeURIComponent(ferret)}/chat`;

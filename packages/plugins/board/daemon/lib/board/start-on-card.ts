@@ -173,7 +173,7 @@ export function startOnCardBrief(card: CardView, laneSet: LaneSet | null, bin: s
     '',
     focusCardBrief(card, laneSet),
     '',
-    `The daemon assigned ${ref} to you and moved it into its working lane; \`${bin} card note\` adds progress.`,
+    `The daemon assigned ${ref} to you and moved it into its working lane; \`${bin} task note\` adds progress.`,
   ].join('\n');
 }
 

@@ -43,7 +43,7 @@ export async function checkMergeGate(
   }
   if (answer.unreadable.length > 0) {
     return unreadable(
-      `the board has cards it cannot read (${answer.unreadable.map(id => formatCardRef({ id })).join(', ')}), and any of them might link this PR`,
+      `the board has tasks it cannot read (${answer.unreadable.map(id => formatCardRef({ id })).join(', ')}), and any of them might link this PR`,
     );
   }
   const lines = mergeGateLines(answer);

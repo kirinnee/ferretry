@@ -103,8 +103,11 @@ describe('fy verbs', () => {
       'fy guide show',
       'fy guide show --json',
       'fy guide inventory',
+      'fy task show F12',
+      'fy task show F12 --yaml',
+      'fy task note F12 progress',
+      // the old spelling still runs, as the verb that replaced it
       'fy card show F12',
-      'fy card show F12 --yaml',
       'fy card note F12 progress',
       'fy --as-owner status',
       '/home/kirin/.nix-profile/bin/fy logs ses-1',
@@ -132,15 +135,16 @@ describe('fy verbs', () => {
       should(classifyCommand(`fy send wren hello ${flags}`)).equal('unknown');
   });
 
-  it('should leave every other verb, and every other card verb, unclassified', () => {
+  it('should leave every other verb, and every other task verb, unclassified', () => {
     for (const command of [
       'fy migrate wren --agent claude-llm3',
       'fy restart wren',
       'fy stop children me',
+      'fy task move F12 done',
+      'fy task',
+      'fy task --json',
       'fy card move F12 done',
       'fy card',
-      'fy card --json',
-      'fy task show F12',
       'fy',
       'fy daemon update',
       'fy --other status',

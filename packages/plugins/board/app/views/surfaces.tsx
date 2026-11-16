@@ -22,7 +22,7 @@ import { embedSpecOf } from '../lib/embed-lanes.ts';
 import { readChatTasksUrl } from '../lib/board-chat-url.ts';
 import { ferretNamer } from '../lib/board-present.ts';
 import { THIS_MACHINE } from '../lib/machine.ts';
-import { navigateTo } from '../lib/navigate.ts';
+import { navigateTo, replaceTo } from '../lib/navigate.ts';
 import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../lib/paths.ts';
 import { BoardPage } from './board-page.tsx';
 import { LaneEditorPage } from './lane-editor.tsx';
@@ -123,27 +123,45 @@ const boardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
     );
   };
 
-/** `/card/:id` — one card on a page of its own. */
+/** One task on a page of its own: `/task/:id`, and `/card/:id` while it moves the address. */
+function TaskPage({ runtime, id }: { readonly runtime: BoardRuntime; readonly id: string }): ReactNode {
+  const callsigns = useCallsigns(useFerrets(runtime));
+  const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
+  const projectName = useProjectNames(runtime);
+  const now = useNow();
+  return (
+    <BoardDetail
+      machine={MACHINE}
+      names={names}
+      now={now}
+      onClose={() => navigateTo(boardPath())}
+      onNavigate={navigateTo}
+      phone
+      projectName={projectName}
+      siblings={[]}
+      store={runtime.store}
+      taskId={id}
+    />
+  );
+}
+
+/** `/task/:id` — one task on a page of its own. */
 const cardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
   function CardScreen({ params }: ScreenProps): ReactNode {
-    const callsigns = useCallsigns(useFerrets(runtime));
-    const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
-    const projectName = useProjectNames(runtime);
-    const now = useNow();
-    return (
-      <BoardDetail
-        machine={MACHINE}
-        names={names}
-        now={now}
-        onClose={() => navigateTo(boardPath())}
-        onNavigate={navigateTo}
-        phone
-        projectName={projectName}
-        siblings={[]}
-        store={runtime.store}
-        taskId={params.id ?? ''}
-      />
-    );
+    return <TaskPage id={params.id ?? ''} runtime={runtime} />;
+  };
+
+/**
+ * `/card/:id` — the address a link made before the rename still carries (transcripts and agenda text keep them): it
+ * shows the task and moves the address to `/task/:id`.
+ */
+const formerCardScreen = (runtime: BoardRuntime): AppComponent<ScreenProps> =>
+  function FormerCardScreen({ params }: ScreenProps): ReactNode {
+    const id = params.id ?? '';
+    useEffect(() => {
+      if (id !== '') replaceTo(cardPagePath(id));
+    }, [id]);
+    return <TaskPage id={id} runtime={runtime} />;
   };
 
 /** `ferret.side` — the cards of the ferret the panel sits beside. */
@@ -274,7 +292,11 @@ const cardEmbedRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =
   };
 
 export interface BoardSurfaces {
-  readonly screens: { readonly board: AppComponent<ScreenProps>; readonly card: AppComponent<ScreenProps> };
+  readonly screens: {
+    readonly board: AppComponent<ScreenProps>;
+    readonly task: AppComponent<ScreenProps>;
+    readonly card: AppComponent<ScreenProps>;
+  };
   readonly panels: {
     readonly 'cards-of-ferret': AppComponent<PanelProps>;
     readonly 'card-progress': AppComponent<PanelProps>;
@@ -290,7 +312,7 @@ export interface BoardSurfaces {
 export const createSurfaces = (client: PluginClient): BoardSurfaces => {
   const runtime = boardRuntimeOf(client);
   return {
-    screens: { board: boardScreen(runtime), card: cardScreen(runtime) },
+    screens: { board: boardScreen(runtime), task: cardScreen(runtime), card: formerCardScreen(runtime) },
     panels: { 'cards-of-ferret': cardsOfFerret(runtime), 'card-progress': cardProgress(runtime) },
     settings: { board: boardSettings() },
     renderers: {
