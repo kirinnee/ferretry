@@ -25,7 +25,7 @@ const item = agendaItem('A47', {
 });
 const view = sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build' } });
 const card = inboxCard(item, view);
-const daemon = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'device' });
+const daemon = daemonConnection({ daemonId: 'laptop' });
 /** Dictation switched on, as Voice's defaults have it; the Inbox only passes it through to the host composer. */
 const DICTATION = { enabled: true };
 const phone = window.innerWidth < 768;

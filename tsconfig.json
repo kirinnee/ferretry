@@ -18,7 +18,10 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": false,
-    "types": ["bun"]
+    "types": ["bun"],
+    // The plugins' browser tests (tests/integration/app) import playwright-core, which only the app package installs: resolve it
+    // to that one copy, so the root project can check them without a second dependency.
+    "paths": { "playwright-core": ["./packages/app/node_modules/playwright-core"] }
   },
   "include": [
     "packages/std",
@@ -28,22 +31,5 @@
     "packages/cli/src",
     "packages/cli/tests"
   ],
-  "exclude": [
-    "packages/app",
-    "**/node_modules",
-    // Agenda browser fixtures await app-shell-fill; preserve the port's integration-test exclusion.
-    "packages/plugins/agenda/tests/integration/app",
-    // Conversation's fy-render browser tests need playwright-core, the Vite harness and the built sandbox shell, which the
-    // test tier has not got; they are never run locally (the [tests] reason in packages/plugins/conversation/ports-pending.json).
-    "packages/plugins/conversation/tests/integration/app",
-    "packages/plugins/conversation/tests/realworld/app",
-    // Claude Code's card screenshots (the same browser harness): they need playwright-core, which only the app package has.
-    "packages/plugins/claude-code/tests/integration/app",
-    // Board's card screenshots (the same browser harness): playwright-core is the app package's alone.
-    "packages/plugins/board/tests/integration/app",
-    // Logins' card screenshots (the same browser harness): playwright-core is only in the app package.
-    "packages/plugins/logins/tests/integration/app",
-    // MCP's Add MCP reload screenshots (the same browser harness): playwright-core is the app package's alone.
-    "packages/plugins/mcp/tests/integration/app"
-  ]
+  "exclude": ["packages/app", "**/node_modules"]
 }

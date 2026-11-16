@@ -14,8 +14,8 @@
  *   ?theme=<family>-<mode>
  */
 
-import type { FerretView } from '@ferretry/core-ferrets/contract';
-import type { LogPageOptions, LogPage, SessionLogSearch } from '../../../../contract/index.ts';
+import { FerretIdSchema, type FerretView } from '@ferretry/core-ferrets/contract';
+import type { LogPageOptions, LogPage, LogSearch } from '../../../../contract/index.ts';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChatSearch, type ChatSearchPort } from '../../../../app/search/chat-search.tsx';
 import { createRoot } from 'react-dom/client';
@@ -39,6 +39,7 @@ declare global {
 }
 
 const TOTAL = 1_500;
+const FERRET = FerretIdSchema.parse('s');
 const STRIDE = 100;
 const DELAY_MS = 60;
 let count = TOTAL;
@@ -91,7 +92,7 @@ const logPage = async (_id: string, options: LogPageOptions = {}): Promise<LogPa
   for (let index = kept; index < end; index += 1) lines.push(record(index));
   return {
     v: 1,
-    sessionId: 's',
+    ferret: FERRET,
     log: lines.join('\n'),
     offsets: Array.from({ length: end - kept }, (_, index) => (kept + index) * STRIDE),
     start: options.before === undefined || kept > first ? kept * STRIDE : from,
@@ -102,7 +103,7 @@ const logPage = async (_id: string, options: LogPageOptions = {}): Promise<LogPa
 /** Every record that says `query`, as `log-search` answers: oldest first, by its record's byte. */
 const searchRecords = async (query: string, options: { readonly who: string; readonly tools: boolean }) => {
   const needle = query.toLowerCase();
-  const matches: SessionLogSearch['matches'][number][] = [];
+  const matches: LogSearch['matches'][number][] = [];
   for (let index = 0; index < count; index += 1) {
     const text = record(index);
     const role = text.includes(' user/') ? 'user' : text.includes(' tool/') ? 'tool' : 'assistant';
@@ -114,7 +115,7 @@ const searchRecords = async (query: string, options: { readonly who: string; rea
     const at = body.toLowerCase().indexOf(needle);
     if (at >= 0) matches.push({ offset: index * STRIDE, role, kind: 'message', snippet: body });
   }
-  return { v: 1 as const, sessionId: 's', query, file: 'f1', matches, truncated: false };
+  return { v: 1 as const, ferret: FERRET, query, file: 'f1', matches, truncated: false };
 };
 
 function Scene() {
