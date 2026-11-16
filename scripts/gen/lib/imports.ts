@@ -211,10 +211,31 @@ export function scannedImportsOf(ws: Workspace, file: string): ImportEdge[] {
   }));
 }
 
+/** A dynamic `import(...)` whose specifier is not a plain string literal: the edge it makes cannot be known. */
+export interface OpaqueImport {
+  /** Absolute importing file. */
+  readonly from: string;
+  /** 1-based line of the specifier expression. */
+  readonly line: number;
+  /** The specifier expression as written. */
+  readonly text: string;
+}
+
 /** Every import edge of one file. Throws with the file name on a parse error. */
 export function importsOf(ws: Workspace, file: string): ImportEdge[] {
+  return importsAndOpaqueOf(ws, file).edges;
+}
+
+/**
+ * `importsOf` plus the dynamic imports it cannot resolve (a non-literal specifier). A check that must fail closed
+ * (the CI scope) reads the second list; the import checks keep reading edges only.
+ */
+export function importsAndOpaqueOf(
+  ws: Workspace,
+  file: string,
+): { readonly edges: ImportEdge[]; readonly opaque: OpaqueImport[] } {
   const fromPkg = ws.ownerOf(file);
-  if (fromPkg === undefined) return [];
+  if (fromPkg === undefined) return { edges: [], opaque: [] };
   const source = readFileSync(file, 'utf8');
   const parsed = parser()(file, source, { sourceType: 'module' });
   if (parsed.errors.length > 0) {
@@ -245,10 +266,12 @@ export function importsOf(ws: Workspace, file: string): ImportEdge[] {
       break;
     }
   }
+  const opaque: OpaqueImport[] = [];
   for (const record of parsed.module.dynamicImports) {
     const raw = source.slice(record.moduleRequest.start, record.moduleRequest.end).trim();
     const literal = /^(['"`])([^'"`$]*)\1$/.exec(raw);
     if (literal !== null) push(literal[2] as string, record.moduleRequest.start, false, 'dynamic');
+    else opaque.push({ from: file, line: lineAt(source, record.moduleRequest.start), text: raw.replace(/\s+/g, ' ') });
   }
-  return edges;
+  return { edges, opaque };
 }
