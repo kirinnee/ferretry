@@ -142,12 +142,13 @@ const QUESTION_ASKED_FILE = 'question-asked.json';
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
  */
 export class SessionFiles {
-  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
+  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler (the latter
+   * through the registry's own record of when a launch began, since FerretsService does not register in it). */
   readonly launchGate: InMemoryLaunchGate;
   /**
    * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so does FerretsService's
-   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): the
-   * interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers are not on it yet.
+   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): runtime
+   * control, Pack hooks and switches, and answers are not on it yet.
    */
   readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
