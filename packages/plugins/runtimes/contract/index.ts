@@ -109,6 +109,13 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
    * not carried yet): Runtimes cannot say, and a reader must treat that as unknown and fail closed, never as `random`.
    */
   machineBrowserPorts(): Promise<MachineBrowserPorts>;
+  /**
+   * The machine's "Auto-resume after restart" switch (`runtimes.yaml` `autoResume`, on when left out): `true` on, `false`
+   * off, `undefined` when it cannot be read as it stands. It is the one setting there is for "may the machine bring a ferret
+   * back by itself" (no per-ferret one exists); the Warden's automatic revive reads it and treats anything but `true` as no.
+   * An operator's own resume never asks it.
+   */
+  autoResume(): Promise<boolean | undefined>;
 }
 /** What {@link RuntimesApi.machineBrowserPorts} answers (Runtimes' own copy of the two schemas, `wire/shared.ts`). */
 export interface MachineBrowserPorts {
@@ -116,7 +123,7 @@ export interface MachineBrowserPorts {
   readonly browserFirewallFailure: z.infer<typeof BrowserFirewallFailureSchema>;
 }
 /** The members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
-export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools' | 'machineBrowserPorts'>;
+export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools' | 'machineBrowserPorts' | 'autoResume'>;
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
@@ -129,6 +136,7 @@ export const RUNTIMES_READ_MODELS = [
   'catalog',
   'tools',
   'machineBrowserPorts',
+  'autoResume',
   ...RUNTIME_HOME_READ_MODELS,
   ...RUNTIME_LAYER_READ_MODELS,
 ] as const;

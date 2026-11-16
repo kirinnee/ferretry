@@ -1143,6 +1143,19 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
     const off = await askSwitch({ file: { autoResume: false } });
     expect(off?.decision).toEqual({ allow: false, reason: 'Auto-resume after restart is off on this machine' });
   });
+
+  it('the provided port answers the same switch to the Warden: on, off, and undefined when it cannot be read', async () => {
+    const answer = async (autoResume: (() => boolean | undefined) | undefined) => {
+      const { host } = await compose({ assemble: ctx => ({ ...hostAssembly(ctx), autoResume }) });
+      return await host.provided(RuntimesPort).autoResume();
+    };
+
+    expect(await answer(() => true)).toBe(true);
+    expect(await answer(() => false)).toBe(false);
+    expect(await answer(() => undefined)).toBeUndefined();
+    // No assembly answer: the file decides, and a machine that never wrote the setting is on, as it always was.
+    expect(await answer(undefined)).toBe(true);
+  });
 });
 
 const FIXTURE_SOURCES = ModelCatalogSourcesSchema.parse({

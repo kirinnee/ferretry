@@ -23,7 +23,8 @@ import { createWardenSubsystem } from './subsystem.ts';
  *   sweep) and recorded as failed. The revive notice is the same send: it is journalled apart, and the resume it
  *   follows stands (`daemon/remedies.ts`), so the revive limits count it.
  * - Auto-revive resumes a ferret Ferrets reports as having died (`FerretSummary.cause`) through `FerretsApi.resume`
- *   (automatic). A failover act is a move through `FerretsApi.move`, and so is every automatic one: the sweep routes both
+ *   (automatic), only while the machine's auto-resume switch (Runtimes' `autoResume()`; there is no per-ferret one) reads
+ *   on, and at most 3 times per ferret per rolling hour. A failover act is a move through `FerretsApi.move`, and so is every automatic one: the sweep routes both
  *   through the auto-move service (`subsystem.ts`), which reads the fleet facts from Runtimes, Logins and Usage and asks
  *   Accounts ONE yes or no for the owner hold (an input card, a sign-in waiting on their phone, a plan card, a copied
  *   secret: a ferret with any is never moved, and a hold that cannot be checked is a hold). GAP: Ferrets publishes no

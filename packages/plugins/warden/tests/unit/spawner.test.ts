@@ -70,6 +70,41 @@ describe('the Ferrets spawner', () => {
     await scratch.closeAll();
   });
 
+  it("should start an investigator only through Ferrets' ordinary start, so start.decide and Packs judge it like any start", async () => {
+    // Arrange: a Ferrets that records every call and refuses the start the way Packs' start.decide does.
+    const scratch = fakeScratch();
+    const calls: string[] = [];
+    const starts: Parameters<FerretsApi['start']>[] = [];
+    const ferrets = new Proxy(
+      {
+        start: async (...args: Parameters<FerretsApi['start']>) => {
+          starts.push(args);
+          return err({ code: 'refused', reason: 'lead already has 4 running helpers' });
+        },
+      },
+      {
+        get: (target, name: string) => {
+          calls.push(name);
+          return (target as Record<string, unknown>)[name];
+        },
+      },
+    ) as unknown as FerretsApi;
+    const spawner = ferretsWardenSpawner({ ferrets, folders: new ScratchWardenWorkFolders(scratch) });
+
+    // Act
+    const failure = (await spawner.spawn(request()).catch((error: unknown) => error)) as Error;
+
+    // Assert: the one door is `start` (no launch of its own, no admission skipped), under the Warden as an agent's
+    // launch, with no parent: the pack limits are about a child's lead, and a start with none is not Pack-limited.
+    should(calls).deepEqual(['start']);
+    should(starts).have.length(1);
+    should(starts[0]?.[0]).containEql({ by: 'warden' });
+    should(starts[0]?.[0]).not.have.property('parent');
+    should(starts[0]?.[0]).not.have.property('role');
+    should(failure.message).containEql('lead already has 4 running helpers');
+    await scratch.closeAll();
+  });
+
   it('should read a started ferret that cannot be read back as a failed start', async () => {
     // Arrange
     const scratch = fakeScratch();

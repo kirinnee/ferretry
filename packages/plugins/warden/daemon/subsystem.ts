@@ -240,20 +240,35 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem & { rea
     resume: automaticResume,
     // Ferrets owns the runner and refuses a resume it cannot start; there is no separate tmux server to wait for.
     tmuxReady: async () => true,
+    // The machine's "Auto-resume after restart" switch, Runtimes' to answer (no per-ferret switch exists). Runtimes off, or
+    // unable to say, is no: the revive then does nothing, as a hold that cannot be checked is a hold.
+    autoResume: async () => await host.runtimes?.()?.autoResume(),
     sleep: async ms =>
       await new Promise<void>(resolve => {
         kernel.clock.after(milliseconds(ms), resolve);
       }),
     notifyOwner: async notice => {
-      // The breaker's one notice lands on the ferret that tripped it, as a plain notification (today's).
-      await agenda.notice(notice.sessionId, {
-        sourceRef: 'warden-revive-breaker',
-        subject: `${notice.title}: ${notice.subject}`,
-        why: notice.why,
-        context: 'Auto-revive paused itself after revived sessions kept dying.',
-        howToResolve:
-          'Nothing to answer. Look at why sessions keep dying; revives resume by themselves after the pause.',
-      });
+      // The breaker's one notice lands on the ferret that tripped it, as a plain notification (today's); a ferret left
+      // dead at the hourly cap gets the same kind of notice, one per ferret per hour.
+      await agenda.notice(
+        notice.sessionId,
+        notice.kind === 'cap'
+          ? {
+              sourceRef: 'warden-revive-cap',
+              subject: `${notice.title}: ${notice.subject}`,
+              why: notice.why,
+              context: 'Auto-revive left one ferret stopped after it died four times in an hour.',
+              howToResolve: 'Nothing to answer. Look at why it keeps dying, then resume it yourself.',
+            }
+          : {
+              sourceRef: 'warden-revive-breaker',
+              subject: `${notice.title}: ${notice.subject}`,
+              why: notice.why,
+              context: 'Auto-revive paused itself after revived sessions kept dying.',
+              howToResolve:
+                'Nothing to answer. Look at why sessions keep dying; revives resume by themselves after the pause.',
+            },
+      );
     },
     journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
   });

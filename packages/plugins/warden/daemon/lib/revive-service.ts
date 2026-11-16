@@ -34,6 +34,9 @@ import {
   type PlannedRevive,
   planRevives,
   REVIVE_BATCH_LIMIT,
+  REVIVE_CAP_WINDOW_MS,
+  REVIVE_HOURLY_CAP,
+  revivesInCapWindow,
   type ReviveEvent,
   type ReviveRefusal,
   type ReviveState,
@@ -62,6 +65,8 @@ export type WardenResumeOutcome =
   | { readonly ok: false; readonly reason: string };
 
 export interface WardenReviveNotice {
+  /** Which owner-facing sentence this is: the breaker's pause, or one ferret left dead at the hourly cap. */
+  readonly kind?: 'breaker' | 'cap';
   readonly sessionId: string;
   readonly title: string;
   readonly subject: string;
@@ -74,6 +79,11 @@ export interface WardenRevivePorts {
   resume(sessionId: string, message: string, origin: LaunchOrigin): Promise<WardenResumeOutcome>;
   /** Whether the daemon's tmux server answers. */
   tmuxReady(): Promise<boolean>;
+  /**
+   * The machine's "Auto-resume after restart" switch: `true` on, `false` off, `undefined` when it cannot be read. There
+   * is no per-ferret switch. Total: a throw or an absent owner is `undefined`, and anything but `true` means no revive.
+   */
+  autoResume(): Promise<boolean | undefined>;
   sleep(ms: number): Promise<void>;
   /** One notice to the owner. Total. */
   notifyOwner(notice: WardenReviveNotice): Promise<void>;
@@ -124,6 +134,9 @@ export class WardenReviveService {
     // A revive IS a resume of a dead agent: an owner who has not let the Warden resume alone has not let it
     // revive alone either, whatever `revive.enabled` says.
     if (!config.enabled || !config.revive.enabled || !config.mayActAlone.resume) return none;
+    // The machine's own switch for unattended resumes, fail closed: off or unreadable revives nothing. An operator's own
+    // resume never comes through here.
+    if ((await this.ports.autoResume().catch((): undefined => undefined)) !== true) return none;
 
     let state = this.housekeeping(input.revive ?? EMPTY_REVIVE_STATE, input.fleet, nowMs);
     const found = await this.candidates(input, state);
@@ -137,6 +150,7 @@ export class WardenReviveService {
       const subject = fresh[0];
       if (subject !== undefined)
         await this.ports.notifyOwner({
+          kind: 'breaker',
           sessionId: subject.id,
           title: 'Auto-revive paused',
           ...fitOwnerNotice({
@@ -161,6 +175,7 @@ export class WardenReviveService {
     for (const { subject, why } of plan.refused) {
       state = { ...state, refused: { ...state.refused, [deathKey(subject)]: at } };
       await this.refuse(subject.id, why);
+      if (why === 'hourly_cap') state = await this.tellCapped(subject, state, nowMs);
     }
 
     const actions: WardenAction[] = [];
@@ -263,6 +278,28 @@ export class WardenReviveService {
     return false;
   }
 
+  /**
+   * The ferret that died a 4th time inside the hour is left dead, and the owner is told in ONE sentence on that ferret: the
+   * breaker's notice style, once per ferret per hour (`capNoticedAt`), so a ferret that keeps dying raises no item per death.
+   */
+  private async tellCapped(subject: ReviveSubject, state: ReviveState, nowMs: number): Promise<ReviveState> {
+    const record = state.sessions[subject.id];
+    if (record === undefined) return state;
+    const told = record.capNoticedAt === undefined ? undefined : instantMs(record.capNoticedAt);
+    if (told !== undefined && nowMs - told < REVIVE_CAP_WINDOW_MS) return state;
+    const times = revivesInCapWindow(record, nowMs).length;
+    await this.ports.notifyOwner({
+      kind: 'cap',
+      sessionId: subject.id,
+      title: 'Ferret left stopped',
+      ...fitOwnerNotice({
+        subject: `Ferretry started ${subject.id} again ${times} times in the last hour and it died again, so it is left stopped.`,
+        why: `Auto-revive brings one ferret back at most ${REVIVE_HOURLY_CAP} times an hour so a crash cannot become a loop. Look at why it keeps dying, then resume it yourself.`,
+      }),
+    });
+    return { ...state, sessions: { ...state.sessions, [subject.id]: { ...record, capNoticedAt: isoFromMs(nowMs) } } };
+  }
+
   private async refuse(sessionId: string, why: ReviveRefusal): Promise<void> {
     await this.ports.events.emit(sessionId, 'warden.revive_refused', { why });
     this.ports.journal.record('fleet.warden_revive_refused', { sessionId, why });
@@ -322,6 +359,7 @@ export class WardenReviveService {
           [planned.id]: {
             revivedAt: at,
             attempts,
+            recent: [...revivesInCapWindow(previous, nowMs), at],
             crashRevives: (previous?.crashRevives ?? 0) + (planned.cause.kind === 'agent_crashed' ? 1 : 0),
           },
         },

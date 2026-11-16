@@ -449,6 +449,8 @@ const ReviveStateSchema = z.object({
         revivedAt: Instant,
         attempts: z.number().int().min(0),
         crashRevives: z.number().int().min(0),
+        recent: z.array(Instant).optional(),
+        capNoticedAt: Instant.optional(),
       }),
     )
     .default({}),

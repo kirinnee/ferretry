@@ -19,6 +19,7 @@ const service = (read: () => Promise<readonly ReviveEvent[]>, resumed: string[] 
       return { ok: true };
     },
     tmuxReady: async () => true,
+    autoResume: async () => true,
     sleep: async () => {},
     notifyOwner: async () => {},
     journal: { record: () => {} },
