@@ -129,7 +129,7 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
         setError(
           isForbidden(cause)
             ? NO_ACCOUNTS_DEVICE_WORDS
-            : `This browser could not read this daemon’s sign-in plans:${failureWords(cause)}`,
+            : `This browser could not read this daemon’s sign-in plans: ${failureWords(cause)}`,
         );
       });
     return () => {

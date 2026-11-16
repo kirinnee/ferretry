@@ -15,7 +15,7 @@ describe('the card', () => {
   it('says there are no live plans, with the honest-client line above', async () => {
     const mounted = await mount(<TaskPlansCard busy={false} error={null} onRevoke={() => undefined} plans={[]} />);
     try {
-      expect(q(mounted.container, '[data-task-plans-empty]').textContent).toContain('No live task plans');
+      expect(q(mounted.container, '[data-task-plans-empty]').textContent).toContain('No live sign-in plans');
       expect(q(mounted.container, '[data-task-plans-honest]').textContent).toBe(HONEST_CLIENT_LINE);
     } finally {
       await mounted.unmount();
@@ -129,7 +129,7 @@ describe('the surface', () => {
     const failing = await mount(<TaskPlansSurface client={client} />);
     try {
       expect(q(failing.container, '[data-task-plans-error]').textContent).toContain(
-        'could not read this daemon’s task plans: offline',
+        'could not read this daemon’s sign-in plans: offline',
       );
     } finally {
       await failing.unmount();
@@ -139,7 +139,7 @@ describe('the surface', () => {
   it('says it is reading while the first read is out', async () => {
     const mounted = await mount(<TaskPlansSurface client={{ call: () => new Promise<never>(() => undefined) }} />);
     try {
-      expect(mounted.container.querySelector('[aria-label="Loading task plans"]')).not.toBeNull();
+      expect(mounted.container.querySelector('[aria-label="Loading sign-in plans"]')).not.toBeNull();
     } finally {
       await mounted.unmount();
     }

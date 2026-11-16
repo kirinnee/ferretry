@@ -87,7 +87,7 @@ describe('reading one plan', () => {
       standing: ferretStanding('F1' as FerretId),
     });
     should(refused).match({ status: 403, code: 'owner_only' });
-    should(refused.body).containEql('approves or changes a task plan');
+    should(refused.body).containEql('approves or changes a sign-in plan');
   });
 
   it('should refuse a path that could not name a plan or a session, and a plan that is not held', async () => {
@@ -227,7 +227,7 @@ describe('a staged selection', () => {
 
     should(view).match({ status: 200, body: { state: 'waiting' } });
     should(forged).match({ status: 404, code: 'stage_not_found' });
-    should(forged.body).equal('that task plan selection is not waiting for a passkey');
+    should(forged.body).equal('that sign-in plan selection is not waiting for a passkey');
     should(unknown).match({ status: 404, code: 'stage_not_found' });
   });
 
