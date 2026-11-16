@@ -115,6 +115,7 @@ describe('the per-ferret file definitions', () => {
         'prompt',
         'tmuxSession',
         'capabilityHash',
+        'pendingMove',
       ].sort(),
     );
   });
