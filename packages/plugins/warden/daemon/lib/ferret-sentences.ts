@@ -34,7 +34,7 @@ const ANOMALY_CLAUSE: Readonly<Record<AnomalyKind, string>> = {
   bootstrap_degraded: 'it started in a degraded state',
   provider_unavailable: 'its model provider could not be reached',
   owner_request: 'the owner asked for a look at it',
-  orphaned_card: 'a card is left with no ferret on it',
+  orphaned_card: 'a task is left with no ferret on it',
   report_overdue: 'a report asked of it is overdue',
   input_stuck: 'a message typed to it was not sent',
   inbox_stuck: 'a message queued for it has not been delivered',

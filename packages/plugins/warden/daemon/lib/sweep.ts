@@ -2737,7 +2737,7 @@ export class WardenSweepService {
     const board = await port.read().catch(() => undefined);
     if (board === undefined)
       this.ports.journal.record('fleet.warden_board_blind', {
-        reason: 'the board could not be read, so no card was reported orphaned or cleared this sweep',
+        reason: 'the board could not be read, so no task was reported orphaned or cleared this sweep',
       });
     return board;
   }

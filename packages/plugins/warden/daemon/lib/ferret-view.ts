@@ -76,6 +76,7 @@ const FLAG_FIELDS = [
   'assignedWarden',
   'ledger',
   'subject',
+  'task',
   'card',
 ] as const;
 

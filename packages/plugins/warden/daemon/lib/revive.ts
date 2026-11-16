@@ -193,7 +193,7 @@ export function reviveMessage(
   if (mode === 'interactive') return notice;
   return (
     `${notice} Your conversation was resumed as it was. Re-read your last turn, then continue from where you stopped` +
-    (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`)
+    (card === undefined ? '.' : `, on the task below.\n\n${focusCardBrief(card)}`)
   );
 }
 

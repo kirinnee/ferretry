@@ -170,9 +170,9 @@ describe('the plain words for a death', () => {
     const interactive = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'interactive', card);
 
     // Assert
-    should(auto).containEql('continue from where you stopped, on the card below.\n\nYour card: &F1 — Ship the thing');
+    should(auto).containEql('continue from where you stopped, on the task below.\n\nYour task: &F1 — Ship the thing');
     should(auto).containEql('The ask, verbatim (owner):\nbuild the board');
-    should(interactive).not.containEql('Your card');
+    should(interactive).not.containEql('Your task');
   });
 
   it('should tell an interactive session the notice and nothing to do', () => {

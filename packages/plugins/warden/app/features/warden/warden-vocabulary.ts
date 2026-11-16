@@ -33,7 +33,7 @@ export const FLAG_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   peer_wait_unanswerable: chip('waiting on nobody', 'warn'),
   bootstrap_degraded: chip('setup broken', 'err'),
   owner_request: chip('you asked', 'accent'),
-  orphaned_card: chip('card orphaned', 'err'),
+  orphaned_card: chip('task orphaned', 'err'),
   report_overdue: chip('no reply', 'warn'),
   input_stuck: chip('stuck unsent', 'err'),
   inbox_stuck: chip('inbox stuck', 'err'),

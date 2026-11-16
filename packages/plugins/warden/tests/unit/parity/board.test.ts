@@ -153,7 +153,7 @@ describe('Board, an optional use of the Warden', () => {
     // ask is raised on the assignee's board.
     expect(typed).toEqual([]);
     expect(await notices('worker')).toEqual([]);
-    expect(await machineItem()).toEqual({ entries: ['warden.orphans'], subjects: ['A card has nobody working on it'] });
+    expect(await machineItem()).toEqual({ entries: ['warden.orphans'], subjects: ['A task has nobody working on it'] });
   });
 
   test('the owner’s message names the binary a ferret types (`fy`), never the product name', async () => {
@@ -216,7 +216,7 @@ describe('Board, an optional use of the Warden', () => {
 
     // Assert
     expect(await notices('lead')).toEqual([]);
-    expect(await machineItem()).toEqual({ entries: ['warden.orphans'], subjects: ['A card has nobody working on it'] });
+    expect(await machineItem()).toEqual({ entries: ['warden.orphans'], subjects: ['A task has nobody working on it'] });
     expect(typed).toHaveLength(1);
   });
 
@@ -240,7 +240,7 @@ describe('Board, an optional use of the Warden', () => {
     expect(await notices('lead')).toEqual([]);
     expect(await machineItem()).toEqual({
       entries: ['warden.orphans'],
-      subjects: ['31 cards have nobody working on them'],
+      subjects: ['31 tasks have nobody working on them'],
     });
   });
 
@@ -283,7 +283,7 @@ describe('Board, an optional use of the Warden', () => {
 
     // Assert
     expect(changed.ids).toEqual(first);
-    expect(changed.item).toEqual({ entries: ['warden.orphans'], subjects: ['3 cards have nobody working on them'] });
+    expect(changed.item).toEqual({ entries: ['warden.orphans'], subjects: ['3 tasks have nobody working on them'] });
     expect(await machineItem()).toEqual({ entries: [], subjects: [] });
   });
 

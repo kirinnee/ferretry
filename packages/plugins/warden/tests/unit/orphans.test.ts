@@ -143,7 +143,7 @@ describe('planOrphanEscalations', () => {
     const tell = result.tell[0];
     should(tell).containDeep({ taskId: 'F1', assignee: 'worker', sessionId: 'lead' });
     const text = tell?.message ?? '';
-    should(text).startWith('Your card &F1 "Ship the thing" has no ferret working on it. It is waiting in Implement');
+    should(text).startWith('Your task &F1 "Ship the thing" has no ferret working on it. It is waiting in Implement');
     should(text).not.containEql('[ferretry]');
     should(text).not.containEql('This notice is from Ferretry');
     should(text).containEql('its ferret worker has finished, so nothing will happen to it.');
@@ -258,7 +258,7 @@ describe('planOrphanEscalations', () => {
         taskId: 'F1',
         sessionId: 'lead',
         sourceRef: 'warden-orphan:F1',
-        note: 'Closed by the Warden: the card changed hands since.',
+        note: 'Closed by the Warden: the task changed hands since.',
       },
     ]);
     should(result.tell).containDeep([{ sessionId: 'lead', assignee: 'worker' }]);
@@ -274,7 +274,7 @@ describe('planOrphanEscalations', () => {
         taskId: 'F1',
         sessionId: 'worker',
         sourceRef: 'warden-orphan:F1',
-        note: 'Closed by the Warden: the orphaned cards are one item on the machine agenda now.',
+        note: 'Closed by the Warden: the orphaned tasks are one item on the machine agenda now.',
       },
     ]);
     should(result.tell).be.empty();
@@ -303,7 +303,7 @@ describe('planOrphanEscalations', () => {
         taskId: 'F1',
         sessionId: 'worker',
         sourceRef: 'warden-orphan:F1',
-        note: 'Closed by the Warden: a ferret is on the card again, or it left its lane.',
+        note: 'Closed by the Warden: a ferret is on the task again, or it left its lane.',
       },
     ]);
   });
