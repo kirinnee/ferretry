@@ -85,16 +85,38 @@ const POINTER = /^(["']?)\$(?:\{[^}]+\}|[A-Za-z_][A-Za-z0-9_]*)\1$/u;
  */
 const PLAIN_WORD = /^-{0,2}@?[a-z][a-z._/-]*$/u;
 
-/** A path or a URL as the write rule's value test knows one: a scheme and `://`, or a leading `/`, `~` or `.`. */
-const PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+/** A real path: `~/…`, `./…`, `../…` and a first `/` with at least a second segment (`/a/b`), never a bare `/x`. */
+const PLACE = /^(?:(?:~|\.|\.\.)\/[^/]|\/[^/]+\/[^/])/u;
+
+/** A mark a value has and a place has not: a pointer, a query, a fragment, a user, a scheme or a pair. */
+const NOT_IN_A_PLACE = /[\s${}#?@:=]/u;
+
+/** A flag word on its own (`--token-file`, `-k`): no `=`, so its value is the word AFTER it. */
+const FLAG_ONLY = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
 
 /**
- * Whether a part the cutter cut is one path or URL and nothing else (`--token-file ~/.config/tool/token`,
+ * Whether a part the cutter cut is one path and nothing else (`--token-file ~/.config/tool/token`,
  * `--key /home/u/.ssh/id_ed25519`): where a credential is kept, which the write rule accepts under a credential name.
- * It must be a single word that the cutter, run on it alone, shows whole: a URL with a password, a query key or a
- * token in it is a value.
+ * It is a place only as the word right after a FLAG word (never after `KEY=` or `Header:`), only a real path of more than
+ * one segment (never `/x` or `~x`), with no pointer, query, fragment, user, scheme or pair in it, and no segment the
+ * token test refuses on its own: a segment that is a value is a value. A URL is never a place.
  */
-const isPlace = (part: string): boolean => PLACE.test(part) && !/\s/u.test(part) && !shownWord(part, undefined).hidden;
+function isPlace(part: string, flagBefore: string | undefined): boolean {
+  return (
+    flagBefore !== undefined &&
+    FLAG_ONLY.test(flagBefore) &&
+    PLACE.test(part) &&
+    !NOT_IN_A_PLACE.test(part) &&
+    !part.split('/').some(segment => looksSecret('', segment)) &&
+    !shownWord(part, undefined).hidden
+  );
+}
+
+/** The word right before `at` in `text` when a blank is between them, or `before` when `at` is the start. */
+function wordBefore(text: string, at: number, before: string | undefined): string | undefined {
+  if (at === 0) return before;
+  return /\s/u.test(text[at - 1] ?? '') ? text.slice(0, at).trimEnd().split(/\s+/u).at(-1) : undefined;
+}
 
 /**
  * Whether a part the cutter cut is a pointer and nothing else: its first word is a pointer, and the words the cutter
@@ -128,7 +150,7 @@ function cutsAValue(text: string, before?: string): boolean {
     const end = last ? text.length - piece.length : text.indexOf(piece, at + 1);
     if (end < at + 1 || (last && !text.endsWith(piece))) return true;
     const part = text.slice(at, end);
-    if (!pointerThenPlainWords(part) && !isPlace(part)) return true;
+    if (!pointerThenPlainWords(part) && !isPlace(part, wordBefore(text, at, before))) return true;
     at = end + piece.length;
   }
   return false;

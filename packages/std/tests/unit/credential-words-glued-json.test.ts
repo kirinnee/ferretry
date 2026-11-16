@@ -111,7 +111,8 @@ describe('a JSON document inside a word', () => {
   });
 
   test('should read a string whose escape does not parse as written', () => {
-    expect(shown(`{"password":"${VALUE}\\q"}`)).toBe(`{"password":"${HIDDEN}"}`);
+    // The document does not parse, so it is cut from the key's value to its end
+    expect(shown(`{"password":"${VALUE}\\q"}`)).toBe(`{"password":${HIDDEN}`);
   });
 
   test('should read a document that does not parse as far as it goes, and one with stray marks', () => {
@@ -128,11 +129,40 @@ describe('a JSON document inside a word', () => {
 
     // Assert
     expect(actual).toEqual([
-      `{"password":"${HIDDEN}"`,
-      `{}}]{"password":"${HIDDEN}"}`,
-      `[:,"${VALUE}",{"secret":"${HIDDEN}"}]`,
+      `{"password":${HIDDEN}`,
+      `{}}]{"password":${HIDDEN}`,
+      `[:,"${VALUE}",{"secret":${HIDDEN}`,
       `  [{"token":"${HIDDEN}"}]`,
     ]);
+  });
+
+  // A document that does not parse has no pairs to read: from the value of its first secret-named key, in any of the
+  // ways a key can be written, to the end of the document, everything is cut.
+  const BROKEN: readonly (readonly [string, string, string])[] = [
+    ['a bare value under a quoted key', `{"API_KEY": ${VALUE}}`, `{"API_KEY": ${HIDDEN}`],
+    ['a missing colon', `{"API_KEY" "${VALUE}"}`, `{"API_KEY" ${HIDDEN}`],
+    ['a key after stray closing marks', `{"x":}}}"API_KEY":"${VALUE}"}`, `{"x":}}}"API_KEY":${HIDDEN}`],
+    ['a key after unclosed lists', `{"x":[[[[ "API_KEY":"${VALUE}"}`, `{"x":[[[[ "API_KEY":${HIDDEN}`],
+    ['single quotes', `{'API_KEY':'${VALUE}'}`, `{'API_KEY':${HIDDEN}`],
+    ['escaped quotes', `{\\"API_KEY\\":\\"${VALUE}\\"}`, `{\\"API_KEY\\":${HIDDEN}`],
+    ['a bare key', `{API_KEY: ${VALUE}}`, `{API_KEY: ${HIDDEN}`],
+  ];
+  for (const [name, word, expected] of BROKEN) {
+    test(`should cut from the value of a secret-named key to the end of a document that does not parse: ${name}`, () => {
+      expect(shown(word, '--settings')).toBe(expected);
+    });
+  }
+
+  test('should cut it when the broken document is inside one pair of quotes with its own quotes escaped', () => {
+    expect(shown(`"{\\"API_KEY\\":\\"${VALUE}\\"}"`, '--settings')).toBe(`"{\\"API_KEY\\":${HIDDEN}"`);
+  });
+
+  test('should leave a broken document with no secret-named key as it is', () => {
+    expect(shown(`{"mode": plain, 'name': 'x'}`, '--settings')).toBe(`{"mode": plain, 'name': 'x'}`);
+  });
+
+  test('should leave a broken document whose secret-named key has no value after it', () => {
+    expect(shown(`{"mode": plain, "API_KEY"`, '--settings')).toBe(`{"mode": plain, "API_KEY"`);
   });
 
   test('should not read a word that is not a JSON document', () => {

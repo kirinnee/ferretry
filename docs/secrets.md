@@ -659,7 +659,8 @@ per-document plan (one refused document writes nothing of the set).
 - **A JSON document inside a word is read key by key, and `-p<password>` is a password.** A word that starts with `{`
   or `[` (`--settings '{"env":{"API_KEY":"v"}}'`, also glued with `=` or inside one pair of quotes) has each string under a
   secret-named key cut, wherever it sits, the nearest key above it naming it; the read is lexical, so a document that does not
-  parse is read as far as it goes. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
+  parse is read as far as it goes, and it is also cut from the value of its first secret-named key (quoted with `"`, `'` or
+  `\"`, or bare) to its end. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
   name when the value is stuck to it (`-pHunter2Hunter2` is `-p‹hidden›`; a value under 8 characters is no credential, as
   everywhere); a longer flag glued to its value (`-password=$X`) is that flag's, and a `=` or blank inside a stuck value
   (`-pabc=def12345`) is still shown: a counted gap.
@@ -671,8 +672,10 @@ per-document plan (one refused document writes nothing of the set).
   after it is shown as `‹hidden›` (checked: `--token-file` then `/home/me/.config/tool/token`), though W accepts a path
   there. A person sees `‹hidden›` where a path stood, and a text saved back with it is refused until the real text is
   typed at the machine. Runtimes' MCP `command` shows such a path (`srv --token-file ~/.config/tool/token`, `srv --key
-/home/u/.ssh/id_ed25519`): a part the cutter cut that is one path or URL, which the cutter shows whole when it is
-  read alone, is no value, as W reads it.
+/home/u/.ssh/id_ed25519`): a part the cutter cut that is no value, as W reads it: the word right after a flag word, a real
+  multi-segment path (`~/…`, `./…`, `../…`, `/a/b…`, never a bare `/x` or `~x`) with no `$ { } # ? @ : =` in it and no
+  segment the token test refuses alone, which the cutter shows whole when read alone. A URL is never one, and nothing
+  after `KEY=` or `Header:` is.
 - **W and the mask agree by construction.** The cutter and W are one implementation, and each consumer runs W on what
   its cutter shows and withholds what W still refuses: the kernel doors withhold the file (`unmaskable`), and
   Runtimes' views withhold the item in words (the Resolved view's server line or flag, a component's whole args or flags

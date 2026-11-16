@@ -556,14 +556,47 @@ function jsonString(literal: string): string {
   }
 }
 
+/** A key's name as a broken document may write it: bare, or in `"`, `'` or `\"`, then a `:`, `=` or blanks. */
+const JSON_KEY_ISH = /(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*)(?:\\?["'])?[ \t]*[:=]?[ \t]*/gu;
+
+/** Whether a text parses as JSON (a document too deep for the parser does not). */
+function parses(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The cut of a document that does not parse (`{"API_KEY": v}`, `{'API_KEY':'v'}`, `{\"API_KEY\":\"v\"}`, a stray `}}}`
+ * before the key): it has no key and value pairs to read, so the first secret-named key anywhere in it (quoted with
+ * `"`, `'` or `\"`, or bare) cuts from its value to the end of the document, whatever shape that takes.
+ */
+function brokenJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  for (const found of matchesOf(JSON_KEY_ISH, text)) {
+    const from = found.index + found[0].length;
+    if (tests.namesSecret(found[1] ?? '') && from < text.length) return [[from, text.length]];
+  }
+  return [];
+}
+
 /**
  * The cuts of the strings of a JSON document inside a value (`{"env":{"API_KEY":"v"}}`) that look like credentials
  * under the key they are held by, as W names it: the nearest key above a string, however deep. Read lexically, one
  * pass and no recursion, so a document that does not parse is read as far as it goes and a deep one costs its length.
- * The quotes stay: only what is between them is cut.
+ * The quotes stay: only what is between them is cut. A document that does not parse is also cut from the value of its
+ * first secret-named key to its end ({@link brokenJsonCuts}), so a shape the lexical read misses shows nothing.
  */
 function jsonCuts(text: string, tests: CutterTests): readonly Cut[] {
   if (!JSON_DOCUMENT.test(text)) return [];
+  return parses(text)
+    ? lexicalJsonCuts(text, tests)
+    : [...lexicalJsonCuts(text, tests), ...brokenJsonCuts(text, tests)];
+}
+
+function lexicalJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
   const cuts: Cut[] = [];
   const frames: JsonFrame[] = [];
   for (const token of matchesOf(JSON_TOKEN, text)) {
