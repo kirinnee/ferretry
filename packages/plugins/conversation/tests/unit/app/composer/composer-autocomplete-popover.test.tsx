@@ -105,14 +105,14 @@ const texts = (view: ReactTestRenderer): string[] => {
 };
 
 describe('composer autocomplete popover', () => {
-  test('offers "Include agent cards" on the task menu only, and flips it from a key or a tap', () => {
+  test('offers "Include agent tasks" on the task menu only, and flips it from a key or a tap', () => {
     const flips: boolean[] = [];
     const switchOf = (included: boolean) => ({ included, onToggle: () => flips.push(!included) });
     const view = mounted(
       render(
         <ComposerAutocompletePopover
           agentTasks={switchOf(false)}
-          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& cards' })}
+          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& tasks' })}
         />,
       ),
     );
@@ -137,7 +137,7 @@ describe('composer autocomplete popover', () => {
       view.update(
         <ComposerAutocompletePopover
           agentTasks={switchOf(true)}
-          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& cards' })}
+          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& tasks' })}
         />,
       ),
     );
@@ -338,7 +338,7 @@ describe('composer autocomplete popover', () => {
   test('names the keys in the footer and marks an agent’s status as a dot', () => {
     expect(autocompleteFooterHint(undefined, undefined, undefined)).toBe('↑↓ choose · esc');
     expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 3, undefined)).toBe(
-      '↑↓ choose · esc · type @ again for cards',
+      '↑↓ choose · esc · type @ again for tasks',
     );
     expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 4, undefined)).toBe('↑↓ choose · esc');
     // A touch screen is told only what one more @ reaches, never keys it does not have.

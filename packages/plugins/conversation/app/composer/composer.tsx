@@ -572,7 +572,7 @@ export function Composer({
   // A host that reads the reference catalogs itself (the chat page, which proves the transcript's references from the
   // same arrays) owns those prefixes; a host that does not is a standalone composer whose providers read them.
   const hosted = referenceCatalogs !== undefined;
-  // "Include agent cards" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
+  // "Include agent tasks" in the `&` menu: a menu-only choice, off at rest, read live by the providers.
   const [includeAgentTasks, setIncludeAgentTasks] = useState(false);
   const includeAgentTasksRef = useRef(includeAgentTasks);
   includeAgentTasksRef.current = includeAgentTasks;

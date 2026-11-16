@@ -12,24 +12,24 @@ import { type FyRenderParsedBlock, isFyRenderEmbedBlock, parseFyRender } from '.
 
 const host = { daemon: 'daemon-a' };
 
-const blockOf = (type: 'card' | 'board', payload: string) => {
+const blockOf = (type: 'task' | 'board', payload: string) => {
   const result = parseFyRender([`type: ${type}`, 'alt: Live work', '---', payload].join('\n'));
   const block: FyRenderParsedBlock | undefined = result.ok ? result.block : undefined;
   if (block === undefined || !isFyRenderEmbedBlock(block)) throw new Error('fixture is not an embed block');
   return block;
 };
 
-describe('FyRenderCardEmbed: a card', () => {
-  it('names the group for what it shows and holds one row for the card', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('card', '&F12')} host={host} />);
-    const group = tree.root.findByProps({ 'data-fy-card-embed': 'card' });
+describe('FyRenderCardEmbed: a task', () => {
+  it('names the group for what it shows and holds one row for the task', () => {
+    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
+    const group = tree.root.findByProps({ 'data-fy-card-embed': 'task' });
     expect(group.props.role).toBe('group');
     expect(group.props['aria-label']).toBe('Live work');
     expect(tree.root.findAllByProps({ 'data-fy-card-embed-card': 'F12' })).toHaveLength(1);
   });
 
   it('keeps the written reference as text when no Board renderer is mounted, never as a link', () => {
-    const tree = render(<FyRenderCardEmbed block={blockOf('card', '&F12')} host={host} />);
+    const tree = render(<FyRenderCardEmbed block={blockOf('task', '&F12')} host={host} />);
     expect(tree.root.findAllByType('a')).toHaveLength(0);
     expect(JSON.stringify(tree.toJSON())).toContain('F12');
   });

@@ -79,7 +79,7 @@ describe('the reading verbs', () => {
 
   test('search refuses an unknown kind and an empty query', async () => {
     const { verbs } = harness();
-    expect(await run(verbs.search, ['x'], { kind: 'task' })).toBe(2);
+    expect(await run(verbs.search, ['x'], { kind: 'hologram' })).toBe(2);
     expect(await run(verbs.search, [])).toBe(2);
   });
 
@@ -90,6 +90,30 @@ describe('the reading verbs', () => {
     expect(await run(verbs['render guide'], ['hologram'])).toBe(2);
     expect(err.join('')).toContain('no type hologram');
     expect(await run(verbs.render, [])).toBe(0);
+  });
+
+  test('render guide answers for the task type, and still for the card name an older agent types', async () => {
+    const { verbs, out } = harness();
+    expect(await run(verbs['render guide'], [])).toBe(0);
+    expect(out.join('')).toContain('fy render guide task');
+    expect(out.join('')).not.toContain('fy render guide card');
+    out.length = 0;
+    expect(await run(verbs['render guide'], ['task'])).toBe(0);
+    const task = out.join('');
+    expect(task).toContain('`task` and `board` point at tasks on the board');
+    out.length = 0;
+    expect(await run(verbs['render guide'], ['board'])).toBe(0);
+    expect(out.join('')).toBe(task);
+    out.length = 0;
+    expect(await run(verbs['render guide'], ['card'])).toBe(0);
+    expect(out.join('')).toBe(task);
+  });
+
+  test('search takes task and the former card for --kind, and refuses anything else', async () => {
+    const { verbs, calls } = harness({ 'GET /v1/search': { hits: [], total: 0, indexed: { cards: 0, asks: 0 } } });
+    expect(await run(verbs.search, ['x'], { kind: 'task' })).toBe(0);
+    expect(await run(verbs.search, ['x'], { kind: 'card' })).toBe(0);
+    expect(calls.map(call => (call.init as { query: { kind: string } }).query.kind)).toEqual(['task', 'card']);
   });
 
   test('Q19 link keep sends the conversations as links and exits 1 when any is refused', async () => {

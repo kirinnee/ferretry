@@ -148,7 +148,7 @@ export const MAX_SESSION_SEARCH_RESULTS = 12;
  * What each field is worth when ordering matches.
  *
  * NOT `palette-ranking.ts`'s `FIELD_WEIGHTS`: that table is session-shaped
- * (teammate, label, folder) and these are files and cards. The ALGORITHM is
+ * (teammate, label, folder) and these are files and tasks. The ALGORITHM is
  * single-sourced — `scoreFields` and its word-start/substring/subsequence ladder
  * are imported, not re-derived — while the weights are this surface's own, which
  * is the "two legitimate input domains need two named things" split rather than
@@ -487,8 +487,8 @@ export function SessionSearchProvider({
 const indexingCopy = (taskState: SessionSearchResourceState, fileState: SessionSearchResourceState): string =>
   taskState === 'loading'
     ? fileState === 'loading'
-      ? "Indexing this ferret's files and cards…"
-      : "Indexing this ferret's cards…"
+      ? "Indexing this ferret's files and tasks…"
+      : "Indexing this ferret's tasks…"
     : "Indexing this ferret's files…";
 
 /**
@@ -505,7 +505,7 @@ const unavailableCopy = (
   fileError: string | null,
 ): string =>
   [
-    [taskState === 'unavailable' ? 'Cards unavailable.' : '', taskError],
+    [taskState === 'unavailable' ? 'Tasks unavailable.' : '', taskError],
     [fileState === 'unavailable' ? 'Files unavailable.' : '', fileError],
   ]
     .map(([copy, reason]) =>
@@ -716,7 +716,7 @@ export function SessionSearchControl({
   return (
     <div className={`relative min-w-0 ${className}`} data-current-session-search="" ref={container}>
       <label className="sr-only" htmlFor={inputId}>
-        Search this ferret's files and cards
+        Search this ferret's files and tasks
       </label>
       <span
         className="pointer-events-none absolute inset-y-0 left-2 flex items-center text-muted"
@@ -746,7 +746,7 @@ export function SessionSearchControl({
         }}
         onFocus={() => search.present(instanceId)}
         onKeyDown={onKeyDown}
-        placeholder="Search files & cards"
+        placeholder="Search files & tasks"
         ref={input}
         role="combobox"
         spellCheck={false}
@@ -798,7 +798,7 @@ export function SessionSearchControl({
             </p>
           )}
           {!queryPresent && !loading && !unavailable && (
-            <p className="m-0 px-3 py-2 text-ui text-muted">Type to search this ferret's files and cards.</p>
+            <p className="m-0 px-3 py-2 text-ui text-muted">Type to search this ferret's files and tasks.</p>
           )}
           {queryValid &&
             !loading &&
@@ -807,7 +807,7 @@ export function SessionSearchControl({
             !unavailable &&
             !partial && (
               <p className="m-0 px-3 py-2 text-ui text-muted">
-                No files or cards of this ferret match “{search.query}”.
+                No files or tasks of this ferret match “{search.query}”.
               </p>
             )}
           {queryValid &&
