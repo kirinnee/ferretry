@@ -365,7 +365,7 @@ describe('a runtime wrapper, run', () => {
 
   const withWrapper = async (
     input: Partial<RuntimeWrapperInput>,
-    options: { readonly fyStatus?: number; readonly cwdName?: string } = {},
+    options: { readonly fyStatus?: number; readonly cwdName?: string; readonly sessionId?: string } = {},
   ): Promise<{ readonly run: (...args: string[]) => Promise<Run>; readonly cwd: string }> => {
     const root = await temporaryDirectory();
     const bin = path.join(root, 'bin');
@@ -416,7 +416,12 @@ describe('a runtime wrapper, run', () => {
         const child = Bun.spawn({
           cmd: ['/bin/sh', script, ...args],
           cwd,
-          env: { PATH: `${bin}:/usr/bin:/bin`, HOME: path.join(root, 'person'), FY_SEED_FIRST_RUN: '0' },
+          env: {
+            PATH: `${bin}:/usr/bin:/bin`,
+            HOME: path.join(root, 'person'),
+            FY_SEED_FIRST_RUN: '0',
+            ...(options.sessionId === undefined ? {} : { FY_SESSION_ID: options.sessionId }),
+          },
           stdout: 'ignore',
           stderr: 'pipe',
         });
@@ -467,6 +472,49 @@ describe('a runtime wrapper, run', () => {
     should(resumed.harness).containEql('--session-id\nabc\n');
     should(ordinary.fyCalls).be.undefined();
     should(ordinary.stderr).equal('');
+  });
+
+  // c58-36c (a): a wrapper run for a session (FY_SESSION_ID set) that cannot check its conversation refuses instead of
+  // launching anyway. (A pane the daemon launches never runs the wrapper: the daemon moves its lease, see the lifecycle test.)
+  it('should refuse to launch, with the reason, when a daemon-launched wrapper cannot renew its lease', async () => {
+    // Arrange
+    const { run } = await withWrapper({}, { fyStatus: 1, sessionId: 'mw7bp88g-50e00159' });
+
+    // Act
+    const result = await run('--resume', '0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
+
+    // Assert
+    should(result.status).equal(HISTORY_CLAIM_HELD_EXIT_CODE);
+    should(result.harness).be.undefined();
+    should(result.stderr).containEql('fy history claim exited 1').and.containEql('not launching');
+  });
+
+  it('should refuse to launch a daemon-launched wrapper when fy is missing', async () => {
+    // Arrange
+    const { run } = await withWrapper({}, { sessionId: 'mw7bp88g-50e00159' });
+
+    // Act
+    const result = await run('--session-id', 'abc');
+
+    // Assert
+    should(result.status).equal(HISTORY_CLAIM_HELD_EXIT_CODE);
+    should(result.harness).be.undefined();
+    should(result.stderr).containEql('fy was not found').and.containEql('not launching');
+  });
+
+  it('should launch a daemon-launched wrapper whose claim renewed, and ask nothing for an ordinary launch', async () => {
+    // Arrange
+    const { run } = await withWrapper({}, { fyStatus: 0, sessionId: 'mw7bp88g-50e00159' });
+
+    // Act
+    const resumed = await run('--resume', 'abc');
+    const ordinary = await run('--print', 'hello');
+
+    // Assert
+    should(resumed.status).equal(0);
+    should(resumed.harness).containEql('--resume\nabc\n');
+    should(ordinary.status).equal(0);
+    should(ordinary.fyCalls).be.undefined();
   });
 
   it("should keep the person's real HOME", async () => {

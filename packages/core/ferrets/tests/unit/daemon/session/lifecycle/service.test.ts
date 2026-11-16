@@ -1149,11 +1149,20 @@ describe('SessionLifecycleService', () => {
 class RecordingLeases {
   readonly calls: string[] = [];
   claimError?: unknown;
+  moveError?: unknown;
   releaseError?: unknown;
 
   async claim(sessionId: string, command: readonly string[]): Promise<void> {
     this.calls.push(`claim:${sessionId}:${command.join(' ')}`);
     if (this.claimError !== undefined) throw this.claimError;
+  }
+
+  /** Every move onto a pane's pid (kept apart from `calls`: most tests are about claim and release). */
+  readonly moves: string[] = [];
+
+  async moveToPane(sessionId: string, _command: readonly string[], pid: number | undefined): Promise<void> {
+    this.moves.push(`${sessionId}:${pid}`);
+    if (this.moveError !== undefined) throw this.moveError;
   }
 
   async release(sessionId: string): Promise<void> {
@@ -1215,6 +1224,43 @@ describe('SessionLifecycleService conversation leases', () => {
     // Assert
     await should(starting).be.rejected();
     should(built.leases.calls.at(-1)).equal(`release:${ID}`);
+  });
+
+  it('should stop the pane, fail the start and release the lease when the lease cannot be moved onto the pane (c58-36c-r2)', async () => {
+    // Arrange
+    const built = leased();
+    built.leases.moveError = new Error('no pane pid');
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert
+    await should(starting).be.rejectedWith(/no pane pid/u);
+    should(built.launcher.calls).containEql('stop');
+    should(built.repository.current().state).containDeep({ status: 'failed' });
+    should(built.leases.calls.at(-1)).equal(`release:${ID}`);
+  });
+
+  it('should keep the lease and record kill_failed with both reasons when the lease cannot be moved and the pane will not stop (c58-36c-r2)', async () => {
+    // Arrange — the pane may still be alive and writing, so freeing its lease would let a second writer in
+    const built = leased();
+    built.leases.moveError = new Error('no pane pid');
+    built.launcher.stopError = new Error('runner unavailable');
+    built.launcher.livenessFromLaunch = true;
+    await built.subject.create(input());
+
+    // Act
+    const starting = built.subject.start(ID);
+
+    // Assert
+    await should(starting).be.rejectedWith(/no pane pid.*runner unavailable/su);
+    const state = built.repository.current().state;
+    should(state.status).equal('kill_failed');
+    should(String(state.reason)).match(/no pane pid/u);
+    should(String(state.reason)).match(/runner unavailable/u);
+    should(built.leases.calls.filter(call => call.startsWith('release:'))).deepEqual([]);
   });
 
   it('should still report a stop when the release fails, because the daemon reads that lease as stale', async () => {
