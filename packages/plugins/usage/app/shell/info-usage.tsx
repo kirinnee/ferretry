@@ -2,9 +2,10 @@
  * `ferret.side:usage`: Info › Usage — how full this ferret's context is, what its turns have cost, and how much of its
  * login's quota is left (today's `session-info/info-usage.tsx`).
  *
- * Every number has a source and none is invented: context, turns, tokens and cost are this ferret's own analytics
- * row (read scoped to the ferret, where the daemon enforces the id), and the quota is the daemon's passive usage feed
- * for the login the row names. A total the analytics could not price says "unknown", never $0.00, and a login with no
+ * Every number has a source and none is invented: context and turns are the ferret's live reading (a fact it does not
+ * state is unknown; the analytics row stands in only when the live route is unavailable), tokens and cost are this
+ * ferret's own analytics row (read scoped to the ferret, where the daemon enforces the id), and the quota is the
+ * daemon's passive usage feed for the login the row names. The row gates only tokens, cost and quota. A total the analytics could not price says "unknown", never $0.00, and a login with no
  * quota reading says "usage unknown".
  */
 import { useFerretWorkspace, useOptionalRouter } from '@ferretry/app';
@@ -27,26 +28,36 @@ const INSIGHTS_PANEL = 'insights';
 /** How often the live turns and context are read again while the panel is open. */
 const LIVE_POLL_MS = 10_000;
 
+/** What the live route said: nothing yet, its answer, or that it is not there (an error, a 404, a 501, an odd answer). */
+type Live =
+  | { readonly kind: 'loading' }
+  | { readonly kind: 'read'; readonly read: FerretLiveRead }
+  | { readonly kind: 'unavailable' };
+
 /**
- * The ferret's turns and context as its state document stands now (`GET /v1/ferrets/:ferretId/live`), or null while
- * unread or unreadable: the analytics end-of-turn row is only the previous turn's numbers during a long turn, so
- * this is read in preference and the row stands in only when the daemon says nothing.
+ * The ferret's turns and context as its state document stands now (`GET /v1/ferrets/:ferretId/live`): the analytics
+ * end-of-turn row is only the previous turn's numbers during a long turn, so this is read in preference. A successful
+ * read is the answer even for a fact it does not state (that fact is unknown, never the row's); the row stands in
+ * only when the route itself is unavailable.
  */
-function useLive(client: UsageClient, subject: string | undefined): FerretLiveRead | null {
-  const [live, setLive] = useState<FerretLiveRead | null>(null);
+function useLive(client: UsageClient, subject: string | undefined): Live {
+  const [live, setLive] = useState<Live>({ kind: 'loading' });
   useEffect(() => {
     if (subject === undefined) return;
     let current = true;
     const read = (): void => {
       client.call('GET /v1/ferrets/:ferretId/live', { params: { ferretId: subject } }).then(
         answer => {
+          if (!current) return;
           const parsed = FerretLiveReadSchema.safeParse(answer);
-          if (current && parsed.success) setLive(parsed.data);
+          setLive(parsed.success ? { kind: 'read', read: parsed.data } : { kind: 'unavailable' });
         },
-        () => undefined,
+        () => {
+          if (current) setLive({ kind: 'unavailable' });
+        },
       );
     };
-    setLive(null);
+    setLive({ kind: 'loading' });
     read();
     const timer = setInterval(read, LIVE_POLL_MS);
     return () => {
@@ -55,6 +66,34 @@ function useLive(client: UsageClient, subject: string | undefined): FerretLiveRe
     };
   }, [client, subject]);
   return live;
+}
+
+/** The context and turns as the panel draws them, and where they came from. */
+type Figures =
+  | { readonly kind: 'pending' }
+  | {
+      readonly kind: 'known';
+      readonly contextPercent: number | null;
+      readonly contextWindow: number | null;
+      readonly turns: number | null;
+    };
+
+/** Live when the route answered (a fact it leaves out is unknown); the analytics row only when the route is unavailable. */
+function figuresOf(live: Live, analytics: Read, row: AnalyticsRawSession | null): Figures {
+  if (live.kind === 'read')
+    return {
+      kind: 'known',
+      contextPercent: live.read.contextPercent,
+      contextWindow: live.read.contextPercent === null ? null : live.read.contextWindow,
+      turns: live.read.turns,
+    };
+  if (live.kind === 'loading' || analytics.kind === 'loading') return { kind: 'pending' };
+  return {
+    kind: 'known',
+    contextPercent: row?.contextEndPercent ?? null,
+    contextWindow: null,
+    turns: row?.turns ?? null,
+  };
 }
 
 type Read =
@@ -147,9 +186,10 @@ export function FerretUsageInfoPanel({
       ? workspace
       : null;
   const row = read.kind === 'ready' ? read.row : null;
-  // The live reading wins: the analytics row is the end of the PREVIOUS turn while a long one runs.
-  const contextPercent = live?.contextPercent ?? row?.contextEndPercent ?? null;
-  const turns = live?.turns ?? row?.turns ?? null;
+  // The live reading wins: the analytics row is the end of the PREVIOUS turn while a long one runs. The row gates only
+  // what the row alone holds (tokens, cost, quota); the live context, turns and Insights link stand without it.
+  const figures = figuresOf(live, read, row);
+  const liveTurns = live.kind === 'read' ? (live.read.turns ?? 0) : 0;
   const quota =
     row?.agent == null ? null : store.quotaFor(connection.daemonId, { state: {}, config: { agent: row.agent } });
   const stamp = now();
@@ -171,22 +211,30 @@ export function FerretUsageInfoPanel({
     <section aria-label="Usage" className="grid min-w-0 gap-sm px-panel py-3" data-info-usage={read.kind}>
       {read.kind === 'loading' ? <Muted>Reading…</Muted> : null}
       {read.kind === 'failed' ? <Muted>Couldn’t read: {read.reason}</Muted> : null}
-      {read.kind === 'ready' && row === null ? <Muted>No turns recorded yet</Muted> : null}
+      {read.kind === 'ready' && row === null && liveTurns === 0 ? <Muted>No turns recorded yet</Muted> : null}
+      <Row label="Context">
+        {figures.kind === 'pending' ? (
+          <Muted>Reading…</Muted>
+        ) : figures.contextPercent === null ? (
+          <Muted>Not reported yet</Muted>
+        ) : (
+          <>
+            <Meter label="Context used" percent={figures.contextPercent} />
+            {figures.contextWindow === null ? null : <Muted>of {formatTokens(figures.contextWindow)} tokens</Muted>}
+          </>
+        )}
+      </Row>
+      <Row label="Turns">
+        {figures.kind === 'pending' ? (
+          <Muted>Reading…</Muted>
+        ) : figures.turns === null ? (
+          <Muted>unknown</Muted>
+        ) : (
+          String(figures.turns)
+        )}
+      </Row>
       {row === null ? null : (
         <>
-          <Row label="Context">
-            {contextPercent === null ? (
-              <Muted>Not reported yet</Muted>
-            ) : (
-              <>
-                <Meter label="Context used" percent={contextPercent} />
-                {live?.contextPercent == null || live.contextWindow === null ? null : (
-                  <Muted>of {formatTokens(live.contextWindow)} tokens</Muted>
-                )}
-              </>
-            )}
-          </Row>
-          <Row label="Turns">{turns === null ? <Muted>unknown</Muted> : String(turns)}</Row>
           <Row label="Tokens">{tokensText(row)}</Row>
           <Row label="Cost (equiv.)">
             {row.equivalentApiCostUsdMicros === null ? (
@@ -200,21 +248,25 @@ export function FerretUsageInfoPanel({
               </>
             )}
           </Row>
-          <Row label="Insights">
-            <RouteLink
-              className="text-cell"
-              data-info-open-insights=""
-              title={here === null ? 'Open the machine’s Insights' : 'Show this ferret’s Insights panel'}
-              to={daemonInsightsPath(connection.daemonId)}
-              {...(here === null
-                ? router
-                  ? { onNavigate: router.navigate }
-                  : {}
-                : { onNavigate: () => here.showPanel(INSIGHTS_PANEL) })}
-            >
-              Open Insights
-            </RouteLink>
-          </Row>
+        </>
+      )}
+      <Row label="Insights">
+        <RouteLink
+          className="text-cell"
+          data-info-open-insights=""
+          title={here === null ? 'Open the machine’s Insights' : 'Show this ferret’s Insights panel'}
+          to={daemonInsightsPath(connection.daemonId)}
+          {...(here === null
+            ? router
+              ? { onNavigate: router.navigate }
+              : {}
+            : { onNavigate: () => here.showPanel(INSIGHTS_PANEL) })}
+        >
+          Open Insights
+        </RouteLink>
+      </Row>
+      {row === null ? null : (
+        <>
           <h3 className="m-0 mt-2 text-meta font-semibold text-muted">Login quota · {row.agent ?? 'unknown login'}</h3>
           {windows.length === 0 ? (
             <Row label="Quota">{quotaMoneyText(quota) ?? <Muted>usage unknown</Muted>}</Row>

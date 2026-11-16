@@ -1,11 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
-import { FakeGate, ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
+import { FULL_DEVICE_GRANTS } from '@ferretry/core-gate/contract';
+import {
+  deviceStanding,
+  FakeGate,
+  ferretStanding,
+  ownerStanding,
+  StandInAdmission,
+} from '@ferretry/core-gate/contract/testing';
 import { FakeVault } from '@ferretry/core-vault/contract/testing';
+import type { ApiRequest, CallStanding } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
-import { FerretLiveReadSchema, Harnesses, Runners } from '../../../../contract/index.ts';
+import { type FerretId, FerretLiveReadSchema, Harnesses, Runners } from '../../../../contract/index.ts';
 import { FakeHarness, FakeRunner } from '../../../../contract/testing/index.ts';
 import ferrets from '../../../../daemon/index.ts';
 
@@ -43,11 +51,23 @@ const runnerPlugin = (runner: FakeRunner) =>
     { build: () => ({ hooks: { 'runners:tmux': runner } }) },
   );
 
+/** Who calls: `x-test-caller` names a ferret (`ferret:<id>`) or a paired device (`device:full` / `device:narrowed`). */
+const callerHeader = 'x-test-caller';
+const NARROWED = { ...FULL_DEVICE_GRANTS, fleet: { use: false, configure: false } };
+const standingFor = (request: ApiRequest): CallStanding => {
+  const raw = request.headers.get(callerHeader) ?? '';
+  if (raw.startsWith('ferret:')) return ferretStanding(raw.slice(7) as FerretId);
+  if (raw === 'device:full') return deviceStanding('phone', FULL_DEVICE_GRANTS);
+  if (raw === 'device:narrowed') return deviceStanding('phone', NARROWED);
+  return ownerStanding();
+};
+const callAs = (caller: string) => ({ headers: { [callerHeader]: caller } });
+
 const boot = async (): Promise<TestHost> =>
   await testHost({
     everyDirectory: true,
     plugins: [ferrets, harnessPlugin(new FakeHarness()), runnerPlugin(new FakeRunner())],
-    gate: new StandInAdmission(() => ownerStanding()),
+    gate: new StandInAdmission(standingFor),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });
 
@@ -91,6 +111,25 @@ describe('the ferret’s live turns and context', () => {
       contextPercent: null,
       contextWindow: null,
     });
+  });
+
+  test('a governed device narrowed off fleet use is refused; one holding it is served', async () => {
+    const h = await boot();
+    const id = await started(h);
+    const refused = await h.request('GET', `/v1/ferrets/${id}/live`, callAs('device:narrowed'));
+    expect(refused.status).toBe(403);
+    expect(refused.body).not.toContain('turns');
+    const served = await h.request('GET', `/v1/ferrets/${id}/live`, callAs('device:full'));
+    expect(served.status).toBe(200);
+    expect(FerretLiveReadSchema.safeParse(served.json()).success).toBe(true);
+  });
+
+  test('an agent caller reads a ferret (v4 reach: the sibling ferret reads fence no agent)', async () => {
+    const h = await boot();
+    const id = await started(h);
+    const served = await h.request('GET', `/v1/ferrets/${id}/live`, callAs('ferret:someone-else'));
+    expect(served.status).toBe(200);
+    expect(FerretLiveReadSchema.safeParse(served.json()).success).toBe(true);
   });
 
   test('a ferret nobody holds is a 404, as the ferret read is', async () => {
