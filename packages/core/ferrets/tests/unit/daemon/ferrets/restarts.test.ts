@@ -86,6 +86,29 @@ describe('restarting ferrets', () => {
     await again.stop();
   });
 
+  test('R-0323 when: now restarts a ferret that is mid-turn at once; idle and an absent `when` queue it as before', async () => {
+    const { h, runner, start } = await running();
+    const id = await start('aniya');
+    // `idle` is the default spelled out: the same queue as no `when` at all.
+    const idle = await ask(h, { scope: 'ids', ids: [id], when: 'idle' });
+    expect(idle.json<RestartResult>()).toMatchObject({ restarted: [], queued: [{ id, reason: 'mid-turn' }] });
+    expect(runner.starts).toBe(1);
+    // `now` takes it past the wait: restarted, and the waiting entry it had is gone.
+    const now = await ask(h, { scope: 'ids', ids: [id], when: 'now' });
+    expect(now.json<RestartResult>()).toMatchObject({ restarted: [{ id, name: 'aniya' }], queued: [], failed: [] });
+    expect(runner.starts).toBe(2);
+    expect((await h.request('GET', '/v1/restarts')).json<RestartStatus>().queued).toEqual([]);
+    expect(history(h, id)).toContain('session.restarted');
+    await h.stop();
+  });
+
+  test('R-0323 an unknown `when` is refused', async () => {
+    const { h, start } = await running();
+    const id = await start('aniya');
+    expect((await ask(h, { scope: 'ids', ids: [id], when: 'later' })).status).toBe(400);
+    await h.stop();
+  });
+
   test('R-0323 the drain restarts a queued ferret once it declares a wait, and drops an entry that is done', async () => {
     const { h, runner, start } = await running();
     const id = await start('aniya');
@@ -331,6 +354,10 @@ describe('who may restart', () => {
     const self = await ask(h, { scope: 'ids', ids: [id], caller: other }, id);
     // Its credential, not the body, says who is asking: a ferret cannot restart itself mid-turn by claiming another.
     expect(self.json<RestartResult>().queued).toEqual([{ id, name: 'aniya', reason: 'own-session' }]);
+    expect(runner.starts).toBe(2);
+    // `when: now` does not take a ferret past its own turn: it still waits for it to end.
+    const selfNow = await ask(h, { scope: 'ids', ids: [id], when: 'now' }, id);
+    expect(selfNow.json<RestartResult>().queued).toEqual([{ id, name: 'aniya', reason: 'own-session' }]);
     expect(runner.starts).toBe(2);
     const fleet = await ask(h, { scope: 'all' }, id);
     expect(fleet.status).toBe(403);

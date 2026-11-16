@@ -147,7 +147,7 @@ describe('homeText', () => {
         hasCompletedOnboarding: true,
         hasCompletedClaudeInChromeOnboarding: true,
         ...CLAUDE_PROMPTS_SEEN,
-        projects: { '/work/repo': { hasTrustDialogAccepted: true, enableAllProjectMcpServers: true } },
+        projects: { '/work/repo': { hasTrustDialogAccepted: true } },
       });
     }
   });

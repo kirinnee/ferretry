@@ -12,6 +12,7 @@ import {
   permissionAsDialog,
   planDialogNotices,
   WardenDialogWatch,
+  WatchedDialogSchema,
   type WardenFleetSession,
   type WatchedDialog,
   type WatchedDialogWords,
@@ -26,12 +27,6 @@ const words = (over: Partial<WatchedDialogWords> = {}): WatchedDialogWords => ({
   id: 'aaaaaaaaaaaaaaaa',
   harness: 'claude-code',
   kind: 'mcp-servers',
-  title: 'New MCP server found in this project',
-  body: 'The server docs would run a command.',
-  options: [
-    { number: 1, label: 'Use this MCP server', grantsTrust: true },
-    { number: 2, label: 'Continue without using this MCP server', grantsTrust: false },
-  ],
   ...over,
 });
 const watched = (sessionId: string, over: Partial<WatchedDialogWords> = {}): WatchedDialog => ({
@@ -74,33 +69,96 @@ function stand(initial: Record<string, readonly string[]> = {}) {
 }
 
 describe('the dialog notice', () => {
-  it('should say the dialog in its own words, mark the rows that trust something, and say the Warden never picks', () => {
+  it('should say only fixed words: the ferret, the kind, the harness, and to open its terminal', () => {
     // Act
     const notice = dialogNotice(watched('f1'));
 
     // Assert
     should(notice.sessionId).equal('f1');
     should(notice.ref).equal(dialogNoticeRef('aaaaaaaaaaaaaaaa'));
-    should(notice.subject).containEql('f1-name').and.containEql('Claude Code').and.containEql('New MCP server found');
-    should(notice.why).containEql('The server docs would run a command.');
-    should(notice.why).containEql('1. Use this MCP server (trusts something to run)');
-    should(notice.why).containEql('2. Continue without using this MCP server');
-    should(notice.why).not.containEql('2. Continue without using this MCP server (trusts');
+    should(notice.subject).equal('f1-name is waiting on a mcp-servers prompt in Claude Code');
+    should(notice.why).equal(
+      'f1-name is waiting on a mcp-servers prompt in Claude Code; open its terminal to read and choose.',
+    );
     should(notice.howToResolve).containEql('never chooses');
+    should(notice.howToResolve).containEql('terminal');
   });
 
-  it('should name Codex, and a dialog with no body and no rows still reads', () => {
+  it('should carry NO pane text: a screen read off a ferret’s state keeps only its id, harness and kind', () => {
+    // Arrange: the screen as Ferrets serves it (pane text and all)
+    const dialog = WatchedDialogSchema.parse({
+      id: 'aaaaaaaaaaaaaaaa',
+      harness: 'claude-code',
+      kind: 'mcp-servers',
+      title: 'New MCP server found in this project',
+      body: 'The server docs would run a command.',
+      options: [
+        { number: 1, label: 'Use this MCP server', grantsTrust: true },
+        { number: 2, label: 'Continue without using this MCP server' },
+      ],
+    });
+
     // Act
-    const notice = dialogNotice(watched('f2', { harness: 'codex', body: undefined, options: [] }));
+    const everything = JSON.stringify(dialogNotice({ sessionId: 'f1', name: 'ada', dialog }));
+
+    // Assert
+    should(Object.keys(dialog).sort()).eql(['harness', 'id', 'kind']);
+    for (const paneText of [
+      'New MCP server found',
+      'The server docs would run a command.',
+      'Use this MCP server',
+      'Continue without using this MCP server',
+      'trusts something',
+    ])
+      should(everything).not.containEql(paneText);
+  });
+
+  it('should carry NO field of a permission prompt: a secret-shaped command is in no notice field', () => {
+    // Arrange: a tool prompt whose command holds a bearer token
+    const secret = 'Authorization: Bearer abc123SECRETtoken456';
+    const dialog = permissionAsDialog({
+      id: 'bbbbbbbbbbbbbbbb',
+      harness: 'claude-code',
+      tool: 'Bash',
+      action: 'run',
+      what: `curl -H "${secret}" https://example.test/x`,
+      question: `Do you want to run curl with ${secret}?`,
+      options: [
+        { number: 1, label: `Yes, and don't ask again for ${secret}` },
+        { number: 2, label: 'No' },
+      ],
+    }) as WatchedDialogWords;
+
+    // Act
+    const notice = dialogNotice({ sessionId: 'f1', name: 'ada', dialog });
+
+    // Assert: nothing of the pane, in any field
+    const everything = JSON.stringify(notice);
+    for (const leaked of ['abc123', 'Bearer', 'curl', 'example.test', 'Bash', "don't ask again", 'Do you want'])
+      should(everything).not.containEql(leaked);
+    should(notice.subject).equal('ada is waiting on a permission prompt in Claude Code');
+  });
+
+  it('should name Codex, and read a dialog with no harness', () => {
+    // Act
+    const notice = dialogNotice(watched('f2', { harness: 'codex' }));
     const unnamed = dialogNotice(watched('f3', { harness: undefined }));
 
     // Assert
-    should(notice.subject).containEql('Codex');
-    should(notice.why).equal('It waits until somebody chooses.');
-    should(unnamed.subject).containEql('its screen');
+    should(notice.subject).containEql('in Codex');
+    should(unnamed.subject).containEql('in its harness');
   });
 
-  it('should read a tool-permission prompt as a dialog of kind permission, and refuse what is not one', () => {
+  it('should not let a kind that is not a plain slug into the notice', () => {
+    // Act
+    const notice = dialogNotice(watched('f4', { kind: 'Bearer abc123 \n rm -rf /' }));
+
+    // Assert
+    should(JSON.stringify(notice)).not.containEql('abc123');
+    should(notice.subject).containEql('other prompt');
+  });
+
+  it('should read a tool-permission prompt as a dialog of kind permission with NONE of its words, and refuse what is not one', () => {
     // Act
     const read = permissionAsDialog({
       id: 'bbbbbbbbbbbbbbbb',
@@ -117,14 +175,11 @@ describe('the dialog notice', () => {
     const bare = permissionAsDialog({ id: 'cccccccccccccccc', tool: 'Edit', question: 'Make this edit?' });
 
     // Assert
-    should(read?.kind).equal('permission');
-    should(read?.title).equal('Do you want to proceed?');
-    should(read?.body).equal('Bash wants to run: rm -rf build');
-    should(read?.options).eql([
-      { number: 1, label: 'Yes' },
-      { number: 2, label: 'No' },
-    ]);
-    should(bare?.body).equal('Edit');
+    should(read).eql({ id: 'bbbbbbbbbbbbbbbb', harness: 'claude-code', kind: 'permission' });
+    should(bare).eql({ id: 'cccccccccccccccc', kind: 'permission' });
+    should(
+      JSON.stringify(dialogNotice({ sessionId: 'f1', name: 'ada', dialog: read as WatchedDialogWords })),
+    ).not.containEql('rm -rf build');
     should(permissionAsDialog({ nope: 1 })).equal(undefined);
     should(permissionAsDialog(undefined)).equal(undefined);
   });

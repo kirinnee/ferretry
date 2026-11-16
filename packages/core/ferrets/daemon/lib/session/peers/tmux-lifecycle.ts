@@ -152,7 +152,16 @@ const positive = (field: string): number | undefined => {
   return Number.isSafeInteger(value) ? value : undefined;
 };
 
-/** Parse {@link PANE_PROOF_FORMAT}; `undefined` for anything that is not a pane tmux described. */
+/**
+ * Whether tmux answered {@link PANE_PROOF_FORMAT} with every field empty (`|||`). tmux 3.8 does this, with exit 0,
+ * when the target names no session or pane: it is not a pane tmux described, so it is neither parsed nor trusted.
+ */
+export function isEmptyPaneAnswer(output: string): boolean {
+  const text = output.trim();
+  return text.includes('|') && text.replaceAll('|', '') === '';
+}
+
+/** Parse {@link PANE_PROOF_FORMAT};`undefined` for anything that is not a pane tmux described. */
 export function parsePaneSighting(output: string): PaneSighting | undefined {
   const fields = output.trimEnd().split('|');
   if (fields.length !== 4) return undefined;
