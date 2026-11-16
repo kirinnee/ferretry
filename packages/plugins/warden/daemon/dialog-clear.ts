@@ -1,7 +1,13 @@
 import type { ConfigPort } from '@ferretry/kernel/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, WARDEN_DIALOG_RULES } from '../contract/dialog-rules.ts';
-import { CLAUDE_DIALOG_RULES, CODEX_DIALOG_RULES, type ClearFrame, type DialogClearPorts } from './lib/index.ts';
+import {
+  CLAUDE_DIALOG_RULES,
+  CODEX_DIALOG_RULES,
+  type ClearFrame,
+  type DialogClearPorts,
+  dialogWordsOf,
+} from './lib/index.ts';
 
 /**
  * The rules in effect: the built-in tables, then the ones the owner taught (`config/warden-dialogs.yaml`, the version
@@ -19,9 +25,12 @@ export function dialogRulesInEffect(config: Pick<ConfigPort, 'file'>): () => Pro
  * A ferret's own pane, through Ferrets' form seam (`FerretHarness.form`): the runner reads it masked and guards every key
  * with `kernel.act(<pane>, 'keys')`, so a Vault hold presses NOTHING and answers a refusal. Nothing here names a tmux pane.
  */
-export function ferretClearPane(ferrets: Pick<FerretsApi, 'harness'>): Pick<DialogClearPorts, 'frame' | 'key'> {
+export function ferretClearPane(
+  ferrets: Pick<FerretsApi, 'harness' | 'prompt'>,
+): Pick<DialogClearPorts, 'frame' | 'key' | 'words'> {
   const form = async (sessionId: string) => (await ferrets.harness?.(sessionId as FerretId))?.form;
   return {
+    words: async sessionId => dialogWordsOf(await ferrets.prompt?.(sessionId as FerretId).catch(() => undefined)),
     frame: async (sessionId): Promise<ClearFrame | undefined> => {
       const read = await (await form(sessionId))?.capture().catch(() => undefined);
       return read?.ok === true

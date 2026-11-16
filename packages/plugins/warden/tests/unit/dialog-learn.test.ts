@@ -18,7 +18,7 @@ import {
   proposeRule,
   WardenDialogClear,
   WardenDialogLearn,
-  type WatchedDialogWords,
+  type ClearableDialogWords,
 } from '../../daemon/lib/index.ts';
 import { renderLearn } from '../../cli/index.ts';
 
@@ -30,7 +30,7 @@ import { renderLearn } from '../../cli/index.ts';
 const SECRET = 'abc123def456ghi789jkl012';
 
 const row = (number: number, label: string, grantsTrust = false) => ({ number, label, grantsTrust });
-const unknown = (over: Partial<WatchedDialogWords> = {}): WatchedDialogWords => ({
+const unknown = (over: Partial<ClearableDialogWords> = {}): ClearableDialogWords => ({
   id: 'bbbbbbbbbbbbbbbb',
   harness: 'claude',
   kind: 'other',
@@ -41,7 +41,7 @@ const unknown = (over: Partial<WatchedDialogWords> = {}): WatchedDialogWords => 
 });
 
 /** The frame the harness draws for that screen, with the cursor where the test puts it. */
-const frameOf = (dialog: WatchedDialogWords, cursor: number, extra: readonly string[] = []): string =>
+const frameOf = (dialog: ClearableDialogWords, cursor: number, extra: readonly string[] = []): string =>
   [
     '',
     `  ${dialog.title}`,
@@ -129,7 +129,11 @@ describe('masking a frame', () => {
 
 /** The learn flow over fakes: the ferret's dialog and frame, the masker, the kept frame, the proposals, the saved rules. */
 function stand(
-  options: { dialog?: WatchedDialogWords | undefined; frame?: ClearFrame | undefined; saved?: readonly string[] } = {},
+  options: {
+    dialog?: ClearableDialogWords | undefined;
+    frame?: ClearFrame | undefined;
+    saved?: readonly string[];
+  } = {},
 ) {
   const log = {
     frames: [] as string[],
@@ -260,6 +264,7 @@ describe('the owner’s yes', () => {
     const state = { cursor: 1, gone: false, pressed: [] as FormKey[] };
     const clear = new WardenDialogClear({
       rules: async () => [...CLAUDE_DIALOG_RULES, ...CODEX_DIALOG_RULES, ...log.saved],
+      words: async () => screen,
       frame: async () =>
         state.gone
           ? { visible: '\n  ❯ \n', blocking: false }

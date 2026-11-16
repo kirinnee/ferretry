@@ -1,4 +1,4 @@
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, StatePort } from '@ferretry/kernel/contract';
 import {
   DialogProposalSchema,
@@ -15,9 +15,7 @@ import {
   CODEX_DIALOG_RULES,
   type DialogLearnPorts,
   type MachineMembersStore,
-  permissionAsDialog,
   WardenDialogLearn,
-  WatchedDialogSchema,
 } from './lib/index.ts';
 
 /** The state file name a ferret's frame is kept under: its id, as one plain name. */
@@ -38,11 +36,7 @@ export function dialogLearnService(deps: {
 }): WardenDialogLearn {
   const pane = ferretClearPane(deps.ferrets);
   return new WardenDialogLearn({
-    dialogOf: async ferret => {
-      const prompt = await deps.ferrets.prompt?.(ferret as FerretId).catch(() => undefined);
-      const screen = WatchedDialogSchema.safeParse(prompt?.dialog);
-      return screen.success ? screen.data : permissionAsDialog(prompt?.permissionRequest);
-    },
+    dialogOf: pane.words,
     frame: pane.frame,
     mask: deps.mask,
     saveFrame: async (ferret, masked) => {

@@ -22,6 +22,7 @@ describe('storage parity', () => {
       ['reports', 'reports/*', 'opaque', 1],
       ['jev-checks', 'jev-checks/*.json', 'json', 1],
       ['remembered', 'remembered.json', 'json', 1],
+      ['dialog-frames', 'dialog-frames/*', 'opaque', 1],
     ]);
     expect([WARDEN_STATE.path, WARDEN_REPORTS.path, WARDEN_JEV_CHECKS.path]).toEqual([
       'state.json',

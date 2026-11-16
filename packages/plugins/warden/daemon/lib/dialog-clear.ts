@@ -28,6 +28,7 @@ import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { DialogRule } from '../../contract/dialog-rules.ts';
 import { cursorRow, frameShows, planKeys, ruleFor } from './dialog-rules.ts';
 import type { WatchedDialog } from './dialog-watch.ts';
+import type { ClearableDialogWords } from './dialog-words.ts';
 import type { MachineMembersStore } from './machine-notices.ts';
 import { SerialQueue } from './serial-queue.ts';
 
@@ -50,6 +51,8 @@ export interface ClearFrame {
 export interface DialogClearPorts {
   /** The rules in effect right now: the built-in tables and the ones the owner taught. */
   rules(): Promise<readonly DialogRule[]>;
+  /** The words of the ferret's dialog, read for this press only (pane text: never logged, stored or told). */
+  words(sessionId: string): Promise<ClearableDialogWords | undefined>;
   /** The ferret's live frame, or `undefined` when it cannot be read (gone, held, no pane). */
   frame(sessionId: string): Promise<ClearFrame | undefined>;
   /** Presses one key; `false` when nothing was pressed. */
@@ -82,12 +85,17 @@ export class WardenDialogClear {
       const toTell: WatchedDialog[] = [];
       let cleared = 0;
       for (const watched of dialogs) {
-        const rule = ruleFor(watched.dialog, rules);
-        if (rule === undefined) {
+        const { sessionId } = watched;
+        // The words are read only for a screen some rule is about, and must be the very dialog the look saw.
+        const read = rules.some(each => each.kind === watched.dialog.kind)
+          ? await this.ports.words(sessionId)
+          : undefined;
+        const dialog = read?.id === watched.dialog.id ? read : undefined;
+        const rule = dialog === undefined ? undefined : ruleFor(dialog, rules);
+        if (dialog === undefined || rule === undefined) {
           toTell.push(watched);
           continue;
         }
-        const { sessionId, dialog } = watched;
         if (memory[sessionId]?.[0] === dialog.id) {
           // Keyed already. Still on screen: the keys failed, and the owner is told once. Gone from it: they worked.
           const frame = await this.ports.frame(sessionId);
@@ -107,7 +115,7 @@ export class WardenDialogClear {
           }
           continue;
         }
-        const pressed = await this.press(watched, rule);
+        const pressed = await this.press(sessionId, dialog, rule);
         if (pressed === 'stale') continue;
         if (pressed === 'failed') {
           next[sessionId] = [dialog.id, FAILED];
@@ -123,8 +131,11 @@ export class WardenDialogClear {
   }
 
   /** `stale`: the frame does not show the screen, nothing was pressed. `failed`: a plan or a key did not go. */
-  private async press(watched: WatchedDialog, rule: DialogRule): Promise<'sent' | 'failed' | 'stale'> {
-    const { sessionId, dialog } = watched;
+  private async press(
+    sessionId: string,
+    dialog: ClearableDialogWords,
+    rule: DialogRule,
+  ): Promise<'sent' | 'failed' | 'stale'> {
     const frame = await this.ports.frame(sessionId);
     if (frame === undefined || !frame.blocking || !frameShows(rule, dialog, frame.visible)) return 'stale';
     const plan = planKeys(rule, dialog, frame.visible);

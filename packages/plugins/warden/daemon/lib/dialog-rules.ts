@@ -19,7 +19,7 @@
  */
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, isGrantLabel } from '../../contract/dialog-rules.ts';
-import type { WatchedDialogWords } from './dialog-watch.ts';
+import type { ClearableDialogWords } from './dialog-words.ts';
 
 /** How many of the frame's last lines a screen may sit in. */
 const FRAME_WINDOW_LINES = 40;
@@ -35,7 +35,7 @@ function matches(source: string | undefined, text: string): boolean {
 }
 
 /** The first rule that names this dialog by what Ferrets recorded of it; the live frame is checked separately. */
-export function ruleFor(dialog: WatchedDialogWords, rules: readonly DialogRule[]): DialogRule | undefined {
+export function ruleFor(dialog: ClearableDialogWords, rules: readonly DialogRule[]): DialogRule | undefined {
   return rules.find(
     rule =>
       rule.kind === dialog.kind &&
@@ -55,7 +55,7 @@ const tail = (frame: string): readonly string[] =>
     .slice(-FRAME_WINDOW_LINES);
 
 /** Whether the live frame still shows what the rule names: its title line and its fixed printed phrase. */
-export function frameShows(rule: DialogRule, dialog: WatchedDialogWords, frame: string): boolean {
+export function frameShows(rule: DialogRule, dialog: ClearableDialogWords, frame: string): boolean {
   const lines = tail(frame);
   if (rule.text !== undefined && !lines.some(line => matches(rule.text, line))) return false;
   if (rule.text === undefined && !lines.some(line => line.includes(dialog.title.slice(0, 40).trim()))) return false;
@@ -63,7 +63,7 @@ export function frameShows(rule: DialogRule, dialog: WatchedDialogWords, frame: 
 }
 
 /** One row of the cursor's view: which of the dialog's rows the live frame draws the cursor on, or `undefined`. */
-export function cursorRow(frame: string, dialog: WatchedDialogWords): number | undefined {
+export function cursorRow(frame: string, dialog: ClearableDialogWords): number | undefined {
   const found = new Set<number>();
   for (const line of tail(frame)) {
     const drawn = /^[❯›>»▌]\s*(?:[1-9][.)]\s+)?(\S.*)$/u.exec(line);
@@ -91,7 +91,7 @@ export type NoPlan = 'no-escape' | 'no-row' | 'grants' | 'cursor-unknown';
  * The keys that leave `dialog` the way `rule` says, given the live frame. A permission prompt (`kind: 'permission'`) is
  * refused with Esc alone, and Esc is the only action it has. A choice is the arrows from where the cursor is, then Enter.
  */
-export function planKeys(rule: DialogRule, dialog: WatchedDialogWords, frame: string): KeyPlan | NoPlan {
+export function planKeys(rule: DialogRule, dialog: ClearableDialogWords, frame: string): KeyPlan | NoPlan {
   if ('press' in rule.action) {
     // Esc is a decline on a permission prompt, and on a dialog only when its footer offers it.
     return dialog.kind === 'permission' || dialog.escape !== undefined ? { moves: [], confirm: 'Escape' } : 'no-escape';

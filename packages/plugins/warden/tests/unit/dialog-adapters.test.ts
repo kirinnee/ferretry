@@ -179,7 +179,7 @@ describe('teaching a screen over the daemon’s ports', () => {
     should(saved.saved).equal(true);
     should(members()).eql({});
     const patch = (writes[0] as { patch: { rules: DialogRule[] } }).patch;
-    should(patch.rules.map(rule => rule.id)).eql(['learned-x', proposed.proposal.rule?.id]);
+    should(patch.rules.map(rule => rule.id)).eql(['learned-old', 'learned-x', proposed.proposal.rule?.id]);
   });
 
   it('should read a tool prompt as a dialog it will not teach, and refuse a ferret with no dialog', async () => {

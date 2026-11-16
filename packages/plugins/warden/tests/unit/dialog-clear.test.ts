@@ -15,7 +15,7 @@ import {
   WardenDialogClear,
   WardenDialogWatch,
   type WatchedDialog,
-  type WatchedDialogWords,
+  type ClearableDialogWords,
 } from '../../daemon/lib/index.ts';
 
 /**
@@ -28,7 +28,7 @@ const BUILT_IN = [...CLAUDE_DIALOG_RULES, ...CODEX_DIALOG_RULES];
 /** One known screen: what Ferrets would have recorded, and how the harness draws it. */
 interface Screen {
   readonly rule: string;
-  readonly dialog: WatchedDialogWords;
+  readonly dialog: ClearableDialogWords;
   /** The lines above the rows (a header the frame carries). */
   readonly header: readonly string[];
   /** The glyph the harness draws on the cursor row. */
@@ -40,7 +40,9 @@ interface Screen {
 }
 
 const row = (number: number, label: string, grantsTrust = false) => ({ number, label, grantsTrust });
-const words = (over: Partial<WatchedDialogWords> & Pick<WatchedDialogWords, 'kind' | 'title'>): WatchedDialogWords => ({
+const words = (
+  over: Partial<ClearableDialogWords> & Pick<ClearableDialogWords, 'kind' | 'title'>,
+): ClearableDialogWords => ({
   id: 'aaaaaaaaaaaaaaaa',
   harness: 'claude',
   options: [],
@@ -196,6 +198,7 @@ function frameOf(screen: Screen, cursor: number): string {
 function fakePane(screen: Screen, options: { readonly stuck?: boolean; readonly refuse?: boolean } = {}) {
   const state = { cursor: screen.start, gone: false, pressed: [] as FormKey[] };
   const ports = {
+    words: async (): Promise<ClearableDialogWords | undefined> => screen.dialog,
     frame: async (): Promise<ClearFrame | undefined> =>
       state.gone
         ? { visible: '\n  ❯ \n', blocking: false }
@@ -212,7 +215,7 @@ function fakePane(screen: Screen, options: { readonly stuck?: boolean; readonly 
   return { state, ports };
 }
 
-function stand(pane: Pick<DialogClearPorts, 'frame' | 'key'>, rules = BUILT_IN) {
+function stand(pane: Pick<DialogClearPorts, 'frame' | 'key' | 'words'>, rules = BUILT_IN) {
   let memory: Record<string, readonly string[]> = {};
   const events: { type: string; data: Readonly<Record<string, string>> }[] = [];
   const clear = new WardenDialogClear({

@@ -23,7 +23,7 @@ import {
   isGrantLabel,
 } from '../../contract/dialog-rules.ts';
 import type { MachineMembersStore } from './machine-notices.ts';
-import type { WatchedDialogWords } from './dialog-watch.ts';
+import type { ClearableDialogWords } from './dialog-words.ts';
 import type { ClearFrame } from './dialog-clear.ts';
 
 /** The key the pending proposals are kept under in the Warden's state file: one per ferret, the last learned. */
@@ -55,7 +55,7 @@ function slug(text: string): string {
   return hash.toString(36);
 }
 
-const rowsOf = (dialog: WatchedDialogWords, pressed: number | undefined) =>
+const rowsOf = (dialog: ClearableDialogWords, pressed: number | undefined) =>
   dialog.options.map(option => ({ number: option.number, label: option.label, pressed: option.number === pressed }));
 
 /**
@@ -65,7 +65,7 @@ const rowsOf = (dialog: WatchedDialogWords, pressed: number | undefined) =>
  */
 export function proposeRule(input: {
   readonly ferret: string;
-  readonly dialog: WatchedDialogWords;
+  readonly dialog: ClearableDialogWords;
   readonly row?: number | undefined;
 }): DialogProposal {
   const { ferret, dialog } = input;
@@ -105,7 +105,7 @@ export function proposeRule(input: {
 
 export interface DialogLearnPorts {
   /** The dialog the ferret's state records now (words only), or `undefined` when it records none. */
-  dialogOf(ferret: string): Promise<WatchedDialogWords | undefined>;
+  dialogOf(ferret: string): Promise<ClearableDialogWords | undefined>;
   /** The ferret's live frame. */
   frame(ferret: string): Promise<ClearFrame | undefined>;
   /** The secret masker the terminal and screenshot paths use. */
@@ -142,7 +142,7 @@ export class WardenDialogLearn {
     // The words and the frame go through the masker before anything is kept or said.
     const masked = maskShapes(await this.ports.mask(frame.visible));
     await this.ports.saveFrame(ferret, masked);
-    const words: WatchedDialogWords = {
+    const words: ClearableDialogWords = {
       ...dialog,
       title: maskShapes(await this.ports.mask(dialog.title)),
       options: await Promise.all(

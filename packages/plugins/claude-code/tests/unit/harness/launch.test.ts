@@ -636,7 +636,7 @@ describe('the question tool (!A527: withheld from every ferret unless the questi
   });
 
   it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
-    should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_QUESTION_HOOKS);
-    should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
+    should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_OVERLAY_HOOKS);
+    should(CLAUDE_OVERLAY_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
   });
 });
