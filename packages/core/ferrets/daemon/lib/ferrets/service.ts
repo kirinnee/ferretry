@@ -119,6 +119,7 @@ import {
   modeSwitchDefaults,
   recordedSwitches,
   sessionModeSwitch,
+  subFerretSwitch,
 } from '../agent-control/launch-environment.ts';
 import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/state-home.ts';
 
@@ -2453,7 +2454,7 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, mode, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(record.id, mode, record.role, issued.token, parts, login.value, signedIn.value);
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2912,6 +2913,7 @@ export class FerretsService implements FerretsApi {
   private async environment(
     ferret: FerretId,
     mode: FerretRecord['mode'],
+    role: FerretRecord['role'],
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
@@ -2925,6 +2927,9 @@ export class FerretsService implements FerretsApi {
     // in AFTER the parts: it is the record's own fact, the same one the harness decided its question tool from
     // (`LaunchSpec.mode`), so no part or login file can make the pane say something else.
     Object.assign(env, sessionModeSwitch(mode));
+    // Whether it is a helper (`FY_SUB_FERRET`) is the record's own fact too: with it the wrapper gives the pane the
+    // Sub-ferret section, without it every helper would be handed the lead's Notify, Board and Agenda text.
+    Object.assign(env, subFerretSwitch(role));
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
     Object.assign(env, signedIn);
