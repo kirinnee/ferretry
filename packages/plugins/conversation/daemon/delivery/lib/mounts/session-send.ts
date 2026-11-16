@@ -23,10 +23,11 @@ import {
 import { DraftSentSchema } from '../../../../contract/index.ts';
 import { callerIsAgent, ferretOf, isFerretCall, OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
 import { type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
+import { createHash } from 'node:crypto';
 import { isUpdateUnconfirmed } from '../types.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
-import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
+import { answerWhenChanged, type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
 import { jsonResponse } from '../../../seams/api.ts';
 import type { MountRoute, RouteContext } from '../../../seams/api.ts';
 import { queuePage } from '../../../queue/lib/page.ts';
@@ -104,8 +105,16 @@ export interface SessionSendSubsystem {
   sends(sessionId: string): Promise<readonly SendRecord[]>;
   /** One send by its id — how a sender learns where its message settled. */
   sendStatus(sessionId: string, sendId: string, options?: SendStatusWait): Promise<SendRecord>;
+  /**
+   * What the ledger is NOW, as a cheap token that moves with every line appended (a stat of its file, after the look
+   * that settles fates), so a poll that finds nothing new is answered `304` without reading the ledger. Left out by a
+   * subsystem that cannot say, whose ledger is always read.
+   */
+  sendsStamp?(sessionId: string): Promise<string>;
   /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
   queue(sessionId: string): Promise<readonly QueuedMessage[]>;
+  /** The same for the durable queue; refuses a ferret that is unknown and holds nothing, as `queue` does. */
+  queueStamp?(sessionId: string): Promise<string>;
   /** New words for a queued message that is still waiting; refused once a key has gone to the pane. */
   editQueued(sessionId: string, messageId: string, text: string): Promise<QueuedMessage>;
   /** Takes back a queued message that is still waiting; nothing of it was ever typed. */
@@ -368,22 +377,45 @@ function pageQuery(context: RouteContext, noun: string): SendPageQuery {
   return before === undefined ? { limit } : { limit, before };
 }
 
+/**
+ * The validator of one page of a log, from the log's stamp and the page asked for (a different `limit` or cursor is a
+ * different body), never from the page itself.
+ */
+const pageTag = (kind: 'sends' | 'queue', sessionId: string, stamp: string, query: SendPageQuery): string =>
+  `"${createHash('sha256')
+    .update(JSON.stringify([kind, sessionId, stamp, query.limit, query.before ?? null]))
+    .digest('base64url')}"`;
+
 /** One page of a session's sends, or the refusal of a cursor that names none of them. */
 async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
   const query = pageQuery(context, 'sends');
-  const page = sendPage(await subsystem.sends(pathSessionId(context)).catch(refuse), query);
-  if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
-  return jsonResponse(page);
+  const sessionId = pathSessionId(context);
+  const build = async (): Promise<ApiResponse> => {
+    const page = sendPage(await subsystem.sends(sessionId).catch(refuse), query);
+    if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
+    return jsonResponse(page);
+  };
+  // The tag is read BEFORE the ledger, so a send settled in between leaves the body newer than its tag, never older.
+  const stamp = await subsystem.sendsStamp?.(sessionId).catch(refuse);
+  return stamp === undefined
+    ? await build()
+    : await answerWhenChanged(context.request, pageTag('sends', sessionId, stamp, query), build);
 }
 
 /** One page of a session's durable queue, or the refusal of a cursor that names none of its messages. */
 async function queueMessagesPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
   const query = pageQuery(context, 'queue');
   const sessionId = pathSessionId(context);
-  const page = queuePage(await subsystem.queue(sessionId).catch(refuse), query, sessionId);
-  if (page === undefined)
-    throw new ApiError(400, `no queued message ${query.before ?? ''} to page from`, 'invalid_cursor');
-  return jsonResponse(page);
+  const build = async (): Promise<ApiResponse> => {
+    const page = queuePage(await subsystem.queue(sessionId).catch(refuse), query, sessionId);
+    if (page === undefined)
+      throw new ApiError(400, `no queued message ${query.before ?? ''} to page from`, 'invalid_cursor');
+    return jsonResponse(page);
+  };
+  const stamp = await subsystem.queueStamp?.(sessionId).catch(refuse);
+  return stamp === undefined
+    ? await build()
+    : await answerWhenChanged(context.request, pageTag('queue', sessionId, stamp, query), build);
 }
 
 /**

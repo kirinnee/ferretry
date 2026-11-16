@@ -1,0 +1,122 @@
+/**
+ * The supervisor half of `fy daemon status` (V-0243): what supervises the daemon, as today's status says it. The read
+ * is the controller's (`supervision()`, through its process port); this file turns it, with the probe's own facts, into
+ * the human lines and the `--json` keys. Today's keys {daemon, reachability, orphan, supervisor, health} sit BESIDE 5.0's
+ * {running, baseUrl, version|why, protocol}, so a script reading either keeps working.
+ */
+import type { Health } from '@ferretry/kernel/contract';
+import type { DaemonSupervision } from '../daemon/controller.ts';
+import type { DaemonSupervisorReport } from '../daemon/ports.ts';
+import type { ShellContext } from '../shell-context.ts';
+
+/** What a status read of the supervisor came to: a read, a manager 5.0 does not ask, or a failure that is only said. */
+export type SupervisorRead = DaemonSupervision | { readonly kind: 'failed'; readonly why: string };
+
+/** The parts of today's status 5.0 has no read for; said in both outputs rather than left to look healthy. */
+const NOT_REPORTED = ['liveness', 'tunnel', 'firewall'] as const;
+
+/**
+ * Asks the controller what supervises the daemon. NEVER throws: `status` reports on the daemon and its exit code is the
+ * daemon's, so a supervisor that cannot be read is a line, not a failure. Nothing here changes anything.
+ */
+export async function readSupervisor(ctx: ShellContext): Promise<SupervisorRead> {
+  const { world } = ctx;
+  if (world.daemon === undefined) return { kind: 'failed', why: 'this fy has no local daemon-control adapters' };
+  try {
+    // `status` uses neither read a stop or reset needs, so both are inert.
+    const built = world.daemon({ resetInventory: { count: async () => undefined }, turns: { midTurn: async () => 0 } });
+    return await built.controller.supervision();
+  } catch (error) {
+    return { kind: 'failed', why: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** The daemon is not answering, and its manager (if it names a running process) says one exists: today's `wedged`. */
+const reachabilityOf = (up: boolean, read: SupervisorRead): 'serving' | 'wedged' | 'stopped' =>
+  up ? 'serving' : read.kind === 'read' && read.report.state === 'running' ? 'wedged' : 'stopped';
+
+const supervisorKeys = (read: SupervisorRead): Readonly<Record<string, unknown>> => {
+  if (read.kind === 'read') {
+    const { manager, state, pid, detail } = read.report;
+    return {
+      manager,
+      state,
+      ...(pid === undefined ? {} : { pid }),
+      ...(detail === undefined || detail === '' ? {} : { detail }),
+    };
+  }
+  return read.kind === 'unread'
+    ? { manager: read.manager, state: 'not-reported', detail: unreadSentence(read.manager) }
+    : { manager: 'unknown', state: 'not-reported', detail: read.why };
+};
+
+/** `daemon`, `reachability`, `orphan`, `supervisor`, `health` and `notReported`: today's keys, for `--json` to add. */
+export function supervisorJson(
+  read: SupervisorRead,
+  probe: { readonly up: boolean; readonly health?: Health | undefined },
+): Readonly<Record<string, unknown>> {
+  return {
+    ...(read.kind === 'failed' ? {} : { daemon: read.daemon }),
+    reachability: reachabilityOf(probe.up, read),
+    orphan: read.kind === 'read' && read.orphan,
+    supervisor: supervisorKeys(read),
+    ...(probe.health === undefined
+      ? {}
+      : { health: { ...probe.health, ...(read.kind === 'read' && read.pid !== undefined ? { pid: read.pid } : {}) } }),
+    notReported: NOT_REPORTED,
+  };
+}
+
+const unreadSentence = (manager: string): string =>
+  `${manager} status is not reported in 5.0 yet (macOS is on the Mac end list)`;
+
+const detailOf = (report: DaemonSupervisorReport): string =>
+  report.detail === undefined || report.detail === '' ? '' : ` (${report.detail})`;
+
+/** Today's supervisor line: the manager and its state, or that none manages the daemon. */
+function supervisorLine(read: SupervisorRead): string {
+  if (read.kind === 'unread') return `  ${read.manager}: not read — ${unreadSentence(read.manager)}`;
+  if (read.kind === 'failed') return `  supervisor not read: ${read.why}`;
+  const { report } = read;
+  return report.manager === 'direct'
+    ? '  not managed by a service manager'
+    : `  ${report.manager}: ${report.state}${detailOf(report)}`;
+}
+
+/** The lines `status` adds under the 5.0 ones, and the remedy (said on the error stream, as today's does) for an orphan. */
+export function supervisorLines(
+  read: SupervisorRead,
+  binary: string,
+): { readonly lines: readonly string[]; readonly remedy?: string } {
+  const orphan = read.kind === 'read' && read.orphan;
+  const pid = read.kind === 'read' ? (read.pid ?? read.report.pid) : undefined;
+  return {
+    lines: [
+      ...(orphan && read.kind === 'read'
+        ? [`${read.daemon} is serving, but OUTSIDE ${read.report.manager} — nothing supervises it`]
+        : []),
+      ...(pid === undefined ? [] : [`pid      ${String(pid)}`]),
+      supervisorLine(read),
+      `not reported in 5.0: ${NOT_REPORTED.join(', ')}`,
+    ],
+    ...(orphan && read.kind === 'read' && read.pid !== undefined
+      ? {
+          remedy:
+            `pid ${String(read.pid)} was not started by ${read.report.manager}, so ${read.report.manager} cannot start its own; ` +
+            `run ${binary} daemon restart to stop it and have ${read.report.manager} own the daemon`,
+        }
+      : {}),
+  };
+}
+
+/** What a daemon that does not answer adds: the supervisor line, and today's `wedged` words when a process exists. */
+export function downLines(read: SupervisorRead, binary: string): readonly string[] {
+  const wedged =
+    reachabilityOf(false, read) === 'wedged' && read.kind === 'read'
+      ? [
+          `  a process exists${read.report.pid === undefined ? '' : ` (pid ${String(read.report.pid)})`} but answered nothing in time — its event loop looks stalled or wedged`,
+          `  \`${binary} daemon logs\` shows the last step and any stall it reported; \`${binary} daemon restart\` replaces it`,
+        ]
+      : [];
+  return [supervisorLine(read), ...wedged];
+}
