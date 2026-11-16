@@ -227,8 +227,41 @@ export interface RuntimeCatalogAccount {
   readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
 }
 
+/**
+ * What a session's switch reads of the account it runs on, and nothing more: no wrapper path, no home, no secret binding.
+ * A published account row satisfies it; so does the catalog a runtime serves (`RuntimeStartSource.catalog`).
+ */
+export interface RuntimeSwitchAccount {
+  /** The executable NAME the session runs (the account's wrapper), the handle a refusal names. */
+  readonly agent: string;
+  readonly available: boolean;
+  /** Why it is down; `null` when it is not. */
+  readonly unavailableReason: string | null;
+  /** The model it serves when a caller names none; `null` when it names none. */
+  readonly defaultModel: string | null;
+  readonly models: readonly RuntimeSwitchAccountModel[];
+  readonly modelCatalog?: { readonly id: string; readonly label: string; readonly customIds: boolean };
+}
+
+interface RuntimeSwitchModelFacts {
+  readonly id: string;
+  readonly displayName?: string;
+  readonly tier?: 'best' | 'balanced' | 'fast';
+  readonly context?: number;
+  readonly reasoning?: boolean;
+  readonly efforts?: readonly string[];
+  readonly defaultEffort?: string;
+}
+
+/** One model an account may be asked to serve; an unavailable one says why. */
+export type RuntimeSwitchAccountModel =
+  | (RuntimeSwitchModelFacts & { readonly available: true })
+  | (RuntimeSwitchModelFacts & { readonly available: false; readonly unavailableReason: string });
+
 /** The harness's catalog projections and picker driver. A harness that has no live catalog or picker leaves them out. */
 export interface HarnessRuntimeCatalogs {
+  /** The catalog a Claude session may be switched within: the models its account serves, as its picker would list them. */
+  claudeRuntimeCatalog?(account: RuntimeSwitchAccount): RuntimeModelCatalog;
   /** The catalog a Codex session may be switched within: what its own app-server advertised, described by its account. */
   codexRuntimeCatalog?(choices: readonly RuntimeModelChoice[], account?: RuntimeCatalogAccount): RuntimeModelCatalog;
   /** The advertised choices in the planner's vocabulary. */

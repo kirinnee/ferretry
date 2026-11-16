@@ -26,13 +26,13 @@ import {
   type RuntimeControlApi,
   type RuntimeControlRequest,
   type RuntimeModelCatalog,
+  type RuntimeSwitchAccount,
   type RuntimeSwitchFrame,
   type RuntimeSwitchPane,
 } from '../../../../contract/index.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
 import type { SessionEffectLedger } from '../effects/types.ts';
-import type { AccountInventoryPort } from '../peers/core.ts';
 import type { CodexRuntimeCatalogCache, HarnessRuntimeCatalogs, PickerSleeper } from '../peers/harness.ts';
 import { HARNESS_PICKER_COMMAND, SessionRuntimeControlService, type SessionRuntimeControlPorts } from './service.ts';
 import {
@@ -58,7 +58,11 @@ export interface FerretRuntimeControlDeps {
   /** Stops a ferret whose per-ferret key the caller ALREADY HOLDS (the control holds it while it drives). */
   readonly stopHeld: (ferret: FerretId) => Promise<void>;
   readonly serial: SerialExecutor;
-  readonly accounts: AccountInventoryPort;
+  /**
+   * What the runtime THIS FERRET WAS STARTED ON serves, read from the ferret's own record by the host (never from a request),
+   * or nothing when it has none recorded or cannot say. Values-free: models and their levels, no credential, no path.
+   */
+  readonly served: (ferret: FerretId) => Promise<RuntimeModelCatalog | undefined>;
   readonly clock: ClockPort;
   readonly sleeper: PickerSleeper;
   /** The CLI a quarantined session tells a human to type. */
@@ -112,6 +116,30 @@ export function ferretRuntimePane(seam: FerretHarness, stop: () => Promise<void>
   };
 }
 
+/**
+ * The one account a switch reads, from the catalog a runtime serves: its servable models with their levels, the default, and
+ * the catalog's own say on custom ids. A catalog with no model is an account that is down, and says so.
+ */
+export function accountOfServed(served: RuntimeModelCatalog, agent: string): RuntimeSwitchAccount {
+  const defaultModel = served.choices.find(choice => choice.isDefault === true)?.value ?? null;
+  return {
+    agent,
+    available: served.choices.length > 0,
+    unavailableReason: served.choices.length > 0 ? null : 'its runtime serves no model',
+    defaultModel,
+    models: served.choices.map(choice => ({
+      id: choice.value,
+      displayName: choice.label,
+      ...(choice.tier === undefined ? {} : { tier: choice.tier }),
+      ...(choice.context === undefined ? {} : { context: choice.context }),
+      efforts: choice.reasoningEfforts.map(effort => effort.value),
+      ...(choice.defaultReasoningEffort === undefined ? {} : { defaultEffort: choice.defaultReasoningEffort }),
+      available: true as const,
+    })),
+    ...(served.catalog === undefined ? {} : { modelCatalog: served.catalog }),
+  };
+}
+
 /** What the service needs where a harness gave nothing: a refusal that reads as the harness not offering it. */
 function lacking(what: string): never {
   throw new SessionRuntimeError('unsupported', `this ferret's harness does not offer ${what}`);
@@ -120,7 +148,8 @@ function lacking(what: string): never {
 /** The service's whole catalog seam, from the members this harness supplied. */
 function catalogsOf(supplied: HarnessRuntimeSwitch['catalogs']): HarnessRuntimeCatalogs {
   return {
-    claudeRuntimeCatalog: () => lacking('a model catalog'),
+    claudeRuntimeCatalog: account =>
+      supplied.claudeRuntimeCatalog === undefined ? lacking('a model catalog') : supplied.claudeRuntimeCatalog(account),
     codexRuntimeCatalog: (choices, account) =>
       supplied.codexRuntimeCatalog === undefined
         ? lacking('a live model catalog')
@@ -234,7 +263,12 @@ export class FerretRuntimeControl implements NonNullable<RuntimeControlApi['runt
       picker: pickerTransportOf(pane),
       harness: harness.quirks,
       catalogs: catalogsOf(harness.catalogs),
-      accounts: deps.accounts,
+      accounts: {
+        accounts: async () => {
+          const [served, view] = await Promise.all([deps.served(ferret), deps.view(id)]);
+          return served === undefined || view === undefined ? [] : [accountOfServed(served, view.config.agent)];
+        },
+      },
       catalog: harness.liveCatalog ?? NO_LIVE_CATALOG,
       serial: deps.serial,
       sleeper: deps.sleeper,

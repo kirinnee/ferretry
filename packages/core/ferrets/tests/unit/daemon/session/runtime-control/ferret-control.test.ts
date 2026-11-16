@@ -6,18 +6,21 @@ import {
   type FerretId,
   type HarnessRuntimeSwitch,
   type RuntimeControlRequest,
+  type RuntimeModelCatalog,
+  type RuntimeSwitchAccount,
   type RuntimeSwitchPane,
   type CodexPickerKeyExpectation,
   type RuntimeSwitchPlan,
   RuntimeControlError,
 } from '../../../../../contract/index.ts';
 import {
+  accountOfServed,
   FerretRuntimeControl,
   type FerretRuntimeControlDeps,
   ferretRuntimePane,
 } from '../../../../../daemon/lib/session/runtime-control/ferret-control.ts';
 import type { RuntimeQuarantinePatch } from '../../../../../daemon/lib/session/runtime-control/types.ts';
-import { CODEX_VIEW, FakeSessionEffectLedger, NOW, RecordingSerial } from './support.ts';
+import { CLAUDE_VIEW, CODEX_VIEW, FakeSessionEffectLedger, NOW, RecordingSerial } from './support.ts';
 
 /**
  * The runtime control OVER A FERRET: what Ferrets adds to the ported service. The service's own decisions (the four
@@ -92,6 +95,15 @@ function switchOf(
         options.catalogs === 'none'
           ? {}
           : {
+              claudeRuntimeCatalog: account => ({
+                harness: 'claude',
+                source: 'wrapper-inventory',
+                choices: account.models.map(model => ({
+                  value: model.id,
+                  label: model.displayName ?? model.id,
+                  reasoningEfforts: [],
+                })),
+              }),
               codexRuntimeCatalog: choices => ({ harness: 'codex', source: 'codex-app-server', choices: [...choices] }),
               codexSwitchContext: () => ({ choices: [] }),
               fastModeFacts: () => ({ supported: true, current: false }),
@@ -133,6 +145,9 @@ const world = (
     readonly viewAnswer?: 'present' | 'missing';
     readonly switchOptions?: SwitchOptions;
     readonly journalFails?: boolean;
+    /** What the ferret's runtime serves: a catalog, nothing, or a runtime that cannot be read. */
+    readonly served?: RuntimeModelCatalog | 'fails';
+    readonly claude?: boolean;
   } = {},
 ): World => {
   const state: World = {
@@ -161,7 +176,7 @@ const world = (
     runtimeSwitchOf: () => (options.offers === false ? undefined : switchOf(state.switched, options.switchOptions)),
     view: async () => {
       state.views.reads += 1;
-      return options.viewAnswer === 'missing' ? undefined : CODEX_VIEW();
+      return options.viewAnswer === 'missing' ? undefined : options.claude === true ? CLAUDE_VIEW() : CODEX_VIEW();
     },
     journal: async (_id, event, data) => {
       if (options.journalFails === true) throw new Error('the journal is not writable');
@@ -175,7 +190,10 @@ const world = (
       state.stopped.push(ferret);
     },
     serial: new RecordingSerial(),
-    accounts: { accounts: async () => [] },
+    served: async () => {
+      if (options.served === 'fails') throw new Error('the runtime could not be read');
+      return options.served;
+    },
     clock: { now: () => NOW },
     sleeper: { sleep: async () => undefined },
     clientName: 'fy',
@@ -315,6 +333,77 @@ describe('the runtime control over a ferret', () => {
       const refused = await refusal(w.control.control(undefined, 's1', MODEL, 'request-1'));
       should((refused as RuntimeControlError).failure).equal('failed');
     });
+  });
+});
+
+const SERVED: RuntimeModelCatalog = {
+  harness: 'claude',
+  source: 'wrapper-inventory',
+  choices: [
+    {
+      value: 'claude-opus-5-5',
+      label: 'Opus 5.5',
+      tier: 'best',
+      context: 200_000,
+      isDefault: true,
+      reasoningEfforts: [{ value: 'high' }, { value: 'max' }],
+      defaultReasoningEffort: 'high',
+    },
+    { value: 'claude-sonnet-5-5', label: 'Sonnet 5.5', reasoningEfforts: [] },
+  ],
+  catalog: { id: 'anthropic', label: 'Anthropic', customIds: false },
+};
+
+describe('the account a switch reads is what the ferret’s own runtime serves', () => {
+  it('builds one account from a served catalog: its models and levels, the default, the custom-id say, never a path or a token', () => {
+    const account: RuntimeSwitchAccount = accountOfServed(SERVED, 'claude-auto');
+    should(account).eql({
+      agent: 'claude-auto',
+      available: true,
+      unavailableReason: null,
+      defaultModel: 'claude-opus-5-5',
+      models: [
+        {
+          id: 'claude-opus-5-5',
+          displayName: 'Opus 5.5',
+          tier: 'best',
+          context: 200_000,
+          efforts: ['high', 'max'],
+          defaultEffort: 'high',
+          available: true,
+        },
+        { id: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', efforts: [], available: true },
+      ],
+      modelCatalog: { id: 'anthropic', label: 'Anthropic', customIds: false },
+    });
+  });
+
+  it('reads a catalog with no model as an account that is down, and one with no default as no default', () => {
+    const down = accountOfServed({ ...SERVED, choices: [] }, 'claude-auto');
+    should(down.available).equal(false);
+    should(down.unavailableReason).match(/serves no model/u);
+    const noDefault = accountOfServed(
+      { harness: 'claude', source: 'wrapper-inventory', choices: [{ value: 'm', label: 'M', reasoningEfforts: [] }] },
+      'a',
+    );
+    should(noDefault.defaultModel).equal(null);
+    should(noDefault).not.have.property('modelCatalog');
+  });
+
+  it('lists a Claude ferret’s models from what its runtime serves, through its harness’s own projection', async () => {
+    const w = world({ claude: true, served: SERVED });
+    const catalog = await w.control.models(undefined, 's1');
+    should(catalog.harness).equal('claude');
+    should(catalog.choices.map(choice => choice.value)).eql(['claude-opus-5-5', 'claude-sonnet-5-5']);
+  });
+
+  it('refuses as catalog_unavailable, naming nothing it did not read, when its runtime serves nothing, cannot say, or is down', async () => {
+    for (const served of [undefined, 'fails' as const, { ...SERVED, choices: [] }]) {
+      const w = world({ claude: true, served });
+      const failure = (await refusal(w.control.models(undefined, 's1'))) as RuntimeControlError;
+      should(failure).be.instanceOf(RuntimeControlError);
+      should(failure.failure).equal('catalog_unavailable');
+    }
   });
 });
 
