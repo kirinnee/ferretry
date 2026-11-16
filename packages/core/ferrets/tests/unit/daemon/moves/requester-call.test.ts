@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { MovePreflight, type MoveTargetView } from '../../../../daemon/lib/moves/preflight-service.ts';
 import type { ProcessInfo, ProcessObservation } from '../../../../daemon/lib/moves/inflight-report.ts';
-import type { ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
+import type { MovePane, ProcessInventoryPort } from '../../../../daemon/lib/moves/process-inventory-port.ts';
 import { identifyAgentJobs } from '../../../../daemon/lib/moves/agent-jobs.ts';
 import { identifyKnownProcesses } from '../../../../daemon/lib/moves/harness-provenance.ts';
 import { inventoryProcesses, type ProcRow } from '../../../../daemon/lib/moves/process-table.ts';
@@ -53,11 +53,11 @@ class StubInventory implements ProcessInventoryPort {
     return this.observation;
   }
 }
-const panes = { visible: async () => '' };
+const panes: MovePane = { identify: async () => undefined, screen: async () => '' };
 const view = (overrides: Partial<MoveTargetView> = {}): MoveTargetView => ({
   sessionId: 's1',
   harness: 'claude',
-  tmuxSession: 'fy-s1',
+  pane: panes,
   status: 'tool_running',
   turn: 3,
   openTools: [],
@@ -88,7 +88,7 @@ describe('requesterCall', () => {
 
 describe('a ferret moving itself', () => {
   it('should not be refused for its own tool shell, `fy ferret move` and three ugrep consumers', async () => {
-    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)), panes);
+    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)));
     const tool = {
       type: 'tool.use',
       data: { toolUseId: 't1', name: 'Bash', input: { command: PIPELINE } },
@@ -107,7 +107,7 @@ describe('a ferret moving itself', () => {
 
   it('should still refuse for a job the same tool shell left running beside the call', async () => {
     const rows = [...selfMoveRows, row(330, 300, 'bun run deploy.ts', 400)];
-    const preflight = new MovePreflight(new StubInventory(observe(rows)), panes);
+    const preflight = new MovePreflight(new StubInventory(observe(rows)));
 
     const report = await preflight.inspect(view(), [], { requesterPid: 320 });
 
@@ -116,14 +116,14 @@ describe('a ferret moving itself', () => {
   });
 
   it('should refuse as before when the requester pid belongs to no tool shell of this pane', async () => {
-    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)), panes);
+    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)));
     const report = await preflight.inspect(view(), [], { requesterPid: 4242 });
     should(preflight.gate(report).proceed).be.false();
     should(report.requesterCall).be.undefined();
   });
 
   it('should keep a different open tool call blocking', async () => {
-    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)), panes);
+    const preflight = new MovePreflight(new StubInventory(observe(selfMoveRows)));
     const tools = [
       { type: 'tool.use', data: { toolUseId: 't1', name: 'Bash', input: { command: PIPELINE } } },
       { type: 'tool.use', data: { toolUseId: 't2', name: 'Bash', input: { command: 'git push' } } },
@@ -136,7 +136,7 @@ describe('a ferret moving itself', () => {
 
 describe('what may stand between the `fy` process and its tool shell', () => {
   const inspectRows = async (rows: readonly ProcRow[]) => {
-    const preflight = new MovePreflight(new StubInventory(observe(rows)), panes);
+    const preflight = new MovePreflight(new StubInventory(observe(rows)));
     return { preflight, report: await preflight.inspect(view(), [], { requesterPid: 320 }) };
   };
 
@@ -212,7 +212,7 @@ describe('what may stand between the `fy` process and its tool shell', () => {
 
 describe('the report carries whose turn it is to the gate', () => {
   it('should tell a session at its prompt apart from one mid-turn', async () => {
-    const preflight = new MovePreflight(new StubInventory({ kind: 'observed', processes: [] }), panes);
+    const preflight = new MovePreflight(new StubInventory({ kind: 'observed', processes: [] }));
 
     const working = await preflight.inspect(view({ status: 'running', turnState: 'working' }));
     const prompt = await preflight.inspect(view({ status: 'running', turnState: 'your-turn' }));

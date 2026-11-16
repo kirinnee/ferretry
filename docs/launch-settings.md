@@ -79,10 +79,11 @@ ferret is bound to — as if only the process had restarted:
   first turn wrote a rollout, or a v4 ferret whose rollout v4 never found) starts a NEW one and says so the same way:
   history `session.conversation_not_found` with `{ unknown: true }`, and a fixed sentence before an autonomous
   ferret's revive turn, so it never forgets everything in silence.
-- **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
-  Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
-  harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and
-  resumes that one.
+- **Go back to the earlier conversation** (Actions, or `--conversation previous`) is **not built yet (GAP)**. The
+  harness's finder lists the owner's own history, never the ferret's home, so answering it would unbind the ferret's
+  real conversation for one of the person's. A Restart that asks for it is refused `unavailable` (503 `agent_unavailable`: "going back to an
+  earlier conversation is not built yet") before anything is written or killed, as `convert` does; it waits for a
+  reader the harness scopes to the ferret's own home.
 
 Moving between harnesses is not a restart: a plain move stays refused (`harness_mismatch`). It is done by
 **converting** the conversation (Move to Codex…/Move to Claude…, `--convert`) — see

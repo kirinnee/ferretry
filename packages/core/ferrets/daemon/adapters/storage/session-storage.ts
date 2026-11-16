@@ -1290,6 +1290,18 @@ export class DaemonStorage {
   }
 
   /**
+   * When a live session's newest journal event was written, by that event's own stamp, from the index alone: no
+   * journal is read. The state port reads no file's modified time, so this is what a journal "last grew" means.
+   */
+  lastEventAt(id: SessionId): string | undefined {
+    this.assertOpen();
+    const row = this.index.findSession(id);
+    return row === undefined || row.lastSequence === 0
+      ? undefined
+      : this.index.eventPointers(id, row.lastSequence - 1, 1)[0]?.time;
+  }
+
+  /**
    * The live sessions the state folder holds and, for each, whether its journal has vanished.
    *
    * Three listings and no document or journal read, and nothing is reconciled, so a health tick can afford this on

@@ -47,6 +47,7 @@ import {
   type QueueOutcome,
   type Runner,
   type RunnerHandle,
+  type RunnerPaneIdentity,
   runnerDeliveryFailure,
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
@@ -148,6 +149,14 @@ export class FakeRunner implements Runner {
   }
   async alive(handle: RunnerHandle): Promise<boolean> {
     return this.#live.has(handle);
+  }
+  /** What the next `identify` answers instead of the live pane: a test's own `'gone'`, or `undefined` for a runner that cannot tell. */
+  identity: 'gone' | undefined | 'live' = 'live';
+  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+    if (this.identity !== 'live') return this.identity;
+    const live = this.#live.get(handle);
+    if (live === undefined) return 'gone';
+    return { handle, ...(live.pid === undefined ? {} : { pid: live.pid }), processStart: String(live.startedAt) };
   }
   async signal(): Promise<void> {}
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {

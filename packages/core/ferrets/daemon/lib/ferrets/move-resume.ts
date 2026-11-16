@@ -3,6 +3,7 @@ import { type FerretId, type FerretRecord, LaunchOriginSchema, type StartFailure
 import type { Result } from '@ferretry/std';
 import { ResumeRefused } from '../session/resume/types.ts';
 import type { ResumeOutcome, ResumeRequest } from '../session/resume/service.ts';
+import type { RestartRelaunch } from '../../modules/restart-in-place.ts';
 import type { ResumeTarget, ServiceResumeOptions } from './service.ts';
 
 /** What the move's relaunch needs of Ferrets: its own resume, and the record to describe the outcome with. */
@@ -94,5 +95,53 @@ export function ferretsMoveResume(
         disposition: 'revived',
       };
     },
+  };
+}
+
+/**
+ * A RESTART's relaunch (c58-37): the ferret's pane replaced by a resume of THIS service on the runtime the ferret is already
+ * on. It names no target unless the person chose another conversation, so the record's own runtime, login, model and
+ * effort stand and the conversation it is bound to is resumed (a target without one would start a new conversation, which
+ * is what a Restart must never do unasked). The pane the gate looked at is judged under the ferret's own queue
+ * (`expect`), so a pane replaced or stopped between the gate and the kill refuses with nothing written. A refusal is a
+ * {@link ResumeRefused}, which the Restart restates in its own words.
+ */
+export function ferretsRestartResume(
+  service: ResumingService,
+  recordOf: (ferret: FerretId) => FerretRecord | undefined,
+): (request: RestartRelaunch) => Promise<ResumeOutcome> {
+  return async request => {
+    const ferret = request.id as unknown as FerretId;
+    const stated = LaunchOriginSchema.safeParse(request.origin);
+    if (!stated.success)
+      throw new ResumeRefused('the Restart did not say who it is relaunching for, so nothing was launched');
+    const record = recordOf(ferret);
+    if (record === undefined) throw new ResumeRefused(`no ferret ${ferret}`);
+    let target: ResumeTarget | undefined;
+    if (request.conversation.kind !== 'resume') {
+      if (record.runtime === undefined)
+        throw new ResumeRefused('this ferret has no runtime recorded, so it cannot open another conversation on it');
+      target = { runtime: record.runtime, harness: record.harness };
+    }
+    const resumed = await service.resume(ferret, request.message, {
+      origin: stated.data,
+      automatic: false,
+      replaceLiveTerminal: true,
+      expect: current => current.handle === request.expectHandle,
+      ...(target === undefined ? {} : { target }),
+      ...(request.actor === undefined ? {} : { actor: request.actor }),
+    });
+    if (!resumed.ok) throw new ResumeRefused(resumed.error.reason);
+    const after = recordOf(ferret);
+    return {
+      target: {
+        id: request.id,
+        status: 'running',
+        mode: after?.mode ?? 'auto',
+        cwd: after?.folder ?? '',
+        turn: 0,
+      },
+      disposition: 'revived',
+    };
   };
 }
