@@ -40,6 +40,14 @@ export interface SendTrackerSettings {
    * one capture and types nothing.
    */
   readonly untypedLookMs: number;
+  /**
+   * How long a person's send may stay `untyped` — retried every `untypedLookMs` against a composer that cannot be
+   * proven empty — before it is said OUT LOUD: once, as a warning in the daemon's log, a `control.send_stuck` journal
+   * entry and the row's `stuckAt`, which the app shows as "not delivered yet" with what to do. It keeps being tried
+   * until `holdLimitMs`. An idle harness draws nothing by itself, so a screen the reader refused stays refused until
+   * something redraws it: the owner's message waited ten minutes this way, and a ferret's six and a half hours (v4).
+   */
+  readonly stuckAlarmMs: number;
   /** The ceiling on waiting behind a busy agent, after which a held send is reported unconfirmed. */
   readonly holdLimitMs: number;
   /**
@@ -89,6 +97,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
   untypedLookMs: 5_000,
+  stuckAlarmMs: 2 * 60_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,

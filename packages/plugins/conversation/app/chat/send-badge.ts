@@ -133,7 +133,24 @@ const HELD_UPDATE_NOTE = `${UPDATE_NOTE} (sent before the update). Ferretry will
  *   * `unconfirmed` — could be proven neither way. NOT an error, and never red: it may well have
  *     landed, and red invites a resend that would make the agent read it twice.
  */
+/**
+ * STUCK, SAID TO THE SENDER (the daemon's `stuckAt`): nothing could be typed for minutes, and the reason is on the
+ * agent's screen, not in the network. v4 retried such a message silently for six and a half hours. It outranks the
+ * queue's own words, because a person's send the box refused sits in the queue as `typing` the whole time and "it is
+ * being typed into the agent now" is exactly what is not happening. Only an open send that this browser can still read
+ * is stuck: a settled fate, or an unread ledger, says its own thing.
+ */
+export const isStuckSend = (record: Pick<LedgerSendRecord, 'fate' | 'stuckAt' | 'unread'>): boolean =>
+  record.fate === 'accepted' && record.stuckAt !== undefined && record.unread === undefined;
+
+const stuckBadge = (record: LedgerSendRecord): SendBadge => ({
+  label: 'not delivered yet',
+  tone: WAITING_TONE,
+  detail: `not typed since ${readAt(record.acceptedAt)}: the agent’s input box could not be read, so nothing was typed. Ferretry keeps trying; the agent’s terminal shows what is in the way`,
+});
+
 const badgeOf = (record: LedgerSendRecord): SendBadge => {
+  if (isStuckSend(record)) return stuckBadge(record);
   const queued = queueBadge(record);
   if (queued !== undefined) return queued;
   if (record.fate === 'delivered')
