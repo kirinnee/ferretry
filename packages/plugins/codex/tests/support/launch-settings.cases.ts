@@ -65,10 +65,11 @@ export function launchSettingsCases(): void {
     state: StatePort,
     items: ReadonlyMap<string, unknown> = new Map(),
     hooks: ReadonlyMap<string, unknown> = new Map(),
-    selected: typeof selectEverything = selectEverything,
+    selected: typeof selectEverything | undefined = undefined,
   ) {
     return codexHarness({
-      selected,
+      // Default: everything the collection holds, selected in its insertion order (the profile's order, here).
+      selected: selected ?? (async () => ({ ...(await selectEverything()), hooks: new Set([...hooks.keys()]) })),
       kernel: {
         roots: roots(),
         state,
@@ -197,6 +198,46 @@ export function launchSettingsCases(): void {
         expect(rewritten).not.toBe(damagedShapes[shape]);
       });
     }
+
+    test('F-0422 a record written before the hooks section reads fine: no damage, its other sections still drift, hooks are unknown', async () => {
+      // Arrange: a launch recorded by the real port, then rewritten the way an older build wrote it (no hooks section).
+      const { port, changed, memory } = await realPortWithBadRecord('not JSON', HEALTHY_RECORD);
+      const items = new Map<string, unknown>([['guard', { settings: { model: 'one' } }]]);
+      const hooks = new Map<string, unknown>([['notify', { hooks: { Stop: [] } }]]);
+      const harness = over({ value: 'auto' }, port, items, hooks);
+      await harness.start(spec, runner, {} as never);
+      const path = '/fy/state/codex/launch-settings/f1.json';
+      const written = JSON.parse((await memory.readText(path)) ?? 'null');
+      delete written.sections.hooks;
+      await memory.writeAtomic(path, `${JSON.stringify(written)}\n`, 0o600);
+
+      // Boot reads it without a warning, and a read is not damage.
+      const reopened = await kernelState.openPluginState({
+        home: '/fy',
+        pluginId: 'codex',
+        files: [CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
+        fs: memory,
+        clock: { now: () => 0 as never },
+        kind: 'plugin',
+        liveTargets: true,
+      });
+      expect(reopened.damaged).toEqual([]);
+      expect(reopened.narrowed).toEqual([]);
+
+      // Hooks are unknown (even when they differ now); the other sections compare as before.
+      hooks.set('notify', { hooks: { Stop: [{ hooks: [] }] } });
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+      items.set('guard', { settings: { model: 'two' } });
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'drifted', sections: ['settings'] });
+      expect(port.damaged()).toEqual([]);
+      expect(changed).toEqual([]);
+
+      // The next resume writes the hooks section, and the comparison then covers it.
+      await harness.resume(spec, runner, {} as never, 'thread-1');
+      expect(JSON.parse((await memory.readText(path)) ?? 'null').sections.hooks).toMatch(/^[0-9a-f]{64}$/u);
+      hooks.set('notify', { hooks: { Stop: [] } });
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'drifted', sections: ['hooks'] });
+    });
 
     test('BG-045 F-0422 a REAL symlink at the record: a read is unknown, the launch removes the link and never follows it, and records afresh so the answer is current at once', async () => {
       // Arrange: a real tmp dir, the record a symlink to a file outside the plugin's state holding a fake secret.
@@ -394,6 +435,25 @@ export function launchSettingsCases(): void {
       hooks.delete('extra');
       hooks.delete('notify');
       expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+    });
+
+    test('F-0422 selecting the same hooks items in another layer order drifts in the hooks section only', async () => {
+      const { state } = fresh();
+      const hooks = new Map<string, unknown>([
+        ['first', notify('one')],
+        ['second', notify('two')],
+      ]);
+      let order = ['first', 'second'];
+      const selected = async () => ({ ...(await selectEverything()), hooks: new Set(order) });
+      const harness = over({ value: 'auto' }, state, new Map(), hooks, selected);
+      await harness.start(spec, runner, {} as never);
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+      order = ['second', 'first'];
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+      order = ['first', 'second'];
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
     });
 
     test('F-0422 a hooks item the runtime’s profile does not select is not a launch setting', async () => {

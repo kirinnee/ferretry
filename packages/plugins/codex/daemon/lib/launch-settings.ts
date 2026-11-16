@@ -34,13 +34,14 @@ function fingerprint(value: unknown): string {
  * One fingerprint per section of what a launch would run under with this permission mode and these settings items
  * (`config/codex/settings/`, merged into every Codex home's `config.toml`, so a changed item is a relaunch for a running
  * ferret exactly as Claude Code's is). The `hooks` section is the hooks items (`config/codex/hooks/`) the runtime's
- * profile selects, which Runtimes renders into the runtime's `hooks.json`: a changed, added or removed one is a relaunch
- * too. With none selected it is the digest of the empty set.
+ * profile selects, IN THE ORDER it selects them (Runtimes merges their handlers into the runtime's `hooks.json` in that
+ * order): a changed, added, removed or reordered one is a relaunch too. With none selected it is the digest of the empty
+ * list. A record written before this section existed has none, and its hooks compare as unknown.
  */
 export function codexLaunchSettingsRecord(
   permissionMode: HarnessConfig['permissionMode'],
   items: ReadonlyMap<string, SettingsItem>,
-  hooks: ReadonlyMap<string, HooksItem>,
+  hooks: readonly (readonly [string, HooksItem])[],
   runtime?: string,
 ): CodexLaunchSettingsRecord {
   const document = settingsDocument(items);
@@ -53,7 +54,8 @@ export function codexLaunchSettingsRecord(
       'fixed-layer': fingerprint(codexFixedArguments(permissionMode, FOLDER_STAND_IN)),
       // The flags are part of what the item runs the launch under; a document with none keeps the digest it always had.
       settings: fingerprint(flags.length === 0 ? document : { document, flags }),
-      hooks: fingerprint(Object.fromEntries([...hooks].map(([name, item]) => [name, item.hooks]))),
+      // An ordered list, not a name-keyed object: the order is the merge order, and a reorder changes the hooks.json.
+      hooks: fingerprint(hooks.map(([name, item]) => [name, item.hooks])),
     },
   };
 }
@@ -65,6 +67,10 @@ export function compareCodexLaunchSettings(
 ): HarnessLaunchSettings {
   const drifted: HarnessLaunchSection[] = HARNESS_LAUNCH_SECTIONS.filter(
     (section): section is keyof CodexLaunchSettingsRecord['sections'] => section in now.sections,
-  ).filter(section => recorded.sections[section] !== now.sections[section]);
+  ).filter(section => {
+    const before = recorded.sections[section];
+    // A section the record never had (hooks, before this change) is unknown, not drifted, until the next launch writes it.
+    return before !== undefined && before !== now.sections[section];
+  });
   return drifted.length === 0 ? { kind: 'current' } : { kind: 'drifted', sections: drifted };
 }

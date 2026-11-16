@@ -169,7 +169,8 @@ export const CodexLaunchSettingsRecordSchema = z.strictObject({
     'permission-mode': SectionDigestSchema,
     'fixed-layer': SectionDigestSchema,
     settings: SectionDigestSchema,
-    hooks: SectionDigestSchema,
+    /** Absent on a record written before hooks were fingerprinted: its hooks are unknown until the next start or resume. */
+    hooks: SectionDigestSchema.optional(),
   }),
   /** The runtime this launch ran as (a name, not a secret): the selection of settings and hooks is read for it again. */
   runtime: z.string().min(1).max(128).optional(),
