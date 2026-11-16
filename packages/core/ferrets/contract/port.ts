@@ -30,6 +30,7 @@ import type {
   HarnessTranscriptBytes,
   TurnUsage,
 } from './kinds.ts';
+import type { HarnessHistorySource } from './history.ts';
 import type { AgentControl, LimitsFile } from './state.ts';
 
 /**
@@ -653,6 +654,13 @@ export interface FerretsApi {
   children(ferret: FerretId): readonly FerretId[];
   /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
   harnesses(): readonly HarnessKey[];
+  /**
+   * The past conversations each provided harness holds, as read-only trees (additive, the conversation index): one entry per
+   * harness that offers any, in no particular order. A harness that fails offers nothing. Reads nothing itself.
+   */
+  historySources?(): Promise<
+    readonly { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[]
+  >;
   /**
    * Starts a ferret FOR `origin`: who the start is for, as the admitted credential decided it (required, no default). An
    * agent's start never binds a folder inside the daemon's state home.

@@ -428,10 +428,50 @@ describe('KernelProcessProbe, reading one subtree from procfs', () => {
 
     // Assert
     should(actual).deepEqual([
-      { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' },
+      { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js', command: 'node x.js' },
       { pid: 201, ppid: 100, startedSecondsAgo: 10, argv: '[kw)x]' },
-      { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b' },
+      // The display copy has the newline as `?`; the exact command keeps it, so a multi-line command can be judged per line.
+      { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b', command: 'echo a\nb' },
     ]);
+  });
+
+  describe('a multi-line Claude tool command', () => {
+    const wrapper = (payload: string): string =>
+      "/usr/bin/zsh\0-c\0source /h/shell-snapshots/snapshot-zsh-1-ab.sh 2>/dev/null || true && setopt NO_EXTENDED_GLOB 2>/dev/null || true && eval '" +
+      payload +
+      "' < /dev/null && pwd -P >| /tmp/claude-99ff-cwd\0";
+    const MULTI_LINE = 'echo start\ngit stash\nbun test\ngit stash pop';
+    const pane = (): FakeProc =>
+      new FakeProc()
+        .set('stat', `cpu 1 2 3\nbtime ${String(BOOT_SECONDS)}\n`)
+        .set('100/task/100/children', '200')
+        .set('200/stat', stat(200, 'zsh', 100, 50_000))
+        .set('200/cmdline', wrapper(MULTI_LINE));
+    const inventory = (probe: ProcessProbePort) =>
+      new PaneProcessInventory(new FakeTmux({ code: 0, stdout: livePane(100), stderr: '' }), probe, provenance);
+
+    it('should judge EVERY line when the kernel gave the words (the stash in the middle is seen)', async () => {
+      // Act
+      const observed = await inventory(probeOver(pane())).collect('session-1');
+
+      // Assert — judged by its first line alone this was `echo`: safe_to_kill, and the gate passed.
+      should(observed).containDeep({
+        kind: 'observed',
+        processes: [{ pid: 200, verdict: 'destructive_to_interrupt' }],
+      });
+    });
+
+    it('should refuse to unwrap the lossy `ps` form, whose newlines are already `?`', async () => {
+      // Arrange — what `ps` prints for the same process: every control character is a `?`.
+      const lossy = wrapper(MULTI_LINE).replaceAll('\0', ' ').replaceAll('\n', '?').trim();
+      const probe = new FakeProbe(table(`100 1 50 harness\n200 100 20 ${lossy}`));
+
+      // Act
+      const observed = await inventory(probe).collect('session-1');
+
+      // Assert — not unwrapped, so not judged by `echo start`: it blocks.
+      should(observed).containDeep({ kind: 'observed', processes: [{ pid: 200, verdict: 'unknown' }] });
+    });
   });
 
   it('should hand the question back to the full table whenever procfs cannot answer it', async () => {
@@ -723,7 +763,7 @@ describe('KernelProcessProbe, looking up pids wherever they are', () => {
 
     // Assert
     should([...actual.entries()]).deepEqual([
-      [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' }],
+      [200, { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js', command: 'node x.js' }],
     ]);
   });
 

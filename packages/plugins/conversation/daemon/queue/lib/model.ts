@@ -1,4 +1,9 @@
-import { type QueueEvent, QueueEventSchema } from '../../../contract/index.ts';
+import {
+  type QueueEvent,
+  QueueEventSchema,
+  type QueueSegmentHeader,
+  type SegmentMessage,
+} from '../../../contract/index.ts';
 import type { QueuedMessage, QueuedMessageState } from '../../seams/protocol.ts';
 
 /**
@@ -70,27 +75,97 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
   }
 }
 
+/** A message whose `version` is known: every message a fold answers has one. */
+export type VersionedMessage = QueuedMessage & { readonly version: number };
+
+/** A message with the place it was first accepted: its index in the order every list of the queue keeps. */
+export interface HeldMessage {
+  readonly order: number;
+  readonly message: VersionedMessage;
+}
+
+/**
+ * A live SEGMENT's header, as the model sees it (`QueueSegmentHeaderSchema`). `UNROTATED_SEGMENT` is what a log with no
+ * header is: it begins at position 0, has accepted nothing and carries nothing.
+ */
+export const UNROTATED_SEGMENT: QueueSegmentHeader = { v: 1, kind: 'segment', base: 0, accepted: 0, carried: 0 };
+
+/**
+ * One live segment of a queue, folded EVENT BY EVENT.
+ *
+ * `version` is the position of the latest event that CHANGED the message, counted over the whole queue: the segment
+ * starts at `base`, so the event at line `i` is at `base + i` and a rotation never renumbers anything. The log is
+ * append-only, so a position is never shared by two changes. `order` is when the message was first accepted, counted
+ * the same way, so the messages come out "in the order first accepted" however many rotations ago the oldest was.
+ *
+ * It is a left fold that can be CONTINUED: `apply` takes one more event, so a store that appended a line does not fold
+ * the segment again. `sealed` is the ids of messages already sealed into shards: an `enqueued` line for one is a retried
+ * request, as it is for a message held here, and changes nothing.
+ */
+export class SegmentFold {
+  private readonly held = new Map<string, HeldMessage>();
+  private applied = 0;
+  private accepted: number;
+
+  constructor(
+    readonly header: QueueSegmentHeader = UNROTATED_SEGMENT,
+    carried: readonly SegmentMessage[] = [],
+    private readonly sealed: ReadonlySet<string> = new Set(),
+  ) {
+    this.accepted = header.accepted;
+    for (const { order, message } of [...carried].sort((a, b) => a.order - b.order))
+      this.held.set(message.id, { order, message });
+  }
+
+  /** How many events this segment has applied: the log's rotation counts these. */
+  get events(): number {
+    return this.applied;
+  }
+
+  /** The position the queue has reached: the next segment's `base`. */
+  get position(): number {
+    return this.header.base + this.applied;
+  }
+
+  /** How many messages the queue has accepted so far: the next segment's `accepted`. */
+  get acceptedCount(): number {
+    return this.accepted;
+  }
+
+  /** Every message this segment holds, carried ones first, in the order they were first accepted. */
+  get messages(): readonly HeldMessage[] {
+    return [...this.held.values()];
+  }
+
+  apply(event: QueueEvent): void {
+    this.applied += 1;
+    const position = this.header.base + this.applied;
+    if (event.kind === 'enqueued') {
+      if (this.held.has(event.message.id) || this.sealed.has(event.message.id)) return;
+      this.held.set(event.message.id, {
+        order: this.accepted,
+        message: { ...event.message, version: position },
+      });
+      this.accepted += 1;
+      return;
+    }
+    const current = this.held.get(event.id);
+    if (current === undefined) return;
+    const next = applied(current.message, event);
+    if (next !== current.message)
+      this.held.set(event.id, { order: current.order, message: { ...next, version: position } });
+  }
+}
+
 /**
  * The messages a log describes, in the order they were first accepted.
  *
  * An `enqueued` line for an id already held is a retried request and changes nothing; any other line for
- * an id never enqueued is ignored, since there is no message for it to move.
+ * an id never enqueued is ignored, since there is no message for it to move. This is the WHOLE queue folded from its
+ * first event with no rotation: the rotated store is proven against it.
  */
 export function foldQueue(events: readonly QueueEvent[]): readonly QueuedMessage[] {
-  const messages = new Map<string, QueuedMessage>();
-  // `version` is the 1-based position in the log of the latest line that CHANGED the message: the log is append-only,
-  // so it only grows, and unlike a clock it is never shared by two changes.
-  let position = 0;
-  for (const event of events) {
-    position += 1;
-    if (event.kind === 'enqueued') {
-      if (!messages.has(event.message.id)) messages.set(event.message.id, { ...event.message, version: position });
-      continue;
-    }
-    const current = messages.get(event.id);
-    if (current === undefined) continue;
-    const next = applied(current, event);
-    messages.set(event.id, next === current ? current : { ...next, version: position });
-  }
-  return [...messages.values()];
+  const fold = new SegmentFold();
+  for (const event of events) fold.apply(event);
+  return fold.messages.map(held => held.message);
 }

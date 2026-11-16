@@ -183,6 +183,10 @@ export default implementDaemon(manifest, {
             const home = await homeDirectory();
             return home === '' ? undefined : `${home}/.codex/sessions`;
           },
+          historyHome: async () => {
+            const home = await homeDirectory();
+            return home === '' ? undefined : `${home}/.codex`;
+          },
           update: { view, start, settled: () => service.settled() },
         }),
       },

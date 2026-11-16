@@ -187,6 +187,14 @@ export interface ArchiveVerdict {
   readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
 }
 
+/** What a complete read of a session's journal made its row: see {@link DaemonStorage.indexedJournals}. */
+interface JournalProof {
+  readonly etag: string;
+  readonly lastSequence: number;
+  readonly journalLine: number;
+  readonly journal: JournalFingerprint;
+}
+
 export class DaemonStorage {
   private closed = false;
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
@@ -210,6 +218,14 @@ export class DaemonStorage {
   private archived: ReadonlyMap<SessionId, ArchivedSession> = new Map();
   /** Registry writes, one after another: an archive pass and a revive never interleave their documents. */
   private registryWrites: Promise<void> = Promise.resolve();
+  /**
+   * The proof that a session's row describes its whole journal (&F4319): the journal's file identity (one `lstat`) and
+   * the journal-derived fields of the row that a COMPLETE read of that journal produced. A document write may skip
+   * re-reading a journal while the file is still that identity AND the row still equals that proof exactly, so any
+   * other writer of the row (a reconcile, a rebuild, a replay that read part of the journal) breaks the match by
+   * itself and nothing has to remember to clear this. Only a full sync that read to the end, or an append, records it.
+   */
+  private readonly indexedJournals = new Map<SessionId, JournalProof>();
   /** Config writes and archive commits share root lanes, always taken before document lanes. */
   private readonly lineages = new KeyedSerialExecutor();
   /** A keep published during verification or registry IO cancels that finite archive commit. */
@@ -251,12 +267,48 @@ export class DaemonStorage {
   }
 
   /**
+   * The journal's file identity from one `lstat` (no read). `undefined` when it is absent, cannot be told, or is not
+   * one an equal etag can be trusted for (`settled`: a device and nanosecond ctime that no caller can set back, old
+   * enough that a later write could not share it): the journal is then read in full, as before.
+   */
+  private async journalEtag(id: SessionId): Promise<string | undefined> {
+    const version = await this.state.version(FerretHistoryFiles, id).catch(() => undefined);
+    return version?.settled === true ? version.etag : undefined;
+  }
+
+  /** Notes the journal `session`'s row now describes, or forgets it when there is none to note. */
+  private rememberJournal(id: SessionId, etag: string | undefined, session: IndexedSession | undefined): void {
+    if (etag === undefined || session?.journal == null) this.indexedJournals.delete(id);
+    else
+      this.indexedJournals.set(id, {
+        etag,
+        lastSequence: session.lastSequence,
+        journalLine: session.journalLine,
+        journal: session.journal,
+      });
+  }
+
+  /** Whether the journal on disk is exactly the one `indexed` was last brought level with. */
+  private async journalUnchanged(id: SessionId, indexed: IndexedSession): Promise<boolean> {
+    const remembered = this.indexedJournals.get(id);
+    return (
+      remembered !== undefined &&
+      indexed.lastSequence === remembered.lastSequence &&
+      indexed.journalLine === remembered.journalLine &&
+      sameFingerprint(indexed.journal, remembered.journal) &&
+      (await this.journalEtag(id)) === remembered.etag
+    );
+  }
+
+  /**
    * Settles the journal contract BEFORE a write: a session that has lost its journal keeps its documents exactly as
    * they were, and nothing is even computed to write.
    */
   private async assertJournalKept(id: SessionId): Promise<void> {
     const indexed = this.index.findSession(id);
     if (indexed === undefined || indexed.journal === null) return;
+    // The journal the index describes is still the file on disk, so it is still there: no need to read it to see.
+    if (await this.journalUnchanged(id, indexed)) return;
     if (!(await this.journalPresent(id))) throw new MissingSessionJournalError(id, fileOf(FerretHistoryFiles, id));
   }
 
@@ -334,18 +386,84 @@ export class DaemonStorage {
     return { session, eventCount: plan.events.length, problems: plan.problems };
   }
 
-  private async syncSessionUnlocked(id: SessionId): Promise<{
+  /** `written: 'documents'` — only a config or state document changed, so the metadata may be all that moves. */
+  private async syncSessionUnlocked(
+    id: SessionId,
+    written?: 'documents',
+  ): Promise<{
     readonly session?: IndexedSession;
     readonly eventCount: number;
     readonly problems: readonly JournalProblem[];
   }> {
-    const source = await this.readSource(id);
+    if (written === 'documents') {
+      const refreshed = await this.refreshDocumentsUnlocked(id);
+      if (refreshed !== undefined) return refreshed;
+    }
+    // Taken BEFORE the read: a journal that moves in between leaves a stale identity, which never matches.
+    const etag = await this.journalEtag(id);
+    const read = await this.readSession(id);
+    const source = read.source;
     if (source === undefined) {
       this.index.removeSession(id);
+      this.rememberJournal(id, undefined, undefined);
       return { eventCount: 0, problems: [] };
     }
     this.assertExpectedJournal(id, this.index.findSession(id), source.journal !== undefined);
-    return this.applySource(source);
+    const applied = this.applySource(source);
+    // Only a journal read to its end is one the row can be said to describe: a read cut short by an io fault indexed
+    // what it got, and must be read again.
+    this.rememberJournal(id, read.journal.complete ? etag : undefined, applied.session);
+    return applied;
+  }
+
+  /**
+   * The index brought up to a config or state document just written (&F4319).
+   *
+   * Such a write changes the session's metadata and nothing in its journal, yet it used to re-index the session
+   * from scratch: re-read the whole journal, plan every event, and queue a `replace-session` carrying a pointer
+   * per event, which the write-behind then copies to the index worker. One journal on the owner's host held
+   * 236,562 events, so every write cost the event loop a full journal read and a structured clone of that many
+   * pointers.
+   *
+   * So when the index already holds this session and its journal is exactly the one it was last level with (same
+   * file identity, same indexed fingerprint), only the metadata is refreshed — the `refresh-metadata` step a
+   * reconcile takes for the same observation, pointers untouched. The row's journal fields (last sequence, line,
+   * fingerprint) are the ones the index already holds, which a rescan of an unchanged journal would reproduce.
+   * Anything else — a session not indexed yet, a journal that moved — is the full sync. Answers `undefined` when
+   * it did not apply, so the caller syncs in full.
+   */
+  private async refreshDocumentsUnlocked(id: SessionId): Promise<
+    | {
+        readonly session?: IndexedSession;
+        readonly eventCount: number;
+        readonly problems: readonly JournalProblem[];
+      }
+    | undefined
+  > {
+    const current = this.index.findSession(id);
+    if (current?.journal == null || !(await this.journalUnchanged(id, current))) return undefined;
+    const [config, state] = await Promise.all([
+      this.readDocumentSource(FerretConfigFile, id),
+      this.readDocumentSource(FerretStateFile, id),
+    ]);
+    const source: SessionSource = {
+      id,
+      config,
+      state,
+      journal: {
+        file: fileOf(FerretHistoryFiles, id),
+        scan: {
+          pointers: [],
+          problems: [],
+          scannedTo: current.journal.size,
+          lastSequence: current.lastSequence,
+          lineAtOffset: current.journalLine,
+        },
+        fingerprint: current.journal,
+      },
+    };
+    // No `eventCount`: counting the pointers is a scan of every one of them, and a document write ignores it.
+    return { ...this.applyMetadataRefresh(source), eventCount: 0 };
   }
 
   async syncSession(id: SessionId): Promise<RebuildResult> {
@@ -656,7 +774,7 @@ export class DaemonStorage {
           try {
             publishing();
             await this.writeDocument('config', id, document);
-            await this.syncSessionUnlocked(id);
+            await this.syncSessionUnlocked(id, 'documents');
           } finally {
             this.configChanges += 1;
           }
@@ -754,7 +872,7 @@ export class DaemonStorage {
       await this.reviveIfArchived(id);
       await this.assertJournalKept(id);
       await this.writeDocument('state', id, document);
-      await this.syncSessionUnlocked(id);
+      await this.syncSessionUnlocked(id, 'documents');
       if (this.stateListeners.size > 0) this.publishState(id, document);
     });
   }
@@ -854,7 +972,7 @@ export class DaemonStorage {
           serializeJsonDocument(next);
           publishing();
           await this.writeDocument(kind, id, next);
-          await this.syncSessionUnlocked(id);
+          await this.syncSessionUnlocked(id, 'documents');
         } finally {
           if (kind === 'config') this.configChanges += 1;
         }
@@ -933,6 +1051,7 @@ export class DaemonStorage {
       };
       try {
         this.index.appendEvent(session, pointer);
+        this.rememberJournal(id, await this.journalEtag(id), session);
       } catch (error) {
         try {
           await this.syncSessionUnlocked(id);

@@ -6,7 +6,7 @@ import {
 } from '@ferretry/core-ferrets/contract';
 import { canonicalJson } from '@ferretry/std';
 import type { HarnessConfig, HooksItem, LaunchSettingsRecord, SettingsItem } from '../../../contract/index.ts';
-import { fixedLayer } from './fixed-layer.ts';
+import { CLAUDE_HOME_ENV, fixedLayer } from './fixed-layer.ts';
 import { settingsDocument, settingsFlags } from './launch.ts';
 
 /**
@@ -50,7 +50,7 @@ export function launchSettingsRecord(inputs: LaunchSettingsInputs): LaunchSettin
     ...(inputs.runtime === undefined ? {} : { runtime: inputs.runtime }),
     sections: {
       'permission-mode': fingerprint(inputs.permissionMode),
-      'fixed-layer': fingerprint({ settings: fixed.settings, overlay: fixed.overlay }),
+      'fixed-layer': fingerprint({ settings: fixed.settings, overlay: fixed.overlay, env: CLAUDE_HOME_ENV }),
       // The flags are part of what the item runs the launch under; a document with none keeps the digest it always had.
       settings: fingerprint(flags.length === 0 ? document : { document, flags }),
       hooks: fingerprint(settingsDocument({ settings: none, hooks: inputs.hooks }).hooks ?? {}),

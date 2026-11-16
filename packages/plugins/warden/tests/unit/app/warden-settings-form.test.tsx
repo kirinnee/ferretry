@@ -656,10 +656,25 @@ describe('WardenSettingsForm: moving a ferret that hit a limit', () => {
   const moving = (changes: Partial<WardenConfig['autoMove']> = {}) =>
     wardenConfig({ autoMove: { ...wardenConfig().autoMove, enabled: true, ...changes } });
 
+  it('should show it on by default, as nothing was written to switch it off', () => {
+    // Arrange
+    const renderer = render(<Harness initial={wardenConfig()} changes={[]} />);
+
+    // Act
+    const checked = renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' }).props[
+      'aria-checked'
+    ];
+
+    // Assert
+    expect(checked).toBe(true);
+    run(() => renderer.unmount());
+  });
+
   it('should offer it off, even with no AI layer on, and turn it on with the switch', () => {
     // Arrange
     const changes: WardenConfig[] = [];
-    const renderer = render(<Harness initial={wardenConfig()} changes={changes} />);
+    const off = wardenConfig({ autoMove: { ...wardenConfig().autoMove, enabled: false } });
+    const renderer = render(<Harness initial={off} changes={changes} />);
     const toggle = () => renderer.root.findByProps({ 'aria-label': 'Move the ferret to another login on' });
 
     // Act
