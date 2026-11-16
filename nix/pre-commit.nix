@@ -365,6 +365,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A pushed branch must contain its base's tip (owner, 2026-11-16: agents always rebase before pushing).
+    # See scripts/validate/pre-push-fresh.sh; FY_ALLOW_BEHIND_PUSH=1 pushes anyway.
+    a-pre-push-fresh = {
+      enable = true;
+      name = "Pushed branch contains its base";
+      entry = validator "scripts/validate/pre-push-fresh.sh";
+      stages = [ "pre-push" ];
+      always_run = true;
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-git-hooks-worktree = {
       enable = true;
       name = "Worktree commit linting";
