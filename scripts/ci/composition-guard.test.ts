@@ -419,13 +419,13 @@ suite('composition.tsv', () => {
   });
 
   test('an oversize expiry more than 45 days after today is a problem; 45 days exactly is fine', () => {
-    const declare = (expires: string) =>
+    const oversizeRow = (expires: string) =>
       readDeclared(['packages/a'], path =>
         path === 'packages/a/composition.tsv'
           ? file(line('oversize', 'host.ts', '700', expires, 'wiring, being split'))
           : undefined,
       );
-    const check = (expires: string) => checkPaths(declare(expires), ['packages/a'], () => true, '2026-11-16');
+    const check = (expires: string) => checkPaths(oversizeRow(expires), ['packages/a'], () => true, '2026-11-16');
     expect(check('2026-12-31')).toEqual([]);
     expect(check('2026-11-30')).toEqual([]);
     const far = check('2999-01-01');
