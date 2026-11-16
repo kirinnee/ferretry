@@ -23,6 +23,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
 import { moveSealed } from '../sealed.ts';
 import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents.ts';
+import { rebaseV4Path } from '../v4/rebase.ts';
 import {
   V4_JEV_CHECK_FILE,
   V4_WARDEN_DIR,
@@ -99,7 +100,8 @@ export const wardenStep: Step = {
       let pathsDropped = 0;
       const rebase = (record: Record<string, unknown>): Record<string, unknown> => {
         const { reportPath, ...rest } = record;
-        const path = typeof reportPath === 'string' ? below(reportsFrom, reportPath) : undefined;
+        // A report path v4 wrote with its home where it was then is re-based onto the home being read first.
+        const path = typeof reportPath === 'string' ? below(reportsFrom, rebaseV4Path(home, reportPath)) : undefined;
         if (path === undefined) {
           if (reportPath !== undefined) pathsDropped++;
           return rest;

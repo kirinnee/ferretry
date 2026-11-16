@@ -422,9 +422,9 @@ export function useSharedDraft({
         retry();
       }
     };
-    // GAP(app-shell), see `./seam-drafts.ts`: no socket, or an item's own draft, opens no stream; the draft stays this
-    // device's own, as it is whenever no stream is open.
-    if (client.socket !== undefined && scope.item === undefined) void connect();
+    // No socket opens no stream; the draft stays this device's own, as it is whenever no stream is open. An item's own
+    // draft streams like the chat's, named in the stream's query.
+    if (client.socket !== undefined) void connect();
     return () => {
       stopped = true;
       cancelRetry?.();

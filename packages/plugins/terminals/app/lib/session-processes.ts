@@ -54,7 +54,7 @@ export const listSessionProcesses = async (
   assertScopeDaemon(daemon, scope);
   signal?.throwIfAborted();
   const list = SessionProcessListSchema.parse(
-    settled(await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId } }), signal),
+    settled(await client.call(PROCESS_ROUTES.list, { params: { ferretId: scope.sessionId }, quiet: true }), signal),
   );
   if (list.sessionId !== scope.sessionId) throw mismatch('daemon listed another session');
   return list;
@@ -101,14 +101,25 @@ export const stopSessionProcess = async (
   return stopped;
 };
 
+/**
+ * The words for a read this device is refused: the grant's own explanation when the daemon named one (a switched-off
+ * capability, a device not given it, or a missing passkey each want a different remedy), else the plain 403 copy.
+ */
+export const processForbiddenText = (error: unknown): string => {
+  const grant = grantRefusalNotice(error);
+  if (grant !== null)
+    return grant.detail === '' ? grant.guidance.explanation : `${grant.guidance.explanation} ${grant.detail}`;
+  return PROCESSES_FORBIDDEN_TEXT;
+};
+
 /** A failure, in the words the reader should see: the 403 copy, the changed-process copy, else the daemon's. */
 export const processErrorText = (error: unknown): string => {
   if (error instanceof DaemonCallError) {
-    if (error.status === 403) return PROCESSES_FORBIDDEN_TEXT;
+    if (error.status === 403) return processForbiddenText(error);
     if (error.status === 409 && error.code === 'process_changed') return PROCESS_CHANGED_TEXT;
   }
   const grant = grantRefusalNotice(error);
-  if (grant !== null) return PROCESSES_FORBIDDEN_TEXT;
+  if (grant !== null) return processForbiddenText(error);
   return error instanceof Error ? error.message : String(error);
 };
 

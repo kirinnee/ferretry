@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { ferretStanding, ownerStanding } from '@ferretry/core-gate/contract/testing';
 import type { FerretId } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { AskOwnerActionError } from '../../../contract/index.ts';
 import type { AskDraft, AskId, AskSourceSpec, AskRef, EntryId, SourceKey } from '../../../contract/index.ts';
 import { agendaLedgerDocument, applyAgendaCommandToSession } from '../../../daemon/lib/agenda/state-machine.ts';
 import { agendaFilePath } from '../../support/daemon/agenda-state.ts';
@@ -66,6 +67,29 @@ describe('raising through the Asks port', () => {
       howToResolve: 'Pick the branch to target.',
       ask: { kind: 'multiple-choice', options: [{ label: 'main' }, { label: 'develop' }] },
     });
+  });
+
+  it('should put a form on the board with the fields a source gave, and refuse a form without any', async () => {
+    // Arrange
+    const half = await world();
+
+    // Act
+    const ref = await half.asks.raise(
+      draft('e1', 'f1', {
+        kind: 'form',
+        fields: [{ id: '1', type: 'one', label: 'Which mode?', options: [{ label: 'Fast' }, { label: 'Slow' }] }],
+      }),
+    );
+    const [snapshot] = await half.asks.snapshots({ ferret: 'f1' });
+    const bare = half.asks.raise(draft('e2', 'f1', { kind: 'form' }));
+
+    // Assert
+    expect(snapshot?.items[0]).toMatchObject({
+      id: ref.id,
+      kind: 'form',
+      fields: [{ id: '1', type: 'one', label: 'Which mode?' }],
+    });
+    await expect(bare).rejects.toThrow('a form names its fields');
   });
 
   it('should use the reason as the way to resolve when the source gave none', async () => {
@@ -454,6 +478,71 @@ describe('the owner’s actions on the machine agenda through the Asks port', ()
       code: 'forbidden',
       message: 'these owner actions belong to the machine agenda',
     });
+  });
+});
+
+describe('the owner dismisses what a ferret raised, through the Asks port', () => {
+  const add = (half: Awaited<ReturnType<typeof world>>) =>
+    half.call(
+      BOARD,
+      { ferretId: 'f1' },
+      {
+        action: 'add',
+        title: 'Which region',
+        subject: 'Which region ships first?',
+        why: 'The relay ships Friday.',
+        premise: 'A relay ships Friday.',
+        context: 'Two regions are near.',
+        howToResolve: 'Pick one.',
+        ask: { kind: 'open-question' },
+      },
+      ferretStanding('f1' as FerretId),
+    );
+
+  it('should close an ask the ferret raised as the owner’s dismissal, which the daemon’s own close cannot do', async () => {
+    // Arrange
+    const half = await world();
+    await add(half);
+    const [raised] = await half.asks.open({ ferret: 'f1' as FerretId });
+    expect(raised?.raisedBy).toMatchObject({ kind: 'ferret' });
+    const ref = { ferret: 'f1', id: raised?.id as AskId };
+
+    // Act
+    // Assert: the daemon closes only what the daemon raised, so its close leaves the ferret's ask open (and says nothing).
+    await expect(half.asks.close(ref, 'dismissed')).rejects.toThrow(/may dismiss only/u);
+    expect(await half.asks.open({ ferret: 'f1' as FerretId })).toHaveLength(1);
+    await half.asks.ownerDismiss(ref, 'cleared by the owner');
+    expect(await half.asks.open({ ferret: 'f1' as FerretId })).toHaveLength(0);
+    const [snapshot] = await half.asks.snapshots({ ferret: 'f1' });
+    expect(snapshot?.resolved.map(each => [each.id, each.resolutionNote])).toEqual([[ref.id, 'cleared by the owner']]);
+  });
+
+  it('should make a second dismissal of the same ask a no-op, and refuse nothing it does not know as a failure', async () => {
+    // Arrange
+    const half = await world();
+    await add(half);
+    const [raised] = await half.asks.open({ ferret: 'f1' as FerretId });
+    const ref = { ferret: 'f1', id: raised?.id as AskId };
+
+    // Act
+    await half.asks.ownerDismiss(ref);
+
+    // Assert
+    await half.asks.ownerDismiss(ref);
+    await half.asks.ownerDismiss({ ferret: 'f1', id: 'A99' as AskId });
+  });
+
+  it('should refuse the owner’s dismissal as a failure when the board is not one it may write, never as a no-op', async () => {
+    // Arrange
+    const half = await world();
+
+    // Act
+    const refused = await half.asks
+      .ownerDismiss({ ferret: '../escape', id: 'A1' as AskId })
+      .catch((error: unknown) => error);
+
+    // Assert
+    expect(refused).toBeInstanceOf(AskOwnerActionError);
   });
 });
 

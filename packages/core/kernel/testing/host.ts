@@ -43,8 +43,9 @@ import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
 import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, FetchPort, HostFactsPort, UpdateHostPort } from '../contract/ports.ts';
+import type { ContractSurface, FetchPort, HostFactsPort, SelfCountersPort, UpdateHostPort } from '../contract/ports.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
+import { NO_SELF_COUNTERS, undeclaredSelfCounters } from '../host/adapters/self-counters.ts';
 import { nodeFs } from '../host/adapters/node-fs.ts';
 import { gatedOverrides, gatedPaths, gatedWhich, stateHomeHolding } from '../host/paths.ts';
 import { handleReaders, locateCommand, whichCommand, whichForCommand } from '../host/which.ts';
@@ -225,6 +226,11 @@ export interface TestHostOptions {
     args: readonly string[],
     options?: SpawnOptions,
   ) => SpawnResult | Promise<SpawnResult>;
+  /**
+   * Answers a plain (not detached) `kernel.spawn.start` for declared programs, the way the real host starts a child; the
+   * declaration is judged here exactly as for `run`. Without it a long-lived start fails, as it always did.
+   */
+  readonly start?: (program: string, args: readonly string[], options?: SpawnOptions) => ChildHandle;
   /** Answers `kernel.fetch.request` for declared hosts. Without it a fetch fails. */
   readonly fetch?: (url: URL, init?: RequestInit) => Response | Promise<Response>;
   /** Answers `kernel.websocket.connect` for declared hosts (`ws:`/`wss:`). Without it a dial fails. */
@@ -309,6 +315,8 @@ export interface TestHostOptions {
   readonly secrets?: readonly string[];
   /** What `kernel.hostFacts` answers to a plugin that declared `permissions.hostFacts`. Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /** What `kernel.selfCounters` answers to a plugin that declared `permissions.selfCounters`. Absent: every read refuses. */
+  readonly selfCounters?: SelfCountersPort;
   /**
    * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
    * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
@@ -2212,6 +2220,17 @@ async function start(world: World): Promise<TestHost> {
               throw new Error(`${manifest.id}: detached ${program} with no detachedStart fake`);
             return detachedHandle(options.detachedStart(program, args, spawnOptions));
           }
+          if (
+            options.start !== undefined &&
+            spawnPermitted(
+              effectivePermissions(manifest.id, manifest.permissions?.spawn ?? []),
+              itemsOf,
+              program,
+              resolversOf(manifest.id),
+            )
+          )
+            return options.start(program, args, spawnOptions);
+          if (options.start !== undefined) throw new Error(`${manifest.id}: spawn ${program} is not declared`);
           throw new Error(
             `${manifest.id}: the test host does not start long-lived ${program}; fake the port that does`,
           );
@@ -2359,6 +2378,10 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.hostFacts === true && options.hostFacts !== undefined
           ? options.hostFacts
           : undeclaredHostFacts(manifest.id, options.hostFacts ?? NO_HOST_FACTS),
+      selfCounters:
+        manifest.permissions?.selfCounters === true && options.selfCounters !== undefined
+          ? options.selfCounters
+          : undeclaredSelfCounters(manifest.id, (options.selfCounters ?? NO_SELF_COUNTERS).platform),
       processes: processesPortFor(
         manifest.id,
         manifest.permissions?.processes,
@@ -2377,6 +2400,7 @@ async function start(world: World): Promise<TestHost> {
           mayReach,
           transport: outboundSecretTransport(fetchPort, clock),
           log: logFor(manifest.id),
+          sent: note => admission.secretSent?.({ plugin: manifest.id, ...note }),
         },
       ),
       signer: signerFor(manifest.id, identitySigner),
@@ -2427,7 +2451,18 @@ async function start(world: World): Promise<TestHost> {
     if (kernelOnly !== undefined)
       throw new Error(`testHost: ${manifest.id} asks for ${kernelOnly.name}, which only the kernel may hold`);
     const needs: Record<string, unknown> = {};
-    const needer = neederOf(manifest, () => ownedReferences(manifest, 'credential-records'));
+    const needer = neederOf(
+      manifest,
+      () => ownedReferences(manifest, 'credential-records'),
+      (hostname, host) =>
+        hostPermitted(
+          effectivePermissions(manifest.id, manifest.permissions?.network ?? []),
+          itemsOf,
+          hostname,
+          resolversOf(manifest.id),
+          host,
+        ),
+    );
     for (const [field, token] of Object.entries(manifest.needs ?? {})) {
       const fake = lookup(options.fakes ?? {}, field, token);
       const value = boundFor(
@@ -2750,7 +2785,18 @@ async function start(world: World): Promise<TestHost> {
       if (typeof as === 'string') {
         const manifest = options.plugins.find(plugin => plugin.manifest.id === as)?.manifest;
         if (manifest === undefined) throw new Error(`provided: no loaded plugin ${as}`);
-        needer = neederOf(manifest as Manifest, () => ownedReferences(manifest as Manifest, 'credential-records'));
+        needer = neederOf(
+          manifest as Manifest,
+          () => ownedReferences(manifest as Manifest, 'credential-records'),
+          (hostname, host) =>
+            hostPermitted(
+              effectivePermissions(manifest.id, (manifest as Manifest).permissions?.network ?? []),
+              itemsOf,
+              hostname,
+              resolversOf(manifest.id),
+              host,
+            ),
+        );
       } else if (as !== undefined) needer = as;
       return boundFor(token as PortToken<unknown>, providedBy.get(token.name), needer) as Api;
     },

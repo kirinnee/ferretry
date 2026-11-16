@@ -12,7 +12,7 @@ export interface SignInAct {
 /**
  * Told when an act on a page MAY have changed who the page signs in without the daemon reading who: the record of who
  * it is signing in (`./identities.ts`) is then dropped. Told by the browser runtime itself, so every
- * caller is covered — the agent tools, the `POST /v1/sessions/:id/browser` toolbar (a ferret's `fy browser` and the
+ * caller is covered — the agent tools, the `POST /v1/ferrets/:ferretId/browser` toolbar (a ferret's `fy browser` and the
  * owner's address bar, Back, Forward and Reload), a press in the live view, and an act that failed partway. A missing
  * record is the safe state; only the agent tools ever put one back, from what they saw an agent's act do.
  */
@@ -59,7 +59,7 @@ export function pageActLeavesSignIn(action: SignInAct): boolean {
 }
 
 /**
- * Whether a person's toolbar act (`act`, posted to `POST /v1/sessions/:id/browser`) leaves who the page signs in: only a
+ * Whether a person's toolbar act (`act`, posted to `POST /v1/ferrets/:ferretId/browser`) leaves who the page signs in: only a
  * read, a picture or the viewport's size. Who posts it is not known (the owner's address bar or a ferret's
  * `fy browser`), so any other act clears.
  */

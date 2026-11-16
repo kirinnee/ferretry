@@ -122,6 +122,11 @@
   background-image: var(--body-wash);
   box-shadow: var(--shadow-panel);
 }
+/* A preview tile in Settings › This device sits close to its label and its neighbour: a theme's own panel shadow (Neo-Brutalism's
+   flat offset, Mission Control's and Geist's glow) would spill past the swatch over them, so the tile shows the swatch flat. */
+[data-theme-tiles] .kt-swatch {
+  box-shadow: none;
+}
 .kt-swatch-mini {
   display: flex;
   flex: 1 1 auto;

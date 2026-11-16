@@ -1,10 +1,13 @@
+import { provideToShell } from '@ferretry/app';
 import { implementApp, type PanelProps } from '@ferretry/kernel/manifest';
 import type { ComposerToolsProps } from '@ferretry/plugin-conversation/contract';
 import { createElement } from 'react';
 import manifest from '../manifest.ts';
+import { usageCommands } from './command-bar.ts';
 import { browserLongTaskObserver, observeLongTasks } from './lib/performance/main-thread.ts';
 import { PerformanceRecorder } from './lib/performance/recorder.ts';
 import { recordingClient } from './lib/performance/recording-client.ts';
+import { forgetUsageOf, holdUsageStore } from './lib/forget-usage.ts';
 import { daemonUsagePort } from './lib/usage-store.ts';
 import { DaemonUsageStore } from './lib/usage-store.ts';
 import {
@@ -25,13 +28,14 @@ import {
  * client the shell built this half with (§9.6). The shell builds one half per daemon, so the feed store and the
  * performance recorder below belong to one daemon each.
  */
-export default implementApp(manifest, {
+const half = implementApp(manifest, {
   build: ({ client: shellClient }) => {
     // This browser's half of a performance report: every call this half makes, by route pattern.
     const recorder = new PerformanceRecorder({ now: () => globalThis.performance.now() });
     observeLongTasks(recorder, browserLongTaskObserver());
     const client = recordingClient(shellClient, recorder);
     const usage = new DaemonUsageStore(daemonUsagePort(client));
+    holdUsageStore(shellClient, usage);
     return {
       screens: {
         insights: () => createElement(InsightsScreen, { client, view: 'overview' }),
@@ -59,3 +63,6 @@ export default implementApp(manifest, {
     };
   },
 });
+
+// S12: an unpaired machine's cached usage leaves this browser with it.
+export default provideToShell(half, { commands: usageCommands, forget: forgetUsageOf });

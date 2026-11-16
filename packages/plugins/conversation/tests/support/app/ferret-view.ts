@@ -4,7 +4,8 @@
  * a `FerretView` happens to carry.
  */
 
-import type { FerretView } from '@ferretry/core-ferrets/contract';
+import { type FerretSummary, FerretSummarySchema, type FerretView } from '@ferretry/core-ferrets/contract';
+import type { z } from 'zod';
 
 export interface FerretFixtureOverrides {
   readonly config?: Partial<FerretView['config']>;
@@ -55,3 +56,27 @@ export const ferretView = (id: string, overrides: FerretFixtureOverrides = {}): 
     ...(overrides.revive === undefined ? {} : { revive: overrides.revive }),
     ...(overrides.pinnedAt === undefined ? {} : { pinnedAt: overrides.pinnedAt }),
   }) as unknown as FerretView;
+
+/**
+ * What Ferrets' `GET /v1/ferrets/:ferretId` SERVES (its summary), for a suite that fakes that route: built through
+ * Ferrets' own `FerretSummarySchema`, so a fake can never answer a shape the route does not. A running ferret at its
+ * prompt, overridable field by field.
+ */
+export const ferretSummary = (
+  id: string,
+  overrides: Partial<z.input<typeof FerretSummarySchema>> = {},
+): FerretSummary =>
+  FerretSummarySchema.parse({
+    id,
+    name: `ferret-${id}`,
+    role: 'lead',
+    harness: 'claude-code',
+    runner: 'tmux',
+    runtime: 'claude',
+    folder: `/work/${id}`,
+    state: 'idle',
+    createdAt: '1970-01-01T00:00:00.000Z',
+    stateAt: '1970-01-01T00:00:01.000Z',
+    title: `Ferret ${id}`,
+    ...overrides,
+  });

@@ -8,6 +8,7 @@ import { useMemo } from 'react';
 import type { LiveFerretsClient } from '../lib/client.ts';
 import '../features/files/files.css';
 import { FilesTab } from '../features/files/files-tab.tsx';
+import { useFileOpenRequest } from '../features/files/open-request.ts';
 
 const NoFerret = () => (
   <div className="kt-fs rounded-md border border-border bg-surface">
@@ -21,7 +22,9 @@ const NoFerret = () => (
 export function createFilesPanel(client: LiveFerretsClient): AppComponent<PanelProps> {
   return function FilesPanel({ subject }: PanelProps) {
     const scope = useMemo(() => (subject === undefined ? null : { client, ferretId: subject }), [subject]);
+    // The Instructions list (and any other panel of this ferret) asks Files to open a file through `open-request.ts`.
+    const requestedReference = useFileOpenRequest(scope);
     if (scope === null) return <NoFerret />;
-    return <FilesTab scope={scope} />;
+    return <FilesTab requestedReference={requestedReference} scope={scope} />;
   };
 }

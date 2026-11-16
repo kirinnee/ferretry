@@ -22,7 +22,7 @@ captures behind the unit fixtures are `tests/fixtures/transcript/claude-fast-mod
 - **Start**: `fast: true` launches fast, `fast: false` launches standard, omitted leaves the CLI's own
   setting in charge — which is **not** "off" (see below). `fy start --fast` / `--no-fast`; the New session
   form sends `fast: true` when its ⚡ switch is pressed and nothing otherwise.
-- **Running**: `POST /v1/sessions/:id/runtime` with `{"action":"fast","fast":true|false}`, from the ⚡
+- **Running**: `POST /v1/ferrets/:id/runtime` with `{"action":"fast","fast":true|false}`, from the ⚡
   switch beside the model and reasoning chips. It needs an idle prompt, like every runtime control.
 - **Restart keeps it.** A relaunch asserts the state the ferret is in — what the CLI last reported, else
   what it launched with — through the same launch builder as Restart CLI, a revive and a restart after

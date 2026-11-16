@@ -1050,6 +1050,35 @@ describe('RemoteBrowserPane clipboard', () => {
 });
 
 describe('RemoteBrowserPane errors', () => {
+  it('says it needs the passkey, never "stopped", when the status read was refused for a step-up, and offers the press that asks (#8)', async () => {
+    const transport = new FakeTransport(runningStatus());
+    transport.failure = Object.assign(new Error('using the browser needs a passkey confirmation from this device.'), {
+      status: 403,
+      code: 'grant_step_up_required',
+    });
+    const renderer = await mountPane(
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
+    );
+
+    expect(json(renderer)).not.toContain('Browser is stopped');
+    expect(json(renderer)).toContain('Confirm it’s you to use the browser');
+    // The press is a POST, which the shell answers with the passkey prompt at once; a quiet read never does.
+    transport.failure = null;
+    await runAsync(async () => control(renderer, 'Confirm with passkey').props.onClick());
+    expect(transport.dispatched()).toEqual([{ action: 'start' }]);
+    expect(json(renderer)).not.toContain('Confirm it’s you to use the browser');
+  });
+
+  it('shows what a refused read said, not "stopped", for any other failure before the first status', async () => {
+    const transport = new FakeTransport(runningStatus());
+    transport.failure = new Error('the daemon is unreachable');
+    const renderer = await mountPane(
+      <RemoteBrowserPane daemon={daemonA} scope={scopeA} transport={transport} schedule={pollSeam().schedule} />,
+    );
+    expect(json(renderer)).not.toContain('Browser is stopped');
+    expect(json(renderer)).toContain('Browser unavailable');
+  });
+
   it('surfaces a failed daemon read and lets the reader dismiss it', async () => {
     const transport = new FakeTransport(runningStatus());
     transport.failure = new Error('the daemon is unreachable');

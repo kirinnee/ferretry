@@ -1,4 +1,4 @@
-import { implementCli, type VerbHandler, type VerbInvocation } from '@ferretry/kernel/manifest';
+import { configItemVerbs, implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { type HarnessCliView, VersionSchema } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { renderStatus } from './lib/render.ts';
@@ -17,21 +17,20 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
   return Array.isArray(value) ? (value[value.length - 1] as string | undefined) : undefined;
 };
 
-/**
- * The item verbs (`settings` and `hooks`) edit config collections, and the item-kind service that serves them has
- * no route in this build. Said plainly rather than pretended.
- */
-const itemVerb =
-  (io: { err(text: string): void }, what: string): VerbHandler =>
-  async () => {
-    io.err(
-      `Claude Code ${what} items are edited through the item service, which is not served by this daemon yet; nothing was changed.`,
-    );
-    return 69;
-  };
-
 export default implementCli(manifest, {
-  build: ({ client, io }) => {
+  build: ({ client, io, readText, confirm }) => {
+    const items = (collection: 'settings' | 'hooks') =>
+      configItemVerbs({
+        collection: `claude-code/${collection}`,
+        noun: `Claude Code ${collection} item`,
+        verbPrefix: `harness claude-code ${collection}`,
+        client,
+        io,
+        readText,
+        confirm,
+      });
+    const settings = items('settings');
+    const hooks = items('hooks');
     const view = async (): Promise<HarnessCliView> => await client.call<HarnessCliView>(GET_UPDATE);
     return {
       verbs: {
@@ -77,16 +76,16 @@ export default implementCli(manifest, {
           );
           return 0;
         },
-        'harness claude-code settings ls': itemVerb(io, 'settings'),
-        'harness claude-code settings show': itemVerb(io, 'settings'),
-        'harness claude-code settings add': itemVerb(io, 'settings'),
-        'harness claude-code settings edit': itemVerb(io, 'settings'),
-        'harness claude-code settings rm': itemVerb(io, 'settings'),
-        'harness claude-code hooks ls': itemVerb(io, 'hooks'),
-        'harness claude-code hooks show': itemVerb(io, 'hooks'),
-        'harness claude-code hooks add': itemVerb(io, 'hooks'),
-        'harness claude-code hooks edit': itemVerb(io, 'hooks'),
-        'harness claude-code hooks rm': itemVerb(io, 'hooks'),
+        'harness claude-code settings ls': settings.ls,
+        'harness claude-code settings show': settings.show,
+        'harness claude-code settings add': settings.add,
+        'harness claude-code settings edit': settings.edit,
+        'harness claude-code settings rm': settings.rm,
+        'harness claude-code hooks ls': hooks.ls,
+        'harness claude-code hooks show': hooks.show,
+        'harness claude-code hooks add': hooks.add,
+        'harness claude-code hooks edit': hooks.edit,
+        'harness claude-code hooks rm': hooks.rm,
       },
     };
   },

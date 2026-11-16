@@ -55,6 +55,8 @@ export function areaOf(pkg: WorkspacePackage, file: string): Area {
     if (rel.startsWith('host/') || rel.startsWith('src/')) return 'kernel-host';
     if (rel === 'plugin.ts') return 'kernel-plugin';
     if (rel === 'worker.ts') return 'kernel-worker';
+    // The Kernel's own app half (Settings › Files, Doctor, Host checks): browser code like any other app half.
+    if (rel.startsWith('app/')) return 'app';
     return 'other';
   }
   if (rel.startsWith('contract/testing/')) return 'contract-testing';
@@ -79,6 +81,9 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       // The hosted app origin alone, for the app's build config: Node's type stripping loads it, and the barrel
       // carries syntax it refuses.
       'contract/hosted-app': 'kernel-contract',
+      // The one reader of the port a home's own configuration names (`direct.port`): the daemon binds it and `fy` dials
+      // it, so neither keeps a second copy. It parses YAML, so it stays out of the barrel the app bundles.
+      'contract/home-port': 'kernel-contract',
       // The pure wire and the browser-safe session codec: no IO, so another package may import them as it imports
       // the contract (the files themselves sit outside contract/ because they re-export the host's session wire).
       wire: 'kernel-contract',
@@ -89,6 +94,7 @@ function areaOfSubpath(pkg: WorkspacePackage, subpath: string): Area {
       plugin: 'kernel-plugin',
       // A worker thread's opener for the sqlite files its half granted: daemon-side code only.
       worker: 'kernel-worker',
+      app: 'app',
     };
     return kernelAreas[subpath] ?? 'other';
   }

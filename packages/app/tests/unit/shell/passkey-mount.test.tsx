@@ -151,7 +151,8 @@ describe('G105 the one passkey prompt is mounted by the shell', () => {
     const view = await mount(app);
     await settle();
     expect(view.container.querySelector('[data-testid="board"]')).not.toBeNull();
-    expect(view.container.querySelectorAll('[data-testid="access-prompts"]')).toHaveLength(1);
+    // The prompts are portalled to the document root (above every body-level menu and sheet), not drawn inside the frame.
+    expect(document.body.querySelectorAll('[data-testid="access-prompts"]')).toHaveLength(1);
     await view.unmount();
   });
 
@@ -160,8 +161,8 @@ describe('G105 the one passkey prompt is mounted by the shell', () => {
     const { app } = setup(undefined);
     const view = await mount(app);
     await settle();
-    expect(view.container.querySelector('[data-testid="access-prompts"]')).toBeNull();
-    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="access-prompts"]')).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
     await view.unmount();
   });
 

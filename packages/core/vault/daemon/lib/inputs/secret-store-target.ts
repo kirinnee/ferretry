@@ -1,11 +1,17 @@
 import type { InputTarget, InputTargetFacts, SecretName } from '../../../contract/index.ts';
-import type { InputFieldValue, InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
+import type { InputFieldValue, InputTargetPort, ObserveResult, TypeOptions, TypeResult } from './ports.ts';
 
 /** The secret store as a paste needs it: which names it holds, and storing one if it is still as seen. Never a value back. */
 export interface SecretStoreDirectory {
   list(): Promise<readonly { readonly name: string }[]>;
   /** Checked and written in the store's own turn, against every other writer; see `SecretDirectory.putIf`. */
-  putIf(name: SecretName, value: string, exists: boolean): Promise<'stored' | 'changed' | 'full' | 'unreadable'>;
+  putIf(
+    name: SecretName,
+    value: string,
+    exists: boolean,
+    /** Asked in that same turn, right before the write; a sentence refuses it (`refused`, nothing written). */
+    proceed?: () => Promise<string | undefined>,
+  ): Promise<'stored' | 'changed' | 'full' | 'unreadable' | 'refused'>;
 }
 
 /**
@@ -15,7 +21,9 @@ export interface SecretStoreDirectory {
  * true: a name that gained or lost a value since the card was drawn types nothing (`target_changed`), so a paste
  * the owner allowed as "new" can never overwrite a secret created meanwhile. The check and the write are one
  * turn of the store's own, shared with every other writer (the routes, an import, an MCP sign-in refresh), so
- * nothing lands between them and two pastes into one new name cannot both find it empty.
+ * nothing lands between them and two pastes into one new name cannot both find it empty. A secure paste's own
+ * last check (is its copy still the live capture the card was raised for?) is asked in that same turn, right before
+ * the write, so a copy that ended while the write waited behind another writer is never stored (`guard_refused`).
  */
 export class SecretStoreTarget implements InputTargetPort {
   constructor(private readonly directory: SecretStoreDirectory) {}
@@ -34,18 +42,20 @@ export class SecretStoreTarget implements InputTargetPort {
     values: readonly InputFieldValue[],
     _submit: boolean,
     expected: InputTargetFacts,
+    options?: TypeOptions,
   ): Promise<TypeResult> {
     const [only, ...rest] = values;
     if (target.kind !== 'secret' || expected.kind !== 'secret' || only === undefined || rest.length > 0)
       return 'target_changed';
     let outcome: Awaited<ReturnType<SecretStoreDirectory['putIf']>>;
     try {
-      outcome = await this.directory.putIf(target.key, only.text, expected.exists);
+      outcome = await this.directory.putIf(target.key, only.text, expected.exists, options?.refuse);
     } catch {
       // It failed while writing: the value may or may not be there.
       return 'uncertain';
     }
     // A full or unreadable store refused before writing anything: nothing is there, so nothing is uncertain.
+    if (outcome === 'refused') return 'guard_refused';
     return outcome === 'stored' ? 'typed' : outcome === 'changed' ? 'target_changed' : 'target_gone';
   }
 

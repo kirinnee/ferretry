@@ -6,6 +6,7 @@ import { CODEX_SETTINGS } from '../../../contract/index.ts';
 import { codexHarness } from '../../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../../support/ports.ts';
 import { RUNTIME_SETTINGS_FILE } from '../../../daemon/lib/index.ts';
+import { selectEverything } from '../../support/selected.ts';
 
 /**
  * Storage parity (docs/design/rebuild-parity.tsv): where Codex's files live now. Each row is a path today's code built
@@ -36,6 +37,7 @@ describe('codex storage parity', () => {
   test('F-0005 the config.toml of a ferret’s home is written inside the agent-homes root, never beside it', async () => {
     const { written, asked, roots } = home();
     const harness = codexHarness({
+      selected: selectEverything,
       kernel: {
         roots,
         state: undefined as never,

@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import { definePlugin, verb } from '@ferretry/kernel/manifest';
 import should from 'should';
-import { buildVerbTable, expandAlias, renderHelp, resolveVerb, verbWords } from '../../src/lib/verbs.ts';
+import { renderRootHelp } from '../../src/lib/help.ts';
+import { buildVerbTable, expandAlias, resolveVerb, verbWords } from '../../src/lib/verbs.ts';
 import { boardEntry, entry, registryOf, skeletonEntry } from './fakes.ts';
 
 describe('verb table', () => {
@@ -41,6 +42,53 @@ describe('verb table', () => {
     should(resolveVerb(table, ['daemon', 'config']).kind).equal('verb');
   });
 
+  describe('an unknown sub-verb under a known verb', () => {
+    const parent = definePlugin({
+      id: 'inbox',
+      title: 'Inbox',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: ['command'],
+      actions: {
+        cli: [
+          verb('inbox'),
+          verb('inbox open'),
+          verb('inbox mode'),
+          verb('say [text...]'),
+          verb('say loud'),
+          verb('show <id>'),
+          verb('show all'),
+        ],
+      },
+    });
+    const table = () => buildVerbTable(registryOf(skeletonEntry(parent)));
+
+    it("should be a sub-verb refusal naming the verb's real sub-verbs, never the parent run with the word as an argument", () => {
+      const typed = resolveVerb(table(), ['inbox', 'add', 'x']);
+      should(typed.kind).equal('subverb');
+      if (typed.kind !== 'subverb') return;
+      should(typed.parent.words).deepEqual(['inbox']);
+      should(typed.word).equal('add');
+      should(typed.subverbs.map(each => each.line)).deepEqual(['inbox open', 'inbox mode']);
+    });
+
+    it('should still run the parent bare, with only options, and its own known sub-verbs', () => {
+      should(resolveVerb(table(), ['inbox']).kind).equal('verb');
+      should(resolveVerb(table(), ['inbox', '--json']).kind).equal('verb');
+      const open = resolveVerb(table(), ['inbox', 'open', 'now']);
+      should(open.kind === 'verb' && open.entry.line).equal('inbox open');
+    });
+
+    it('should let a parent whose declared line takes arguments keep reading its first word as one', () => {
+      const words = resolveVerb(table(), ['say', 'hello', 'there']);
+      should(words.kind === 'verb' && words.entry.line).equal('say [text...]');
+      should(words.kind === 'verb' && words.rest).deepEqual(['hello', 'there']);
+      const id = resolveVerb(table(), ['show', 'c1']);
+      should(id.kind === 'verb' && id.entry.line).equal('show <id>');
+    });
+  });
+
   it('should expand a data plugin alias into the verb line it runs, carrying the arguments', () => {
     const aliasPlugin = definePlugin({
       id: 'quick',
@@ -64,7 +112,7 @@ describe('verb table', () => {
 
   it('should list every owner’s verbs in help, under its title', () => {
     const table = buildVerbTable(registryOf(boardEntry()));
-    const help = renderHelp('fy', table, { board: 'Board' });
+    const help = renderRootHelp('fy', table, { board: 'Board' });
     should(help).containEql('Usage: fy <verb>');
     should(help).containEql('Board\n  card show');
     should(help).containEql('The shell\n  plugin list');
@@ -89,5 +137,83 @@ describe('verb table', () => {
         ),
       ).entries.some(e => e.owner === 'odd'),
     ).be.false();
+  });
+});
+
+describe('a group’s own options written before its verb', () => {
+  /** A group shaped like Browsers: `-s, --session <id>` on every verb, `--json`, and a two-word group verb. */
+  const group = definePlugin({
+    id: 'grouped',
+    title: 'Grouped',
+    version: '5.0.0',
+    api: 5,
+    core: false,
+    kinds: ['command'],
+    actions: {
+      cli: [
+        verb('grp status', {
+          options: [
+            { flag: '-s, --session, --ferret <id>', help: 'a ferret' },
+            { flag: '--json', help: 'json' },
+          ],
+        }),
+        verb('grp page click', {
+          options: [
+            { flag: '-s, --session, --ferret <id>', help: 'a ferret' },
+            { flag: '--double', help: 'double' },
+            { flag: '--ask [message]', help: 'ask' },
+          ],
+        }),
+      ],
+    },
+  });
+  const table = buildVerbTable(registryOf(skeletonEntry(group)));
+  const resolved = (...tokens: string[]) => {
+    const found = resolveVerb(table, tokens);
+    return found.kind === 'verb' ? { line: found.entry.line, rest: found.rest } : found.kind;
+  };
+
+  it('should find the verb after an option written before it, and hand the option on in front of the arguments', () => {
+    should(resolved('grp', '--session', 'f1', 'status')).deepEqual({ line: 'grp status', rest: ['--session', 'f1'] });
+    should(resolved('grp', '-s', 'f1', 'page', 'click', 'app', '#go')).deepEqual({
+      line: 'grp page click',
+      rest: ['-s', 'f1', 'app', '#go'],
+    });
+  });
+
+  it('should find the verb after an option written between its own words', () => {
+    should(resolved('grp', 'page', '--session=f1', 'click', 'app')).deepEqual({
+      line: 'grp page click',
+      rest: ['--session=f1', 'app'],
+    });
+    should(resolved('grp', 'page', '--ferret', 'f1', 'click', 'app', '--json')).deepEqual({
+      line: 'grp page click',
+      rest: ['--ferret', 'f1', 'app', '--json'],
+    });
+  });
+
+  it('should keep the option written on the verb after the one written before it, so the nearest wins', () => {
+    should(resolved('grp', '-s', 'outer', 'status', '--session', 'inner')).deepEqual({
+      line: 'grp status',
+      rest: ['-s', 'outer', '--session', 'inner'],
+    });
+  });
+
+  it('should keep resolving a line that has no option before its verb exactly as it did', () => {
+    should(resolved('grp', 'page', 'click', 'app', '--double', '#go')).deepEqual({
+      line: 'grp page click',
+      rest: ['app', '--double', '#go'],
+    });
+  });
+
+  it('should still stop at a mistyped verb or an option the group does not declare', () => {
+    should(resolved('grp', '--session', 'f1', 'nope')).equal('unknown');
+    should(resolved('grp', '--bogus', 'status')).equal('unknown');
+    should(resolved('grp', 'page', '--session', 'f1', 'clack', 'app')).equal('unknown');
+  });
+
+  it('should not take the word after an option that declares no value', () => {
+    // `--double` declares no `<value>`: `status` stays a word of the verb line instead of becoming its value.
+    should(resolved('grp', '--double', 'status')).deepEqual({ line: 'grp status', rest: ['--double'] });
   });
 });

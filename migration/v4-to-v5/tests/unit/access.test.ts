@@ -227,7 +227,10 @@ test('both v4 journals become one grant-audit.jsonl, oldest first, every line a 
   );
   const report = await accessStep.run(ctx());
 
-  expect(report.kept).toContainEqual({ what: 'grant and security journal lines', count: 4 });
+  expect(report.kept).toContainEqual({
+    what: 'grant and security journal lines (the grant audit history is left behind by owner ruling, see not carried)',
+    count: 4,
+  });
   expect(report.note).toContain('1 unreadable journal line(s) skipped');
   expect(report.note).toContain('1 journal line(s) v5 refuses skipped');
   expect(JSON.stringify(report)).not.toContain('FAKE');
@@ -258,7 +261,10 @@ test('a dry run reads and counts, and writes nothing', async () => {
   expect(report.kept).toEqual([
     { what: 'paired devices', count: 1 },
     { what: 'passkeys', count: 1 },
-    { what: 'grant and security journal lines', count: 1 },
+    {
+      what: 'grant and security journal lines (the grant audit history is left behind by owner ruling, see not carried)',
+      count: 1,
+    },
   ]);
   expect(await readdir(v5)).toEqual([]);
 });

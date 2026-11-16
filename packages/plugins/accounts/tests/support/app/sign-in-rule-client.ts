@@ -23,6 +23,8 @@ export interface RuleWorld {
   /** The rule list; a function is asked on every read, so a test can change it between reads. */
   readonly list?: SignInRuleList | (() => SignInRuleList);
   readonly eligibility?: unknown;
+  /** What a read of the asking ferret's record answers (`GET /v1/ferrets/:ferretId`). */
+  readonly ferret?: unknown;
   readonly suggestions?: readonly SignInRuleSuggestionView[];
   readonly staged?: SignInRuleStaged;
   readonly committed?: SignInRuleView;
@@ -52,6 +54,7 @@ const answerFor =
     if (key.startsWith('GET /v1/sign-in-rules/eligibility'))
       return world.eligibility ?? { signIn: SITE_SIGN_IN, eligible: true };
     if (key === 'GET /v1/sign-in-rules/suggestions') return { suggestions: world.suggestions ?? [suggestion()] };
+    if (key.startsWith('GET /v1/ferrets/')) return world.ferret ?? {};
     if (key === 'GET /v1/accounts') return accountList();
     if (key.startsWith('POST /v1/accounts/') && key.endsWith('/sign-in-rules/revoke'))
       return { account: key.split('/')[3], revoked: world.revoked ?? 1 };

@@ -47,7 +47,11 @@ describe('message.before-send', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
-        ferrets: { get: async () => summary('idle'), list: async () => [] },
+        ferrets: {
+          get: async () => summary('idle'),
+          list: async () => [],
+          resolve: async () => ({ kind: 'unknown' as const }),
+        },
         asks: { get: async () => undefined },
       },
       clock: fixedClock('2026-11-06T09:00:00Z'),
@@ -62,7 +66,11 @@ describe('message.before-send', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
-        ferrets: { get: async () => summary('idle'), list: async () => [] },
+        ferrets: {
+          get: async () => summary('idle'),
+          list: async () => [],
+          resolve: async () => ({ kind: 'unknown' as const }),
+        },
         asks: { get: async () => undefined },
       },
       clock: fixedClock('2026-11-06T09:00:00Z'),
@@ -79,7 +87,11 @@ describe('turn.ended', () => {
     const host = await testHost({
       plugins: [implementation],
       fakes: {
-        ferrets: { get: async () => summary('working'), list: async () => [] },
+        ferrets: {
+          get: async () => summary('working'),
+          list: async () => [],
+          resolve: async () => ({ kind: 'unknown' as const }),
+        },
         asks: { get: async () => undefined },
       },
       clock: fixedClock('2026-11-06T09:00:00Z'),
@@ -130,7 +142,11 @@ describe('an answered ask', () => {
   const build = (kernel: never, asks: { get(id: string): Promise<unknown> }) =>
     buildConversationA({
       kernel,
-      ferrets: { get: async () => summary('idle'), list: async () => [] } as never,
+      ferrets: {
+        get: async () => summary('idle'),
+        list: async () => [],
+        resolve: async () => ({ kind: 'unknown' as const }),
+      } as never,
       asks: asks as never,
       hooks: {
         observe: () => undefined,

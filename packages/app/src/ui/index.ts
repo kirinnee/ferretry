@@ -47,6 +47,7 @@ export * from './lib/context-menu-scroll.ts';
 export * from './lib/escape-closes.ts';
 export * from './lib/fullscreen.ts';
 export * from './lib/keyboard-capture.ts';
+export * from './lib/popover-placement.ts';
 export * from './lib/orientation-lock.ts';
 export * from './lib/title-marquee.ts';
 export * from './lib/viewport-diagnostics.ts';

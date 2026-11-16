@@ -221,6 +221,61 @@ export class WardenAutoMoveService {
   }
 
   /**
+   * An investigation's `MOVE (agent)`, carried out under the SAME guard as a scheduled move: the one lock, a
+   * fail-closed owner-hold read, the hourly cap and the ledger. `execute` is the act itself (the sweep's failover
+   * remedy); it runs only after the target is chosen and the hold is read AGAIN, so a card opened while the facts
+   * were read still stops it. Throws, with the reason, when the ferret is not moved — the verdict is then a failed
+   * act. Whether a verdict may act alone at all (`mayActAlone.failover`) is the caller's, and unchanged.
+   */
+  async failover(
+    request: {
+      readonly sessionId: string;
+      readonly source: { readonly agent: string; readonly harness: AutoMoveSubject['harness'] };
+      readonly named: string;
+    },
+    config: WardenConfig,
+    nowMs: number,
+    execute: (target: { readonly agent: string; readonly note?: string }) => Promise<void>,
+  ): Promise<{ readonly agent: string; readonly note?: string }> {
+    const { sessionId, source, named } = request;
+    return await this.exclusive(async () => {
+      // Moved since the verdict was read — by a sweep, a budget stop or a person: there is nothing left to move.
+      if ((await this.ports.agentOf(sessionId)) !== source.agent)
+        throw new Error('it is no longer on the login the verdict was about, so it was not moved');
+      const blocked = await this.holdNow(sessionId);
+      if (blocked !== undefined) throw new Error(`not moved: ${blocked}`);
+      const memory = await this.load();
+      const moves = movesInLastHour(memory, sessionId, nowMs);
+      if (moves >= config.autoMove.maxMovesPerHour)
+        throw new Error(
+          `not moved: it was already moved ${moves === 1 ? 'once' : `${moves} times`} in the last hour, the most the Warden settings allow`,
+        );
+      const target = await this.failoverTarget(source, named, config);
+      // The facts read above awaited: read the hold once more, immediately before the move.
+      const late = await this.holdNow(sessionId);
+      if (late !== undefined) throw new Error(`not moved: ${late}`);
+      await execute(target);
+      await this.ports.ledger.write(recordMove(memory, sessionId, nowMs));
+      this.ports.journal.record('fleet.warden_auto_moved', {
+        sessionId,
+        from: source.agent,
+        to: target.agent,
+        trigger: 'verdict',
+      });
+      return target;
+    });
+  }
+
+  /** The owner-hold read, total: a read that throws is a reason not to move. */
+  private async holdNow(sessionId: string): Promise<string | undefined> {
+    try {
+      return await this.ports.ownerHold(sessionId);
+    } catch (error) {
+      return `whether something of the owner's is open on it could not be checked (${failureMessage(error)})`;
+    }
+  }
+
+  /**
    * For each ferret, the logins an investigation may pick for it (`fy move -a <login>`): the ready ones, most
    * headroom first. A ferret whose login cannot be read, or any ferret when the facts cannot be, gets an empty list —
    * which the prompt reads as "do not move".
@@ -318,7 +373,7 @@ export class WardenAutoMoveService {
     const held = sessionMemory(memory, subject.id).held;
     if (STICKY_REASONS.some(reason => held === autoMoveHoldKey(subject, reason))) return { memory, moved: false };
 
-    const owner = await this.ports.ownerHold(subject.id);
+    const owner = await this.holdNow(subject.id);
     if (owner !== undefined)
       return this.hold(subject, memory, nowMs, 'owner', `Not moved although ${because}: ${owner}.`);
 
@@ -353,6 +408,10 @@ export class WardenAutoMoveService {
     let next = memory;
     if (jobs.length > 0) {
       if (settings.forceStopBackground) {
+        // The facts and jobs reads awaited: nothing is stopped under a card opened since the hold was read.
+        const late = await this.holdNow(subject.id);
+        if (late !== undefined)
+          return this.hold(subject, memory, nowMs, 'owner', `Not moved although ${because}: ${late}.`);
         const result = await this.ports.stopJobs(subject.id);
         stopped = result.stopped;
         await this.ports.emit(subject.id, 'warden.auto_move_stopped_jobs', {
@@ -411,6 +470,11 @@ export class WardenAutoMoveService {
         );
       }
     }
+
+    // Everything above awaited (facts, jobs, stopping them): read the hold once more, immediately before the move.
+    const late = await this.holdNow(subject.id);
+    if (late !== undefined)
+      return this.hold(subject, memory, nowMs, 'owner', `Not moved although ${because}: ${late}.`);
 
     const note = moveNote(subject.agent, target.wrapper, because, stopped);
     const base = {

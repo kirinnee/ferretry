@@ -7,281 +7,307 @@ phones away: this one keeps them.
 
 Why it is a prompt and not a feature: Ferretry 5 contains **no code that reads a v4 home** (owner decision A452,
 addendum 2 of 2026-11-07: "dont include the migration IN code itself, because we dont want backward compatibility as a
-deadweight"). The one-time converter lives at `migration/v4-to-v5/` in the repository, outside every package, and is
-**deleted from the repository once all three machines are on v5**. What it reads is listed in
-[v4-formats.md](v4-formats.md).
+deadweight"). The one-time converter and its driver script, `migration/v4-to-v5/migrate.sh`, live in the repository
+outside every package, and are **deleted from the repository once all three machines are on v5**. What the converter
+reads is listed in [v4-formats.md](v4-formats.md).
 
 ---
 
-You are moving this machine's Ferretry from **v4 (4.291.x)** to **v5**, keeping all data and every ferret. Follow the
-steps in order. Stop and tell the owner at any step that fails; never improvise around a failure.
+You are moving this machine's Ferretry from **v4 (4.291.10 or later)** to **a released v5**, keeping all data and every
+ferret. Every mechanical step is one tested script, `migrate.sh <phase>`. Your job is to ask the owner the questions
+below, run the phases in order, **read each phase's output**, and show it to the owner. **A phase that exits non-zero is
+a stop: tell the owner what it printed, and never improvise around it.** The exit codes mean: `1` refused or failed,
+`2` something could not be inspected, `3` (convert) the converter says a step would not finish, `64` wrong usage.
 
-## Rules you must keep for the whole run
+## Rules you keep for the whole run
 
-- **Never open a secret.** You never `cat`, `less`, `head`, `jq`, `grep`, `diff`, hash or otherwise read these, in the
-  old home, the backup or the new home: `state/secrets.key`, `state/secrets.json`, `state/login-secrets.json`,
-  `state/mcp-oauth-secrets.json`, `state/catalogs/link-keys.json`, `state/daemon-identity.json`,
-  `state/push-vapid.json`, `state/push.json`, `state/session-message-token.key`, `state/sessions/*/environment.json`,
-  `api-token`, `api-warden-token`, anything under `fleet/credentials/`, and any `auth.json`, `.credentials.json` or
-  `.claude.json`. You may only move them (`mv`) or copy them (`cp -p`). The converter moves keys and identity files the same way,
-  byte for byte. For a sealed document (`secrets.json` and its siblings) it re-labels only the envelope (`"v": 1`
-  becomes `"format": 1`, as v5's Vault asks) and copies every sealed value unchanged: it never decrypts, prints or
-  logs anything from them. Never print a token, key, pairing code or secret, and never paste one into chat.
+- **Never open a secret.** You never `cat`, `less`, `head`, `jq`, `grep`, `diff`, hash or otherwise read any file named
+  in [v4-formats.md](v4-formats.md) as sealed or secret (the vault and its key, login and OAuth secrets, identity and
+  push keys, `api-token`, `api-warden-token`, `sessions/*/environment.json`, anything under `fleet/credentials/`, any
+  `auth.json`, `.credentials.json` or `.claude.json`) in the old home, the backup or the new home. The script and the
+  converter move them byte for byte and never print one. Never print a token, key, pairing code or secret, and never
+  paste one into chat.
 - **Never touch the harness's own sign-in folders** outside the home (`~/.claude*`, `~/.codex*`, the macOS keychain).
-- **Never kill the tmux server** (`tmux … kill-server`, `pkill`, `killall`). Ferrets keep running in their panes the
-  whole time; that is how they are kept.
-- Ask the owner before each step marked **(owner's yes)**, and wait for the answer.
-- Work in your own shell. Do not use any Ferretry tool (`fy`, the app, an MCP tool) to read the old home or the
-  backup; Ferretry fences those folders and must not be asked to look inside them.
+- **Never kill the tmux server** (`tmux … kill-server`, `pkill`, `killall`) and never run `fy daemon reset`. Ferrets keep
+  running in their panes the whole time; that is how they are kept.
+- Do not use any Ferretry tool (`fy`, the app, an MCP tool) to read the old home or the backup yourself; the script does
+  the only reading, and only of names and metadata.
+- **Run in `bash`.** Each tool call may begin in a fresh shell, so pass the notes file on every call: `--notes "$NOTES"`.
+  The script never changes your shell: you export nothing (no `PATH`, no `FY_URL`, no `FY_HOME`, no `FY_PORT`). Every
+  phase runs `fy`/`fyd` with the home and port recorded at `preflight`, whatever your shell holds later. A `FY_URL` that
+  carries credentials or names another machine makes `preflight` refuse (unset it for the switch); a query or fragment on a
+  loopback address is dropped, never copied.
 
-In the commands, `H` is this machine's Ferretry home (`${FY_HOME:-$HOME/.ferretry}`) and `STAMP` is the time you take
-the backup, as `YYYY-MM-DD-HHMM` in UTC. Set both once in your shell:
+## What is left behind (tell the owner before they confirm anything)
 
-```bash
-H="${FY_HOME:-$HOME/.ferretry}"; STAMP="$(date -u +%Y-%m-%d-%H%M)"; B="$H-before-$STAMP"
-```
+The owner chose **not** to carry these over (decision !A516, "Leave them"). Read this list to the owner before the first
+decision below, and again in your final report. `preflight`, `backup` (until the owner says yes), `verify` and the
+converter's summary print the same list from one file, `migration/v4-to-v5/left-behind.txt`.
 
-## 1. Check versions
+- chat history (old conversations and transcripts)
+- agents' browser sign-ins (the agent browser profile)
+- named agent terminals
+- the Warden machine agenda item
+- the default routing prompt before your own routing words (v4 rendered it from its model catalogs; models-guide routing)
+- some security history (Gate kept-bucket and grant audit history)
 
-1. `fy --version` must print `4.291.` something, and it must be **4.291.10 or later**: that is the first v4 that refuses
-   the jump to 5.x unless it is given `--major`, so a stray update cannot leave this home unconverted. The converter
-   reads layout 2 of 4.291.x only (`cat "$H/layout-version"` prints `2`). If it is older, bring v4 to 4.291.10 or later
-   by the install kind (`fy daemon update --check` names it), and start again:
-   - **Homebrew**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise switch to the separate v4
-     cask (`ferretry@4`, released with 4.291.10). It links the same programs as the main cask, so remove the main cask first:
-     `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`, then `fy daemon restart`.
-     `--to` does not work here: once 5.0 is released Homebrew installs the newest release whatever `--to` says.
-   - **Nix profile**: skip this when `fy --version` already prints 4.291.10 or newer. Otherwise replace the profile
-     element with the v4 tag: `nix profile list` (the element is the entry's `Name:` on newer Nix, or its `Index:` on
-     older Nix such as 2.18; pick the entry whose original flake URL starts with `github:kirinnee/ferretry`), then
-     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10`, then `fy daemon restart`.
-     (A Nix too old to know `add` calls it `install`; this applies to EVERY `nix profile add` line in this prompt.)
-     Same reason: `nix profile upgrade` and `--to` give the newest release.
-   - **Pinning kinds** (standalone, nix-module with a pinned flake input, deb/rpm): `fy daemon update --yes --to 4.291.10`,
-     or the kind's own pin.
-   - If none of these applies, stop and tell the owner.
+**Nothing is deleted.** v4's home is kept untouched at `<home>-before-<stamp>` (the backup; `preflight` prints the exact
+path), so the owner can look back at any of it. To look: open that folder, or copy it and run v4's `fy` against the copy
+(`FY_HOME=<copy>`). Do not start v4 on the original; it must stay as it is for a rollback.
 
-   **Never run `fy daemon update --yes` bare** on a v4 older than 4.291.10: once 5.0 is released, "latest" is 5.0, and an
-   update that jumps there leaves this home unconverted (5.0 refuses it). **Never pass `--major` in this section**: it is
-   the flag that lets a machine skip this prompt. It is used once only, in §5, after the home is prepared.
+## Decisions the owner makes
 
-2. Note how Ferretry is installed here (Homebrew, nix profile, home-manager/nix-darwin, deb/rpm, standalone binary):
-   `fy daemon update --check` names it. You need it in step 7 and for a rollback.
-3. Get the v5 repository at the release you will install, in a folder **outside** `H`:
-   `git clone --branch v5.0.0 https://github.com/kirinnee/ferretry ~/ferretry-v5-src`, or in an existing clone
-   `git fetch && git checkout v5.0.0`. Check the converter is there: `ls ~/ferretry-v5-src/migration/v4-to-v5/README.md`.
-   If it is not, this machine is already past the window in which the converter exists: stop and tell the owner.
-4. Check free space: the new home needs about as much as `du -sh "$H"` reports, on **the same filesystem** as `H`
-   (`df -h "$(dirname "$H")"`).
+Ask these first, one at a time, and wait.
 
-## 2. Stop v4 politely
+1. **Is this the machine to move now?** One machine per run. v4 stops being usable here until the end or a rollback.
+2. **Which released tag?** The real switch runs **only from a released 5.0** (`v5.0.0` or later): there is no
+   pre-release install path for the owner's machine, and `preflight` refuses a checkout that is not exactly a `v5.N.N`
+   tag. If 5.0 is not released yet, stop and say so.
+3. **The quiet window.** The owner stops messaging ferrets and says all four: no ferret is mid-turn, phone approvals and
+   input holds are answered or dismissed (v4 closes approval cards at a daemon stop), no ferret runs a loop or timer inside
+   its own harness, and nobody will type into a pane until the end. You pass `--owner-confirmed` only after hearing this.
+4. **The agenda count.** The owner opens the app's Agenda and tells you how many asks are open, and the title of one
+   that has an answer. You pass both to **`baseline`** (`--asks-open N --answered-ask "<title>"`); no other phase takes them.
+5. **The backup (owner's yes).** Say: "I will move the Ferretry home aside; that folder is the backup and stays untouched
+   until you delete it." With their yes you pass `--owner-yes`.
+6. **If the install kind is not Homebrew, a nix profile or a standalone binary** (nix-module, deb/rpm), `preflight --kind
+manual` has the owner install v5 by hand; ask how this machine installs Ferretry.
 
-1. Turn off automatic updates for the duration: in the app, Settings › ‹this machine› › Updates › _Install updates
-   automatically when idle_ off (or confirm it is already off — it is off by default).
-2. Write down what is running, into a file outside the home: `fy list > ~/v4-ferrets-$STAMP.txt` (names, states,
-   cards). This is for the owner's eyes and for step 6; it holds no secret.
-3. Let every ferret reach a quiet point: wait until `fy list` shows **no ferret mid-turn** (each is idle or waiting on
-   the owner). Do not interrupt a ferret that is mid-turn unless the owner says so. Ferrets that are idle stay idle in
-   their panes; nothing is ended.
-4. Stop the daemon: `fy daemon stop`. **The tmux server and every pane stay running** — v4's stop only ends the daemon
-   (only `fy daemon reset` ends the terminal server, and you must not run it). Check: `tmux -S "$H/tmux.sock" ls` still
-   lists the ferrets' sessions.
-5. Check nothing is half-done: none of these may exist —
-   `ls "$H"/state/sessions/*/agenda-*.pending.json "$H/fleet/.fy-fleet-apply.lock" "$H"/fleet/shared/*/.migration-journal 2>/dev/null`.
-   If any does, start v4 again (`fy daemon start`), wait a minute, stop it again, and re-check. If it persists, stop
-   and tell the owner.
+## Run it
 
-## 3. Back up the whole home (owner's yes)
-
-Tell the owner: "I will now move `H` aside to `B`; that folder is the backup and stays untouched until you delete it."
-With their yes:
+Get the v5 repository into a **fresh folder** (never reuse, reset or clean an existing clone) at the released tag, and
+run the script from there. The converter and the programs are then one tag by construction:
 
 ```bash
-mv "$H" "$B" && chmod 700 "$B"
+TAG=v5.0.0   # the tag the owner named
+SRC="$HOME/ferretry-v5-src-$(date -u +%Y-%m-%d-%H%M)"
+git clone --no-checkout https://github.com/kirinnee/ferretry "$SRC" && git -C "$SRC" checkout --detach "$TAG"
+S="$SRC/migration/v4-to-v5/migrate.sh"
+bash "$S" preflight
 ```
 
-A move, not a copy: it is instant, keeps every file exactly (modes, times, links, the live tmux socket) and leaves
-nothing at `H`. The running panes are not disturbed: tmux keeps serving its socket, now at `$B/tmux.sock`. From now on
-the converter only **reads** `B`; nothing writes into it. Until v5 is started (§7), send nothing to any ferret and
-do not type into their panes: their harness folders moved with the home, so an idle ferret must stay idle.
+`preflight` prints `NOTES=<path>`: use that path as `$NOTES` from now on. Then, each followed by showing its output to
+the owner:
 
-**Standalone install only: keep the v4 programs aside too**, because §5 replaces them with v5 and §9 must be able to
-put them back. Do this before §5, with the paths `command -v` prints:
+| Phase                                             | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            | Owner / you                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `preflight`                                       | tools present, bun is at least the version in `migration/v4-to-v5/bun-version` (the converter's lockfile needs it; refused before anything changes), v4 is 4.291.10 or later, this checkout is a released v5 tag the install kind can get, disk space; records the original `PATH`, whether `FY_URL` (a plain loopback address only) and `FY_PORT` were set, and where v4's `fy`/`fyd` are (never a secret). `MIGRATE_REHEARSAL=1` on the default home is refused here, before anything changes                                                         | stop on any exit                                                            |
+| `baseline --asks-open N --answered-ask "<title>"` | saves what v4 holds now into a folder beside the notes: every ferret (id, **callsign and title kept apart**, parent, state), pane map, board ids and lanes of every state (stops at the 500-card limit), login names, secret **names**. An empty fleet (no live ferret) is a defined path                                                                                                                                                                                                                                                               | the owner's agenda count                                                    |
+| `quiet --owner-confirmed`                         | no pane writes for a minute, stops the v4 daemon, proves it again, checks nothing is half-done (an unfinished agenda commit, the fleet apply lock, a share migration journal). Queued agenda changes are not half-done: it names their ferrets and `convert` carries them into v5. Panes and tmux keep running                                                                                                                                                                                                                                          | exit `1`: see **If `quiet` exits 1** below                                  |
+| `backup --owner-yes`                              | `mv` the home to `<home>-before-<stamp>` (mode 700)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | the owner's yes                                                             |
+| `convert`                                         | converter dry run (own report), then the real run, exit codes checked. Writes the new home with `home.json` last                                                                                                                                                                                                                                                                                                                                                                                                                                        | show the printed summary; exit `3` → rollback or wait for a fixed converter |
+| `install`                                         | puts the released v5 programs in place for the recorded install kind (cask, nix profile element, standalone), proves `fy --version` is the tag. **Never starts the daemon**                                                                                                                                                                                                                                                                                                                                                                             | stop on any exit                                                            |
+| `start`                                           | `fyd --check` (offline: nothing can start a daemon), the home holds only what v5 makes (plus the asset files under `fleet/assets`: skills, hook files; regular files and folders only), then **the one deliberate daemon start**, proved by asking it, then `fy config check` against that running daemon                                                                                                                                                                                                                                               | show every `!` line                                                         |
+| `verify`                                          | compares v5 with the baseline and prints a table: ferret ids, parents, callsigns (v4 callsign = v5 name), titles, panes (each baseline pane still there, or its ferret restarted by v5 in a new pane of the same session with `session.restarted` in its history; a `session.restart_gave_up` is a FAIL; a `session.restart_blocked` with the old pane still there is a REVIEW: "still on v4 until <login> is signed in", with the `fy login signin <login>` to run), board ids (lanes are shown to the owner), logins, secret names, asks, `fy doctor` | a `FAIL` row is a stop; a `REVIEW` row is for the owner to decide           |
+
+### Before any `fy` command after `start`
+
+Every step after `start` that runs `fy ...` (the credential repair, the logins, "Check by eye", `fy ask`, `fy secret`)
+first runs `fy --version`. It must print **5.x**. If it prints 4.x, stop: a v4 `fy` left first on the PATH talks to
+the v4 daemon (or to whatever it finds), not to v5. Call the v5 `fy` by its full path, or fix the PATH with the owner, and
+run the check again.
+
+`rollback` needs no `fy` check: it runs no `fy` itself and chooses v4 or v5 from the notes. After a rollback, `fy --version`
+must print 4.291.x (v4 is back), and any `fy` after that is the v4 one.
+
+### If `quiet` exits 1
+
+**v4 is now stopped** (`quiet` stops its daemon before it checks): the owner has no working Ferretry until you act. The
+panes and tmux keep running and nothing has been moved, so nothing is lost. Read the output and tell the owner which case it is:
+
+- **A pane kept writing** ("a pane kept writing …"): a ferret is still taking a turn, or someone typed into a pane. Wait
+  for it, bring v4 back if the owner wants to use it meanwhile (below), ask the owner to confirm the four quiet points again, then
+  rerun `quiet` (the whole phase, not `preflight` or `baseline`: the baseline is still valid).
+- **Files listed under "FOUND: something is pending"**: an unfinished agenda commit (`agenda-versions.pending.json`,
+  `agenda-history.jsonl.pending`), the fleet apply lock, or a share migration journal. The script already started v4 for a
+  minute so it could finish them, and stopped it again. Rerun `quiet` **once**. If the **same files** are listed again, stop:
+  do not rerun a third time. Tell the owner the file names (never their content) and that the move cannot go on until they are
+  cleared; offer to stay on v4 (below). Nothing has been backed up or converted, so there is nothing to roll back.
+- `agenda-changes.pending.json` is **not** a pending file: it is a ferret's queue of agenda notices for its next turn end, which a
+  quiet window can never drain. `quiet` lists the ferrets whose queue holds notices under "queued agenda changes" and passes (an empty `[]` file is listed apart as nothing to carry; an unreadable one is named as one convert sets aside); `convert` carries each non-empty queue
+  into v5. If you see it named as a refusal, the script is older than this prompt: stop and say so.
+
+**Bring v4 back while waiting or giving up** (before `backup` only): `fy daemon start` with the v4 `fy` (the one on the
+PATH, still v4 because `install` has not run). After `backup` the home has moved: use **Rollback** instead.
+
+### Rehearsal (a sandbox with a fake home only; never the owner's machine)
+
+A rehearsal runs this same prompt against a fake home with a pre-release build. Put `MIGRATE_REHEARSAL=1` in the environment of
+**every** `migrate.sh` call (`preflight` and `install` read it, the other phases read what `preflight` recorded; setting it
+on all of them is harmless), run from an untagged checkout, and pass `install --rehearsal-build <dir>`, where `<dir>` holds
+executable `fy` and `fyd` of the build. `MIGRATE_REHEARSAL=1` refuses the default home `$HOME/.ferretry`, and
+`--rehearsal-build` refuses to run without it. The preview build's app origin is not production's, so passkeys do not carry over.
+
+`fy config check` may name a login file that still holds a literal key: that is expected and the **owner** repairs it
+(below). `start` runs `fy config check` against the daemon it just started (5.0's check asks the daemon, so it cannot run offline). Any other
+`config check` failure stops the run with that daemon still running; `rollback` stops it.
+
+### Repair each literal credential (the owner does this, not you)
+
+v5 refuses a literal credential in a login file (an intended difference); the converter seals the keys it recognises, and
+`start` shows any it did not (the login file and key, never the value). That login stays out of effect until repaired; the
+daemon is up regardless.
+
+1. The owner **chooses one unique valid name per repaired credential** (uppercase letters, digits, underscores) and
+   writes down login, key and chosen name (no value). `NAME` in `fy secret set NAME` is a placeholder, not a name
+   `fy` allocates; reusing one name for several keys would point several sign-ins at one value.
+2. The owner enters the value through a masked surface, never in chat, argv, shell history or a file: the app's
+   Settings › ‹this machine› › Secrets (a password field, write-only), or in a terminal only they type into:
+   `stty -echo; fy secret set <NAME>; stty echo`, type the value, Enter, then Ctrl-D on the empty line. (At least 8
+   characters.)
+3. The owner rewrites that login's variable to `${secret:<NAME>}` (app: Settings › Files, or `config/logins/<id>.yaml`).
+4. v5 **holds** a login file that newly names a secret until the owner confirms it: `fy config confirm logins/<id>.yaml`
+   (a bare `fy config confirm` lists what waits), or Allow it in the app. Do not bypass this.
+5. You run `fy config check` and `fy secret use --with <NAME> -- true`; both must succeed. You never see the value.
+
+### Logins: what the owner is told before v5 starts
+
+1. **Which are listed.** The converter moves every v4 login folder (`fleet/credentials/<name>/`) to
+   `state/logins/credentials/<name>/` whole and unopened, **keeping its name**. The one exception is a Codex login kept
+   in the terminal's own folder (`store: host`): its v4 folder is not moved or followed (it may even be a link into the
+   terminal's folder) and the name gets a new, empty folder owned by Ferretry (item 4). A login folder that is a link
+   is never followed by any step. After v5 starts, `fy login ls` lists every login by that name, Claude Code and Codex
+   together, with whether each works. Every login Ferretry keeps itself that needs a sign-in is repeated under "Needs
+   sign-in:", each with its exact command. A login kept in the terminal's own folder (`store: host`) is never in that
+   section.
+2. **An old terminal sign-in keeps working.** The sign-in your own terminal holds (`~/.codex*`) is never read, moved or
+   changed by the converter or by v5, so `codex` in a terminal stays signed in as before.
+3. **When the owner must sign a Codex login in again.** For each Codex login `fy login ls` lists under "Needs sign-in:":
+   its sign-in file is empty or missing, cannot be read, has a second name (another link to it), or its sign-in has
+   expired. A Codex file that cannot be read or has a second name is shown as "Needs sign-in" and never as Ready. Do not
+   guess: the owner signs it in again with the app (Settings › Logins, open that login, "Sign in to <name>") or with
+   `fy login signin <name>` (Codex shows a code and a page to open, or a link; `--force` starts over).
+   `fy login check <name>` then re-checks it. You never see the sign-in.
+4. **Logins kept in the terminal's own folder (`store: host`).** Say both parts plainly.
+   - **A Codex login (`harness: codex`) is moved to Ferretry's own sign-in.** 5.0 cannot start a Codex ferret from the
+     terminal's folder, so the converter writes that login as `store: ferretry` under the **same name** (every other
+     field kept) and gives it an **empty, private** sign-in folder. It copies, links and reads nothing of the terminal's
+     sign-in. The converter's summary lists each one: "moved to Ferretry's own sign-in; needs one sign-in:
+     fy login signin <name>". List them for the owner by name. The owner runs `fy login signin <name>` **once for each**
+     (Codex shows a code and a page to open), then `fy login check <name>`. Until then `fy login ls` lists it under
+     "Needs sign-in:". You never see the sign-in.
+   - **A Claude login (`harness: claude`) stays `store: host`, with no step.** 5.0 starts a Claude ferret from the
+     terminal's own sign-in as v4 did, and `fy login ls` shows it as shared with the terminal. Its terminal sign-in and
+     configuration are untouched (v4's folder of that name, which held at most `usage.json`, moves as an empty one).
+     Signing it in or out happens with `claude` in the terminal.
+   - The terminal's own sign-in (`~/.claude*`, `~/.codex*`, the keychain) is never read or changed, and keeps working.
+5. **Links v4 made.** Links inside the v4 account and shared-history folders (`fleet/homes`, `fleet/shared`,
+   `fleet/bin`) are not carried: the summary lists each by path as a note, and 5.0 rebuilds them.
+
+## What is kept, item by item
+
+Tell the owner this list before `start`, and say which items the converter summary showed as converted.
+
+| Item                                                                                                                               | Kept?                    | How                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Every ferret, live and archived: id, callsign, title, lineage (parent/child, pack), project, runtime, start options, pins, history | **Kept**                 | converted into Ferrets                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Running ferrets                                                                                                                    | **Kept, then restarted** | v5 attaches to each live tmux pane by its handle (no lost turn) and queues a restart for each, so its hooks, tools and folders are v5. The restart runs only once v5 ITSELF has seen the ferret idle (its own look at the pane, never v4's last record): usually within about 20 s of `start` for a ferret that is idle (two looks 2 s apart, then the 10 s restart tick); a ferret mid-turn is restarted when its turn ends, never cut short. The restart first proves the ferret can start (its runtime and login usable), then stops the old harness outright (it is idle) and starts it again in a new pane. A ferret whose login needs sign-in in v5 is NOT stopped: it stays on v4, the restart waits (`session.restart_blocked` in its history, once), and `verify` shows it as REVIEW; sign the login in (`fy login signin <login>`) and v5 restarts it by itself within about 2 minutes. Until then its harness still runs v4's hooks and MCP server and its v4 config folder (`fleet/homes/<uuid>`) is not in the new home, so what it writes there in that window is lost: send nothing during it. The restart starts a NEW conversation and tells the ferret so (old chats are left behind); a restart that fails is written in the ferret's history as `session.restart_gave_up` with the reason. A ferret whose pane is gone is resumed the same way |
+| Harness conversations (Claude Code / Codex transcripts, chat history)                                                              | **Left behind**          | not carried (see the left-behind list above)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Message queue, shared drafts (chat and ask replies), turns, attachments, renders                                                   | **Kept**                 | converted into Conversation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Board: cards, lanes, links, dependencies, history; projects                                                                        | **Kept**                 | converted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Agenda: asks, answers, notices                                                                                                     | **Kept**                 | converted into Asks and Agenda                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Lessons, usage history and budgets, warden history and settings                                                                    | **Kept**                 | converted                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Catalogs and shares (published catalogs, links, members, installs)                                                                 | **Kept**                 | converted; link keys moved sealed; the skill folders you installed are copied to the new home byte for byte                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Settings, layouts, runtimes, profiles, logins                                                                                      | **Kept**                 | YAML split per v5 owner; comments kept                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Changes you had confirmed that loosen a setting (e.g. skipping agent permissions, a raised cap)                                    | **Kept**                 | your v4 confirmations move with them, so v5 does not ask again. If v4 was still waiting for you to confirm a change when it stopped, none are carried and v5 asks again (the summary names the file)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| MCP server sign-ins (OAuth)                                                                                                        | **Kept**                 | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| Security log (pairings, grants, secrets used)                                                                                      | **Kept, in part**        | the v4 logs are merged into one v5 log, names and ids only, EXCEPT the Gate kept-bucket and grant audit history, which is left behind                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Harness sign-ins                                                                                                                   | **Kept**                 | the owned sign-in folders move whole, never read; a Codex `store: host` login gets a new empty owned folder (sign in once), and a Claude one stays in the terminal                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Secrets                                                                                                                            | **Kept**                 | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**                 | the daemon identity, device public keys, grants, passkey ids and push keys move as they are. See **Devices and passkeys** below                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Admin and warden tokens                                                                                                            | **Kept**                 | moved byte for byte, never opened; `fy` keeps working without signing in again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Global lessons (the rules applied from Lessons)                                                                                    | **Kept, wider**          | they now reach EVERY ferret, where v4 gave them only to ferrets whose profile listed `instructions/lessons`; that profile entry is removed, so no ferret gets them twice                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| Model routing catalog (`routing.json`: scores, floors, weights)                                                                    | **Not kept**             | v5 picks models by the routing prompt and `fy recommend`; the runtimes v4 never suggested are named in one line added to the end of your routing prompt (or listed in the summary when you had no prompt of your own)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Pairing codes                                                                                                                      | **Not kept**             | single-use, two minutes long                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Live unlocks                                                                                                                       | **Not kept**             | each device unlocks again with its passkey, once                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| In-flight input holds                                                                                                              | **Not kept**             | a hold mid-delivery is closed and its pane quarantined, as at any restart                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Caches (session index, analytics, search) and per-login usage readings                                                             | **Rebuilt**              | v5 rebuilds them from the kept files, and measures usage afresh                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+
+## Devices and passkeys: nobody re-pairs
+
+Released 5.0 serves its hosted app at **`https://ferretry.pages.dev`, the same origin v4 links to**, so existing paired
+phones and browsers and their passkeys **keep working**. Each device just reloads the app and unlocks once with its
+passkey; nothing is paired again. Why this is true, in source: v4 pairs against `HOSTED_APP_ORIGIN =
+'https://ferretry.pages.dev'` (`packages/protocol/src/lib/pairing.ts`); a released v5 build embeds
+`DEFAULT_HOSTED_APP_ORIGIN`, the same address, because no define overrides it (`packages/core/kernel/contract/hosted-app.ts`,
+`scripts/ci/hosted-app-origin.sh`, `scripts/release/compile.sh`), and the production workflow deploys the app with no
+override (`.github/workflows/pwa-pages.yaml`, from `main`); a passkey's relying-party id is the hostname of its origin
+(`relyingPartyId` in `packages/plugins/access/daemon/lib/passkeys/verifier.ts`), and the converter carries each passkey
+with its origin unchanged. The one exception is the **preview** app (`ferretry-v5.pages.dev`), a different origin whose
+passkeys are not interchangeable: it exists only for rehearsing this migration in a sandbox (`install --rehearsal-build`,
+for a fake home, never a real one) and is never used on the owner's machine.
+
+## Check by eye, with the owner (after `verify` passes)
+
+`verify` proves the data; these need a person. Show the owner each result.
+
+1. `fy ps`: every ferret that was running shows `idle` or `working` as its pane really is (never `working` on an idle
+   prompt), and its history (`timeout 5 fy stream <id> --after 0`, or the ferret's page in the app) has
+   `session.restarted`. A `session.restart_gave_up` line is a restart that failed: show the owner its reason. A ferret
+   whose last line is `session.restart_blocked` is still on v4 (nothing was stopped): with the owner, run the
+   `fy login signin <login>` that `verify` printed, then check again in about 2 minutes for `session.restarted`. Then send
+   one running ferret a short message (owner's yes) and see it answer. It is a NEW conversation (old chats are left
+   behind): an autonomous ferret was told so, and pointed at its assigned task, in its first turn after the restart, and
+   the history of every one has `session.conversation_not_found` (naming the old conversation, or `unknown: true` for one
+   whose id v4 never recorded, as a Codex ferret can be).
+2. Resume one stopped ferret with the owner. It starts a NEW conversation, never a failed launch: its old chat was left
+   behind (!A516), so its first line says it remembers nothing from before, and its history has
+   `session.conversation_not_found`.
+3. Open one card with history and links. Show the owner every `REVIEW` row of `verify` (lane differences, fallback
+   callsigns, dropped titles) and let them decide.
+4. `fy ask show <id>` for the answered ask the owner named: the answer is there. `fy login ls` lists every login by name, Codex ones included. Anything under "Needs sign-in:" is signed in again as in the Logins section above; name each `store: host` Codex login the converter moved until the owner has run `fy login signin <name>` for it. A `store: host` Claude login needs nothing and shows as shared with the terminal.
+5. Reload the app on one paired phone: it connects without pairing and unlocks with its passkey.
+6. `fy secret use --with <NAME> -- true` (owner's yes) for one secret by name. It must succeed; you never see the value.
+
+**An item that does not exist on this machine** (no running ferret, no stopped ferret, no card with history, no answered
+ask, no paired phone, no named secret): ask the owner to confirm there is none and write it down as
+`SKIP: <item> (owner confirmed there is none)` in your report. Never invent a substitute and never call a skipped item
+checked.
+
+## Rollback (owner's yes)
+
+If any phase from `convert` on fails, or `verify` or the checks above fail, and the owner wants v4 back, say what it
+costs and get the yes: **v4 returns exactly as it was at the backup. Anything done in v5 since the start (messages,
+cards, asks, new ferrets, new conversation lines, new secrets) is not in v4.** It stays whole in the failed v5 home
+(`<home>-v5-failed-<stamp>`); nothing is deleted. Then:
 
 ```bash
-mkdir -p "$B-bin" && for p in fy fyd fyd-browser-worker; do c="$(command -v "$p")" && cp -p "$c" "$B-bin/$p"; done
-printf '%s\n' "$(command -v fy)" "$(command -v fyd)" "$(command -v fyd-browser-worker)" > "$B-bin/paths.txt"
-ls -l "$B-bin"
+bash "$S" rollback --notes "$NOTES" --owner-yes            # add --restart once the owner agrees to the line below
 ```
 
-Tell the owner which paths were copied (`$B-bin/paths.txt` holds them). If `fy` or `fyd` is missing from that
-listing, stop and tell the owner: there is then no exact v4 to put back. `fyd-browser-worker` may be absent from a
-very old install; say so.
+`rollback` reads the notes, so it acts only on what happened: it reaches a quiet point and stops any v5 daemon (proved
+by the process list, not by a marker), closes only the tmux sessions it can prove v5 started (the real v5 socket, `fy-<id>` of a ferret in v5's registry, not named by the baseline; with no readable, non-empty baseline it closes nothing, and it names what it left alone), moves the v5 home aside only if the backup exists, restores the backup, puts the
+v4 programs back from the recorded state (including "neither installed"), restores the recorded `PATH` and `FY_URL`
+exactly, starts v4, and puts back **only the baseline ferrets v5 relaunched or resumed**, each **as it was at the backup**. v5's own
+history decides which (a `session.restarted` or `session.resumed` written by v5, after the carried v4 journal; an unreadable history is
+not proof), and the baseline decides what each one was:
 
-## 4. Convert into a new home
+- **Running at the baseline** (a live pane then, a status other than stopped/completed/failed): v5 left it on a **v5-launched harness**
+  that v4's `fy restart` refuses ("can't see what it is running"; it has no `--force`). With `--restart` (the owner's yes: it
+  **stops the ferret, interrupting what it is doing and closing its own web-terminal panes**) the script runs v4's `fy stop orphan <id> --yes`
+  then `fy resume <id>`: it comes back as a v4 launch with its conversation. (This pair was proven on real rollbacks of 15 ferrets.)
+- **Stopped, completed, failed, stalled or interrupted at the baseline**, and the owner resumed it in v5: it is **never resumed by v4**. Its v5
+  session is closed (the script closes the tmux session only v5 had: a live pane that is not the pane the backup's own record names) and it
+  stays stopped, exactly as at the backup. The script **never stops it on v4's word**: if v4 shows it running afterwards, that is a v4 launch
+  (the owner resumed it, or v4 revived it), so it is only named, with the command, and the owner decides.
+- **Anything it cannot place** (running at the baseline but no live pane then, or no status): left alone and named.
 
-```bash
-cd ~/ferretry-v5-src/migration/v4-to-v5 && bun install
-bun src/main.ts --from "$B" --to "$H" --dry-run      # reads only; prints what it would do; exit 0 = every step would convert
-bun src/main.ts --from "$B" --to "$H"                # writes the new home at H
-```
+Without `--restart` it only names the three groups. With it, it prints one counts line (`handed back N, stopped as at the baseline N,
+left alone N, failed N`) and names every ferret it could not put back, with v4's reason ("stop refused" or "stopped, not resumed"); then
+it exits non-zero, and `rollback --restart` again retries only those (a ferret already stopped is only resumed). A ferret v5 did not
+touch is never touched. If it exits non-zero, read what it printed and tell the owner; it is safe to run again. It proves the panes quiet before it moves anything, whether or not
+a daemon is running, and it decides what a live `fyd` is from the notes, not from the `fy` now on the PATH: if that
+`fyd` is the v5 one and no v5 `fy` is left to stop it, it refuses and moves nothing. For an install kind `manual` it
+restores the homes, then stops and asks the owner to put the v4 programs back by hand; **run `rollback` again after
+that** and it checks that `fy` and `fyd` print 4.291.x and finishes (starts v4, puts back the ferrets v5 relaunched or resumed).
 
-- The converter refuses (exit 2, nothing written) if `B` is not a stopped 4.291.x home, if the v4 daemon still holds
-  its lock, or if `H` exists and is not empty.
-- It writes `H` mode `0700`, every file `0600`, and moves sealed files byte for byte. It gives the live tmux socket a
-  second name inside the new home (a hard link, so the same running server answers there); this is why `B` and `H`
-  must be on one filesystem. It prints counts and names
-  only, and writes a report **beside** the new home: `$H.conversion-report.json`. Show the owner the printed summary.
-- A **dry run** writes nothing (not even `H`): exit 0 means every step would convert, exit 3 means one would not; read
-  the printed summary to the owner before the real run.
-- **Exit 0** means complete: every item converted, and `H/home.json` written **last**. **Exit 3** means some step did
-  not finish: there is no `home.json`, so v5 refuses to start on `H` by design. Do not "fix" that by writing a
-  `home.json` yourself; tell the owner, and roll back (§9) or wait for a fixed converter.
-- A step that **failed** names the v4 file (never its contents) and, where the owner can fix it, how. Two such fixes
-  are expected; each is done in **v4** (roll back §9, fix, stop v4, back up again, convert again), never by editing
-  `B` or `H` by hand:
-  - **A login id with capital letters** (v5 login ids are lowercase): the owner renames that login in v4 first.
-    The converter never renames it, because runtimes, budgets and usage are joined on the id.
-  - **A sign-in file the converting user cannot read**: the owner makes it readable by its owner (`chmod u+r`). The
-    converter copies sign-in files and never hard-links them, so the backup stays a separate copy for rollback.
+## Afterwards
 
-## 5. Install v5 (do not start it) and check the new home
-
-1. Install v5 the way this machine installs Ferretry (the kind from step 1.2), without starting the daemon. The v4
-   updater refuses a jump to 5.x without `--major`, which is why the home is prepared first. `--major` only allows
-   the jump (it is a plain flag, combined with `--to`; `--yes` is still needed in an agent's shell and alone never
-   allows the jump). It does not switch a package source, so each kind has its own command:
-   - **Standalone binary**: `fy daemon update --major --yes --to 5.0.0`.
-   - **Homebrew**: §1.1 is skipped when v4 is already 4.291.10 or newer, so check which cask is installed:
-     `brew list --cask | grep -x 'ferretry\(@4\)\?'`.
-     - **Main cask `ferretry`**: the tap's cask is 5.x once 5.0.0 is released, so `brew upgrade --cask ferretry`.
-     - **`ferretry@4`**: `fy daemon update` can never reach 5.0 here (that cask stays 4.x and refuses, saying so).
-       Switch the cask instead: `brew uninstall --cask ferretry@4 && brew install --cask kirinnee/ferretry/ferretry`.
-   - **Nix profile**: `nix profile upgrade` stays on the source it was installed from, whichever v4 source that is
-     (untagged, or any v4 tag). Switch the source: `nix profile list`, pick the Ferretry element whatever its source
-     (the entry whose original flake URL starts with `github:kirinnee/ferretry`; its `Name:` on newer Nix, its
-     `Index:` on older Nix such as 2.18), then
-     `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v5.0.0`. (A Nix too old to know `add`
-     calls it `install`; that applies here too.)
-   - **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v5.0.0` and switch.
-   - **deb/rpm**: install the 5.0.0 package.
-
-   Do not start the daemon. `fy --version` must print `5.`.
-
-2. `fy config check` — every YAML file in `H/config` parses and passes its schema.
-3. `fy doctor` — names any damaged file. A damaged file is a stop: tell the owner, do not start.
-4. `ls -la "$H"` shows only `home.json`, `config/`, `state/`, `run/`, `logs/`.
-5. **A literal credential in a v4 login file is refused in v5** (an intended difference, rebuild-parity.md). The converter
-   seals the keys it recognises; `fy config check` (step 2) names any login file that still holds one, as the FILE and the
-   KEY (never the value) and says to use `fy secret set NAME`. For each one, **the OWNER does this, not you**:
-   1. `fy secret set NAME` — the owner types the value at the prompt. You never read, copy, echo or paste it.
-   2. The owner rewrites that login's variable to `${secret:NAME}` (app: Settings › Files, or edit `config/logins/<id>.yaml`).
-   3. v5 **holds** a login file that newly names a secret reference until the owner acknowledges it. The owner confirms
-      that held edit: `fy config confirm logins/<id>.yaml` (list what waits with `fy config confirm`; or Allow it in the
-      app). Setting the secret does not approve the reference. Do not bypass this.
-   4. `fy config check` passes, and `fy secret run NAME -- true` succeeds.
-
-## 6. What is kept, item by item
-
-Tell the owner this list before starting v5, and say which items the summary showed as converted.
-
-| Item                                                                                                                               | Kept?               | How                                                                                                                                                                                                                                                                                          |
-| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Every ferret, live and archived: id, callsign, title, lineage (parent/child, pack), project, runtime, start options, pins, history | **Kept**            | converted into Ferrets                                                                                                                                                                                                                                                                       |
-| Running ferrets                                                                                                                    | **Kept, same pane** | v5 attaches to each live tmux pane by its handle (no new window, no lost turn). A ferret whose pane is gone is resumed from its harness conversation id. At its next idle turn, an attached harness is restarted in that same pane with resume, so its hooks and tools are v5 (no lost turn) |
-| Harness conversations (Claude Code / Codex transcripts, for resume)                                                                | **Kept**            | moved whole, never parsed                                                                                                                                                                                                                                                                    |
-| Message queue, shared drafts (chat and ask replies), turns, attachments, renders                                                   | **Kept**            | converted into Conversation                                                                                                                                                                                                                                                                  |
-| Board: cards, lanes, links, dependencies, history; projects                                                                        | **Kept**            | converted                                                                                                                                                                                                                                                                                    |
-| Agenda: asks, answers, notices                                                                                                     | **Kept**            | converted into Asks and Agenda                                                                                                                                                                                                                                                               |
-| Lessons, usage history and budgets, warden history and settings                                                                    | **Kept**            | converted                                                                                                                                                                                                                                                                                    |
-| Catalogs and shares (published catalogs, links, members, installs)                                                                 | **Kept**            | converted; link keys moved sealed; the skill folders you installed are copied to the new home byte for byte                                                                                                                                                                                  |
-| Settings, layouts, runtimes, profiles, logins                                                                                      | **Kept**            | YAML split per v5 owner; comments kept                                                                                                                                                                                                                                                       |
-| Changes you had confirmed that loosen a setting (e.g. skipping agent permissions, a raised cap)                                    | **Kept**            | your v4 confirmations move with them, so v5 does not ask again. If v4 was still waiting for you to confirm a change when it stopped, none are carried and v5 asks again (the summary names the file)                                                                                         |
-| MCP server sign-ins (OAuth)                                                                                                        | **Kept**            | the sign-in records move, and the sealed refresh tokens move byte for byte with the vault key that opens them                                                                                                                                                                                |
-| Security log (pairings, grants, secrets used)                                                                                      | **Kept**            | the v4 logs are merged into one v5 log, names and ids only                                                                                                                                                                                                                                   |
-| Harness sign-ins                                                                                                                   | **Kept**            | the sign-in folders move whole; never read                                                                                                                                                                                                                                                   |
-| Secrets                                                                                                                            | **Kept**            | the sealed vault and its key move byte for byte; no existing value is ever opened. A key v4 had saved in plain text in a login file is sealed into the vault as `LOGIN_<ID>_<VAR>` and the login file names it with `${secret:…}` (listed by name in the summary)                            |
-| Paired phones and browsers, passkeys, unlock settings, push                                                                        | **Kept**            | the daemon identity, device public keys, grants, passkey ids and push keys move as they are                                                                                                                                                                                                  |
-| Admin and warden tokens                                                                                                            | **Kept**            | moved byte for byte, never opened; `fy` keeps working without signing in again                                                                                                                                                                                                               |
-| Global lessons (the rules applied from Lessons)                                                                                    | **Kept, wider**     | they now reach EVERY ferret, where v4 gave them only to ferrets whose profile listed `instructions/lessons`; that profile entry is removed, so no ferret gets them twice                                                                                                                     |
-| Model routing catalog (`routing.json`: scores, floors, weights)                                                                    | **Not kept**        | v5 picks models by the routing prompt and `fy recommend`; the runtimes v4 never suggested are named in one line added to the end of your routing prompt (or listed in the summary when you had no prompt of your own)                                                                        |
-| Pairing codes                                                                                                                      | **Not kept**        | single-use, two minutes long                                                                                                                                                                                                                                                                 |
-| Live unlocks                                                                                                                       | **Not kept**        | each device unlocks again with its passkey, once                                                                                                                                                                                                                                             |
-| In-flight input holds                                                                                                              | **Not kept**        | a hold mid-delivery is closed and its pane quarantined, as at any restart                                                                                                                                                                                                                    |
-| Caches (session index, analytics, search) and per-login usage readings                                                             | **Rebuilt**         | v5 rebuilds them from the kept files, and measures usage afresh                                                                                                                                                                                                                              |
-
-## 7. Start v5
-
-1. `fy daemon start`.
-2. In each browser and phone: just reload the app. Paired devices stay paired (same daemon identity); each one asks
-   for its passkey unlock once.
-
-## 8. Verify
-
-Run each check and show the owner the result. Command names are v5's; if one differs in the installed release, use
-`fy help` to find its current name — never fall back to reading files. Any failure: stop, tell the owner, and offer the rollback (§9).
-
-1. **Ferrets**: `fy list` shows every ferret from `~/v4-ferrets-$STAMP.txt`, with the same names and parents.
-2. **Running ferrets were attached in their own panes**: for each ferret that was running, its pane id is unchanged
-   (`tmux -S "$H/state/terminals/tmux.sock" list-panes -a` against the note) and `fy list` shows it live. Send one a
-   short message with the owner's yes and see it answer in the same conversation.
-3. **Resume**: pick one stopped ferret with the owner and resume it; it continues its old conversation.
-4. **Board**: `fy board` shows the same cards in the same lanes; open one with history and links.
-5. **Agenda**: open asks and their answers are there (`fy ask list`).
-6. **Secrets by USE**: `fy secret list` shows every name; with the owner's yes run one harmless command that uses a
-   secret by name (never print it), e.g. `fy secret run <NAME> -- true`. It must succeed. You never see the value.
-7. **No key in plain text in a login file**: `fy config check` passes (v5 refuses a login file that holds a key, so a pass is
-   the proof; do not open the login files to look). Every key the converter moved out of a login file is listed in its
-   summary by login, variable and secret name (`LOGIN_<ID>_<VAR>`), never by value. With the owner's yes run
-   `fy secret run <NAME> -- true` for one of them; it must succeed. You never see the value.
-8. **Devices**: on one paired phone, reload the app: it connects without pairing again and unlocks with its passkey.
-9. **Sign-ins**: `fy login list` shows every login signed in.
-10. `fy doctor` is clean.
-
-Then turn automatic updates back on if the owner had them on.
-
-## 9. Rollback (owner's yes)
-
-If anything in §4–§8 fails and the owner wants v4 back:
-
-```bash
-fy daemon stop                                   # stop v5 (panes keep running)
-mv "$H" "$H-v5-failed-$STAMP" && chmod 700 "$H-v5-failed-$STAMP"
-mv "$B" "$H"                                     # the untouched v4 home, exactly as it was
-```
-
-Then put **4.291.10 or later** (v4) back the way this machine installs Ferretry (below), then `fy daemon restart`. v4 finds its
-home and its live tmux server as it left them. Every kind below applies to a machine that **did** install v5 in §5:
-until the v4 programs are back, starting the daemon runs v5, which refuses the restored v4 home. Pick the line for the
-install kind `fy daemon update --check` named:
-
-- **Nix profile**: remove the v5 element and install the v4 tag: `nix profile list` (the entry whose
-  original flake URL is the v5 tag; its `Name:` on newer Nix, its `Index:` on older Nix), then
-  `nix profile remove <element> && nix profile add github:kirinnee/ferretry/v4.291.10` (`install` instead of `add` on a
-  Nix too old to know `add`)
-  (or `nix profile rollback` to the generation from before §5, if it is still there and was 4.291.10 or later).
-- **nix-module** (home-manager / nix-darwin): repin the flake input to `github:kirinnee/ferretry/v4.291.10` and switch.
-- **Standalone binary**: copy the programs saved in §3 back over the v5 ones, to the paths in `$B-bin/paths.txt`:
-  `for p in fy fyd fyd-browser-worker; do if [ -f "$B-bin/$p" ]; then cp -p "$B-bin/$p" "$(grep "/$p\$" "$B-bin/paths.txt")"; fi; done`,
-  then check `fy --version` prints `4.291.`. (Only an accidental v4 self-update on a standalone install never moved off
-  4.x, because v4 refuses a standalone release it cannot verify; after §5 it did move, which is why §3 saved them.)
-- **Homebrew**: `brew upgrade` installs what the tap has now, which is 5.x, and brew cannot pin a cask version. The way
-  back is the separate v4 cask `ferretry@4` (released with 4.291.10):
-  `brew uninstall --cask ferretry && brew install --cask kirinnee/ferretry/ferretry@4`.
-- **deb/rpm**: install the 4.291.10 (or later 4.x) package of `fy` from the package source, if it still keeps that version.
-
-After the install line for your kind, run `fy daemon restart` and check `fy --version` prints `4.291.`.
-
-A migrated v5 home is **refused by v4 with nothing written** (it has no `layout-version`), so the `mv "$B" "$H"` above is
-the way back: without the backup there is no v4 home to go back to. Tell the owner the failed v5 home is at
-`$H-v5-failed-$STAMP` (it holds copies of sealed files: they decide when to delete it).
-
-## 10. Afterwards
-
-- **Keep the backup.** `B` (`$H-before-$STAMP`) stays until **the owner** deletes it. Never delete it yourself. v5
-  fences every `<home>-before-*` folder and never reads it. It holds the old vault, key and sign-ins, so it stays `0700`.
-- Report to the owner: the converter's summary, the §8 results, and where the backup and the report are.
-- Do not delete `~/ferretry-v5-src` until the owner says this machine is done.
-- **When all three machines are on v5**, the converter is deleted from the repository (`git rm -r migration/v4-to-v5 scripts/validate/migration-isolated.sh`
-  and its wiring), together with this prompt's reference to it. Say so to the
-  owner when you report the last machine.
+- **Keep the backup.** `<home>-before-<stamp>` stays until **the owner** deletes it. Never delete it yourself. v5 fences
+  every `<home>-before-*` folder and never reads it. It holds the old vault, key and sign-ins, so it stays `0700`.
+- Report to the owner: the converter's summary (it ends with the left-behind list and the path of the v4 home), repeat that list in plain words, the `verify` table, the commit in `$NOTES` (`COMMIT`), and where the
+  backup, the report, the baseline folder and the notes are.
+- Do not delete `$SRC` until the owner says this machine is done.
+- **When all three machines are on v5**, the converter and its script are deleted from the repository
+  (`git rm -r migration/v4-to-v5 scripts/validate/migration-isolated.sh` and its wiring), together with this prompt's
+  reference to them. Say so to the owner when you report the last machine.

@@ -15,6 +15,7 @@ export interface RecordedCall {
     readonly query?: Readonly<Record<string, string>>;
     readonly body?: unknown;
     readonly headers?: Readonly<Record<string, string>>;
+    readonly quiet?: boolean;
   };
 }
 

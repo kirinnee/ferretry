@@ -49,6 +49,18 @@ describe('S6 machineShow', () => {
     });
   });
 
+  test('S6 keeps the event key, and taps to the conversation the push is about when its page is refused', () => {
+    const shown = machineShow(show({ eventKey: 'k1', sessionId: 'f1', url: '/no/such/page' }), WORK, ORIGIN);
+    expect(shown.eventKey).toBe('k1');
+    expect(shown.url).toBe(`${ORIGIN}/d/sha256%3Awork%2Fone/ferrets/f1/chat`);
+    expect(machineShow(show({ url: '/no/such/page' }), WORK, ORIGIN)).toEqual({
+      title: 'Work laptop · Deploy',
+      body: 'Ship it?',
+      count: 1,
+      url: `${ORIGIN}/d/sha256%3Awork%2Fone`,
+    });
+  });
+
   test('an untagged, kind-less show has no tag and counts as one; the app-wide registration is unverified and opens the app', () => {
     const shown = machineShow(show({ url: '/ferrets/f1/chat' }), null, ORIGIN);
     expect(shown).toEqual({ title: 'Unverified · Deploy', body: 'Ship it?', count: 1, url: `${ORIGIN}/app/` });
@@ -117,6 +129,31 @@ describe('S6 grouping', () => {
       data: object;
     };
     expect('tag' in untagged.data).toBe(false);
+  });
+
+  test('S6 a push whose eventKey a line already showing carries is a transport twin: skipped, so "+N more" does not grow', () => {
+    const twin = shown({ eventKey: 'session-1:agenda:7' });
+    expect(planNotificationPresentation(twin, [{ count: 2, eventKey: 'session-1:agenda:7' }])).toEqual({
+      action: 'skip',
+    });
+    // another event under the same tag is a newer line and still merges
+    expect((planNotificationPresentation(twin, [{ count: 2, eventKey: 'other' }]) as { count: number }).count).toBe(3);
+    // a push or a line with no key is never a twin
+    expect((planNotificationPresentation(shown(), [{ count: 2, eventKey: 'x' }]) as { count: number }).count).toBe(3);
+    expect((planNotificationPresentation(twin, [{ count: 2 }]) as { count: number }).count).toBe(3);
+  });
+
+  test('S6 a key equal to the daemon tag names the line, not an event (an older daemon), so it never skips; nor does an untagged push', () => {
+    // older daemons copied the notification tag into the key: a distinct event under the same tag must still show
+    const older = shown({ eventKey: 'agenda-A3' });
+    expect(planNotificationPresentation(older, [{ count: 2, eventKey: 'agenda-A3' }]).action).toBe('show');
+    const untagged = shown({ tag: undefined, daemonTag: undefined, eventKey: 'k1' });
+    expect(planNotificationPresentation(untagged, [{ count: 2, eventKey: 'k1' }]).action).toBe('show');
+  });
+
+  test('S6 the event key travels in the notification’s data, so the next push can be compared to it', () => {
+    const plan = planNotificationPresentation(shown({ eventKey: 'k1' }), []) as { data: object };
+    expect(plan.data).toEqual({ url: 'u', count: 1, latestBody: 'Latest', tag: 'agenda-A3', eventKey: 'k1' });
   });
 
   test('an approval is never merged or hidden under "+N more"; the same words are a twin, a re-read number is not', () => {

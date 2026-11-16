@@ -396,6 +396,87 @@ describe('typing into a terminal an input request aims at', () => {
     should(w.typed).deepEqual([]);
   });
 
+  it("should write nothing when a secure paste's last check refuses, asked after the last look (secure-clip-1 fix2, R4)", async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+    let asked = 0;
+    let protectedCount = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, {
+      refuse: async () => {
+        asked += 1;
+        return 'the copy ended';
+      },
+      protect: () => {
+        protectedCount += 1;
+      },
+    });
+
+    should(result).equal('guard_refused');
+    should(asked).equal(1);
+    // The copy ended, so there is nothing to protect and nothing typed.
+    should(protectedCount).equal(0);
+    should(sends(w)).have.length(0);
+    should(w.typed).deepEqual([]);
+  });
+
+  it("should write when a secure paste's last check finds nothing to refuse", async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, { refuse: async () => undefined });
+
+    should(result).equal('typed');
+    should(w.typed).have.length(1);
+  });
+
+  // FINDING 3 (secure-clip-2 fix round 1): a sealed paste's protection goes in INSIDE this turn, before the first byte.
+  it('should install a sealed paste’s protection after every check and BEFORE the first byte, with no origin for a terminal', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+    const told: { origins: readonly string[]; typedBefore: number }[] = [];
+
+    const result = await target(w).type('s1', dev, SECRET, true, expected, {
+      protect: where => void told.push({ origins: where.origins, typedBefore: w.typed.length }),
+    });
+
+    should(result).equal('typed');
+    should(told).deepEqual([{ origins: [], typedBefore: 0 }]);
+    should(w.typed).have.length(1);
+  });
+
+  it('should write NOTHING when the protection cannot be installed, and not even ask it when an earlier check refused', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+    let asked = 0;
+
+    const refused = await target(w)
+      .type('s1', dev, SECRET, true, expected, {
+        protect: () => {
+          throw new Error('no room for the mask');
+        },
+      })
+      .then(
+        () => 'typed',
+        (error: Error) => error.message,
+      );
+    const early = await target(w).type('s1', dev, SECRET, true, expected, {
+      proceed: () => false,
+      protect: () => {
+        asked += 1;
+      },
+    });
+
+    should(refused).equal('no room for the mask');
+    should(early).equal('target_changed');
+    should(asked).equal(0);
+    should(w.typed).deepEqual([]);
+  });
+
   it('I48 should make tmux itself check the pane pid, program name, cursor row and liveness in the writing command', async () => {
     const w = world();
     const expected = await observed(w);

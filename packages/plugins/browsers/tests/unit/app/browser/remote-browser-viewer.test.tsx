@@ -282,7 +282,7 @@ describe('RemoteBrowserViewer', () => {
     );
     await interact(async () => await Promise.resolve());
     expect(sockets.opened).toEqual([
-      { key: 'GET /v1/sessions/:sessionId/browser/stream', params: { sessionId: 'session-a' } },
+      { key: 'GET /v1/ferrets/:ferretId/browser/stream', params: { ferretId: 'session-a' } },
     ]);
     await interact(() => {
       for (const chunk of encodeBrowserStreamChunks(0, new Uint8Array(frame('page-a')), 64))

@@ -146,8 +146,9 @@ export interface ConnectionHealthEnvironment {
 
 /**
  * One REAL read through the router — never a synthetic probe — so a retry that succeeds is a request
- * that succeeded. Its outcome reaches the model through the reporter like any other request's; what
- * the promise says is only that the attempt is over.
+ * that succeeded. A fresh dial's outcome reaches the model through the reporter like any other request's;
+ * the promise says the attempt is over, and resolving `true` says the machine ANSWERED it, which is what
+ * ends the outage when an already accepted session carried the read (no new commit to report).
  */
 export type ReconnectAttempt = (daemonId: DaemonId) => Promise<unknown>;
 
@@ -362,13 +363,22 @@ export class DaemonConnectionHealth implements ConnectionHealth, ConnectionHealt
       if (health.state.kind !== 'reconnecting' || health.cancelRetry !== undefined) return;
       this.#scheduleNext(daemonId, health);
     };
+    // The outage this read belongs to: every outage start and every stop bumps the epoch, so a read begun
+    // under a pairing that was since cleared (and an outage since begun anew) is no longer this outage's.
+    const epoch = health.epoch;
     let pending: Promise<unknown>;
     try {
       pending = this.attempt(daemonId);
     } catch {
       pending = Promise.resolve();
     }
-    void pending.then(finish, finish);
+    void pending.then(answer => {
+      // The machine answered this read — over a session that was already accepted, so no new commit told the router:
+      // the answer itself ends the outage, unless it was cleared or settled while the read was in flight, or a
+      // replacement outage has begun since (an answer for the cleared pairing proves nothing about this one).
+      if (answer === true && health.epoch === epoch && health.state.kind === 'reconnecting') this.answered(daemonId);
+      finish();
+    }, finish);
   }
 
   #publish(health: DaemonHealth, next: ConnectionHealthState): void {

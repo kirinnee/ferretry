@@ -289,7 +289,7 @@ sequenceDiagram
 | ----- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------- |
 | skill | project | `<root>/.claude/skills/<name>/` (Claude) or `<root>/.agents/skills/<name>/` (Codex), compare-and-swap, no symlink follow, like the `.mcp.json` write    | `filesystem.configure` |
 | skill | runtime | a `catalog.install` fleet change: files into `fleet/assets/skills/<name>/`, a `skills` component, and an entry in the chosen profile (Clone's executor) | `fleet.configure`      |
-| MCP   | project | the existing `.mcp.json` write (`POST /v1/sessions/:id/mcp/project`'s service), with `${NAME}` for each mapped secret                                   | `filesystem.configure` |
+| MCP   | project | the existing `.mcp.json` write (`POST /v1/ferrets/:ferretId/mcp/project`'s service), with `${NAME}` for each mapped secret                              | `filesystem.configure` |
 | MCP   | runtime | an `mcp` component and a `profile.put` (the existing login add's service), with `${secret:NAME}` for each mapped secret                                 | `fleet.configure`      |
 
 Each install records **provenance** on what it wrote: `installedFrom: { publisher, publisherName,

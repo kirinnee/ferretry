@@ -243,3 +243,26 @@ describe('one change lands its configuration documents, then its fleet', () => {
     expect(await readFile(join(world.fleet, '.keep'), 'utf8').catch(() => 'none')).toBe('none');
   });
 });
+
+describe('the setup service knows which daemon it is (the copy bundle names its source)', () => {
+  it('answers the kernel identity’s daemon id and name, so an export is never "still starting"', async () => {
+    const world = await fleetWorld();
+    const { kernel } = kernelOver(world);
+    const needs = {
+      logins: { list: async () => ({ logins: [] }), environmentTemplates: async () => [] },
+      loginChanges: {},
+      ferrets: { list: async () => [] },
+    } as never;
+
+    const services = fileAssembly({ kernel, needs, hooks: { provider: () => 'unavailable' } }, new FleetPublication());
+
+    // The service keeps its collaborators private; this reads the one the export asks (setup-service.ts `exportBundle`).
+    const deps = (
+      services.setup as unknown as {
+        readonly deps: { daemonId(): string | undefined; readonly catalog: { machineName(): string } };
+      }
+    ).deps;
+    expect(deps.daemonId()).toBe('fy_daemon_testid');
+    expect(deps.catalog.machineName()).toBe('work-mac');
+  });
+});

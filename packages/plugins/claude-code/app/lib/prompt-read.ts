@@ -39,7 +39,7 @@ const asWire = (recorded: unknown): unknown =>
 export const readStoppedOn = async (client: ClaudeCodeClient, ferret: string): Promise<StoppedOn> => {
   let raw: unknown;
   try {
-    raw = await client.call(PROMPT_ROUTE, { params: { ferretId: ferret } });
+    raw = await client.call(PROMPT_ROUTE, { params: { ferretId: ferret }, quiet: true });
   } catch {
     return NOT_STOPPED;
   }

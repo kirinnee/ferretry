@@ -234,7 +234,19 @@ describe('what the types refuse', () => {
     // Assert — the directory a route holds can list, write and remove; nothing on it opens ciphertext.
     const methods = Object.getOwnPropertyNames(SecretDirectory.prototype).filter(name => name !== 'constructor');
     should(methods.filter(name => !name.startsWith('#')).sort()).deepEqual(
-      ['document', 'inTurn', 'list', 'put', 'putIf', 'putMissing', 'remove', 'write'].sort(),
+      // `putIdentified` and `writeIdentity` answer a write's random seal nonce (a mint ledger's identity), never a value.
+      [
+        'document',
+        'inTurn',
+        'list',
+        'put',
+        'putIdentified',
+        'putIf',
+        'putMissing',
+        'remove',
+        'write',
+        'writeIdentity',
+      ].sort(),
     );
   });
 
@@ -267,6 +279,8 @@ describe('what the types refuse', () => {
       'ferret launch environment': /childEnvironment\s*=\s*async[\s\S]*?\bvault\.values\(\)/u,
       // The kernel's own `${secret:NAME}` lookup (`kernel.secrets`): bound to the kernel alone, never a route or a half.
       'kernel secret resolver': /secretResolver:\s*SecretResolver\s*=\s*\{[\s\S]*?\bvault\.values\(\)/u,
+      // A minted secret's send reads the entry once (`openEntry`), so the ledger authorizes exactly what is sent.
+      'minted secret send': /await\s+vault\.openEntry\(/u,
     };
 
     // Assert — one vault, built in one place, handed only to the allowlist. A new holder adds a use and fails here.

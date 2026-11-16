@@ -67,7 +67,7 @@ const optionText = (invocation: VerbInvocation, name: string): string | undefine
 export default implementCli(manifest, {
   build: ({ client, io }) => {
     const usage = (line: string): number => {
-      io.err(`usage: ${line}`);
+      io.err(`usage: ${line}\n`);
       return USAGE;
     };
 
@@ -117,6 +117,12 @@ export default implementCli(manifest, {
                 `"${zone}" is not a time zone this machine knows: use an IANA name such as America/Los_Angeles or UTC.`,
               );
 
+            // A login the machine does not have is refused in v4's words, before anything is read or written. The list is
+            // the daemon's own (Logins' port, the same one Usage reads), not a file.
+            const known = await client.call<{ readonly logins: readonly { readonly id: string }[] }>('GET /v1/logins');
+            if (!known.logins.some(login => login.id === id))
+              throw new BudgetEditError(`No login "${id}" on this machine.`);
+
             const file = await client.call<ConfigFileView>('GET /v1/config/file', { query: { path: USAGE_FILE } });
             const text = file.exists ? file.text : '';
             const current = budgetInFile(text, id);
@@ -129,8 +135,9 @@ export default implementCli(manifest, {
               io.out(
                 wantsJson(invocation)
                   ? JSON.stringify({ login: id, budget: current ?? null, standing: standing ?? null }, null, 2)
-                  : `${id}: ${budgetWords(current)}.${standing?.pause === undefined ? '' : ` Paused: ${standing.pause.phrase}.`}`,
+                  : `${id}: ${budgetWords(current)}.${standing?.pause === undefined ? '' : ` Paused: ${standing.pause.phrase}.`} What it spent: \`fy login check ${id}\`.`,
               );
+              io.out('\n');
               return OK;
             }
 
@@ -170,11 +177,11 @@ export default implementCli(manifest, {
                 result.timeZoneOutcome = written.outcome;
               }
             }
-            io.out(wantsJson(invocation) ? JSON.stringify(result, null, 2) : lines.join('\n'));
+            io.out(`${wantsJson(invocation) ? JSON.stringify(result, null, 2) : lines.join('\n')}\n`);
             return OK;
           } catch (error) {
             if (!(error instanceof BudgetEditError)) throw error;
-            io.err(error.message);
+            io.err(`${error.message}\n`);
             return FAILED;
           }
         },

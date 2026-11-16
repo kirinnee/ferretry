@@ -9,14 +9,16 @@
  */
 import { afterEach, describe, expect, it } from 'bun:test';
 import { mkdir, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { AutoResumeDecide, FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets } from '@ferretry/core-ferrets/contract/testing';
 import { ownerStanding, StandInAdmission } from '@ferretry/core-gate/contract/testing';
 import { type DaemonImplementation, definePlugin, type HookInvoker, implementDaemon } from '@ferretry/kernel/manifest';
 import { type TestHost, testHost } from '@ferretry/kernel/testing';
 import { fakeLoginChanges, fakeLogins, sampleLogin } from '@ferretry/plugin-logins/contract/testing';
+import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferretry/plugin-logins/contract';
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
+import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
 import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
@@ -51,17 +53,30 @@ async function compose(
     readonly config?: Record<string, unknown>;
     readonly logins?: ReturnType<typeof sampleLogin>[];
     readonly executables?: readonly string[];
+    readonly ferrets?: FakeFerrets;
+    readonly sources?: ModelCatalogSourcesView;
   } = {},
 ): Promise<Composed> {
   const world = await fleetWorld();
+  const composedLogins = fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]);
+  if (options.sources !== undefined) composedLogins.setModelSources(options.sources);
+  // Logins keeps the Ferretry-kept login under state/logins/credentials: the store a wrapper is signed in through.
+  composedLogins.setLaunchStores([
+    {
+      id: 'claude-you',
+      variables: {
+        CLAUDE_SECURESTORAGE_CONFIG_DIR: join(dirname(world.fleet), 'state', 'logins', 'credentials', 'claude-you'),
+      },
+    },
+  ]);
   const stubbed: string[] = [];
   const real: RuntimesAssembler = ctx =>
     (options.assemble ?? hostAssembly)({ ...ctx, kernel: { ...ctx.kernel, roots: world.roots } } as never);
   const host = await testHost({
     plugins: [runtimesDaemon(real) as DaemonImplementation<any>],
     fakes: {
-      ferrets: new FakeFerrets(),
-      logins: fakeLogins(options.logins ?? [sampleLogin('claude-you', { store: 'ferretry' })]),
+      ferrets: options.ferrets ?? new FakeFerrets(),
+      logins: composedLogins,
       loginChanges: fakeLoginChanges(),
     },
     gate: new StandInAdmission(() => ownerStanding()),
@@ -131,6 +146,34 @@ describe('a catalogue read through the composed daemon', () => {
     expect(JSON.stringify(profiles.json())).toContain('modelSets/heavy');
   });
 
+  it('names the machine by the daemon’s own name and carries what the last auto-resume pass did', async () => {
+    const ferrets = new FakeFerrets();
+    const none = await compose({ ferrets });
+    const before = (await none.host.request('GET', '/v1/runtimes/machine')).json<{
+      name: string;
+      lastAutoResume: unknown;
+    }>();
+    ferrets.setLastAutoResume({
+      at: '2027-01-15T08:00:00.000Z' as Instant,
+      resumed: 2,
+      skipped: [{ sessionId: 'ses-9', reason: 'its login needs sign-in' }],
+    });
+    const after = (await none.host.request('GET', '/v1/runtimes/machine')).json<{
+      name: string;
+      lastAutoResume: unknown;
+    }>();
+
+    // `fy machine` printed "this machine" and no restart line, whatever the host was called or had done.
+    expect(before.name).not.toBe('this machine');
+    expect(before.lastAutoResume).toBeNull();
+    expect(after.name).toBe(before.name);
+    expect(after.lastAutoResume).toEqual({
+      at: '2027-01-15T08:00:00.000Z',
+      resumed: 2,
+      skipped: [{ sessionId: 'ses-9', reason: 'its login needs sign-in' }],
+    });
+  });
+
   it('answers in a sentence, not a stack, when the composition falls back to the unavailable assembly (fail closed)', async () => {
     const { host } = await compose({ assemble: unavailableAssembly });
 
@@ -140,13 +183,25 @@ describe('a catalogue read through the composed daemon', () => {
     expect(machine.json<{ error: string }>().error).toContain(UNAVAILABLE);
   });
 
-  it('answers a login that is not there as the files’ own problem, in a sentence naming the rule', async () => {
+  it('does not take the machine down for a runtime whose login is not there: that runtime is unavailable and not listed', async () => {
     const { host } = await compose({ logins: [] });
 
     const machine = await host.request('GET', '/v1/runtimes/machine');
 
-    expect(machine.status).toBeGreaterThanOrEqual(400);
-    expect(JSON.stringify(machine.json())).toContain('uses unknown credential');
+    expect(machine.status).toBe(200);
+    expect(JSON.stringify(machine.json())).not.toContain('uses unknown credential');
+    expect(JSON.stringify(machine.json())).not.toContain('claude-default');
+  });
+});
+
+describe('a machine export through the composed daemon', () => {
+  it('copies this machine once the kernel knows who it is: the bundle is answered, not "still starting"', async () => {
+    const { host } = await compose();
+
+    const exported = await host.request('GET', '/v1/runtimes/export');
+
+    expect([exported.status, exported.status === 200 ? '' : JSON.stringify(exported.json())]).toEqual([200, '']);
+    expect(exported.body).not.toContain('still starting');
   });
 });
 
@@ -184,8 +239,9 @@ describe('a real apply through the composed daemon', () => {
 
   it('S144 a real apply links a login’s sign-in folder and never copies or reads it: its bytes are in no home, no wrapper and no manifest', async () => {
     const { host, world } = await compose();
-    await mkdir(join(world.fleet, 'credentials', 'claude-you'), { recursive: true });
-    await writeFile(join(world.fleet, 'credentials', 'claude-you', '.credentials.json'), INERT);
+    const store = join(dirname(world.fleet), 'state', 'logins', 'credentials', 'claude-you');
+    await mkdir(store, { recursive: true });
+    await writeFile(join(store, '.credentials.json'), INERT);
 
     const applied = await stageAndApply(host, put('claude-work'));
 
@@ -914,6 +970,20 @@ describe('the homes the composed daemon provides', () => {
     expect(port.home('00000000-0000-4000-8000-0000000000ff')).toBeUndefined();
   });
 
+  it('the provided port answers catalog() and tools() as the fleet runtimes and machine reads do (Packs recommends from them)', async () => {
+    const { host } = await compose();
+    const port = host.provided(RuntimesPort);
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+    const machine = await host.request('GET', '/v1/runtimes/machine');
+
+    expect(runtimes.status).toBe(200);
+    expect(machine.status).toBe(200);
+    expect(await port.catalog()).toEqual(runtimes.json<{ runtimes: unknown[] }>().runtimes as never);
+    expect(await port.tools()).toEqual(machine.json<{ tools: unknown[] }>().tools as never);
+    expect((await port.tools()).length).toBeGreaterThan(0);
+  });
+
   it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
     const { host, world } = await compose();
     await mkdir(join(world.fleet, 'assets', 'skills', 'review'), { recursive: true });
@@ -1026,5 +1096,53 @@ describe('M2b the auto-resume switch through the composed daemon', () => {
     expect((await askSwitch({ file: { autoResume: true } }))?.decision).toEqual({ allow: true });
     const off = await askSwitch({ file: { autoResume: false } });
     expect(off?.decision).toEqual({ allow: false, reason: 'Auto-resume after restart is off on this machine' });
+  });
+});
+
+const FIXTURE_SOURCES = ModelCatalogSourcesSchema.parse({
+  catalogs: {
+    anthropic: {
+      id: 'anthropic',
+      origin: 'built-in',
+      label: 'Anthropic',
+      docs: 'https://example.invalid/anthropic',
+      verified: '2027-01-01',
+      claude: {
+        models: [
+          { id: 'claude-opus-5-5', label: 'Opus 5.5', tier: 'best', default: true, efforts: ['high'] },
+          { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5', tier: 'balanced', efforts: [] },
+          { id: 'claude-haiku-5-5', label: 'Haiku 5.5', tier: 'fast', efforts: [] },
+        ],
+      },
+    },
+  },
+  presets: [],
+});
+
+describe('a runtime’s models through the composed daemon', () => {
+  it('offers the models of the login’s catalog, read from Logins, not only the profile’s model set', async () => {
+    const { host } = await compose({ sources: FIXTURE_SOURCES });
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+
+    const body = runtimes.json<{
+      runtimes: { name: string; models?: { catalog: { id: string }; choices: { id: string }[] } }[];
+    }>();
+    const runtime = body.runtimes.find(entry => entry.name === 'claude-default');
+    expect(runtime?.models?.catalog.id).toBe('anthropic');
+    expect(runtime?.models?.choices.map(choice => choice.id)).toEqual([
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
+    ]);
+  });
+
+  it('shows the model set only when Logins has no catalog for the login', async () => {
+    const { host } = await compose();
+
+    const runtimes = await host.request('GET', '/v1/runtimes');
+
+    const body = runtimes.json<{ runtimes: { name: string; models?: unknown }[] }>();
+    expect(body.runtimes.find(entry => entry.name === 'claude-default')?.models).toBeUndefined();
   });
 });

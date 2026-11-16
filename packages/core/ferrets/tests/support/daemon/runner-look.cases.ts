@@ -79,6 +79,19 @@ export function runnerLookCases(): void {
       should(promptOf({}, mask)).deepEqual({});
     });
 
+    it('should carry the instant the observer stored for the turn state, unchanged, and none when none is stored', () => {
+      // Arrange
+      const at = '2026-11-05T00:00:10.000Z';
+
+      // Act
+      const prompt = promptOf({ turnState: 'needs-input', turnStateAt: at }, text => text);
+
+      // Assert
+      should(prompt.turnState).equal('needs-input');
+      should(prompt.turnStateAt).equal(at);
+      should(promptOf({ turnState: 'your-turn' }, text => text).turnStateAt).be.undefined();
+    });
+
     it('should mask every string of a harness dialog the pane is asking, keys and nested options included', () => {
       // Arrange
       const mask = (text: string) => text.replaceAll('example.com', '***********');
@@ -100,6 +113,41 @@ export function runnerLookCases(): void {
       should(JSON.stringify(prompt.dialog)).not.containEql('example.com');
       should(JSON.stringify(prompt.dialog)).containEql('Trust ***********?');
       should(JSON.stringify(prompt.dialog)).containEql('Yes, trust ***********');
+    });
+
+    it('should carry the limit a rate-limited session records, masked, and none for a session that is not limited', () => {
+      // Arrange
+      const mask = (text: string) => text.replaceAll('example.com', '***********');
+      const limited = {
+        status: 'rate_limited',
+        quota: { limitNotice: 'example.com spend limit', unavailableReason: 'spend_limit', retryAt: 1_700_000_000_000 },
+      } as never;
+
+      // Act
+      const prompt = promptOf(limited, mask);
+
+      // Assert
+      should(prompt.limit).deepEqual({ notice: '*********** spend limit', spend: true, retryAt: 1_700_000_000_000 });
+      should(promptOf({ status: 'running', quota: (limited as { quota: never }).quota }, mask).limit).be.undefined();
+      should(promptOf({ status: 'rate_limited' } as never, mask).limit).be.undefined();
+    });
+
+    it('should read the limit from the usage-limit dialog a session is parked on when its quota names none', () => {
+      // Act
+      const prompt = promptOf(
+        {
+          status: 'rate_limited',
+          harnessDialog: {
+            kind: 'usage-limit',
+            title: 'Usage limit',
+            body: 'You hit your limit\nresets at 5pm',
+          } as never,
+        },
+        text => text,
+      );
+
+      // Assert
+      should(prompt.limit).deepEqual({ notice: 'You hit your limit', spend: false });
     });
 
     it('should keep the shape and every non-string of a value it masks', () => {

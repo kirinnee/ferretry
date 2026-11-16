@@ -53,7 +53,7 @@ import {
   signInRuleWords,
   type TwoFactorKeySummary,
 } from '../../contract/routes/index.ts';
-import type { z } from 'zod';
+import { z } from 'zod';
 import type { AccountsClient, PasskeyWords } from '../shell.tsx';
 
 export type RuleClient = AccountsClient;
@@ -76,6 +76,24 @@ async function ask<Schema extends z.ZodType>(
 /** Every rule on the machine and the stages waiting in the app (`secrets.use`: it names accounts). */
 export async function listRules(client: RuleClient): Promise<SignInRuleList> {
   return await ask(client, 'GET /v1/sign-in-rules', SignInRuleListSchema);
+}
+
+/** The one fact read of a ferret: its board's project, a UUID. `unfiled` is not one, so it reads as no project. */
+const FerretProjectSchema = z.looseObject({ projectId: z.uuid() });
+
+/**
+ * The board project a ferret works on, for the "this project" choice of a rule's scope, or `undefined` when it has none
+ * (unfiled, a session older than boards, or a read that failed). Only a NARROWING choice hangs on it: nothing is widened
+ * when the read fails, the owner is just not offered the project. The ferret record names no secret.
+ */
+export async function readFerretProject(client: RuleClient, ferret: string): Promise<string | undefined> {
+  try {
+    const answer: unknown = await client.call('GET /v1/ferrets/:ferretId', { params: { ferretId: ferret } });
+    const read = FerretProjectSchema.safeParse(answer);
+    return read.success ? read.data.projectId : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Whether a sign-in could have a rule now, and why not. */
@@ -371,13 +389,12 @@ export const suspendableRules = (rules: readonly SignInRuleView[], signIn: SignI
 export const suspendWarning = (count: number): string =>
   `Saving this suspends ${String(count)} standing ${count === 1 ? 'rule' : 'rules'}: you approve again with a passkey.`;
 
-/** @pending accounts: the device-revoke rule-count warning ("revoking this device suspends N standing sign-in rules") needs a slot in Access's revoke-device panel */
+/** The note under a paired device's Revoke (Access's `access.device-note` slot): how many rules revoking it suspends. */
 export const deviceRevokeWarning = (count: number): string =>
   `${String(count)} standing ${count === 1 ? 'rule was' : 'rules were'} approved with this device’s passkey; ${count === 1 ? 'it' : 'they'} will be suspended.`;
 
 /**
  * Rules that this paired device's passkey approved (a revoke of the device suspends them).
- * @pending accounts: the device-revoke rule-count warning ("revoking this device suspends N standing sign-in rules") needs a slot in Access's revoke-device panel
  */
 export const rulesApprovedWith = (rules: readonly SignInRuleView[], deviceId: string): number =>
   rules.filter(rule => rule.approvedWith.deviceId === deviceId && rule.status !== 'suspended').length;

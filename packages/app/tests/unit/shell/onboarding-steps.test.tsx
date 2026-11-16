@@ -37,7 +37,7 @@ async function until(done: () => boolean, turns = 300): Promise<void> {
   }
 }
 
-/** The steps the daemon lists: exactly the ones the five plugins declare in their manifests. */
+/** The steps the daemon lists: exactly the ones the booted plugins declare in their manifests. */
 const declaredSteps = real.flatMap(entry =>
   (entry.manifest.onboarding ?? []).map(step => ({
     plugin: entry.id,
@@ -99,12 +99,12 @@ describe('S14 the first run is Onboarding’s daemon-less screen', () => {
     await view.unmount();
   });
 
-  test('S14 a paired device is not sent to /onboarding', async () => {
+  test('S14 a paired device is not sent to /onboarding: opening the app lands on its machine', async () => {
     go('/app/');
     const { app } = boot({ paired: true });
     const view = await mount(app);
     await until(() => view.container.textContent?.includes('laptop') === true);
-    expect(window.location.pathname).toBe('/app/');
+    expect(window.location.pathname).toBe('/d/d1');
     expect(view.container.querySelector('[data-onboarding="setup"]')).toBeNull();
     await view.unmount();
   });
@@ -155,7 +155,7 @@ describe('S14 the steps come from the plugins', () => {
     // Every declared step has its box, and each box mounts the slot once.
     const boxes = [...view.container.querySelectorAll('[data-step]')].map(node => node.getAttribute('data-step'));
     expect(boxes.toSorted()).toEqual(declaredSteps.map(step => `${step.plugin}.${step.id}`).toSorted());
-    expect(declaredSteps.map(step => step.plugin).toSorted()).toEqual(
+    expect([...new Set(declaredSteps.map(step => step.plugin))].toSorted()).toEqual(
       ['claude-code', 'codex', 'logins', 'runtimes', 'shells'].toSorted(),
     );
     await view.unmount();

@@ -105,6 +105,7 @@ async function world(
 ) {
   let opener: ChildEnvironmentOpener | undefined;
   const programs: string[] = [];
+  const spawned: { program: string; options: unknown }[] = [];
   const reached: string[] = [];
   const refused = (): never => {
     throw new Error('not used by a secret run');
@@ -114,6 +115,7 @@ async function world(
     runBytes: refused,
     start: (program, _args, spawnOptions): ChildHandle => {
       programs.push(program);
+      spawned.push({ program, options: spawnOptions });
       const env = opener?.open(spawnOptions?.env as ChildEnvironment) ?? {};
       return {
         pid: 1,
@@ -164,7 +166,7 @@ async function world(
   const core = host.provided(VaultPort);
   for (const name of [GROQ, OWNED, OTHER]) await core.put(name, VALUE);
   const of = (id: string) => host.provided(VaultPort, id);
-  return { host, core, of, programs, reached, seen };
+  return { host, core, of, programs, spawned, reached, seen };
 }
 
 const TENANT: Permissions = { network: ['api.groq.test'], spawn: ['echo'], secrets: [GROQ] };
@@ -623,18 +625,21 @@ describe('the phone approval’s reach through the Vault is by name', () => {
       expect(api.pushNumber).toBeUndefined();
       expect(api.observeTerminal).toBeUndefined();
       expect(api.tainted).toBeUndefined();
+      expect(api.inputOpen).toBeUndefined();
     }
     const accounts = of('accounts');
     expect(typeof accounts.pushNumber).toBe('function');
     expect(typeof accounts.observeTerminal).toBe('function');
     expect(typeof accounts.tainted).toBe('function');
+    // The Warden's hold answer: Accounts alone asks whether a ferret has an input card open, and a yes or no is all it gets.
+    expect(accounts.inputOpen?.(FERRET)).toBe(false);
     // With no Browsers or Terminals bound, a look finds nothing, and nothing is said to be unsteered.
     expect(await accounts.pushNumber?.(FERRET, 'login')).toBeUndefined();
     expect(await accounts.observeTerminal?.(FERRET, 'build')).toEqual({ ok: false, reason: 'unsupported' });
   });
 
-  test('only Browsers is handed the raise, and it is refused while no service provides approvals', async () => {
-    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+  test('only Browsers and Terminals are handed the raise, and it is refused while no service provides approvals', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, terminals: NONE, tenant: NONE });
 
     expect(of('accounts').raisePhoneApproval).toBeUndefined();
     expect(of('tenant').raisePhoneApproval).toBeUndefined();
@@ -643,7 +648,65 @@ describe('the phone approval’s reach through the Vault is by name', () => {
       ok: false,
       error: PHONE_APPROVAL_UNAVAILABLE,
     });
+    expect(await of('terminals').raisePhoneApproval?.(FERRET, { target: { kind: 'terminal', key: 'dev' } })).toEqual({
+      ok: false,
+      error: PHONE_APPROVAL_UNAVAILABLE,
+    });
     // A core caller keeps the whole reach.
     expect(await core.raisePhoneApproval?.(FERRET, ask)).toEqual({ ok: false, error: PHONE_APPROVAL_UNAVAILABLE });
+  });
+});
+
+describe('secure copy’s reach through the Vault is by name', () => {
+  const NONE: Permissions = {};
+
+  test('only Accounts (and a core caller) is handed the command runner and the masking registry', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    for (const id of ['browsers', 'tenant']) {
+      expect(of(id).captureCommand).toBeUndefined();
+      expect(of(id).maskCopy).toBeUndefined();
+    }
+    expect(typeof of('accounts').captureCommand).toBe('function');
+    expect(typeof of('accounts').maskCopy?.hold).toBe('function');
+    expect(typeof of('accounts').maskCopy?.retime).toBe('function');
+    expect(typeof of('accounts').maskCopy?.holdScrollback).toBe('function');
+    expect(typeof core.captureCommand).toBe('function');
+  });
+
+  test('P2-5 only Browsers (and a core caller) is handed the takeover report, which ends waiting pastes', async () => {
+    const { of, core } = await world({ accounts: NONE, browsers: NONE, tenant: NONE });
+
+    expect(typeof of('browsers').pageTakenOver).toBe('function');
+    expect(typeof core.pageTakenOver).toBe('function');
+    for (const id of ['accounts', 'tenant']) expect(of(id).pageTakenOver).toBeUndefined();
+  });
+
+  test('P1-2 starts a capture child sealed: no tool overlay, whatever the program is called', async () => {
+    const { of, spawned } = await world({ accounts: NONE });
+    const capture = of('accounts').captureCommand;
+    if (capture === undefined) throw new Error('Accounts should be handed the command runner');
+
+    for (const program of ['git', 'gh', 'vercel']) {
+      await capture({ command: [program, 'auth', 'token'], cwd: '/tmp', timeoutMs: 1000, maxOutputBytes: 1024 });
+    }
+
+    expect(spawned.map(each => each.program)).toEqual(['git', 'gh', 'vercel']);
+    for (const each of spawned) expect((each.options as { sealed?: unknown }).sealed).toBe(true);
+  });
+
+  test('holds a value in the masking registry without handing it back, and lets go of the hold sooner', async () => {
+    const { of } = await world({ accounts: NONE });
+    const registry = of('accounts').maskCopy;
+    if (registry === undefined) throw new Error('Accounts should be handed the masking registry');
+
+    registry.hold('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]', Date.now() + 60_000);
+    registry.retime('ferret_1' as never, '[sealed:token]', Date.now() + 1_000);
+    registry.retime('ferret_9' as never, '[sealed:nothing]', Date.now());
+    registry.holdScrollback('ferret_1' as never, 'FAKE-SC-7f3a91', '[sealed:token]');
+
+    // Four members; the only answer any gives is whether the scrollback may keep another copy, never a value.
+    expect(Object.keys(registry).sort()).toEqual(['hold', 'holdScrollback', 'retime', 'scrollbackFull']);
+    expect(typeof registry.scrollbackFull('ferret_1' as never, '[sealed:token]')).toBe('boolean');
   });
 });

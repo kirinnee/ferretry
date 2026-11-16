@@ -16,7 +16,15 @@ interface ChoiceOption {
 /** A key that takes one word out of a short list. */
 export interface ChoiceSetting {
   readonly kind: 'choice';
-  readonly path: 'nav.side' | 'nav.style' | 'side.show' | 'density';
+  readonly path:
+    | 'nav.side'
+    | 'nav.style'
+    | 'side.show'
+    | 'density'
+    | 'phone.nav.side'
+    | 'phone.nav.style'
+    | 'phone.side.show'
+    | 'phone.density';
   readonly name: string;
   readonly hint: string;
   readonly options: readonly ChoiceOption[];
@@ -25,7 +33,7 @@ export interface ChoiceSetting {
 /** A key that takes a list of view names (`agenda, board`). */
 export interface ListSetting {
   readonly kind: 'list';
-  readonly path: 'nav.items' | 'top' | 'panels.ferret.side';
+  readonly path: 'nav.items' | 'top' | 'panels.ferret.side' | 'phone.nav.items' | 'phone.top';
   readonly name: string;
   readonly hint: string;
 }
@@ -95,9 +103,68 @@ export const LAYOUT_SETTINGS: readonly LayoutSetting[] = [
     name: 'Ferret side panels',
     hint: 'The panels beside a ferret, in order, separated by commas',
   },
+  {
+    kind: 'choice',
+    path: 'phone.nav.side',
+    name: 'Phone navigation side',
+    hint: 'Where the navigation sits on a narrow screen',
+    options: [
+      { id: 'left', label: 'Left', title: 'A column down the left edge.' },
+      { id: 'right', label: 'Right', title: 'A column down the right edge.' },
+      { id: 'top', label: 'Top', title: 'A row along the top.' },
+      { id: 'bottom', label: 'Bottom', title: 'A row along the bottom.' },
+    ],
+  },
+  {
+    kind: 'choice',
+    path: 'phone.nav.style',
+    name: 'Phone navigation style',
+    hint: 'How the navigation is drawn on a narrow screen',
+    options: [
+      { id: 'rail', label: 'Rail', title: 'Icons in a slim strip.' },
+      { id: 'bar', label: 'Bar', title: 'Icons with names in a bar.' },
+      { id: 'list', label: 'List', title: 'Names in a list.' },
+    ],
+  },
+  {
+    kind: 'choice',
+    path: 'phone.side.show',
+    name: 'Phone second column',
+    hint: 'The column beside the page on a narrow screen',
+    options: [
+      { id: 'never', label: 'Never', title: 'No second column.' },
+      { id: 'wide-only', label: 'Wide screens', title: 'Only when the screen is wide.' },
+      { id: 'always', label: 'Always', title: 'On every screen.' },
+    ],
+  },
+  {
+    kind: 'choice',
+    path: 'phone.density',
+    name: 'Phone density',
+    hint: 'How much room each row takes on a narrow screen',
+    options: [
+      { id: 'comfortable', label: 'Comfortable', title: 'Room between rows.' },
+      { id: 'compact', label: 'Compact', title: 'Keep rows close, to see more at once.' },
+    ],
+  },
+  {
+    kind: 'list',
+    path: 'phone.nav.items',
+    name: 'Phone navigation items',
+    hint: 'The screens in the navigation on a narrow screen, in order, separated by commas',
+  },
+  {
+    kind: 'list',
+    path: 'phone.top',
+    name: 'Phone top bar',
+    hint: 'What the top bar shows on a narrow screen, in order, separated by commas',
+  },
 ];
 
-/** The word a choice key currently holds. */
+/**
+ * The word a choice key currently holds. A phone key the layout does not set follows the wide one, the way the shell
+ * lays `phone` over the layout.
+ */
 export function choiceOf(layout: Layout, path: ChoiceSetting['path']): string {
   switch (path) {
     case 'nav.side':
@@ -108,10 +175,18 @@ export function choiceOf(layout: Layout, path: ChoiceSetting['path']): string {
       return layout.side.show;
     case 'density':
       return layout.density;
+    case 'phone.nav.side':
+      return layout.phone?.nav?.side ?? layout.nav.side;
+    case 'phone.nav.style':
+      return layout.phone?.nav?.style ?? layout.nav.style;
+    case 'phone.side.show':
+      return layout.phone?.side?.show ?? layout.side.show;
+    case 'phone.density':
+      return layout.phone?.density ?? layout.density;
   }
 }
 
-/** The names a list key currently holds. */
+/** The names a list key currently holds; a phone list the layout does not set follows the wide one. */
 export function listOf(layout: Layout, path: ListSetting['path']): readonly string[] {
   switch (path) {
     case 'nav.items':
@@ -120,6 +195,10 @@ export function listOf(layout: Layout, path: ListSetting['path']): readonly stri
       return layout.top;
     case 'panels.ferret.side':
       return layout.panels['ferret.side'] ?? [];
+    case 'phone.nav.items':
+      return layout.phone?.nav?.items ?? layout.nav.items;
+    case 'phone.top':
+      return layout.phone?.top ?? layout.top;
   }
 }
 

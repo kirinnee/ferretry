@@ -90,8 +90,8 @@ export const THEME_FAMILIES: readonly ThemeFamily[] = Object.freeze([
   { id: 'ma', label: 'Ma', blurb: 'Extreme restraint — enormous whitespace, one accent per screen.' },
 ] as const);
 
-export const THEME_MODES: readonly ThemeMode[] = Object.freeze(['system', 'light', 'dark'] as const);
-export const TEXT_SCALES: readonly TextScale[] = Object.freeze(['default', 'large', 'larger'] as const);
+const THEME_MODES: readonly ThemeMode[] = Object.freeze(['system', 'light', 'dark'] as const);
+const TEXT_SCALES: readonly TextScale[] = Object.freeze(['default', 'large', 'larger'] as const);
 
 const FAMILY_IDS: readonly string[] = THEME_FAMILIES.map(family => family.id);
 const DEFAULT_FAMILY: ThemeFamilyId = 'studio';

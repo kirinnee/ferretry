@@ -7,15 +7,13 @@
  */
 
 import { AsksChanged } from '@ferretry/core-asks/contract';
-import { PushSeenRequestSchema } from '../../contract/wire.ts';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { daemonOfClient } from '../shell.ts';
-import { type AgendaCall, agendaCall, requestIdHeaders } from './agenda-call.ts';
+import type { AgendaCall } from './agenda-call.ts';
 import type { ClearPort } from './agenda-clear-agents.ts';
 import { DaemonAgendaClient } from './agenda-client.ts';
 import { DaemonAgendaStore } from './agenda-store.ts';
-import { PUSH_SEEN } from './agenda-wire.ts';
 import { AgendaFerretStore } from './ferret-store.ts';
 import { type DaemonConnection, daemonConnection, THIS_MACHINE } from './machine.ts';
 
@@ -29,8 +27,12 @@ export interface AgendaRuntime {
   readonly agenda: DaemonAgendaClient;
   readonly ferrets: AgendaFerretStore;
   readonly clearPort: ClearPort;
-  /** The owner opened an ask here: its buzz is spent on every device (`POST /v1/push/seen`). Best effort. */
-  readonly itemOpened: (ferret: string, ask: string) => Promise<void>;
+  /**
+   * Lets go of the transport events this runtime listens to and stops the ferret store's queued reads. For the owner
+   * of a runtime made for one purpose (the nav badge); the device's shared runtime (`AgendaFleet`) lives with the
+   * connection. A disposed runtime does not read again — make a new one.
+   */
+  readonly dispose: () => void;
 }
 
 export type RuntimeClient = AgendaCall & Partial<Pick<PluginClient, 'subscribe'>>;
@@ -46,27 +48,23 @@ export const createAgendaRuntime = (
   const id = daemonOfClient(client);
   const connection = id === undefined ? THIS_MACHINE : daemonConnection({ daemonId: id });
   const ferrets = new AgendaFerretStore(client, connection, agenda.rollup);
-  client.subscribe?.(AsksChanged, payload => {
-    agenda.noteEvent(connection, payload);
-    ferrets.askChanged();
-  });
-  client.subscribe?.(FerretsChanged, () => ferrets.ferretChanged());
+  const transport = [
+    client.subscribe?.(AsksChanged, payload => {
+      agenda.noteEvent(connection, payload);
+      ferrets.askChanged();
+    }),
+    client.subscribe?.(FerretsChanged, () => ferrets.ferretChanged()),
+  ];
   return {
+    dispose: () => {
+      for (const off of transport.splice(0)) off?.();
+      ferrets.stop();
+    },
     client,
     connection,
     name: THIS_MACHINE_NAME,
     agenda,
     ferrets,
     clearPort: { clientFor: target => (target.daemonId === connection.daemonId ? client : undefined) },
-    itemOpened: async (ferret, ask) => {
-      try {
-        await agendaCall(client, PUSH_SEEN, {
-          body: PushSeenRequestSchema.parse({ sessionId: ferret, agendaId: ask }),
-          headers: requestIdHeaders(),
-        });
-      } catch {
-        // A seen mark that did not land only leaves a buzz on another device; nothing here waits on it.
-      }
-    },
   };
 };

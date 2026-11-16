@@ -652,6 +652,18 @@ export function RuntimeModelChoices({
   submittingModel,
 }: RuntimeModelChoicesProps) {
   if (error) {
+    // In the composer's popover this is a quiet line, said once: a daemon whose runtime discovery is not built yet is
+    // a fact about the machine, not an alarm, and the person only sees it by opening the picker.
+    if (presentation === 'popover')
+      return (
+        <p
+          className="m-0 px-cell-x py-1 text-meta text-muted leading-base"
+          data-model-choices-unavailable=""
+          role="status"
+        >
+          Model choices are unavailable: {runtimeModelCatalogErrorMessage(error)}
+        </p>
+      );
     return (
       <p
         className="mt-2 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
@@ -1097,7 +1109,12 @@ export function RuntimeEffortControls({
         />
       ) : (
         <div className={popover ? undefined : 'mt-3'}>
-          {catalogError ? (
+          {catalogError && popover ? (
+            // The cause is said once, by the model list beside it.
+            <p className="m-0 px-cell-x py-1 text-meta text-muted leading-base" role="status">
+              Reasoning choices are unavailable until the model list can be read.
+            </p>
+          ) : catalogError ? (
             <p
               className="m-0 rounded-control border border-err-border bg-surface-2 p-3 text-err text-ui leading-base"
               role="alert"

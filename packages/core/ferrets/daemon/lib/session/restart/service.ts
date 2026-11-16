@@ -58,6 +58,25 @@ export class RestartBusy extends Error {
   }
 }
 
+/**
+ * The ONE sentence a blocked restart is queued with (the same fixed-text rule as {@link RESTART_BUSY_DETAIL}). Why it is
+ * blocked, in the launch's own words, is journalled on the ferret once (`session.restart_blocked`), never queued.
+ */
+export const RESTART_BLOCKED_DETAIL =
+  'Its runtime cannot start now (a login may need sign-in); it keeps running as it is, and the restart is tried again.';
+
+/**
+ * Thrown by {@link RestartPorts.restart} when the relaunch was refused BEFORE the old harness was stopped (its runtime
+ * cannot start: a login that needs sign-in, a runtime switched off): the ferret runs on, untouched, and the restart is
+ * kept to try again. `reason` is the launch's refusal sentence.
+ */
+export class RestartBlocked extends Error {
+  constructor(readonly reason: string) {
+    super(reason);
+    this.name = 'RestartBlocked';
+  }
+}
+
 export interface RestartPorts {
   /** Every ferret: for a person's request, which may name any of them. */
   subjects(): Promise<readonly RestartSubject[]>;
@@ -65,10 +84,15 @@ export interface RestartPorts {
   subject(id: string): Promise<RestartSubject | undefined>;
   /** The sections a launch now would change for this ferret, read fresh — empty when it is current. */
   outdated(id: string): Promise<readonly LaunchInstructionSectionId[]>;
-  /** The same-login resume move, without force. Throws {@link RestartBusy} when the inventory refuses. */
+  /**
+   * The same-login resume move, without force. Throws {@link RestartBusy} when the inventory refuses, and
+   * {@link RestartBlocked} when the runtime cannot start (checked before the old harness is stopped, which it then is not).
+   */
   restart(id: string, origin: LaunchOrigin, requestedBy?: string): Promise<void>;
   /** Journals that a queued restart gave up, so the ferret's history says why. */
   gaveUp(id: string, reason: string): Promise<void>;
+  /** Journals, once per wait, that a restart is blocked and why (`session.restart_blocked`), so the owner can act. */
+  blocked(id: string, reason: string): Promise<void>;
   readonly queue: {
     load(): Promise<readonly RestartQueueEntry[]>;
     save(entries: readonly RestartQueueEntry[]): Promise<void>;
@@ -193,13 +217,14 @@ export class RestartService {
     for (const subject of targets) {
       // A person asking again starts the ferret's backoff over: the drain may try it at its next tick.
       this.#retries.delete(subject.id);
-      // read-scoped: none — the only detail ever queued is RestartBusy's one fixed sentence, no interpolated text
+      // read-scoped: none — only RestartBusy's and RestartBlocked's fixed sentences are queued, nothing interpolated
       const wait = (reason: RestartQueueReason): void => {
         queued.push({
           id: subject.id,
           ...named(subject),
           reason,
           ...(reason === 'in-flight' ? { detail: RESTART_BUSY_DETAIL } : {}),
+          ...(reason === 'blocked' ? { detail: RESTART_BLOCKED_DETAIL } : {}),
         });
         waiting.set(subject.id, {
           id: subject.id,
@@ -220,7 +245,12 @@ export class RestartService {
           waiting.delete(subject.id);
         } catch (error) {
           if (error instanceof RestartBusy) wait('in-flight');
-          else failed.push({ id: subject.id, ...named(subject), reason: message(error) });
+          else if (error instanceof RestartBlocked) {
+            // Said once per wait: a ferret already waiting blocked was told before.
+            if (waiting.get(subject.id)?.reason !== 'blocked')
+              await this.ports.blocked(subject.id, error.reason).catch(() => undefined);
+            wait('blocked');
+          } else failed.push({ id: subject.id, ...named(subject), reason: message(error) });
         }
       }
     }
@@ -267,6 +297,12 @@ export class RestartService {
       } catch (error) {
         if (error instanceof RestartBusy) {
           kept.push({ ...entry, reason: 'in-flight' });
+          this.#refused(entry.id, subject.revision, retry);
+        } else if (error instanceof RestartBlocked) {
+          // The old harness runs on, untouched: kept, tried again on the same backoff (a sign-in is seen at the next
+          // try), and journalled only the first time it is blocked, never on every tick.
+          if (entry.reason !== 'blocked') await this.ports.blocked(entry.id, error.reason).catch(() => undefined);
+          kept.push({ ...entry, reason: 'blocked' });
           this.#refused(entry.id, subject.revision, retry);
         } else await this.ports.gaveUp(entry.id, message(error)).catch(() => undefined);
       }

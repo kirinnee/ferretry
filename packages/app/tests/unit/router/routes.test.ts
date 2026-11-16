@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { ScreenRef } from '../../../src/layout/engine.ts';
-import { addressPlace, daemonSettingsHref, routeTable } from '../../../src/router/routes.ts';
+import { addressPlace, daemonSettingsHref, needsSubject, routeTable } from '../../../src/router/routes.ts';
 
 const card: ScreenRef = { plugin: 'board', id: 'card', path: 'board/:card', label: 'Card' };
 const newCard: ScreenRef = { plugin: 'board', id: 'new-card', path: 'board/new', label: 'New card' };
@@ -49,6 +49,28 @@ describe('routes', () => {
     expect(table.parse('/d/d1/board/new')).toMatchObject({ screen: newCard });
   });
 
+  test('board-app: a trailing optional param (`board/:project?`) matches with and without its segment', () => {
+    const board: ScreenRef = { plugin: 'board', id: 'board', path: 'board/:project?', label: 'Board' };
+    const optional = routeTable([board]);
+    expect(optional.parse('/d/d1/board')).toEqual({ kind: 'screen', daemon: 'd1', screen: board, params: {} });
+    expect(optional.parse('/d/d1/board/')).toEqual({ kind: 'screen', daemon: 'd1', screen: board, params: {} });
+    // The card id a v4 deep link carries (`/d/<id>/board/<card>`) is the param, named without its `?`.
+    expect(optional.parse('/d/d1/board/I1')).toEqual({
+      kind: 'screen',
+      daemon: 'd1',
+      screen: board,
+      params: { project: 'I1' },
+    });
+    expect(optional.parse('/d/d1/board/I1/extra')).toEqual({ kind: 'not-found', path: '/d/d1/board/I1/extra' });
+    expect(optional.href(board, {}, 'd1')).toBe('/d/d1/board');
+    expect(optional.href(board, { project: 'I 1' }, 'd1')).toBe('/d/d1/board/I%201');
+  });
+
+  test('board-app: an exact route wins over an optional one at the same address', () => {
+    const board: ScreenRef = { plugin: 'board', id: 'board', path: 'board/:project?', label: 'Board' };
+    expect(routeTable([board, newCard]).parse('/d/d1/board/new')).toMatchObject({ screen: newCard });
+  });
+
   test('an absolute screen has no daemon', () => {
     expect(table.parse('/join')).toEqual({ kind: 'screen', screen: join, params: {} });
     expect(table.parse('/d/d1/join')).toEqual({ kind: 'not-found', path: '/d/d1/join' });
@@ -67,6 +89,32 @@ describe('routes', () => {
     expect(daemonSettingsHref('d1', 'board')).toBe('/d/d1/settings/board');
     expect(daemonSettingsHref('d1', 'runtimes', 'model-sets')).toBe('/d/d1/settings/runtimes/model-sets');
     expect(daemonSettingsHref('d 1')).toBe('/d/d%201/settings');
+  });
+});
+
+describe('a trailing optional parameter', () => {
+  const board: ScreenRef = { plugin: 'board', id: 'board', path: 'board/:project?', label: 'Board' };
+  const sharing: ScreenRef = { plugin: 'catalogs', id: 'sharing', path: 'sharing/:tab?', label: 'Sharing' };
+  const optional = routeTable([board, sharing, card]);
+
+  test('is served with and without it, and is a place on its own (the command bar and the nav list it)', () => {
+    expect(optional.parse('/d/d1/board')).toEqual({ kind: 'screen', daemon: 'd1', screen: board, params: {} });
+    expect(optional.parse('/d/d1/sharing/shared')).toEqual({
+      kind: 'screen',
+      daemon: 'd1',
+      screen: sharing,
+      params: { tab: 'shared' },
+    });
+    expect(optional.href(board, {}, 'd1')).toBe('/d/d1/board');
+    expect(optional.href(sharing, { tab: 'catalogs' }, 'd1')).toBe('/d/d1/sharing/catalogs');
+    expect(needsSubject(board.path)).toBe(false);
+    expect(needsSubject(sharing.path)).toBe(false);
+  });
+
+  test('a required parameter still needs a subject', () => {
+    expect(needsSubject('ferrets/:ferret/chat')).toBe(true);
+    expect(needsSubject('card/:id')).toBe(true);
+    expect(needsSubject('/join')).toBe(false);
   });
 });
 

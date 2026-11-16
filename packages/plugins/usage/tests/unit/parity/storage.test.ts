@@ -1,8 +1,16 @@
 /** Parity rows F-0130, F-0230, F-0231, F-0253, F-0254, F-0255 (docs/design/rebuild-parity.md, usage). */
 import { describe, expect, test } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
-import { PAUSE_TOLD_STATE, PAUSES_STATE, INSIGHTS_STATE, type Pause } from '../../../contract/index.ts';
+import {
+  COMPACTION_HISTORY_STATE,
+  CompactionHistoryFileSchema,
+  PAUSE_TOLD_STATE,
+  PAUSES_STATE,
+  INSIGHTS_STATE,
+  type Pause,
+} from '../../../contract/index.ts';
 import { PausesStore, ToldStore } from '../../../daemon/adapters/budget/ports.ts';
+import { StateCompactionHistory } from '../../../daemon/adapters/usage/state-compaction-history.ts';
 import manifest from '../../../manifest.ts';
 import { usageHost } from './host.ts';
 
@@ -80,5 +88,26 @@ describe('the usage state files', () => {
 
   test.skip('F-0254 F-0255 the index database has no -shm and -wal files of its own — pending port: the kernel sqlite store, which opens the file and owns its journal side files; Usage opens no database itself', () => {});
 
-  test.skip('F-0130 compaction-history.json — not Usage’s: it is Ferrets’ live activity file (core/ferrets tests/integration file-compaction-history); the parity table lists it under usage in error', () => {});
+  test('F-0130 the compaction history is kept in compaction-history.json under the usage state folder, format 1, and read back', async () => {
+    const state = memoryState();
+    const history = new StateCompactionHistory(state.port);
+    const entry = { harness: 'claude', durationMs: 42_000, at: '2026-11-14T10:00:00.000Z' } as const;
+
+    expect([COMPACTION_HISTORY_STATE.path, COMPACTION_HISTORY_STATE.store, COMPACTION_HISTORY_STATE.format]).toEqual([
+      'compaction-history.json',
+      'json',
+      1,
+    ]);
+    expect(manifest.data.state).toContain(COMPACTION_HISTORY_STATE);
+    expect(await history.durations('claude', undefined)).toEqual([]);
+    await history.record(entry);
+
+    expect(await history.durations('claude', undefined)).toEqual([42_000]);
+    expect(state.files.get(COMPACTION_HISTORY_STATE.path)).toEqual({ entries: [entry] });
+    expect(state.touched.every(path => path === COMPACTION_HISTORY_STATE.path)).toBe(true);
+    // An entry the schema refuses (a run longer than any compaction) is not a record of one.
+    expect(CompactionHistoryFileSchema.safeParse({ entries: [{ ...entry, durationMs: 31 * 60_000 }] }).success).toBe(
+      false,
+    );
+  });
 });

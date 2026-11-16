@@ -249,6 +249,16 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       if (kind === undefined) throw new TypeError('state entry is not a file, directory or symlink');
       return { kind, modifiedMs: info.modifiedAtMs };
     },
+    async entries(def, name) {
+      const at = locateTree(def, name);
+      if (!(await treeParents(at.path, false))) return [];
+      const info = await fs.info(at.path);
+      if (info === undefined || info.symlink === true || !info.directory) return [];
+      return (await fs.list(at.path)).map(entry => ({
+        name: entry.name,
+        kind: entry.directory ? ('directory' as const) : entry.regularFile ? ('file' as const) : ('symlink' as const),
+      }));
+    },
     async createPrivateDirectory(def, name) {
       const at = locateTree(def, name);
       await treeParents(at.path, true);

@@ -3,11 +3,12 @@ import manifest from '../manifest.ts';
 import { AnswerQuestionController, InterruptController } from './lib/answer/controller.ts';
 import { CompactAtController } from './lib/compact-at/controller.ts';
 import { CommandError } from './lib/errors.ts';
-import { ClientConversationGateway, NO_FILE_ACCESS } from './lib/gateway.ts';
+import { ClientConversationGateway } from './lib/gateway.ts';
 import { queueCancelVerb, queueEditVerb, queueVerb } from './lib/queue/commands.ts';
 import { ClientQueueGateway } from './lib/queue/gateway.ts';
 import { SendMessageController } from './lib/send/controller.ts';
-import type { ConversationOutput, SendFiles } from './lib/send/ports.ts';
+import { shellFiles } from './lib/send/files.ts';
+import type { ConversationOutput } from './lib/send/ports.ts';
 // The reading verbs: logs, search, render, link and transcript.
 import { readingVerbs } from './reading/verbs.ts';
 
@@ -22,11 +23,13 @@ const text = (invocation: VerbInvocation, ...names: readonly string[]): string |
 };
 const on = (invocation: VerbInvocation, ...names: readonly string[]): boolean =>
   names.some(name => invocation.options[name] === true || invocation.options[name] === 'true');
-const list = (invocation: VerbInvocation, name: string): string[] => {
-  const value = invocation.options[name];
-  if (Array.isArray(value)) return [...value] as string[];
-  return typeof value === 'string' ? [value] : [];
-};
+/** Every value of a repeatable option, under any of its spellings (`-f` and `--file` are keyed apart), in the order given. */
+const list = (invocation: VerbInvocation, ...names: readonly string[]): string[] =>
+  names.flatMap(name => {
+    const value = invocation.options[name];
+    if (Array.isArray(value)) return [...value] as string[];
+    return typeof value === 'string' ? [value] : [];
+  });
 const first = (invocation: VerbInvocation, what: string): string => {
   const value = invocation.args[0]?.trim();
   if (value === undefined || value === '') throw new CommandError(`missing the ${what}`);
@@ -40,7 +43,7 @@ const joinedFrom = (parts: readonly string[]): string | undefined => {
 /**
  * Conversation's cli half: `send`, `reply`, `answer`, `interrupt`, `compact-at` and the `queue` verbs.
  *
- * The shell hands a half no environment: no files (so `--message-file` and `--file` say so), no clock to rest on (so
+ * The shell hands a half no environment: no clock to rest on (so
  * `--wait` has the DAEMON hold each status read open, ten rounds at most) and no caller ferret (so `--ask` takes
  * `--session <ferret>`). Write positionals before options.
  */
@@ -50,12 +53,12 @@ export default implementCli(manifest, {
       out: line => ctx.io.out(`${line}\n`),
       note: line => ctx.io.err(`${line}\n`),
     };
-    const gateway = new ClientConversationGateway(ctx.client);
-    const files: SendFiles = {
-      readText: async () => {
-        throw new CommandError(NO_FILE_ACCESS);
-      },
-    };
+    // `--message-file` and `-f` read through the shell's own readers (relative to the working directory; `-` is stdin).
+    const files = shellFiles({
+      ...(ctx.readText === undefined ? {} : { readText: ctx.readText }),
+      ...(ctx.readBytes === undefined ? {} : { readBytes: ctx.readBytes }),
+    });
+    const gateway = new ClientConversationGateway(ctx.client, undefined, files);
     const guarded =
       (work: (invocation: VerbInvocation) => Promise<void>): VerbHandler =>
       async invocation => {
@@ -89,7 +92,7 @@ export default implementCli(manifest, {
         await controller.execute(ferret, {
           ...(message === undefined ? {} : { message }),
           ...(messageFile === undefined ? {} : { messageFile }),
-          attachmentPaths: list(invocation, 'file'),
+          attachmentPaths: list(invocation, 'file', 'f'),
           ...(on(invocation, 'now') ? { now: true } : {}),
           ...(!peerReply && on(invocation, 'ask') ? { ask: true } : {}),
           ...(!peerReply && on(invocation, 'expect-reply') ? { expectReply: true } : {}),
@@ -133,7 +136,7 @@ export default implementCli(manifest, {
       answer,
       interrupt,
       'compact-at': compactAt,
-      queue: queueVerb(queuePorts),
+      'queue <ferret>': queueVerb(queuePorts),
       'queue edit': queueEditVerb(queuePorts),
       'queue cancel': queueCancelVerb(queuePorts),
     };

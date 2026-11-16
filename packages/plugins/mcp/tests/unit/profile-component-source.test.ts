@@ -24,6 +24,28 @@ describe('the mcp profile component source', () => {
     });
   });
 
+  it('passes the change wake-up of its owner through, and offers none when the owner gives none', () => {
+    let listener: (() => void) | undefined;
+    let stopped = false;
+    const source = mcpComponentSource(items, heard => {
+      listener = heard;
+      return () => {
+        stopped = true;
+      };
+    });
+    let woke = 0;
+
+    const stop = source.watch?.(() => {
+      woke += 1;
+    });
+    listener?.();
+    stop?.();
+
+    expect(woke).toBe(1);
+    expect(stopped).toBe(true);
+    expect(mcpComponentSource(items).watch).toBeUndefined();
+  });
+
   it('answers undefined for a name that is not there', async () => {
     expect(await mcpComponentSource(items).read('absent')).toBeUndefined();
   });

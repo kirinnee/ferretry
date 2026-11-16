@@ -73,7 +73,8 @@ export function ScanDialog(props: ScanDialogProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const titleId = useId();
   const { onKeyDown } = useDialogFocus(true, panelRef, onClose);
-  // The run this dialog has shown progress for, so its end is shown here rather than a fresh form.
+  // The run this dialog has shown progress for, or started itself, so its end is shown here rather than a fresh form. A
+  // scan with nothing to read finishes before any poll sees it running, so Start names its run too.
   const [watching, setWatching] = useState<string | null>(null);
   const scan = control.scan;
   const running = scan?.state === 'running';
@@ -120,7 +121,7 @@ export function ScanDialog(props: ScanDialogProps) {
         ) : phase === 'finished' && scan !== null ? (
           <ScanFinishedBody sentence={scanResultSentence(scan)} onClose={onClose} onView={onView} />
         ) : (
-          <ScanForm {...props} />
+          <ScanForm {...props} onStarted={setWatching} />
         )}
       </div>
     </div>
@@ -217,13 +218,14 @@ function ScanForm({
   connection,
   control,
   onClose,
+  onStarted,
   initialScope,
   ferrets,
   defaultAgent,
   passive,
   now = Date.now,
   estimateDelayMs = ESTIMATE_DELAY_MS,
-}: ScanDialogProps) {
+}: ScanDialogProps & { readonly onStarted: (runId: string) => void }) {
   const [draft, setDraft] = useState<ScanDraft>(() => initialScanDraft(now(), initialScope));
   const [estimate, setEstimate] = useState<EstimateState | null>(null);
   const [starting, setStarting] = useState(false);
@@ -263,7 +265,8 @@ function ScanForm({
     setStarting(true);
     setStartError(null);
     try {
-      await control.start(request);
+      const started = await control.start(request);
+      onStarted(started.runId);
     } catch (reason) {
       setStartError(lessonsErrorMessage(reason));
     } finally {

@@ -9,9 +9,8 @@
  * they said, and where. Tapping a row opens a short preview of its last few exchanges with the button
  * that continues it. A conversation a ferret already keeps resumes (or opens) that ferret instead of
  * making a second one; any other is kept with `start: true` on a runtime that drives its CLI — the
- * person picks it on the runtime step, which opens even when only one runtime drives it (today's Continue adopted on
- * the only runtime at once; the extra "Continue" press is the declared "Runtimes is not a need" line) — and the new
- * ferret opens on its full history.
+ * person picks it on the runtime step, unless the runtime slot reports that only one runtime can run it, which is then
+ * taken at once — and the new ferret opens on its full history.
  */
 
 import { Button } from '@ferretry/app/ui';
@@ -117,6 +116,8 @@ function ContinueConversationBody({
   const runtimeInputId = useId();
   const clock = useRef(now);
   clock.current = now;
+  /** The row whose runtime step already heard which runtimes can run it (see `offered`). */
+  const decided = useRef<LinkableConversation | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => setQuery(text), debounceMs);
@@ -216,7 +217,22 @@ function ContinueConversationBody({
     // A harness this app has no runtime picker for cannot be continued here.
     if (harnessKeyOf(row.harness) === undefined)
       setPicking({ kind: 'issue', key, sentence: `This app can’t continue a ${row.harness} conversation.` });
-    else setPicking({ kind: 'runtime', row, draft: '' });
+    else {
+      decided.current = null;
+      setPicking({ kind: 'runtime', row, draft: '' });
+    }
+  };
+
+  /**
+   * The runtime step tells which runtimes can run it. The FIRST real answer decides, once per step: exactly one means
+   * there is nothing to choose, so it continues on that one at once; none or several keep the step. `null` (still
+   * reading) decides nothing, and a list that changes afterwards never continues anything on its own.
+   */
+  const offered = (row: LinkableConversation, wrappers: readonly string[] | null): void => {
+    if (wrappers === null || decided.current === row) return;
+    decided.current = row;
+    const [only] = wrappers;
+    if (wrappers.length === 1 && only !== undefined) void keep(row, only);
   };
 
   const runtimeNote = (row: LinkableConversation, draft: string): ReactNode => {
@@ -233,6 +249,7 @@ function ContinueConversationBody({
           value: draft,
           onValueChange: next => setPicking({ kind: 'runtime', row, draft: next }),
           onChosen: () => undefined,
+          onOffered: wrappers => offered(row, wrappers),
           fallbackId: runtimeInputId,
           labelId: runtimeLabelId,
           fallbackPlaceholder: 'a runtime',
@@ -405,7 +422,7 @@ function ContinueConversationBody({
       </div>
       {computerHidden && source !== 'ferretry' ? (
         <p className="m-0 text-meta text-muted" data-continue-computer-hidden="">
-          Conversations on this computer are hidden. Turn on Keep in sync in Settings › Machine › Conversations.
+          Conversations on this computer are hidden. Turn on Keep in sync in Settings › Agents › Conversations.
         </p>
       ) : null}
       {listed}

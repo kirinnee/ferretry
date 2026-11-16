@@ -30,6 +30,7 @@ function world(
     history?: RecordedSurfaceEvent[];
     publishFails?: boolean;
     raiseInput?: TerminalToolPorts['raiseInput'] | 'none';
+    raisePhoneApproval?: TerminalToolPorts['raisePhoneApproval'] | 'none';
     screens?: string[];
     foreground?: () => Promise<string>;
   } = {},
@@ -87,6 +88,12 @@ function world(
       now += ms;
     },
     ...(options.raiseInput === 'none' ? {} : { raiseInput: options.raiseInput ?? (async () => ok('r-1' as never)) }),
+    ...(options.raisePhoneApproval === 'none'
+      ? {}
+      : {
+          raisePhoneApproval:
+            options.raisePhoneApproval ?? (async () => ok({ id: `pa_${'1'.repeat(24)}`, state: 'waiting' as const })),
+        }),
   };
   const service = new TerminalToolService(ports);
   return {
@@ -243,6 +250,51 @@ describe('the tools that need a terminal', () => {
     });
     expect(answer.input).toEqual({ id: 'r-1' });
     expect(answer.summary).toContain('!r-1');
+  });
+
+  it('B14 raises a phone approval for the terminal this session has, and tells the ferret to wait, never a number', async () => {
+    const asks: unknown[] = [];
+    const w = world({
+      rows: [mine],
+      raisePhoneApproval: async (ferret, ask) => {
+        asks.push({ ferret, ask });
+        return ok({ id: `pa_${'1'.repeat(24)}`, state: 'waiting' as const });
+      },
+    });
+    const answer = await w.service.call(agent, { tool: 'terminal.request_push', name: 'dev', ask: { factor: 'push' } });
+    expect(asks).toEqual([{ ferret: SESSION, ask: { factor: 'push', target: { kind: 'terminal', key: 'dev' } } }]);
+    expect(answer.summary).toContain(`pa_${'1'.repeat(24)}`);
+    expect(answer.summary).toContain('%terminal:dev');
+  });
+
+  it('B14 refuses a phone approval from a person, with no service, for a terminal that is not there, and passes a refusal on', async () => {
+    const person_ = await refusalOf(
+      world({ rows: [mine] }).service.call(person, { tool: 'terminal.request_push', name: 'dev', ask: {} }),
+    );
+    expect(person_.code).toBe('bad_request');
+    const none = await refusalOf(
+      world({ rows: [mine], raisePhoneApproval: 'none' }).service.call(agent, {
+        tool: 'terminal.request_push',
+        name: 'dev',
+        ask: {},
+      }),
+    );
+    expect([none.code, none.message]).toEqual([
+      'unavailable',
+      'Approving a sign-in on the phone is not available on this machine.',
+    ]);
+    const gone = await refusalOf(
+      world({ rows: [mine] }).service.call(agent, { tool: 'terminal.request_push', name: 'nope', ask: {} }),
+    );
+    expect(gone.code).toBe('not_found');
+    const refused = await refusalOf(
+      world({ rows: [mine], raisePhoneApproval: async () => err('no sign-in is saved for that') }).service.call(agent, {
+        tool: 'terminal.request_push',
+        name: 'dev',
+        ask: {},
+      }),
+    );
+    expect([refused.code, refused.message]).toEqual(['conflict', 'no sign-in is saved for that']);
   });
 
   it('closes a terminal and forgets what stood about it', async () => {

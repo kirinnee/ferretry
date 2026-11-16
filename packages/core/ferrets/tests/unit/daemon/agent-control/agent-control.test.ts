@@ -23,7 +23,9 @@ import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import {
   type LaunchEnvironmentRecord,
   LaunchEnvironmentStore,
+  modeSwitchDefaults,
   recordedSwitches,
+  sessionModeSwitch,
   switchesOfRecord,
 } from '../../../../daemon/lib/agent-control/launch-environment.ts';
 import { instructionsAnswer } from '../../../../daemon/lib/agent-control/instructions.ts';
@@ -154,7 +156,12 @@ function persisted() {
   return { held, record };
 }
 
-function launching(state: ReturnType<typeof persisted>, parts: Record<string, string>, mode?: 'auto' | 'interactive') {
+function launching(
+  state: ReturnType<typeof persisted>,
+  parts: Record<string, string>,
+  mode?: 'auto' | 'interactive',
+  options: { readonly fresh?: boolean } = {},
+) {
   const id = ferretId('wren');
   const stopped: FerretRecord = {
     format: 1,
@@ -169,7 +176,10 @@ function launching(state: ReturnType<typeof persisted>, parts: Record<string, st
     createdAt: T0,
     stateAt: T0,
   };
-  const registry = new FerretRegistry([stopped]);
+  /** Every environment the launch resolved for the pane, in order. */
+  const handed: Readonly<Record<string, string>>[] = [];
+  const registry = new FerretRegistry(options.fresh === true ? [] : [stopped]);
+  const harness = new FakeHarness();
   const store = new LaunchEnvironmentStore(state.record, async ferret => switchesOfRecord(registry.get(ferret)));
   const ports: FerretsPorts = {
     now: () => T0,
@@ -177,7 +187,7 @@ function launching(state: ReturnType<typeof persisted>, parts: Record<string, st
     newName: () => 'wren',
     save: async () => {},
     saveTokens: async () => {},
-    harness: () => new FakeHarness(),
+    harness: () => harness,
     harnessKeys: () => ['claude-code'],
     runner: () => new FakeRunner(),
     decide: async () => ({ allow: true }),
@@ -186,7 +196,12 @@ function launching(state: ReturnType<typeof persisted>, parts: Record<string, st
     instructions: () => [],
     folder: path => ok(fenced(path)),
     changed: () => {},
-    vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
+    vault: {
+      childEnvironment: async (_ferret, env) => {
+        handed.push(env);
+        return ok(emptyChildEnvironment());
+      },
+    },
     asks: { open: async () => [] },
     launchEnvironment: store,
     saveDetails: async () => {
@@ -194,7 +209,7 @@ function launching(state: ReturnType<typeof persisted>, parts: Record<string, st
     },
   };
   const service = new FerretsService(registry, new FerretTokenDirectory(), ports);
-  return { id, registry, store, ports, service };
+  return { id, registry, store, ports, service, harness, handed };
 }
 
 describe('the launch environment instructions reads is PERSISTED, through one reader (RULING #30)', () => {
@@ -218,7 +233,7 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     const state = persisted();
     const f = launching(state, { ...TOLD, SOME_SECRET_LOOKING_NAME: 'x' }, 'interactive');
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
-    expect(state.held.get(f.id)).toEqual(TOLD);
+    expect(state.held.get(f.id)).toEqual({ ...TOLD, FY_SESSION_MODE: 'interactive' });
     expect(JSON.stringify([...state.held.values()])).not.toContain('FY_SESSION_TOKEN');
     expect(state.record.writes).toEqual([f.id]);
   });
@@ -244,6 +259,32 @@ describe('the launch environment instructions reads is PERSISTED, through one re
     expect((await instructionsAnswer(f.id, id => f.store.read(id), 'fy')).text).toContain('was not handed');
   });
 
+  test('c58-18 the mode default is part of what a launch records: Hypermedia on for an interactive ferret, off otherwise', async () => {
+    expect(modeSwitchDefaults('interactive')).toEqual({ FY_HYPERMEDIA: '1' });
+    expect(modeSwitchDefaults('auto')).toEqual({ FY_HYPERMEDIA: '0' });
+    expect(modeSwitchDefaults(undefined)).toEqual({ FY_HYPERMEDIA: '0' });
+
+    // No owner switch says anything (Conversation's part is silent): the launch itself records the mode's default.
+    const state = persisted();
+    const interactive = launching(state, {}, 'interactive');
+    await interactive.service.resume(interactive.id, undefined, { origin: PERSON_ORIGIN });
+    expect(state.held.get(interactive.id)).toEqual({ FY_HYPERMEDIA: '1', FY_SESSION_MODE: 'interactive' });
+    const answer = (await instructionsAnswer(interactive.id, id => interactive.store.read(id), 'fy')).text;
+    expect(answer).toContain('✓ Hypermedia: on');
+
+    const autoState = persisted();
+    const auto = launching(autoState, {}, 'auto');
+    await auto.service.resume(auto.id, undefined, { origin: PERSON_ORIGIN });
+    expect(autoState.held.get(auto.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'auto' });
+  });
+
+  test('c58-18 an owner’s Hypermedia switch (a launch part) wins over the mode default', async () => {
+    const state = persisted();
+    const f = launching(state, { FY_HYPERMEDIA: '0' }, 'interactive');
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    expect(state.held.get(f.id)).toEqual({ FY_HYPERMEDIA: '0', FY_SESSION_MODE: 'interactive' });
+  });
+
   test('T-0036 a launch that is refused records nothing, and a store that fails never fails the launch', async () => {
     const refused = persisted();
     const a = launching(refused, TOLD);
@@ -259,5 +300,83 @@ describe('the launch environment instructions reads is PERSISTED, through one re
       },
     };
     expect((await b.service.resume(b.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
+  });
+});
+
+describe('the ferret’s mode reaches the harness and the pane on every launch (v4 interactive question-tool parity)', () => {
+  const MODES = [
+    ['interactive', 'interactive'],
+    ['auto', 'auto'],
+  ] as const;
+
+  for (const [label, mode] of MODES) {
+    test(`a RESUME of an ${label} ferret hands the harness spec.mode and the pane FY_SESSION_MODE=${mode}`, async () => {
+      const f = launching(persisted(), {}, mode);
+      expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
+      expect(f.harness.launched.map(spec => spec.mode)).toEqual([mode]);
+      expect(f.harness.prepared.map(spec => spec.mode)).toEqual([mode]);
+      expect(f.handed.map(env => env.FY_SESSION_MODE)).toEqual([mode]);
+    });
+
+    test(`a fresh START of an ${label} ferret hands the harness spec.mode and the pane FY_SESSION_MODE=${mode}`, async () => {
+      const f = launching(persisted(), {}, undefined, { fresh: true });
+      f.ports.saveDetails = async () => {}; // a fresh start writes details.json; the switches never go in it (above)
+      const started = await f.service.start(
+        { by: 'owner', folder: '/work', harness: 'claude-code', options: { mode } },
+        PERSON_ORIGIN,
+      );
+      expect(started.ok).toBe(true);
+      expect(f.harness.launched.map(spec => spec.mode)).toEqual([mode]);
+      expect(f.handed.map(env => env.FY_SESSION_MODE)).toEqual([mode]);
+    });
+  }
+
+  test('a start with no mode is the start’s own default, auto: the harness and the pane both read it', async () => {
+    const f = launching(persisted(), {}, undefined, { fresh: true });
+    f.ports.saveDetails = async () => {}; // a fresh start writes details.json; the switches never go in it (above)
+    expect((await f.service.start({ by: 'owner', folder: '/work', harness: 'claude-code' }, PERSON_ORIGIN)).ok).toBe(
+      true,
+    );
+    expect(f.harness.launched.map(spec => spec.mode)).toEqual(['auto']);
+    expect(f.handed.map(env => env.FY_SESSION_MODE)).toEqual(['auto']);
+  });
+
+  test('a record with NEITHER a mode nor a persisted start mode hands the harness no mode and the pane no variable (unattended, as an unset variable reads; a converted ferret whose details hold the mode is converted-mode.test.ts)', async () => {
+    const f = launching(persisted(), {}, undefined);
+    expect((await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN })).ok).toBe(true);
+    expect(f.harness.launched[0]).not.toHaveProperty('mode');
+    expect(f.handed[0]).not.toHaveProperty('FY_SESSION_MODE');
+  });
+
+  test('no launch part can make the pane say another mode than the harness decided from, and a part still sets its section switch', async () => {
+    const f = launching(persisted(), { FY_PACK: '1', FY_SESSION_MODE: 'interactive' }, 'auto');
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    expect(f.handed[0]).toMatchObject({ FY_SESSION_MODE: 'auto', FY_PACK: '1' });
+    expect(f.harness.launched[0]?.mode).toBe('auto');
+  });
+
+  test('the recorded launch does not read as changed: the stored mode is the one the record derives, before and after a launch', async () => {
+    for (const mode of ['interactive', 'auto'] as const) {
+      const state = persisted();
+      const f = launching(state, {}, mode);
+      const derivedBefore = await f.store.read(f.id);
+      expect(derivedBefore).toEqual({ FY_SESSION_MODE: mode });
+      await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+      expect(state.held.get(f.id)).toMatchObject({ FY_SESSION_MODE: mode });
+      // The mode reads the same before and after the launch, and across a restart (a fresh service over the same state).
+      expect((await f.store.read(f.id)).FY_SESSION_MODE).toBe(derivedBefore.FY_SESSION_MODE);
+      expect((await launching(state, {}, mode).store.read(f.id)).FY_SESSION_MODE).toBe(mode);
+      // A ferret launched before this change recorded no mode: the derived one fills in, nothing contradicts it.
+      const older = persisted();
+      older.held.set(f.id, { FY_PACK: '1' });
+      expect(await launching(older, {}, mode).store.read(f.id)).toEqual({ FY_PACK: '1', FY_SESSION_MODE: mode });
+    }
+  });
+
+  test('sessionModeSwitch is the one spelling both sides use', () => {
+    expect(sessionModeSwitch('interactive')).toEqual({ FY_SESSION_MODE: 'interactive' });
+    expect(sessionModeSwitch('auto')).toEqual({ FY_SESSION_MODE: 'auto' });
+    expect(sessionModeSwitch(undefined)).toEqual({});
+    expect(switchesOfRecord({ mode: 'auto' } as FerretRecord)).toEqual(sessionModeSwitch('auto'));
   });
 });

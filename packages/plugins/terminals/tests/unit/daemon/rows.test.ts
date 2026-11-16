@@ -110,6 +110,72 @@ describe('the terminal rows', () => {
     should(half.runtime.typed).have.length(0);
   });
 
+  it('B14 terminal_request_input push:true raises a phone approval through the Vault for the ferret’s own terminal and types nothing', async () => {
+    // Arrange
+    const half = await opened();
+    const acts = half.host.acts.length;
+
+    // Act
+    const asked = await half.host.tool('terminal_request_input', {
+      name: 'dev',
+      push: true,
+      secretHint: 'GITHUB_TOKEN',
+    });
+
+    // Assert — the approval is for the named terminal, raised as the ferret, and no input card is raised
+    should(asked.isError).not.equal(true);
+    should(half.approvals).have.length(1);
+    should(half.approvals[0]?.ferret).equal(FERRET);
+    should(half.approvals[0]?.ask).eql({ target: { kind: 'terminal', key: 'dev' }, secretHint: 'GITHUB_TOKEN' });
+    should(half.raised).have.length(0);
+    should(asked.text).containEql(`pa_${'0'.repeat(24)}`);
+    should(half.host.acts.length).equal(acts);
+    should(half.runtime.typed).have.length(0);
+  });
+
+  it('B14 a push approval for a terminal the ferret does not have is refused and raises nothing', async () => {
+    // Arrange
+    const half = await opened();
+
+    // Act
+    const asked = await half.host.tool('terminal_request_input', { name: 'nope', push: true });
+
+    // Assert
+    should(asked.isError).equal(true);
+    should(half.approvals).have.length(0);
+  });
+
+  it('B14 the owner cannot raise a phone approval: only the agent asks', async () => {
+    // Arrange
+    const half = await opened();
+    half.as('owner');
+
+    // Act
+    const asked = await half.host.tool('terminal_request_input', { name: 'dev', push: true });
+
+    // Assert
+    should(asked.isError).equal(true);
+    should(half.approvals).have.length(0);
+  });
+
+  it('B14 a push call that also carries a card’s fields is refused as a call that is not valid', async () => {
+    // Arrange
+    const half = await opened();
+
+    // Act
+    const asked = await half.host.tool('terminal_request_input', {
+      name: 'dev',
+      push: true,
+      prompt: 'x',
+      sensitivity: 'secret',
+    });
+
+    // Assert
+    should(asked.isError).equal(true);
+    should(half.approvals).have.length(0);
+    should(half.raised).have.length(0);
+  });
+
   it('terminal_ask_owner hands the terminal over without an act', async () => {
     // Arrange
     const half = await opened();

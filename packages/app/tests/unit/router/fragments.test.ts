@@ -288,3 +288,139 @@ describe('holding', () => {
     stop();
   });
 });
+
+/**
+ * THE EARLY ARRIVAL (`public/arrival.js`, run before the module graph is fetched): the fragment is already off the
+ * address when the taker is built, and the value reaches it through ONE function on `window` that the taker calls
+ * once, with what is left of the two minutes counted from the arrival. The taker takes it by the plugins' own
+ * declarations.
+ */
+describe('early arrival', () => {
+  const EARLY = '#v1;a=127.0.0.1:9;c=FAKEFAKE;fp=00'; // an obviously fake pairing fragment
+  /** What the script's hand-off returns, and how often it was called. */
+  const withEarly = (
+    browser: FakeBrowser,
+    pathname: string,
+    hash: string,
+    remainingMs: number = HELD_FOR_MS,
+  ): FakeBrowser & { readonly calls: () => number } => {
+    let calls = 0;
+    Object.defineProperty(browser, '__fyArrival', {
+      configurable: true,
+      value: () => {
+        calls += 1;
+        return calls === 1 ? { pathname, hash, remainingMs } : undefined;
+      },
+    });
+    return Object.assign(browser, { calls: () => calls });
+  };
+
+  test('a fragment the early script took is held for its declared screen, with nothing left to rewrite', () => {
+    const browser = withEarly(browserAt('/pair'), '/pair', EARLY);
+    const taker = new AddressTaker(declared, browser);
+    expect(browser.href()).toBe('/pair');
+    expect(browser.replaced).toEqual([]);
+    expect(taker.arrival('path:access.pair')).toBe(1);
+    expect(taker.take('path:access.pair')).toBe(EARLY);
+    expect(taker.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('the hand-off is called once and leaves the window, so nothing else can read the code from there', () => {
+    const browser = withEarly(browserAt('/app/pair'), '/app/pair', EARLY);
+    new AddressTaker(declared, browser);
+    expect(browser.calls()).toBe(1);
+    expect('__fyArrival' in browser).toBe(false);
+    expect(new AddressTaker(declared, browser).arrival('path:access.pair')).toBe(0);
+  });
+
+  test('an arrival beneath a screen, or on a path nobody declares, is dropped and handed to no one', () => {
+    for (const pathname of ['/pair/extra', '/settings', '/d/d1/settings']) {
+      const taker = new AddressTaker(declared, withEarly(browserAt(pathname), pathname, EARLY));
+      expect(taker.take('path:access.pair')).toBeUndefined();
+      expect(taker.take('path:catalogs.join')).toBeUndefined();
+    }
+  });
+
+  test('the hold still ends after two minutes when the taker is built at once', () => {
+    const clock = fakeClock();
+    const taker = new AddressTaker(declared, withEarly(browserAt('/pair'), '/pair', EARLY), clock);
+    clock.advance(HELD_FOR_MS);
+    expect(taker.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('a late boot does NOT restart the hold: it ends at the original deadline, and not a moment later', () => {
+    const clock = fakeClock();
+    // The script reports 30 s left: the module took 90 s to boot.
+    const taker = new AddressTaker(declared, withEarly(browserAt('/pair'), '/pair', EARLY, 30_000), clock);
+    clock.advance(29_999);
+    expect(taker.take('path:access.pair')).toBe(EARLY);
+    const expired = new AddressTaker(declared, withEarly(browserAt('/pair'), '/pair', EARLY, 30_000), clock);
+    clock.advance(30_000);
+    expect(expired.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('a hand-off that is spent, odd, throws or reports no time left gives nothing, and is removed', () => {
+    const values: unknown[] = [
+      null,
+      'x',
+      { pathname: '/pair', hash: EARLY, remainingMs: 1 }, // a value, not a function
+      () => undefined,
+      () => {
+        throw new Error('spent');
+      },
+      () => ({ pathname: 1, hash: EARLY, remainingMs: 5 }),
+      () => ({ pathname: '/pair', hash: '#', remainingMs: 5 }),
+      () => ({ pathname: '/pair', hash: EARLY, remainingMs: 0 }),
+      () => ({ pathname: '/pair', hash: EARLY, remainingMs: -1 }),
+      () => ({ pathname: '/pair', hash: EARLY, remainingMs: HELD_FOR_MS + 1 }),
+      () => ({ pathname: '/pair', hash: EARLY }),
+    ];
+    for (const value of values) {
+      const browser = Object.defineProperty(browserAt('/pair'), '__fyArrival', { configurable: true, value });
+      const taker = new AddressTaker(declared, browser);
+      expect(taker.arrival('path:access.pair')).toBe(0);
+      expect('__fyArrival' in browser).toBe(false);
+    }
+  });
+});
+
+/**
+ * A PAIRING-SHAPED FRAGMENT ON A PATH NO ONE DECLARED has no taker, and a live code must not sit in the address: the
+ * runtime reader drops it too, at construction, on every hashchange and after the router's own pushState (the router
+ * calls `read` after every write).
+ */
+describe('a credential on an undeclared path', () => {
+  const FAKE = '#v1;a=127.0.0.1:9;c=FAKEFAKE;fp=00';
+
+  test('is stripped at construction, keeping the entry state, and held by nobody', () => {
+    for (const path of ['/app/', '/', '/pairing', '/d/d1/settings']) {
+      const browser = browserAt(`${path}${FAKE}`);
+      const taker = new AddressTaker(declared, browser);
+      expect(browser.href()).toBe(path);
+      expect(browser.replaced).toEqual([{ state: { fyEntry: 'e1', fyIndex: 0 }, url: path }]);
+      expect(taker.take('path:access.pair')).toBeUndefined();
+      expect(taker.take('path:catalogs.join')).toBeUndefined();
+    }
+  });
+
+  test('is stripped when it arrives later by hashchange, or by a router write followed by read', () => {
+    const browser = browserAt('/app/');
+    const taker = new AddressTaker(declared, browser);
+    browser.go(`/app/${FAKE}`);
+    browser.fire();
+    expect(browser.href()).toBe('/app/');
+    browser.go(`/settings${FAKE}`); // pushState puts it there and fires nothing
+    taker.read();
+    expect(browser.href()).toBe('/settings');
+    expect(taker.take('path:access.pair')).toBeUndefined();
+  });
+
+  test('a keyed or unrelated fragment on the same path is still left alone', () => {
+    for (const hash of ['#agenda-ish', '#v2;x=1', '#v10', '#xv1;a=1', '#machines/desk']) {
+      const browser = browserAt(`/app/${hash}`);
+      new AddressTaker(declared, browser);
+      expect(browser.href()).toBe(`/app/${hash}`);
+      expect(browser.replaced).toEqual([]);
+    }
+  });
+});

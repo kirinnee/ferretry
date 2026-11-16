@@ -69,6 +69,12 @@
   color: var(--muted);
   font-size: var(--text-xs);
 }
+.fy-sbar__tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-xs);
+}
 .fy-sbar__list {
   flex: 1;
   min-height: 0;
@@ -80,6 +86,18 @@
   margin: 0;
   padding: 0;
   list-style: none;
+}
+/* The list's foot: the one primary door to a new ferret, always in reach under the rows. */
+.fy-sbar__footer {
+  display: flex;
+  flex-shrink: 0;
+  padding: var(--gap-sm);
+  border-top: var(--stroke-control) solid var(--border);
+}
+.fy-sbar__footer .kt-btn {
+  flex: 1;
+  justify-content: center;
+  min-height: 44px;
 }
 .fy-sbar__empty {
   margin: 0;
@@ -203,6 +221,34 @@
 /* The owner's pinned ferrets, above the folders. A pinned ferret that is over is dimmed, not dropped. */
 .fy-sbar__pinned .fy-sbar__project {
   color: var(--accent);
+}
+/* A ferret with open items waiting on the owner: a bold name, an accent count, the ask under it. */
+.fy-sbar__needs-you .fy-sbar__project {
+  color: var(--accent);
+}
+.fy-sbar__session[data-sbar-needs-you] .fy-sbar__name {
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__unread {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--accent-fg, var(--bg));
+  font-family: var(--font-mono);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__ask {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .fy-sbar__session[data-sbar-pinned][data-sbar-stopped] {
   opacity: 0.6;

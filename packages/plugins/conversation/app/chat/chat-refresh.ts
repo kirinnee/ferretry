@@ -6,7 +6,7 @@ import {
   type TranscriptImageMarker,
 } from '../../contract/index.ts';
 import { cancelSend, retrySend, submitSend } from './chat-reads.ts';
-import type { FerretView } from '@ferretry/core-ferrets/contract';
+import type { ChatSession } from './chat-session.ts';
 import { projectDeliveries } from './peer-delivery.ts';
 import { type TranscriptEntry } from './transcript-entries.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../composer/slash-commands.ts';
@@ -680,7 +680,7 @@ export const transcriptEntriesFromLog = (
 /** What the refresh reads, bound to one daemon's client (`chat-reads.ts`). */
 export interface ChatReadApi {
   /** The ferret's view (`GET /v1/ferrets/:ferretId`). */
-  readonly get: (id: string) => Promise<FerretView>;
+  readonly get: (id: string) => Promise<ChatSession>;
   /** One page of the transcript: the tail, or the page `before` a byte (`GET …/log-page`). */
   readonly logPage: (id: string, options?: LogPageOptions) => Promise<LogPage>;
   /** The ferret's send ledger. Optional: a reader that does not show sends never asks. */
@@ -753,7 +753,7 @@ export interface ChatRefreshInput {
   readonly onLog?: (text: string) => void;
   /** What the top of the chat offers, whenever it changes (`lib/transcript-history.ts`). */
   readonly onHistory?: (status: TranscriptHistoryStatus) => void;
-  readonly onSession: (view: FerretView) => void;
+  readonly onSession: (view: ChatSession) => void;
   /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
   readonly onSends?: (sends: readonly unknown[]) => void;
   /**

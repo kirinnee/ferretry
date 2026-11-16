@@ -1,6 +1,9 @@
 import type { AskedQuestionFile, TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import type { Question } from '../../../contract/index.ts';
+import type { PendingQuestion } from '../../seams/protocol.ts';
+import type { TranscriptEvent } from '../../seams/transcript-types.ts';
 import { parseAskedQuestion } from './asked.ts';
+import { projectStructuredQuestion } from './projection.ts';
 
 /** How often the roster is looked at for a question the hook recorded (the plan's 2 s cadence). */
 export const QUESTION_WATCH_MS = 2_000;
@@ -41,10 +44,36 @@ export interface QuestionWatchDeps {
   clear(ferret: string, toolUseId: string): Promise<void>;
   asked(ferret: string, toolUseId: string): Promise<void>;
   answered(ferret: string, toolUseId: string): Promise<void>;
+  /**
+   * Codex's half. Its `request_user_input` call is in the transcript while the form is open (no hook file): the tail of the
+   * ferret's own proved transcript as parsed events; `'unreadable'` when it cannot be read (then nothing is decided);
+   * `undefined` for a ferret that is not a Codex one (its hook file is read instead). Absent: Codex is not watched.
+   */
+  transcriptEvents?(ferret: string, limit?: number): Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
+  /**
+   * The one writer for a question the transcript projected (it has no hook payload): stored whole, or `undefined`.
+   * `askedAt` is the call's own time, or absent when the event carried none (the writer stamps the instant it saw it).
+   */
+  writeProjected?(ferret: string, pending: PendingQuestion, askedAt: string | undefined): Promise<Question | undefined>;
 }
 
-/** The only harness whose asking leaves a hook file: Claude Code's. Codex's `request_user_input` is not detected (GAP). */
+/** How many of a Codex transcript's newest events a look projects (the open call is among the newest). */
+export const QUESTION_TAIL_EVENTS = 200;
+/**
+ * The wider read made once, only for a stored question whose call AND result are both outside the newest
+ * {@link QUESTION_TAIL_EVENTS}: it looks for the exact ids further back before deciding anything.
+ */
+export const QUESTION_DEEP_EVENTS = 2_000;
+
+const callsTool = (event: TranscriptEvent, toolUseId: string): boolean =>
+  event.kind === 'tool-call' && event.call.id === toolUseId;
+const resultsTool = (event: TranscriptEvent, toolUseId: string): boolean =>
+  event.kind === 'tool-result' && event.result.callId === toolUseId;
+
+/** The harness whose asking leaves a hook file: Claude Code's. */
 const CLAUDE_CODE = 'claude-code';
+/** The harness whose asking is read from its transcript: Codex's `request_user_input`. */
+const CODEX = 'codex';
 
 /** How many looks store one payload before a state store that keeps failing is left alone (looks are 2 s apart). */
 const WRITE_ATTEMPTS = 5;
@@ -89,7 +118,11 @@ export class QuestionWatch {
   async sweep(): Promise<void> {
     const roster = await this.deps.roster();
     for (const ferret of roster) {
-      if (ferret.harness !== CLAUDE_CODE || (ferret.state !== 'working' && ferret.state !== 'idle')) continue;
+      if (
+        (ferret.harness !== CLAUDE_CODE && !(ferret.harness === CODEX && this.deps.transcriptEvents !== undefined)) ||
+        (ferret.state !== 'working' && ferret.state !== 'idle')
+      )
+        continue;
       await this.look(ferret.id).catch(() => undefined);
     }
   }
@@ -113,6 +146,7 @@ export class QuestionWatch {
   }
 
   async #lookNow(ferret: string): Promise<void> {
+    if ((await this.#codex(ferret)) === 'handled') return;
     const harness = await this.deps.harness(ferret);
     if (harness === undefined) return;
     const open = await this.deps.current(ferret);
@@ -161,6 +195,78 @@ export class QuestionWatch {
       } else this.#failed.set(ferret, { payload: file.payload, attempts });
       throw error;
     }
+  }
+
+  /**
+   * A Codex ferret's look: the transcript IS the evidence. The open call is stored once; it is retired by the call's own
+   * result (the only release a tail carries: a turn event is not one), or by the answered stamp. A transcript that cannot
+   * be read decides nothing. `'skip'` means this is not a Codex ferret (or the half is not mounted), so the hook path runs.
+   */
+  async #codex(ferret: string): Promise<'handled' | 'skip'> {
+    const read = this.deps.transcriptEvents;
+    const write = this.deps.writeProjected;
+    if (read === undefined || write === undefined) return 'skip';
+    const events = await read(ferret);
+    if (events === undefined) return 'skip';
+    if (events === 'unreadable') return 'handled';
+    const open = await this.deps.current(ferret);
+    const stamped = await this.deps.lastAnswered(ferret);
+    const projection = projectStructuredQuestion(events);
+    const pending = projection.kind === 'pending' ? projection.question : undefined;
+    const over =
+      open !== undefined &&
+      (open.toolUseId === stamped ||
+        (projection.kind === 'resolved' && projection.toolUseId === open.toolUseId) ||
+        (pending !== undefined && pending.toolUseId !== open.toolUseId) ||
+        (await this.#codexReleased(ferret, open.toolUseId, events)));
+    if (over) {
+      await this.deps.clear(ferret, open.toolUseId);
+      await this.deps.answered(ferret, open.toolUseId);
+    }
+    if (pending === undefined || pending.toolUseId === stamped) return 'handled';
+    if (!over && open?.toolUseId === pending.toolUseId) return 'handled';
+    const key = `codex:${pending.toolUseId}`;
+    if (this.#seen.get(ferret) === key) return 'handled';
+    try {
+      const stored = await write(ferret, pending, pending.askedAt);
+      this.#seen.set(ferret, key);
+      this.#failed.delete(ferret);
+      if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
+    } catch (error) {
+      if (this.#seen.get(ferret) === key) throw error;
+      const previous = this.#failed.get(ferret);
+      const attempts = (previous?.payload === key ? previous.attempts : 0) + 1;
+      if (attempts >= WRITE_ATTEMPTS) {
+        this.#seen.set(ferret, key);
+        this.#failed.delete(ferret);
+      } else this.#failed.set(ferret, { payload: key, attempts });
+      throw error;
+    }
+    return 'handled';
+  }
+
+  /**
+   * Whether the transcript positively releases the STORED question, independently of the projector's one final pick (a
+   * result whose call left the newest tail, or an earlier question's result behind a later question, projects to none):
+   *
+   * 1. its exact tool-result is among the events: released;
+   * 2. its exact call is among them with no result: still open (a turn event is never release evidence);
+   * 3. neither, and the tail is not full: the transcript simply does not say, so nothing is decided;
+   * 4. neither, and the tail is full: a wider read looks for the same ids; a result there releases, a call there keeps
+   *    it, and a FULL wide read holding neither means the call is more than {@link QUESTION_DEEP_EVENTS} events old.
+   *    An open form writes no such run of events, so that too is a positive release.
+   *
+   * An unreadable wide read decides nothing.
+   */
+  async #codexReleased(ferret: string, toolUseId: string, events: readonly TranscriptEvent[]): Promise<boolean> {
+    if (events.some(event => resultsTool(event, toolUseId))) return true;
+    if (events.some(event => callsTool(event, toolUseId))) return false;
+    if (events.length < QUESTION_TAIL_EVENTS) return false;
+    const wide = await this.deps.transcriptEvents?.(ferret, QUESTION_DEEP_EVENTS);
+    if (wide === undefined || wide === 'unreadable') return false;
+    if (wide.some(event => resultsTool(event, toolUseId))) return true;
+    if (wide.some(event => callsTool(event, toolUseId))) return false;
+    return wide.length >= QUESTION_DEEP_EVENTS;
   }
 
   /** `true` the question is over, `false` still open, `undefined` the transcript could not be read. */

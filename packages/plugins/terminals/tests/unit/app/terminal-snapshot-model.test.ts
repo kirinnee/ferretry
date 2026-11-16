@@ -50,14 +50,18 @@ describe('reading a pane snapshot', () => {
     const text = await readPaneSnapshot(client, daemon, scope);
     expect(text).toBe('$ bun test\nok');
     expect(calls).toEqual([
-      { route: SNAPSHOT_ROUTE, init: { params: { ferretId: 'pane/session' }, query: { live: 'false' } } },
+      { route: SNAPSHOT_ROUTE, init: { params: { ferretId: 'pane/session' }, query: { live: 'false' }, quiet: true } },
     ]);
   });
 
   it('reads only the visible screen when asked', async () => {
     const { calls, client } = reading('screen');
     await readPaneSnapshot(client, daemon, scope, undefined, true, 'screen');
-    expect(calls[0]?.init).toEqual({ params: { ferretId: 'pane/session' }, query: { live: 'true', scope: 'screen' } });
+    expect(calls[0]?.init).toEqual({
+      params: { ferretId: 'pane/session' },
+      query: { live: 'true', scope: 'screen' },
+      quiet: true,
+    });
   });
 
   it('refuses a scope belonging to another daemon rather than crossing the pair', async () => {

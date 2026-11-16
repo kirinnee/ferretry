@@ -3,9 +3,13 @@ import type { Runner, RunSpec, LaunchSpec } from '@ferretry/core-ferrets/contrac
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
 import { ok } from '@ferretry/std';
 import should from 'should';
+import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
+import { CODEX_LAUNCH_SETTINGS } from '../../contract/index.ts';
+import { CODEX_QUESTIONS_FEATURE, codexFixedArguments, codexQuestionArguments } from '../../daemon/lib/fixed-layer.ts';
+import { selectEverything } from '../support/selected.ts';
 
 const FERRET = 'f1' as FerretId;
 const HOME = '/state/codex/agent-homes/f1' as FencedPath;
@@ -60,10 +64,18 @@ function fakeRunner() {
 
 const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
   const { written, privateDirectories, roots } = fakeRoots();
+  /** The launch-settings records the launches wrote, in order. */
+  const records: unknown[] = [];
   const harness = codexHarness({
+    selected: selectEverything,
     kernel: {
       roots,
-      state: { write: async () => undefined } as never,
+      state: {
+        // Only the launch-settings record is of interest: the rollouts write their own beside it.
+        write: async (definition: unknown, record: unknown) => {
+          if (definition === CODEX_LAUNCH_SETTINGS) records.push(record);
+        },
+      } as never,
       log: { warn: () => undefined } as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
@@ -83,7 +95,7 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
       settled: async () => undefined,
     },
   });
-  return { harness, written, privateDirectories };
+  return { harness, written, privateDirectories, records };
 };
 
 const LOCATED = {
@@ -183,6 +195,54 @@ describe('the Codex harness', () => {
     should(resumed.ok && resumed.value.harnessConversation).equal('conv-1');
   });
 
+  describe('the question tool, per ferret (v4: interactive Codex gets --enable default_mode_request_user_input)', () => {
+    const FEATURE = ['--enable', 'default_mode_request_user_input'];
+    const withFeature = (command: readonly string[]): boolean =>
+      command.some((argument, at) => argument === '--enable' && command[at + 1] === 'default_mode_request_user_input');
+
+    for (const call of ['start', 'resume'] as const) {
+      const launch = async (mode: 'interactive' | 'auto' | undefined) => {
+        const { harness, records } = harnessOver(LOCATED);
+        const { runner, seen } = fakeRunner();
+        const spec = specOf(mode === undefined ? {} : { mode });
+        const launched =
+          call === 'start' ? await harness.start(spec, runner, ENV) : await harness.resume(spec, runner, ENV, 'conv-1');
+        should(launched.ok).be.true();
+        return { command: seen[0]?.spec.command ?? [], records };
+      };
+
+      it(`a ${call} of an interactive ferret enables it, as the Runtimes wrapper does`, async () => {
+        const { command } = await launch('interactive');
+        should(withFeature(command)).be.true();
+        should(command.filter(argument => argument === '--enable')).eql(['--enable']);
+        should(command.indexOf('--enable') + 1).equal(command.indexOf(FEATURE[1] as string));
+      });
+
+      it(`a ${call} of an auto ferret, or one with no mode, does not`, async () => {
+        should(withFeature((await launch('auto')).command)).be.false();
+        should(withFeature((await launch(undefined)).command)).be.false();
+      });
+
+      it(`a ${call} records the same launch settings whatever the mode, so no ferret reads as outdated for it`, async () => {
+        const interactive = await launch('interactive');
+        const auto = await launch('auto');
+        should(interactive.records).eql(auto.records);
+        should(interactive.records.length).equal(1);
+      });
+    }
+
+    it('names the feature the Runtimes wrapper names, and only for interactive', () => {
+      should(codexQuestionArguments('interactive')).eql(FEATURE);
+      should(codexQuestionArguments('auto')).eql([]);
+      should(codexQuestionArguments(undefined)).eql([]);
+      should(CODEX_QUESTIONS_FEATURE).equal('default_mode_request_user_input');
+    });
+
+    it('is outside the fixed layer, whose fingerprint is the recorded launch: its arguments never carry it', () => {
+      should(codexFixedArguments('auto', FOLDER).includes(CODEX_QUESTIONS_FEATURE)).be.false();
+    });
+  });
+
   it('refuses to start when Codex cannot be found, and starts nothing', async () => {
     const { harness } = harnessOver({ outcome: 'absent', searched: [] });
     const { runner, seen } = fakeRunner();
@@ -195,6 +255,17 @@ describe('the Codex harness', () => {
     const { harness } = harnessOver(LOCATED);
     const delivery = await harness.deliver(FERRET, '%1' as never, { id: 'm1', text: 'hi' });
     should(delivery).containDeep({ status: 'refused', id: 'm1' });
+  });
+
+  it('explains a start that died offline in its own fixed words (what Ferrets keeps as start_failed.explained), and the screen is never quoted', () => {
+    const { harness } = harnessOver(LOCATED);
+
+    const sentence = harness.startFailure?.('Error: FIXTURE_SECRET workspace routing discovery failed (ENETUNREACH)');
+
+    should(sentence).equal(codexLaunchFailure('workspace routing discovery failed'));
+    should(sentence?.startsWith(CODEX_OFFLINE_LAUNCH_ERROR)).be.true();
+    should(sentence).not.containEql('FIXTURE_SECRET');
+    should(harness.startFailure?.('error: unrecognised option')).be.undefined();
   });
 });
 

@@ -22,10 +22,12 @@ import {
   EndpointFileSchema,
   type EnvironmentLoginTemplate,
   type LocalModels,
+  type LoginBudget,
   type LoginFile,
   LoginFileSchema,
   LoginIdSchema,
   type LoginChange,
+  type LoginRuntimePreview,
   type LoginChangeOutcome,
   type LoginChangeRefusalCode,
   type LoginChangeView,
@@ -35,14 +37,18 @@ import {
   type ModelCatalogFile,
   ModelCatalogFileSchema,
   type ModelCatalogRefreshResult,
+  type ModelCatalogSourcesView,
   type ModelCatalogsView,
+  type ModelPriceCatalog,
   ModelsStateSchema,
+  PassiveAssignmentsStateSchema,
   type ProviderPresetCatalog,
   LOGIN_NAME,
 } from './wire.ts';
 
 export * from './wire.ts';
-export { hasTokenShape, storedEnvironmentIssue } from './secret-shape.ts';
+export * from './slots.ts';
+export { hasTokenShape, nameLooksLikeKey, storedEnvironmentIssue } from './secret-shape.ts';
 
 /** The five login kinds this plugin takes under Ferrets' `logins` hook (§4.4). */
 export const LOGIN_KINDS = ['anthropic', 'openai', 'api-key', 'proxy', 'endpoint'] as const;
@@ -73,12 +79,30 @@ export interface LoginsApi {
    * kept between calls.
    */
   environmentTemplates(): Promise<readonly EnvironmentLoginTemplate[]>;
+  /**
+   * Where each Ferretry-kept login is stored, for a runtime wrapper a PERSON runs (a ferret gets the same through its
+   * launch hook). Names a store, never a credential value. Read live, kept nowhere. Only a Ferretry-kept login is listed:
+   * a Claude login by its secure-storage variable, a Codex login by the sign-in FILE its runtime home links its `auth.json` to
+   * (`signInFile`); a host-kept or environment login has no store of Ferretry's to name. A ferret gets its Codex sign-in through
+   * the kernel (`RootHandle.linkCredential`, single use); a runtime wrapper a person runs links the file itself.
+   */
+  launchStores(): Promise<readonly LoginLaunchStore[]>;
   /** The login's rate-limit windows and provider quota, as last read. Never reads on an idle timer. */
   quota(id: z.output<typeof LoginIdSchema>): Promise<LoginUsage | undefined>;
   /** The provider presets this machine offers (`endpoints/*.yaml` and the built-in catalogue). */
   presets(): Promise<ProviderPresetCatalog>;
   /** The model catalogs in effect and the state of the published catalog. */
   models(): Promise<ModelCatalogsView>;
+  /**
+   * The catalogs in effect with every stated list price WHOLE (cache and reasoning rates, source, day) and Claude Code's
+   * tier pins: what Usage prices a session from. Public catalog data only; no login, key or credential is in it.
+   */
+  modelPrices(): Promise<readonly ModelPriceCatalog[]>;
+  /**
+   * The catalogs in effect WHOLE, the preset slice that names each login's catalog, and what the last read of a local
+   * server found: what Runtimes derives each runtime's models from. Public catalog data only; no login, key or value.
+   */
+  modelSources(): Promise<ModelCatalogSourcesView>;
   /**
    * Puts ONE login's own key on ONE request to a host it names, and returns only what came back (Usage's quota read).
    * The caller names the LOGIN and the variable that carries its key, never a secret: Logins resolves the secret from
@@ -93,6 +117,20 @@ export interface LoginsApi {
     request: OutboundHttpRequest,
     placement?: CredentialPlacement,
   ): Promise<AuthorizedOutcome>;
+}
+/**
+ * How one login's store takes part in a runtime's launch (`LoginsApi.launchStores`). A path here names a store, never a
+ * credential; Logins is the only plugin that spells it.
+ */
+export interface LoginLaunchStore {
+  readonly id: string;
+  /** The variables a runtime on this login exports: a Claude login's one secure-storage variable (empty for a host-kept one). */
+  readonly variables: Readonly<Record<string, string>>;
+  /**
+   * A Codex login's sign-in file: where Logins keeps its `auth.json`. A runtime wrapper links the runtime home's `auth.json` to
+   * it (never reading or copying it), so Codex signs in and renews through the one file. Absent for a Claude login.
+   */
+  readonly signInFile?: string;
 }
 export const LoginsPort = definePort<LoginsApi>('logins');
 
@@ -127,6 +165,11 @@ export const LoginChangesPort = definePort<LoginChangesApi>('logins.changes');
 export interface LoginUsers {
   /** The runtimes that launch on this login, by name. Throws when the answer is not known. */
   of(loginId: string): Promise<readonly string[]> | readonly string[];
+  /**
+   * The runtimes on the login as this change would leave them, each with whether it can launch then and why not. A
+   * preview only: nothing is written. Absent, or throwing, the change's preview names the runtimes without a status.
+   */
+  after?(change: LoginChange): Promise<readonly LoginRuntimePreview[]> | readonly LoginRuntimePreview[];
 }
 
 /**
@@ -141,6 +184,24 @@ export const LoginsUsedBy = defineHook('logins.used-by', {
   takers: ['runtimes'],
 });
 
+/** What Logins asks the plugin that measures spend: where a login stands against its budget. */
+export interface LoginBudgets {
+  /** The standing of one login, or `undefined` when it has no budget. Synchronous: Usage keeps it in memory. */
+  view(loginId: string): LoginBudget | undefined;
+}
+
+/**
+ * `logins.budget:<key>`: offered by Logins, provided by Usage (which owns the budgets and meters the spend). Logins
+ * cannot see Usage (Usage needs Logins), so the list and the check ask here for the line they show. With no provider
+ * a login shows no budget line, as a machine with no budgets does.
+ */
+export const LoginsBudget = defineHook('logins.budget', {
+  mode: 'provide',
+  key: z.literal('usage'),
+  value: z.custom<LoginBudgets>(),
+  takers: ['usage'],
+});
+
 /** A change refused, in the transport's taxonomy: a code a client branches on and a sentence for the person. */
 export class LoginChangeError extends Error {
   constructor(
@@ -153,7 +214,16 @@ export class LoginChangeError extends Error {
 }
 
 /** Read models others and the app may call (`manifest.data.readModels`). */
-export const LOGINS_READ_MODELS = ['list', 'get', 'quota', 'presets', 'models', 'environmentTemplates'] as const;
+export const LOGINS_READ_MODELS = [
+  'list',
+  'get',
+  'quota',
+  'presets',
+  'models',
+  'modelPrices',
+  'modelSources',
+  'environmentTemplates',
+] as const;
 
 // ─── events ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -191,6 +261,15 @@ export const LOGINS_MODELS = defineState({
   store: 'json',
   format: 1,
   schema: ModelsStateSchema,
+});
+
+/** Which login each Codex ferret was last seen on, and since when (the passive usage reading's attribution). */
+export const LOGINS_PASSIVE_ASSIGNMENTS = defineState({
+  name: 'passive-assignments',
+  path: 'passive-assignments.json',
+  store: 'json',
+  format: 1,
+  schema: PassiveAssignmentsStateSchema,
 });
 
 // ─── config (§9.2, §7.2) ─────────────────────────────────────────────────────────────────────────────────────────

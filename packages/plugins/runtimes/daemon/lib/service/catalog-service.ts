@@ -31,6 +31,7 @@
  * live passkey step-up. The order is: read the change, consume synchronously, check it is still current,
  * then act — restoring it only while it is certain nothing was attempted.
  */
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import type { AccountModel } from '../account/schema.ts';
 import { standInsNamedBy, type StoodInLogin, stoodInLoginSentence } from '../account/runtimes-model.ts';
 import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
@@ -87,10 +88,12 @@ import type { ModelCatalogSources } from '../models/catalog.ts';
 import {
   LoginChangeError,
   type LoginChangesApi,
+  type LoginChange,
   type LoginChangeView,
+  type LoginRuntimePreview,
   type LoginsApi,
 } from '@ferretry/plugin-logins/contract';
-import { loginChangeOf, movedSentence, REFUSAL_CODES } from './login-changes.ts';
+import { loginChangeOf, modelAfterLoginChange, movedSentence, REFUSAL_CODES } from './login-changes.ts';
 import type { RuntimeConfigWriter } from './ports.ts';
 import {
   type AccountChangeFacts,
@@ -294,6 +297,8 @@ export interface FleetCatalogServiceDeps {
   presets?(): Promise<readonly ProviderPreset[]>;
   /** The model catalogs and presets in effect (docs/model-catalog.md): what each runtime offers and pins. */
   modelCatalogs?(): Promise<ModelCatalogSources>;
+  /** Where Logins keeps each Ferretry-kept login (`LoginsApi.launchStores`): how a wrapper and a home reach its sign-in. */
+  loginStores?(): Promise<readonly LoginLaunchStore[]>;
   /** The fleet manifest as it is published now, unparsed; `undefined` when there is none. */
   publishedManifest?(): Promise<unknown>;
   /** The last auto-resume pass after a restart, for the Machine view; `null` when none has run. */
@@ -487,6 +492,29 @@ export class FleetCatalogService {
     });
   }
 
+  /**
+   * The runtimes on a login as a change to it would leave them (Logins' `logins.used-by` hook, `after`): each with its
+   * resulting launch status, read from the model with the change applied. Nothing is written.
+   */
+  async runtimesAfterLoginChange(change: LoginChange): Promise<readonly LoginRuntimePreview[]> {
+    if (change.kind === 'login.add' || change.kind === 'login.signout' || change.kind === 'login.remove') return [];
+    const reading = await this.#read();
+    const onIt = new Set(runtimesUsingCredential(reading.model, change.id));
+    if (onIt.size === 0) return [];
+    const candidate = modelAfterLoginChange(reading.model, change);
+    const catalog = runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate }));
+    return catalog.runtimes
+      .filter(runtime => onIt.has(runtime.name))
+      .map(runtime => ({
+        name: runtime.name,
+        harness: runtime.harness,
+        agent: runtime.agent,
+        launch: runtime.launch.available
+          ? { available: true }
+          : { available: false, ...(runtime.launch.reason === undefined ? {} : { reason: runtime.launch.reason }) },
+      }));
+  }
+
   /** `GET /v1/fleet/machine`, with what this caller may do to it. */
   async machine(governance: CallerGovernance | undefined): Promise<MachineView> {
     const reading = await this.#read();
@@ -545,9 +573,20 @@ export class FleetCatalogService {
     return await this.#exclusively(async () => await this.#republish(options.rebuild === true));
   }
 
+  /**
+   * Publish the fleet from the configuration files as they stand: what the daemon does once after start and after every
+   * change to a file Runtimes reads (v4 published after each configuration load). It is {@link republish} with
+   * `rebuild`, because no model catalog is what moved: a machine whose files an owner wrote, edited or converted gets
+   * its homes, wrappers and manifest with no write through a route first. A machine with no fleet files has nothing to
+   * publish, and a fleet whose manifest would be identical is left exactly as it is.
+   */
+  async publishFromFiles(): Promise<'applied' | 'unchanged' | 'skipped'> {
+    return await this.#exclusively(async () => await this.#republish(true));
+  }
+
   /** {@link republish} for a caller that already holds the section (a login change republishes from inside its apply). */
   async #republish(rebuild = false): Promise<'applied' | 'unchanged' | 'skipped'> {
-    const reading = await this.#read();
+    const reading = await this.#read(true);
     const sources = await this.#modelCatalogs();
     if (reading.format === 'none' || (sources.modelCatalogs === undefined && !rebuild)) return 'skipped';
     // A reading that holds a stand-in is never published: it would replace what the homes hold with what stands in. This is
@@ -572,6 +611,7 @@ export class FleetCatalogService {
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...this.#budgetHolds(),
         ...sources,
+        ...(await this.#loginStores()),
       });
     } catch (error) {
       throw new FleetCatalogRefusal('fleet_change_refused', errorMessage(error));
@@ -831,6 +871,12 @@ export class FleetCatalogService {
     return sources === undefined ? {} : { modelCatalogs: sources };
   }
 
+  /** Where Logins keeps each Ferretry-kept login, read live for an apply; nothing on a machine wired without it. */
+  async #loginStores(): Promise<{ readonly loginStores?: readonly LoginLaunchStore[] }> {
+    const stores = await this.deps.loginStores?.();
+    return stores === undefined ? {} : { loginStores: stores };
+  }
+
   /** Each runtime's id by name, from `ids.json`. A machine with none yet has no ids to report. */
   async #runtimeIds(): Promise<Readonly<Record<string, string>>> {
     const ids = await this.deps.ids();
@@ -932,6 +978,7 @@ export class FleetCatalogService {
         harnessCommands: harnessCommandsOf(this.deps.locate),
         ...(this.deps.hostCodexHome === undefined ? {} : { hostCodexHome: this.deps.hostCodexHome }),
         ...(await this.#modelCatalogs()),
+        ...(await this.#loginStores()),
         acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
         ...held,
       });
@@ -1091,6 +1138,15 @@ export class FleetCatalogService {
     return undefined;
   }
 
+  /** The catalogue rows of the runtimes on the login, read from the model as the change leaves it (a switch-off shows as blocked). */
+  async #runtimesAfter(reading: AccountDocumentReading, change: LoginAccountChange) {
+    const onIt = new Set(runtimesUsingCredential(reading.model, change.id));
+    const candidate = modelAfterLoginChange(reading.model, loginChangeOf(change));
+    return runtimeCatalog(candidate, await this.#facts({ ...reading, model: candidate })).runtimes.filter(runtime =>
+      onIt.has(runtime.name),
+    );
+  }
+
   /** The preview in this surface's own shapes: a sign-out's, or an apply's with the runtimes this lands on. */
   async #loginPreview(
     reading: AccountDocumentReading,
@@ -1113,7 +1169,7 @@ export class FleetCatalogService {
     const rows =
       onIt.size === 0 || change.kind === 'credential.add' || change.kind === 'credential.remove'
         ? []
-        : runtimeCatalog(reading.model, await this.#facts(reading)).runtimes.filter(runtime => onIt.has(runtime.name));
+        : await this.#runtimesAfter(reading, change);
     return {
       kind: 'apply',
       operations: [],

@@ -62,7 +62,11 @@ function drivenClock() {
   };
 }
 
-function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: number, fire: () => void) => () => void) {
+function fixture(
+  runtimeStart: Resolve | undefined = rt,
+  after?: (delayMs: number, fire: () => void) => () => void,
+  defaultRuntime?: () => Promise<string | undefined>,
+) {
   const registry = new FerretRegistry([]);
   const harness = new FakeHarness('claude-code');
   const loginsAsked: string[] = [];
@@ -109,6 +113,7 @@ function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: numbe
       return ok({});
     },
     ...(runtimeStart === undefined ? {} : { runtimeStart }),
+    ...(defaultRuntime === undefined ? {} : { defaultRuntime }),
     ...(after === undefined ? {} : { after }),
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
@@ -124,6 +129,44 @@ function fixture(runtimeStart: Resolve | undefined = rt, after?: (delayMs: numbe
 }
 
 describe('a start by runtime launches with the runtime’s login', () => {
+  test('a start that chooses nothing is a start on the machine default runtime: recorded with it, through the same login gate', async () => {
+    const f = fixture(rt, undefined, async () => 'rt');
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(true);
+    const record = f.registry.get(startedId(started));
+    expect(record?.runtime).toBe('rt');
+    expect(record?.login).toBe('oauth');
+    expect(f.loginsAsked).toEqual(['oauth']);
+  });
+
+  test('a default runtime whose login needs signing in refuses the start: nothing is recorded or launched', async () => {
+    const f = fixture(
+      async runtime => ({ ok: false, sentence: `runtime ${runtime} was not started: its login needs sign in` }),
+      undefined,
+      async () => 'claude-default',
+    );
+
+    const started = await f.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(started.ok).toBe(false);
+    expect(started.ok ? '' : started.error.reason).toContain('needs sign in');
+    expect(f.registry.list()).toEqual([]);
+    expect(f.harness.launched).toEqual([]);
+  });
+
+  test('a start that names its own login or harness, or a machine with no default runtime, is left as it was', async () => {
+    const named = fixture(rt, undefined, async () => 'rt');
+    const none = fixture(rt, undefined, async () => undefined);
+
+    const direct = await named.service.start({ folder: '/work', login: 'oauth', by: 'owner' }, PERSON_ORIGIN);
+    const bare = await none.service.start({ folder: '/work', by: 'owner' }, PERSON_ORIGIN);
+
+    expect(named.registry.get(startedId(direct))?.runtime).toBeUndefined();
+    expect(none.registry.get(startedId(bare))?.runtime).toBeUndefined();
+  });
+
   test('the record carries the runtime’s harness and login, the decision and the launch see them', async () => {
     const f = fixture();
 
@@ -544,5 +587,62 @@ describe('a Runtimes answer that never arrives is refused in time and releases t
 
     expect(started.ok).toBe(true);
     expect(clock.pending()).toBe(0);
+  });
+});
+
+describe('a relaunch that replaces a live pane judges the login BEFORE it stops the old harness', () => {
+  test('a login whose sign-in cannot be used refuses the relaunch and leaves the running ferret as it was', async () => {
+    // Proof run 7: the restart stopped the harness, then the launch found the login unusable. Every read of the login the
+    // launch makes after the stop is now made before it.
+    const f = fixture();
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    const stops: string[] = [];
+    f.harness.stop = async (_ferret, _handle, _runner, how) => void stops.push(how);
+    const before = f.registry.get(id);
+    for (const broken of [
+      { loginCredential: async () => ({ kind: 'unavailable' as const, sentence: 'login oauth needs sign-in' }) },
+      { loginLaunchEnv: async () => ({ ok: false as const, error: 'login oauth could not be read' }) },
+      { loginEnv: async () => ({ ok: false as const, error: 'login oauth could not be read' }) },
+    ]) {
+      const ports = { ...f.ports, ...broken } as FerretsPorts;
+      const service = new FerretsService(f.registry, new FerretTokenDirectory(), ports);
+      const relaunched = await service.resume(id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true });
+      expect(relaunched.ok ? '' : relaunched.error.code).toBe('login_unavailable');
+      expect(stops).toEqual([]);
+      expect(f.registry.get(id)?.state).toBe(before?.state);
+      expect(f.registry.get(id)?.handle).toBe(before?.handle);
+      expect(f.harness.launched).toHaveLength(1);
+    }
+  });
+});
+
+describe('startable: whether a running ferret could start again now, touching nothing', () => {
+  test('a runtime whose login needs sign-in, or a login whose credential cannot be used, is not startable', async () => {
+    let signedIn = true;
+    const f = fixture(async runtime =>
+      signedIn
+        ? { ok: true, harness: 'claude-code', login: 'oauth' }
+        : { ok: false, sentence: `runtime ${runtime} was not started: Login oauth needs sign-in` },
+    );
+    const id = startedId(await f.service.start({ folder: '/work', runtime: 'rt', by: 'owner' }, PERSON_ORIGIN));
+    const before = f.registry.get(id);
+    expect((await f.service.startable(id)).ok).toBe(true);
+
+    signedIn = false;
+    const needsSignIn = await f.service.startable(id);
+    expect(needsSignIn.ok ? '' : needsSignIn.error.reason).toContain('needs sign-in');
+
+    signedIn = true;
+    const unusable = new FerretsService(f.registry, new FerretTokenDirectory(), {
+      ...f.ports,
+      loginCredential: async () => ({ kind: 'unavailable' as const, sentence: 'login oauth needs sign-in' }),
+    } as FerretsPorts);
+    const refused = await unusable.startable(id);
+    expect(refused.ok ? '' : refused.error.code).toBe('login_unavailable');
+    // Nothing was touched: the same record, one launch.
+    expect(f.registry.get(id)).toEqual(before);
+    expect(f.harness.launched).toHaveLength(1);
+    const missing = await f.service.startable('nobody' as never);
+    expect(missing.ok).toBe(false);
   });
 });

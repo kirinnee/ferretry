@@ -4,7 +4,13 @@ import { canonicalJson } from '@ferretry/std';
 import { NonNegativeIntegerSchema } from '@ferretry/std';
 import { InstantSchema } from './foreign.ts';
 import { sha256Hex } from './sha256.ts';
-import { SurfaceKeySchema } from '@ferretry/core-vault/contract';
+import {
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_PROMPT_MAX_LENGTH,
+  InputSubmitModeSchema,
+  SecretNameSchema,
+  SurfaceKeySchema,
+} from '@ferretry/core-vault/contract';
 
 /**
  * SECURE COPY: a value the agent asked the daemon to capture and may only ever name (docs/secure-copy.md).
@@ -654,4 +660,40 @@ export const CopyPlanApproveSchema = z.strictObject({
         .max(COPY_PLAN_MAX_ITEMS - 1),
     )
     .max(COPY_PLAN_MAX_ITEMS),
+});
+
+// ─── the agent's tool calls (`secure_copy`, `secure_list`, `secure_discard`, `secure_paste`) ──────────────────────────
+
+/** `secure_discard`: let go of a copy now. */
+export const SecureDiscardInputSchema = z.strictObject({ handle: CopyHandleSchema });
+
+/** `secure_list` takes nothing. */
+export const SecureListInputSchema = z.strictObject({});
+
+/**
+ * `secure_paste`: where a copy goes. A terminal the agent opened (the daemon observes what reads it), one field of a page
+ * the agent opened (a snapshot's ref or a selector; the daemon observes the field and the page's origin), or the secret
+ * store under a name (the daemon observes whether the name already holds a value).
+ */
+export const SecurePasteInputSchema = z.strictObject({
+  handle: CopyHandleSchema,
+  to: z.discriminatedUnion('kind', [
+    z.strictObject({ kind: z.literal('terminal'), name: SurfaceKeySchema }),
+    z
+      .strictObject({
+        kind: z.literal('browser'),
+        name: SurfaceKeySchema,
+        ref: BrowserRefSchema.optional(),
+        selector: boundedLine(512).optional(),
+      })
+      .superRefine((to, context) => {
+        if ((to.ref === undefined) === (to.selector === undefined))
+          context.addIssue({ code: 'custom', message: 'name the field by ref or by selector, exactly one' });
+      }),
+    z.strictObject({ kind: z.literal('secret'), name: SecretNameSchema }),
+  ]),
+  /** What the paste is for, shown to the owner as the agent's words. */
+  prompt: z.string().trim().min(1).max(INPUT_PROMPT_MAX_LENGTH),
+  submit: InputSubmitModeSchema.optional(),
+  expiresInSeconds: z.number().int().min(30).max(INPUT_MAX_EXPIRY_SECONDS).optional(),
 });

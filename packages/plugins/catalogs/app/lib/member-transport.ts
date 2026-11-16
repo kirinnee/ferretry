@@ -5,12 +5,12 @@
  * the tunnel record, the device key handle and the pinned session are fixed in `@ferretry/app` or built here, so a
  * Connections implementation cannot weaken them. A refusal is final; only a transport failure advances the walk.
  *
- * GAP(connections): the shell does not offer a member transport yet, so {@link noMemberTransport} answers every ask
- * as "unreachable" and no publisher is reached from this half. Nothing is sent, and the share code is never spent.
- * Connections' port must keep these guarantees, which are tested here against fake carriers: a leg whose dial throws
+ * With Connections off the shell offers no member carriers, so {@link noMemberTransport} answers every ask as
+ * "unreachable": nothing is sent, and the share code is never spent. Connections' carriers (`memberCarriers`) keep these
+ * guarantees, which are tested here against fake carriers: a leg whose dial throws
  * moves on; a refusal is final; spent-unheard is reported; 4403/401 mean the key is refused; a lease replay is a GET only;
  * a timeout closes the session. The walk-order cases (loopback, fingerprint, published relays, de-duplication) live in
- * `@ferretry/app` `memberWalk`; the direct and relay deadlines and the real socket/heartbeat behaviour are Connections'.
+ * `@ferretry/app` `memberWalk`; the real socket address and heartbeat are Connections' (its own tests).
  */
 
 import {
@@ -107,8 +107,12 @@ const publisherOf = (seed: Pick<ShareLinkSeed, 'daemonId' | 'daemonUrl'>): Membe
 /** The session a walk builds over a socket; replaced only by tests. */
 export type MemberSessionFactory = (dependencies: RelayClientSessionDependencies) => RelayClientSession;
 
-const walkOf = (carriers: MemberCarriers, publisher: MemberPublisher, purpose: MemberPurpose): readonly MemberStep[] =>
-  memberWalk(publisher, purpose, { rendezvousUrl: carriers.rendezvousUrl });
+const walkOf = async (
+  carriers: MemberCarriers,
+  publisher: MemberPublisher,
+  purpose: MemberPurpose,
+): Promise<readonly MemberStep[]> =>
+  memberWalk(publisher, purpose, { rendezvousUrl: await carriers.rendezvous().catch(() => undefined) });
 
 /** What a session that was walked came to, read from the session this half built and from nothing else. */
 type Settlement<T> =
@@ -144,7 +148,7 @@ async function attemptOver<T>(
   settledOf: (session: RelayClientSession) => Promise<T>,
   keepAlive: boolean,
 ): Promise<{ readonly value: T; readonly session: RelayClientSession }> {
-  const socket = carriers.dial(step.kind, step.address);
+  const socket = carriers.dial(step.kind, step.address, daemonId);
   held.socket = socket;
   const session = sessionOf({ crypto, daemonId, mode, socket });
   held.session = session;
@@ -197,7 +201,7 @@ export function memberTransportOver(
   return {
     async join({ seed, clientName, keys, passkey }) {
       const publisher = publisherOf(seed);
-      const steps = walkOf(carriers, publisher, 'join');
+      const steps = await walkOf(carriers, publisher, 'join');
       const key = crypto.deviceKeyHandle(keys.signingKey);
       let spentUnheard = false;
       for (const step of steps) {
@@ -240,7 +244,7 @@ export function memberTransportOver(
     async joinOptions({ seed, keys }) {
       const publisher = publisherOf(seed);
       const key = crypto.deviceKeyHandle(keys.signingKey);
-      for (const step of walkOf(carriers, publisher, 'join')) {
+      for (const step of await walkOf(carriers, publisher, 'join')) {
         const held: Held = {};
         try {
           const { value: outcome } = await attemptOver(
@@ -299,7 +303,7 @@ function openMemberClientOver(
   let closed = false;
 
   const walk = async (): Promise<RelayClientSession> => {
-    const steps = walkOf(carriers, subscription, 'member');
+    const steps = await walkOf(carriers, subscription, 'member');
     for (const step of steps) {
       const held: Held = {};
       try {

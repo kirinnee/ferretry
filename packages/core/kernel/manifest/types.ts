@@ -6,6 +6,7 @@ import type { RootName } from '../contract/ports.ts';
 import type { MemberRouteDescriptor, RouteDescriptor, ScopedRoute } from '../contract/route.ts';
 import type { SocketDescriptor } from '../contract/socket.ts';
 import type { InstructionWhen, Word } from '../contract/snapshot.ts';
+import type { SettingsGroupId } from './settings-groups.ts';
 
 /** What a plugin can add (§4). Each kind brings its contract and conformance suite. */
 export type PluginKind =
@@ -67,16 +68,37 @@ export interface ToolDecl<Name extends string = string> extends ToolDescriptor {
 export interface VerbOptionDecl {
   readonly flag: string;
   readonly help: string;
+  /** The verb refuses to run without it (`error: required option '--scope <scope>' not specified`), before any handler. */
+  readonly required?: boolean;
+}
+
+/** One positional argument a verb takes, as `fy <verb> --help` lists it under Arguments. */
+export interface VerbArgDecl {
+  /** The placeholder name (`id`, `name`): shown as `<id>`, `[id]` when optional, `[id...]` when variadic. */
+  readonly name: string;
+  readonly help: string;
+  readonly optional?: boolean;
+  readonly variadic?: boolean;
 }
 
 /** A `fy` verb (code) or an alias to an existing verb (data). */
 export interface VerbDecl<Verb extends string = string> {
   readonly verb: Verb;
   readonly summary?: string;
+  /**
+   * The arguments `fy <verb> --help` lists. An empty array says the verb takes none; leaving it out means the verb
+   * line's own placeholders (`<id>`, `[name...]`) are shown without a sentence, which a test refuses for a verb in the table.
+   */
+  readonly args?: readonly VerbArgDecl[];
   /** The options `fy <verb> --help` lists under the summary (only the ones worth naming; the verb's parser owns the rest). */
   readonly options?: readonly VerbOptionDecl[];
   /** Data plugins only: the verb line this alias runs (`card move --to done`). */
   readonly alias?: string;
+  /**
+   * Declares this verb the default of its group: the bare group (`fy catalog`, `fy catalog --json`) runs it, flags passed
+   * through, where a group without one refuses with "needs a sub-verb". At most one per group, and only a direct child.
+   */
+  readonly default?: boolean;
 }
 
 /** A button or menu item on a thing, naming the route it calls; hidden when Gate would refuse this device. */
@@ -128,6 +150,10 @@ export interface SettingsTabDecl<Id extends string = string> {
   readonly id: Id;
   readonly label: string;
   readonly order: number;
+  /** The heading the Settings page lists this tab under (`settings-groups.ts`); a tab that names none is listed last. */
+  readonly group?: SettingsGroupId;
+  /** Words the command bar finds this tab by, beyond its label (the settings it holds). */
+  readonly keywords?: readonly string[];
 }
 
 /** Renderers are provide hooks of the app (§5.2): one per ask source, one per reference prefix. */
@@ -247,8 +273,16 @@ export interface Permissions {
    * other non-core plugin lists only the names it may use or mints.
    */
   readonly secretNamePicker?: true;
+  /**
+   * It starts a command for a RUNTIME (MCP's check) and may put into that one child exactly the secrets the runtime's
+   * profile references (`VaultApi.childEnvironmentForRuntime`; Runtimes answers which). Not a general grant: no other name,
+   * no value, only for the call, and only a non-core plugin that declares it is handed the method.
+   */
+  readonly profileSecrets?: true;
   /** It reads this machine's `/proc` and `/sys` facts through `kernel.hostFacts` (today's Terminals). */
   readonly hostFacts?: true;
+  /** It reads THIS process's own `/proc/self/io` and `/proc/self/stat` through `kernel.selfCounters` (Usage's profile), and no other file or pid. */
+  readonly selfCounters?: true;
   /**
    * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
    * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a
@@ -268,6 +302,12 @@ export interface Permissions {
    * other variable is ever read.
    */
   readonly whichOverrides?: readonly string[];
+  /**
+   * The shell variables this plugin's `fy` half may read through `CliContext.readEnvironment` (Logins: the variable
+   * names its provider presets declare, for `fy login add --from-env`), by exact name; `'*'` or a pattern matches no
+   * variable. `CliContext.env` is unchanged. Absent or empty: every read answers nothing, whatever the shell holds.
+   */
+  readonly cliEnvReads?: readonly string[];
   /**
    * It mints shared trees through `kernel.roots.share` (Skills: one skill folder handed, read-only, to the harness that
    * receives the launch part). It hands another plugin read of a folder it owns, so a plugin that does not declare it
@@ -336,6 +376,13 @@ export interface Needer {
    * these names as the needer's own, beside `permissions.secrets`.
    */
   readonly ownedSecretReferences: () => ReadonlySet<string>;
+  /**
+   * The KERNEL's own answer to "may this plugin reach this host", asked at the call: its `network` entries of every
+   * kind (a plain host, an installed item's, a `{ resolver }` answer), exactly what its own `kernel.fetch` allows. A
+   * provider that sends a request for the needer asks THIS rather than reading `permissions.network`, which a resolver
+   * entry grants nothing through. Absent (a bare needer): only the literal entries count, as `neederMayReach` reads them.
+   */
+  readonly mayReach?: (hostname: string, host: string) => boolean;
 }
 
 /** A state file that names itself like a secret but is not one, with the reason a reviewer can check. */

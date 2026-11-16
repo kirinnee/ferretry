@@ -250,11 +250,13 @@ describe('the MCP callback page — nothing to hand over', () => {
 });
 
 describe('the MCP callback page — how it is served', () => {
-  it('runs one same-origin script and no inline one, as the site policy requires', () => {
+  it('runs same-origin scripts and no inline one, as the site policy requires', () => {
     const scripts = [...page.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gu)];
-    expect(scripts).toHaveLength(1);
-    expect(scripts[0]?.[1]).toBe(` src="${MCP_OAUTH_CALLBACK_PATH}.js"`);
-    expect(scripts[0]?.[2]).toBe('');
+    // 88bdc8946a: the pairing strip (/arrival.js) is the first script of every HTML page; the page's own comes last.
+    expect(scripts).toHaveLength(2);
+    expect(scripts[0]?.[1]).toBe(' src="/arrival.js" data-drop');
+    expect(scripts[1]?.[1]).toBe(` src="${MCP_OAUTH_CALLBACK_PATH}.js"`);
+    for (const each of scripts) expect(each[2]).toBe('');
     expect(script).not.toContain('innerHTML');
   });
 

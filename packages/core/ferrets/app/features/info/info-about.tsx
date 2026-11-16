@@ -10,10 +10,15 @@
 
 import { useState } from 'react';
 import type { FerretSummary } from '../../../contract/index.ts';
+import { OutdatedMark } from '../restart-outdated/outdated-mark.tsx';
 import { InfoRow, InfoSection } from './info-parts.tsx';
 import { activeSubFerrets, SubFerretsPack } from './sub-ferrets.tsx';
 
 export interface InfoAboutProps {
+  /** This ferret: its `outdated` flag is what the mark beside Restart says. */
+  readonly ferret: FerretSummary;
+  /** The daemon's client, which keys what "Restart outdated" last answered (`restart-outdated/restart-overlay.ts`). */
+  readonly overlayKey?: object;
   /** The ferrets this one started (`lineage(...).children`). */
   readonly subFerrets: readonly FerretSummary[];
   readonly onOpenFerret?: (ferretId: string) => void;
@@ -23,9 +28,11 @@ export interface InfoAboutProps {
   readonly onRestart?: () => Promise<boolean>;
 }
 
-function RestartRow({ onRestart }: Pick<InfoAboutProps, 'onRestart'>) {
+function RestartRow({ ferret, overlayKey, onRestart }: Pick<InfoAboutProps, 'ferret' | 'overlayKey' | 'onRestart'>) {
   const [busy, setBusy] = useState(false);
-  if (onRestart === undefined) return null;
+  // The mark is a fact about the ferret, not a control: a reader who may not restart it still sees that it is outdated.
+  const mark = <OutdatedMark ferret={ferret} overlayKey={overlayKey} />;
+  if (onRestart === undefined) return ferret.outdated === undefined ? null : <InfoRow label="Restart">{mark}</InfoRow>;
   return (
     <InfoRow label="Restart">
       <button
@@ -44,11 +51,12 @@ function RestartRow({ onRestart }: Pick<InfoAboutProps, 'onRestart'>) {
       >
         {busy ? 'Restarting…' : 'Restart'}
       </button>
+      {mark}
     </InfoRow>
   );
 }
 
-export function InfoAbout({ subFerrets, onOpenFerret, card, onRestart }: InfoAboutProps) {
+export function InfoAbout({ ferret, overlayKey, subFerrets, onOpenFerret, card, onRestart }: InfoAboutProps) {
   return (
     <section aria-label="About this ferret" className="fy-info-about" data-info-about="">
       <InfoSection title="About this ferret">
@@ -66,7 +74,7 @@ export function InfoAbout({ subFerrets, onOpenFerret, card, onRestart }: InfoAbo
             </span>
           </InfoRow>
         )}
-        <RestartRow {...(onRestart === undefined ? {} : { onRestart })} />
+        <RestartRow ferret={ferret} overlayKey={overlayKey} {...(onRestart === undefined ? {} : { onRestart })} />
       </InfoSection>
     </section>
   );

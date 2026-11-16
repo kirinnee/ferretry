@@ -6,31 +6,40 @@ import type { KernelPorts } from '@ferretry/kernel/contract';
 import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
+import type { RuntimesApi } from '@ferretry/plugin-runtimes/contract';
 import type { TerminalsApi } from '@ferretry/plugin-terminals/contract';
-import type { UsageHeadroomApi } from '../contract/others.ts';
+import type { LoginFactsApi, OwnerHoldApi, UsageHeadroomApi } from '../contract/others.ts';
 import { WARDEN_CONFIG, WardenActed, WardenConfigChanged, WardenFlagged } from '../contract/index.ts';
 import { AsksWardenAgenda, NoticeEntries } from './asks.ts';
 import { boardReader } from './board.ts';
 import {
   ConfigWardenConfigStore,
   FileWardenArtifacts,
+  ScratchWardenWorkFolders,
   kernelSecretSender,
   StateMachineMembers,
   StateWardenJevCheckLog,
   StateWardenReportFiles,
+  StateAutoMoveLedger,
   StateWardenStateStore,
   WardenReportReader,
+  runtimesWardenAgents,
 } from './adapters/index.ts';
+import { WardenFleetFacts } from './adapters/fleet-facts.ts';
 import {
   exchangeSends,
+  limitedFerrets,
   livenessTargets,
   readFleet,
   reviveEventsOf,
+  statusOf,
   TurnOrdinals,
   transcriptDigest,
   withLiveness,
+  withRateLimited,
 } from './fleet.ts';
 import { createWardenRemedies } from './remedies.ts';
+import { ferretsWardenSpawner } from './spawner.ts';
 import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
 import {
   INBOX_STUCK_REF,
@@ -38,6 +47,9 @@ import {
   type LivenessSample,
   StuckInboxList,
   StuckInputList,
+  ownerHoldReason,
+  WARDEN_SWEEP_ORIGIN,
+  WardenAutoMoveService,
   type WardenAgentInventory,
   WardenLivenessMonitor,
   WardenReviveService,
@@ -69,6 +81,12 @@ export interface WardenHost {
   readonly conversation: ConversationApi;
   readonly asks: AsksApi;
   readonly usage: () => UsageHeadroomApi | undefined;
+  /** Logins, when it is on: each login's sign-in word, quota and budget, for the auto-move's facts. Off: nothing is moved. */
+  readonly logins?: () => LoginFactsApi | undefined;
+  /** Accounts, when it is on: its one owner-hold yes or no. Off: nothing is moved (a hold cannot be checked). */
+  readonly accounts?: () => OwnerHoldApi | undefined;
+  /** Runtimes, when it is on: the catalog the auto-move chooses a login from. Off: nothing is moved. */
+  readonly runtimes?: () => RuntimesApi | undefined;
   /** Board, when it is on: read at each sweep, never during build. */
   readonly board: () => BoardApi | undefined;
   /** Terminals, when it is on: the liveness look at each ferret's own pane. Off, the liveness checks do not run. */
@@ -90,6 +108,8 @@ export interface WardenSubsystem {
   run(spawn: boolean): Promise<WardenRunView>;
   config(): ReturnType<WardenSweepService['view']>;
   updateConfig(patch: unknown): ReturnType<WardenSweepService['updateConfig']>;
+  /** The owner's act of naming the Jev key in `warden.yaml`; held for the owner unless the kernel finds the caller is. */
+  nameJevKey(): ReturnType<WardenSweepService['view']>;
   agenda(scope?: WardenReadScope): Promise<WardenAgendaView>;
   investigate(ferret: string, note?: string): Promise<WardenInvestigateView>;
   leave(ferret: string, duration: '1h' | '4h' | 'until_change'): ReturnType<WardenSweepService['leaveAlone']>;
@@ -107,10 +127,6 @@ export const WARDEN_LIVENESS_TICK_SECONDS = 30;
 /** The binary's name, for sentences that name a command a ferret types; the other halves quote it the same way. */
 const BINARY = 'fy';
 
-const refuse = (what: string): never => {
-  throw new Error(`${what} is not available on this machine yet.`);
-};
-
 export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const { kernel, ferrets, conversation, asks } = host;
   const nowMs = (): number => kernel.clock.nowMs();
@@ -121,8 +137,18 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   const nowIso = (): string => new Date(kernel.clock.nowMs()).toISOString();
   const files = new StateWardenReportFiles(kernel.state);
   const reader = new WardenReportReader(files, REPORTS_DIRECTORY);
-  const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY);
+  // A finished investigator's report is the summary of its last `signal done`, masked before it is filed.
+  const artifacts = new FileWardenArtifacts(files, reader, REPORTS_DIRECTORY, async investigator => {
+    const summary = await ferrets.summary(investigator as FerretId);
+    if (summary === undefined) return undefined;
+    return await kernel.redaction.read(async scope => scope.text(summary));
+  });
   const configStore = new ConfigWardenConfigStore(kernel.config);
+  /** Every settings answer says whether `warden.yaml` names the Jev key: a fact about a reference, never the key. */
+  const naming = <View extends object>(view: View): View & { readonly jevKey: 'named' | 'not_named' } => ({
+    ...view,
+    jevKey: configStore.jevKeyNamed() ? 'named' : 'not_named',
+  });
   // A settings screen hears warden.yaml move the moment the kernel reloads it, from any editor (not only on mount).
   kernel.config.watch(WARDEN_CONFIG, () => kernel.events.publish(WardenConfigChanged, {}));
 
@@ -209,23 +235,95 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
   });
 
   // ── investigators ────────────────────────────────────────────────────────────────────────────────────────────────────
-  // GAP(warden folder): Ferrets now starts a ferret in a `workFolder` and hands back what it wrote with
-  // `summary(ferret)`, but the Warden has no folder of its own to pass: its manifest declares no root and the kernel
-  // offers no path to its state. Without one, no investigator starts and nothing is spent.
-  const spawner: WardenSpawner = {
-    spawn: async request => {
-      if (request.cwd === '') {
-        return refuse('Starting a warden investigation (it has no folder to work and write its report in)');
-      }
-      return refuse('Starting a warden investigation');
-    },
-  };
+  // Each starts through Ferrets as the Warden, in a folder of its own that the kernel's scratch port made outside the
+  // Ferretry home (never the home, never a project), and hands its report back with `signal done` (`spawner.ts`).
+  const workFolders = new ScratchWardenWorkFolders(kernel.scratch);
+  const spawner: WardenSpawner = ferretsWardenSpawner({ ferrets, folders: workFolders });
 
-  const agents: WardenAgentInventory = {
-    installed: async () => ferrets.harnesses(),
-    currentName: async reference => reference,
-    defaultRuntime: async () => undefined,
-  };
+  // The logins an investigation may run on: this machine's agent runtimes by NAME, and its default runtime for an owner who
+  // never chose one (`runtime-agents.ts`). Runtimes not answering is "unreadable": it condemns no account and leaves the login
+  // not set. Ferrets resolves the runtime at the start itself and refuses a signed-out one: the sweep then strikes that
+  // account and tries the next, which is the check that matters. (The harness keys Ferrets lists are not runtime names.)
+  const agents: WardenAgentInventory = runtimesWardenAgents(() => host.runtimes?.());
+
+  // ── auto-move: a ferret on a login that hit its limit goes to one with room (`auto-move-service.ts`) ────────────────
+  // No Jev, no investigation, no spend: a rule over recorded facts and the owner's `autoMove` setting. The act is
+  // Ferrets' own move (same session, same conversation), under its own safety check and NEVER forced; the Warden only
+  // chooses the login, and only for a ferret nothing of the owner's is open on.
+  const facts = new WardenFleetFacts(
+    () => host.runtimes?.(),
+    () => host.logins?.(),
+    () => host.usage(),
+    async () => (await ferrets.paneLimits?.()) ?? [],
+    () => kernel.clock.now() as string,
+  );
+  const autoMove = new WardenAutoMoveService({
+    facts: async () => await facts.facts(),
+    // ONE yes or no from Accounts (an input card, a sign-in waiting on their phone, a plan card or a copied secret all
+    // answer it), then the ferret's own prompt. A check that cannot be made is a reason not to move.
+    // GAP(warden): a terminal or browser the ferret handed to the owner is not on any 5.0 port, so it is not checked.
+    ownerHold: async sessionId => {
+      const held = host.accounts?.()?.ownerHold?.(sessionId);
+      if (held === undefined)
+        return "whether something of the owner's is open on it could not be checked (Accounts did not answer)";
+      if (held)
+        return 'it has something of the owner open (an input card, a sign-in approval on their phone, a plan card or a secret it copied)';
+      return await ownerHoldReason(
+        {
+          inputCardOpen: () => false,
+          phoneApprovalOpen: () => false,
+          planAwaitingOwner: () => false,
+          heldSecrets: () => 0,
+          surfaceAsked: async () => false,
+          state: async id => {
+            const [summary, prompt] = await Promise.all([
+              ferrets.get(id as FerretId),
+              ferrets.prompt?.(id as FerretId),
+            ]);
+            if (summary === undefined || prompt === undefined) return undefined;
+            return {
+              status: statusOf(summary),
+              ...(prompt.permissionRequest === undefined ? {} : { permissionRequest: prompt.permissionRequest }),
+              ...(prompt.dialog === undefined ? {} : { harnessDialog: prompt.dialog }),
+            };
+          },
+        },
+        sessionId,
+      );
+    },
+    // Ferrets reads no background job and its move refuses one in flight (never forced), so the mover sees none: a
+    // ferret with jobs is refused by the move's own check and the owner is told, as a failed move. The ask-to-stop and
+    // force-stop paths need a Ferrets read of the jobs that 5.0 does not publish yet (GAP).
+    blockingJobs: async () => [],
+    askToStopJobs: async () => undefined,
+    stopJobs: async () => ({ stopped: [], survivors: [] }),
+    move: async (sessionId, request) => {
+      if (ferrets.move === undefined) throw new Error('Moving a ferret to another account is not available here.');
+      const moved = await ferrets.move(sessionId as FerretId, request.agent, {
+        origin: WARDEN_SWEEP_ORIGIN,
+        actor: 'warden',
+        movedBy: 'warden',
+        note: request.note,
+      });
+      if (!moved.ok) throw new Error(moved.error.reason);
+    },
+    agentOf: async sessionId => {
+      const ferret = await ferrets.get(sessionId as FerretId).catch(() => undefined);
+      return ferret === undefined ? undefined : (ferret.runtime ?? ferret.harness);
+    },
+    ledger: new StateAutoMoveLedger(kernel.state),
+    notifyOwner: async notice => {
+      await agenda.notice(notice.sessionId, {
+        sourceRef: 'warden-auto-move',
+        subject: `${notice.title}: ${notice.subject}`,
+        why: notice.why,
+        context: 'The Warden moves a ferret whose login hit a limit to another login.',
+        howToResolve: 'Nothing to answer. Move the ferret yourself if you want it on another login now.',
+      });
+    },
+    emit: async (sessionId, type, data) => kernel.log.info(type, { ferret: sessionId, ...scalars(data) }),
+    journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
+  });
 
   const service = new WardenSweepService(
     {
@@ -258,10 +356,14 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       fleet: {
         fleet: async () => {
           const fleet = await fleetNow();
-          if (!monitorOn()) return fleet;
+          const limited = await limitedFerrets(ferrets);
+          if (!monitorOn()) return withRateLimited(fleet, limited);
           const now = isoFromMs(nowMs());
           const leftovers = browsers() !== undefined;
-          return fleet.map(session => withLiveness(session, liveness, now, leftovers));
+          return withRateLimited(
+            fleet.map(session => withLiveness(session, liveness, now, leftovers)),
+            limited,
+          );
         },
         // A monitor that has stopped seeing is ONE fault of this daemon, never one per ferret.
         monitorStalled: () => monitorOn() && liveness.stalled(),
@@ -277,6 +379,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       journal: { record: (type, data) => kernel.log.info(type, scalars(data)) },
       jevChecks: new StateWardenJevCheckLog(kernel.state, nowMs),
       revive,
+      autoMove,
       // Board off (or not loaded): no port, so no card is reported orphaned and none is cleared.
       board: () => {
         const board = host.board();
@@ -351,8 +454,13 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
     verdicts: async scope => await reader.readVerdicts(undefined, scope),
     report: async reportPath => await reader.readReportAt(posix.join(REPORTS_DIRECTORY, posix.basename(reportPath))),
     run: async spawn => await loop.run(spawn),
-    config: async () => await service.view(),
-    updateConfig: async patch => await service.updateConfig(parseWardenConfigPatch(patch)),
+    config: async () => naming(await service.view()),
+    updateConfig: async patch => naming(await service.updateConfig(parseWardenConfigPatch(patch))),
+    nameJevKey: async () => {
+      const held = await configStore.nameJevKey();
+      const view = naming(await service.view());
+      return held.length === 0 ? view : { ...view, held: [...held] };
+    },
     agenda: async scope => await service.agenda(scope),
     // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation starts now.
     investigate: async (ferret, note) => {
@@ -409,6 +517,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         if (livenessArmed) liveness.disarm();
         livenessArmed = false;
         disarm?.();
+        void workFolders.close().catch(() => undefined);
       };
     },
   };

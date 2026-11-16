@@ -4,6 +4,7 @@
     "types": ["bun"],
     "paths": {
       "@ferretry/std": ["../../packages/std/src/index.ts"],
+      "@ferretry/std/credential-words": ["../../packages/std/src/credential-words/index.ts"],
       "@ferretry/std/yaml": ["../../packages/std/src/yaml-text.ts"],
       "@ferretry/kernel/contract": ["../../packages/core/kernel/contract/index.ts"],
       "@ferretry/core-*/contract": ["../../packages/core/*/contract/index.ts"],

@@ -76,6 +76,12 @@ describe('the Layout tab', () => {
       'Navigation items',
       'Top bar',
       'Ferret side panels',
+      'Phone navigation side',
+      'Phone navigation style',
+      'Phone second column',
+      'Phone density',
+      'Phone navigation items',
+      'Phone top bar',
     ])
       expect(text).toContain(name);
     expect(text).toContain('the layout in use, with your changes applied');
@@ -124,12 +130,42 @@ describe('the Layout tab', () => {
     await view.unmount();
   });
 
+  test('a phone row saves its `phone.*` key, in either scope, and shows what the phone holds', async () => {
+    const script = scriptedLayouts();
+    const device = fakeDevice();
+    const view = await mount(<LayoutSettings client={script.client} device={device} />);
+    await settle();
+    expect(group(view.container, 'Phone navigation side').querySelector<HTMLInputElement>('input:checked')?.value).toBe(
+      'bottom',
+    );
+    await pick(view.container, 'Phone navigation side', 'top');
+    await pick(view.container, 'Phone density', 'compact', 1);
+    await settle();
+    expect(script.calls).toEqual(['set phone.nav.side top']);
+    expect(device.calls).toEqual(['set phone.density compact']);
+    const box = must(
+      [...view.container.querySelectorAll<HTMLInputElement>('input[aria-labelledby]')].find(
+        input => input.value === 'ferrets, agenda, board',
+      ),
+      'the phone navigation box',
+    );
+    await type(box, 'agenda');
+    const save = [...view.container.querySelectorAll('button')].filter(
+      button => button.textContent === 'Save' && !button.disabled,
+    );
+    expect(save).toHaveLength(1);
+    await interact(() => save[0]?.click());
+    await settle();
+    expect(script.calls).toEqual(['set phone.nav.side top', 'set phone.nav.items agenda']);
+    await view.unmount();
+  });
+
   test('a list is saved as typed, only once it differs from what the daemon holds', async () => {
     const script = scriptedLayouts();
     const view = await mount(<LayoutSettings client={script.client} />);
     await settle();
     const box = must(view.container.querySelector<HTMLInputElement>('input[aria-labelledby]'), 'a list box');
-    expect(box.value).toBe('ferrets, agenda, board, insights, settings');
+    expect(box.value).toBe('ferrets, agenda, board, projects, insights, settings');
     const save = press(view.container, 'Save');
     expect(save.disabled).toBe(true);
     await type(box, 'agenda, board');

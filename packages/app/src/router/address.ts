@@ -11,7 +11,13 @@ import { addressPlace } from './routes.ts';
  *   declaring plugin's device view. `strip: false` claims the key and leaves it in the address (Runtimes' own router).
  * - **Path** (the whole fragment on one of the plugin's daemon-less screens), matched by the router's own parse
  *   (`addressPlace`): `at` → stripped and held for that screen; `beneath` → stripped and DROPPED.
+ * - A pairing-shaped fragment (`CREDENTIAL_FRAGMENT`) on any OTHER path is stripped and DROPPED: a live code that landed
+ *   on the wrong page has no taker, and must not sit in the address.
  * - Anything else is not the shell's: never read, never stripped.
+ * - A path fragment normally leaves the address before the module graph is even fetched: `public/arrival.js` strips it
+ *   while the document parses and keeps it in its own closure, behind one `window` function that the taker calls once at
+ *   construction (`takeEarlyArrival`). That hand-off is take-once and carries what is left of the two minutes counted
+ *   from the ARRIVAL: a boot that comes late does not restart the hold.
  * - A held value no one takes is dropped after two minutes: a pairing or share code is a live credential. It is never
  *   written to the URL, history state or storage, and never logged.
  */
@@ -24,6 +30,49 @@ export type FragmentDecl =
 export const FRAGMENT_KEY = /^[a-z][a-z0-9-]{0,31}$/u;
 /** How long a held fragment (or hand-off) waits for its taker. */
 export const HELD_FOR_MS = 120_000;
+
+/** The one non-enumerable function `public/arrival.js` leaves on `window` for the taker to call once. */
+export const EARLY_ARRIVAL_KEY = '__fyArrival';
+
+/** A pairing or share link's fragment shape (the access contract's `PAIRING_FRAGMENT_PATTERN`; a unit test pins the two). */
+export const CREDENTIAL_FRAGMENT = /^#?v1(?:;|$)/u;
+
+/**
+ * A fragment `public/arrival.js` already took off the address (before the module graph was fetched): the path it
+ * arrived on, the whole fragment (`#` included) and how much of its two minutes is left. The taker decides, by the
+ * plugins' own declarations, whether it is held for a screen or dropped.
+ */
+export interface EarlyArrival {
+  readonly pathname: string;
+  readonly hash: string;
+  readonly remainingMs: number;
+}
+
+/**
+ * Takes the early arrival, ONCE: calls the script's hand-off (which removes itself and its value) and drops anything
+ * that is not exactly what it promises. `undefined` when none is there, it is odd, or its deadline has passed.
+ */
+function takeEarlyArrival(browser: object): EarlyArrival | undefined {
+  const handoff: unknown = Reflect.get(browser, EARLY_ARRIVAL_KEY);
+  Reflect.deleteProperty(browser, EARLY_ARRIVAL_KEY);
+  if (typeof handoff !== 'function') return undefined;
+  let found: unknown;
+  try {
+    found = Reflect.apply(handoff, undefined, []);
+  } catch {
+    return undefined; // a hand-off that throws gave nothing
+  }
+  if (typeof found !== 'object' || found === null) return undefined;
+  const { pathname, hash, remainingMs } = found as Partial<EarlyArrival>;
+  return typeof pathname === 'string' &&
+    typeof hash === 'string' &&
+    hash.length > 1 &&
+    typeof remainingMs === 'number' &&
+    remainingMs > 0 &&
+    remainingMs <= HELD_FOR_MS
+    ? { pathname, hash, remainingMs }
+    : undefined;
+}
 
 /** The slice of `window` the taker reads and rewrites. */
 export interface AddressBrowser {
@@ -99,7 +148,22 @@ export class AddressTaker {
       }
     }
     browser?.addEventListener?.('hashchange', () => this.read());
+    const early = browser === undefined ? undefined : takeEarlyArrival(browser);
+    if (early !== undefined) this.#adopt(early);
     this.read();
+  }
+
+  /**
+   * A fragment the early script already took off the address: held for its declared screen (`at`), or dropped
+   * (`beneath`, or a path nobody declared). It is the same decision `read` makes, only the strip is already done.
+   */
+  #adopt({ pathname, hash, remainingMs }: EarlyArrival): void {
+    for (const { plugin, screen } of this.#paths) {
+      const place = addressPlace(screen, pathname);
+      if (place === 'elsewhere') continue;
+      if (place === 'at') this.#hold(`path:${plugin}.${screen.id}`, hash, remainingMs);
+      return;
+    }
   }
 
   /** Reads the address now: a declared, stripping part leaves it and is held (or, beneath a path screen, dropped). */
@@ -117,7 +181,12 @@ export class AddressTaker {
     }
     const key = fragmentKey(hash);
     const claim = key === undefined ? undefined : this.#keyed.get(key);
-    if (claim === undefined || !claim.strip) return;
+    if (claim === undefined) {
+      // A pairing-shaped fragment on a path no one declared has no taker: it leaves the address and is dropped.
+      if (CREDENTIAL_FRAGMENT.test(hash)) this.#strip(browser);
+      return;
+    }
+    if (!claim.strip) return;
     this.#strip(browser);
     this.#hold(`keyed:${key}`, hash);
   };
@@ -158,11 +227,12 @@ export class AddressTaker {
     browser.history.replaceState(browser.history.state, '', `${pathname}${search}`);
   }
 
-  #hold(slot: string, value: string): void {
-    const held: Held = { value, at: this.#clock.now() };
+  /** Holds `value` for its taker until its deadline: two minutes from now, or what is left of them for an early one. */
+  #hold(slot: string, value: string, remainingMs: number = HELD_FOR_MS): void {
+    const held: Held = { value, at: this.#clock.now() - (HELD_FOR_MS - remainingMs) };
     this.#held.set(slot, held);
     this.#arrivals.set(slot, this.arrival(slot) + 1);
-    this.#clock.after(HELD_FOR_MS, () => {
+    this.#clock.after(remainingMs, () => {
       if (this.#held.get(slot) === held) this.#held.delete(slot);
     });
     for (const listener of [...this.#listeners]) listener();

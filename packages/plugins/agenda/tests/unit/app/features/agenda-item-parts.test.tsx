@@ -126,7 +126,12 @@ describe('the item view’s parts', () => {
     // The version picker is the head's too, behind its ⋯ — never a row of its own on the card.
     expect(root().querySelector('.fy-card [data-agenda-version-picker]')).toBeNull();
     await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
-    expect(one('[data-agenda-menu] [data-agenda-version-slot] [data-agenda-version-picker]')).toBeDefined();
+    expect(
+      must(
+        document.body.querySelector('[data-agenda-menu] [data-agenda-version-slot] [data-agenda-version-picker]'),
+        'the picker',
+      ),
+    ).toBeDefined();
   });
 
   test('the head draws the description — the item’s summary — whole, right under its two small chips', async () => {
@@ -139,7 +144,7 @@ describe('the item view’s parts', () => {
     expect(head.lastElementChild).toBe(description);
     // Said on the card, so the head's ⋯ does not hold it a second time.
     await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
-    expect(root().querySelector('[data-agenda-menu] [data-agenda-ask]')).toBeNull();
+    expect(document.body.querySelector('[data-agenda-menu] [data-agenda-ask]')).toBeNull();
   });
 
   test('a resting item says who it waits on, and a working one says so', async () => {
@@ -414,7 +419,7 @@ describe('what it needs from you', () => {
   test('draws no card ask on an earlier version, which only reads', async () => {
     await draw(full);
     await interact(() => one<HTMLButtonElement>('[data-agenda-menu-toggle]').click());
-    const picker = one<HTMLSelectElement>('[data-agenda-version-picker]');
+    const picker = must(document.body.querySelector<HTMLSelectElement>('[data-agenda-version-picker]'), 'the picker');
     await interact(() => {
       picker.value = '1';
       picker.dispatchEvent(new Event('change', { bubbles: true }));

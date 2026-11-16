@@ -7,14 +7,14 @@ import {
 } from '../../../../app/slots/agenda-conversation-panel.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
 import { fakeClient } from '../../../support/app/fake-client.ts';
-import { ferretView } from '../../../support/app/ferret-view.ts';
+import { ferretSummary } from '../../../support/app/ferret-view.ts';
 
 ensureDom();
 
 const daemon = () =>
   fakeClient(
     {
-      'GET /v1/ferrets/:ferretId': call => ferretView(call.params['ferretId'] ?? ''),
+      'GET /v1/ferrets/:ferretId': call => ferretSummary(call.params['ferretId'] ?? ''),
       'GET /v1/ferrets/:ferretId/log-page': call => ({
         v: 1,
         ferret: call.params['ferretId'],
@@ -52,6 +52,22 @@ describe('the open ask’s conversation (slot agenda.conversation)', () => {
     const { mounted, client } = await open({ ferret: 'f1', ask: 'A3' });
     expect(client.callsTo('GET /v1/ferrets/:ferretId').map(call => call.params['ferretId'])).toContain('f1');
     expect(mounted.container.textContent).not.toContain('names no ferret');
+    await mounted.unmount();
+  });
+
+  test('hands the form card’s Send on to the chat, which answers the form with it', async () => {
+    let answered = 0;
+    const { mounted } = await open({ ferret: 'f1', ask: 'A3', answerForm: () => (answered += 1), formChanges: 2 });
+    expect(mounted.container.querySelector('[data-session="f1"]')).not.toBeNull();
+    expect(answered).toBe(0);
+    await mounted.unmount();
+  });
+
+  test('draws the conversation embedded: not the whole ferret page', async () => {
+    const { mounted, client } = await open({ ferret: 'f1', ask: 'A3' });
+    expect(client.callsTo('GET /v1/ferrets/:ferretId').length).toBeGreaterThan(0);
+    expect(mounted.container.querySelector('[data-session="f1"]')).not.toBeNull();
+    expect(mounted.container.querySelector('main[data-embedded]')).not.toBeNull();
     await mounted.unmount();
   });
 

@@ -377,6 +377,45 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('starts a shell when its host asks for a new terminal (the phone’s + New terminal), once per request', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    let created = 0;
+    const dependencies: typeof deck.dependencies = {
+      ...deck.dependencies,
+      create: async (...args) => {
+        created += 1;
+        return await deck.dependencies.create(...args);
+      },
+    };
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(created).toBe(0);
+
+    const ask = (id: number, action: string) =>
+      run(() =>
+        page.update(
+          <SessionTerminalDeck
+            connection={alpha}
+            dependencies={dependencies}
+            intent={{ id, action }}
+            scope={scopeAlpha}
+          />,
+        ),
+      );
+    ask(1, 'new-page');
+    await settle();
+    expect(created, 'a request for another panel’s act is ignored').toBe(0);
+
+    ask(2, 'new-terminal');
+    await settle();
+    expect(created).toBe(1);
+    expect(json(page)).toContain('Terminal 1');
+    ask(2, 'new-terminal');
+    await settle();
+    expect(created, 'the same request does not start a second shell').toBe(1);
+    run(() => page.unmount());
+  });
+
   test('does not kill a shell the reader declined to close', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     deck.confirm = false;
@@ -414,6 +453,48 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('mount and poll reads stay quiet, but a press on Retry after a step-up refusal asks for the step-up and loads the tabs', async () => {
+    const refusal = new DaemonCallError(403, 'grant_step_up_required', 'confirm with your passkey');
+    const asked: boolean[] = [];
+    let stepped = false;
+    const client = {
+      call: (async (route: string, init: { readonly quiet?: boolean } = {}) => {
+        if (route !== 'GET /v1/ferrets/:ferretId/terminals') throw new Error(`unexpected route ${route}`);
+        asked.push(init.quiet === true);
+        // The daemon client refuses a quiet protected read without prompting; a non-quiet one prompts once, then reads.
+        if (!stepped && init.quiet === true) throw refusal;
+        stepped = true;
+        return terminalListing([terminalView(FIRST)]);
+      }) as PluginClient['call'],
+      subscribe: () => () => undefined,
+    } as PluginClient;
+    const deck = pluginTerminalDeckDependencies(client, {
+      ...browserTerminalDeckHost(),
+    });
+    const fake = fakeDeck(async () => terminalListing([]), deck);
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={fake.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    // Mounting never prompts: the one read was quiet and its refusal is what the person sees.
+    expect(asked).toEqual([true]);
+    expect(json(page)).toContain('Retry loading terminals');
+    expect(json(page)).not.toContain('Terminal F');
+    // A listing that failed is not an empty listing: nothing says "none open" (starting one stays possible).
+    expect(json(page)).not.toContain('No shell terminals open');
+    expect(json(page)).toContain('Terminals not read');
+    expect(json(page)).toContain('terminals unavailable');
+    expect(json(page)).not.toContain('loading terminals…');
+
+    clickNamed(page, 'Retry loading terminals');
+    await settle();
+
+    // The explicit press is not quiet, so the existing step-up ran and the tabs loaded.
+    expect(asked).toEqual([true, false]);
+    expect(json(page)).toContain('1/6 in this session');
+    expect(json(page)).not.toContain('Retry loading terminals');
+    run(() => page.unmount());
+  });
+
   test('words a refused listing as the grant refusal it is, not as a bare HTTP status', async () => {
     const refusal = new DaemonCallError(403, 'grant_not_granted', '');
     const explanation = grantRefusalNotice(refusal)?.guidance.explanation ?? '';
@@ -425,6 +506,7 @@ describe('SessionTerminalDeck', () => {
     await settle();
 
     expect(json(page)).toContain(explanation);
+    expect(json(page)).not.toContain('No shell terminals open');
     run(() => page.unmount());
   });
 

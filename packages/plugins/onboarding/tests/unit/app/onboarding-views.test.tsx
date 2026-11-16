@@ -3,7 +3,7 @@
  * no machine to draw), a read that fails, and the first-run page's pairing hand-off with a fake paired list.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type { DaemonlessPorts } from '@ferretry/app';
+import type { DaemonlessPorts, HostedRelayState } from '@ferretry/app';
 import { noteClientDaemon } from '@ferretry/app/testing';
 import type { EventDef } from '@ferretry/kernel/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
@@ -19,7 +19,8 @@ import { RouterProvider } from '@ferretry/app/testing/router';
 import { DEVICE_SENTENCES } from '../../../app/device-kind.ts';
 import { detectDeviceKind } from '../../../app/device-kind.ts';
 import { LINK_COSTS } from '../../../app/link-costs.ts';
-import { startOnboardingPairing } from '../../../app/onboarding-progress.ts';
+import { ONBOARDING_PROGRESS_KEY, startOnboardingPairing } from '../../../app/onboarding-progress.ts';
+import { ONBOARDING_PAIR_TRIP_KEY } from '../../../app/pair-trip.ts';
 import { interact, mount } from '../support/dom.ts';
 
 interface Listing {
@@ -28,7 +29,7 @@ interface Listing {
 }
 
 /** A paired list with the three members a daemon-less screen uses; the pairing code is never in it. */
-function pairedList(start: Listing) {
+function pairedList(start: Listing, hostedRelay?: () => Promise<HostedRelayState>) {
   let current = start;
   const listeners = new Set<() => void>();
   const list = {
@@ -39,7 +40,7 @@ function pairedList(start: Listing) {
     },
   };
   return {
-    ports: { daemons: list } as unknown as DaemonlessPorts,
+    ports: { daemons: list, ...(hostedRelay === undefined ? {} : { hostedRelay }) } as unknown as DaemonlessPorts,
     set: (next: Listing) => {
       current = next;
       for (const listener of [...listeners]) listener();
@@ -145,6 +146,36 @@ describe('S14 the steps screen', () => {
     expect(modified.defaultPrevented).toBe(false);
     window.history.replaceState(null, '', '/');
     await drawn.unmount();
+  });
+
+  it('closes the setup with what was set up and a Settings link for each step left for later or skipped', async () => {
+    const { client } = clientOf(() => ({
+      steps: [
+        { plugin: 'logins', id: 'login', title: 'Sign in', order: 30, state: 'done' },
+        { plugin: 'voice', id: 'voice', title: 'Voice', order: 40, state: 'later' },
+        { plugin: 'warden', id: 'warden', title: 'Warden', order: 50, state: 'skipped' },
+      ],
+      complete: true,
+      setUp: true,
+    }));
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-summary-set]')?.textContent).toContain('Sign in');
+    expect(view.container.querySelector('[data-onboarding-later-link="voice.voice"]')?.getAttribute('href')).toBe(
+      '/d/d1/settings/voice',
+    );
+    expect(view.container.querySelector('[data-onboarding-later-link="warden.warden"]')).not.toBeNull();
+  });
+
+  it('shows no closing summary while a step still waits', async () => {
+    const { client } = clientOf(() => VIEW);
+    noteClientDaemon(client, 'd1');
+    const Steps = createStepsScreen(client);
+    const view = await mount(<Steps params={{}} />);
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+    expect(view.container.querySelector('[data-onboarding-summary]')).toBeNull();
   });
 
   it('says so when a machine has nothing to set up, and still links to the machine', async () => {
@@ -437,6 +468,106 @@ describe('S14 the first-run route’s pairing hand-off', () => {
     const later = await mount(draw());
     expect(later.container.querySelector('[data-onboarding-open-pair]')).not.toBeNull();
     await later.unmount();
+  });
+
+  it('c58-07 a reload on the pairing page forgets nothing: the count kept in storage tells a new machine from an old one', async () => {
+    startOnboardingPairing(detectDeviceKind(navigator));
+    const paired = pairedList({ daemons: [], selected: null });
+    const props = {
+      params: {},
+      navigate: () => undefined,
+      location: () => BARE,
+      chooseDaemon: async () => undefined,
+    };
+    const Before = Route(paired.ports);
+    const first = await mount(<Before {...props} />);
+    await interact(() => {
+      first.container.querySelector<HTMLElement>('[data-onboarding-open-pair]')?.click();
+    });
+    await first.unmount();
+    // Only a number is kept, beside the place the journey keeps; never a code, an address or an id.
+    expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBe('0');
+    expect(Object.keys(localStorage).sort()).toEqual([ONBOARDING_PROGRESS_KEY, ONBOARDING_PAIR_TRIP_KEY].sort());
+    // Access paired a machine, and the document was reloaded in between: a NEW route holds nothing in memory.
+    paired.set({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    const AfterReload = Route(paired.ports);
+    const back = await mount(<AfterReload {...props} />);
+    expect(screenOf(back)).toBe('done');
+    // The trip is over once the step has been on the glass: nothing stays behind in storage.
+    expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBeNull();
+    await back.unmount();
+  });
+
+  it('c58-07 a kept count that is not a plain number is ignored: the step counts from the list as it is', async () => {
+    startOnboardingPairing(detectDeviceKind(navigator));
+    localStorage.setItem(ONBOARDING_PAIR_TRIP_KEY, 'd1;code=123456');
+    const paired = pairedList({ daemons: [{ daemon: 'd1' }], selected: 'd1' });
+    const AfterReload = Route(paired.ports);
+    const view = await mount(
+      <AfterReload params={{}} navigate={() => undefined} location={() => BARE} chooseDaemon={async () => undefined} />,
+    );
+    expect(view.container.querySelector('[data-onboarding-open-pair]')).not.toBeNull();
+    expect(screenOf(view)).not.toBe('done');
+    expect(localStorage.getItem(ONBOARDING_PAIR_TRIP_KEY)).toBeNull();
+    await view.unmount();
+  });
+
+  /** A first-run journey that stands on the daemon step, where the connection note is drawn. */
+  const ON_DAEMON_STEP = 'https://f.invalid/onboarding#fy-setup=f1;route=first-time;target=this;doer=self;step=daemon';
+  const noteOf = (view: { container: HTMLElement }) =>
+    view.container.querySelector('[data-onboarding-fallback]')?.getAttribute('data-onboarding-fallback');
+  const settleTurn = async (): Promise<void> => {
+    await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+  };
+
+  it('c58-07 the connection note says checking until the shell’s answer lands, then says what Connections read', async () => {
+    const answers: Record<string, HostedRelayState> = {
+      available: { kind: 'available', relayUrl: 'https://relay.example.test' },
+      disabled: { kind: 'disabled' },
+      undetermined: { kind: 'undetermined', reason: 'nothing answered' },
+    };
+    for (const [kind, answer] of Object.entries(answers)) {
+      let release: (state: HostedRelayState) => void = () => undefined;
+      const paired = pairedList(
+        { daemons: [], selected: null },
+        () => new Promise<HostedRelayState>(resolve => (release = resolve)),
+      );
+      const OnboardingRoute = Route(paired.ports);
+      const view = await mount(
+        <OnboardingRoute
+          params={{}}
+          navigate={() => undefined}
+          location={() => ON_DAEMON_STEP}
+          chooseDaemon={async () => undefined}
+        />,
+      );
+      expect(noteOf(view)).toBe('checking');
+      await interact(() => release(answer));
+      await settleTurn();
+      expect(noteOf(view)).toBe(kind);
+      await view.unmount();
+    }
+  });
+
+  it('c58-07 a read the shell could not make is said as undetermined, never left at checking and never "switched off"', async () => {
+    for (const ports of [
+      pairedList({ daemons: [], selected: null }).ports,
+      pairedList({ daemons: [], selected: null }, async () => Promise.reject(new Error('refused'))).ports,
+    ]) {
+      const OnboardingRoute = Route(ports);
+      const view = await mount(
+        <OnboardingRoute
+          params={{}}
+          navigate={() => undefined}
+          location={() => ON_DAEMON_STEP}
+          chooseDaemon={async () => undefined}
+        />,
+      );
+      await settleTurn();
+      expect(noteOf(view)).toBe('undetermined');
+      expect(view.container.textContent).not.toContain('switched off');
+      await view.unmount();
+    }
   });
 
   it('m1 says what kind of device this is on the first run, once', async () => {

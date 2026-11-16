@@ -3,18 +3,27 @@
  *
  * | v4 (4.291.5)                                       | v5                                                       |
  * | -------------------------------------------------- | -------------------------------------------------------- |
- * | `state/catalogs/catalogs.json` (`schemaVersion` 3) | `state/catalogs/catalogs.json` `{format: 1, …}`          |
+ * | `state/catalogs/catalogs.json` (`schemaVersion` 3) | `state/catalogs/catalogs.json` `{format: 1, schemaVersion: 1, …}`  |
  * | `state/catalogs/blobs/<hex>.json`                  | `state/catalogs/blobs/<hex>.json`, byte for byte         |
- * | `state/catalogs/links.json`                        | `state/catalogs/links.json` `{format: 1, links}`         |
+ * | `state/catalogs/links.json`                        | `state/catalogs/links.json` `{format: 1, schemaVersion: 1, links}` |
  * | `state/catalogs/link-keys.json` (SEALED)           | `state/catalogs/link-keys.json`, envelope `v` → `format` |
- * | `state/catalogs/members.json`, `shares.json`       | the same names, `{format: 1, …}`                         |
- * | `state/catalogs/member-passkeys.json`              | the same name, `{format: 1, passkeys}`                   |
- * | `state/catalog-installs.json`                      | `state/catalogs/installs.json` `{format: 1, …}`          |
+ * | `state/catalogs/members.json`, `shares.json`       | the same names, `{format: 1, schemaVersion: 1, …}`       |
+ * | `state/catalogs/member-passkeys.json`              | the same name, `{format: 1, schemaVersion: 1, passkeys}` |
+ * | `state/catalog-installs.json`                      | `state/catalogs/installs.json` `{format: 1, schemaVersion: 1, …}` |
+ *
+ * TWO VERSION KEYS. A v5 JSON file is `{"format": 1, …body}`: the kernel's state port checks `format` against the
+ * manifest's declaration and strips it, and the daemon then parses the REST with its own strict document schema, which
+ * still carries v4's `schemaVersion` key, now `z.literal(1)` in every file (`document.ts` `CATALOGS_SCHEMA_VERSION`,
+ * `catalog-links/document.ts`, `catalog-members/document.ts`, `catalog-installs/store.ts`, `member-passkey-store.ts`).
+ * So the step writes BOTH keys, the kernel's `format` and the daemon's `schemaVersion` (1, whatever v4's said: v4's
+ * catalogs.json said 3). Apart from that value the daemon's document schemas are v4's byte for byte. The test reads
+ * every converted file back through the real kernel state port and those schemas.
  *
  * SIGNATURES. A catalog is signed by the publisher's daemon identity over RFC 8785 canonical JSON when it is exported
  * or served; nothing signed is stored in the home. The signed manifest is rebuilt from `catalogs.json`'s fields
  * (`publisherName`, `revision`, `issuedAt`, the entries and each binding's digest) and the frozen blobs, so the step
- * changes no value in that document (only `schemaVersion` → `format`; canonical JSON ignores key order) and copies
+ * changes no signed value in that document (only `schemaVersion` 3 → 1 and the `format` stamp, neither of which is in
+ * the manifest; canonical JSON ignores key order) and copies
  * every blob as the same bytes. The identity step moves the daemon key unchanged, so v5 signs the same canonical bytes
  * with the same key; nothing is re-signed here. Each blob's name is re-checked as the SHA-256 of its bytes.
  *
@@ -95,15 +104,19 @@ export const V5_CATALOG_MEMBERS = join(V5_DIR, 'members.json');
 export const V5_CATALOG_SHARES = join(V5_DIR, 'shares.json');
 export const V5_CATALOG_MEMBER_PASSKEYS = join(V5_DIR, 'member-passkeys.json');
 export const V5_CATALOG_INSTALLS = join(V5_DIR, 'installs.json');
-/** The manifest's `format` for every Catalogs file. */
+/** The manifest's `format` for every Catalogs file (the kernel's stamp). */
 const FORMAT = 1;
+/** The daemon's own `schemaVersion` in every Catalogs document body (`z.literal(1)` in each schema, see the header). */
+const SCHEMA_VERSION = 1;
 
 // ─── the landing checks: v5's own ids for every join (the bodies are v4's, see the header) ───────────────────────
 
 const Format = z.literal(FORMAT);
+const Version = z.literal(SCHEMA_VERSION);
 
 const CatalogsFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   defaultCatalogId: SharedCatalogIdSchema.optional(),
   items: z.array(
     z.looseObject({
@@ -127,6 +140,7 @@ const CatalogsFile = z.looseObject({
 
 const LinksFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   links: z.array(
     z.looseObject({
       linkId: CatalogLinkIdSchema,
@@ -141,6 +155,7 @@ const catalogIds = z.array(SharedCatalogIdSchema);
 
 const MembersFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   members: z.array(
     z.looseObject({
       memberId: CatalogMemberIdSchema,
@@ -152,6 +167,7 @@ const MembersFile = z.looseObject({
 
 const SharesFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   shares: z.array(
     z.looseObject({
       shareId: CatalogShareIdSchema,
@@ -164,11 +180,13 @@ const SharesFile = z.looseObject({
 
 const MemberPasskeysFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   passkeys: z.array(z.looseObject({ deviceId: CatalogMemberKeyIdSchema })),
 });
 
 const InstallsFile = z.looseObject({
   format: Format,
+  schemaVersion: Version,
   installs: z.array(z.looseObject({ installId: CatalogInstallIdSchema })),
   pins: z.record(SharedCatalogIdSchema, z.string().min(1)),
   revisions: z.record(SharedCatalogIdSchema, z.number().int().min(1)),
@@ -217,14 +235,17 @@ async function readDocument<Shape>(home: string, file: string, schema: z.ZodType
   return parsed.data;
 }
 
-/** A v4 body under the v5 envelope, checked by the landing schema; a failure names the file and field path. */
+/**
+ * A v4 body under the v5 envelope (`format` and the daemon's `schemaVersion`, both written), checked by the landing
+ * schema; a failure names the file and field path.
+ */
 function landed<Shape, V4 extends { readonly schemaVersion: number }>(
   file: string,
   schema: z.ZodType<Shape>,
   v4: V4,
 ): Shape {
   const { schemaVersion: _version, ...body } = v4;
-  const parsed = schema.safeParse({ format: FORMAT, ...body });
+  const parsed = schema.safeParse({ format: FORMAT, schemaVersion: SCHEMA_VERSION, ...body });
   if (!parsed.success) throw new V4InputError(`${file}: does not fit v5 Catalogs at: ${where(parsed.error)}`);
   return parsed.data;
 }

@@ -8,11 +8,11 @@ const tools = manifest.actions.agentTools;
 describe('browsers manifest', () => {
   test("declares today's browser, login-window, proxy and surface routes, the open-url route (G27) and the page stream", () => {
     expect(routes).toHaveLength(10);
-    expect(manifest.actions.sockets.map(socket => socket.key)).toEqual(['GET /v1/sessions/:sessionId/browser/stream']);
+    expect(manifest.actions.sockets.map(socket => socket.key)).toEqual(['GET /v1/ferrets/:ferretId/browser/stream']);
   });
   test('the page stream and the per-ferret browser are built inside one Redaction.read', () => {
     expect(manifest.actions.sockets[0]?.guard).toBe('secrets');
-    expect(routes.find(route => route.key === 'GET /v1/sessions/:sessionId/browser')?.guard).toBe('secrets');
+    expect(routes.find(route => route.key === 'GET /v1/ferrets/:ferretId/browser')?.guard).toBe('secrets');
   });
   test("declares today's 29 browser tools; an act that shows something is guarded, a write answers an Ack", () => {
     expect(tools).toHaveLength(29);

@@ -54,6 +54,12 @@ describe('context-imports: the kernel wire and session subpaths', () => {
     expect(refusal(edge('connections', 'contract/hosted-directory.ts', specifier))).toBeUndefined();
   });
 
+  test('the home port reader is contract surface by its own subpath, for the CLI that dials what the daemon binds', () => {
+    const specifier = '@ferretry/kernel/contract/home-port';
+    expect(edge('connections', 'contract/home-port.ts', specifier).toArea).toBe('kernel-contract');
+    expect(refusal(edge('connections', 'contract/home-port.ts', specifier))).toBeUndefined();
+  });
+
   test('a plugin contract may import them too (they are pure)', () => {
     expect(refusal(edge('connections', 'contract/index.ts', '@ferretry/kernel/wire'))).toBeUndefined();
   });

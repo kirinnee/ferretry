@@ -5,6 +5,7 @@ import { SignInsTab } from '../../../app/features/sign-ins-tab.tsx';
 import { login, loginList } from '../cli/fakes.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
+import { typeInto } from './support/typing.ts';
 import { CLAUDE_URL, claudeFlow } from './support/harness-login.ts';
 
 // Opening a login writes its address, so the window's hash is reset around every test here: the
@@ -70,7 +71,8 @@ describe('the Sign-ins tab', () => {
     expect(c.querySelector('[data-login-page="claude-you"]')).not.toBeNull();
     await click(c.querySelector('[data-page-back]'), 'back');
     expect(c.querySelector('[data-logins-tab]')).not.toBeNull();
-    expect(calls.map(call => call.route)).toEqual([LIST, 'GET /v1/grants']);
+    // The list reads what this caller may change once for its cards; a login's own page reads it again for itself.
+    expect(calls.map(call => call.route).toSorted()).toEqual(['GET /v1/grants', 'GET /v1/grants', LIST]);
     await view.unmount();
   });
 
@@ -226,8 +228,8 @@ describe('the page the address names', () => {
     const view = await mount(<SignInsTab client={client} />);
     await until(() => view.container.querySelector('[data-add-login]') !== null, 'the add button');
     await click(view.container.querySelector('[data-add-login]'), 'Add a login');
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the provider');
-    await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the provider');
+    await click(view.container.querySelector('[data-provider-tile="zai-glm"]'), 'Use this provider');
     await click(view.container.querySelector('[data-add-login-form="zai-glm"] [data-change-submit]'), 'Add');
     await until(() => view.container.querySelector('[data-login-page="claude-zai-glm"]') !== null, 'the new page');
     expect(view.container.querySelector('[data-logins-adding]')).toBeNull();
@@ -290,18 +292,88 @@ const PRESET = {
 };
 
 describe('the add-login panel', () => {
-  it('lists the offered presets, and says why one is not offered', async () => {
+  it('shows the providers as a grid of tiles, and says why one is not offered instead of opening it', async () => {
     const client = scripted({
       'GET /v1/logins/presets': {
-        presets: [PRESET, { ...PRESET, id: 'nope', label: 'Nope', offered: { available: false, reason: 'not yet' } }],
+        presets: [
+          { ...PRESET, group: 'popular' },
+          { ...PRESET, id: 'nope', label: 'Nope', offered: { available: false, reason: 'not yet' } },
+          { ...PRESET, id: 'custom-gateway', label: 'Custom', group: 'self-hosted' },
+        ],
       },
     });
     const view = await mount(<AddLoginPanel client={client} />);
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
-    expect(view.container.querySelector('[data-add-login-preset="zai-glm"]')?.textContent).toContain('GLM / Z.ai');
-    expect(view.container.querySelector('[data-add-login-preset="nope"]')?.textContent).toContain(
-      'Not offered: not yet',
-    );
+    const c = view.container;
+    await until(() => c.querySelector('[data-provider-grid]') !== null, 'the grid');
+    expect(c.querySelector('[data-provider-tile="zai-glm"]')?.textContent).toContain('GLM / Z.ai');
+    expect(c.querySelector('[data-provider-tile-note="zai-glm"]')?.textContent).toBe(PRESET.summary);
+    // A preset names its heading; one that names none is under "More providers", the custom gateway last.
+    expect(
+      Array.from(c.querySelectorAll('[data-provider-section]')).map(s => s.getAttribute('data-provider-section')),
+    ).toEqual(['popular', 'other', 'self-hosted']);
+    // Not offered: focusable, flagged, and a tap shows the reason rather than opening a form.
+    const nope = c.querySelector('[data-provider-tile="nope"]') as HTMLButtonElement;
+    expect(nope.getAttribute('aria-disabled')).toBe('true');
+    expect(c.querySelector('[data-provider-tile-note="nope"]')?.className).toContain('hidden');
+    await click(nope, 'a tile that is not offered');
+    expect(c.querySelector('[data-provider-tile-note="nope"]')?.className).not.toContain('hidden');
+    expect(c.querySelector('[data-provider-tile-reason]')?.textContent).toBe('Not offered here: not yet');
+    expect(c.querySelector('[data-add-login-form]')).toBeNull();
+    // Pointer and focus show a tile's note too, and leaving or blurring hides it again.
+    const zai = c.querySelector('[data-provider-tile="zai-glm"]') as HTMLButtonElement;
+    const note = () => c.querySelector('[data-provider-tile-note="zai-glm"]')?.className ?? '';
+    await interact(() => zai.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })));
+    expect(note()).not.toContain('hidden');
+    await interact(() => zai.dispatchEvent(new PointerEvent('pointerout', { bubbles: true })));
+    expect(note()).toContain('hidden');
+    await interact(() => zai.focus());
+    expect(note()).not.toContain('hidden');
+    await interact(() => zai.blur());
+    expect(note()).toContain('hidden');
+    await view.unmount();
+  });
+
+  it('folds the grid to the tile that was picked, and Cancel brings the grid back', async () => {
+    const client = scripted({ 'GET /v1/logins/presets': { presets: [PRESET] } });
+    const view = await mount(<AddLoginPanel client={client} />);
+    const c = view.container;
+    await until(() => c.querySelector('[data-provider-grid]') !== null, 'the grid');
+    await click(c.querySelector('[data-provider-tile="zai-glm"]'), 'GLM');
+    expect(c.querySelector('[data-provider-grid]')).toBeNull();
+    expect(c.querySelector('[data-add-login-preset="zai-glm"] [data-add-login-form="zai-glm"]')).not.toBeNull();
+    await click(c.querySelector('[data-add-login-form] button:not([data-change-submit])'), 'Cancel');
+    expect(c.querySelector('[data-provider-grid]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('searches a grid of more than eight providers by name, id or summary, and says when nothing matches', async () => {
+    const many = Array.from({ length: 9 }, (_, index) => ({
+      ...PRESET,
+      id: `p${index}`,
+      label: index === 3 ? 'Moonshot' : `Provider ${index}`,
+      summary: index === 4 ? 'Fast open models' : 'A gateway',
+    }));
+    const client = scripted({ 'GET /v1/logins/presets': { presets: many } });
+    const view = await mount(<AddLoginPanel client={client} />);
+    const c = view.container;
+    await until(() => c.querySelector('[data-provider-search]') !== null, 'the search box');
+    const type = (text: string) => typeInto(c.querySelector('[data-provider-search]') as HTMLInputElement, text);
+    await type('moon');
+    expect(c.querySelectorAll('[data-provider-tile-cell]')).toHaveLength(1);
+    await type('FAST models');
+    expect(c.querySelector('[data-provider-tile-cell="p4"]')).not.toBeNull();
+    expect(c.querySelectorAll('[data-provider-tile-cell]')).toHaveLength(1);
+    await type('zzz');
+    expect(c.querySelector('[data-provider-no-match]')?.textContent).toContain('No provider matches “zzz”');
+    expect(c.querySelector('[data-provider-tile="paste"]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('gives a grid of eight providers or fewer no search box', async () => {
+    const client = scripted({ 'GET /v1/logins/presets': { presets: [PRESET] } });
+    const view = await mount(<AddLoginPanel client={client} />);
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the grid');
+    expect(view.container.querySelector('[data-provider-search]')).toBeNull();
     await view.unmount();
   });
 
@@ -345,13 +417,13 @@ describe('the add-login panel', () => {
       calls,
     );
     const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
-    await until(() => view.container.querySelector('[data-add-login-use]') !== null, 'the provider');
-    await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+    await until(() => view.container.querySelector('[data-provider-tile]') !== null, 'the provider');
+    await click(view.container.querySelector('[data-provider-tile="zai-glm"]'), 'Use this provider');
     const field = must(
       view.container.querySelector<HTMLInputElement>('[data-add-login-form="zai-glm"] input'),
       'the secret variable',
     );
-    expect(field.value).toBe('${secret:ZAI_KEY}');
+    expect(field.value).toBe(`\${secret:ZAI_KEY}`);
     await click(view.container.querySelector('[data-add-login-form="zai-glm"] [data-change-submit]'), 'Add');
     await until(() => added.length > 0, 'the login to be added');
     expect(calls.find(call => call.route === STAGE)?.body).toEqual({
@@ -360,7 +432,7 @@ describe('the add-login panel', () => {
       harness: 'claude-code',
       store: 'environment',
       preset: 'zai-glm',
-      env: { ZAI_KEY: '${secret:ZAI_KEY}' },
+      env: { ZAI_KEY: `\${secret:ZAI_KEY}` },
     });
     await view.unmount();
   });
@@ -399,14 +471,16 @@ describe('the add-login panel', () => {
         [GRANTS]: OPEN,
         [STAGE]: staged({ kind: 'login.enable', id: 'x' }),
         [APPLY]: { outcome: 'applied' },
+        'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+        'POST /v1/secrets': { name: 'ZAI_API_KEY' },
       },
       calls,
     );
     const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the preset');
     await interact(() =>
       must(
-        view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null,
+        view.container.querySelector('[data-provider-tile="paste"]') as HTMLButtonElement | null,
         'Paste variables…',
       ).click(),
     );
@@ -425,14 +499,20 @@ describe('the add-login panel', () => {
     await interact(() =>
       must(view.container.querySelector('[data-paste-continue]') as HTMLButtonElement | null, 'Continue').click(),
     );
+    await until(() => view.container.querySelector('[data-add-login-form="zai-glm"]') !== null, 'the prefilled form');
     const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the prefilled form');
     // The plain value the paste carried fills its field; the secret stays a reference to a NAME.
     const fields = Array.from(form.querySelectorAll('input'));
-    expect(fields.map(field => field.value)).toEqual(['https://api.z.ai/api/paas/v4', '${secret:ZAI_API_KEY}', '']);
+    expect(fields.map(field => field.value)).toEqual(['https://api.z.ai/api/paas/v4', `\${secret:ZAI_API_KEY}`, '']);
     expect(form.querySelector('[data-paste-secrets]')?.textContent).toContain(
-      'paste ZAI_API_KEY into the secret store',
+      'Your pasted ZAI_API_KEY is in the secret store',
     );
-    // The pasted key never reaches the tree, before or after the form opens.
+    // The pasted key went to the Vault under the preset's secret name, and reaches nothing else.
+    expect(calls.find(call => call.route === 'POST /v1/secrets')?.body).toEqual({
+      name: 'ZAI_API_KEY',
+      value: 'sk-zai-very-secret',
+    });
+    expect(JSON.stringify(calls.filter(call => call.route !== 'POST /v1/secrets'))).not.toContain('sk-zai-very-secret');
     expect(view.container.innerHTML).not.toContain('sk-zai-very-secret');
     await click(form.querySelector('[data-change-submit]'), 'Add');
     await until(() => added.length > 0, 'the login to be added');
@@ -442,7 +522,7 @@ describe('the add-login panel', () => {
       harness: 'claude-code',
       store: 'environment',
       preset: 'zai-glm',
-      env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
+      env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/paas/v4', ANTHROPIC_AUTH_TOKEN: `\${secret:ZAI_API_KEY}` },
     });
     await view.unmount();
   });
@@ -477,9 +557,9 @@ describe('the add-login panel', () => {
       calls,
     );
     const view = await mount(<AddLoginPanel client={client} onAdded={id => added.push(id)} />);
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the preset');
     await interact(() =>
-      must(view.container.querySelector('[data-add-login-paste]') as HTMLButtonElement | null, 'Paste').click(),
+      must(view.container.querySelector('[data-provider-tile="paste"]') as HTMLButtonElement | null, 'Paste').click(),
     );
     const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
     await interact(() => {
@@ -547,14 +627,16 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+      'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the preset');
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the preset');
     const press = (selector: string, name: string) =>
       interact(() => must(view.container.querySelector(selector) as HTMLButtonElement | null, name).click());
     // A paste that carries a secret NAME: its form says which key to paste into the secret store.
     const pasteIntoForm = async (): Promise<void> => {
-      await press('[data-add-login-paste]', 'Paste');
+      await press('[data-provider-tile="paste"]', 'Paste');
       const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
       await interact(() => {
         const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
@@ -566,16 +648,19 @@ describe('the add-login panel', () => {
       });
       await press('[data-paste-read]', 'Read');
       await press('[data-paste-continue]', 'Continue');
-      expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
+      await until(
+        () => view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]') !== null,
+        'the prefilled form',
+      );
     };
     // The next form opened by hand starts from the preset: no paste note, no pasted address.
     const expectFreshForm = async (): Promise<void> => {
-      await click(view.container.querySelector('[data-add-login-use="zai-glm"]'), 'Use this provider');
+      await click(view.container.querySelector('[data-provider-tile="zai-glm"]'), 'Use this provider');
       const form = must(view.container.querySelector('[data-add-login-form="zai-glm"]'), 'the form');
       expect(form.querySelector('[data-paste-secrets]')).toBeNull();
       expect(Array.from(form.querySelectorAll('input')).map(field => field.value)).toEqual([
         '',
-        '${secret:ZAI_API_KEY}',
+        `\${secret:ZAI_API_KEY}`,
         '',
       ]);
       await interact(() =>
@@ -596,9 +681,8 @@ describe('the add-login panel', () => {
       ).click(),
     );
     await expectFreshForm();
-    // Leaving the paste screen with Back forgets it too, even when it was reached from an open prefilled form.
-    await pasteIntoForm();
-    await press('[data-add-login-paste]', 'Paste');
+    // Leaving the paste screen with Back forgets it too.
+    await press('[data-provider-tile="paste"]', 'Paste');
     await press('[data-paste-back]', 'Back');
     await expectFreshForm();
     await view.unmount();
@@ -648,10 +732,12 @@ describe('the add-login panel', () => {
       'GET /v1/logins/presets': { presets: [zai, openrouter] },
       [LIST]: loginList(),
       [GRANTS]: OPEN,
+      'GET /v1/secrets': { v: 1, health: 'ready', secrets: [], references: [] },
+      'POST /v1/secrets': { name: 'ZAI_API_KEY' },
     });
     const view = await mount(<AddLoginPanel client={client} />);
-    await until(() => view.container.querySelector('[data-add-login-preset]') !== null, 'the presets');
-    await click(view.container.querySelector('[data-add-login-paste]'), 'Paste');
+    await until(() => view.container.querySelector('[data-provider-grid]') !== null, 'the presets');
+    await click(view.container.querySelector('[data-provider-tile="paste"]'), 'Paste');
     const box = must(view.container.querySelector('[data-paste-input]') as HTMLTextAreaElement | null, 'the box');
     await interact(() => {
       const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
@@ -663,15 +749,19 @@ describe('the add-login panel', () => {
     });
     await click(view.container.querySelector('[data-paste-read]'), 'Read');
     await click(view.container.querySelector('[data-paste-continue]'), 'Continue');
-    expect(view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]')).not.toBeNull();
-    // Change of mind: open the OTHER provider by hand.
-    await click(view.container.querySelector('[data-add-login-use="openrouter"]'), 'Use this provider');
+    await until(
+      () => view.container.querySelector('[data-add-login-form="zai-glm"] [data-paste-secrets]') !== null,
+      'the prefilled form',
+    );
+    // Change of mind: leave the form, then open the OTHER provider by hand.
+    await click(view.container.querySelector('[data-add-login-form] button:not([data-change-submit])'), 'Cancel');
+    await click(view.container.querySelector('[data-provider-tile="openrouter"]'), 'Use this provider');
     const form = must(view.container.querySelector('[data-add-login-form="openrouter"]'), 'the form');
     expect(form.querySelector('[data-paste-secrets]')).toBeNull();
     expect(form.querySelector('[data-paste-withheld]')).toBeNull();
     expect(Array.from(form.querySelectorAll('input')).map(field => field.value)).toEqual([
       'https://openrouter.ai/api',
-      '${secret:OPENROUTER_API_KEY}',
+      `\${secret:OPENROUTER_API_KEY}`,
       '',
     ]);
     await view.unmount();

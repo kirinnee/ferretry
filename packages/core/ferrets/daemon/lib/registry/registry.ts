@@ -29,6 +29,16 @@ export interface FerretFilter {
 }
 
 /**
+ * The ONE rule for a ferret's mode. A converted ferret's record carries no `mode` (v4 kept it in `config.json`; the
+ * conversion files it under the start options in `details.json`), so the record's own mode wins and the persisted start
+ * option stands in only when the record has none. The summary, the launch (harness question tool, pane
+ * `FY_SESSION_MODE`) and the derived launch switches all read it here, so they cannot disagree.
+ */
+export function effectiveMode(record: FerretRecord, details?: FerretDetails): FerretRecord['mode'] {
+  return record.mode ?? details?.options?.mode;
+}
+
+/**
  * What other subsystems and the app read: the record without its format stamp and runner handle, with the model and
  * card it was started with and its title from `details.json`. The pin instant is the reader's to add.
  */
@@ -59,6 +69,9 @@ export function summaryOf(
   const fast = details.options?.fast;
   const card = details.options?.card;
   const label = details.options?.label;
+  // A converted ferret's record carries no `mode` (v4 kept it in `config.json`; the conversion files it under the start
+  // options), yet the Agents filter and "Clear all from agent ferrets" read the summary's. The record's own wins.
+  const mode = record.mode === undefined ? effectiveMode(record, details) : undefined;
   const nudgeAfterSeconds = details.options?.nudgeAfterSeconds;
   const killAfterSeconds = details.options?.killAfterSeconds;
   return {
@@ -68,6 +81,7 @@ export function summaryOf(
     ...(fast === undefined ? {} : { fast }),
     ...(card === undefined ? {} : { card }),
     ...(label === undefined ? {} : { label }),
+    ...(mode === undefined ? {} : { mode }),
     ...(nudgeAfterSeconds === undefined ? {} : { nudgeAfterSeconds }),
     ...(killAfterSeconds === undefined ? {} : { killAfterSeconds }),
     ...(details.title === undefined ? {} : { title: details.title }),

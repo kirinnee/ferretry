@@ -238,3 +238,55 @@ describe('the warden report artifacts', () => {
     expect(await new FileWardenArtifacts(listed, new WardenReportReader(listed, DIR), DIR).latest()).toBeUndefined();
   });
 });
+
+describe("the warden report artifacts: an investigator's report is its last signal", () => {
+  const report = `${DIR}/a.md`;
+  const artifacts = (texts: Record<string, string>, summaryOf: (id: string) => Promise<string | undefined>) => {
+    const world = folder(texts);
+    return {
+      world,
+      artifacts: new FileWardenArtifacts(world.files, new WardenReportReader(world.files, DIR), DIR, summaryOf),
+    };
+  };
+  const sidecar = { [provenancePath(report)]: JSON.stringify(spawn) };
+
+  test('the summary of the investigator the sidecar names is filed as the report, once', async () => {
+    const asked: string[] = [];
+    const { world, artifacts: subject } = artifacts(sidecar, async id => {
+      asked.push(id);
+      return 'Verdict: LEAVE\n';
+    });
+
+    const first = await subject.readReport(report);
+    const second = await subject.readReport(report);
+
+    expect(first).toContain('Verdict: LEAVE');
+    expect(second).toContain('Verdict: LEAVE');
+    expect(world.written.get(report)).toBe('Verdict: LEAVE\n');
+    expect(asked).toEqual(['wd-1']);
+  });
+
+  test('a report already filed is never replaced by the summary', async () => {
+    const { world, artifacts: subject } = artifacts(
+      { ...sidecar, [report]: 'Verdict: NUDGE\n' },
+      async () => 'Verdict: LEAVE\n',
+    );
+
+    expect(await subject.readReport(report)).toContain('Verdict: NUDGE');
+    expect(world.written.size).toBe(0);
+  });
+
+  test('no summary, a blank one, no sidecar or no reader files nothing', async () => {
+    for (const summary of [undefined, '  \n']) {
+      const { world, artifacts: subject } = artifacts(sidecar, async () => summary);
+      expect(await subject.readReport(report)).toBeUndefined();
+      expect(world.written.size).toBe(0);
+    }
+    const unnamed = artifacts({}, async () => 'Verdict: LEAVE\n');
+    expect(await unnamed.artifacts.readReport(report)).toBeUndefined();
+    const world = folder(sidecar);
+    const plain = new FileWardenArtifacts(world.files, new WardenReportReader(world.files, DIR), DIR);
+    expect(await plain.readReport(report)).toBeUndefined();
+    expect(world.written.size).toBe(0);
+  });
+});

@@ -189,7 +189,18 @@ describe('the ferret list as a column', () => {
     await mounted?.unmount();
     const lonely = await draw(listDaemon([FERRETS[0] as FerretSummary]), undefined, null);
     expect(lonely.textContent).toContain('No interactive ferrets.');
-    expect(lonely.querySelector('[data-ferret-new]')).toBeNull();
+    // The door to a new ferret is the list's foot, whatever the list holds (v4's sessions bar ended in "New session").
+    expect(lonely.querySelector('[data-ferret-new]')?.getAttribute('href')).toBe('/d/alpha/new');
+  });
+
+  it('smoke path 6: every list that shows rows also ends in the new-ferret door, as v4 ended in New session', async () => {
+    const root = await draw(listDaemon([FERRETS[0] as FerretSummary]), undefined, null);
+    await click(root.querySelector('[data-sbar-filter="all"]'), 'All');
+    expect(ids(root).length).toBeGreaterThan(0);
+    const door = root.querySelectorAll('[data-ferret-new]');
+    expect(door).toHaveLength(1);
+    expect(door[0]?.getAttribute('href')).toBe('/d/alpha/new');
+    expect(door[0]?.textContent).toBe('+ New ferret');
   });
 
   it('S-0405 opens on Interactive until the device remembers another kind', async () => {

@@ -12,6 +12,7 @@ import { ShellRuntime } from '../../../src/shell/runtime.ts';
 import { memoryStore } from '../../../src/storage/records.ts';
 import type { SurfaceEntry } from '../../../src/surfaces/registry.ts';
 import { ThemePreferenceStore } from '../../../src/theme/preferences.ts';
+import { arriveAtList } from '../../support/arrive-at-list.ts';
 import { interact, type Mounted, mount } from '../../support/dom.ts';
 import { CORE, FakeTransport, inventoryOf, json } from '../client/fixtures.ts';
 
@@ -104,6 +105,8 @@ export interface BootOptions {
   readonly surfaces: readonly SurfaceEntry[];
   readonly machines: readonly string[];
   readonly path?: string;
+  /** Open `path` as a person reaches it from inside the app (an entry behind it), not as a freshly opened app. */
+  readonly arrived?: boolean;
   readonly viewport?: 'wide' | 'phone';
   readonly locked?: readonly string[];
   /** Machines whose grants let this device view but not configure. */
@@ -117,7 +120,8 @@ export interface BootOptions {
 
 export async function bootApp(options: BootOptions) {
   const surfaces: readonly SurfaceEntry[] = [...CORE, ...options.surfaces];
-  window.history.replaceState(null, '', options.path ?? '/');
+  if (options.arrived === true) arriveAtList(options.path ?? '/');
+  else window.history.replaceState(null, '', options.path ?? '/');
   const machines = new Map<string, Machine>();
   const prompts: Prompt[] = [];
   const waiting = new Map<string, (() => void)[]>();

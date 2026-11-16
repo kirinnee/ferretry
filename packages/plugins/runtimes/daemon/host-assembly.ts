@@ -14,16 +14,16 @@
  *  - a command's location, looked up ahead through `kernel.paths.which` (`adapters/command-cache.ts`).
  *
  * What is NOT here is what another plugin owns: its components and a login's templates stand in (and an apply is refused
- * while one does), the tool installer, the secret store's list and put, the shared-history pooling and the machine's
- * name; each is a declared GAP in `ports-pending.json`.
+ * while one does), the tool installer, the secret store's list and put and the shared-history pooling; each is a declared
+ * GAP in `ports-pending.json`. The machine's name and id are the kernel's `identity`.
  */
-import type { FerretState } from '@ferretry/core-ferrets/contract';
+import type { FerretsApi, FerretState } from '@ferretry/core-ferrets/contract';
 import type { ConfigPort, KernelPorts, RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { UsageApi } from '@ferretry/plugin-usage/contract';
-import { milliseconds } from '@ferretry/std';
+import { InstantSchema, milliseconds } from '@ferretry/std';
 import type { LoginsApi } from '@ferretry/plugin-logins/contract';
-import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS } from '../contract/index.ts';
+import { PROFILE_COMPONENTS_KEY, PROFILE_ITEMS, type RuntimeCheckEnvironment } from '../contract/index.ts';
 import { applyClaimFor } from './adapters/apply-claim.ts';
 import { configDirectoryOf, fileFleetCatalogDeps } from './adapters/account-model-files.ts';
 import { CommandCache } from './adapters/command-cache.ts';
@@ -35,6 +35,7 @@ import type { RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import type { AdapterHost } from './adapters/ports.ts';
 import { refuseBeforeWriting, runtimesConfigFiles } from './adapters/runtimes-config-files.ts';
 import { fleetMounts, harnessMounts, rootHostFiles } from './adapters/root-host-files.ts';
+import { loginsLaunchStores, loginsModelCatalogs } from './adapters/model-sources.ts';
 import { fileFleetSetupDeps } from './adapters/setup-files.ts';
 import { unavailableSharedHistory } from './adapters/shared-history-unavailable.ts';
 import { type FleetManifest, harnessKindOfKey } from './lib/manifest.ts';
@@ -219,6 +220,34 @@ export function launchFactsSource(
   };
 }
 
+/**
+ * What a published runtime's launch carries for a consumer that fills `${VAR}` from it (`RuntimeHomesApi.checkEnvironment`):
+ * the plain variables its account published and the NAMES of the secret-bearing ones, read in ONE publication read.
+ */
+export function checkEnvironmentSource(
+  kernel: Pick<KernelPorts, 'roots'>,
+  publication: FleetPublication = new FleetPublication(),
+  requestRepair: () => void = () => {},
+): (runtime: string) => Promise<RuntimeCheckEnvironment | undefined> {
+  return async runtime => {
+    const fleet = kernel.roots.root('fleet');
+    const directory = fleetDirectory(fleet);
+    const files = rootHostFiles(fleetMounts(kernel.roots, fleet, directory));
+    try {
+      return await publication.reading(async () => {
+        const manifest = await readFleetManifest(files, `${directory}/${MANIFEST_FILE}`);
+        const published = manifest?.runtimes.find(row => row.name === runtime || row.id === runtime);
+        const account = manifest?.accounts.find(row => row.id === published?.id);
+        if (published === undefined || account === undefined) return undefined;
+        return { values: account.launchEnv ?? {}, opaque: Object.keys(account.secretEnv).sort() };
+      });
+    } catch (error) {
+      if (error instanceof FleetManifestUnreadableError) requestRepair();
+      throw error;
+    }
+  };
+}
+
 /** The harness homes a first run may read and a component may come from: the person's own, by the OS's home. */
 const harnessHomesOf = (userHome: string): readonly string[] => [`${userHome}/.claude`, `${userHome}/.codex`];
 
@@ -299,15 +328,17 @@ export function fleetHost(
  */
 export function fileAssembly(
   ctx: {
-    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log'> & {
+    readonly kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock' | 'log' | 'identity'> & {
       readonly config: Pick<ConfigPort, 'writeAll' | 'collection' | 'file' | 'etag'>;
     };
     readonly needs: {
       readonly logins: FleetCatalogServiceDeps['credentials'] &
         Parameters<typeof fileFleetSetupDeps>[0]['logins'] &
-        Pick<LoginsApi, 'environmentTemplates'>;
+        Pick<LoginsApi, 'environmentTemplates' | 'modelSources' | 'launchStores'>;
       readonly loginChanges: FleetCatalogServiceDeps['loginChanges'];
-      readonly ferrets: { list(): Promise<readonly { readonly state: FerretState }[]> };
+      readonly ferrets: Pick<FerretsApi, 'lastAutoResume'> & {
+        list(): Promise<readonly { readonly state: FerretState }[]>;
+      };
     };
     /** The hooks this plugin offers: the profile component sources the owning plugins take (read live, never kept). */
     readonly hooks: Pick<HookInvoker, 'provider'>;
@@ -344,10 +375,16 @@ export function fileAssembly(
     sessionStatuses: async () => (await ctx.needs.ferrets.list()).map(ferret => SESSION_STATUS_OF[ferret.state]),
     credentials: ctx.needs.logins,
     loginChanges: ctx.needs.loginChanges,
+    // The catalogs Logins owns, read live: what each runtime offers, and what an apply pins its tier slots to.
+    modelCatalogs: loginsModelCatalogs(ctx.needs.logins, sentence => {
+      ctx.kernel.log.warn(sentence);
+    }),
+    // Where Logins keeps each Ferretry-kept login, read live: how a person-run wrapper is signed in (the ferret launch hook's own projection).
+    loginStores: loginsLaunchStores(ctx.needs.logins),
     configWriter: writeAllConfigWriter(ctx.kernel.config, configDirectory),
     locate: harness => commands.which(harness),
-    // GAP(kernel): the kernel offers no host name, so a copy's source is named "this machine".
-    machineName: () => 'this machine',
+    // The daemon's own display name (the host name, normalised by the kernel): what `fy machine` and a copy's source say.
+    machineName: () => ctx.kernel.identity.daemonName,
     clientName: CLIENT_NAME,
     config,
     sharedHistory: unavailableSharedHistory,
@@ -360,6 +397,11 @@ export function fileAssembly(
   });
   const catalog: FleetCatalogServiceDeps = {
     ...unguarded,
+    // What the last auto-resume pass after a restart did, for the Machine view; Ferrets keeps it (`null` before any pass).
+    lastAutoResume: async () => {
+      const report = await ctx.needs.ferrets.lastAutoResume?.();
+      return report === undefined || report === null ? null : { ...report, at: InstantSchema.parse(report.at) };
+    },
     // Usage's pauses in force now, synchronously (they are memory-only): a login its budget holds is published
     // unavailable, exactly as a disabled one is. Usage off (it is an optional need) holds nothing.
     budgetHolds: () =>
@@ -394,7 +436,7 @@ export function fileAssembly(
       catalog: base,
       logins: ctx.needs.logins,
       tools,
-      daemonId: () => undefined,
+      daemonId: () => ctx.kernel.identity.daemonId,
       secrets: { list: refusing.secrets.held, put: refusing.secrets.put },
     }),
   );

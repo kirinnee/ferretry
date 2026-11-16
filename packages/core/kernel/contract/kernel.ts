@@ -31,6 +31,15 @@ export interface DoctorFinding {
   readonly state: 'ok' | 'warn' | 'fail';
   readonly detail: string;
   readonly fix?: string;
+  /**
+   * The row's name when it is not "<plugin>: <check>" (today's rows were named for the thing checked: `tmux`,
+   * `claude`, `loopback firewall`). The report's `name`.
+   */
+  readonly name?: string;
+  /** The kind of consequence a miss has (today's `requirement`); absent: a failure is `required`, a warning `optional`. */
+  readonly requirement?: 'required' | 'capability' | 'optional' | 'alternative';
+  /** The thing checked does not apply on this host (today's `n/a` row): present and never a warning. */
+  readonly notApplicable?: true;
 }
 export const DoctorChecks = defineHook('doctor.checks', { mode: 'contribute', item: z.custom<DoctorCheck>() });
 

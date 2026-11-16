@@ -1,78 +1,39 @@
-/**
- * Where `cloudflared` is: a named override that must be runnable and does not fall back, else `PATH`.
- */
+import { describe, expect, test } from 'bun:test';
+import type { CommandLocation } from '@ferretry/kernel/contract';
+import { KernelCloudflaredLocator } from '../../../daemon/adapters/tunnel/cloudflared-locator.ts';
 
-import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import should from 'should';
-import { locator, executableFile as isExecutableFile } from '../../support/io.ts';
-import { removeTempDirectories, tempDirectory } from './support.ts';
-
-afterEach(removeTempDirectories);
-
-async function executable(directory: string, name: string, mode = 0o755): Promise<string> {
-  const path = join(directory, name);
-  await writeFile(path, '#!/bin/sh\nexit 0\n');
-  await chmod(path, mode);
-  return path;
+/** The kernel's `locate`, answering what it is told to and remembering what it was asked. */
+function locator(answer: CommandLocation) {
+  const asked: unknown[] = [];
+  const subject = new KernelCloudflaredLocator({
+    locate: async (name, options) => {
+      asked.push([name, options]);
+      return answer;
+    },
+  });
+  return { asked, subject };
 }
 
-describe('the cloudflared locator', () => {
-  it('should run the operator’s FY_CLOUDFLARED when it is an executable file', async () => {
-    // Arrange
-    const directory = await tempDirectory('cloudflared-override');
-    const path = await executable(directory, 'my-cloudflared');
+describe('where cloudflared is, as the kernel finds it (the real adapter)', () => {
+  test('asks for cloudflared with the one override variable, and passes a found binary on with how it was found', async () => {
+    const { asked, subject } = locator({ kind: 'found', path: '/usr/bin/cloudflared', via: 'path' });
 
-    // Act
-    const location = locator({ FY_CLOUDFLARED: ` ${path} `, PATH: '' }).locate();
-
-    // Assert
-    should(location).deepEqual({ kind: 'found', path, via: 'override' });
+    expect(await subject.locate()).toEqual({ kind: 'found', path: '/usr/bin/cloudflared', via: 'path' });
+    expect(asked).toEqual([['cloudflared', { override: 'FY_CLOUDFLARED' }]]);
   });
 
-  it('should refuse an override that names nothing runnable, and not search PATH instead', async () => {
-    // Arrange
-    const directory = await tempDirectory('cloudflared-override');
-    const notRunnable = await executable(directory, 'plain-file', 0o644);
-    const onPath = await tempDirectory('cloudflared-path');
-    await executable(onPath, 'cloudflared');
+  test('says a named path that runs nothing is refused in its own sentence, never swapped for another binary', async () => {
+    const { subject } = locator({ kind: 'override_unusable', variable: 'FY_CLOUDFLARED', path: '/opt/nope' });
 
-    // Act
-    const located = [notRunnable, directory, join(directory, 'missing')].map(path =>
-      locator({ FY_CLOUDFLARED: path, PATH: onPath }).locate(),
-    );
-
-    // Assert
-    should(located.map(location => location.kind)).deepEqual(['absent', 'absent', 'absent']);
-    should(located[0]).deepEqual({
+    expect(await subject.locate()).toEqual({
       kind: 'absent',
-      reason: `FY_CLOUDFLARED names ${notRunnable}, which is not an executable file`,
+      reason: 'FY_CLOUDFLARED names /opt/nope, which is not an executable file',
     });
   });
 
-  it('should search the daemon’s PATH when no override is set', async () => {
-    // Arrange
-    const onPath = await tempDirectory('cloudflared-path');
-    const path = await executable(onPath, 'cloudflared');
-    const empty = await tempDirectory('cloudflared-empty');
-    await mkdir(join(empty, 'nothing'));
+  test('says cloudflared is not on the daemon PATH when the search finds nothing', async () => {
+    const { subject } = locator({ kind: 'absent' });
 
-    // Act
-    const found = locator({ PATH: `${empty}:${onPath}`, FY_CLOUDFLARED: '  ' }).locate();
-    const absent = locator({ PATH: empty }).locate();
-    const noPath = locator({}).locate();
-
-    // Assert
-    should(found).deepEqual({ kind: 'found', path, via: 'path' });
-    should(absent).deepEqual({ kind: 'absent', reason: 'cloudflared is not on this daemon’s PATH' });
-    should(noPath.kind).equal('absent');
-  });
-
-  it('should only call a regular executable file executable', async () => {
-    const directory = await tempDirectory('cloudflared-kind');
-    should(isExecutableFile(await executable(directory, 'yes'))).be.true();
-    should(isExecutableFile(directory)).be.false();
-    should(isExecutableFile(join(directory, 'missing'))).be.false();
+    expect(await subject.locate()).toEqual({ kind: 'absent', reason: 'cloudflared is not on this daemon’s PATH' });
   });
 });

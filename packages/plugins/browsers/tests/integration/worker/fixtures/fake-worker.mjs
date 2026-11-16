@@ -212,8 +212,8 @@ function inputReply(id, method, params) {
       page === 'garbled'
         ? { document: {} }
         : page === 'hostless'
-          ? { document: { navigationId: 'loader-1' } }
-          : { document: { navigationId: 'loader-1', host: 'accounts.example.test' } },
+          ? { document: { navigationId: 'loader-1', pairingSeen: 0 } }
+          : { document: { navigationId: 'loader-1', host: 'accounts.example.test', pairingSeen: 0 } },
     );
   else if (method === 'inputProbe')
     reply(id, true, { outcome: page === 'garbled' ? 'typed' : page === 'echoes' ? 'shown' : 'hidden' });

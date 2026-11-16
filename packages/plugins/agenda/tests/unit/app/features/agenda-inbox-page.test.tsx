@@ -675,6 +675,55 @@ describe('AgendaInboxPage on a phone', () => {
     await mounted.unmount();
   });
 
+  it('marks each of the owner’s words with how its send fared, in the chat’s own receipts', async () => {
+    const sent = (id: string, fate: string, extra: object = {}) => ({
+      id,
+      kind: 'user' as const,
+      text: `!A2 words ${id}`,
+      at: 2,
+      send: { sendId: `s-${id}`, fate, ...extra },
+    });
+    const mounted = await mount(
+      page(fakeInbox(), [twoWay], {
+        phone: true,
+        initialOpen: twoWay.key,
+        readConversation: async () => [
+          sent('cancelled', 'cancelled'),
+          sent('unconfirmed', 'unaccounted'),
+          sent('failed', 'timed_out'),
+          sent('typed', 'accepted', { typedNotSent: true }),
+          sent('held', 'queued', { held: true }),
+          sent('queued', 'queued'),
+          sent('sending', 'accepted'),
+          sent('delivered', 'delivered'),
+        ],
+      }),
+    );
+    await flush();
+    await openConversation(mounted.container);
+    const history = must(mounted.container.querySelector('[data-agenda-history]'), 'the History');
+    const receiptOf = (id: string): string | null =>
+      [...history.querySelectorAll('[data-history="owner"]')]
+        .find(row => row.textContent?.includes(`words ${id}`))
+        ?.querySelector('[data-send-receipt]')
+        ?.getAttribute('data-send-receipt') ?? null;
+    expect(
+      ['cancelled', 'unconfirmed', 'failed', 'typed', 'held', 'queued', 'sending', 'delivered'].map(receiptOf),
+    ).toEqual(['cancelled', 'unconfirmed', 'failed', 'typed', 'held', 'queued', 'sending', 'delivered']);
+    const names = [...history.querySelectorAll('[data-send-receipt]')].map(mark => mark.getAttribute('title') ?? '');
+    expect(names.map(title => title.split('\n')[0])).toEqual([
+      'Cancelled',
+      'Unconfirmed',
+      'Not delivered',
+      'Typed, not sent',
+      'Held for revive',
+      'Queued',
+      'Sending',
+      'Delivered',
+    ]);
+    await mounted.unmount();
+  });
+
   it('says "Later" once the skipped cards are left waiting, and counts them', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: twoWay.key }));
     const skip = () =>

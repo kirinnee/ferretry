@@ -241,3 +241,189 @@ describe('changing a login from its page', () => {
     await view.unmount();
   });
 });
+
+const openList = async (routes: Record<string, unknown>, calls: Call[] = []) => {
+  window.history.pushState({}, '', '/');
+  const view = await mount(
+    <SignInsTab client={scripted(routes, calls)} now={() => Date.parse('2026-11-01T10:00:00.000Z')} />,
+  );
+  await until(() => view.container.querySelector('[data-login-card-wrap]') !== null, 'the card');
+  return view;
+};
+
+describe('changing a login from its card on the list', () => {
+  it('shows the on/off switch and Remove on the card, beside the row that opens the page', async () => {
+    const view = await openList({ [LIST]: loginList(login()), [GRANTS]: OPEN });
+    const card = must(view.container.querySelector('[data-login-card-wrap="claude-you"]'), 'the card');
+    expect(card.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(card.querySelector('[data-login-card-remove="claude-you"]')?.textContent).toBe('Remove');
+    // Nothing interactive sits inside the row button.
+    expect(card.querySelector('[data-login-row] button')).toBeNull();
+    await view.unmount();
+  });
+
+  it('asks for a reason and a wait before switching off, and stages the same change as the page', async () => {
+    const calls: Call[] = [];
+    const view = await openList(
+      {
+        [LIST]: loginList(login()),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.disable', id: 'claude-you' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    await click(view.container.querySelector('[data-login-switch] button'), 'the switch');
+    await click(view.container.querySelector('[data-login-disable="on"] [data-change-submit]'), 'Switch off');
+    await until(() => calls.some(call => call.route === STAGE), 'the stage');
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({ kind: 'login.disable', id: 'claude-you' });
+    await view.unmount();
+  });
+
+  it('switches a login that is off back on at once', async () => {
+    const calls: Call[] = [];
+    const view = await openList(
+      {
+        [LIST]: loginList(login({ disabled: { source: 'login', reason: 'over budget' } })),
+        [GRANTS]: OPEN,
+        [STAGE]: staged({ kind: 'login.enable', id: 'claude-you' }),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    const toggle = must(view.container.querySelector('[data-login-switch] button'), 'the switch');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    await click(toggle, 'the switch');
+    await until(() => calls.some(call => call.route === APPLY), 'the apply');
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({ kind: 'login.enable', id: 'claude-you' });
+    await view.unmount();
+  });
+
+  it('shows the daemon’s consequences first when Remove is pressed, then removes on the second press', async () => {
+    const calls: Call[] = [];
+    const view = await openList(
+      {
+        [LIST]: loginList(login()),
+        [GRANTS]: OPEN,
+        [STAGE]: staged(
+          { kind: 'login.remove', id: 'claude-you' },
+          { summary: 'Remove login claude-you', consequences: ['Its saved sign-in stays on this machine.'] },
+        ),
+        [APPLY]: { outcome: 'applied' },
+      },
+      calls,
+    );
+    await click(view.container.querySelector('[data-login-card-remove]'), 'Remove');
+    await until(() => view.container.querySelector('[data-login-remove]') !== null, 'the confirm card');
+    expect(calls.find(call => call.route === STAGE)?.body).toEqual({ kind: 'login.remove', id: 'claude-you' });
+    expect(calls.some(call => call.route === APPLY)).toBe(false);
+    expect(view.container.querySelector('[data-login-remove]')?.textContent).toContain('saved sign-in stays');
+    await click(view.container.querySelector('[data-login-remove] [data-change-submit]'), 'Remove');
+    await until(() => calls.some(call => call.route === APPLY), 'the apply');
+    await view.unmount();
+  });
+
+  it('folds the confirmation away when the login is kept', async () => {
+    const view = await openList({
+      [LIST]: loginList(login()),
+      [GRANTS]: OPEN,
+      [STAGE]: staged({ kind: 'login.remove', id: 'claude-you' }),
+    });
+    await click(view.container.querySelector('[data-login-card-remove]'), 'Remove');
+    await until(() => view.container.querySelector('[data-login-remove]') !== null, 'the confirm card');
+    await click(view.container.querySelector('[data-login-remove-keep]'), 'Keep it');
+    await until(() => view.container.querySelector('[data-login-card-remove]') !== null, 'the Remove button again');
+    expect(view.container.querySelector('[data-login-remove]')).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('the card acts are one at a time, honest about authority, and close when they are done', () => {
+  const two = loginList(login(), login({ id: 'second', email: 'b@example.com' }));
+  const wrap = (view: { container: Element }, id: string) =>
+    must(view.container.querySelector(`[data-login-card-wrap="${id}"]`), `the ${id} card`);
+
+  it('lets only one card act at a time, scopes a refusal to the card that asked, and cancels in every state', async () => {
+    const calls: Call[] = [];
+    const view = await openList(
+      {
+        [LIST]: two,
+        [GRANTS]: OPEN,
+        [STAGE]: (call: Call) =>
+          (call.body as { id: string }).id === 'second'
+            ? new Error('second cannot be removed')
+            : staged(call.body, { summary: 'Remove login claude-you', consequences: ['It is forgotten.'] }),
+      },
+      calls,
+    );
+    // Remove the first: its confirmation opens, and the other card's controls wait.
+    await click(wrap(view, 'claude-you').querySelector('[data-login-card-remove]'), 'Remove (first)');
+    await until(() => wrap(view, 'claude-you').querySelector('[data-login-remove]') !== null, 'the confirmation');
+    const secondRemove = wrap(view, 'second').querySelector<HTMLButtonElement>('[data-login-card-remove]');
+    const secondSwitch = wrap(view, 'second').querySelector<HTMLButtonElement>('[data-login-switch] button');
+    expect(secondRemove?.disabled).toBe(true);
+    expect(secondSwitch?.disabled).toBe(true);
+    // Keeping it frees the other card.
+    await click(wrap(view, 'claude-you').querySelector('[data-login-remove-keep]'), 'Keep it');
+    await until(() => wrap(view, 'claude-you').querySelector('[data-login-card-remove]') !== null, 'the button back');
+    // The second is refused: the refusal shows under IT only, and it can still be cancelled.
+    await click(wrap(view, 'second').querySelector('[data-login-card-remove]'), 'Remove (second)');
+    await until(() => wrap(view, 'second').querySelector('[data-change-refusal]') !== null, 'the refusal');
+    expect(wrap(view, 'claude-you').querySelector('[data-change-refusal]')).toBeNull();
+    expect(wrap(view, 'claude-you').querySelector<HTMLButtonElement>('[data-login-card-remove]')?.disabled).toBe(true);
+    await click(wrap(view, 'second').querySelector('[data-login-remove-keep]'), 'Keep it');
+    await until(() => wrap(view, 'second').querySelector('[data-login-card-remove]') !== null, 'the button back');
+    expect(wrap(view, 'second').querySelector('[data-change-refusal]')).toBeNull();
+    expect(calls.some(call => call.route === APPLY)).toBe(false);
+    await view.unmount();
+  });
+
+  it('keeps Remove off, and says why, for a caller the operator has not allowed — and stages nothing', async () => {
+    const calls: Call[] = [];
+    const view = await openList({ [LIST]: loginList(login()), [GRANTS]: NOT_GRANTED }, calls);
+    await until(() => view.container.querySelector('[data-login-card-locked]') !== null, 'the explanation');
+    const remove = must(view.container.querySelector<HTMLButtonElement>('[data-login-card-remove]'), 'Remove');
+    expect(remove.disabled).toBe(true);
+    expect(view.container.querySelector('[data-login-card-locked]')?.textContent).toContain('Remove is off here');
+    await interact(() => remove.click());
+    expect(calls.some(call => call.route === STAGE)).toBe(false);
+    await view.unmount();
+  });
+
+  it('keeps Remove on for a caller who only needs a passkey, which the carrier asks for when it applies', async () => {
+    const view = await openList({ [LIST]: loginList(login()), [GRANTS]: STEP_UP });
+    await until(() => view.container.querySelector('[data-login-card-remove]') !== null, 'Remove');
+    expect(view.container.querySelector<HTMLButtonElement>('[data-login-card-remove]')?.disabled).toBe(false);
+    expect(view.container.querySelector('[data-login-card-locked]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('closes the switch-off form once it has applied, and does not bring it back on switching on again', async () => {
+    let off = false;
+    let kind = '';
+    const view = await openList({
+      [LIST]: () => loginList(login(off ? { disabled: { source: 'login', reason: 'over budget' } } : {})),
+      [GRANTS]: OPEN,
+      [STAGE]: (call: Call) => {
+        kind = (call.body as { kind: string }).kind;
+        return staged(call.body);
+      },
+      [APPLY]: () => {
+        off = kind === 'login.disable';
+        return { outcome: 'applied' };
+      },
+    });
+    const state = () => view.container.querySelector('[data-login-switch]')?.getAttribute('data-login-switch-state');
+    // On: the form opens on a tap, and is gone once the switch-off has applied.
+    await click(view.container.querySelector('[data-login-switch] button'), 'the switch');
+    await until(() => view.container.querySelector('[data-login-disable="on"]') !== null, 'the form');
+    await click(view.container.querySelector('[data-login-disable="on"] [data-change-submit]'), 'Switch off');
+    await until(() => state() === 'off', 'the switch to read off');
+    expect(view.container.querySelector('[data-login-disable]')).toBeNull();
+    // Off -> on: switched back on at once, and no form appears.
+    await click(view.container.querySelector('[data-login-switch] button'), 'the switch');
+    await until(() => state() === 'on', 'the switch to read on');
+    expect(view.container.querySelector('[data-login-disable]')).toBeNull();
+    await view.unmount();
+  });
+});

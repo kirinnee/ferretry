@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { PhoneApproval } from '../../../../contract/routes/index.ts';
+import { type PhoneApproval, PhoneApprovalRaiseSchema } from '../../../../contract/routes/index.ts';
 import { PhoneApprovalError } from '../../../../daemon/lib/phone-approval/errors.ts';
 import { PhoneApprovalService } from '../../../../daemon/lib/phone-approval/service.ts';
 import {
@@ -632,5 +632,57 @@ describe('waiting on an approval, and a watch that cannot look', () => {
     unsure.state.terminal = { ok: false, reason: 'unsupported' };
     await unsure.time.advance(3_000);
     should(unsure.seen(third.id).state).equal('waiting');
+  });
+});
+
+describe('the ferret hears "Not me" in its own terminal', () => {
+  it('should tell the ferret, once and by approval id, when the owner refuses, in words that carry no number', async () => {
+    const w = await phoneWorld();
+    const view = await w.raiseBrowser();
+    should(w.told).eql([]);
+
+    await w.service.refuse(OWNER, FERRET, view.id);
+
+    should(w.told).have.length(1);
+    should(w.told[0]?.ferret).equal(FERRET);
+    should(w.told[0]?.approvalId).equal(view.id);
+    should(w.told[0]?.message).containEql('"Not me"');
+    should(w.told[0]?.message).not.match(/\d/u);
+  });
+
+  for (const [way, settle] of [
+    ['the approval times out', async (w: Awaited<ReturnType<typeof phoneWorld>>) => await w.time.advance(121_000)],
+    ['the ferret ends', async (w: Awaited<ReturnType<typeof phoneWorld>>) => await w.service.ferretEnded(FERRET)],
+  ] as const) {
+    it(`should tell the ferret nothing when ${way}: only a refusal says "Not me"`, async () => {
+      const w = await phoneWorld();
+      await w.raiseBrowser();
+      await settle(w);
+      should(w.told).eql([]);
+    });
+  }
+
+  it('should still refuse, close the card and log it when the ferret cannot be told, or when nothing is bound to tell it', async () => {
+    const w = await phoneWorld();
+    const deps = (w.service as unknown as { deps: ConstructorParameters<typeof PhoneApprovalService>[0] }).deps;
+    const raiseOf = PhoneApprovalRaiseSchema.parse({ target: { kind: 'browser', key: 'login' } });
+    const down = new PhoneApprovalService({
+      ...deps,
+      notifier: {
+        tell: async () => {
+          throw new Error('the ferret cannot be told');
+        },
+      },
+    });
+    const view = await down.raise(FERRET, FERRET, raiseOf);
+    should((await down.refuse(OWNER, FERRET, view.id)).state).equal('refused');
+    should(w.closed).have.length(1);
+    should(w.audit.map(entry => entry.event)).eql(['phone-approval.raised', 'phone-approval.refused']);
+
+    const { notifier: _unbound, ...bare } = deps;
+    const unbound = new PhoneApprovalService(bare);
+    const second = await unbound.raise(FERRET, FERRET, raiseOf);
+    should((await unbound.refuse(OWNER, FERRET, second.id)).state).equal('refused');
+    should(w.told).eql([]);
   });
 });

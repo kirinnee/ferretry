@@ -1886,7 +1886,7 @@ Afterwards, any number of requests:
   "t": "req",
   "id": 1,
   "method": "GET",
-  "path": "/v1/sessions",
+  "path": "/v1/ferrets",
   "query": [["sessionId", "fy_…"]],
   "headers": { "content-type": "application/json" },
   "body": "…",
@@ -1933,7 +1933,7 @@ The daemon answers each request with one of:
 ```
 
 **A conditional read is an ordinary request and answer**, because every byte a session carries is
-metered. `GET /v1/sessions/:id/logs` — the transcript tail the chat page re-reads every few seconds,
+metered. `GET /v1/ferrets/:ferretId/logs` — the transcript tail the chat page re-reads every few seconds,
 tens to hundreds of kilobytes — carries a strong `etag`, a digest of the text after redaction. A
 request whose `if-none-match` names it is answered `304` with an empty body, and the client returns
 the body it holds for that exact path. The client holds the last 16 paths in memory, per connection;
@@ -1941,7 +1941,7 @@ it sends a validator only for a path it holds, and treats any other `304` as an 
 empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
 work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
 
-**Older history is paged, conditionally too.** The chat reads its tail as `GET /v1/sessions/:id/log-page`
+**Older history is paged, conditionally too.** The chat reads its tail as `GET /v1/ferrets/:ferretId/log-page`
 (`{ v, sessionId, log, start, file }`: the `/logs` text plus the byte it begins at and an opaque file
 token), and scrolling up reads `?before=<start>&file=<token>` for the page just older, until a page
 starts at `0`. Each page is its own path, so the polled tail keeps its `304` while older pages are held.
@@ -1949,19 +1949,19 @@ Pages are whole records and meet exactly at `start`; a page asked of a file that
 session's transcript is `409 log_cursor_stale`. An older daemon answers `unknown_route` and the chat
 keeps reading `/logs`.
 Each page also carries `offsets`, one byte offset per line of `log`, so a row knows where it came from.
-`GET /v1/sessions/:id/log-search?q=…&who=all|me|agent&tools=0|1` searches the whole transcript and
+`GET /v1/ferrets/:ferretId/log-search?q=…&who=all|me|agent&tools=0|1` searches the whole transcript and
 answers every match oldest first with that same offset and a scrubbed snippet; the chat loads pages back
 to a match's offset and scrolls to the row that holds it. A search is asked once per query and is not
 conditional.
 
 **An image of a transcript is addressed, not embedded.** `/logs` prints `[fy-image <handle> <type>]`
-where an image was, and `GET /v1/sessions/:id/transcript-images/:handle` answers one image as JSON
+where an image was, and `GET /v1/ferrets/:ferretId/transcript-images/:handle` answers one image as JSON
 (`{ image: { handle, mediaType, byteLength }, base64 }`). The handle names a record by its offset and
 length plus an ordinal, so it never changes for a transcript that is only appended to, and the answer
 is `cache-control: private, max-age=31536000, immutable` with a strong `etag` over session, handle and
 size; a request whose `if-none-match` names it is answered `304`. It is governed exactly like `/logs`.
 
-`GET /v1/sessions` — the fleet list every open app re-reads on a beat, about 1.7 MB on a fleet with forty
+`GET /v1/ferrets` — the fleet list every open app re-reads on a beat, about 1.7 MB on a fleet with forty
 running sessions — is conditional the same way. Its tag is a digest of the exact JSON served, so it moves when any field
 of any session moves (a status, a name, a turn count, `journalSequence`), and is computed from the
 body the route already built. The client holds the one last list per connection and answers a `304`
@@ -2024,7 +2024,7 @@ The rules, each of which is a reason it can be trusted:
   digest of one, a pairing code or input-request material beside text a caller can influence lets an
   observer of sizes recover it a byte at a time. A list of routes that must NOT be compressed is wrong
   the day someone adds a route and forgets it, so the default is off and the set that is on is the
-  short, audited one: `GET /v1/sessions` (the fleet list: names, states, context counters and the
+  short, audited one: `GET /v1/ferrets` (the fleet list: names, states, context counters and the
   hashes of launch-instruction sections, which authorise nothing), `GET /v1/board` (the board list:
   work-item titles, states and the people's own work text) and `GET /v1/board/ids` (the card ids alone). Every other route — passkeys, secrets, the
   security settings, pairing codes and devices, fleet credentials and MCP authorisation, the tunnel,
@@ -2084,7 +2084,7 @@ and reads on events and its poll as before.
 **A fleet feed may skip its replay.** With no cursor, `/v1/events` without a `sessionId` replays the
 last 5000 events across the fleet on every connect — megabytes on a busy fleet. `?tail=N` (an integer
 from 0 to 5000, default 5000) bounds that, and `tail=0` replays nothing: the reader opens the feed,
-waits for its opening proof, reads `GET /v1/sessions` (conditionally), and from then on re-reads the
+waits for its opening proof, reads `GET /v1/ferrets` (conditionally), and from then on re-reads the
 list only when an event says something moved. `tail` on a session stream is refused
 (`tail_needs_fleet`); that stream resumes from `after`. A daemon that predates `tail` refuses it as
 an unknown parameter, so a reader decides from the daemon's version (`x-fy-version`) whether to send it.
@@ -2156,7 +2156,7 @@ changed, so this is not a version: a client that sent one request at a time sees
 ### Stream sessions
 
 The daemon's protocol-switching surfaces — `/v1/events`,
-`/v1/sessions/:sessionId/terminals/:terminalId/stream` and `/v1/sessions/:sessionId/browser/stream`
+`/v1/ferrets/:ferretId/terminals/:terminalId/stream` and `/v1/ferrets/:ferretId/browser/stream`
 (the remote-browser live view) — are sockets that keep talking, which one
 request and one answer cannot carry. A stream session carries **exactly one of them**: the socket is
 the session, so the session layer already owns the stream's ordering, its flow control, its teardown
@@ -3311,7 +3311,7 @@ partial one. The operator runbook is
   this daemon), the close code with what it means and the reason quoted on one line, how long it
   lived, how long before the end the last client frame arrived (a `fy-ping` counts), the bytes each
   way, and whether a device proved itself on it. Request sessions also name their **top five routes by
-  sent bytes**, for example `; top routes: GET /v1/sessions 41× 38.2 MB`. Counts are answers, not parts;
+  sent bytes**, for example `; top routes: GET /v1/ferrets 41× 38.2 MB`. Counts are answers, not parts;
   bytes are the frames actually sent after gzip/base64 and sealing, including record envelopes and tags.
   Names come from the existing router's registered templates, never raw paths, ids, queries, headers or
   bodies. Each session keeps at most 32 distinct templates; further routes and unmatched requests go

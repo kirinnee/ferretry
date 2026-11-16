@@ -1,0 +1,77 @@
+/* "Outdated" mark (outdated-mark.tsx): a refresh glyph in the warn ink, the size of a mode icon, the ⋯ options button with its
+   count badge, and the line that answers "Restart outdated (N)". Warn tokens: it means "act when you can", not "broken". */
+.fy-outdated-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--warn);
+}
+.fy-sbar__session[aria-current='page'] .fy-outdated-mark {
+  color: var(--nav-sel-fg, var(--warn));
+}
+/* A restart waiting for the ferret's idle moment: the same glyph, in muted ink, so it reads as "in hand". */
+.fy-outdated-mark--queued {
+  color: var(--muted);
+}
+.fy-restart-outdated {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+.fy-restart-outdated__result {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fy-restart-outdated__dismiss {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fy-sbar__options {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+}
+.fy-sbar__options:hover,
+.fy-sbar__options[aria-expanded='true'] {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__options-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--warn);
+  color: var(--bg);
+  font-size: 10px;
+  line-height: 14px;
+  text-align: center;
+}
+@media (pointer: coarse) {
+  .fy-sbar__options {
+    min-width: var(--target-floor, 44px);
+    min-height: var(--target-floor, 44px);
+  }
+}

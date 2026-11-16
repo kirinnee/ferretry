@@ -34,7 +34,7 @@ export function ShellLine({
  * too: only its own box shows "Loading {title}…" until its chunk arrives, and the frame around it is never blanked (S10).
  */
 export class ViewBoundary extends Component<
-  { readonly title: string; readonly children: ReactNode },
+  { readonly title: string; readonly children: ReactNode; readonly fallback?: ReactNode },
   { failed: boolean }
 > {
   override state = { failed: false };
@@ -48,8 +48,16 @@ export class ViewBoundary extends Component<
   }
 
   override render(): ReactNode {
-    if (this.state.failed) return <ShellLine tone="warn">{this.props.title} stopped working on this screen.</ShellLine>;
-    return <Suspense fallback={<ShellLine>Loading {this.props.title}…</ShellLine>}>{this.props.children}</Suspense>;
+    const { fallback } = this.props;
+    if (this.state.failed) {
+      if (fallback !== undefined) return <>{fallback}</>;
+      return <ShellLine tone="warn">{this.props.title} stopped working on this screen.</ShellLine>;
+    }
+    return (
+      <Suspense fallback={fallback === undefined ? <ShellLine>Loading {this.props.title}…</ShellLine> : fallback}>
+        {this.props.children}
+      </Suspense>
+    );
   }
 }
 
@@ -61,25 +69,31 @@ interface PluginViewProps {
   readonly section: Section;
   readonly id: string;
   readonly props: Record<string, unknown>;
+  /**
+   * What stands in when the view cannot be drawn (blocked, not built, failed to start, throws, still loading) instead of
+   * the shell's one line: for a view that REPLACES something the host can draw itself, which stays readable.
+   */
+  readonly fallback?: ReactNode;
 }
 
-export function PluginView({ daemon, plugin, section, id, props }: PluginViewProps) {
+export function PluginView({ daemon, plugin, section, id, props, fallback }: PluginViewProps) {
   const { runtime } = useShell();
   useRuntimeVersion(runtime);
   // Who is drawn here (§1.1): this plugin, on a daemon, with its own reach into every paired daemon (S2).
   const identity = useMemo(() => identityOf(runtime, plugin, 'daemon'), [runtime, plugin]);
   const title = runtime.titleOf(plugin);
+  const stood = (line: ReactNode): ReactNode => (fallback === undefined ? line : <>{fallback}</>);
   const blocked = runtime.blockedLine(daemon, plugin);
-  if (blocked !== undefined) return <ShellLine tone="warn">{blocked}</ShellLine>;
+  if (blocked !== undefined) return stood(<ShellLine tone="warn">{blocked}</ShellLine>);
   const half = runtime.half(daemon, plugin);
-  if (half === undefined || half.kind === 'skeleton') return <ShellLine>{skeletonSentence(title)}</ShellLine>;
-  if (half.kind === 'failed') return <ShellLine tone="warn">{title} could not start in this app.</ShellLine>;
+  if (half === undefined || half.kind === 'skeleton') return stood(<ShellLine>{skeletonSentence(title)}</ShellLine>);
+  if (half.kind === 'failed') return stood(<ShellLine tone="warn">{title} could not start in this app.</ShellLine>);
   const view = half[section][id] as ((p: Record<string, unknown>) => ReactNode) | undefined;
-  if (view === undefined) return <ShellLine>{skeletonSentence(title)}</ShellLine>;
+  if (view === undefined) return stood(<ShellLine>{skeletonSentence(title)}</ShellLine>);
   const Rendered = view;
   // Where the view is drawn (S1): ITS daemon's machine, feed and authority, never the selected daemon's.
   return (
-    <ViewBoundary title={title}>
+    <ViewBoundary title={title} fallback={fallback}>
       <WithPluginIdentity identity={identity}>
         <WithViewPlace place={runtime.place(daemon)}>
           <Rendered {...props} />
@@ -163,11 +177,21 @@ export function PanelSlot({
   slot,
   subject,
   props,
+  phone,
 }: {
   readonly daemon: string;
   readonly slot: string;
   readonly subject?: string;
   readonly props?: Readonly<Record<string, unknown>>;
+  /**
+   * On a phone the slot shows ONE panel at a time, full width (`ferret-workspace.tsx`). `active` is the panel on show
+   * (`<plugin>.<id>`), or none while another tab (the chat) is; every panel stays mounted, only the active one is drawn,
+   * so a terminal keeps its stream while another tab is open. `labelledBy` names the chip each panel answers to.
+   */
+  readonly phone?: {
+    readonly active: string | undefined;
+    readonly labelledBy: (panel: string) => string;
+  };
 }) {
   // Outside a shell (a plugin's own harness or suite) there is no layout, so no panel is placed.
   const shell = useOptionalShell();
@@ -175,9 +199,20 @@ export function PanelSlot({
   const panels: readonly PanelRef[] = shell.plan.panels(slot);
   if (panels.length === 0) return null;
   return (
-    <div className="fy-slot" data-slot={slot}>
+    <div className="fy-slot" data-slot={slot} data-phone-active={phone?.active}>
       {panels.map(panel => (
-        <div key={`${panel.plugin}.${panel.id}`} className="fy-panel" data-panel={`${panel.plugin}.${panel.id}`}>
+        <div
+          key={`${panel.plugin}.${panel.id}`}
+          className="fy-panel"
+          data-panel={`${panel.plugin}.${panel.id}`}
+          {...(phone === undefined
+            ? {}
+            : {
+                role: 'tabpanel',
+                'aria-labelledby': phone.labelledBy(`${panel.plugin}.${panel.id}`),
+                'data-phone-shown': phone.active === `${panel.plugin}.${panel.id}` ? '' : undefined,
+              })}
+        >
           <PluginView
             daemon={daemon}
             plugin={panel.plugin}
@@ -190,6 +225,52 @@ export function PanelSlot({
     </div>
   );
 }
+
+/**
+ * A BODY THE PANELS OF A SLOT MAY REPLACE: the host's own `fallback`, or — where a layout places panels in `slot` —
+ * what they draw instead. The panels are NESTED in layout order, with no wrapper around any of them: the first is
+ * handed the second as its `fallback` prop (and the last the host's), so a panel that does not recognise what it was
+ * given returns `fallback` as it is. A panel that cannot be drawn (blocked, not built, throws, still loading) leaves
+ * the next one in its place, and the host's body at the end, so what the slot replaces stays readable. No shell, no
+ * panel: just `fallback`.
+ */
+export function PanelReplace({
+  daemon,
+  slot,
+  subject,
+  props,
+  fallback,
+}: {
+  readonly daemon: string;
+  readonly slot: string;
+  readonly subject?: string;
+  readonly props?: Readonly<Record<string, unknown>>;
+  readonly fallback: ReactNode;
+}) {
+  const panels = useSlotPanels(slot);
+  const drawn = panels.reduceRight<ReactNode>(
+    (inner, panel) => (
+      <PluginView
+        daemon={daemon}
+        fallback={inner}
+        id={panel.id}
+        key={`${panel.plugin}.${panel.id}`}
+        plugin={panel.plugin}
+        props={subject === undefined ? { ...props, fallback: inner } : { ...props, subject, fallback: inner }}
+        section="panels"
+      />
+    ),
+    fallback,
+  );
+  return <>{drawn}</>;
+}
+
+/** The panels the layout places in `slot` here, in order; none outside a shell. */
+export function useSlotPanels(slot: string): readonly PanelRef[] {
+  const shell = useOptionalShell();
+  return shell === null ? NO_PANELS : shell.plan.panels(slot);
+}
+const NO_PANELS: readonly PanelRef[] = [];
 
 /**
  * Whether the layout places any panel in `slot` here: false outside a shell. A screen that offers a slot draws its own

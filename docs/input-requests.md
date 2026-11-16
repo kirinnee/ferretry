@@ -358,7 +358,7 @@ When a `secret` is delivered the terminal is **quarantined** from the write for 
 
 - **Nobody reads it through an ordinary tool.** `terminal.read` and `terminal.wait` are refused with a
   `conflict` error that says when the quarantine ends, for the agent **and for the owner's ordinary
-  terminal-tools endpoint** (`POST /v1/sessions/:sessionId/surfaces/terminals/tools`); the owner's way to
+  terminal-tools endpoint** (`POST /v1/ferrets/:ferretId/surfaces/terminals/tools`); the owner's way to
   look is the viewer's "Show anyway", which is audited. The agent can still send keys.
 - **ONE publication gate, asked where a result is published.** Whatever is derived from a pane is checked
   again, synchronously, at the point it leaves the daemon: after every awaited capture, redaction, batch,
@@ -382,7 +382,7 @@ When a `secret` is delivered the terminal is **quarantined** from the write for 
 - **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
   is per connection (`?reveal=1` on the viewer socket), owner-gated, and audited as
   `input.quarantine_revealed`.
-- **The owner can end it early** (`POST /v1/sessions/:sessionId/input-quarantines/:key/end`, audited as
+- **The owner can end it early** (`POST /v1/ferrets/:ferretId/input-quarantines/:key/end`, audited as
   `input.quarantine_ended`); `GET .../input-quarantines` lists the live ones. Ending it lets go of exactly the
   settled holds it released, each journalled by its own id, never every hold that shares a name. A hold whose
   write may still be in flight or unresolved is never ended this way.
@@ -588,7 +588,7 @@ What is different is how the daemon looks and types, and what it holds back afte
   that is not `type=password`, a field that cannot be seen: amber. Only a password input on a secure page
   is green.
 - **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the card
-  (`GET /v1/sessions/:sid/input-requests/:id/shot`, owner only; `request.pictured` says there is one). The
+  (`GET /v1/ferrets/:ferretId/input-requests/:requestId/shot`, owner only; `request.pictured` says there is one). The
   card draws each field's box on it from the browser's facts. It is let go when the request ends.
 
 - **The field's identity is the node Playwright holds.** Playwright resolves the agent's ref or selector in its
@@ -698,6 +698,15 @@ answers a password, a seed or a code. A listing shows the label, the match, the 
 fields exist. The sealed document is not the main vault: `fy secret use` cannot spend a saved login and
 `${secret:…}` cannot name one. Saved values are masked wherever the daemon scrubs text, as
 `[redacted:login:<ID>:password]`.
+
+**How the card reaches them in 5.0.** The Vault owns the card; Accounts owns the entries. So the Vault declares the
+`input.saved` hook (key `saved`, taken by Accounts alone) and Accounts provides it: the listing the offers are drawn
+from, the one value a field types (`fill`), "Save as", the card's order, and the facts the daemon saw after a submit.
+The Vault looks the provider up **on every call** and parses what it answers against its own strict schemas. **Fail
+closed:** with Accounts off or unreadable nothing is offered or saved, the lock reads the facts as unreadable (the long
+lock), a value typed by hand still goes in, and a client that sends a saved entry is told "Ferretry could not read the
+saved accounts, so nothing was typed". `fill` is the only member that answers a value, and it goes only to the target's
+write. No route, command or agent tool can reach the hook: only the Vault's input path asks it.
 
 ### How it signs in, and where
 
@@ -926,7 +935,7 @@ the field's document, from the ferret's own acts as the browser saw them:
 without the daemon reading who. The browser runtime clears it itself (`BrowserSignInWatch`), whoever acted, so no path
 goes around it:
 
-- every act through `POST /v1/sessions/:id/browser` but a read, a picture or a resize. Who posts it is not known: the
+- every act through `POST /v1/ferrets/:ferretId/browser` but a read, a picture or a resize. Who posts it is not known: the
   owner's address bar, Back, Forward and Reload, or a ferret's `fy browser type|click|navigate`;
 - a press, a key or text in the **live view** (an account tile the owner clicks in the "pick the account" hand-off),
   for every page of the session. A mouse move, a wheel or a release is not;
@@ -1403,8 +1412,8 @@ the sign-in, and does not tell the ferret one: the move may be the ferret's own.
 An approval lives in RAM. A restart ends it: at start, the daemon closes every card that still presents one.
 
 **The owner's routes** (owner only, like every input route; an agent is refused before anything is read):
-`GET /v1/phone-approvals` (the ones waiting), `GET /v1/sessions/:sessionId/phone-approvals/:approvalId` (one, for
-its card) and `POST /v1/sessions/:sessionId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
+`GET /v1/phone-approvals` (the ones waiting), `GET /v1/ferrets/:ferretId/phone-approvals/:approvalId` (one, for
+its card) and `POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
 card itself is refused (`use_input_form`). They are `terminal.use` routes, and an approval names an account, its
 username and the account it signs in via: a caller without `secrets.use` gets each approval **without** `account`,
 `username` and `via`, as a card comes without `saved`. Only the daemon raises a card with the `phoneApproval` ref: the agenda's
@@ -1582,7 +1591,7 @@ in the table above holds for a rule too, plus these:
   is made to buzz), so a ferret that measures how long its raises take could tell that some rule is about that sign-in.
   It learns nothing more (not which account, not why), and it is accepted. A grant fill that finds the target changed
   is a miss: it neither redraws the card nor counts a failed check, because nobody tapped anything. **Declared (R4):**
-  the session's event log (`GET /v1/sessions/:sid/events`, readable by any ferret) is not frozen like the view. A rule
+  the session's event log (`GET /v1/events` socket from that ferret's cursor, readable by any ferret) is not frozen like the view. A rule
   attempt that reaches the write takes the page hold and journals `surface.input_delivering` and the quarantine start
   before its last `held()` check, because nothing may be awaited between that check and the write; a miss there
   journals the request pending again and the quarantine's end. So a ferret that reads the event log could tell that a

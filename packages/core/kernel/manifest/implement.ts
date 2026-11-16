@@ -369,6 +369,13 @@ export interface PluginClient {
        * the answer it does nothing.
        */
       readonly signal?: AbortSignal;
+      /**
+       * A READ THE PAGE MAKES ON ITS OWN (a panel mounting, a poll), not one a person asked for. If the daemon answers
+       * that it wants a passkey STEP-UP for it, the refusal comes back as the answer and no prompt is raised: the
+       * person is asked when they act on the panel (a press is never quiet), not merely for opening the page. An
+       * UNLOCK (the owner's `unlockOnOpen`) still asks. Only a `GET`/`HEAD` can be quiet; any other call ignores it.
+       */
+      readonly quiet?: boolean;
     },
   ): Promise<Answer>;
   subscribe<Name extends string, Payload>(event: EventDef<Name, Payload>, listener: (payload: Payload) => void): Cancel;
@@ -412,8 +419,20 @@ export type AppComponent<Props> = (props: Props) => unknown;
 export interface ScreenProps {
   readonly params: Readonly<Record<string, string | undefined>>;
 }
+/**
+ * A ONE-SHOT REQUEST from the host that draws a slot to the panels in it: "start a new terminal", "open a new page". The
+ * host cannot reach a panel's state, and a panel never imports another's, so the request rides the panel's own props.
+ * `id` changes with every request (a panel acts when it sees an id it has not handled, never on the one it mounted with);
+ * `action` names the act. A panel answers the actions it owns and ignores the rest.
+ */
+export interface PanelIntent {
+  readonly id: number;
+  readonly action: string;
+}
 export interface PanelProps {
   readonly subject?: string;
+  /** What the host just asked for, if anything. */
+  readonly intent?: PanelIntent;
 }
 export type SettingsProps = {};
 export interface RendererProps {
@@ -455,9 +474,40 @@ export interface TerminalIo {
   readonly isTty: boolean;
 }
 
+/** A word the shell read as an option's value, and how many positional words came before it. */
+export interface SwallowedWord {
+  readonly option: string;
+  readonly word: string;
+  /** The number of positional words written before this one, so a verb that declares the option a switch can put it back. */
+  readonly at: number;
+}
+
 export interface VerbInvocation {
+  /**
+   * The words after the verb exactly as they were typed, `--` included, for the one verb whose grammar needs the boundary
+   * the parser drops (`fy secret use --with A B -- cmd`: a list of names ends where `--` begins). Optional: a caller that
+   * does not supply it gets the parsed `args` and `options` alone.
+   */
+  readonly words?: readonly string[];
   readonly args: readonly string[];
   readonly options: Readonly<Record<string, string | boolean | readonly string[]>>;
+  /**
+   * The words after the verb exactly as typed, in order (`--` kept), for a verb whose grammar the shell cannot know:
+   * `args` and `options` are the shell's fixed-rule reading of these (a switch followed by a word reads the word as
+   * its value), so a verb that knows which of its flags are switches reads this instead of undoing that reading.
+   */
+  readonly raw?: readonly string[];
+  /**
+   * Every word taken as the value of `--name word`, in the order written. The shell knows no verb's options, so a
+   * verb whose option is a switch reads these to give the word back its place among the arguments. Absent when none.
+   */
+  readonly swallowed?: readonly SwallowedWord[];
+  /**
+   * Every option name as it was written, in order, one entry per occurrence (`--session`, `-s`, `--no-color`, `--x=1`).
+   * Present only when some name was written more than once: the options map then cannot say which of two spellings of
+   * one flag came last, and a verb that reads a flag under several names needs the order. Absent otherwise.
+   */
+  readonly written?: readonly string[];
 }
 
 /**
@@ -503,6 +553,11 @@ export interface CliContext<M extends Manifest> {
   sleep?(delay: Duration, signal?: AbortSignal): Promise<void>;
   /** `FY_SESSION_ID` and the shell's allowed names only. */
   readonly env?: CliEnvironment;
+  /**
+   * The caller's shell variables among `names` that this plugin's manifest declares in `permissions.cliEnvReads` and
+   * that are set. An undeclared name answers nothing, set or not. Optional until the fy shell fills it in.
+   */
+  readEnvironment?(names: readonly string[]): CliEnvironment;
   /** Asks a question at the terminal; `undefined` when there is no terminal to ask at. */
   prompt?(question: string): Promise<string | undefined>;
   /** A yes/no at the terminal; `false` when there is no terminal. */

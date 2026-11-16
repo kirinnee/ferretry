@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { BrowserBar, type BrowserBarProps } from '../../../../app/features/browser/browser-bar.tsx';
 import type { BrowserChip } from '../../../../app/features/browser/browser-bar-model.ts';
 import { interact, mount, must, pressKey } from '@ferretry/app/testing';
@@ -45,6 +46,24 @@ const find = (root: HTMLElement, selector: string): HTMLElement =>
 const trigger = (root: HTMLElement, name: 'pages' | 'chip' | 'menu'): HTMLElement =>
   find(root, `[data-browser-trigger="${name}"]`);
 const has = (root: HTMLElement, selector: string): boolean => root.querySelector(selector) !== null;
+
+describe('BrowserBar in a narrow dock', () => {
+  it('sits in a frame whose own width, not the screen, decides how the bar folds', async () => {
+    const view = await mount(<BrowserBar {...bar()} />);
+    const frame = find(view.container, '[data-browser-bar-frame]');
+    expect(frame.classList.contains('fy-browser-bar-frame')).toBe(true);
+    expect(frame.querySelector('[data-browser-bar]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('gives the address a row of its own when the frame is narrow (the 328px dock showed a 0px address box)', () => {
+    const css = readFileSync(new URL('../../../../app/features/browser/browser.css', import.meta.url), 'utf8');
+    expect(css).toMatch(/\.fy-browser-bar-frame\s*\{[^}]*container-type:\s*inline-size/u);
+    const narrow = css.slice(css.indexOf('@container fy-browser-bar (max-width: 440px)'));
+    expect(narrow).toMatch(/\.fy-browser-bar\s*\{[^}]*flex-wrap:\s*wrap/u);
+    expect(narrow).toMatch(/\[data-browser-bar-part='address'\]\s*\{[^}]*flex:\s*1 1 100%/u);
+  });
+});
 
 describe('BrowserBar', () => {
   it('is one header holding the name, the address, one chip, three steps and a menu — nothing else', async () => {

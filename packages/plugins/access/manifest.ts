@@ -5,6 +5,7 @@ import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import {
   ACCESS_WORDS,
   AccessPort,
+  PairingWindowPort,
   AUDIT,
   DevicesChanged,
   DevicesFile,
@@ -41,7 +42,7 @@ export default definePlugin({
 
   needs: { gate: GatePort },
   uses: { connections: ConnectionsPort },
-  provides: { access: AccessPort },
+  provides: { access: AccessPort, pairingWindow: PairingWindowPort },
 
   actions: {
     routes: [
@@ -186,12 +187,59 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('pair', { summary: 'pair a phone or another device with this machine' }),
-      verb('device ls', { summary: 'list the devices that may reach this machine' }),
-      verb('device grant', { summary: 'change what one device may do' }),
-      verb('device revoke', { summary: "take one device's access away" }),
-      verb('passkey', { summary: "this machine's passkeys" }),
-      verb('passkey window', { summary: 'open a short window in which a device may add a passkey' }),
+      verb('pair', {
+        summary: 'pair a phone or another device with this machine',
+        args: [],
+        options: [
+          { flag: '--large', help: 'draw the QR at full size, for a camera that will not focus on the compact one' },
+          { flag: '--no-wait', help: 'print the code and exit instead of staying to report the scan' },
+          {
+            flag: '--limited',
+            help: 'give the new device read-and-chat only, instead of full access behind its unlock',
+          },
+          {
+            flag: '--open',
+            help: "open the pairing link in this host's browser — for when the daemon and the browser are the same machine",
+          },
+        ],
+      }),
+      verb('device ls', {
+        default: true,
+        summary: 'list the devices that may reach this machine',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol document instead of the human report' }],
+      }),
+      verb('device grant', {
+        summary: 'change what one device may do',
+        args: [
+          { name: 'device', help: 'a device id, or a device name when exactly one device has that name' },
+          {
+            name: 'capability',
+            help: 'the capability: fleet, terminal, browser, filesystem, warden, pairing, secrets or sharing',
+          },
+        ],
+        options: [
+          { flag: '--use', help: 'let this device exercise the capability' },
+          { flag: '--no-use', help: 'stop this device exercising the capability' },
+          { flag: '--configure', help: "let this device change the capability's host settings" },
+          { flag: '--no-configure', help: "stop this device changing the capability's host settings" },
+        ],
+      }),
+      verb('device revoke', {
+        summary: "take one device's access away",
+        args: [{ name: 'device', help: 'a device id, or a device name when exactly one device has that name' }],
+        options: [{ flag: '-y, --yes', help: 'skip the typed confirmation; required when not on a terminal' }],
+      }),
+      verb('passkey', { summary: "this machine's passkeys", args: [] }),
+      verb('passkey window', {
+        summary: 'open a short window in which a device may add a passkey',
+        args: [
+          {
+            name: 'device',
+            help: 'the device that may add a passkey: its id, or its name when exactly one device has that name',
+          },
+        ],
+      }),
     ],
   },
 
@@ -199,11 +247,11 @@ export default definePlugin({
     // Daemon-less on purpose: the page a pairing link opens on a device that has no daemon yet (first contact is direct).
     screens: [screen('pair', { path: '/pair', daemonless: true })],
     settings: [
-      settingsTab('devices', { label: 'Devices', order: 20 }),
+      settingsTab('devices', { group: 'devices-access', label: 'Devices', order: 20 }),
       // v4's order: Devices, then the limits that explain a refused control, then passkeys, then the log.
-      settingsTab('grants', { label: 'What devices may do', order: 21 }),
-      settingsTab('security', { label: 'Security', order: 22 }),
-      settingsTab('audit', { label: 'Audit log', order: 23 }),
+      settingsTab('grants', { group: 'devices-access', label: 'What devices may do', order: 21 }),
+      settingsTab('security', { group: 'devices-access', label: 'Security', order: 22 }),
+      settingsTab('audit', { group: 'devices-access', label: 'Audit log', order: 23 }),
     ],
     panels: [
       panel('daemon.status', { id: 'new-devices', order: 5 }),

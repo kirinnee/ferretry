@@ -95,7 +95,7 @@ describe('the input card host', () => {
 
   it('draws a paste of a secure copy with no field to type into', async () => {
     const paste = terminalRequest({
-      source: { kind: 'sealed', name: 'SOME_COPY' },
+      source: { kind: 'sealed', name: 'SOME_COPY', from: { kind: 'command', program: 'gh' } },
       target: { kind: 'secret', key: 'SOME_COPY' },
     });
     const { mounted } = await host([paste]);

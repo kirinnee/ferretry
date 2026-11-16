@@ -2,12 +2,14 @@ import type { CliContext, TerminalIo } from '@ferretry/kernel/manifest';
 import type { ICatalogFileWriter, ICatalogOutput, ICatalogPrompt } from '../lib/catalog/ports.ts';
 import type { ICatalogFileReader, ICatalogInstallOutput } from '../lib/catalog-install/ports.ts';
 import type { IShareScreen, ITerminalSize } from '../lib/catalog-share/ports.ts';
+import { FileCatalogWriter } from './export-file.ts';
 
 /**
- * What the shell does not hand a CLI half yet, read by shape: today's `FileCatalogWriter` (`exists`, `write` with
- * `wx` / rename-over) for an export to an arbitrary `--out` path (`ownState` reaches own declared defs only), the
- * size of a file without reading it, and the terminal's width. A verb that needs one the shell did not hand it refuses
- * before anything is sent. No `fs` here: a CLI half reaches files only through the shell.
+ * What the shell may hand a CLI half, read by shape: a file writer (`exists`, `write` with `wx` / rename-over) for
+ * an export to an arbitrary `--out` path (`ownState` reaches own declared defs only), the size of a file without
+ * reading it, and the terminal's width. A shell that hands no writer gets this half's own {@link FileCatalogWriter}
+ * (v4's), the way Browsers writes a screenshot; a verb that needs a file reader the shell did not hand it refuses
+ * before anything is sent.
  */
 interface CliExtras {
   readonly files?: ICatalogFileWriter & {
@@ -64,9 +66,6 @@ class TerminalPrompt implements ICatalogPrompt {
 
 const NO_READER =
   'this fy cannot read a file for Catalogs yet. Nothing was sent. (The fy shell hands plugins a file reader in a later build.)';
-const NO_WRITER =
-  'this fy cannot write a file for Catalogs yet, so nothing was signed. (The fy shell hands plugins a file writer in a later build.)';
-
 /**
  * Today's `FsCatalogFileReader` over the shell: the size first, from a stat when the shell can give one (so a file
  * past the cap is never read), then a read bounded by `maxBytes`. The shell's reader has no cap of its own, so a
@@ -100,16 +99,6 @@ class ShellCatalogFileReader implements ICatalogFileReader {
   }
 }
 
-/** Refuses up front, before the export is signed, when the shell gave no writer. */
-const refusingWriter: ICatalogFileWriter = {
-  exists: async () => {
-    throw new Error(NO_WRITER);
-  },
-  write: async () => {
-    throw new Error(NO_WRITER);
-  },
-};
-
 export interface CatalogTerminal {
   readonly out: TerminalOutput;
   readonly screen: TerminalScreen;
@@ -129,7 +118,7 @@ export function catalogTerminal(ctx: CliContext<never>): CatalogTerminal {
     prompt: new TerminalPrompt(ctx.prompt?.bind(ctx)),
     interactive: ctx.io.isTty && ctx.prompt !== undefined,
     reader: new ShellCatalogFileReader(ctx.readText?.bind(ctx), more.files?.size?.bind(more.files)),
-    writer: more.files ?? refusingWriter,
+    writer: more.files ?? new FileCatalogWriter(),
     size: { columns: () => more.columns?.() },
   };
 }

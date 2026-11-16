@@ -124,6 +124,36 @@ export const carriesOwnPolicy = (name: string, source: string, headers: string):
       rule.lines.some(line => /^Content-Security-Policy:/iu.test(line)),
   );
 
+/** The page with its comments removed: a tag named inside one is prose, not a tag the browser acts on. */
+const withoutComments = (page: string): string => page.replace(/<!--[\s\S]*?-->/gu, '');
+
+/**
+ * True when the FIRST thing the browser executes or waits on in this document is the early-arrival script
+ * (`public/arrival.js`, which takes a pairing link's fragment off the address; shell contract S3). Anything before it
+ * (another script, inline or external; a stylesheet or `<style>`, which blocks the parser's next script) is a window in
+ * which a live code sits in the address bar. Read from the emitted bytes, in document order.
+ */
+export const arrivalScriptIsFirst = (page: string): boolean => {
+  const bare = withoutComments(page);
+  const script = /<script\b[^>]*>/iu.exec(bare);
+  if (script === null || !/\bsrc\s*=\s*["']\/arrival\.js["']/iu.test(script[0])) return false;
+  const blocking = /<style\b|<link\b[^>]*\brel\s*=\s*["']?stylesheet/iu.exec(bare);
+  return blocking === null || blocking.index > script.index;
+};
+
+/**
+ * True when `_headers` serves this page as a SANDBOXED document (`Content-Security-Policy: ... sandbox ...` on the
+ * spelling it is served at): an opaque origin, where the page's own `history.replaceState` is refused and no pairing
+ * link is ever aimed. The `fy-render` shells are the pages that are. Any other page with a policy of its own is not exempt.
+ */
+export const isSandboxedByHeader = (name: string, headers: string): boolean =>
+  headerRulesOf(headers).some(
+    rule =>
+      rule.pattern !== '/*' &&
+      patternMatches(rule.pattern, servedPathOf(name)) &&
+      rule.lines.some(line => /^Content-Security-Policy:.*\bsandbox\b/iu.test(line)),
+  );
+
 /** Every `.html` file under `dir` (the pages copied verbatim from `public/`), as `[path relative to dir, text]`. */
 export const htmlPagesUnder = (dir: string): readonly (readonly [string, string])[] => {
   const found: [string, string][] = [];
@@ -218,6 +248,23 @@ export function getStartedPagePlugin(options: GetStartedPageOptions): Plugin {
           `The script-src in packages/app/public/_headers lists ${unused.join(' ')}, which no page the build emits ` +
             `uses: remove it (an allowance with no owner lets one exact old script run on every page).`,
         );
+      // EVERY page the build emits takes a pairing link's fragment off the address first, or is a sandboxed shell.
+      for (const [name, source] of pages) {
+        if (hasOwnPolicy(name, headers)) {
+          if (!isSandboxedByHeader(name, headers))
+            this.error(
+              `The ${name} page is served with a policy of its own and is not sandboxed, so it cannot be one of the ` +
+                `documents that are exempt from the early-arrival script (public/arrival.js): a pairing link opened there ` +
+                `would sit in the address. Sandbox it in _headers, or give it the script as its first script.`,
+            );
+        } else if (!arrivalScriptIsFirst(source)) {
+          this.error(
+            `The ${name} page does not start with the early-arrival script, so a pairing link's fragment sits in the ` +
+              `address while the page loads: make \`<script src="/arrival.js"></script>\` the FIRST script of the document, ` +
+              `before anything executable or any stylesheet (\`data-drop\` on a page that has no taker; public/arrival.js says why).`,
+          );
+        }
+      }
       this.emitFile({ type: 'asset', fileName: 'get-started/index.html', source: stamped });
     },
   };

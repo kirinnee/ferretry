@@ -1,16 +1,22 @@
 import type { ChildEnvironment, FerretId, SecretResolver } from '@ferretry/kernel/contract';
 import type { FerretState } from '@ferretry/core-ferrets/contract';
-import { implementDaemon, type Needer, perNeeder } from '@ferretry/kernel/manifest';
+import { implementDaemon, type Needer, neederMayReach, perNeeder } from '@ferretry/kernel/manifest';
 import { err, ok, type Result } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import {
   type AuthorizedOutcome,
   type CredentialPlacement,
+  MINTED_DEFAULT_BODY_BYTES,
+  MINTED_ECHO_MASK,
+  type MintedExchangeOutcome,
+  MintedExchangeRequestSchema,
+  MintsFile,
   CredentialPlacementSchema,
   type OutboundHttpRequest,
   OutboundHttpRequestSchema,
   HoldsChanged,
   RedactionSources,
+  ProfileSecrets,
   SecretsChanged,
   type SecretName,
   SecretUseRequestSchema,
@@ -38,6 +44,8 @@ import { EphemeralValues } from './lib/inputs/ephemeral-values.ts';
 import { InputRequestError } from './lib/inputs/errors.ts';
 import { secretRouteHandlers } from './lib/runtime/mounts/secrets.ts';
 import { OutboundProviderAuthorizer } from './lib/secrets/authorizer.ts';
+import { echoMask, maskReplyHeaders, maskText, sanitizeBody } from './lib/secrets/echo-mask.ts';
+import { MintLedger } from './lib/secrets/mint-ledger.ts';
 import {
   isCoreNeeder,
   isMintedSecret,
@@ -59,6 +67,7 @@ import { DeclaredMaskSource } from './lib/secrets/mask-source.ts';
 import { combinedValues, SecretRedactor } from './lib/secrets/redaction.ts';
 import { UnknownSecretError } from './lib/secrets/types.ts';
 import { SecretUseError, SecretUseService } from './lib/secrets/use.ts';
+import { allowedDestination } from '../contract/index.ts';
 import { SecretDirectory, SecretVault } from './lib/secrets/vault.ts';
 
 /**
@@ -70,8 +79,10 @@ const IDENTITY_NOT_OFFERED: SecretCloneIdentitySource = { load: async () => unde
 
 /** The one plugin that looks at a page's number and a terminal's prompt for a phone approval, and may ask whether a ferret steered. */
 const PHONE_APPROVAL_LOOKER = 'accounts';
-/** The plugins whose request tools carry a ferret's `push: true` raise (Terminals' does not serve one yet). */
-const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers'];
+/** The one plugin that captures a secure copy: it runs the command and holds the value in the masking registry. */
+const SECURE_COPY_OWNER = 'accounts';
+/** The plugins whose request tools carry a ferret's `push: true` raise. */
+const PHONE_APPROVAL_RAISERS: readonly string[] = ['browsers', 'terminals'];
 
 /**
  * The Vault's daemon half (§2.2): the sealed store and key (byte for byte, spine D16), `${secret:NAME}` use, the
@@ -136,6 +147,17 @@ export default implementDaemon(manifest, {
       recipes,
       masks,
     );
+    const mints = new MintLedger({
+      read: async () => {
+        const read = await kernel.state.read(MintsFile);
+        if (!read.ok) throw new Error('the mint ledger could not be read');
+        return read.value;
+      },
+      update: async change => {
+        const done = await kernel.state.update(MintsFile, current => change(current ?? { format: 1, entries: {} }));
+        if (!done.ok) throw new Error('the mint ledger could not be written');
+      },
+    });
     const authorizer = new OutboundProviderAuthorizer(vault, new KernelOutboundTransport(kernel.fetch, kernel.clock));
     const crypto = new WebCryptoCloneCrypto();
     const imports = new SecretImportService({ crypto, identity: IDENTITY_NOT_OFFERED, directory, clock: kernel.clock });
@@ -199,6 +221,8 @@ export default implementDaemon(manifest, {
       resolve: async name => (await vault.values()).get(name as SecretName),
     };
 
+    // Its OWN sealed child path (secure-clip-1 fix1, P1-2): the sealed allowlist only, never the git/gh tool overlay.
+    const copyRunner = new KernelSecretChildRunner(kernel.spawn, kernel.clock, undefined, true);
     const full: VaultApi = {
       names: async () => await directory.list(),
       has: async name => (await directory.list()).some(secret => secret.name === name),
@@ -232,10 +256,21 @@ export default implementDaemon(manifest, {
       // What a ferret did to a page and where page scripts ran, told by Browsers (lead DECISIONS-2 #5, I98–I100):
       // the login observer's act notes and the machine-wide script taint a page card's lock reads.
       pageActed: (ferret, script) => inputs.observer?.acted(ferret, 'browser', script) ?? { placed: () => undefined },
-      scriptRunning: () => inputs.scripts.running(),
-      scriptedOn: host => inputs.scripts.scriptedOn(host),
+      scriptRunning: () => {
+        const ended = [inputs.scripts.running(), inputs.grants.running?.() ?? (() => undefined)];
+        return () => {
+          for (const end of ended) end();
+        };
+      },
+      // A person took a page over (Browsers): a paste still waiting for the owner into it is refused now (secure-clip-1 fix1, P2-5).
+      pageTakenOver: async (ferret, keys) => await inputs.service.pageTakenOver(ferret, keys),
+      scriptedOn: host => {
+        inputs.scripts.scriptedOn(host);
+        inputs.grants.scriptedOn?.(host);
+      },
       // The input card a 2FA seed is set up from (Accounts, I173): where the daemon saw its target, and "use it now".
       cardTarget: requestId => inputs.service.cardTarget(requestId),
+      inputOpen: ferret => inputs.service.hasOpen(ferret),
       useNow: async (requestId, use) =>
         await inputs.service.useNow(requestId, {
           ...use,
@@ -248,6 +283,116 @@ export default implementDaemon(manifest, {
       observeTerminal: async (ferret, key) => await inputs.phoneReach.observeTerminal(ferret, key),
       tainted: (ferret, kind, since) => inputs.phoneReach.tainted(ferret, kind, since),
       raisePhoneApproval: async (ferret, ask) => await inputs.phoneReach.raisePhoneApproval(ferret, ask),
+      // A secure copy (docs/secure-copy.md): the command it captures runs with NO shell and an environment that holds
+      // nothing but what the kernel host allows every child (no admin token, none of the daemon's secrets); what it
+      // printed goes once to the service that seals it. The masking registry is the one the input bridge uses.
+      captureCommand: async spec =>
+        await copyRunner.run({
+          command: spec.command,
+          cwd: spec.cwd,
+          env: environments.mint({}, { requester: SECURE_COPY_OWNER }),
+          timeoutMs: spec.timeoutMs,
+          maxOutputBytes: spec.maxOutputBytes,
+        }),
+      maskCopy: {
+        hold: (ferret, value, marker, until) => values.holdUntil(ferret, value, marker, until),
+        retime: (ferret, marker, until) => values.retime(ferret, marker, until),
+        holdScrollback: (ferret, value, marker) => values.holdScrollback(ferret, value, marker),
+        scrollbackFull: (ferret, marker) => values.scrollbackFull(ferret, marker),
+      },
+    };
+
+    /** The names a runtime's profile references, from Runtimes (the hook's one provider); none when it is off or fails. */
+    const profileReferences = async (runtime: string): Promise<ReadonlySet<string>> => {
+      try {
+        if (ctx.hooks.declaredProvider(ProfileSecrets, 'profiles') === undefined) return new Set();
+        const provider = ctx.hooks.provider(ProfileSecrets, 'profiles');
+        return provider === 'unavailable' ? new Set() : new Set(await provider.references(runtime));
+      } catch {
+        return new Set();
+      }
+    };
+
+    /**
+     * ONE request with a secret the needer MINTED placed on it, answered as the reply (a stream a caller reads for itself),
+     * the credential masked out of it. The name must be one the ledger says THIS needer wrote the current value of; the
+     * request is parsed once into plain data; the destination must be a host the needer's own `network` allows; nothing
+     * the caller sent already carries the credential header; a redirect is never followed.
+     */
+    const fetchMinted = async (
+      needer: Needer,
+      name: SecretName,
+      asked: unknown,
+      placementAsked?: unknown,
+    ): Promise<MintedExchangeOutcome> => {
+      const request = MintedExchangeRequestSchema.safeParse(asked);
+      const placed = CredentialPlacementSchema.safeParse(
+        placementAsked ?? { header: 'authorization', scheme: 'Bearer' },
+      );
+      if (!request.success || !placed.success) return { kind: 'refused' };
+      const secret = String(name);
+      let parsed: URL;
+      try {
+        parsed = new URL(request.data.url);
+      } catch {
+        return { kind: 'refused' };
+      }
+      // The destination is one the KERNEL says this plugin may reach (its `network` of every kind, a resolver's answer
+      // included), and a plain https (or this machine's http) address.
+      const mayReach = needer.mayReach ?? ((hostname: string) => neederMayReach(needer, hostname));
+      if (!allowedDestination(request.data.url, [parsed.host.toLowerCase()]) || !mayReach(parsed.hostname, parsed.host))
+        return { kind: 'refused' };
+      const placement = placed.data;
+      const carries = (header: string): boolean =>
+        Object.keys(request.data.headers).some(name => name.toLowerCase() === header.toLowerCase());
+      if (carries(placement.header)) return { kind: 'refused' };
+      // A caller `Host` header is never forwarded (as `kernel.secrets.send`): the connection goes to the host the
+      // permission was checked for, and nothing re-aims it.
+      if (carries('host')) return { kind: 'refused' };
+      // ONE reading of the store gives both the entry's write identity and its value, so what the ledger authorizes is
+      // exactly what is sent: a write that lands after this read cannot swap in a value the plugin did not mint.
+      let opened: { readonly write: string; readonly value: string } | undefined;
+      try {
+        opened = await vault.openEntry(secret as SecretName);
+      } catch {
+        return { kind: 'vault_damaged' };
+      }
+      if (opened === undefined || !(await mints.mintedBy(needer.id, secret as SecretName, opened.write)))
+        return { kind: 'refused' };
+      const value = opened.value.trim();
+      if (value.length === 0) return { kind: 'secret_missing' };
+      const credential = placement.scheme === undefined ? value : `${placement.scheme} ${value}`;
+      let response: Response;
+      try {
+        response = await kernel.fetch.request(request.data.url, {
+          method: request.data.method,
+          // A body the Vault cannot read is a body it cannot mask: it asks for the plain one.
+          headers: { 'accept-encoding': 'identity', ...request.data.headers, [placement.header]: credential },
+          ...(request.data.body === undefined ? {} : { body: request.data.body }),
+          ...(request.data.signal === undefined ? {} : { signal: request.data.signal }),
+          redirect: 'manual',
+        });
+      } catch (error) {
+        if (request.data.signal?.aborted === true) return { kind: 'aborted' };
+        return {
+          kind: 'unreachable',
+          certificate: error instanceof Error && /certificate|ssl|tls/iu.test(error.message),
+        };
+      }
+      // Sanitized HERE, by the holder of what was sent, against the value AS SENT (not whatever the store holds now).
+      const around = echoMask([value, credential], MINTED_ECHO_MASK);
+      try {
+        return {
+          kind: 'response',
+          status: response.status,
+          statusText: maskText(response.statusText, around),
+          headers: maskReplyHeaders(response.headers, around),
+          body: await sanitizeBody(response, around, request.data.maxBodyBytes ?? MINTED_DEFAULT_BODY_BYTES),
+        };
+      } catch {
+        if (request.data.signal?.aborted === true) return { kind: 'aborted' };
+        return { kind: 'unreachable', certificate: false };
+      }
     };
 
     /**
@@ -262,13 +407,26 @@ export default implementDaemon(manifest, {
       const ownChildEnvironment: VaultApi['childEnvironment'] = async (_ferret, env) =>
         await mintChildEnvironment(env, needer.id);
       if (isCoreNeeder(needer)) return { ...full, childEnvironment: ownChildEnvironment };
-      // The phone approval's reach is by name: the service that looks (Accounts) and the tool that raises (Browsers).
+      // The phone approval's reach is by name: the service that looks (Accounts) and the tools that raise (Browsers, Terminals).
       // Every other needer is handed none of it, so a plugin cannot read a page's number or the prompt of
       // a terminal, or raise an approval, by holding the Vault port.
-      const { pushNumber, observeTerminal, tainted, raisePhoneApproval, ...rest } = full;
+      const {
+        pushNumber,
+        observeTerminal,
+        tainted,
+        raisePhoneApproval,
+        captureCommand,
+        maskCopy,
+        pageTakenOver,
+        inputOpen,
+        ...rest
+      } = full;
       return {
         ...rest,
-        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted } : {}),
+        ...(needer.id === SECURE_COPY_OWNER ? { captureCommand, maskCopy } : {}),
+        // Browsers alone reports a takeover: the report ends waiting pastes, so no other plugin may make one.
+        ...(needer.id === 'browsers' ? { pageTakenOver } : {}),
+        ...(needer.id === PHONE_APPROVAL_LOOKER ? { pushNumber, observeTerminal, tainted, inputOpen } : {}),
         ...(PHONE_APPROVAL_RAISERS.includes(needer.id) ? { raisePhoneApproval } : {}),
         // LIST reach: the secrets this needer may use or mints itself. WRITE reach is narrower: only the names it MINTS, so a
         // plugin cannot overwrite or delete a secret it merely uses (an owner's GITHUB_TOKEN named in its records), nor see
@@ -281,13 +439,22 @@ export default implementDaemon(manifest, {
         put: async (name, value) => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'write');
-          await full.put(secret as SecretName, value);
+          // The write is recorded as THIS plugin's: only a value a plugin wrote itself is one it may place on a request.
+          await mints.record(
+            needer.id,
+            secret as SecretName,
+            await directory.putIdentified(secret as SecretName, value),
+          );
+          changed();
         },
         remove: async name => {
           const secret = String(name);
           if (!isMintedSecret(needer, secret)) throw new UndeclaredSecretError(needer, secret, 'remove');
-          return await full.remove(secret as SecretName);
+          const removed = await full.remove(secret as SecretName);
+          await mints.forget(secret as SecretName).catch(() => undefined);
+          return removed;
         },
+        fetchMinted: async (name, asked, placement) => await fetchMinted(needer, name, asked, placement),
         // Every narrowed call reads what the caller passed ONCE, into plain data of its own, checks that copy and uses
         // only that copy: a getter on the caller's object cannot show a declared value to the check and another to the use.
         run: async (asked, ferret) => {
@@ -319,6 +486,21 @@ export default implementDaemon(manifest, {
           if (refused.length > 0) return err({ unknown: refused });
           return await ownChildEnvironment(ferret, env);
         },
+        ...(needer.permissions.profileSecrets === true
+          ? {
+              // One command for one runtime: what the needer may use, plus the names that runtime's profile references,
+              // asked of Runtimes AFRESH for this call and kept by nothing. No value is returned; the kernel opens the handle.
+              childEnvironmentForRuntime: async (runtime, asked) => {
+                const env = SecretUseRequestSchema.shape.env.parse({ ...asked });
+                const granted = await profileReferences(runtime);
+                const refused = secretsNamedBy({ secrets: [], env }).filter(
+                  name => !mayUseSecret(needer, name) && !granted.has(name),
+                );
+                if (refused.length > 0) return err({ unknown: refused });
+                return await ownChildEnvironment('runtime-check' as FerretId, env);
+              },
+            }
+          : {}),
       };
     };
 

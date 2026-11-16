@@ -498,6 +498,7 @@ export class PhoneApprovalService {
       await this.deps.notifier
         ?.tell(
           sessionId,
+          held.approval.id,
           'The owner did not expect this sign-in and said "Not me": stop signing in there, and do not ask again.',
         )
         .catch(() => undefined);

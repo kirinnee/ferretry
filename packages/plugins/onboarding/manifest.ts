@@ -58,9 +58,21 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('onboard', { summary: 'run the first run at a terminal: find what you have, ask only what is missing' }),
-      verb('onboard status', { summary: 'the first-run steps and where each stands' }),
-      verb('onboard reset', { summary: 'forget which steps were answered and start the first run again' }),
+      verb('onboard', {
+        summary: 'run the first run at a terminal: find what you have, ask only what is missing',
+        args: [],
+        options: [
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--check', help: 'say what is present and what is missing, and change nothing' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('onboard status', {
+        summary: 'the first-run steps and where each stands',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('onboard reset', { summary: 'forget which steps were answered and start the first run again', args: [] }),
     ],
   },
 
@@ -68,11 +80,16 @@ export default definePlugin({
     // Daemon-less on purpose: the first run happens before any daemon is paired.
     screens: [
       screen('onboarding', { path: '/onboarding', daemonless: true }),
+      // The address a hand-off link carries to the OTHER device (`/setup#fy-setup=…`, v4's `setupPath`): the SAME first-run page,
+      // drawn by the same view, with the place the link carries read from its fragment. One page, two addresses.
+      screen('handoff', { path: '/setup', daemonless: true }),
       // The steps every plugin declared, on one machine: it OFFERS the `onboarding.step` slot (contract/slots.ts).
       screen('steps', { path: 'onboarding/steps' }),
+      // v4's address for the same first run (`/d/<machine>/setup`): a bookmark or an old link still lands on the steps.
+      screen('setup', { path: 'setup' }),
     ],
     // The way back to the steps screen for a machine that was paired but not set up: nothing else links to it.
-    settings: [settingsTab('setup', { label: 'Setup', order: 60 })],
+    settings: [settingsTab('setup', { group: 'agents', label: 'Setup', order: 60 })],
   },
 
   data: {

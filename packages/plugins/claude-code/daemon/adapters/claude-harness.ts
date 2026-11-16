@@ -41,6 +41,7 @@ import type {
   SpawnPort,
   StatePort,
 } from '@ferretry/kernel/contract';
+import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
@@ -80,6 +81,11 @@ export interface ClaudeHarnessDeps {
   readonly panes: PaneDirectory;
   readonly permission: PermissionAnswerService;
   readonly dialog: DialogAnswerService;
+  /**
+   * The settings and hooks components the launching runtime's profile selects (`selectedComponents`): only those items
+   * reach its home, as v4's profile resolution gave `adaptProfile` only the resolved profile's. No runtime selects none.
+   */
+  readonly selected: (runtime: string | undefined) => Promise<SelectedComponents>;
   /** A fresh conversation id: Claude takes `--session-id`, so the daemon assigns it. */
   readonly newConversationId: () => string;
   /** The user's documented Claude history home; only its projects subtree is read. */
@@ -87,6 +93,11 @@ export interface ClaudeHarnessDeps {
 }
 
 const TMUX_TIMEOUT_MS = 5_000;
+/**
+ * The most `projects/*` folders `hasConversation` lists before it says "cannot tell". One ferret's home holds the
+ * folders it was launched in (a handful); a home with more proves nothing either way.
+ */
+const MAX_PROJECT_FOLDERS = 1_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
@@ -152,7 +163,7 @@ export class ClaudeHarness implements Harness {
   }
 
   async prepareHome(spec: LaunchSpec): Promise<HomePlan> {
-    return await this.prepareHomeFrom(spec, this.launchInputs());
+    return await this.prepareHomeFrom(spec, await this.launchInputs(spec.runtime));
   }
 
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
@@ -201,6 +212,47 @@ export class ClaudeHarness implements Harness {
     harnessConversation: string,
   ): Promise<Result<Started, StartRefusal>> {
     return await this.launch(spec, runner, env, { kind: 'resume', id: harnessConversation });
+  }
+
+  /**
+   * Whether `claude --resume <id>` would find its conversation in THIS ferret's home, where Claude keeps it as
+   * `projects/<its own spelling of the folder>/<id>.jsonl`. Claude's spelling is NOT always the one Ferretry computes
+   * (`claudeTranscriptPath`): it keys by the physical working folder (a folder reached through a link spells its real
+   * path) and shortens a spelling over 200 characters with a hash. So `false` is answered ONLY when the id is in no
+   * `projects/*` folder at all, after a complete listing of at most {@link MAX_PROJECT_FOLDERS} plain folders. Found under
+   * Ferretry's own spelling is `true`; found under any other is `undefined` (Claude may well find it), and so is every
+   * doubt: a linked or odd entry, a folder too many, a path the root refuses. A resume is never given up on a guess. A
+   * ferret converted from v4 names a conversation whose transcript was left behind, and its home has no such file.
+   */
+  async hasConversation(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined> {
+    if (!isConversationId(harnessConversation) || !isConversationId(spec.ferret)) return undefined;
+    try {
+      const home = this.home(spec.ferret);
+      const projects = home.resolve('projects');
+      if (!projects.ok) return undefined;
+      const folder = await home.lstat(projects.value);
+      // No `projects` folder: Claude has written no conversation in this home.
+      if (folder === undefined) return false;
+      if (folder.kind !== 'directory') return undefined;
+      const entries = await home.entries(projects.value);
+      if (entries.length > MAX_PROJECT_FOLDERS) return undefined;
+      const ours = claudeTranscriptPath(spec.folder, harnessConversation);
+      let elsewhere = false;
+      for (const entry of entries) {
+        // A link could lead to the conversation, and is never followed to find out.
+        if (entry.kind === 'symlink' || entry.kind === 'other') return undefined;
+        if (entry.kind !== 'directory') continue;
+        const relative = `projects/${entry.name}/${harnessConversation}.jsonl`;
+        const file = home.resolve(relative);
+        if (!file.ok) return undefined;
+        if ((await home.lstat(file.value)) === undefined) continue;
+        if (relative === ours) return true;
+        elsewhere = true;
+      }
+      return elsewhere ? undefined : false;
+    } catch {
+      return undefined;
+    }
   }
 
   async stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void> {
@@ -341,7 +393,7 @@ export class ClaudeHarness implements Harness {
     if (!found.found) return err('unavailable');
     // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
     // reload between them cannot leave a record that differs from what the process runs on.
-    const inputs = this.launchInputs();
+    const inputs = await this.launchInputs(spec.runtime);
     await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
@@ -349,6 +401,7 @@ export class ClaudeHarness implements Harness {
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
+      mode: spec.mode,
       conversation,
       readable: spec.readable,
     });
@@ -492,18 +545,25 @@ export class ClaudeHarness implements Harness {
       if (size === undefined || size > MAX_LAUNCH_RECORD_BYTES) return UNKNOWN_LAUNCH;
       const recorded = await this.deps.state.read(CLAUDE_CODE_LAUNCH_SETTINGS, ferret);
       if (!recorded.ok || recorded.value === undefined) return UNKNOWN_LAUNCH;
-      return compareLaunchSettings(recorded.value, launchSettingsRecord(this.launchInputs()));
+      return compareLaunchSettings(
+        recorded.value,
+        launchSettingsRecord(await this.launchInputs(recorded.value.runtime)),
+      );
     } catch {
       return UNKNOWN_LAUNCH;
     }
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private launchInputs(): LaunchSettingsInputs {
+  private async launchInputs(runtime: string | undefined): Promise<LaunchSettingsInputs> {
+    const selected = await this.deps.selected(runtime);
+    const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
+      new Map([...items].filter(([name]) => names.has(name)));
     return {
       permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'auto',
-      settings: this.deps.config.collection(settingsCollection) as never,
-      hooks: this.deps.config.collection(hooksCollection) as never,
+      settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
+      hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
+      ...(runtime === undefined ? {} : { runtime }),
     };
   }
 

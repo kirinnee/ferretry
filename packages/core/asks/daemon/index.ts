@@ -18,7 +18,14 @@
 import { randomUUID } from 'node:crypto';
 import { implementDaemon, perNeeder } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
-import { AgendaContext, AskDeliveries, AskSources, type SourceKey } from '../contract/index.ts';
+import {
+  AgendaContext,
+  ASK_OWNER_CHAT_KEY,
+  AskDeliveries,
+  AskOwnerChats,
+  AskSources,
+  type SourceKey,
+} from '../contract/index.ts';
 import { agendaContext } from './adapters/agenda-context.ts';
 import manifest from '../manifest.ts';
 import { askDelivery } from './adapters/ask-delivery.ts';
@@ -45,8 +52,8 @@ import { AgendaLedgerFiles } from './lib/state.ts';
 /** How often the outboxes that hold a change event are drained. */
 const CHANGES_SWEEP_MS = 5_000;
 
-/** The one plugin whose Asks view can tell a ferret something. */
-const TELLING_PLUGIN = 'vault';
+/** The two plugins whose Asks view can tell a ferret something: the Vault (a request ended) and Accounts ("Not me"). */
+const TELLING_PLUGINS: ReadonlySet<string> = new Set(['vault', 'accounts']);
 
 export default implementDaemon(manifest, {
   build({ kernel, hooks }) {
@@ -63,8 +70,8 @@ export default implementDaemon(manifest, {
       warn,
     });
     // Lineage and card context are Ferrets' and Board's (`agenda.context`), read at each call; an answer that cannot be had
-    // is the safe side of its question (see `agendaContext`). The machine agenda and the owner's chat are not on this
-    // base: a notice with no owner home stays on the sub-ferret, and `fy agenda log` finds nothing.
+    // is the safe side of its question (see `agendaContext`). A notice with no owner home lands on the machine agenda
+    // (bound there); a gate item or a follow-up never does.
     const context = agendaContext(key => hooks.provider(AgendaContext, key), warn);
     const agenda = new AgendaService(
       repository,
@@ -81,7 +88,15 @@ export default implementDaemon(manifest, {
       context.homes,
       context.gates,
       undefined,
-      undefined,
+      // The owner's chat is Conversation's (`ask.owner-chat:conversation`), read at each look so a Conversation that is
+      // turned on later is used from then on; with none, `fy agenda log` finds nothing, as it says.
+      {
+        find: async (session, messageId) => {
+          const found = hooks.provider(AskOwnerChats, ASK_OWNER_CHAT_KEY);
+          if (found === 'unavailable') return { ok: false, reason: messageId === undefined ? 'none' : 'unknown' };
+          return await found.find(session, messageId);
+        },
+      },
       versions,
       seen,
     );
@@ -172,9 +187,10 @@ export default implementDaemon(manifest, {
         ),
       },
       provides: {
-        // Typing into a ferret is not for every plugin that holds Asks: `tell` is on the view of the one plugin that
-        // owes a ferret something (Vault, when its request ends); every other needer's view has no `tell`.
-        asks: perNeeder(needer => (needer.id === TELLING_PLUGIN ? withTell : withoutTell)),
+        // Typing into a ferret is not for every plugin that holds Asks: `tell` is on the view of the plugins that owe a
+        // ferret something (Vault, when its request ends; Accounts, when the owner says "Not me" to a phone approval);
+        // every other needer's view has no `tell`.
+        asks: perNeeder(needer => (TELLING_PLUGINS.has(needer.id) ? withTell : withoutTell)),
       },
     };
   },

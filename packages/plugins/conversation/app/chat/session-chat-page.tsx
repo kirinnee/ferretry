@@ -14,17 +14,32 @@
  * nothing on this page holds or indexes a transcript beyond the rows on screen.
  */
 
-import { type ChatScrollSlot, LiveStreamIndicator, type LiveStreamIndicatorProps, PanelSlot } from '@ferretry/app';
-import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useLiveActivity } from '@ferretry/app';
+import {
+  type ChatScrollSlot,
+  FerretWorkspace,
+  LiveStreamIndicator,
+  type LiveStreamIndicatorProps,
+  PanelSlot,
+} from '@ferretry/app';
+import { ReferenceSurfaceProvider, TERMINAL_STATUSES, statusMark, useAppHook, useLiveActivity } from '@ferretry/app';
 import type { LiveActivityFeed } from '@ferretry/app';
-import type { FerretLiveActivity, FerretView } from '@ferretry/core-ferrets/contract';
+import {
+  FERRETS_FILE_OPEN_HOOK,
+  FERRETS_PLUGIN,
+  type FerretLiveActivity,
+  isFerretsFileOpen,
+} from '@ferretry/core-ferrets/contract';
+import { useChatFleet } from './chat-fleet.ts';
+import { FilesPanelBridge } from './files-panel-bridge.tsx';
+import { type ChatSession, isUnread } from './chat-session.ts';
 import { CONVERSATION_ABOVE_COMPOSER_SLOT, type ComposerAccount } from '../../contract/index.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AttachmentGalleryProvider } from '../composer/attachment-gallery.tsx';
-import { Composer } from '../composer/composer.tsx';
+import { composerApi } from '../composer/composer-api.ts';
+import { Composer, type ComposerSent } from '../composer/composer.tsx';
 import { useComposerPreferences } from '../composer/use-composer-preferences.ts';
-import { daemonConnection } from '../composer/seam.ts';
+import { daemonConnection, withReferencePrefix } from '../composer/seam.ts';
 import {
   type PendingQuestion,
   type QuestionAnswerApi,
@@ -34,12 +49,14 @@ import {
 import { ChatSearch, type ChatSearchPort } from '../search/chat-search.tsx';
 import { displayCallsign } from '../transcript/callsign.ts';
 import { sessionTurn, UNREAD_PANE } from '../transcript/session-activity.ts';
+import { aboveComposerProps } from './above-composer-props.ts';
 import { readHandoff } from './chat-reads.ts';
+import type { LedgerSendRecord } from './send-ledger.ts';
 import type { ChatWidthPreference } from '@ferretry/app';
 import { CompactionChip } from './compaction-card.tsx';
 import { HandoffSourceProvider } from './handoff-message.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
-import { chatReferenceSurface } from './reference-surface.ts';
+import { chatFileProof, chatReferenceSurface } from './reference-surface.ts';
 import { RowSlotProvider } from './row-slots.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { Transcript } from './transcript.tsx';
@@ -49,9 +66,31 @@ import { TranscriptUnboundNotice } from './transcript-unbound-notice.tsx';
 import { useChatScrollbarGutter } from './use-chat-scrollbar-gutter.ts';
 import { hideWaiting } from './waiting-fold.ts';
 
+/**
+ * The ask this conversation is drawn under (Agenda's `agenda.conversation` slot): what the owner types here is a reply
+ * to THAT item, so the composer keeps the item's own draft (never the ferret's chat box), the message carries its
+ * reference (`!A3 …`, delivered as `[re !A3 …]`), and the host hears once a message about it was accepted.
+ */
+export interface AskReply {
+  /** The item the reply is about (`A3`). */
+  readonly id: string;
+  /** A message about the item was accepted. */
+  readonly onReplied?: ((sent: ComposerSent) => void) | undefined;
+  /** The words of a reply that was taken back: they go in the box once. */
+  readonly restore?: string | undefined;
+  readonly onRestored?: (() => void) | undefined;
+  /**
+   * The item is a form card: Send answers THE FORM (the picks on the card and the words in the box, as one answer through
+   * the Agenda's answer route) instead of sending a message. It may throw the one sentence the composer shows.
+   */
+  readonly answerForm?: (() => void) | undefined;
+  /** Bumped when a pick on the open form changes, so the "nothing to send" line goes away with it. */
+  readonly formChanges?: number | undefined;
+}
+
 export interface SessionChatPageProps {
   readonly daemonId: string;
-  readonly session: FerretView;
+  readonly session: ChatSession;
   readonly entries: readonly TranscriptEntry[];
   readonly client: Pick<PluginClient, 'call'>;
   /**
@@ -59,6 +98,11 @@ export interface SessionChatPageProps {
    * null when it asks none. Absent: the chat has not read it yet, and the status alone decides the notice.
    */
   readonly question?: PendingQuestion | null;
+  /**
+   * The ferret's send ledger as the daemon answered it. Only each send's id and acceptance instant reach the
+   * `conversation.above-composer` slot (`ConversationAboveComposerProps.sends`), never its words. Absent: no sends.
+   */
+  readonly sends?: readonly LedgerSendRecord[];
   readonly canControl?: boolean;
   /**
    * A ready-to-read sentence, or null. Rendered VERBATIM and NOT as a live region: the chat screen owns the one
@@ -80,6 +124,14 @@ export interface SessionChatPageProps {
   readonly chatWidth?: ChatWidthPreference;
   /** A phone's drawer layout: the composer is compact. */
   readonly compact?: boolean;
+  /**
+   * Drawn UNDER something else (an agenda item's ask): only the conversation — issue line, transcript, question or
+   * composer. No `ferret.toolbar` and no `ferret.side` (terminals, browser, files, Warden…): viewing an item must not
+   * open a terminal, which would ask for a passkey, and the item is not the ferret's page.
+   */
+  readonly embedded?: boolean;
+  /** Drawn under an agenda item's ask: the composer is that item's reply box ({@link AskReply}). */
+  readonly ask?: AskReply | undefined;
   readonly onRefresh?: () => void;
   /** Re-sends a send under its original id from its row in the transcript. */
   readonly onRetry?: SendRetry;
@@ -99,8 +151,13 @@ export interface SessionChatPageProps {
   readonly liveActivity?: LiveActivityFeed<FerretLiveActivity>;
 }
 
-/** The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. */
-const composerAccountOf = (session: FerretView): ComposerAccount => {
+/**
+ * The account a ferret runs on, as the composer's tools may read it: its name and the usage its monitor stamped. None while
+ * the runtime is not known (a ferret the chat could not read).
+ */
+const composerAccountOf = (session: ChatSession): ComposerAccount | undefined => {
+  const agent = session.config.agent;
+  if (agent === undefined) return undefined;
   const { state } = session;
   const usage = {
     ...(state.usageAuthOk === undefined ? {} : { usageAuthOk: state.usageAuthOk }),
@@ -110,11 +167,11 @@ const composerAccountOf = (session: FerretView): ComposerAccount => {
     ...(state.usage5hResetAt === undefined ? {} : { usage5hResetAt: state.usage5hResetAt }),
     ...(state.usageWeeklyResetAt === undefined ? {} : { usageWeeklyResetAt: state.usageWeeklyResetAt }),
   };
-  return { agent: session.config.agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
+  return { agent, ...(Object.keys(usage).length === 0 ? {} : { usage }) };
 };
 
 /** A ferret as its words name it: the callsign, else the task's name, else the id (today's `sessionDisplayName`). */
-const ferretDisplayName = (session: FerretView): string =>
+const ferretDisplayName = (session: ChatSession): string =>
   displayCallsign(session.config.teammate) || session.config.name || session.config.id;
 
 /**
@@ -129,12 +186,16 @@ function CompactIssue({ sentence }: { readonly sentence: string }) {
   );
 }
 
+/** One shared empty ledger, so a page given none does not rebuild the slot's props on every render. */
+const NO_SENDS: readonly LedgerSendRecord[] = [];
+
 export function SessionChatPage({
   daemonId,
   session,
   entries,
   client,
   question: asked,
+  sends = NO_SENDS,
   canControl = true,
   refreshError = null,
   transcriptUnbound = false,
@@ -143,6 +204,8 @@ export function SessionChatPage({
   conversationSearch,
   chatWidth = 'readable',
   compact = false,
+  embedded = false,
+  ask,
   onRefresh,
   onRetry,
   onCancel,
@@ -155,13 +218,36 @@ export function SessionChatPage({
 }: SessionChatPageProps) {
   const ferretId = session.config.id;
   const agentName = ferretDisplayName(session);
+  const account = composerAccountOf(session);
   // This device's Enter-key choices, Vim mode and suggestion families, from the one device-controls store.
   const composerPreferences = useComposerPreferences(daemonId);
   // The ONE reference surface for every Markdown reader in this conversation, rebuilt only with the daemon, the ferret
   // or the navigator — never with a status tick, which would re-parse every rendered block.
+  // `:agent` is proved from this daemon's fleet; `@file` only where Ferrets offers an opener AND a workspace shows Files.
+  const fleet = useChatFleet(client);
+  const fileOpenHook = useAppHook(daemonId, FERRETS_FILE_OPEN_HOOK, FERRETS_PLUGIN);
+  const fileOpen = !embedded && isFerretsFileOpen(fileOpenHook) ? fileOpenHook : undefined;
+  const showFiles = useRef<(() => void) | undefined>(undefined);
+  // The `@file` proof reads this ferret's folder only, so it is built apart from the surface: a fleet change that leaves
+  // the folder alone (another ferret came or went) rebuilds the surface but keeps this value, and no folder is re-listed.
+  const cwd = fleet?.folders.get(ferretId);
+  const files = useMemo(
+    () => chatFileProof({ ferretId, client, fileOpen, cwd, showFiles: () => showFiles.current?.() }),
+    [ferretId, client, fileOpen, cwd],
+  );
   const references = useMemo(
-    () => chatReferenceSurface({ daemonId, ferretId, ...(onNavigate === undefined ? {} : { onNavigate }) }),
-    [daemonId, ferretId, onNavigate],
+    () =>
+      chatReferenceSurface({
+        daemonId,
+        ferretId,
+        client,
+        fleet,
+        files,
+        ...(onNavigate === undefined ? {} : { onNavigate }),
+      }),
+    // `fleet` keeps its identity until a fact the proof reads changes (an id, a callsign, a ferret going live or
+    // dormant, a folder), so a working <-> idle tick keeps the surface.
+    [daemonId, ferretId, client, fleet, files, onNavigate],
   );
   // A message handed to the agent through a file is read back through the same client, so the transcript shows what
   // the person sent rather than the pointer the agent was typed.
@@ -178,20 +264,55 @@ export function SessionChatPage({
   // Bumped when the reader sends: they want to watch the reply arrive, so the transcript returns to the tail and
   // follows again even if they had scrolled up to re-read while composing.
   const [pinSignal, setPinSignal] = useState(0);
-  const onSent = useCallback(() => {
-    setPinSignal(signal => signal + 1);
-    onRefresh?.();
-  }, [onRefresh]);
+  const askId = ask?.id;
+  const askReplied = ask?.onReplied;
+  const answerForm = ask?.answerForm;
+  const forForm = answerForm !== undefined;
+  const onSent = useCallback(
+    (sent?: ComposerSent) => {
+      setPinSignal(signal => signal + 1);
+      onRefresh?.();
+      // A form's Send is an answer, not a reply to the ask: the Inbox is told nothing.
+      if (sent !== undefined && !forForm) askReplied?.(sent);
+    },
+    [onRefresh, askReplied, forForm],
+  );
+  // The ask's reply carries its reference; the ferret's own chat box has none, and keeps the composer's default calls.
+  const askApi = useMemo(
+    () => (askId === undefined ? undefined : withReferencePrefix(composerApi(client), () => [askId])),
+    [client, askId],
+  );
   // LIVE is not WORKING. `running` means the agent's terminal is up; whose turn it is comes from the daemon's turn
   // watcher (`state.turnState`, read through `session-activity.ts`). The pane is the Terminals plugin's to read, so the
   // chat reads none (`UNREAD_PANE`) and a ferret with no `turnState` falls back to its status mark.
   const working = session.state.turnState === 'working';
-  const statusLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
+  // A ferret the chat could not read claims nothing: no spinner over a turn nobody saw start.
+  const statusLive =
+    !isUnread(session) && session.state.turnState === undefined && statusMark(session).klass === 'active';
   const liveSample = useLiveActivity(liveActivity);
   const turn = sessionTurn(session, UNREAD_PANE);
   const busy = turn === 'working' || (turn === null && statusLive);
   const question = TERMINAL_STATUSES.has(session.state.status) ? null : (asked ?? null);
   const awaitingAnswer = question !== null || session.state.status === 'awaiting_question';
+  // What the slot above the composer is handed. `live`: this page's ferret was read from the daemon and the latest
+  // refresh did not fail, so a contributor never acts on an unread or stale turn.
+  const ended = TERMINAL_STATUSES.has(session.state.status);
+  const aboveComposer = useMemo(
+    () =>
+      aboveComposerProps({
+        session,
+        entries: shownEntries,
+        sends,
+        question,
+        ended,
+        live: !isUnread(session) && refreshError === null,
+      }),
+    [session, shownEntries, sends, question, ended, refreshError],
+  );
+  // The ferret's own chat box gives way to the question's form (a typed message would not answer it). An agenda item's
+  // reply box is not that box: it answers THE ITEM, through the Agenda's answer route, so a question the ferret is
+  // waiting on never takes it away (the item is a card of that very question as often as not).
+  const showComposer = askId !== undefined || !awaitingAnswer;
   // The answer goes through the question form's own route reader; the chat re-reads once it lands.
   const questionApi = useMemo<QuestionAnswerApi>(() => {
     const api = questionAnswerApi(client);
@@ -234,7 +355,7 @@ export function SessionChatPage({
 
   const header = (
     <>
-      <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />
+      {embedded ? null : <PanelSlot daemon={daemonId} slot="ferret.toolbar" subject={ferretId} />}
       {liveSample?.compaction?.phase === 'running' || liveStream !== undefined ? (
         <div className="flex items-center gap-2 px-3" data-chat-status="">
           {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
@@ -242,11 +363,9 @@ export function SessionChatPage({
           {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} compact={compact} quiet />}
         </div>
       ) : null}
-      {transcriptUnbound ? (
-        <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} />
-      ) : refreshError === null ? null : (
-        <CompactIssue sentence={refreshError} />
-      )}
+      {/* Independent failures: an unprovable transcript never hides that the session itself could not be read. */}
+      {transcriptUnbound ? <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} /> : null}
+      {refreshError === null ? null : <CompactIssue sentence={refreshError} />}
     </>
   );
 
@@ -287,7 +406,12 @@ export function SessionChatPage({
       <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
           {/* What the ferret is stopped on (Claude Code's permission and dialog cards): drawn by their plugin, above the composer. */}
-          <PanelSlot daemon={daemonId} slot={CONVERSATION_ABOVE_COMPOSER_SLOT} subject={ferretId} />
+          <PanelSlot
+            daemon={daemonId}
+            props={{ ...aboveComposer }}
+            slot={CONVERSATION_ABOVE_COMPOSER_SLOT}
+            subject={ferretId}
+          />
           {question !== null && canControl ? (
             <QuestionForm
               api={questionApi}
@@ -311,20 +435,41 @@ export function SessionChatPage({
                 can be sent safely; refresh the session or interrupt the turn to abandon it.
               </p>
             </section>
-          ) : (
-            <Composer
-              busy={busy}
-              compact={compact}
-              compacting={liveSample?.compaction?.phase === 'running'}
-              {...(session.context === undefined ? {} : { context: session.context })}
-              daemon={daemonConnection(daemonId)}
-              {...composerPreferences}
-              disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-              ferretId={ferretId}
-              account={composerAccountOf(session)}
-              onSent={onSent}
-            />
-          )}
+          ) : null}
+          {showComposer ? (
+            <>
+              {isUnread(session) ? (
+                <p className="m-0 px-3 py-1 text-meta text-warn" data-composer-unread="" role="status">
+                  This ferret could not be read, so nothing can be sent to it until it can.
+                </p>
+              ) : null}
+              <Composer
+                busy={busy}
+                compact={compact}
+                compacting={liveSample?.compaction?.phase === 'running'}
+                {...(session.context === undefined ? {} : { context: session.context })}
+                daemon={daemonConnection(daemonId)}
+                {...composerPreferences}
+                disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl || isUnread(session)}
+                ferretId={ferretId}
+                {...(account === undefined ? {} : { account })}
+                {...(askApi === undefined ? {} : { api: askApi })}
+                {...(session.config.harness === undefined ? {} : { harness: session.config.harness })}
+                {...(askId === undefined ? {} : { draftSlot: askId })}
+                {...(forForm
+                  ? {
+                      allowEmptySend: true,
+                      // A form card's Send answers THE FORM, from the press itself: never a chat message, never the outbox.
+                      onFormSend: answerForm,
+                      ...(ask?.formChanges === undefined ? {} : { clearErrorOn: ask.formChanges }),
+                    }
+                  : {})}
+                {...(ask?.restore === undefined ? {} : { restore: ask.restore })}
+                {...(ask?.onRestored === undefined ? {} : { onRestored: ask.onRestored })}
+                onSent={onSent}
+              />
+            </>
+          ) : null}
         </div>
       </div>
     </div>
@@ -341,13 +486,26 @@ export function SessionChatPage({
             <main
               className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
               data-daemon={daemonId}
+              {...(embedded ? { 'data-embedded': '' } : {})}
               data-session={ferretId}
             >
               {header}
-              <div className="flex min-h-0 min-w-0 flex-1">
-                {chat}
-                <PanelSlot daemon={daemonId} slot="ferret.side" subject={ferretId} />
-              </div>
+              {/* The chat and the `ferret.side` panels: side by side wide; on a phone one at a time behind chips and "+". */}
+              {embedded ? (
+                chat
+              ) : (
+                <FerretWorkspace
+                  canControl={canControl}
+                  chat={
+                    <>
+                      <FilesPanelBridge ferretId={ferretId} target={showFiles} />
+                      {chat}
+                    </>
+                  }
+                  daemon={daemonId}
+                  subject={ferretId}
+                />
+              )}
             </main>
           </RowSlotProvider>
         </AttachmentGalleryProvider>

@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { z } from 'zod';
-import { SecretResolverPort } from '../../../contract/bound.ts';
+import { type Admission, AdmissionPort, SecretResolverPort, type SecretSendNote } from '../../../contract/bound.ts';
 import { defineConfig } from '../../../contract/define.ts';
 import type { KernelPorts } from '../../../contract/ports.ts';
 import type { OutboundSecretRequest } from '../../../contract/secrets.ts';
@@ -19,7 +19,7 @@ import { createNodeHostFs } from '../../../host/state/index.ts';
 import { realAdapters } from '../../../host/wiring.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { fixedClock } from '../../../testing/clock.ts';
-import { testHost } from '../../../testing/index.ts';
+import { owner, standInAdmission, testHost } from '../../../testing/index.ts';
 import { silentLog } from '../host/fixtures.ts';
 
 const parents: string[] = [];
@@ -94,6 +94,29 @@ const vaultStandIn = implementDaemon(
   { build: () => ({ provides: { secretResolver: { resolve: async (name: string) => VAULT[name] } } }) },
 );
 
+/**
+ * Gate stand-in for the real boot: it provides the admission the kernel tells about every send (`secretSent`), and
+ * keeps what it was told, so the security-log line can be compared across the two hosts.
+ */
+const toldAdmission = (told: SecretSendNote[]): Admission => ({
+  ...standInAdmission(() => owner()),
+  secretSent: note => void told.push(note),
+});
+
+const gateStandIn = (told: SecretSendNote[]) =>
+  implementDaemon(
+    definePlugin({
+      id: 'gate',
+      title: 'Gate',
+      version: '5.0.0',
+      api: 5,
+      core: true,
+      kinds: [],
+      provides: { admission: AdmissionPort },
+    }),
+    { build: () => ({ provides: { admission: toldAdmission(told) } }) },
+  );
+
 /** What the network fake saw and answered, the same on both hosts. */
 function network() {
   const sent: { url: string; method?: string; headers: Record<string, string>; redirect?: string }[] = [];
@@ -148,14 +171,16 @@ const placedLines = (records: readonly { readonly message: string; readonly fiel
 async function onTestingHost() {
   const seen: Seen = {};
   const net = network();
+  const told: SecretSendNote[] = [];
   const host = await testHost({
     plugins: halves(seen),
     config: { 'jevish/keys.yaml': { key: '${secret:JEV_KEY}' } },
     vault: VAULT,
     fetch: net.fetch,
+    gate: toldAdmission(told),
   });
   try {
-    return { outcomes: await cases(seen), sent: net.sent, logged: placedLines(host.logs) };
+    return { outcomes: await cases(seen), sent: net.sent, logged: placedLines(host.logs), told };
   } finally {
     await host.stop();
   }
@@ -185,6 +210,7 @@ async function onRealHost() {
   const records: LogRecord[] = [];
   const net = network();
   const seen: Seen = {};
+  const told: SecretSendNote[] = [];
   const outcome = await bootHost({
     home,
     version: '5.0.0',
@@ -194,11 +220,11 @@ async function onRealHost() {
       clock: fixedClock(),
       homeLock: async () => ({ release: async () => {} }),
     },
-    implementations: [vaultStandIn, ...halves(seen)],
+    implementations: [vaultStandIn, gateStandIn(told), ...halves(seen)],
   });
   if (outcome.kind !== 'running') throw new Error(outcome.sentence);
   try {
-    return { outcomes: await cases(seen), sent: net.sent, logged: placedLines(records) };
+    return { outcomes: await cases(seen), sent: net.sent, logged: placedLines(records), told };
   } finally {
     await outcome.host.stop();
   }
@@ -230,4 +256,16 @@ test('NN2 D2 #19 secrets.send parity: the real host and the testing host answer,
   expect(real.sent[0]?.headers.authorization).toBe(`Bearer ${VALUE}`);
   expect(real.logged).toHaveLength(5);
   expect(JSON.stringify([real.outcomes, real.logged])).not.toContain(VALUE);
+  // c58-22: every send that put the key on a request is told to Gate for the security log (`secrets.used`) by the
+  // secret's NAME, the plugin, the host and the outcome's kind: one note per logged send, and none for a refusal.
+  expect(real.told).toEqual([
+    { plugin: 'jevish', secret: 'JEV_KEY', host: 'api.jev.test', outcome: 'completion' },
+    { plugin: 'jevish', secret: 'JEV_KEY', host: 'api.jev.test', outcome: 'completion' },
+    { plugin: 'jevish', secret: 'JEV_KEY', host: 'api.jev.test', outcome: 'status' },
+    { plugin: 'jevish', secret: 'JEV_KEY', host: 'api.jev.test', outcome: 'unreadable' },
+    { plugin: 'jevish', secret: 'JEV_KEY', host: 'api.jev.test', outcome: 'status' },
+  ]);
+  // the line has no value: not in a field, not in any text of any note
+  expect(JSON.stringify(real.told)).not.toContain(VALUE);
+  expect(real.told.every(note => Object.keys(note).sort().join() === 'host,outcome,plugin,secret')).toBe(true);
 });

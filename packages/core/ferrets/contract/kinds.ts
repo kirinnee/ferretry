@@ -34,6 +34,13 @@ export interface LaunchSpec {
   readonly model?: string;
   readonly effort?: string;
   /**
+   * The ferret's mode (the record's own): an `interactive` ferret has an owner at the pane and so keeps the harness's
+   * question tool; an `auto` one has nobody to answer, so the tool is withheld. ABSENT is unattended (`auto`), the rule
+   * the Runtimes wrappers have always applied (`FY_SESSION_MODE` unset). Set by Ferrets from the record on every launch
+   * (a start, a resume, Restart CLI, a move, a revive), so every launch of one ferret decides the tool the same way.
+   */
+  readonly mode?: 'interactive' | 'auto';
+  /**
    * This ferret's OWN compaction choice, in tokens or `auto` (its session config, else its start options). A
    * `launch.parts` taker resolves it against the login's default and the model's window; ABSENT means the login's default.
    */
@@ -499,6 +506,13 @@ export interface RunnerFormCapture {
    * form whatever text it shares with one. A closed code, never the prompt's words. Absent when neither reader claims it.
    */
   readonly blocking?: 'permission' | 'dialog' | undefined;
+  /**
+   * Additive (stuck-send snapshot): where tmux put the cursor on the VISIBLE frame, zero-based, when it said. The
+   * cursor is what tells a composer's placeholder from typed input, so a frame kept to explain a send that could not be
+   * typed is unreadable without it. Absent when tmux did not answer.
+   */
+  readonly cursorX?: number | undefined;
+  readonly cursorY?: number | undefined;
 }
 
 /** How many of a frame's last lines {@link RunnerLook.status} carries (the live readout's status window). */
@@ -719,10 +733,12 @@ export class HarnessTranscriptReplaced extends Error {
 
 /**
  * The transcript a harness PROVED to be one ferret's own, as RAW bytes, for the one reader that parses records itself
- * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its ONE consumer, Conversation's
+ * (Conversation's transcript reader, G162). UNMASKED: it is evidence, not an answer. Its consumer, Conversation's
  * reader, masks every answer it cuts from these bytes through the kernel's read-scoped redaction (Conversation's
- * `reads.ts`), exactly as v4's reader masked what it read from the file. No other plugin calls `transcriptBytes`
- * (a consumer-check test pins it), and it never names the file's path.
+ * `reads.ts`), exactly as v4's reader masked what it read from the file. Logins is the one other trusted consumer,
+ * because it keeps only the normalized rate_limits fields and timestamps (a Codex login's passive usage reading), so no
+ * message text ever leaves the bytes. No other plugin calls `transcriptBytes` (a consumer-check test pins it), and it
+ * never names the file's path.
  */
 export interface HarnessTranscriptBytes {
   /** Which parser speaks these bytes. */
@@ -811,6 +827,25 @@ export interface Harness {
     env: ChildEnvironment,
     harnessConversation: string,
   ): Promise<Result<Started, StartRefusal>>;
+  /**
+   * Additive (mig-harness-home): whether the conversation a resume would name is in the ferret's home for this launch,
+   * asked before `resume`. `false` ONLY when its absence is proved (the harness looked where it keeps that conversation
+   * and nothing is there); `undefined` when it cannot tell. A real harness asked to resume a conversation it does not
+   * have fails the launch ("No conversation found…"), so on `false` Ferrets starts a NEW conversation instead and says
+   * so; on `true` or `undefined` it resumes as before. Absent: every resume is attempted as asked.
+   */
+  hasConversation?(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined>;
+  /**
+   * Additive (codex-resume-id): the conversation this ferret's LAST launch is PROVED to have written, for a harness that
+   * names its own conversation after launch (Codex), so Ferrets can record it and a later resume names it. Proved means
+   * by the harness's own evidence of this launch (Codex: the correlation marker only this launch typed, in a rollout that
+   * was not there before it), never by folder or recency; `undefined` on any doubt, and while none is written yet.
+   * `home` is the harness home the launch exported, `file` the conversation's file in it. Absent (Claude Code, which
+   * names its conversation on the launch argv): nothing is recorded this way.
+   */
+  provedConversation?(
+    ferret: FerretId,
+  ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined>;
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;
@@ -932,6 +967,19 @@ export interface SitrepLine {
   /** A reference the app renders (`&F12`, `!A3`). */
   readonly ref?: string;
   readonly at?: Instant;
+  /** A `card` line only: the name of the lane the card sits in. */
+  readonly lane?: string;
+  /** A `card` line only: the card's PR as its board last read it (the open one when there are several, else the newest). */
+  readonly pr?: SitrepPr;
+}
+
+/** A pull request as a sitrep line shows it (a `card` line's `pr`): GitHub's state and checks as the board cached them. */
+export interface SitrepPr {
+  readonly number: number;
+  readonly url: string;
+  readonly state: 'unknown' | 'open' | 'closed' | 'merged';
+  readonly draft: boolean;
+  readonly checks: 'none' | 'pending' | 'passing' | 'failing';
 }
 
 export interface SitrepLineSource {

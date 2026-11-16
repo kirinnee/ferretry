@@ -540,6 +540,17 @@ describe('the clean-up review', () => {
     expect(root.querySelector('[data-clean-up-review]') === null).toBe(false);
   });
 
+  it('says a held accept waits for the owner, keeps the review open and the box as it was', async () => {
+    const root = await reviewing({
+      accept: async () => ({ kind: 'held', message: 'The new routing prompt waits for you to confirm it.' }),
+    });
+    await click(byText(root, 'button', 'Accept'));
+    await waitForText(root, 'waits for you to confirm it.');
+    expect(root.querySelector('[data-routing-outcome]')?.getAttribute('data-routing-outcome')).toBe('warn');
+    expect(root.querySelector('[data-clean-up-review]') === null).toBe(false);
+    expect(field(root).value).toBe(OWNER_PROMPT);
+  });
+
   it('discards the rewrite without writing anything', async () => {
     let writes = 0;
     const root = await reviewing({
@@ -590,6 +601,16 @@ describe('undo', () => {
     await click(action(root, 'undo'));
     await waitForText(root, 'Put the old routing prompt back.');
     expect(undone).toBe(1);
+  });
+
+  it('says a held undo waits for the owner, as a warning', async () => {
+    const root = await card(
+      { ...OWNER_VIEW, undo: { savedAt: '2026-10-22T14:35:00.000Z' as Instant, source: 'file' } },
+      { undo: async () => ({ kind: 'held', message: 'The undo waits for you to confirm it.' }) },
+    );
+    await click(action(root, 'undo'));
+    await waitForText(root, 'The undo waits for you to confirm it.');
+    expect(root.querySelector('[data-routing-outcome]')?.getAttribute('data-routing-outcome')).toBe('warn');
   });
 
   it('shows a new prompt under an untouched box, and keeps a draft being written', async () => {

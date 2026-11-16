@@ -6,16 +6,20 @@
 
 import type { ScreenProps } from '@ferretry/kernel/manifest';
 import { MACHINE_AGENDA_ID } from '@ferretry/core-asks/contract';
-import { AgendaBoardProviders, laneEditorOf, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
-import { AgendaConversationSlot } from '../features/agenda/agenda-conversation-slot.tsx';
+import { useCallback } from 'react';
+import { useAgendaReferenceFacts } from '../hooks/use-agenda-reference-facts.ts';
+import { AgendaBoardProviders, useAgendaBoardHooks, useCardBoards } from '../features/agenda/agenda-board-hooks.tsx';
+import { AgendaCardConversation } from '../features/agenda/agenda-conversation-slot.tsx';
 import { AgendaInboxPage } from '../features/agenda/agenda-inbox-page.tsx';
 import { useAskFocus } from '../features/agenda/use-ask-focus.ts';
 import { AgendaInboxContext, useRuntimeInbox } from '../hooks/use-agenda-inbox.ts';
+import { useItemOpened } from '../hooks/use-item-opened.tsx';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { inboxConversationReader } from '../lib/inbox-conversation.ts';
 import { useLayoutMode, useRouter } from '../shell.ts';
 
 export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) {
@@ -23,17 +27,28 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
   return function AgendaScreen(_props: ScreenProps) {
     const { navigate } = useRouter();
     const links = useAgendaLinks();
-    // Board's hooks for this machine: Done · closes, a notice's Start and Close, Edit's lane editor and `&F12` proof.
+    const go = useCallback((to: string) => navigate(to), [navigate]);
+    // Board's hooks for THIS machine, over the whole page: the list's cards of this machine keep their proofs
+    // (`&F12` through the hook, `:agent` through the facts below). The machine-wide page mixes ferrets, so it proves
+    // `:agent` only (`!A3` and `@file` need one ferret's own page). A card of ANOTHER machine is drawn without them.
     const board = useAgendaBoardHooks(daemon);
-    const inbox = useRuntimeInbox(runtime, laneEditorOf(board), fleet);
+    const references = useAgendaReferenceFacts(runtime, go);
+    // Board's hooks per OPEN CARD's machine (the Inbox is every machine's): Done · closes, a notice's Start and Close,
+    // Edit's lane editor and `&F12` proof. Each strips the page's proofs before it adds its own machine's.
+    const { laneEditor, cardBoard } = useCardBoards(go);
+    // Told on the OPENED CARD's machine (it may be another machine's, from the fleet Inbox), never the page's.
+    const itemOpened = useItemOpened({ daemon, client: runtime.client }, fleet);
+    const inbox = useRuntimeInbox(runtime, laneEditor, fleet);
     const phone = useLayoutMode() === 'drawer';
     // A machine ask's push opens `/agenda?ask=A3`: the page opens that ask's card once it is among the open ones.
     const asked = useAskFocus();
     return (
-      <AgendaBoardProviders hooks={board} onNavigate={to => navigate(to)}>
+      <AgendaBoardProviders hooks={board} onNavigate={go} references={references}>
         <AgendaClientContext.Provider value={runtime.client}>
           <AgendaInboxContext.Provider value={inbox}>
+            {itemOpened.host}
             <AgendaInboxPage
+              cardBoard={cardBoard}
               inbox={inbox}
               phone={phone}
               clearPort={runtime.clearPort}
@@ -54,9 +69,10 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               }}
               from={inboxSourceFromSearch(window.location.search)}
               onClearFrom={() => navigate(links.agenda(daemon), { replace: true })}
-              onItemOpened={card => void runtime.itemOpened(card.view.config.id, card.item.id)}
-              renderComposer={card => (
-                <AgendaConversationSlot ask={card.item.id} daemon={daemon} ferret={card.view.config.id} />
+              onItemOpened={card => itemOpened.onOpened(card.daemonId, card.view.config.id, card.item.id)}
+              readConversation={inboxConversationReader({ daemon, client: runtime.client }, fleet)}
+              renderComposer={(card, answerForm) => (
+                <AgendaCardConversation answerForm={answerForm} card={card} inbox={inbox} />
               )}
             />
           </AgendaInboxContext.Provider>

@@ -18,19 +18,31 @@ import {
   InMemoryCredentialStatusStore,
   localCredentialFacts,
   type CredentialStatusPorts,
+  type CredentialSubject,
   type LocalCredentialFacts,
 } from '../../lib/credentials/credential-status.ts';
 import { resolveCredentialStore, type StoredCredentialResolution } from '../../lib/credentials/credentials.ts';
 import type { FleetTokenRefreshPort } from '../../lib/credentials/token-refresh.ts';
-import { PassiveUsageRecordSchema } from '../../lib/credentials/usage.ts';
+import { PassiveUsageRecordSchema, type PassiveUsageRecord } from '../../lib/credentials/usage.ts';
 import { classifyCredential, type CredentialMaterial } from '../../lib/shared/identity.ts';
 import type { CredentialStoreCheck, CredentialStoreInspection } from '../../lib/shared/store-inspection.ts';
 import { credentialFingerprint } from './credential-classifier.ts';
 import type { AnthropicUsageProbe } from './anthropic-usage-probe.ts';
 import type { CodexUsageProbe } from './codex-usage-probe.ts';
 
+/** Said for a login kept in the person's own terminal sign-in folder (store: host): not in 5.0 yet. Their terminal's own sign-in is not touched and still works. */
+export const HOST_STORE_PENDING =
+  "using a login kept in your terminal's own sign-in folder (store: host) is not in 5.0 yet; the sign-in in your terminal itself still works";
+
+/** Said for a Claude login kept in the terminal's own folder: it starts ferrets as it does in v4, and Ferretry neither reads nor signs it in. */
+const HOST_CLAUDE_TERMINAL =
+  'this login uses the sign-in in your terminal (store: host); Ferretry does not read or change it, so sign in or out with claude in your terminal';
+
 /** The calls this store makes on the kernel's `credentials` root. No host-home or keychain authority exists here. */
-export type OwnedLoginRoot = Pick<RootHandle, 'resolve' | 'readText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'>;
+export type OwnedLoginRoot = Pick<
+  RootHandle,
+  'resolve' | 'readText' | 'writeText' | 'stat' | 'lstat' | 'ensurePrivateDirectory'
+>;
 
 const describe = (info: Pick<RootLstat, 'kind' | 'size' | 'modified' | 'mode' | 'links'>): string =>
   `${info.kind}:${info.size}:${String(info.modified)}:${info.mode}:${info.links}`;
@@ -67,6 +79,8 @@ function fileFailure(error: unknown): string {
 export class OwnedLoginStore {
   readonly #base: string;
   readonly #emails = new Map<string, { readonly stamp: string; readonly email: string | undefined }>();
+  /** The passive-reading write in flight for each login's file, so the next one waits for it. */
+  readonly #passiveWrites = new Map<string, Promise<void>>();
 
   /**
    * `root` is `kernel.roots.root('credentials')`, and nothing else: the kernel binds that name to Logins and its base to
@@ -95,7 +109,7 @@ export class OwnedLoginStore {
           return {
             harness: credential.harness,
             store: 'host',
-            unavailable: 'this build can only read owned login stores',
+            unavailable: credential.harness === 'claude' ? HOST_CLAUDE_TERMINAL : HOST_STORE_PENDING,
           };
         // A login is one directory, never a path supplied by a configuration name.
         if (id.length === 0 || id === '.' || id === '..' || /[/\\\0]/u.test(id))
@@ -141,6 +155,12 @@ export class OwnedLoginStore {
           outcome: 'unreadable',
           reason:
             'the Claude credential file is a symbolic link, which Claude replaces with a private copy on its next refresh',
+        };
+      } else if (resolution.harness === 'codex' && ((await this.root.lstat(path))?.links ?? 1) > 1) {
+        material = {
+          outcome: 'unreadable',
+          reason:
+            'the Codex sign-in file has a second name (another link to it exists), so a ferret cannot be given it',
         };
       } else if ((await this.root.stat(path)) === undefined) material = { outcome: 'absent' };
       else {
@@ -201,6 +221,45 @@ export class OwnedLoginStore {
     return email;
   }
 
+  /**
+   * Records a login's passive reading where `passiveUsage` reads it: `<its owned directory>/usage.json`, exactly the
+   * file `fy statusline` writes for a Claude login (one JSON line, replaced whole, `0600`). A login this daemon does
+   * not own has no such file, so nothing is written for it.
+   */
+  async recordPassiveUsage(subject: CredentialSubject, record: PassiveUsageRecord): Promise<void> {
+    const resolution = subject.resolution;
+    if (resolution.store !== 'ferretry' || 'unavailable' in resolution || resolution.ownedDirectory === undefined)
+      return;
+    const path = this.#path(`${resolution.ownedDirectory}/usage.json`);
+    // Serialised per file, so two writers cannot both read the same older record and the slower one replace the newer.
+    const before = this.#passiveWrites.get(path) ?? Promise.resolve();
+    const turn = before.then(async () => {
+      // An older reading never replaces a newer persisted one (an exhausted login must not read as free after a restart).
+      const kept = await this.#readPassive(`${resolution.ownedDirectory}/usage.json`);
+      if (kept !== undefined && kept.at >= record.at) return;
+      await this.root.writeText(path, `${JSON.stringify(record)}\n`);
+    });
+    const settled = turn.catch(() => undefined);
+    this.#passiveWrites.set(path, settled);
+    try {
+      await turn;
+    } finally {
+      if (this.#passiveWrites.get(path) === settled) this.#passiveWrites.delete(path);
+    }
+  }
+
+  /** The reading persisted in `file` (inside the root), or `undefined` when there is none or it cannot be read. */
+  async #readPassive(file: string): Promise<PassiveUsageRecord | undefined> {
+    try {
+      const parsed = PassiveUsageRecordSchema.safeParse(
+        JSON.parse(await this.root.readText(this.#path(file))) as unknown,
+      );
+      return parsed.success ? parsed.data : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   statusPorts(options: {
     readonly anthropic: AnthropicUsageProbe;
     readonly codex: CodexUsageProbe;
@@ -212,15 +271,9 @@ export class OwnedLoginStore {
     return {
       local: resolution => this.local(resolution),
       passiveUsage: async subject => {
-        try {
-          const resolution = subject.resolution;
-          if (resolution.store !== 'ferretry' || 'unavailable' in resolution) return undefined;
-          const path = this.#path(`${resolution.ownedDirectory}/usage.json`);
-          const parsed = PassiveUsageRecordSchema.safeParse(JSON.parse(await this.root.readText(path)) as unknown);
-          return parsed.success ? parsed.data : undefined;
-        } catch {
-          return undefined;
-        }
+        const resolution = subject.resolution;
+        if (resolution.store !== 'ferretry' || 'unavailable' in resolution) return undefined;
+        return await this.#readPassive(`${resolution.ownedDirectory}/usage.json`);
       },
       // Today's MaterialCredentialReads.active: one read, facts for that exact material, a fixed failure on throw.
       activeUsage: async resolution => {

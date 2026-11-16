@@ -142,7 +142,7 @@ describe('the app half the shell builds', () => {
   });
 
   it('S-0298 feature board: a &F12 reference links the card by its title, and the card ask names it with no button', async () => {
-    expect(Object.keys(half?.renderers ?? {}).sort()).toEqual(['ask:card', 'reference:&']);
+    expect(Object.keys(half?.renderers ?? {}).sort()).toEqual(['ask:card', 'reference:&', 'reference:&board']);
     const reference = await draw<RendererProps>(
       half?.renderers['reference:&'],
       { value: '&F1' },
@@ -161,6 +161,36 @@ describe('the app half the shell builds', () => {
     );
     expect(ask.querySelector('[data-ask-card="F1"] a')?.textContent).toBe('&F1');
     expect(ask.querySelector('button')).toBeNull();
+  });
+
+  it('S-0298 feature board: a card or board block of a chat draws the real card and its lane, named by the ferret', async () => {
+    const children = await draw<RendererProps>(
+      half?.renderers['reference:&board'],
+      { value: { kind: 'children', parent: 'F1' } },
+      node => node.querySelector('[data-task="F2"]') !== null,
+      'the children of F1 as a mini board',
+    );
+    expect(children.textContent).toContain('Draw the lanes');
+    expect(children.textContent).toContain('Implement');
+    expect(children.querySelector('[data-task="F3"]')).toBeNull();
+    await view?.unmount();
+
+    const one = await draw<RendererProps>(
+      half?.renderers['reference:&board'],
+      { value: { kind: 'card', id: 'F1' } },
+      node => node.querySelector('[data-embed-card="F1"] a') !== null,
+      'the card F1 with its link',
+    );
+    expect(one.textContent).toContain('Fix the scroller');
+    await view?.unmount();
+
+    const nothing = await draw<RendererProps>(
+      half?.renderers['reference:&board'],
+      { value: 'not a block' },
+      node => node.isConnected,
+      'a value that names nothing',
+    );
+    expect(nothing.innerHTML).toBe('');
   });
 
   it('S-0298 feature board: a &F7 reference links only a card the machine lists, whether or not its read answers', async () => {

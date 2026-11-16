@@ -30,6 +30,7 @@ import { AgendaConversationPanel } from './slots/agenda-conversation-panel.tsx';
 import { FilesSearchPanel } from './slots/files-search-panel.tsx';
 import { InterruptRowPanel } from './slots/interrupt-row-panel.tsx';
 import { HypermediaPanel } from './toolbar/hypermedia-panel.tsx';
+import { TurnPanel } from './toolbar/turn-panel.tsx';
 
 /** A surface body inside the client context. */
 const scoped =
@@ -47,6 +48,7 @@ export interface ConversationSurfaces {
     readonly queue: AppComponent<PanelProps>;
     readonly 'compact-at': AppComponent<PanelProps>;
     readonly hypermedia: AppComponent<PanelProps>;
+    readonly turn: AppComponent<PanelProps>;
     readonly 'files-search': AppComponent<PanelProps>;
     readonly 'interrupt-row': AppComponent<PanelProps>;
     readonly 'agenda-conversation': AppComponent<PanelProps>;
@@ -81,6 +83,7 @@ export const createSurfaces = (client: PluginClient): ConversationSurfaces => ({
     queue: scoped<PanelProps>(client, QueuePanel),
     'compact-at': scoped<PanelProps>(client, CompactAtPanel),
     hypermedia: scoped<PanelProps>(client, HypermediaPanel),
+    turn: scoped<PanelProps>(client, TurnPanel),
     'files-search': scoped<PanelProps>(client, FilesSearchPanel),
     'interrupt-row': scoped<PanelProps>(client, InterruptRowPanel),
     'agenda-conversation': scoped<PanelProps>(client, AgendaConversationPanel),

@@ -9,7 +9,11 @@ import {
   VOICE_READ_MODELS,
   VoicePort,
 } from './contract/index.ts';
-import { CONVERSATION_ROW_ACTIONS_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
+import {
+  CONVERSATION_ABOVE_COMPOSER_SLOT,
+  CONVERSATION_ROW_ACTIONS_SLOT,
+  ConversationPort,
+} from '@ferretry/plugin-conversation/contract';
 import { LoginsPort } from '@ferretry/plugin-logins/contract';
 
 /**
@@ -64,8 +68,26 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('voice', { summary: 'clean up dictated text through the enhancement provider (same as voice enhance)' }),
-      verb('voice enhance', { summary: 'clean up dictated text — punctuation, casing and proper nouns' }),
+      verb('voice [text...]', {
+        summary: 'clean up dictated text through the enhancement provider (same as voice enhance)',
+        args: [{ name: 'text', help: 'the text to clean up', variadic: true }],
+        options: [
+          { flag: '-m, --model <model>', help: 'the enhancement model to use instead of the provider default' },
+          { flag: '-t, --term <term>', help: 'a proper noun the model keeps mangling; repeat for each (default: [])' },
+          { flag: '-c, --context <text>', help: 'what the dictation is about, to disambiguate homophones' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('voice enhance', {
+        summary: 'clean up dictated text — punctuation, casing and proper nouns',
+        args: [{ name: 'text', help: 'the text to clean up', variadic: true }],
+        options: [
+          { flag: '-m, --model <model>', help: 'the enhancement model to use instead of the provider default' },
+          { flag: '-t, --term <term>', help: 'a proper noun the model keeps mangling; repeat for each (default: [])' },
+          { flag: '-c, --context <text>', help: 'what the dictation is about, to disambiguate homophones' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
     ],
   },
 
@@ -74,10 +96,15 @@ export default definePlugin({
       panel('composer.tools', { id: 'dictation', order: 20 }),
       // "Read aloud" in an assistant message's footer (Conversation's `conversation.row-actions` slot).
       panel(CONVERSATION_ROW_ACTIONS_SLOT, { id: 'read-aloud', order: 10 }),
+      // "Read replies aloud": reads a finished reply (or a question) while the device setting is on (Conversation's `conversation.above-composer` slot).
+      panel(CONVERSATION_ABOVE_COMPOSER_SLOT, { id: 'auto-read', order: 40 }),
+      // First-run steps (Onboarding's steps screen offers this slot): the same views as the two Settings tabs.
+      panel('onboarding.step', { id: 'onboarding-speedups', order: 50 }),
+      panel('onboarding.step', { id: 'onboarding-voice', order: 51 }),
     ],
     settings: [
-      settingsTab('voice', { label: 'Voice', order: 60 }),
-      settingsTab('speedups', { label: 'Speed-ups', order: 70 }),
+      settingsTab('voice', { group: 'behaviour', label: 'Voice', order: 60 }),
+      settingsTab('speedups', { group: 'advanced', label: 'Speed-ups', order: 70 }),
     ],
   },
 
@@ -86,6 +113,12 @@ export default definePlugin({
     config: [VOICE_CONFIG],
     readModels: [...VOICE_READ_MODELS],
   },
+
+  // v4's New machine setup: Speed-ups (the provider keys), then Voice (this device's dictation).
+  onboarding: [
+    { id: 'speedups', title: 'Speed-ups', order: 50 },
+    { id: 'voice', title: 'Voice', order: 51 },
+  ],
 
   permissions: {
     // Keys ride only on requests the Vault's outbound holder builds; the hosts are the provider table's.

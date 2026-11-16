@@ -52,6 +52,7 @@ export const readPaneSnapshot = async (
   const answer = await client.call<unknown>(SNAPSHOT_ROUTE, {
     params: { ferretId: scope.sessionId },
     query: snapshotQuery(live, extent),
+    quiet: true,
   });
   return settled(typeof answer === 'string' ? answer : String(answer ?? ''), signal);
 };

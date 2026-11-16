@@ -25,7 +25,7 @@ export const SurfaceKeySchema = z
   .transform(value => value.replace(/^%(?:terminal|browser):/u, ''))
   .pipe(z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u, 'not a surface name or id'));
 
-/** `POST /v1/sessions/:sessionId/surfaces/browser/control`: take over (the WHOLE browser), hand back, hand over. */
+/** `POST /v1/ferrets/:ferretId/surfaces/browser/control`: take over (the WHOLE browser), hand back, hand over. */
 export const SurfaceControlRequestSchema = z.strictObject({
   action: z.enum(['takeover', 'handback', 'handover']),
   key: SurfaceKeySchema,

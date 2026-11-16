@@ -89,7 +89,13 @@ function resolveProfileStack(
   profiles: ReadonlyMap<string, ProfileFile>,
   start: string,
 ):
-  | { readonly ok: true; readonly mcp: readonly string[]; readonly skills: readonly string[] }
+  | {
+      readonly ok: true;
+      readonly mcp: readonly string[];
+      readonly skills: readonly string[];
+      readonly settings: readonly string[];
+      readonly hooks: readonly string[];
+    }
   | { readonly ok: false; readonly sentence: string } {
   const stack = expandStack<string>(
     name => profiles.get(name)?.contents,
@@ -101,12 +107,12 @@ function resolveProfileStack(
   );
   // The leaf reader above never answers `fail`, so the expansion's failure type has no 'layer' arm.
   if (!stack.ok) return { ok: false, sentence: stackRefusal(stack.failure, start) };
-  const named = (kind: 'mcp' | 'skills'): readonly string[] =>
+  const named = (kind: 'mcp' | 'skills' | 'settings' | 'hooks'): readonly string[] =>
     stack.entries
       .map(entry => entry.key)
       .filter(layer => layer.startsWith(`${kind}/`))
       .map(layer => layer.slice(kind.length + 1));
-  return { ok: true, mcp: named('mcp'), skills: named('skills') };
+  return { ok: true, mcp: named('mcp'), skills: named('skills'), settings: named('settings'), hooks: named('hooks') };
 }
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -283,7 +289,14 @@ export function createProfileLayers(deps: ProfileLayerDeps): RuntimeLayersApi {
       if (file === undefined) return undefined;
       const stack = resolveProfileStack(deps.profiles(), file.profile);
       if (!stack.ok) throw new ProfileLayersRefused(`${runtime}: ${stack.sentence}`);
-      return { runtime: RuntimeIdSchema.parse(runtime), profile: file.profile, mcp: stack.mcp, skills: stack.skills };
+      return {
+        runtime: RuntimeIdSchema.parse(runtime),
+        profile: file.profile,
+        mcp: stack.mcp,
+        skills: stack.skills,
+        settings: stack.settings,
+        hooks: stack.hooks,
+      };
     },
 
     changeProfileLayers: async (change: ProfileLayerChange, governance?: unknown): Promise<ProfileLayerOutcome> => {

@@ -1,7 +1,8 @@
 /**
- * A proved-agent resolver over a fixed fleet, for the suites that draw agent references. The chat's own `:agent`
- * proof is GAP(ferrets) on 5.0 (`app/chat/reference-surface.ts`); a suite still drives the renderer's linked branch
- * through the shell's `agentReferenceResolver` port with this: a ferret is proved by its id or its callsign.
+ * A proved-agent resolver over a fixed fleet, for the suites that draw agent references without a chat page around them.
+ * The chat's own `:agent` proof is `app/chat/reference-surface.ts` (Ferrets' addressing rule); a suite that draws a
+ * single row drives the renderer's linked branch through the shell's `agentReferenceResolver` port with this: a ferret
+ * is proved by its id or its callsign.
  */
 
 import type { AgentReferenceResolver, DaemonId } from '@ferretry/app';

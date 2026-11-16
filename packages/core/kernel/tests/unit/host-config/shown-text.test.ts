@@ -36,6 +36,17 @@ function shownOf(text: string, def: Def = fileDef) {
 }
 
 describe('what is cut, and what stays', () => {
+  test('CFG-LEAK-R an ALL-UPPERCASE literal of 8-15 characters under a credential-named key is a value, not a secret name: it is cut', () => {
+    // `API_KEY: FIXTUREKEY` is shaped like a secret NAME (`GITHUB_TOKEN`), but nothing in a file says it is one: only the
+    // `${secret:NAME}` pointer is. A literal under a credential-named key is cut like any other value, so no door shows it.
+    for (const literal of ['FIXTUREKEY', 'ABCDEFGHIJKLMNO', 'SECRETVALUE_1']) {
+      const result = shownOf(`command: srv\nenv:\n  API_KEY: ${literal}\n`);
+      expect(result.text).not.toContain(literal);
+      expect(result.text).toContain(`API_KEY: ${HIDDEN}`);
+      expect(result.hidden).toEqual([{ line: 3 }]);
+    }
+  });
+
   test('CFG-LEAK-R glued --client-secret=v, -e API_KEY=v, Authorization: Bearer v, https://u:p@h each cut to the value; flag/key/user/host shown', () => {
     const text = [
       'args:',
@@ -118,14 +129,14 @@ describe('what is cut, and what stays', () => {
     expect(result.text).toBe(`args:\n  - --token-file\n  - ${HIDDEN}\n`);
   });
 
-  test('CFG-LEAK-R env.DB_PASSWORD of 10 chars is cut; a secret NAME under GITHUB_TOKEN stays', () => {
+  test('CFG-LEAK-R env.DB_PASSWORD of 10 chars is cut; a literal under GITHUB_TOKEN is cut like any value, a pointer stays', () => {
     const result = shownOf(
-      `env:\n  DB_PASSWORD: ${SHORT_PASSWORD}\n  GITHUB_TOKEN: MY_GH_PAT_NAME\n  LOG_LEVEL: debuglevel\n`,
+      `env:\n  DB_PASSWORD: ${SHORT_PASSWORD}\n  GITHUB_TOKEN: MY_GH_PAT_NAME\n  API_KEY: \${secret:GH_PAT}\n  LOG_LEVEL: debuglevel\n`,
     );
     expect(result.text).toBe(
-      `env:\n  DB_PASSWORD: ${HIDDEN}\n  GITHUB_TOKEN: MY_GH_PAT_NAME\n  LOG_LEVEL: debuglevel\n`,
+      `env:\n  DB_PASSWORD: ${HIDDEN}\n  GITHUB_TOKEN: ${HIDDEN}\n  API_KEY: \${secret:GH_PAT}\n  LOG_LEVEL: debuglevel\n`,
     );
-    expect(result.hidden).toEqual([{ line: 2 }]);
+    expect(result.hidden).toEqual([{ line: 2 }, { line: 3 }]);
   });
 
   test('CFG-LEAK-R a value in any other open map is cut by its nearest key too', () => {

@@ -32,6 +32,12 @@ const ID_C = '00000000-0000-4000-8000-00000000000c';
 const HOME_A = `/fy/fleet/homes/${ID_A}`;
 const HOME_B = `/fy/fleet/homes/${ID_B}`;
 
+/** Where Logins keeps the Ferretry-kept logins these models name (`LoginsApi.launchStores`): never under the fleet directory. */
+const LOGIN_STORES: NonNullable<MaterialiseInput['loginStores']> = [
+  { id: 'claude-you', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/state/logins/credentials/claude-you' } },
+  { id: 'codex-work', variables: {}, signInFile: '/fy/state/logins/credentials/codex-work/auth.json' },
+];
+
 const COMPONENTS = {
   instructions: { main: { file: 'components/instructions/main.md' } },
   mcp: { github: { command: 'npx', args: ['server-github'], env: { GITHUB_TOKEN: '${secret:GH_TOKEN}' } } },
@@ -78,6 +84,7 @@ const plan = (model: AccountModel, overrides: Partial<MaterialiseInput> = {}): F
     fyCommand: '/opt/ferretry/bin/fy',
     hostCodexHome: '/home/person/.codex',
     acceptsAutoPermissionMode: true,
+    loginStores: LOGIN_STORES,
     ...overrides,
   });
 
@@ -164,7 +171,7 @@ describe('materialiseFleet', () => {
     should(error.message).startWith('the fleet cannot be applied: codex-default: its config directory');
   });
 
-  it('should create the fleet directories, every Ferretry-kept login and the Codex SQLite pool', () => {
+  it('should create the fleet directories and the Codex SQLite pool, and no directory for a Ferretry-kept login (Logins keeps its own)', () => {
     // Act
     const result = plan(modelOf());
 
@@ -174,11 +181,8 @@ describe('materialiseFleet', () => {
       { kind: 'directory', path: '/fy/fleet/bin', mode: 0o700 },
       { kind: 'directory', path: '/fy/fleet/homes', mode: 0o700 },
     ]);
-    should(only(result, '/fy/fleet/credentials/codex-work')).eql({
-      kind: 'directory',
-      path: '/fy/fleet/credentials/codex-work',
-      mode: 0o700,
-    });
+    should(at(result, '/fy/fleet/credentials/codex-work')).be.empty();
+    should(at(result, '/fy/state/logins/credentials/codex-work')).be.empty();
     should(at(result, '/fy/fleet/credentials/claude-you')).be.empty();
     should(only(result, '/fy/fleet/shared/codex/sqlite')).match({ kind: 'directory', mode: 0o700 });
   });
@@ -268,17 +272,12 @@ describe('materialiseFleet', () => {
     });
   });
 
-  it('should link a Codex config directory to its canonical auth.json and never sweep .system', () => {
+  it("should leave a Ferretry-kept Codex login's config directory with no link (Logins' file is the kernel's to link) and never sweep .system", () => {
     // Act
     const result = plan(modelOf());
 
     // Assert
-    should(only(result, `${HOME_B}/auth.json`)).eql({
-      kind: 'symlink',
-      source: '/fy/fleet/credentials/codex-work/auth.json',
-      path: `${HOME_B}/auth.json`,
-      dangling: true,
-    });
+    should(at(result, `${HOME_B}/auth.json`)).be.empty();
     should(at(result, `${HOME_B}/skills`)[0]).eql({ kind: 'directory', path: `${HOME_B}/skills`, mode: 0o700 });
     const sweeps = result.operations.filter(
       operation => operation.kind === 'prune-directory' && operation.path === `${HOME_B}/skills`,
@@ -301,7 +300,7 @@ describe('materialiseFleet', () => {
     });
     should(JSON.parse((only(result, `${HOME_B}/.fy/materialised.json`) as { content: string }).content)).eql({
       version: 1,
-      entries: ['AGENTS.md', 'auth.json'],
+      entries: ['AGENTS.md'],
     });
   });
 
@@ -379,9 +378,9 @@ describe('materialiseFleet', () => {
 
     // Assert
     should(wrapperOf(result, 'claude-default')).containEql(
-      "export CLAUDE_SECURESTORAGE_CONFIG_DIR='/fy/fleet/credentials/claude-you'",
+      "export CLAUDE_SECURESTORAGE_CONFIG_DIR='/fy/state/logins/credentials/claude-you'",
     );
-    should(only(result, '/fy/fleet/credentials/claude-you')).match({ kind: 'directory', mode: 0o700 });
+    should(at(result, '/fy/fleet/credentials/claude-you')).be.empty();
     should(wrapperOf(result, 'codex-default')).containEql("export CODEX_SQLITE_HOME='/fy/fleet/shared/codex/sqlite'");
     should(wrapperOf(result, 'codex-default')).containEql(`exec codex '-c' 'model="gpt-6"' "$@"`);
   });
@@ -1347,5 +1346,36 @@ describe('materialiseFleet', () => {
         });
       });
     });
+  });
+});
+
+describe('the variables a runtime publishes for a check to fill from', () => {
+  it('should publish the plain variables its login sets, and none that name a secret or look like a credential', () => {
+    // Arrange — one plain variable, one that names a stored secret, one literal that is a credential by name
+    const model = modelOf({
+      credentials: {
+        'claude-you': {
+          harness: 'claude',
+          store: 'environment',
+          env: {
+            ANTHROPIC_BASE_URL: 'https://gateway.example/anthropic',
+            ANTHROPIC_API_KEY: '${secret:WORK_KEY}',
+            ANTHROPIC_AUTH_TOKEN: 'loge-internal',
+          },
+        },
+        'codex-work': { harness: 'codex', store: 'ferretry' },
+      },
+    });
+
+    // Act
+    const result = plan(model);
+
+    // Assert
+    const account = result.manifest.accounts[0];
+    should(account?.launchEnv).containEql({ ANTHROPIC_BASE_URL: 'https://gateway.example/anthropic' });
+    should(Object.keys(account?.launchEnv ?? {})).not.containEql('ANTHROPIC_API_KEY');
+    should(Object.keys(account?.launchEnv ?? {})).not.containEql('ANTHROPIC_AUTH_TOKEN');
+    should(JSON.stringify(result.manifest)).not.containEql('loge-internal');
+    should(account?.secretEnv).containEql({ ANTHROPIC_API_KEY: '${secret:WORK_KEY}' });
   });
 });

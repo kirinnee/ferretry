@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import { ensureDom, render, run, runAsync } from '@ferretry/app/testing';
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
+import { ferretSummary } from '@ferretry/core-ferrets/contract/testing';
 import { InterruptRowPanel, INTERRUPT_ROW_ID } from '../../../../app/slots/interrupt-row-panel.tsx';
 import { type FakeClient, fakeClient, refusal } from '../../../support/app/fake-client.ts';
 import { withClient } from '../../../support/app/client.tsx';
@@ -49,7 +50,7 @@ const mountRow = async (client: FakeClient, held: Offers, canControl = true, pro
 
 describe('Interrupt turn in the Actions menu', () => {
   test('offers the row for a ferret that is working, and the row interrupts it', async () => {
-    const client = fakeClient({ [VIEW]: () => ({ state: 'working' }), [INTERRUPT]: () => ({}) });
+    const client = fakeClient({ [VIEW]: () => ferretSummary({ id: 'f1', state: 'working' }), [INTERRUPT]: () => ({}) });
     const held = offers();
     const view = await mountRow(client, held);
     const row = held.current();
@@ -64,7 +65,7 @@ describe('Interrupt turn in the Actions menu', () => {
 
   test('offers nothing for a stopped ferret', async () => {
     const held = offers();
-    const view = await mountRow(fakeClient({ [VIEW]: () => ({ state: 'stopped' }) }), held);
+    const view = await mountRow(fakeClient({ [VIEW]: () => ferretSummary({ id: 'f1', state: 'stopped' }) }), held);
     expect(held.current()).toBeNull();
     run(() => view.unmount());
   });

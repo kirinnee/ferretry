@@ -130,6 +130,34 @@ describe('useRemoteBrowser', () => {
     expect(reads).toHaveLength(2);
   });
 
+  it('knows a read refused for the passkey from a stopped browser, and forgets it when the next answer comes', async () => {
+    const clock = manualScheduler();
+    let refuse = true;
+    const harness = mount(
+      {
+        readStatus: async (_daemon, scope) => {
+          if (refuse)
+            throw Object.assign(new Error('using the browser needs a passkey confirmation from this device.'), {
+              status: 403,
+              code: 'grant_step_up_required',
+            });
+          return statusFor(scope.sessionId);
+        },
+        runAction: async () => ({ status: statusFor('session-1') }) as BrowserActionResult,
+      },
+      clock.schedule,
+    );
+    await settle();
+    expect(harness.model().needsPasskey).toBe(true);
+    expect(harness.model().status).toBeNull();
+
+    refuse = false;
+    run(() => clock.tick());
+    await settle();
+    expect(harness.model().needsPasskey).toBe(false);
+    expect(harness.model().status?.state).toBe('stopped');
+  });
+
   it('drops a daemon-a response that lands after the pane re-scopes to daemon b', async () => {
     const pending: ((status: BrowserStatus) => void)[] = [];
     const clock = manualScheduler();

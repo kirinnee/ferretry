@@ -8,11 +8,31 @@ import { LayoutSchema, ThemeSchema } from './wire.ts';
 /** The built-in default (design §5.3). With Layouts off, the app shell uses its own copy of the same layout. */
 export const DEFAULT_LAYOUT = LayoutSchema.parse({
   id: 'default',
-  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
+  nav: { side: 'left', style: 'list', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
   side: { show: 'wide-only', holds: 'ferrets' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],
-  panels: { 'ferret.side': ['ferret-agenda', 'cards-of-ferret', 'files', 'ferret-warden', 'queue', 'insights'] },
+  // Every panel a plugin declares for the ferret's side pane: a slot a layout lists draws exactly what it lists, so an
+  // omitted panel is never drawn (`default-side-panels.test.ts` reads the real manifests and fails on a missing one).
+  panels: {
+    'ferret.side': [
+      'ferret-agenda',
+      'queue',
+      'cards-of-ferret',
+      'terminals',
+      'console',
+      'processes',
+      'browser',
+      'files',
+      'ferret-warden',
+      'mcp-servers',
+      'helpers',
+      'skills',
+      'instructions',
+      'usage',
+      'insights',
+    ],
+  },
   density: 'comfortable',
   phone: { nav: { side: 'bottom', items: ['ferrets', 'agenda', 'board'] } },
 });
@@ -20,7 +40,7 @@ export const DEFAULT_LAYOUT = LayoutSchema.parse({
 /** A denser layout: `fy layout use compact`. */
 export const COMPACT_LAYOUT = LayoutSchema.parse({
   id: 'compact',
-  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'insights', 'settings'] },
+  nav: { side: 'left', style: 'rail', items: ['ferrets', 'agenda', 'board', 'projects', 'insights', 'settings'] },
   side: { show: 'never', holds: 'panels' },
   top: ['daemon-picker', 'search'],
   'composer.tools': ['attachments', 'dictation', 'runtime-picker', 'composer-quota'],

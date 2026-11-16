@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConfigPort, OutboundSecretOutcome, SecretsPort } from '@ferretry/kernel/contract';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
-import { owner, testHost } from '@ferretry/kernel/testing';
+import { device, ferret, owner, testHost } from '@ferretry/kernel/testing';
 import {
   effectiveWardenConfig,
   WARDEN_CONFIG,
@@ -187,6 +187,46 @@ describe('D2 #19 Q4 the Jev key is the kernel’s to place, named only by the ow
     const view = await host.request('GET', '/v1/warden/config', { as: owner() });
     expect(view.status).toBe(200);
     expect(view.body).not.toContain('JEV_API_KEY');
+    await host.stop();
+  });
+
+  test('c58-22 the settings view says whether warden.yaml names the Jev key, and the owner can name it', async () => {
+    // the kernel's real config writer, with the owner's judge (what Gate answers the owner at the machine)
+    const { host } = await wardenHost({ realConfig: realWardenConfig({ judge: 'owner-at-machine' }) });
+    const read = async () => JSON.parse((await host.request('GET', '/v1/warden/config', { as: owner() })).body);
+    expect((await read()).jevKey).toBe('not_named');
+    const named = await host.request('POST', '/v1/warden/jev-key', { as: owner() });
+    expect(named.status).toBe(200);
+    const view = JSON.parse(named.body);
+    expect(view.jevKey).toBe('named');
+    expect(view.held).toBeUndefined();
+    expect((await read()).jevKey).toBe('named');
+    // the answer says THAT it is named; the reference and any value stay out of every answer
+    expect(named.body).not.toContain('JEV_API_KEY');
+    expect(named.body).not.toContain('secret:');
+    // naming it again is the same, not an error
+    expect(JSON.parse((await host.request('POST', '/v1/warden/jev-key', { as: owner() })).body).jevKey).toBe('named');
+    await host.stop();
+  });
+
+  test('c58-22 a ferret cannot name the key (refused), and a call the kernel will not let apply it is held, not applied', async () => {
+    // no judge: the real writer holds an added secret reference for the owner, whoever asked
+    const { host } = await wardenHost({ realConfig: realWardenConfig() });
+    const asFerret = await host.request('POST', '/v1/warden/jev-key', { as: ferret('F1') });
+    expect(asFerret.status).toBe(403);
+    const asDevice = await host.request('POST', '/v1/warden/jev-key', { as: device('phone') });
+    const answer = JSON.parse(asDevice.body);
+    expect(asDevice.status).toBe(200);
+    expect(answer.jevKey).toBe('not_named');
+    expect(answer.held).toEqual([expect.stringContaining('JEV_API_KEY')]);
+    expect(asDevice.body).not.toContain('secret:');
+    await host.stop();
+  });
+
+  test('c58-22 a save keeps what the view says: named stays named, not_named stays not_named', async () => {
+    const { host } = await wardenHost({ config: { jev: { key: WARDEN_JEV_KEY_REFERENCE } } });
+    const saved = await host.request('PATCH', '/v1/warden/config', { body: { enabled: false }, as: owner() });
+    expect(JSON.parse(saved.body).jevKey).toBe('named');
     await host.stop();
   });
 

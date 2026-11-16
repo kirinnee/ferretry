@@ -138,6 +138,16 @@ describe('learning vocabulary', () => {
     expect(scanResultSentence(progress({ state: 'failed', message: 'no login' }))).toBe('The scan failed: no login');
     expect(scanResultSentence(progress({ state: 'failed' }))).toBe('The scan failed.');
     expect(scanResultSentence(progress({ state: 'finished', added: 0, merged: 0 }))).toBe('No new lessons.');
+    expect(
+      scanResultSentence(
+        progress({
+          state: 'finished',
+          added: 0,
+          merged: 0,
+          message: 'no ferrets in this scope have a transcript to read',
+        }),
+      ),
+    ).toBe('No new lessons — no ferrets in this scope have a transcript to read.');
     expect(scanResultSentence(progress({ state: 'finished', added: 1, merged: 2 }))).toBe(
       'Added 1 lesson to To review and merged 2 into existing ones.',
     );

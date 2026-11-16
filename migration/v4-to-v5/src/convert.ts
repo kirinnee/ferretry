@@ -3,14 +3,16 @@
  * finished. The v4 home is opened read-only and never written.
  */
 import { mkdir } from 'node:fs/promises';
-import { join } from 'node:path';
 import type { LoginHarness } from './steps/preview-hold.ts';
 import { type LockProbe, preflight } from './preflight.ts';
 import type { ConversionReport, StepReport } from './report.ts';
+import { LEFT_BEHIND } from './left-behind.ts';
 import { type EnforcedConversion, type HostFacts, STEPS, type Step, type StepContext } from './steps/index.ts';
 import { LoginKeyHold } from './steps/login-keys.ts';
+import { fenceV4 } from './v4/fence.ts';
 import { type V4ConfigOverrides, v4Paths } from './v4/layout.ts';
 import { writeHomeJson } from './v5/home.ts';
+import { refuseLinkOnPath } from './v5/no-link.ts';
 import { v5Writer } from './v5/write.ts';
 
 export interface ConvertOptions {
@@ -88,7 +90,11 @@ async function plainConfigs(
   const loginKeys = new LoginKeyHold();
   const plain = {
     ...extra,
-    v4: { ...v4Paths(from), ...(overrides === undefined ? {} : { configOverrides: overrides }) },
+    v4: {
+      ...v4Paths(from),
+      fenced: await fenceV4(from),
+      ...(overrides === undefined ? {} : { configOverrides: overrides }),
+    },
     v5: v5Writer(to, { dryRun: true }),
     dryRun: true,
     loginKeys,
@@ -129,10 +135,17 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   const checked = await preflight(options.from, options.to, options.lock);
   if (!checked.ok) return { kind: 'refused', problems: checked.problems };
 
-  if (!options.dryRun) await mkdir(options.to, { recursive: true, mode: 0o700 });
+  // Every write goes to the RESOLVED place (the new home's parent resolved once in preflight) and is lstat-checked from
+  // its anchor down, so a link swapped in after preflight refuses instead of redirecting a write.
+  const to = checked.to.path;
+  if (!options.dryRun) {
+    refuseLinkOnPath(checked.to.anchor, to, checked.to.pins);
+    await mkdir(to, { recursive: true, mode: 0o700 });
+    refuseLinkOnPath(checked.to.anchor, to, checked.to.pins);
+  }
   const ctx = {
-    v4: v4Paths(options.from),
-    v5: v5Writer(options.to, { dryRun: options.dryRun }),
+    v4: { ...v4Paths(options.from), fenced: await fenceV4(options.from) },
+    v5: v5Writer(to, { dryRun: options.dryRun, anchor: checked.to.anchor, pins: checked.to.pins }),
     dryRun: options.dryRun,
     ...(options.preview === true
       ? {
@@ -162,12 +175,12 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
     ...(options.previewUserHome === undefined ? {} : { previewUserHome: options.previewUserHome }),
     ...(options.dropUncarried === true ? { dropUncarried: true } : {}),
   };
-  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, options.to, options.host, steps, extra) };
+  const withEnforced = { ...ctx, dryConfigs: dryConfigsOf(options.from, to, options.host, steps, extra) };
   const withPlain =
     options.preview === true
       ? {
           ...withEnforced,
-          plainConfigs: (await plainConfigs(options.from, options.to, options.host, steps, extra)).configs,
+          plainConfigs: (await plainConfigs(options.from, to, options.host, steps, extra)).configs,
         }
       : withEnforced;
 
@@ -194,8 +207,9 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
   if (finished && !options.dryRun) {
     // The tree v5's openHome makes for a NEW home (it makes none for an existing one): without `logs/` fyd writes no
     // log at all, and `run/` holds its lock and sockets. Then home.json, last.
-    for (const folder of V5_HOME_TREE) await mkdir(join(options.to, folder), { recursive: true, mode: 0o700 });
-    await writeHomeJson(options.to, at, 'ferretry-v4-to-v5');
+    for (const folder of V5_HOME_TREE) await mkdir(ctx.v5.resolve(folder), { recursive: true, mode: 0o700 });
+    ctx.v5.resolve('home.json');
+    await writeHomeJson(to, at, 'ferretry-v4-to-v5');
   }
   return {
     kind: 'done',
@@ -203,11 +217,13 @@ export async function convert(options: ConvertOptions): Promise<ConvertResult> {
       format: 1,
       tool: 'ferretry-v4-to-v5',
       from: options.from,
-      to: options.to,
+      to,
       at: at.toISOString(),
       dryRun: options.dryRun,
       steps: reports,
+      ...(checked.notes.length === 0 ? {} : { notes: checked.notes }),
       complete: finished && !options.dryRun,
+      leftBehind: LEFT_BEHIND,
     },
   };
 }

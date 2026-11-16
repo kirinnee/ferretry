@@ -40,6 +40,14 @@ export interface SendTrackerSettings {
    * one capture and types nothing.
    */
   readonly untypedLookMs: number;
+  /**
+   * How long a person's send may stay `untyped` — retried every `untypedLookMs` against a composer that cannot be
+   * proven empty — before it is said OUT LOUD: once, as a warning in the daemon's log, a `control.send_stuck` journal
+   * entry and the row's `stuckAt`, which the app shows as "not delivered yet" with what to do. It keeps being tried
+   * until `holdLimitMs`. An idle harness draws nothing by itself, so a screen the reader refused stays refused until
+   * something redraws it: the owner's message waited ten minutes this way, and a ferret's six and a half hours (v4).
+   */
+  readonly stuckAlarmMs: number;
   /** The ceiling on waiting behind a busy agent, after which a held send is reported unconfirmed. */
   readonly holdLimitMs: number;
   /**
@@ -89,6 +97,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
   untypedLookMs: 5_000,
+  stuckAlarmMs: 2 * 60_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
@@ -440,6 +449,20 @@ function mergedRun(
  * An agent has nobody watching a Retry button, so the daemon tells it directly — in its own session —
  * and leaves the decision with it: resend, choose another route, or give up.
  */
+/**
+ * What an agent is told when its message has been STUCK past the limit: nothing could be typed for it, because
+ * `recipient`'s input box could not be proven empty. Not a failure — the message is kept and still tried — so the
+ * sentence says not to send it again: a second copy would land beside the first the moment the box reads clear.
+ */
+export function sendStuckNotice(recipient: string, record: SendRecord, waitedMs: number): string {
+  return (
+    `Your message to ${recipient} (send ${record.sendId}) has not been delivered yet: for ${Math.round(waitedMs / 60_000)} min ` +
+    `Ferretry could not read ${recipient}’s input box to prove it empty, so nothing was typed. It is kept and tried ` +
+    `again every few seconds, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
+    'tell the owner: whatever is on that ferret’s screen instead of an empty input box is what holds it.'
+  );
+}
+
 export function sendFailureNotice(recipient: string, record: SendRecord, clientName: string): string {
   // Its own sentence, because the generic one is wrong twice over here: the keys DID reach the
   // recipient's terminal, and "decide whether to send it again" invites the duplicate. What is

@@ -77,6 +77,7 @@ import {
   LoginViewSchema,
   type LoginBudget,
   type LoginDisabled,
+  type LoginLaunchStore,
   type ProviderPresetCatalog,
   type ProviderQuotaReading,
 } from '../../../contract/index.ts';
@@ -368,7 +369,9 @@ const REASON_SENTENCES: Readonly<Record<CredentialStatusReason, string>> = {
   not_checked_yet: 'This login is present and current. Nothing has checked it with the provider yet.',
   api_key: 'This login uses an API key, so there is nothing to renew.',
   from_environment: 'This login comes from environment variables, so there is no sign-in to check.',
-  credential_unreadable: 'This login could not be read just now. Nothing is wrong with it as far as anyone knows.',
+  host_terminal: 'This login is the sign-in in your terminal. Ferrets start with it; Ferretry does not read it.',
+  credential_unreadable:
+    'This login could not be read just now. If it keeps happening, sign in again to replace its sign-in file.',
   access_expired_refreshable: 'The access token has expired. It renews itself the next time it is used.',
   access_expiring: 'The access token expires within five minutes. It renews the next time it is used.',
   last_refresh_old: 'This login has not been renewed for over eight days. It renews the next time it is used.',
@@ -696,6 +699,24 @@ export class FleetCredentialsService {
     return { kind: 'owned', variables: credentialLaunchEnvironment(owned), usable };
   }
 
+  /**
+   * What a runtime wrapper a PERSON runs needs to be signed in on each login (`LoginsApi.launchStores`): the same
+   * projection {@link launchStore} hands a ferret (a Ferretry-kept Claude login's one secure-storage variable) and, for a Ferretry-kept
+   * Codex login, the sign-in file its runtime home links to. The store path is spelled here and nowhere else; no value is
+   * read, and a login with nothing to name is left out.
+   */
+  async launchStores(): Promise<readonly LoginLaunchStore[]> {
+    const { entries } = await this.deps.catalog.entries();
+    const out: LoginLaunchStore[] = [];
+    for (const { id, resolution } of entries) {
+      const owned = stored(resolution);
+      if (owned === undefined) continue;
+      if (owned.harness === 'claude') out.push({ id, variables: credentialLaunchEnvironment(owned) });
+      else if (owned.store === 'ferretry') out.push({ id, variables: {}, signInFile: owned.canonicalFile });
+    }
+    return out;
+  }
+
   /** Inside Logins only: the trusted Ferrets launch hook shares Check now's work, never its caller standing. */
   async checkForLaunch(id: string): Promise<LoginView> {
     const { entries } = await this.deps.catalog.entries();
@@ -831,7 +852,7 @@ export class FleetCredentialsService {
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),
       needsLabel: needsLabel(entry, email, emails, entries),
       ...disabledField(entry.credential.disabled, this.deps.listCache?.now() ?? 0),
-      ...budgetField(entry.credential.budget === undefined ? undefined : this.deps.budget?.view(entry.id)),
+      ...budgetField(this.deps.budget?.view(entry.id)),
       ...(entry.credential.clonedFrom === undefined ? {} : { clonedFrom: entry.credential.clonedFrom }),
       ...(entry.credential.clonedFromDaemon === undefined
         ? {}
@@ -900,33 +921,5 @@ interface EnvironmentFacts {
 }
 
 const subjectOf = (entry: CredentialEntry): CredentialSubject => ({ id: entry.id, resolution: entry.resolution });
-
-// ── Passive usage ────────────────────────────────────────────────────────────────────────────────
-
-/** One session this daemon launched, as usage attribution reads it: who ran it and where it wrote. */
-interface CredentialSessionRecord {
-  /** The runtime the session was started on. */
-  readonly agent: string;
-  readonly transcript?: { readonly home: string; readonly file?: string };
-}
-
-/**
- * The transcripts of the sessions that ran on this credential (§8.2.3): a session started on one of
- * its runtimes. A rollout this
- * daemon did not launch has no record, so it is never attributed: the shared pool mixes credentials.
- * @pending logins: Codex passive usage reading is not ported (today's `daemon/src/lib/fleet-reading/service.ts:226` in rebuild-ref), so nothing attributes a rollout to the credential whose session this daemon launched (`attributedTranscripts` in `daemon/lib/credentials/credentials-service.ts`)
- */
-export function attributedTranscripts(
-  entry: Pick<CredentialEntry, 'usedBy'>,
-  sessions: readonly CredentialSessionRecord[],
-): readonly string[] {
-  const files = new Set<string>();
-  for (const session of sessions) {
-    const file = session.transcript?.file;
-    if (file === undefined) continue;
-    if (entry.usedBy.includes(session.agent)) files.add(file);
-  }
-  return [...files].sort();
-}
 
 // ── The subsystem ────────────────────────────────────────────────────────────────────────────────

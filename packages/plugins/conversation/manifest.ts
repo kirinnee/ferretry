@@ -35,6 +35,7 @@ import {
   QueueChanged,
   QuestionAnswered,
   QuestionAsked,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
@@ -47,7 +48,16 @@ import {
   TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
-import { ASK_DELIVERY_KEY, AskAnswered, AskDeliveries, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import {
+  ASK_DELIVERY_KEY,
+  ASK_OWNER_CHAT_KEY,
+  AskAnswered,
+  AskDeliveries,
+  AskOwnerChats,
+  AsksChanged,
+  AsksPort,
+  AskSources,
+} from '@ferretry/core-asks/contract';
 import {
   ACTIONS_ROW_SLOT,
   FerretChanged,
@@ -59,6 +69,7 @@ import {
   OpeningAttachments,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
+import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 
 // Shared descriptor pieces. The fields answer independent questions (§7.1); only what repeats is shared.
 const FERRET = { minimum: 'operator', caller: 'any', noStore: true } as const;
@@ -69,6 +80,12 @@ const OWN_DRAFT = {
   guard: { none: "the owner's own draft, person caller only, served raw as today: positional edits need the raw text" },
 } as const;
 const READ = { audit: { skip: 'read' } } as const;
+/**
+ * Reading a ferret's words (its log, messages, question, send ledger, queue, handoffs, images, attachments) is `fleet.use`
+ * (c58-sec1): a device the owner narrowed off it is refused, as it is on `GET /v1/ferrets/:ferretId`. Only a DEVICE is
+ * governed: a ferret's own credential is never grant-governed and the owner's loopback token is ungoverned.
+ */
+const FLEET_USE = { capability: cap('fleet', 'use') } as const;
 const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault text' } } as const;
 
 /**
@@ -96,6 +113,9 @@ export default definePlugin({
   ],
 
   needs: { ferrets: FerretsPort, asks: AsksPort },
+  // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
+  // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
+  uses: { claudeCode: ClaudeCodePort },
   provides: { conversation: ConversationPort },
 
   actions: {
@@ -111,8 +131,8 @@ export default definePlugin({
         },
       }),
       route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
-      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('PATCH /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
         audit: { record: QUEUE_EDITED_AUDIT },
@@ -123,8 +143,8 @@ export default definePlugin({
         audit: { record: QUEUE_CANCELLED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       // A person's alone: a retry is the one act that clears an update-unconfirmed send's mark and types it again.
       route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
         ...PERSON,
@@ -153,10 +173,10 @@ export default definePlugin({
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
-      route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
-      route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
+      route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R265: strong etag over redacted text
+      route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R266 (kept half)
+      route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // G41: bounded fragments
       // The composer's reference menus (lead decision Q6): each prefix's owner provides its entries through `reference.catalog`.
       // Ungoverned itself, but each provider's own demand (files, terminals, pages) is asked of the caller before it answers.
       route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS, consultsGrants: true }),
@@ -164,12 +184,13 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',
         caller: 'any',
+        ...FLEET_USE,
         ...READ,
         ...SECRETS,
       }),
 
       // ── questions, compaction, hypermedia ─────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
         // DELIBERATE PARITY CORRECTION: v4 declared no capability here (R-0335 `capability=none`). On 5.0 the route
@@ -185,6 +206,7 @@ export default definePlugin({
         audit: { record: COMPACT_AT_CHANGED_AUDIT },
         ...ACK,
       }),
+      route('GET /v1/ferrets/:ferretId/hypermedia', { ...FERRET, ...READ, ...ACK }),
       route('PATCH /v1/ferrets/:ferretId/hypermedia', {
         ...FERRET,
         audit: { record: HYPERMEDIA_CHANGED_AUDIT },
@@ -197,7 +219,7 @@ export default definePlugin({
         audit: { record: ATTACHMENT_ADDED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferretId/attachments/:attachmentId', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/attachments/:attachmentId', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/attachments/:attachmentId/unlock', {
         ...FERRET,
         audit: { record: ATTACHMENT_UNLOCKED_AUDIT },
@@ -267,22 +289,179 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('send', { summary: 'say a message to a ferret' }),
-      verb('reply', { summary: 'answer the ferret that last wrote to you' }),
-      verb('answer', { summary: "answer a ferret's question" }),
-      verb('interrupt', { summary: "stop a ferret's turn" }),
-      verb('queue', { summary: "a ferret's queued messages" }),
-      verb('queue edit', { summary: 'change a queued message before it is typed' }),
-      verb('queue cancel', { summary: 'withdraw a queued message' }),
-      verb('logs', { summary: "read a ferret's conversation log" }),
-      verb('compact-at', { summary: 'when a ferret squeezes its memory' }),
-      verb('search', { summary: 'find cards and asks by what they say' }),
-      verb('render', { summary: 'save a picture a ferret can show in a message' }),
-      verb('render guide', { summary: 'how to write a render' }),
-      verb('link', { summary: 'list conversations the harnesses hold, to keep as ferrets' }),
-      verb('link preview', { summary: 'the first words of a conversation' }),
-      verb('link keep', { summary: 'keep conversations as ferrets, read from the harness file' }),
-      verb('transcript', { summary: 'the conversation transcript every runtime of a harness shares' }),
+      verb('send', {
+        summary: 'say a message to a ferret',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'message', help: 'the message text', optional: true, variadic: true },
+        ],
+        options: [
+          { flag: '-f, --file <file>', help: 'attach a supported image or document; repeatable (default: [])' },
+          { flag: '--message-file <file>', help: 'read the message from a file (use for long messages)' },
+          { flag: '--now', help: 'interrupt the active turn and deliver immediately instead of riding the queue' },
+          { flag: '--ask', help: 'label this as needing a reply and park this session until the peer answers' },
+          { flag: '--expect-reply', help: 'label this as needing a reply, without parking this session' },
+          {
+            flag: '--until <when>',
+            help: 'with --ask: give up waiting after this long (45m, 2h, or an ISO timestamp)',
+          },
+          { flag: '--wait', help: 'wait until the message is proven delivered, timed out, or unconfirmed' },
+          {
+            flag: '--kind <kind>',
+            help: "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends",
+          },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('reply', {
+        summary: 'answer the ferret that last wrote to you',
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'message', help: 'the reply text', variadic: true },
+        ],
+        options: [
+          {
+            flag: '--kind <kind>',
+            help: "blocker | action | fyi (default action): how soon it is delivered — a blocker at once, actions combined for a minute, an fyi held until the receiver's turn ends",
+          },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('answer', {
+        summary: "answer a ferret's question",
+        args: [
+          { name: 'id', help: 'session id or callsign' },
+          { name: 'labels', help: 'the option labels to choose', optional: true, variadic: true },
+        ],
+        options: [
+          { flag: '--other <text>', help: 'choose the free-form Other response for one question' },
+          { flag: '--response <answer>', help: 'answer each question in order; repeatable (default: [])' },
+          { flag: '--json', help: 'print the session as JSON' },
+        ],
+      }),
+      verb('interrupt', {
+        summary: "stop a ferret's turn",
+        args: [{ name: 'id', help: 'session id or callsign' }],
+        options: [{ flag: '--json', help: 'print the session as JSON' }],
+      }),
+      verb('queue <ferret>', {
+        summary: "a ferret's queued messages",
+        args: [{ name: 'ferret', help: 'the ferret, by name or session id' }],
+        options: [{ flag: '--json', help: 'print the queue as JSON' }],
+      }),
+      verb('queue edit', {
+        summary: 'change a queued message before it is typed',
+        args: [
+          { name: 'ferret', help: 'the ferret, by name or session id' },
+          { name: 'id', help: 'the message id, as `fy queue <ferret>` lists it' },
+          { name: 'text', help: 'the new words', variadic: true },
+        ],
+      }),
+      verb('queue cancel', {
+        summary: 'withdraw a queued message',
+        args: [
+          { name: 'ferret', help: 'the ferret, by name or session id' },
+          { name: 'id', help: 'the message id, as `fy queue <ferret>` lists it' },
+        ],
+      }),
+      verb('logs', {
+        summary: "read a ferret's conversation log",
+        args: [{ name: 'id', help: 'session id' }],
+        options: [{ flag: '--turn <number>', help: 'read one explicitly bounded transcript turn' }],
+      }),
+      verb('compact-at', {
+        summary: 'when a ferret squeezes its memory',
+        args: [
+          { name: 'ferret', help: 'the ferret to read or change' },
+          {
+            name: 'value',
+            help: 'a size like 250k, auto (the harness’s own trigger) or inherit; leave out to read',
+            optional: true,
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('search', {
+        summary: 'find cards and asks by what they say',
+        args: [{ name: 'text', help: 'words to look for, or an id like F303 / A3', variadic: true }],
+        options: [
+          { flag: '--kind <kind>', help: 'only task | agenda' },
+          { flag: '--open', help: 'only work still to do' },
+          { flag: '--project <name>', help: "only this project's cards (agenda items are kept)" },
+          { flag: '--all', help: 'also find closed, dropped and addressed work older than 30 days' },
+          { flag: '--limit <n>', help: 'at most this many hits (default 20)' },
+          { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
+          { flag: '--json', help: 'print the daemon response as JSON' },
+        ],
+      }),
+      verb('render', { summary: 'save a picture a ferret can show in a message', args: [] }),
+      verb('render guide', {
+        summary: 'how to write a render',
+        args: [
+          {
+            name: 'type',
+            help: 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie, card, board',
+            optional: true,
+          },
+        ],
+      }),
+      verb('link [query...]', {
+        summary: 'list conversations the harnesses hold, to keep as ferrets',
+        args: [
+          {
+            name: 'query',
+            help: 'search words; each must appear in the name, first or latest message or project folder',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [
+          { flag: '--harness <harness>', help: 'only this harness (choices: "claude", "codex")' },
+          {
+            flag: '--since <duration>',
+            help: 'only conversations active within this long: <n>d, <n>h or <n>w (e.g. 7d)',
+          },
+          { flag: '--select <id...>', help: 'adopt these conversation ids instead of listing' },
+          { flag: '--runtime <name>', help: 'the runtime every adopted ferret runs on (required with --select)' },
+          {
+            flag: '--all',
+            help: 'import every conversation as a stopped ferret (needs --runtime; hard-linked, never copied)',
+          },
+          { flag: '--start', help: 'launch every selected conversation now (at most 10 at once)' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
+      }),
+      verb('link preview', {
+        summary: 'the first words of a conversation',
+        args: [
+          { name: 'harness', help: 'claude or codex' },
+          { name: 'conversation-id', help: 'the conversation’s id' },
+        ],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('link keep', {
+        summary: 'keep conversations as ferrets, read from the harness file',
+        args: [
+          { name: 'harness', help: 'claude or codex' },
+          { name: 'runtime', help: 'the runtime to keep them on' },
+          { name: 'conversation-id', help: 'a conversation to keep', variadic: true },
+        ],
+        options: [
+          { flag: '--start', help: 'also start each one as a ferret' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
+      verb('transcript', {
+        summary: 'the conversation transcript every runtime of a harness shares',
+        args: [{ name: 'ferret', help: 'the ferret whose conversation to read' }],
+        options: [
+          { flag: '--cursor <cursor>', help: 'continue from where the last page ended' },
+          { flag: '--through <row>', help: 'end at this row' },
+          { flag: '--tail', help: 'read the newest rows' },
+          { flag: '--limit <n>', help: 'how many rows' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
     agentTools: [
       tool('search_work', {
@@ -308,8 +487,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
-      // `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
+      // The chat offers three slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row,
+      // `conversation.row-body` in place of a person's own words (Agenda's card) and `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
       // a tool row's shell commands) and the ferret as subject — Voice's read-aloud and Packs' card draw there. It mounts `ferret.toolbar` and
       // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
@@ -321,6 +500,8 @@ export default definePlugin({
       panel('ferret.toolbar', { id: 'compact-at', order: 30 }),
       // Lead decision Q2: today's Actions-menu switch, a toolbar panel of its own (listed before Compact memory at, as today).
       panel('ferret.toolbar', { id: 'hypermedia', order: 25 }),
+      // Whose turn it is (working, your turn, needs you), beside Ferrets' status mark (order 20, which has no turn to say).
+      panel('ferret.toolbar', { id: 'turn', order: 21 }),
       // This device's conversation width (lead decision Q11).
       panel('device.settings', { id: 'chat-width', order: 20 }),
       // Settings › Appearance › Message marks: the key to the clock, ticks and ! under a message (S-0509). Last, after
@@ -332,7 +513,7 @@ export default definePlugin({
       panel(ACTIONS_ROW_SLOT, { id: 'interrupt-row', order: 10 }),
       panel(AGENDA_CONVERSATION_SLOT, { id: 'agenda-conversation', order: 10 }),
     ],
-    settings: [settingsTab('conversation', { label: 'Conversation', order: 20 })],
+    settings: [settingsTab('conversation', { group: 'behaviour', label: 'Conversation', order: 20 })],
     renderers: [renderer('ask', { source: 'question' })],
   },
 
@@ -345,12 +526,13 @@ export default definePlugin({
     config: [CONVERSATION_CONFIG],
     readModels: ['transcript', 'queue', 'sends', 'logs', 'search', 'links'],
     publishes: [QueueChanged, MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
-    subscribes: [AskAnswered],
+    subscribes: [AskAnswered, AsksChanged],
   },
 
   hooks: {
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
+      { hook: AskSources, key: 'prompt', schema: PromptAskRefSchema },
       { hook: SitrepLines, priority: 50 },
       // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
       { hook: FerretChanged },
@@ -364,6 +546,14 @@ export default definePlugin({
       // How an owner's agenda answer reaches a ferret: typed through this plugin's own send path (queue + ledger). The
       // one provider of this security-path hook (`takers: ['conversation']`).
       { hook: AskDeliveries, key: ASK_DELIVERY_KEY },
+      // The owner's chat as `fy agenda log` copies it onto an item: this plugin's own queue and send ledger. The one
+      // provider of this hook (`takers: ['conversation']`).
+      { hook: AskOwnerChats, key: ASK_OWNER_CHAT_KEY },
+      // The composer's `:` (the ferrets, by callsign) and `@` (one folder of the ferret's files) menus: the facts are
+      // Ferrets', read through its port, and the composer's reference catalog is this plugin's own (a core piece may not
+      // take a plugin's hook, so Ferrets cannot provide them).
+      { hook: ReferenceCatalog, key: ':' },
+      { hook: ReferenceCatalog, key: '@' },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

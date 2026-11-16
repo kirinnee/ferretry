@@ -579,7 +579,10 @@ describe('a serving relay session', () => {
     const answers = Array.from({ length: burst }, (_, index) =>
       session.request({ method: 'GET', path: `/v1/sessions/${index}/skills` }),
     );
-    await drain();
+    // Watched from the start: if an assertion below fails, the queued requests must not reject unwatched 30 s later and
+    // fail whichever test of the process is running then.
+    for (const answer of answers) answer.catch(() => undefined);
+    await drain(() => socket.sent.length >= CREDIT_WINDOW_FRAMES);
     should(session.live()).be.true();
     // The window still bounds the wire: the hello, the credential and the first requests fill exactly
     // one window, and nothing past it leaves until credit comes back.
@@ -596,7 +599,7 @@ describe('a serving relay session', () => {
     const firstWave = await sentIds(2);
     // The daemon returns a window of credit; the rest of the burst leaves, still in order.
     await session.receiveBinary(creditFrame(sessionId, encodeCreditPayload(CREDIT_WINDOW_FRAMES)));
-    await drain();
+    await drain(() => socket.sent.length >= 2 + burst);
     const secondWave = await sentIds(2 + firstWave.length);
     should([...firstWave, ...secondWave]).eql(Array.from({ length: burst }, (_, index) => index + 1));
     for (let id = 1; id <= burst; id += 1)
@@ -606,9 +609,16 @@ describe('a serving relay session', () => {
   });
 });
 
-/** Let sealing and signing, which resolve on the task queue, finish. */
-const drain = async (): Promise<void> => {
-  for (let spin = 0; spin < 20; spin += 1) await new Promise(resolve => setTimeout(resolve, 0));
+/**
+ * Let sealing and signing, which resolve on the task queue, finish. A test that knows what it is waiting for says so
+ * (`until`): sealing is real crypto, so how many task-queue turns it takes depends on how loaded the machine is, and
+ * a fixed number of turns is a wall-clock guess. The bound only stops a wrong expectation from hanging the file.
+ */
+const drain = async (until?: () => boolean): Promise<void> => {
+  const MIN_TURNS = 20;
+  const MAX_TURNS = 20_000;
+  for (let spin = 0; spin < MAX_TURNS && (spin < MIN_TURNS || (until !== undefined && !until())); spin += 1)
+    await new Promise(resolve => setTimeout(resolve, 0));
 };
 
 /** Whatever a promise rejected with, or `undefined` when it resolved. */

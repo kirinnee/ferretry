@@ -46,7 +46,11 @@ function run(world: World = {}) {
   const half = cli.build?.({
     manifest,
     client,
-    io: { out: text => out.push(text), err: text => err.push(text), isTty: false },
+    io: {
+      out: text => out.push(text.replace(/\n$/u, '')),
+      err: text => err.push(text.replace(/\n$/u, '')),
+      isTty: false,
+    },
     clock: { now: () => '2026-11-06T09:00:00.000Z' as never, nowMs: () => time },
     sleep: async delay => {
       time += Number(delay);
@@ -73,6 +77,8 @@ const STARTED = { id: 'lead' };
 
 /** Each row this file proves, with the 5.0 verb it lives at (the TSV's `name5`, without the binary's name). */
 const ROWS: readonly (readonly [id: string, v5: string])[] = [
+  ['V-0282', 'history'],
+  ['V-0283', 'history claim [words...]'],
   ['V-0290', 'instructions'],
   ['V-0329', 'ferret move <id>'],
   ['V-0334', 'new [words...]'],
@@ -243,21 +249,24 @@ describe('commands parity', () => {
       const json = run({ answers: { [FERRET_ROUTES.get]: lead } });
       expect(await json.verb('status [id]', ['wren'], { json: true })).toBe(0);
       expect(JSON.parse(json.out.join('\n'))).toMatchObject({ id: 'lead', name: 'wren' });
-      const tree = run({
-        answers: {
-          [FERRET_ROUTES.subtree]: {
-            root: { id: 'lead', name: 'wren' },
-            at: '2026-11-06T09:00:00.000Z',
-            endedWindowMs: 7_200_000,
-            rows: [{ id: 'mid', parent: 'lead', name: 'fern', depth: 1, state: 'running', ferretState: 'working' }],
-          },
-        },
-      });
+      const subtreeView = {
+        root: { id: 'lead', name: 'wren' },
+        at: '2026-11-06T09:00:00.000Z',
+        endedWindowMs: 7_200_000,
+        rows: [{ id: 'mid', parent: 'lead', name: 'fern', depth: 1, state: 'running', ferretState: 'working' }],
+      };
+      const tree = run({ answers: { [FERRET_ROUTES.subtree]: subtreeView } });
       expect(await tree.verb('status [id]', ['wren'], { subtree: true })).toBe(0);
       expect(tree.calls).toEqual([
         { route: 'GET /v1/ferrets/:ferretId/subtree', init: { params: { ferretId: 'wren' } } },
       ]);
       expect(tree.out.join('\n')).toContain('fern');
+      // The shell cannot know `--subtree` is a switch, so `fy status --subtree wren` arrives as the option VALUE `wren`.
+      const spaced = run({ answers: { [FERRET_ROUTES.subtree]: subtreeView } });
+      expect(await spaced.verb('status [id]', [], { subtree: 'wren' })).toBe(0);
+      expect(spaced.calls).toEqual([
+        { route: 'GET /v1/ferrets/:ferretId/subtree', init: { params: { ferretId: 'wren' } } },
+      ]);
       const none = run();
       expect(await none.verb('status [id]')).toBe(2);
       expect(none.err.join('\n')).toContain('status <id>');
@@ -366,11 +375,13 @@ describe('commands parity', () => {
       expect(negated.calls[0]?.init).toMatchObject({ body: { mode: 'interactive', fast: false, remoteControl: true } });
     });
 
-    test('V-0443 fy start refuses, by name and unsent, a flag whose job another plugin took (--detach) and a bad number or mode', async () => {
+    test('V-0443 fy start sends --detach (v4: answer once the ferret is recorded) and refuses, unsent, a bad number or mode', async () => {
       const detached = run({ answers: startAnswers });
-      expect(await detached.verb('start [prompt...]', ['x'], { detach: true })).toBe(2);
-      expect(detached.err.join('\n')).toContain('--detach');
-      expect(detached.calls).toEqual([]);
+      expect(await detached.verb('start [prompt...]', ['x'], { cwd: '/abs', detach: true })).toBe(0);
+      expect(detached.calls[0]?.init).toMatchObject({ body: { prompt: 'x', detach: true } });
+      const plain = run({ answers: startAnswers });
+      expect(await plain.verb('start [prompt...]', ['x'], { cwd: '/abs' })).toBe(0);
+      expect(JSON.stringify(plain.calls[0]?.init)).not.toContain('detach');
       const bad = run({ answers: startAnswers });
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', interval: 'banana' })).toBe(2);
       expect(await bad.verb('start [prompt...]', ['x'], { cwd: '/abs', mode: 'sideways' })).toBe(2);
@@ -1070,6 +1081,25 @@ describe('commands parity', () => {
       expect(two.err.join('\n')).toContain('pass only one of --base, --from-head');
       expect(await two.verb('worktree fork <branch>', [])).toBe(2);
       expect(two.calls).toEqual([]);
+    });
+  });
+
+  describe('history', () => {
+    test('V-0282 fy history typed bare prints what the group offers and exits 2, asking the daemon nothing', async () => {
+      const { verb, out, calls } = run();
+      expect(await verb('history')).toBe(2);
+      expect(out.join('\n')).toContain('fy history claim --harness <claude|codex> --pid <pid>');
+      expect(out.join('\n')).toContain('exit 75');
+      expect(calls).toEqual([]);
+    });
+
+    test('V-0283 fy history claim reads the wrapper words, and a caller mistake is 2 or 1, never the held status 75', async () => {
+      const { verb, err, calls } = run();
+      expect(await verb('history claim [words...]', [], { harness: 'claude' })).toBe(2);
+      expect(err.join('\n')).toContain('--pid is required');
+      expect(await verb('history claim [words...]', [], { harness: 'claude', pid: '42' })).toBe(1);
+      expect(err.join('\n')).toContain('no state home');
+      expect(calls).toEqual([]);
     });
   });
 });

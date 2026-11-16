@@ -46,6 +46,6 @@ export default implementCli(manifest, {
       io.out(invocation.options.json === true ? JSON.stringify(result, null, 2) : renderEnhancement(result));
       return OK;
     };
-    return { verbs: { voice: enhance, 'voice enhance': enhance } };
+    return { verbs: { 'voice [text...]': enhance, 'voice enhance': enhance } };
   },
 });

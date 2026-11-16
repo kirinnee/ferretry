@@ -182,6 +182,11 @@ export class SessionLifecycleService {
         if (live) return current;
         throw new Error(`session ${parsed} is running but its terminal is gone; stop it before starting it again`);
       }
+      // Before the first write: a refused start leaves the record, the credential and every lease as they were.
+      if (!live) {
+        const refusal = await this.ports.launcher.refuseLaunch?.(current);
+        if (refusal !== undefined) throw new Error(refusal);
+      }
       const firstTurn = this.firstTurnEffect(current);
       const firstTurnStanding =
         firstTurn === undefined ? undefined : await this.ports.effects.inspect(firstTurn.key, firstTurn.fingerprint);

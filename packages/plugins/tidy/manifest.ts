@@ -54,16 +54,30 @@ export default definePlugin({
     cli: [
       verb('gc', {
         summary: 'reclaim the files stopped ferrets left behind, once past the wait (daemon data is never touched)',
+        args: [],
+        options: [
+          { flag: '--dry-run', help: 'print what would be freed and why, without deleting anything' },
+          { flag: '--limit <count>', help: 'sessions to consider in a dry run' },
+          { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
+        ],
       }),
       verb('tidy', {
         summary:
-          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes)',
+          'drop your own cards nobody asked for and close your own asks that only track work (dry run unless --yes; the owner names a ferret with --ferret <id>)',
+        args: [],
+        options: [
+          { flag: '--yes', help: 'do it: drop the cards and close the items listed' },
+          { flag: '--reason <why>', help: 'the reason written on every card dropped and item closed' },
+          { flag: '--session <id>', help: 'act as this session instead of the ambient FY_SESSION_ID' },
+          { flag: '--ferret <id>', help: 'the ferret to tidy: the owner names it here (a ferret tidies only itself)' },
+          { flag: '--json', help: 'print the plan (and, with --yes, the result) as JSON' },
+        ],
       }),
     ],
   },
 
   ui: {
-    settings: [settingsTab('tidy', { label: 'Tidy', order: 70 })],
+    settings: [settingsTab('tidy', { group: 'advanced', label: 'Tidy', order: 70 })],
   },
 
   data: {

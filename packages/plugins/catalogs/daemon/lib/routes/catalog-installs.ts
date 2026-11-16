@@ -29,6 +29,7 @@ import {
   type CatalogInstalled,
   CatalogInstallIdSchema,
   type CatalogInstallList,
+  type CatalogInstallTargets,
   type CatalogInstallPreview,
   CatalogInstallPreviewRequestSchema,
   CatalogInstallPrefsRequestSchema,
@@ -58,6 +59,7 @@ import { CatalogItemRefusal } from '../../../contract/items/index.ts';
 /** The eight acts, from the parsed request to the answer the caller sees. */
 export interface CatalogInstallSubsystem {
   list(): Promise<CatalogInstallList>;
+  targets(): Promise<CatalogInstallTargets>;
   preview(
     scope: CatalogInstallScope,
     request: CatalogInstallPreviewRequest,
@@ -247,6 +249,15 @@ export function catalogInstallRoutes(subsystem: CatalogInstallSubsystem): readon
       capability: FLEET_CONFIGURE,
       noStore: true,
       handle: applyHandler('runtime', subsystem),
+    },
+    {
+      method: 'GET',
+      path: '/v1/catalog-installs/targets',
+      minimum: 'operator',
+      caller: 'any',
+      capability: FLEET_USE,
+      noStore: true,
+      handle: async () => await answer(() => subsystem.targets()),
     },
     {
       method: 'GET',

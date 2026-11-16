@@ -10,12 +10,12 @@ import { HEARTBEAT_GRACE_SECONDS, RELAY_CLOSE_CODES } from '../session/wire/cons
 import { DaemonIdSchema } from '../session/wire/owner-payloads.ts';
 
 /**
- * HOW A BROWSER REACHES A PUBLISHER IT IS NOT PAIRED WITH, AS A CATALOG MEMBER (Connections only; NOT IMPLEMENTED YET).
+ * HOW A BROWSER REACHES A PUBLISHER IT IS NOT PAIRED WITH, AS A CATALOG MEMBER (Connections only).
  *
  * A share link and a member session name a publisher this browser holds no pairing for, so the shell's per-daemon
  * client cannot carry them. Catalogs' app half runs the member records (`join`, `join-options`, the `/v1/shared/*`
- * requests) over a `RelayClientSession`. With no provider the half fails closed: every publisher is unreachable and
- * nothing is sent, so a share code is never spent.
+ * requests) over a `RelayClientSession`. With no provider (Connections off) the half fails closed: every publisher is
+ * unreachable and nothing is sent, so a share code is never spent.
  *
  * WHAT IS FIXED HERE, AND WHAT CONNECTIONS PROVIDES. Connections provides ONLY addressing and transport
  * ({@link MemberCarriers}): the discovered rendezvous address, a socket for an address, and the heartbeat that keeps a
@@ -194,10 +194,17 @@ export interface MemberSocket extends RelayClientSocket {
 
 /** What Connections offers a member session: addressing and transport, and nothing that decides what is safe. */
 export interface MemberCarriers {
-  /** The one rendezvous this build discovered (the hosted relay), or `undefined`. */
-  readonly rendezvousUrl: string | undefined;
-  /** Opens a socket to `address` on `kind`, or throws when the carrier cannot address it. */
-  dial(kind: MemberStep['kind'], address: string): MemberSocket;
+  /**
+   * The one rendezvous this build discovered (the hosted relay), or `undefined`. ASKED, not read: the advertisement is
+   * a runtime read, so a walk that starts before it lands waits for it rather than walking without the relay.
+   */
+  rendezvous(): Promise<string | undefined>;
+  /**
+   * Opens a socket to `address` on `kind` for the session of the publisher `daemonId` (a direct session socket and a
+   * relayed one both name it in their route), or throws when the carrier cannot address it (a fingerprint that is not a
+   * daemon id). The id is the walk's own, never read from an address.
+   */
+  dial(kind: MemberStep['kind'], address: string, daemonId: string): MemberSocket;
   /** Runs the heartbeat and the deadline over `session` until `settled` resolves (today's `driveRelaySession`). */
   drive<T>(options: {
     readonly kind: MemberStep['kind'];

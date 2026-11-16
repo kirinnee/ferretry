@@ -8,6 +8,8 @@ import should from 'should';
 import { pageTarget } from '../../../daemon/pages/acts.ts';
 import type { BrowserActGuard } from '../../../daemon/pages/service.ts';
 import type { BrowserInputEvent } from '../../../contract/wire/browser.ts';
+import type { RecordedSurfaceEvent } from '../../../daemon/tools/types.ts';
+import type { DrivenClock } from '@ferretry/kernel/testing';
 import { heldViewerHost } from '../../../daemon/stream/held-host.ts';
 import { nodeStagedFiles } from '../../../daemon/tools/adapters/staged-files.ts';
 import { agentControlPolicy } from '../../../daemon/tools/agent-control.ts';
@@ -23,6 +25,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { holdSentence, PageHeld } from '../../../daemon/holds/index.ts';
 import { controlRoutes, toolHandler } from '../../../daemon/tools/index.ts';
+import type { BrowserToolCall } from '../../../daemon/tools/wire.ts';
 import { BrowserToolError, BrowserTools, type BrowserToolPorts } from '../../../daemon/tools/service.ts';
 import { BrowserTransportError } from '../../../daemon/worker/protocol.ts';
 import { callOf } from '../../support/call.ts';
@@ -41,6 +44,10 @@ interface FakePage {
   title: string;
   text: string;
   openedBy?: { by: 'agent'; sessionId: string } | { by: 'local' };
+  /** The ferret session whose page this is: a session is shown, and may address, only its own. */
+  session?: string;
+  /** A popup: the page that opened it. */
+  openerId?: string;
 }
 
 /**
@@ -62,19 +69,34 @@ class FakeBrowser {
   /** Called inside the script's turn, after the guard ran and before the script answers. */
   duringScript: (() => void) | undefined;
 
-  status = async (_sessionId: string) =>
-    ({
+  /** What the lifecycle tools (wait, dialog, console…) were asked, in order. */
+  readonly lifecycles: { readonly op: string; readonly timeoutMs?: number }[] = [];
+  /** What each next lifecycle request answers; an empty queue answers "not matched". */
+  readonly lifecycleReplies: { reply: { text?: string; matched?: boolean } }[] = [];
+  /** Run, in order, right before each lifecycle request's guard: a takeover can land "while it waited". */
+  readonly beforeLifecycle: (() => Promise<void>)[] = [];
+
+  /** This session's own pages: a page of another ferret is never listed to it. */
+  private ownedBy(sessionId: string): FakePage[] {
+    return this.pages.filter(page => (page.session ?? 's1') === sessionId);
+  }
+
+  status = async (sessionId: string) => {
+    const own = this.ownedBy(sessionId);
+    return {
       state: 'running',
-      sessionId: 's1',
-      pages: this.pages.map(page => ({
+      sessionId,
+      pages: own.map(page => ({
         id: page.id,
         url: page.url,
         title: page.title,
         ...(page.name === undefined ? {} : { name: page.name }),
         ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
+        ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
       })),
-      ...(this.pages[0] === undefined ? {} : { activePageId: this.pages[0].id, url: this.pages[0].url, title: '' }),
-    }) as never;
+      ...(own[0] === undefined ? {} : { activePageId: own[0].id, url: own[0].url, title: '' }),
+    } as never;
+  };
 
   private acted(page: FakePage, extra: Record<string, unknown> = {}) {
     return {
@@ -90,16 +112,17 @@ class FakeBrowser {
     } as never;
   }
 
-  private page(key: string): FakePage {
-    const page = this.pages.find(each => each.id === key || each.name === key);
+  private page(key: string, sessionId = 's1'): FakePage {
+    const page = this.ownedBy(sessionId).find(each => each.id === key || each.name === key);
     if (page === undefined) throw new Error(`no page ${key}`);
     return page;
   }
 
-  openPage = async (_sessionId: string, name: string, options?: { url?: string; openedBy?: FakePage['openedBy'] }) => {
+  openPage = async (sessionId: string, name: string, options?: { url?: string; openedBy?: FakePage['openedBy'] }) => {
     const page: FakePage = {
       id: `p${String(this.pages.length + 1)}`,
       name,
+      session: sessionId,
       url: options?.url ?? 'about:blank',
       title: 'New',
       text: '',
@@ -109,17 +132,35 @@ class FakeBrowser {
     return { id: page.id, url: page.url, title: page.title } as never;
   };
 
-  actOnPage = async (_sessionId: string, key: string, action: { action: string }, guard?: BrowserActGuard) => {
-    await guard?.({ document: async () => ({}) } as never);
-    const page = this.page(key);
-    this.acts.push(action.action);
-    const failure = this.failOn.get(action.action);
-    if (failure !== undefined) throw failure();
-    if (action.action === 'read') return this.acted(page, { text: page.text });
-    if (action.action === 'screenshot')
-      return this.acted(page, { screenshotBase64: Buffer.from(`pixels ${SECRET}`).toString('base64') });
-    return this.acted(page);
-  };
+  /** What the live page tells a guard: nothing is on screen that shows a pairing code (`pairing-screen.test.ts` covers one). */
+  private guardPage = (extra: object = {}) =>
+    ({
+      document: async () => ({}),
+      pairingState: async () => ({ marked: false, seen: 0, pages: 1, targets: [], totals: { links: {}, lost: 0 } }),
+      ...extra,
+    }) as never;
+
+  /** The runtime's own order: the guard, the act, then the after-check the guard handed back (even when the act threw). */
+  private async guarded<T>(guard: BrowserActGuard | undefined, page: object, work: () => Promise<T>): Promise<T> {
+    const after = await guard?.(page as never);
+    try {
+      return await work();
+    } finally {
+      await after?.(page as never);
+    }
+  }
+
+  actOnPage = async (sessionId: string, key: string, action: { action: string }, guard?: BrowserActGuard) =>
+    await this.guarded(guard, this.guardPage(), async () => {
+      const page = this.page(key, sessionId);
+      this.acts.push(action.action);
+      const failure = this.failOn.get(action.action);
+      if (failure !== undefined) throw failure();
+      if (action.action === 'read') return this.acted(page, { text: page.text });
+      if (action.action === 'screenshot')
+        return this.acted(page, { screenshotBase64: Buffer.from(`pixels ${SECRET}`).toString('base64') });
+      return this.acted(page);
+    });
 
   filesOnPage = async (_sessionId: string, key: string, action: { action: string; paths?: readonly string[] }) => {
     const page = this.page(key);
@@ -132,21 +173,39 @@ class FakeBrowser {
   };
 
   attachViewer = async () => ({ detach: () => undefined }) as never;
-  scriptOnPage = async (_sessionId: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
-    const page = this.page(key);
-    await guard?.({ document: async () => ({}), host: async () => new URL(page.url).host } as never);
-    this.duringScript?.();
-    if (this.scriptFails) throw new Error('Execution context was destroyed');
-    if (this.scriptMoves !== undefined) page.url = this.scriptMoves;
-    return {
-      ...(this.acted(page) as object),
-      text: `ran:${script.source}`,
-      ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
-    } as never;
+  scriptOnPage = async (sessionId: string, key: string, script: { source: string }, guard?: BrowserActGuard) => {
+    const page = this.page(key, sessionId);
+    return await this.guarded(guard, this.guardPage({ host: async () => new URL(page.url).host }), async () => {
+      this.duringScript?.();
+      if (this.scriptFails) throw new Error('Execution context was destroyed');
+      if (this.scriptMoves !== undefined) page.url = this.scriptMoves;
+      return {
+        ...(this.acted(page) as object),
+        text: `ran:${script.source}`,
+        ...(this.scriptOrigin === undefined ? {} : { scriptOrigin: this.scriptOrigin }),
+      } as never;
+    });
   };
-  closePage = async () => undefined as never;
-  lifecycleOnPage = async () => {
-    throw new Error('not exercised');
+  closePage = async (sessionId: string, key: string) => {
+    const page = this.page(key, sessionId);
+    this.pages.splice(this.pages.indexOf(page), 1);
+    return undefined as never;
+  };
+  lifecycleOnPage = async (
+    sessionId: string,
+    key: string,
+    request: { op: string; timeoutMs?: number },
+    guard?: BrowserActGuard,
+  ) => {
+    await this.beforeLifecycle.shift()?.();
+    this.page(key, sessionId);
+    return await this.guarded(guard, this.guardPage(), async () => {
+      this.lifecycles.push({
+        op: request.op,
+        ...(request.timeoutMs === undefined ? {} : { timeoutMs: request.timeoutMs }),
+      });
+      return { status: {}, reply: this.lifecycleReplies.shift()?.reply ?? { matched: false } } as never;
+    });
   };
   adoptPage = async () => undefined as never;
 }
@@ -163,21 +222,43 @@ async function harness(
     /** The owner's switches as core's AgentControlPort answers them (the real policy); `undefined` is an unbound port. */
     readonly control?: () => AgentControlReader | undefined;
     readonly vault?: FakeVault;
+    /** The session's browser, when a test restarts the daemon over the same pages. */
+    readonly browser?: FakeBrowser;
+    /** The surface events an earlier daemon run journaled, replayed the first time a session is asked about. */
+    readonly journal?: readonly RecordedSurfaceEvent[];
+    /** The clock the tools sleep on (a wait's slices). */
+    readonly clock?: DrivenClock;
   } = {},
 ) {
   const root = await mkdtemp(join(tmpdir(), 'ferretry-browser-tools-'));
   roots.push(root);
   const work = join(root, 'work');
   await mkdir(join(work, '.fy'), { recursive: true });
-  const browser = new FakeBrowser();
-  const clock = fixedClock();
+  const browser = options.browser ?? new FakeBrowser();
+  const clock = options.clock ?? fixedClock();
   const kernel = browserKernel({ secrets: [SECRET], clock });
+  /** Every surface event this run published, as the journal keeps them. */
+  const events: RecordedSurfaceEvent[] = [];
+  const journal = { reads: 0, unreadable: 0 };
+  const control = new SurfaceControl(
+    {
+      publish: async (_sessionId, type, data) => {
+        events.push({ type, data });
+      },
+      history: async () => {
+        journal.reads += 1;
+        if (journal.unreadable > 0) {
+          journal.unreadable -= 1;
+          throw new Error('the journal could not be read');
+        }
+        return options.journal ?? [];
+      },
+    },
+    { now: () => clock.nowMs() },
+  );
   const tools = new BrowserTools({
     browser: browser as unknown as BrowserToolPorts['browser'],
-    control: new SurfaceControl(
-      { publish: async () => undefined, history: async () => [] },
-      { now: () => clock.nowMs() },
-    ),
+    control,
     kernel: kernel.kernel,
     policy:
       options.control === undefined
@@ -185,6 +266,8 @@ async function harness(
         : agentControlPolicy(options.control),
     files: rootFiles(workRoots(work, join(work, '.fy')), nodeStagedFiles(join(root, 'upload'), clock)),
     binaryName: 'fy',
+    // No credential is live in these worlds and no page is the app's (`pairing-screen*.test.ts` is where they are).
+    protection: { now: () => clock.nowMs(), appOrigins: () => new Set(), liveSince: () => false },
     // Bound as the daemon half binds them: the Vault's sign-in lock hears scripts and page acts (I98–I100).
     ...(options.vault === undefined
       ? {}
@@ -199,7 +282,7 @@ async function harness(
           },
         }),
   });
-  return { root, work, browser, kernel, tools };
+  return { root, work, browser, kernel, tools, control, events, journal, clock };
 }
 
 /** What a call failed with, whatever it is. */
@@ -212,11 +295,11 @@ async function failure(work: Promise<unknown>): Promise<unknown> {
   throw new Error('expected the call to fail');
 }
 
-/** The person's tools route for ferret `s1` (`POST /v1/sessions/:sessionId/surfaces/browser/tools`). */
+/** The person's tools route for ferret `s1` (`POST /v1/ferrets/:ferretId/surfaces/browser/tools`). */
 function personRoute(tools: BrowserTools, body: unknown): Promise<unknown> {
-  const { call } = callOf({ method: 'POST', path: '/v1/sessions/s1/surfaces/browser/tools', body, kind: 'host' });
-  const withSession = { ...call, params: new Map([['sessionId', 's1']]) } as unknown as CallContext;
-  return Promise.resolve(controlRoutes(tools)['POST /v1/sessions/:sessionId/surfaces/browser/tools'](withSession));
+  const { call } = callOf({ method: 'POST', path: '/v1/ferrets/s1/surfaces/browser/tools', body, kind: 'host' });
+  const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+  return Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/tools'](withSession));
 }
 
 async function refusal(work: Promise<unknown>): Promise<BrowserToolError> {
@@ -408,11 +491,11 @@ describe('the browser tools — files a page is handed (S51)', () => {
 });
 
 describe('the viewer stream’s input, through the act runner (R549)', () => {
-  it('R549 dispatches one inserted text as ONE `type` act on the viewed page, never split', async () => {
+  it('R549 dispatches one inserted text as ONE input event on the viewed page, never split', async () => {
     // Arrange
     const { browser, kernel, tools } = await harness();
     await tools.call(person, { tool: 'browser.open', name: 'app' });
-    const host = heldViewerHost(kernel.kernel, browser as never);
+    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
     const text = 'a whole sentence, typed at once';
 
     // Act
@@ -420,25 +503,27 @@ describe('the viewer stream’s input, through the act runner (R549)', () => {
 
     // Assert
     should(browser.inputs).deepEqual([{ kind: 'insertText', text }]);
-    should(kernel.acts.filter(act => act.op === 'type')).have.length(1);
   });
 
-  it('R549 refuses a person’s input on a held page before it reaches the browser', async () => {
-    // Arrange
+  it('R549 never refuses the owner’s own viewer input on a page under an input hold, while the agent’s type there is refused', async () => {
+    // Arrange — an input hold that refuses every type and press on the page (the owner just typed a private value).
     const { browser, kernel, tools } = await harness();
-    await tools.call(person, { tool: 'browser.open', name: 'app' });
-    kernel.hold(pageTarget((browser.pages[0] as FakePage).id), 'held', ['type']);
-    const host = heldViewerHost(kernel.kernel, browser as never);
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    kernel.hold(pageTarget((browser.pages[0] as FakePage).id), 'held', ['type', 'press']);
+    const host = heldViewerHost(kernel.kernel, browser as never, { mayType: true });
 
     // Act
-    const refused = await host.dispatchHumanInput('s1', { kind: 'insertText', text: 'x' }).then(
-      () => undefined,
-      (error: unknown) => error as Error,
-    );
+    const byAgent = await failure(tools.call(agent, { tool: 'browser.type', name: 'app', selector: '#q', text: 'x' }));
+    await host.dispatchHumanInput('s1', { kind: 'insertText', text: 'owner types' });
+    await host.dispatchHumanInput('s1', { kind: 'key', type: 'keyDown', key: 'Enter', code: 'Enter' });
+    await host.dispatchHumanInput('s1', { kind: 'mouse', type: 'mousePressed', x: 1, y: 2, button: 'left' });
 
-    // Assert
-    should(refused?.message).equal('This is held right now because the owner just typed a private value into it.');
-    should(browser.inputs).have.length(0);
+    // Assert — the agent's act never reached the page; every one of the owner's inputs did.
+    should((byAgent as Error).message).equal(
+      'This is held right now because the owner just typed a private value into it.',
+    );
+    should(browser.acts).deepEqual([]);
+    should(browser.inputs.map(input => input.kind)).deepEqual(['insertText', 'key', 'mouse']);
   });
 });
 
@@ -709,5 +794,524 @@ describe('the browser tools follow core’s AgentControlPort (What agents may co
 
     // Assert
     should(refused.message).equal(BROWSERS_OFF);
+  });
+});
+
+const phone = { by: 'human', deviceId: 'phone-1' } as const;
+const takeOver = (tools: BrowserTools, key: string, by: typeof phone | { by: 'local' } = { by: 'local' }) =>
+  tools.control('s1', { action: 'takeover', key }, by);
+const handBack = (tools: BrowserTools, key: string) =>
+  tools.control('s1', { action: 'handback', key }, { by: 'local' });
+
+describe('the browser tools — take over and hand back', () => {
+  it('refuses the agent a page a person took over, until they hand it back', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const view = await takeOver(tools, 'app', phone);
+    const refused = await refusal(tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }));
+    const read = await refusal(tools.call(agent, { tool: 'browser.read', name: 'app', mode: 'text' }));
+    const byPerson = await tools.call(person, { tool: 'browser.click', name: 'app', selector: 'a' });
+    const handedBack = await handBack(tools, 'app');
+    const allowed = await tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' });
+
+    // Assert
+    should(view.takeovers).deepEqual([
+      { surface: 'browser', id: 'p1', name: 'app', by: phone, since: '2026-11-06T09:00:00.000Z' },
+    ]);
+    should(view.driving).deepEqual([]);
+    should(refused).match({ code: 'taken_over', message: 'A person has taken over %browser:app; wait or ask them.' });
+    should(read.code).equal('taken_over');
+    should(byPerson.summary).startWith('Done on %browser:app');
+    should(handedBack.takeovers).deepEqual([]);
+    should(allowed.summary).startWith('Done on %browser:app');
+    // Only the person's click and the agent's click after the hand-back reached the page.
+    should(browser.acts).deepEqual(['click', 'click']);
+  });
+
+  it('refuses every pointer tool on a page a person took over, and touches nothing', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await takeOver(tools, 'app');
+    const calls: BrowserToolCall[] = [
+      { tool: 'browser.hover', name: 'app', ref: 'e1' },
+      { tool: 'browser.drag', name: 'app', fromRef: 'e1', toRef: 'e2' },
+      { tool: 'browser.mouse', name: 'app', action: 'up' },
+      { tool: 'browser.press', name: 'app', keys: ['Enter'] },
+      { tool: 'browser.scroll', name: 'app', pages: 1 },
+      { tool: 'browser.select', name: 'app', ref: 'e1', values: ['a'] },
+      { tool: 'browser.check', name: 'app', ref: 'e1', checked: true },
+      { tool: 'browser.fill_form', name: 'app', fields: [{ ref: 'e1', text: 'a' }] },
+      { tool: 'browser.highlight', name: 'app', clear: true },
+    ];
+
+    // Act
+    const refused = await Promise.all(calls.map(call => refusal(tools.call(agent, call))));
+
+    // Assert
+    should(refused.map(error => error.code)).deepEqual(calls.map(() => 'taken_over'));
+    should(browser.acts).deepEqual([]);
+  });
+
+  it('refuses the agent only the page a person holds, and lets it keep working on every other', async () => {
+    // Arrange — two pages; the person takes `login` to type a password.
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await tools.call(agent, { tool: 'browser.open', name: 'login' });
+    await takeOver(tools, 'login');
+
+    // Act
+    const onHeld = await Promise.all(
+      (
+        [
+          { tool: 'browser.read', name: 'login', mode: 'text' },
+          { tool: 'browser.type', name: 'login', selector: '#password', text: 'x' },
+          { tool: 'browser.close', name: 'login' },
+        ] as const
+      ).map(async call => (await refusal(tools.call(agent, call))).code),
+    );
+    const elsewhere = await tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' });
+    const opened = await tools.call(agent, { tool: 'browser.open', name: 'more' });
+
+    // Assert
+    should(onHeld).deepEqual(['taken_over', 'taken_over', 'taken_over']);
+    should(elsewhere.summary).startWith('Done on %browser:app');
+    should(opened.summary).startWith('Opened %browser:more');
+    should(browser.acts).deepEqual(['click']);
+  });
+
+  it('refuses an act already queued when the takeover lands, from inside the page’s own queue', async () => {
+    // Arrange — the guard runs where the real service runs it; a takeover between the agent's checks and its turn in
+    // the queue still wins.
+    const { browser, control, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    const original = browser.actOnPage.bind(browser);
+    browser.actOnPage = async (sessionId, key, action, guard) => {
+      await control.takeover('s1', { surface: 'browser', id: 'p1' }, { by: 'local' });
+      return await original(sessionId, key, action, guard);
+    };
+
+    // Act
+    const raced = await refusal(tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }));
+
+    // Assert
+    should(raced.code).equal('taken_over');
+    should(browser.acts).deepEqual([]);
+  });
+
+  it('refuses a page script queued when a person takes the page over, from inside the page’s own queue', async () => {
+    // Arrange
+    const { browser, control, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    const original = browser.scriptOnPage.bind(browser);
+    browser.scriptOnPage = async (sessionId, key, script, guard) => {
+      await control.takeover('s1', { surface: 'browser', id: 'p1' }, { by: 'local' });
+      return await original(sessionId, key, script, guard);
+    };
+    let ran = false;
+    browser.duringScript = () => {
+      ran = true;
+    };
+
+    // Act
+    const raced = await refusal(tools.call(agent, { tool: 'browser.eval', name: 'app', function: '() => 1' }));
+
+    // Assert
+    should(raced.code).equal('taken_over');
+    should(ran).be.false();
+  });
+
+  it('hides a held page from the agent’s list, and still shows it to the person', async () => {
+    // Arrange
+    const { tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await tools.call(agent, { tool: 'browser.open', name: 'login' });
+    const before = await tools.call(agent, { tool: 'browser.list' });
+
+    // Act
+    await takeOver(tools, 'login');
+    const byAgent = await tools.call(agent, { tool: 'browser.list' });
+    const byPerson = await tools.call(person, { tool: 'browser.list' });
+    await handBack(tools, 'login');
+    const after = await tools.call(agent, { tool: 'browser.list' });
+
+    // Assert
+    const names = (answer: { surfaces?: readonly { name?: string }[] }) => answer.surfaces?.map(row => row.name);
+    should(names(before)).deepEqual(['app', 'login']);
+    should(names(byAgent)).deepEqual(['app']);
+    should(names(byPerson)).deepEqual(['app', 'login']);
+    should(names(after)).deepEqual(['app', 'login']);
+  });
+
+  it('lets a person’s own calls through on a held page, by tool and by route', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    (browser.pages[0] as FakePage).text = 'the page says hi';
+    await takeOver(tools, 'app');
+
+    // Act
+    const read = await tools.call(person, { tool: 'browser.read', name: 'app', mode: 'text' });
+    const clicked = await tools.call(person, { tool: 'browser.click', name: 'app', selector: 'a' });
+    const typed = await tools.call(person, { tool: 'browser.type', name: 'app', selector: '#q', text: 'x' });
+    const byRoute = await personRoute(tools, { tool: 'browser.click', name: 'app', selector: 'a' });
+
+    // Assert
+    should(read.output).equal('the page says hi');
+    should(clicked.summary).startWith('Done on %browser:app');
+    should(typed.summary).startWith('Done on %browser:app');
+    should(byRoute).be.ok();
+    should(browser.acts).deepEqual(['read', 'click', 'type', 'click']);
+  });
+});
+
+describe('the browser tools — who took a page over, as the control route records it', () => {
+  it('records the device a takeover came from, and the box itself when the owner took it at the machine', async () => {
+    // Arrange
+    const { tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await tools.call(agent, { tool: 'browser.open', name: 'docs' });
+    const post = (kind: 'device' | 'host', key: string) => {
+      const { call } = callOf({
+        method: 'POST',
+        path: '/v1/ferrets/s1/surfaces/browser/control',
+        body: { action: 'takeover', key },
+        kind,
+      });
+      const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+      return Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/control'](withSession));
+    };
+
+    // Act
+    await post('device', 'app');
+    await post('host', 'docs');
+    const view = await tools.controlView('s1');
+
+    // Assert
+    should(view.takeovers.map(takeover => [takeover.name, takeover.by])).deepEqual([
+      ['app', { by: 'human', deviceId: 'd1' }],
+      ['docs', { by: 'local' }],
+    ]);
+  });
+});
+
+describe('the browser tools — a takeover refusal on the route', () => {
+  it('answers 409 "taken_over" in the agent’s own words when a ferret’s credential reaches the tools route', async () => {
+    // Arrange — the gate keeps a ferret off this route; the handler still maps a refusal the way the agent reads it.
+    const { tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await takeOver(tools, 'app');
+    const { call } = callOf({
+      method: 'POST',
+      path: '/v1/ferrets/s1/surfaces/browser/tools',
+      body: { tool: 'browser.click', name: 'app', selector: 'a' },
+      kind: 'agent',
+    });
+    const withSession = { ...call, params: new Map([['ferretId', 's1']]) } as unknown as CallContext;
+
+    // Act
+    const refused = await failure(
+      Promise.resolve(controlRoutes(tools)['POST /v1/ferrets/:ferretId/surfaces/browser/tools'](withSession)),
+    );
+
+    // Assert
+    should(refused).be.instanceOf(ApiError);
+    should((refused as ApiError).status).equal(409);
+    should((refused as ApiError).code).equal('taken_over');
+    should((refused as ApiError).message).equal('A person has taken over %browser:app; wait or ask them.');
+  });
+});
+
+describe('the browser tools — a wait ends the moment a person takes the page over', () => {
+  /** A clock whose sleeps return at once, so a test can act "while the agent waited". */
+  function sleeping() {
+    const base = fixedClock();
+    const slept: number[] = [];
+    const onSleep: (() => Promise<void>)[] = [];
+    const clock: DrivenClock = {
+      ...base,
+      sleep: async ms => {
+        slept.push(Number(ms));
+        await onSleep.shift()?.();
+      },
+    };
+    return { clock, slept, onSleep };
+  }
+
+  it('waits out a plain time, a second at a time, while nobody holds the page', async () => {
+    // Arrange
+    const { clock, slept } = sleeping();
+    const { browser, tools } = await harness({ clock });
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+
+    // Act
+    const result = await tools.call(agent, { tool: 'browser.wait_for', name: 'app', time: 2_500 });
+
+    // Assert
+    should(result).deepEqual({ summary: 'Waited 2500 ms on %browser:app.', matched: true });
+    should(slept).deepEqual([1_000, 1_000, 500]);
+    should(browser.lifecycles).deepEqual([]);
+  });
+
+  it('stops a plain wait the moment a person takes the page over', async () => {
+    // Arrange
+    const { clock, slept, onSleep } = sleeping();
+    const { tools } = await harness({ clock });
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    onSleep.push(async () => {
+      await takeOver(tools, 'app');
+    });
+
+    // Act
+    const stopped = await refusal(tools.call(agent, { tool: 'browser.wait_for', name: 'app', time: 5_000 }));
+
+    // Assert
+    should(stopped.code).equal('taken_over');
+    should(slept).have.length(1);
+  });
+
+  it('stops a wait between slices the moment a person takes the page over', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    browser.lifecycleReplies.push({ reply: { matched: false } });
+    browser.beforeLifecycle.push(
+      async () => undefined,
+      async () => {
+        await takeOver(tools, 'app');
+      },
+    );
+
+    // Act
+    const stopped = await refusal(
+      tools.call(agent, { tool: 'browser.wait_for', name: 'app', text: 'Never', timeoutMs: 5_000 }),
+    );
+
+    // Assert — the first slice ran; the takeover landed before the second, which was refused in the page's queue.
+    should(stopped.code).equal('taken_over');
+    should(browser.lifecycles).have.length(1);
+  });
+});
+
+describe('the browser tools — what a takeover, a hand-over and an ask outlive', () => {
+  it('rebuilds them from the journal the first time a session is asked about, retrying a journal it could not read', async () => {
+    // Arrange — a previous run: the agent opened `app` (asking the owner) and `second` (asking, with words), a person
+    // opened `mine`, then took `app` over and handed `mine` on.
+    const before = await harness();
+    await before.tools.call(agent, { tool: 'browser.open', name: 'app', askOwner: true });
+    await before.tools.call(agent, { tool: 'browser.open', name: 'second', askOwner: 'Paste the code.' });
+    await before.tools.call(person, { tool: 'browser.open', name: 'mine' });
+    await takeOver(before.tools, 'app');
+    await before.tools.control('s1', { action: 'handover', key: 'mine' }, { by: 'local' });
+    const restarted = await harness({ browser: before.browser, journal: before.events });
+    restarted.journal.unreadable = 1;
+
+    // Act — the first read of the journal fails and is retried, never remembered as empty.
+    const unreadable = await failure(
+      restarted.tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }),
+    );
+    const held = await refusal(restarted.tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }));
+    const handed = await restarted.tools.call(agent, { tool: 'browser.click', name: 'mine', selector: 'a' });
+    const view = await restarted.tools.controlView('s1');
+
+    // Assert
+    should(unreadable).be.instanceOf(Error);
+    should(held.code).equal('taken_over');
+    should(handed.summary).startWith('Done on %browser:mine');
+    should(view.takeovers.map(takeover => takeover.name)).deepEqual(['app']);
+    should(view.handed.map(entry => entry.name)).deepEqual(['mine']);
+    // The ask on `app` ended with the takeover that followed it; the one on `second` still stands.
+    should(view.asked.map(entry => entry.name)).deepEqual(['second']);
+    should(view.asked.map(entry => entry.message)).deepEqual(['Paste the code.']);
+    should(restarted.journal.reads).equal(2);
+  });
+
+  it('clears an ask when a person takes the page over or hands it back, not when the agent reads', async () => {
+    // Arrange
+    const { tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'one', askOwner: true });
+    await tools.call(agent, { tool: 'browser.open', name: 'two', askOwner: true });
+
+    // Act
+    await tools.call(agent, { tool: 'browser.read', name: 'one', mode: 'text' });
+    const standing = (await tools.controlView('s1')).asked.length;
+    await takeOver(tools, 'one');
+    const taken = (await tools.controlView('s1')).asked.map(entry => entry.name);
+    await handBack(tools, 'two');
+    const handedBack = (await tools.controlView('s1')).asked.map(entry => entry.name);
+
+    // Assert
+    should(standing).equal(2);
+    should(taken).deepEqual(['two']);
+    should(handedBack).deepEqual([]);
+  });
+
+  it('drops an opened page and its ask once the page itself is gone', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app', askOwner: true });
+
+    // Act — closed by a person's hand, outside the tools, so nothing forgot it.
+    browser.pages.length = 0;
+    const view = await tools.controlView('s1');
+
+    // Assert
+    should([view.opened, view.asked]).deepEqual([[], []]);
+  });
+});
+
+describe('the browser tools — two ferrets on one browser profile', () => {
+  const other: ToolCaller = { kind: 'agent', sessionId: 's2' };
+
+  it('answers "not found" for another ferret’s page, and holds one ferret’s page for that ferret only', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await tools.call(other, { tool: 'browser.open', name: 'app' });
+    await tools.call(agent, { tool: 'browser.open', name: 'only-mine' });
+
+    // Act
+    const missing = await refusal(tools.call(other, { tool: 'browser.click', name: 'only-mine', selector: 'a' }));
+    const byId = await refusal(tools.call(other, { tool: 'browser.click', name: 'p1', selector: 'a' }));
+    await takeOver(tools, 'app');
+    const heldForS1 = await refusal(tools.call(agent, { tool: 'browser.click', name: 'app', selector: 'a' }));
+    const freeForS2 = await tools.call(other, { tool: 'browser.click', name: 'app', selector: 'a' });
+    const listed = await tools.call(other, { tool: 'browser.list' });
+
+    // Assert
+    should(missing.code).equal('not_found');
+    should(missing.message).containEql('There is no %browser:only-mine in this session');
+    should(byId.code).equal('not_found');
+    should(heldForS1.code).equal('taken_over');
+    should(freeForS2.summary).startWith('Done on %browser:app');
+    should(listed.surfaces?.map(row => row.id)).deepEqual(['p2']);
+    // `s2` acted on ITS page `p2`, never on the held `p1`.
+    should(browser.acts).deepEqual(['click']);
+  });
+
+  it('counts a popup as its opener’s page: the opener’s ferret may use it, no other may, and a person’s popup stays theirs', async () => {
+    // Arrange
+    const { browser, tools } = await harness();
+    await tools.call(agent, { tool: 'browser.open', name: 'app' });
+    await tools.call(person, { tool: 'browser.open', name: 'mine' });
+    const mine = browser.pages.find(page => page.name === 'mine') as FakePage;
+    browser.pages.push(
+      { id: 'pop-1', url: 'https://example.test/pop', title: 'Popup', text: '', session: 's1', openerId: 'p1' },
+      { id: 'pop-2', url: 'https://example.test/pop', title: 'Popup', text: '', session: 's1', openerId: mine.id },
+    );
+
+    // Act
+    const ofMine = await tools.call(agent, { tool: 'browser.click', name: 'pop-1', selector: 'a' });
+    const ofTheirs = await refusal(tools.call(agent, { tool: 'browser.click', name: 'pop-2', selector: 'a' }));
+    const byOther = await refusal(
+      tools.call({ kind: 'agent', sessionId: 's2' }, { tool: 'browser.click', name: 'pop-1', selector: 'a' }),
+    );
+
+    // Assert
+    should(ofMine.summary).startWith('Done on %browser:pop-1');
+    should(ofTheirs.code).equal('forbidden');
+    should(byOther.code).equal('not_found');
+  });
+});
+
+describe('the address of a ferret’s page, for the plugin that reads it on its behalf (pageAddressOf)', () => {
+  const TOKEN_URL = 'https://app.example.test:8443/cb/reset?token=SECRET-TOKEN#frag-SECRET';
+  const mine = { by: 'agent', sessionId: 's1' } as const;
+
+  /** A ferret `s1` with its own page `app` at `url`, and the owner's Browsers switch as `reader` answers it. */
+  async function world(reader: () => AgentControlReader | undefined, url = TOKEN_URL) {
+    const made = await harness({ control: reader });
+    made.browser.pages.push({ id: 'p1', name: 'app', url, title: 'App', text: '', session: 's1', openedBy: mine });
+    return made;
+  }
+
+  it('PA1 refuses, in the agents’ sentence, while Browsers is off or the port is unbound, and reads no page', async () => {
+    const off = switches('files', 'scripts');
+    for (const reader of [() => off.reader, () => undefined]) {
+      const { tools, browser } = await world(reader);
+      let looked = 0;
+      const status = browser.status;
+      browser.status = async (sessionId: string) => {
+        looked += 1;
+        return await status(sessionId);
+      };
+      const refused = await failure(tools.pageAddressOf('s1', 'app'));
+      should(refused).be.instanceOf(ApiError);
+      should((refused as ApiError).status).equal(403);
+      should((refused as ApiError).code).equal('forbidden');
+      should((refused as ApiError).message).equal(agentControlRefusal('browser'));
+      should(looked).equal(0);
+    }
+    should(off.asked[0]).deepEqual(['s1', 'browser']);
+  });
+
+  it('PA2 answers the page’s origin and nothing after it while Browsers is on: no path, query, fragment or credentials', async () => {
+    const { reader } = switches('browser');
+    const { tools } = await world(() => reader);
+
+    const answer = await tools.pageAddressOf('s1', 'app');
+
+    should(answer).equal('https://app.example.test:8443');
+    should(String(answer)).not.containEql('SECRET');
+    should(await (await world(() => reader, 'http://user:pw@host.test/p?x=1')).tools.pageAddressOf('s1', 'app')).equal(
+      'http://host.test',
+    );
+  });
+
+  it('PA3 reads the switch live on every call: a ferret switched off after an answer is refused the next time', async () => {
+    let on = true;
+    const { tools } = await world(() => ({ allows: async () => on }));
+
+    should(await tools.pageAddressOf('s1', 'app')).equal('https://app.example.test:8443');
+    on = false;
+    const refused = await failure(tools.pageAddressOf('s1', 'app'));
+
+    should((refused as ApiError).message).equal(agentControlRefusal('browser'));
+  });
+
+  it('PA4 never answers another ferret’s page of the same name: each is looked up in its own listing only', async () => {
+    const { reader } = switches('browser');
+    const { tools, browser } = await world(() => reader);
+    browser.pages.push({
+      id: 'p2',
+      name: 'app',
+      url: 'https://other.example.test/',
+      title: 'Other',
+      text: '',
+      session: 's2',
+      openedBy: { by: 'agent', sessionId: 's2' },
+    });
+
+    should(await tools.pageAddressOf('s1', 'app')).equal('https://app.example.test:8443');
+    should(await tools.pageAddressOf('s2', 'app')).equal('https://other.example.test');
+    should(await tools.pageAddressOf('s3', 'app')).be.undefined();
+  });
+
+  it('PA5 answers nothing when there is no such page, or the page is a person’s, or a person holds it, or has no web address', async () => {
+    const { reader } = switches('browser');
+    const { tools, browser } = await world(() => reader);
+    browser.pages.push(
+      {
+        id: 'p2',
+        name: 'theirs',
+        url: 'https://theirs.test/',
+        title: '',
+        text: '',
+        session: 's1',
+        openedBy: { by: 'local' },
+      },
+      { id: 'p3', name: 'blank', url: 'about:blank', title: '', text: '', session: 's1', openedBy: mine },
+      { id: 'p4', name: 'odd', url: 'not a url', title: '', text: '', session: 's1', openedBy: mine },
+    );
+
+    should(await tools.pageAddressOf('s1', 'missing')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'theirs')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'blank')).be.undefined();
+    should(await tools.pageAddressOf('s1', 'odd')).be.undefined();
+    await takeOver(tools, 'app');
+    should(await tools.pageAddressOf('s1', 'app')).be.undefined();
   });
 });

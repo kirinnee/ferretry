@@ -83,7 +83,7 @@ describe('conversation state adapters, on the kernel state port', () => {
 });
 
 describe('conversation daemon half, through the kernel test host', () => {
-  const ferrets = { get: async () => ({ id: 'f1' }) };
+  const ferrets = { get: async () => ({ id: 'f1' }), resolve: async () => ({ kind: 'unknown' as const }) };
   const boot = async () =>
     await testHost({
       plugins: [daemon],
@@ -136,7 +136,11 @@ describe('the merged half', () => {
     await testHost({
       plugins: [daemon],
       fakes: {
-        ferrets: { get: async () => ({ id: 'f1' }), list: async () => [] },
+        ferrets: {
+          get: async () => ({ id: 'f1' }),
+          list: async () => [],
+          resolve: async () => ({ kind: 'unknown' as const }),
+        },
         asks: { get: async () => undefined, open: async () => [] },
       },
       clock: fixedClock('2026-11-06T09:00:00Z'),

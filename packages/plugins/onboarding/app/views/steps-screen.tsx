@@ -4,7 +4,7 @@
  * which is the way back to it for a machine that still has steps to look at.
  */
 
-import { daemonHomeHref, daemonOfClient, PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { daemonHomeHref, daemonOfClient, daemonSettingsHref, PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { Button } from '@ferretry/app/ui';
 import type { PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -82,9 +82,68 @@ function RouterLink({
     router.navigate(href);
   };
   return (
-    <a href={href} onClick={go} className="text-cell" {...marks}>
+    <a href={href} onClick={go} className="inline-flex min-h-11 items-center text-cell" {...marks}>
       {children}
     </a>
+  );
+}
+
+/** A step's title as a list item reads it: the trailing ellipsis of "Start from…" means "pick" and has no place here. */
+const plainTitle = (title: string): string => title.replace(/…$/u, '');
+
+/**
+ * The close of the setup, once no step waits for an answer: what was set up, and each step left for later or skipped,
+ * with the way to its settings, so nothing left undone is lost.
+ */
+export function SetupSummary({
+  daemon,
+  steps,
+}: {
+  readonly daemon: string;
+  readonly steps: readonly {
+    readonly plugin: string;
+    readonly id: string;
+    readonly title: string;
+    readonly state: StepState;
+  }[];
+}): ReactNode {
+  if (steps.length === 0 || steps.some(step => step.state === 'pending')) return null;
+  const set = steps.filter(step => step.state === 'done' || step.state === 'found');
+  const later = steps.filter(step => step.state === 'later' || step.state === 'skipped');
+  return (
+    <section className="kt-panel flex flex-col gap-2 p-3" data-onboarding-summary="">
+      <h2 className="m-0 text-cell font-semibold">Setup is finished</h2>
+      <div className="flex flex-col gap-1" data-onboarding-summary-set="">
+        <p className="m-0 text-cell text-muted">{set.length === 0 ? 'No step was set up here.' : 'Set up:'}</p>
+        {set.length === 0 ? null : (
+          <ul className="m-0 flex list-none flex-col p-0 text-cell">
+            {set.map(step => (
+              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center">
+                {plainTitle(step.title)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+      {later.length === 0 ? null : (
+        <div className="flex flex-col gap-1" data-onboarding-summary-later="">
+          <p className="m-0 text-cell text-muted">Set up later, from Settings:</p>
+          <ul className="m-0 flex list-none flex-col p-0">
+            {later.map(step => (
+              <li key={`${step.plugin}.${step.id}`} className="flex min-h-11 items-center gap-2">
+                <RouterLink
+                  href={daemonSettingsHref(daemon, step.plugin)}
+                  data-onboarding-later-link={`${step.plugin}.${step.id}`}
+                >
+                  {plainTitle(step.title)}
+                </RouterLink>
+                <span className="text-meta text-muted">({STATE_LABEL[step.state].toLowerCase()})</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -195,6 +254,7 @@ export function createStepsScreen(client: PluginClient) {
             ))}
           </ol>
         )}
+        <SetupSummary daemon={daemon} steps={view.steps} />
         <RouterLink href={daemonHomeHref(daemon)} data-onboarding-open-machine="">
           Open this machine
         </RouterLink>

@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { writeFileSync } from 'node:fs';
-import { chmod, lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, mkdtemp, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ChildHandle, RootName, RootsPort } from '@ferretry/kernel/contract';
@@ -12,6 +12,7 @@ import { implementDaemon } from '@ferretry/kernel/manifest';
 import { fixedClock, owner, standInAdmission, testHost } from '@ferretry/kernel/testing';
 import { instantFromEpochMs } from '@ferretry/std';
 import { LoginsPort, type LoginId } from '../../../contract/index.ts';
+import { renderLoginList } from '../../../cli/lib/render.ts';
 import { OwnedLoginStore } from '../../../daemon/adapters/credentials/owned-store.ts';
 import { AnthropicUsageProbe } from '../../../daemon/adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from '../../../daemon/adapters/credentials/codex-usage-probe.ts';
@@ -99,6 +100,9 @@ const config = {
     claude: { harness: 'claude-code', store: 'ferretry' },
     codex: { harness: 'codex', store: 'ferretry' },
     host: { harness: 'claude-code', store: 'host' },
+    'codex-host': { harness: 'codex', store: 'host' },
+    'codex-locked': { harness: 'codex', store: 'ferretry' },
+    'codex-linked': { harness: 'codex', store: 'ferretry' },
   },
 };
 const claudeOnly = () => new Map([['claude', { harness: 'claude-code' as const, store: 'ferretry' as const }]]);
@@ -243,6 +247,17 @@ test('S175 owned store metadata reaches the actual daemon list: status, email, p
     expect(x?.email).toBe('codex@example.test');
     expect(x?.status).toMatchObject({ word: 'ready', reason: 'access_current', planType: 'plus' });
     expect(list.logins.find(login => login.id === 'host')?.signIn.available).toBe(false);
+    // A Claude login in the terminal's own folder launches, so it is not reported as unreachable or "not in 5.0 yet".
+    expect(list.logins.find(login => login.id === 'host')?.status).toMatchObject({
+      word: 'ready',
+      reason: 'host_terminal',
+    });
+    // Only a Codex host login carries the 5.0 sentence; Claude's says the terminal's sign-in is used as it is.
+    const acts = (id: string) => JSON.stringify(list.logins.find(l => l.id === id));
+    const claudeHost = list.logins.find(l => l.id === 'host');
+    expect(JSON.stringify([claudeHost?.signIn, claudeHost?.checkNow])).not.toContain('not in 5.0 yet');
+    expect(JSON.stringify([claudeHost?.signIn, claudeHost?.checkNow])).toContain('your terminal');
+    expect(acts('codex-host')).toContain('not in 5.0 yet');
     const wire = JSON.stringify({ list, logs: host.logs, events: host.published });
     expect(wire.includes(TOKEN) || wire.includes(REFRESH)).toBe(false);
     expect(wire).not.toMatch(/fingerprint|access_token|refresh_token|accessToken|refreshToken/u);
@@ -623,6 +638,41 @@ test('external entrypoints still refuse missing governance after private launch 
     expect(refresh.status).toBe(409);
     expect(refresh.body).toContain('fleet_credential_unauthorized');
   } finally {
+    await host.stop();
+  }
+});
+
+test('an owned Codex login whose file cannot be read or has a second name is never Ready: it is listed under Needs sign-in', async () => {
+  const f = await fixture();
+  await f.put('codex/auth.json', codex());
+  await f.put('codex-locked/auth.json', codex());
+  await chmod(join(f.base, 'codex-locked/auth.json'), 0o000);
+  await f.put('codex-linked/auth.json', codex());
+  await link(join(f.base, 'codex-linked/auth.json'), join(f.base, 'codex-linked/second-name'));
+  const host = await testHost({
+    plugins: [composed(f.roots())],
+    fakes: { vault: emptyVault() },
+    config,
+    clock: fixedClock(instantFromEpochMs(NOW)),
+  });
+  try {
+    const list = await host.provided(LoginsPort).list();
+    const status = (id: string) => list.logins.find(login => login.id === id)?.status;
+    expect(status('codex')).toMatchObject({ word: 'ready', reason: 'access_current' });
+    for (const id of ['codex-locked', 'codex-linked']) {
+      expect(status(id)?.word).toBe('needs_sign_in');
+      expect(list.logins.find(login => login.id === id)?.signIn.available).toBe(true);
+    }
+    const text = renderLoginList(list, 'fy');
+    const section = text.slice(text.indexOf('Needs sign-in:'));
+    expect(section).toContain('fy login signin codex-locked');
+    expect(section).toContain('fy login signin codex-linked');
+    expect(section).not.toContain('login signin codex\n');
+    // Host-store rows stay out of the section, as they are.
+    expect(section).not.toContain('codex-host');
+    expect(JSON.stringify(list)).not.toContain(REFRESH);
+  } finally {
+    await chmod(join(f.base, 'codex-locked/auth.json'), 0o600);
     await host.stop();
   }
 });

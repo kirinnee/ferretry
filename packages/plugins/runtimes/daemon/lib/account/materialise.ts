@@ -32,6 +32,8 @@
  * Pure: bodies are read by the caller, an id is minted by an injected function, the clock is a string.
  */
 import { secretReferencesIn } from '@ferretry/core-vault/contract';
+import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
+import { looksSecret, namesCredential } from '@ferretry/std/credential-words';
 import type { z } from 'zod';
 import type { CompactAtSchema } from '../../../contract/index.ts';
 import { HARNESS_ASSETS, HARNESS_OWNED_SKILL_ENTRIES, harnessAsset } from '../assets.ts';
@@ -72,6 +74,7 @@ import {
 import {
   CODEX_CREDENTIAL_FILE,
   codexCredentialLink,
+  codexWrapperLink,
   credentialLaunchArguments,
   credentialLaunchEnvironment,
   resolveCredentialStore,
@@ -159,6 +162,11 @@ export interface MaterialiseInput {
    * catalog offers its models and gets its tier pins; absent, every runtime offers its profile's model set.
    */
   readonly modelCatalogs?: ModelCatalogSources;
+  /**
+   * Where Logins keeps each Ferretry-kept login (`LoginsApi.launchStores`): the one place a runtime's wrapper and home
+   * learn the store, so a person-run wrapper is signed in where a ferret is. Absent: no `ferretry` login is reachable.
+   */
+  readonly loginStores?: readonly LoginLaunchStore[];
 }
 
 /** One reason a runtime, or the fleet, cannot be planned. */
@@ -196,6 +204,8 @@ interface PlannedRuntime {
   /** The runtime's own `compactAt`, else its profile's. Absent is `auto`. */
   readonly compactAt?: z.infer<typeof CompactAtSchema>;
   readonly secretEnv: Readonly<Record<string, string>>;
+  /** The login's, profile's and model variables whose value names no secret (an MCP check fills `${VAR}` from them). */
+  readonly launchEnv?: Readonly<Record<string, string>>;
   /** Why it cannot launch, when it cannot. */
   readonly blocked?: string;
 }
@@ -265,8 +275,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
   const ids = assignRuntimeIds(runtimeNames, input.ids, input.mint);
   const fleet = layout.fleetDirectory;
   const codexSqliteHome = joinPath(sharedHistoryPoolDirectory(fleet, 'codex'), 'sqlite');
+  const loginStores = new Map((input.loginStores ?? []).map(store => [store.id, store] as const));
   const credentialStorePaths = {
-    fleetRoot: fleet,
     userHome: layout.userHome,
     ...(input.hostCodexHome === undefined ? {} : { hostCodexHome: input.hostCodexHome }),
   };
@@ -283,15 +293,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     { kind: 'file', path: runtimeIdsPath(fleet), content: serializeRuntimeIds(ids), mode: PRIVATE_FILE_MODE },
   ];
 
-  // Every Ferretry-kept login gets its directory, used or not: an empty slot (C8) has no login yet,
-  // and a sign-in needs somewhere to write one.
-  for (const [id, credential] of Object.entries(model.credentials).toSorted(([left], [right]) =>
-    left < right ? -1 : 1,
-  )) {
-    const resolution = resolveCredentialStore(id, credential, credentialStorePaths);
-    if (!('ownedDirectory' in resolution) || resolution.ownedDirectory === undefined) continue;
-    operations.push({ kind: 'directory', path: resolution.ownedDirectory, mode: DIRECTORY_MODE });
-  }
+  // A Ferretry-kept login's store is Logins' (it makes the directory a sign-in writes into): nothing is created for one here.
   if (runtimeNames.some(name => model.credentials[model.runtimes[name]?.credential ?? '']?.harness === 'codex')) {
     operations.push({ kind: 'directory', path: codexSqliteHome, mode: DIRECTORY_MODE });
   }
@@ -321,7 +323,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     const reasons: string[] = [];
     reasons.push(...(runtimeDisable(model, name, now, binary, input.budgetHolds)?.clauses ?? []));
 
-    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness);
+    const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness, loginStores);
     if ('unavailable' in store)
       reasons.push(`its login "${runtime.credential}" cannot be reached: ${store.unavailable}`);
     if (store.store === 'environment' && store.problem !== undefined) {
@@ -413,6 +415,15 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     for (const [variable, reason] of Object.entries(REFUSED_LAUNCH_VARIABLES)) {
       if (variable in env) problems.push({ runtime: name, message: `it may not set ${variable}: ${reason}` });
     }
+    // The variables a person's own configuration sets that carry no secret: what a check may fill from. A name that is a
+    // credential's (a token, a key) or a value that looks like one is never published, whether or not it names a secret.
+    const plainLaunchEnv: Record<string, string> = Object.fromEntries(
+      // The login's OWN variables (an environment login's), not Ferretry's credential-store plumbing.
+      Object.entries({ ...(store.store === 'environment' ? store.env : {}), ...derived.env, ...profileEnv }).filter(
+        ([variable, value]) =>
+          secretReferencesIn(value).length === 0 && !namesCredential(variable) && !looksSecret(variable, value),
+      ),
+    );
     env[CREDENTIAL_ENV] = runtime.credential;
     env[RUNTIME_NAME_ENV] = name;
     env[STATE_HOME_ENV] = layout.stateHome;
@@ -471,6 +482,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         fyCommand: input.fyCommand,
         secretsFile: model.advanced.secretsFile,
         harnessCommand: input.harnessCommands?.[harness],
+        signInLink: codexWrapperLink(home, store),
         refusal: blocked,
       }),
       mode: EXECUTABLE_MODE,
@@ -493,6 +505,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
       secretEnv: sorted(
         Object.fromEntries(Object.entries(env).filter(([, value]) => secretReferencesIn(value).length > 0)),
       ),
+      ...(Object.keys(plainLaunchEnv).length === 0 ? {} : { launchEnv: sorted(plainLaunchEnv) }),
       ...(blocked === undefined ? {} : { blocked }),
     });
   }
@@ -532,6 +545,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
         available: reason === undefined,
         unavailableReason: reason ?? null,
         secretEnv: runtime.secretEnv,
+        ...(runtime.launchEnv === undefined ? {} : { launchEnv: runtime.launchEnv }),
       };
     }),
     runtimes: planned.map(runtime => ({

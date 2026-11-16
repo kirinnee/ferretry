@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 
-import { CHECKING_HOSTED_RELAY } from '../../../app/pending-connections.ts';
+import { CHECKING_HOSTED_RELAY, settleHostedRelay } from '../../../app/hosted-relay-state.ts';
 import { OnboardingConnectionNote } from '../../../app/onboarding-connection-note.tsx';
 import { mount, must } from '../support/dom.ts';
 
@@ -54,6 +54,19 @@ describe('the connection note', () => {
     expect(unknown.container.textContent).not.toContain('switched off');
     expect(unknown.container.textContent).not.toContain('Available now');
     await unknown.unmount();
+  });
+
+  it('c58-07 settles the shell’s answer as it came, and a read that throws as ignorance (never checking, never off)', async () => {
+    const answer = { kind: 'available', relayUrl: 'https://relay.example.test' } as const;
+    expect(await settleHostedRelay(async () => answer)).toBe(answer);
+    expect(await settleHostedRelay(async () => ({ kind: 'disabled' }))).toEqual({ kind: 'disabled' });
+    const thrown = await settleHostedRelay(() => {
+      throw new Error('not a function');
+    });
+    const rejected = await settleHostedRelay(async () => Promise.reject(new Error('refused')));
+    for (const state of [thrown, rejected]) expect(state.kind).toBe('undetermined');
+    expect(CHECKING_HOSTED_RELAY.kind).toBe('checking');
+    expect(Object.isFrozen(CHECKING_HOSTED_RELAY)).toBe(true);
   });
 
   it('folds away what the fallback does not cover and what it would see', async () => {

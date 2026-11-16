@@ -12,12 +12,13 @@ import type {
   SessionTerminalEnding,
 } from '../../src/lib/daemon/ports.ts';
 import { DirectSupervisor, SystemdSupervisor } from '../../src/lib/daemon/supervisor.ts';
+import { MidTurnUnreadableError } from '../../src/lib/update/mid-turn.ts';
 import { CapturedOutput, FakePrompt, SteppingClock } from './update/support.ts';
 
 interface Options {
   readonly installed?: boolean;
   readonly running?: boolean;
-  readonly midTurn?: readonly number[];
+  readonly midTurn?: readonly (number | 'unreadable')[];
   readonly interactive?: boolean;
   readonly answer?: string;
   readonly home?: 'claimed' | 'unclaimed' | 'absent' | 'empty';
@@ -233,7 +234,13 @@ async function harness(options: Options = {}) {
     clientName: 'fy',
     clock: new SteppingClock(100),
     out,
-    turns: { midTurn: async () => turns.shift() ?? 0 },
+    turns: {
+      midTurn: async () => {
+        const next = turns.shift() ?? 0;
+        if (next === 'unreadable') throw new MidTurnUnreadableError();
+        return next;
+      },
+    },
   });
   return {
     controller,
@@ -317,6 +324,41 @@ describe('fy daemon restart', () => {
     expect(h.locks.length).toBeGreaterThan(0);
     expect(h.trail.indexOf('signal:4321:SIGTERM')).toBeGreaterThanOrEqual(0);
     expect(h.out.text.indexOf('waiting until every ferret is idle')).toBeLessThan(h.out.text.indexOf('restarted'));
+  });
+
+  test('V-0237 --when-idle says so when no ferret is mid-turn at the first read, and goes ahead', async () => {
+    const h = await harness({ midTurn: [0] });
+    await h.controller.restart({ whenIdle: true });
+    expect(h.out.text).toContain('no ferret is mid-turn');
+    expect(h.out.text).toContain('ok: fyd restarted');
+  });
+
+  test('V-0237 without --when-idle a restart is silent about ferrets when none is mid-turn', async () => {
+    const h = await harness({ midTurn: [0] });
+    await h.controller.restart();
+    expect(h.out.text).not.toContain('mid-turn');
+  });
+
+  test('V-0237 --when-idle with the daemon up but the count unreadable refuses, and stops nothing', async () => {
+    const h = await harness({ midTurn: ['unreadable'] });
+    await expect(h.controller.restart({ whenIdle: true })).rejects.toThrow(
+      'could not read how many ferrets are mid-turn, so nothing was restarted; run it again, or leave out --when-idle',
+    );
+    expect(h.trail.some(line => line.startsWith('signal'))).toBe(false);
+    expect(h.locks).toEqual([]);
+  });
+
+  test('V-0237 --when-idle refuses too when the count becomes unreadable WHILE waiting', async () => {
+    const h = await harness({ midTurn: [2, 'unreadable'] });
+    await expect(h.controller.restart({ whenIdle: true })).rejects.toThrow('nothing was restarted');
+    expect(h.trail.some(line => line.startsWith('signal'))).toBe(false);
+  });
+
+  test('V-0237 without --when-idle an unreadable count is the same as none: the restart goes ahead, as before', async () => {
+    const h = await harness({ midTurn: ['unreadable'] });
+    await h.controller.restart();
+    expect(h.out.text).toContain('ok: fyd restarted');
+    expect(h.out.text).not.toContain('mid-turn');
   });
 
   test('V-0237 a caller that already said what the restart means for ferrets is not told twice', async () => {

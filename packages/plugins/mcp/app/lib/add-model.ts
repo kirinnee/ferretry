@@ -136,6 +136,7 @@ const QUEUED_WHY = {
   'mid-turn': 'it is working on a turn',
   'in-flight': 'it has work a restart would lose',
   'own-session': 'its own turn has to end first',
+  blocked: 'its runtime cannot start yet (a login may need sign-in)',
 } as const;
 
 const SKIPPED_WHY = {

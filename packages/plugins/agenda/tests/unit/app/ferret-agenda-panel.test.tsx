@@ -9,6 +9,8 @@ import type { PanelProps, PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, Suspense } from 'react';
 import app from '../../../app/index.ts';
 import manifest from '../../../manifest.ts';
+import { useFerretAgenda } from '../../../app/hooks/use-ferret-agenda.ts';
+import { createAgendaRuntime } from '../../../app/lib/agenda-runtime.ts';
 import { projectionSnapshot } from '../../support/app/agenda-projection.ts';
 
 ensureDom();
@@ -84,6 +86,18 @@ describe('the ferret-agenda panel', () => {
     expect(client.calls.find(call => call.route === 'GET /v1/ferrets/:ferretId/agenda')?.params).toEqual({
       ferretId: FERRET,
     });
+  });
+
+  it('keeps the ids of every item on the ferret’s agenda, open and resolved, for `!A3` to be proved against', async () => {
+    const runtime = createAgendaRuntime(daemon(() => ({ ...projectionSnapshot(3, 2), sessionId: FERRET })));
+    const seen: { current: ReturnType<typeof useFerretAgenda> } = { current: null };
+    const Probe = () => {
+      seen.current = useFerretAgenda(runtime, FERRET);
+      return null;
+    };
+    view = await mount(createElement(Probe));
+    await settleUntil(() => (seen.current?.ledger.length ?? 0) > 0, 'the ledger to be read', interact);
+    expect(seen.current?.ledger).toEqual(['A1', 'A2', 'A3', 'A4', 'A5']);
   });
 
   it('fails closed on a refusal: it says the read failed and draws no agenda', async () => {

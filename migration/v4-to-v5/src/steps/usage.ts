@@ -11,10 +11,19 @@
  *   in v4's older rate spelling are converted with v4's own transform (`src/v4/usage.ts`); the result must pass v5's
  *   `PricingFileSchema` or the step fails naming the row, because a booted v4 held only a catalog it accepted.
  *
+ * - `compaction-history.json` (`{version: 1, entries}`, at the v4 home's top) → `state/usage/compaction-history.json`
+ *   `{entries}`: each entry must pass v5's `CompactionRecordSchema` (one that does not is dropped and counted), and
+ *   the newest `KEPT_COMPACTION_ENTRIES` are kept, as Usage itself keeps them. A garbled file is carried as an empty
+ *   history and said so. v5's Usage reads only its own file: there is no legacy reader in the product.
+ *
  * Every v5 schema here describes the body without `format`; `V5Writer.stamped` writes `"format": 1` first, as the
  * kernel does. Nothing here holds a runtime uuid, so M7 has nothing to re-key (the analytics index is a cache).
  */
+import { CompactionRecordSchema } from '@ferretry/core-ferrets/contract';
 import {
+  COMPACTION_HISTORY_STATE,
+  CompactionHistoryFileSchema,
+  KEPT_COMPACTION_ENTRIES,
   PAUSE_TOLD_STATE,
   PAUSES_STATE,
   PauseSchema,
@@ -28,15 +37,17 @@ import { join } from 'node:path';
 import type { KeptItem, StepReport } from '../report.ts';
 import { pathSegment } from '../key-path.ts';
 import { failureNote, readV4Json, V4InputError } from '../v4/documents.ts';
-import { V4_CREDENTIALS, V4_PASSIVE_USAGE } from '../v4/logins.ts';
+import { hasCredentialsRoot, V4_CREDENTIALS, V4_PASSIVE_USAGE } from '../v4/logins.ts';
 import {
   canonicalRateRow,
   V4_ANALYTICS_INDEX,
   V4_BUDGET_HOLDS,
   V4_BUDGET_TOLD,
+  V4_COMPACTION_HISTORY,
   V4_DAEMON_CONFIG,
   V4BudgetHolds,
   V4BudgetTold,
+  V4CompactionHistory,
   V4PricingKeys,
 } from '../v4/usage.ts';
 import type { Step } from './index.ts';
@@ -45,6 +56,7 @@ const V5_DIR = 'state/usage';
 export const V5_USAGE_PAUSES = join(V5_DIR, PAUSES_STATE.path);
 export const V5_USAGE_PAUSE_TOLD = join(V5_DIR, PAUSE_TOLD_STATE.path);
 export const V5_USAGE_PRICING = join(V5_DIR, PRICING_STATE.path);
+export const V5_USAGE_COMPACTION_HISTORY = join(V5_DIR, COMPACTION_HISTORY_STATE.path);
 
 /** A v4 document v4 itself read as empty when garbled: `undefined` for absent, `'damaged'` for anything unreadable. */
 async function lenient(home: string, path: string): Promise<unknown> {
@@ -55,17 +67,29 @@ async function lenient(home: string, path: string): Promise<unknown> {
   }
 }
 
-/** How many logins hold a passive reading. `lstat` only: the file sits in a sign-in folder and is never opened. */
-async function passiveReadings(home: string): Promise<number> {
+/**
+ * How many logins hold a passive reading, and how many login folders are links. `lstat` only: the file sits in a sign-in
+ * folder and is never opened. Each `fleet/credentials/<login>` is lstatted FIRST and only a real folder is looked
+ * inside: a link there points at the terminal's own sign-in folder (a `store: host` login), and is neither statted
+ * through, read nor read as a link (`readlink`), so its target is not even named.
+ */
+async function passiveReadings(home: string): Promise<{ readings: number; links: number }> {
+  const none = { readings: 0, links: 0 };
+  if (!(await hasCredentialsRoot(home).catch(() => false))) return none;
   const root = join(home, V4_CREDENTIALS);
-  const facts = await lstat(root).catch(() => undefined);
-  if (facts === undefined || !facts.isDirectory()) return 0;
-  let count = 0;
+  let readings = 0;
+  let links = 0;
   for (const login of await readdir(root)) {
+    const folder = await lstat(join(root, login)).catch(() => undefined);
+    if (folder === undefined) continue;
+    if (!folder.isDirectory()) {
+      if (folder.isSymbolicLink()) links++;
+      continue;
+    }
     const reading = await lstat(join(root, login, V4_PASSIVE_USAGE)).catch(() => undefined);
-    if (reading?.isFile() === true) count++;
+    if (reading?.isFile() === true) readings++;
   }
-  return count;
+  return { readings, links };
 }
 
 export const usageStep: Step = {
@@ -76,7 +100,8 @@ export const usageStep: Step = {
     V4_BUDGET_HOLDS,
     V4_BUDGET_TOLD,
     `${V4_DAEMON_CONFIG} (analyticsPricing, analyticsPricingSources)`,
-    `${V4_CREDENTIALS}/<login>/${V4_PASSIVE_USAGE} (lstat only, never opened)`,
+    V4_COMPACTION_HISTORY,
+    `${V4_CREDENTIALS}/<login>/${V4_PASSIVE_USAGE} (lstat only, never opened; a login folder that is a link is not looked inside)`,
   ],
   sealed: [],
   notCarried: [
@@ -140,6 +165,26 @@ export const usageStep: Step = {
         kept.push({ what: 'budget notices already told', count: keys.length });
       }
 
+      const history = await lenient(home, V4_COMPACTION_HISTORY);
+      if (history !== undefined) {
+        const v4 = V4CompactionHistory.safeParse(history);
+        const records = v4.success ? v4.data.entries.map(entry => CompactionRecordSchema.safeParse(entry)) : [];
+        const valid = records.flatMap(record => (record.success ? [record.data] : []));
+        const entries = valid.slice(-KEPT_COMPACTION_ENTRIES);
+        if (!v4.success) notes.push(`${V4_COMPACTION_HISTORY} is garbled: carried as no compaction history`);
+        else if (valid.length < records.length)
+          notes.push(`${String(records.length - valid.length)} compaction history entr(ies) v5 refuses dropped`);
+        await ctx.v5.stamped(
+          {
+            path: V5_USAGE_COMPACTION_HISTORY,
+            format: COMPACTION_HISTORY_STATE.format,
+            schema: CompactionHistoryFileSchema,
+          },
+          { entries },
+        );
+        kept.push({ what: 'compaction durations', count: entries.length });
+      }
+
       // daemon.json is the daemon's own document: a booted v4 refused a damaged one, so damage here is a failure.
       const config = await readV4Json(home, join(home, V4_DAEMON_CONFIG));
       if (config !== undefined) {
@@ -170,8 +215,10 @@ export const usageStep: Step = {
       }
 
       const passive = await passiveReadings(home);
-      if (passive > 0)
-        notes.push(`${String(passive)} passive usage reading(s) not carried (read again on the next turn)`);
+      if (passive.readings > 0)
+        notes.push(`${String(passive.readings)} passive usage reading(s) not carried (read again on the next turn)`);
+      if (passive.links > 0)
+        notes.push(`${String(passive.links)} login folder(s) not carried: the login folder is a link`);
       return { ...base, status: 'converted', ...(notes.length > 0 ? { note: notes.join('; ') } : {}), kept };
     } catch (error) {
       return { ...base, status: 'failed', note: failureNote(error, 'cannot convert the usage files'), kept: [] };

@@ -1,7 +1,7 @@
 /**
  * EVERY SURFACE THE BOARD DRAWS, built once per daemon from the generated client: the two screens (the board, one
  * card), the two panels (a ferret's cards, a card's progress), the Settings tab and the two renderers (the `card`
- * ask, a `&F12` reference). The card is READ-ONLY STATUS: nothing here answers, asks or moves a card (#1552). The
+ * ask, a `&F12` reference, the `card` and `board` blocks of a chat). The card is READ-ONLY STATUS: nothing here answers, asks or moves a card (#1552). The
  * owner answers in the Agenda; the ask renderer draws that answer row's one plain reference to the card.
  */
 
@@ -18,6 +18,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react
 import { CARD_ID_PATTERN, type CardAskRef, formatCardRef, writtenProgressParts } from '../../contract/index.ts';
 import { useBoardCard, useCardReferenceProof } from '../hooks/use-board.ts';
 import { useChatCard } from '../hooks/use-chat-card.ts';
+import { embedSpecOf } from '../lib/embed-lanes.ts';
 import { readChatTasksUrl } from '../lib/board-chat-url.ts';
 import { ferretNamer } from '../lib/board-present.ts';
 import { THIS_MACHINE } from '../lib/machine.ts';
@@ -26,6 +27,7 @@ import { boardCardPath, boardPath, cardPagePath, projectLanesPath } from '../lib
 import { BoardPage } from './board-page.tsx';
 import { LaneEditorPage } from './lane-editor.tsx';
 import { ChatTasks } from './chat-tasks.tsx';
+import { CardEmbed } from './embed.tsx';
 import { BoardDetail } from './detail/board-detail.tsx';
 import { useLocationSearch } from './location.ts';
 import { cardProse } from './prose.tsx';
@@ -262,6 +264,15 @@ const cardReferenceRenderer = (runtime: BoardRuntime): AppComponent<RendererProp
     );
   };
 
+/** `reference:&board` — a `card` or `board` block in chat: the mini board and its lanes, drawn from the board. */
+const cardEmbedRenderer = (runtime: BoardRuntime): AppComponent<RendererProps> =>
+  function CardEmbedRenderer({ value }: RendererProps): ReactNode {
+    const callsigns = useCallsigns(useFerrets(runtime));
+    const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
+    const spec = embedSpecOf(value);
+    return spec === null ? null : <CardEmbed names={names} spec={spec} store={runtime.store} />;
+  };
+
 export interface BoardSurfaces {
   readonly screens: { readonly board: AppComponent<ScreenProps>; readonly card: AppComponent<ScreenProps> };
   readonly panels: {
@@ -272,6 +283,7 @@ export interface BoardSurfaces {
   readonly renderers: {
     readonly 'ask:card': AppComponent<RendererProps>;
     readonly 'reference:&': AppComponent<RendererProps>;
+    readonly 'reference:&board': AppComponent<RendererProps>;
   };
 }
 
@@ -281,6 +293,10 @@ export const createSurfaces = (client: PluginClient): BoardSurfaces => {
     screens: { board: boardScreen(runtime), card: cardScreen(runtime) },
     panels: { 'cards-of-ferret': cardsOfFerret(runtime), 'card-progress': cardProgress(runtime) },
     settings: { board: boardSettings() },
-    renderers: { 'ask:card': cardAskRenderer(runtime), 'reference:&': cardReferenceRenderer(runtime) },
+    renderers: {
+      'ask:card': cardAskRenderer(runtime),
+      'reference:&': cardReferenceRenderer(runtime),
+      'reference:&board': cardEmbedRenderer(runtime),
+    },
   };
 };

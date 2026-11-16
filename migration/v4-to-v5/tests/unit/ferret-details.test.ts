@@ -369,3 +369,19 @@ test('notCarried no longer lists what config.json and state.json now carry, and 
   expect(listed).toContain('environment.json');
   expect(ferretsStep.reads.join(' ')).toContain('state/agent-pins.json');
 });
+
+test('the model a ferret was started on and its send counter reach v5 as the insights index reads them (R2-4)', async () => {
+  // The insights index shows a converted ferret's model and turns from exactly these two keys, because a converted
+  // ferret has no transcript to fold: `config.model` (the SELECTED model) and `state.turn`, as v4 passed them to analytics.
+  await f.put('state/sessions/lead/config.json', v4Config('lead'));
+  await f.put('state/sessions/lead/state.json', {
+    id: 'lead',
+    status: 'completed',
+    turn: 6,
+    observedModel: 'claude-observed',
+  });
+  expect((await ferretsStep.run(f.ctx())).status).toBe('converted');
+  const v5 = (await readWithV5(['lead'])) as Record<string, Record<string, V5Read>>;
+  expect(v5.lead?.config?.value).toMatchObject({ model: 'claude-opus-fake' });
+  expect(v5.lead?.state?.value).toMatchObject({ turn: 6, observedModel: 'claude-observed' });
+});

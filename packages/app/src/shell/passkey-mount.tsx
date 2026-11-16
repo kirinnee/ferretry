@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import type { PairedDaemon } from '../daemons/daemon-list.ts';
 import type { PasskeyAsk } from '../passkey/passkey.ts';
 import { useOptionalShell } from './context.tsx';
@@ -12,6 +13,11 @@ import { useOptionalShell } from './context.tsx';
  *
  * A PROMPT COMES FROM THE MACHINE ON SCREEN: the one the route names or, on a page that names none, the selected one.
  * Every other machine's background reads wait for it rather than raise a prompt over this machine's page.
+ *
+ * THE PROMPT IS DRAWN AT THE DOCUMENT ROOT, not inside the frame. The frame is `position: fixed`, so it is its own stacking
+ * context and Access's z-70 is only local to it; the menus and sheets portal to `document.body` (z-40..45) and so painted
+ * OVER a prompt raised while one was open, which could then not be pressed. At the body the z-70 competes with them (and
+ * with the command bar) directly. The focus effect below does not care where the prompt is drawn.
  */
 export function PasskeyMount({ onScreen }: { readonly onScreen: string | null }) {
   const shell = useOptionalShell();
@@ -22,7 +28,7 @@ export function PasskeyMount({ onScreen }: { readonly onScreen: string | null })
   }, [handler, onScreen]);
   if (provision === undefined) return null;
   const { Prompts } = provision;
-  return <Prompts />;
+  return createPortal(<Prompts />, document.body);
 }
 
 const NOTHING_LOCKED: readonly string[] = Object.freeze([]);

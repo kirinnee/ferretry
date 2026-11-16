@@ -30,6 +30,7 @@ function counted() {
     dismiss: inner.dismiss.bind(inner),
     snooze: inner.snooze.bind(inner),
     unsnooze: inner.unsnooze.bind(inner),
+    cardAsk: inner.cardAsk.bind(inner),
   };
   return { agenda, reads };
 }

@@ -1,9 +1,15 @@
-import { FerretsPort, StartDecide } from '@ferretry/core-ferrets/contract';
+import {
+  COMPACTION_HISTORY_KEY,
+  CompactionHistoryHook,
+  FerretsPort,
+  StartDecide,
+} from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
-import { LoginsPort } from '@ferretry/plugin-logins/contract';
+import { LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
   BudgetReached,
+  COMPACTION_HISTORY_STATE,
   INSIGHTS_STATE,
   InsightsChanged,
   LoginPaused,
@@ -133,14 +139,49 @@ export default definePlugin({
       }),
     ],
     cli: [
-      verb('usage', { summary: 'query the insights index: spend, tokens, duration and outcome rates' }),
+      verb('usage', {
+        summary: 'query the insights index: spend, tokens, duration and outcome rates',
+        args: [
+          {
+            name: 'query',
+            help: 'the analytics query; omit it for every session, ungrouped',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the protocol response instead of the terminal table' }],
+      }),
       verb('login budget', {
         summary:
           "show or set a sign-in's daily and weekly spend budget: past the trigger nothing new starts on it, past the hard limit its ferrets are stopped",
+        args: [{ name: 'id', help: 'the login' }],
+        options: [
+          { flag: '--daily-trigger <usd>', help: 'stop routing to it once it spends this much today (or "off")' },
+          { flag: '--daily-hard <usd>', help: 'also stop its ferrets once it spends this much today (or "off")' },
+          { flag: '--weekly-trigger <usd>', help: 'stop routing to it once it spends this much this week (or "off")' },
+          { flag: '--weekly-hard <usd>', help: 'also stop its ferrets once it spends this much this week (or "off")' },
+          { flag: '--clear', help: 'remove the whole budget' },
+          {
+            flag: '--time-zone <zone>',
+            help: 'the IANA zone days and weeks are counted in, for every budget on this machine',
+          },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '--json', help: 'print the outcome as JSON' },
+        ],
       }),
       verb('daemon profile', {
         summary:
           'measure what the daemon spends its time on for a few seconds: CPU, event-loop stalls, hot code, child processes, timers, routes and files',
+        args: [],
+        options: [
+          { flag: '--seconds <n>', help: 'how long to measure (5 to 300; default 30)' },
+          {
+            flag: '--trace-syscalls',
+            help: "also trace the daemon's system calls from outside (strace on Linux, sudo fs_usage on macOS)",
+          },
+          { flag: '--out <file>', help: 'also write the full report as JSON to this file, to send' },
+          { flag: '--json', help: 'print the protocol document instead of the readable report' },
+        ],
       }),
     ],
   },
@@ -161,20 +202,28 @@ export default definePlugin({
       panel('composer.tools', { id: 'composer-quota', order: 90 }),
     ],
     settings: [
-      settingsTab('budgets', { label: 'Budgets', order: 70 }),
-      settingsTab('model-pricing', { label: 'Model pricing', order: 71 }),
-      settingsTab('performance', { label: 'Performance', order: 72 }),
+      settingsTab('budgets', { group: 'agents', label: 'Budgets', order: 70 }),
+      settingsTab('model-pricing', { group: 'advanced', label: 'Model pricing', order: 71 }),
+      settingsTab('performance', { group: 'health', label: 'Performance', order: 72 }),
     ],
   },
 
   data: {
-    state: [PAUSES_STATE, PAUSE_TOLD_STATE, PRICING_STATE, QUOTAS_STATE, INSIGHTS_STATE],
+    state: [PAUSES_STATE, PAUSE_TOLD_STATE, PRICING_STATE, QUOTAS_STATE, INSIGHTS_STATE, COMPACTION_HISTORY_STATE],
     config: [USAGE_CONFIG],
     readModels: USAGE_READ_MODELS,
     publishes: [LoginPaused, LoginResumed, InsightsChanged, BudgetReached],
   },
 
-  hooks: { takes: [{ hook: StartDecide }, { hook: TurnEnded }] },
+  // `ferrets.compaction-history` is the one taker: Usage keeps how long compactions take (F-0130) and fills the hook.
+  hooks: {
+    takes: [
+      { hook: StartDecide },
+      { hook: TurnEnded },
+      { hook: LoginsBudget, key: 'usage' },
+      { hook: CompactionHistoryHook, key: COMPACTION_HISTORY_KEY },
+    ],
+  },
 
   doctor: ['usage-meter'],
 
@@ -196,5 +245,7 @@ export default definePlugin({
     ],
     spawn: [],
     secrets: [],
+    // The daemon's own system-call count and reaped children's CPU, for `fy daemon profile`: `/proc/self/{io,stat}` only.
+    selfCounters: true,
   },
 });

@@ -1,13 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import type { SettingsProps } from '@ferretry/kernel/manifest';
-import type { ReactElement } from 'react';
 import type { PackView } from '../../../contract/index.ts';
 import app from '../../../app/index.ts';
 import { PackSettingsSurface } from '../../../app/features/pack/pack-settings.tsx';
 import type { PacksClient } from '../../../app/lib/client.ts';
 import type { ConfigFiles } from '../../../app/lib/pack-config.ts';
-import { createSettings, NO_CONFIG_FILES } from '../../../app/views/pack-settings.tsx';
 import manifest from '../../../manifest.ts';
 import { type Mounted, mount } from '../support/dom.ts';
 import { textOf } from '../support/learning-dom.ts';
@@ -22,8 +19,8 @@ const draws = (label: string): boolean => settingsSource.includes(`label: '${lab
 /**
  * Today's Settings › Pack mode screen is this plugin's one Settings tab, and the helpers panel beside a ferret is its one
  * panel. The rows are held at the registry (the manifest and the half's entries) and on the RENDERED screen: the
- * surface drawn with the shell's real primitives (`@ferretry/app/ui`), and the tab as the shell mounts it today, which
- * says it cannot save `packs.yaml` yet (no configuration-file port reaches a plugin half on this base).
+ * surface drawn with the shell's real primitives (`@ferretry/app/ui`); the tab mounted over the kernel's configuration-file
+ * routes is held in `pack-settings-routes.test.tsx`.
  */
 const client = { call: () => new Promise(() => undefined) } as unknown as PacksClient;
 const NO_FILES = {} as ConfigFiles;
@@ -66,10 +63,8 @@ describe('app parity, rendered', () => {
     expect(jev).toContain('Jev’s daily cap (USD)');
   });
 
-  test('S-0169 S-0521 the Pack mode tab mounts and says plainly that it cannot save packs.yaml yet', async () => {
-    // The tab as the shell calls it: the half's component, given the settings props.
-    shown = await mount(createSettings(client)({} as SettingsProps) as ReactElement);
-    expect(textOf(shown.container)).toBe(NO_CONFIG_FILES);
+  test("S-0169 S-0521 S-0522 the Pack mode tab is the half's one settings entry, mounted over the config routes (pack-settings-routes.test.tsx)", () => {
+    expect(typeof half?.settings.pack).toBe('function');
   });
 });
 

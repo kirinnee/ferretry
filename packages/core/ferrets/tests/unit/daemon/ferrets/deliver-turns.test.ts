@@ -1,4 +1,4 @@
-import { PERSON_ORIGIN } from '../../../../contract/index.ts';
+import { PERSON_ORIGIN, START_EXPLAINED_MAX } from '../../../../contract/index.ts';
 import { afterEach, describe, expect, test } from 'bun:test';
 import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -17,7 +17,12 @@ import {
 } from '../../../../contract/index.ts';
 import { emptyChildEnvironment, FakeHarness, FakeRunner, fenced, T0 } from '../../../../contract/testing/index.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
-import { FerretsService, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
+import {
+  CONVERSATION_NOT_FOUND,
+  CONVERSATION_UNKNOWN,
+  FerretsService,
+  type FerretsPorts,
+} from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
@@ -76,6 +81,12 @@ interface World {
   readonly state: MemoryStateFolder;
   readonly folderOf: (id: string) => string;
   readonly warnings: string[];
+  /** Every history event the service recorded, in order. */
+  readonly history: {
+    readonly ferret: string;
+    readonly type: string;
+    readonly data: Readonly<Record<string, unknown>>;
+  }[];
 }
 
 /** One daemon over ferret folders that outlive it: `restart` builds the next one on the same state and disk. */
@@ -112,6 +123,7 @@ async function world(
   });
   const registry = new FerretRegistry(records);
   const warnings: string[] = [];
+  const history: World['history'][number][] = [];
   const files = new SessionFiles({
     roots: {
       root: (_name, scope) => {
@@ -164,6 +176,7 @@ async function world(
     vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
     asks: { open: async () => [] },
     session: files.port,
+    history: async (ferret, type, data) => void history.push({ ferret, type, data }),
   };
   const tokens = new FerretTokenDirectory();
   const service = new FerretsService(registry, tokens, ports);
@@ -179,6 +192,7 @@ async function world(
     state,
     folderOf: id => folders[id] ?? '',
     warnings,
+    history,
     reuse: { state, handles, folders },
   };
 }
@@ -669,6 +683,84 @@ describe('GAP(deliver) settleStartup: a pane that dies while its harness is stil
     // The screen was read off this start's own pane, before the cleanup stopped it.
     expect(screens).toEqual(['%1']);
     expect(w.runner.stopped).toEqual(['%1']);
+  });
+
+  /**
+   * What the failed-launch cleanup does in production: it stops the pane (which kills its tmux session) BEFORE anyone can
+   * read it again, so only a read made before that cleanup sees the screen. The harness's sentence is therefore kept on
+   * the stopped record (`cause.explained`), where a plugin that hears the ferret stop (Runtimes) finds it.
+   */
+  const killedWithItsSession = (w: World, screen: string) => {
+    const stop = w.runner.stop.bind(w.runner);
+    let alive = true;
+    w.runner.stop = async handle => {
+      alive = false;
+      await stop(handle);
+    };
+    w.runner.lastScreen = async () => {
+      if (!alive) throw new Error('FIXTURE_SECRET no such tmux session');
+      return screen;
+    };
+  };
+  const SENTENCE = 'Codex needs a network connection to start.';
+  const explaining = (w: World, sentence: string | undefined) =>
+    Object.assign(w.harness, { startFailure: (screen: string) => (screen.includes('routing') ? sentence : undefined) });
+
+  test('GAP(deliver) settleStartup the harness sentence outlives the cleanup that kills the pane: it is on the stopped record as cause.explained', async () => {
+    const w = await world();
+    w.runner.settled = died(true);
+    killedWithItsSession(w, 'Error: FIXTURE_SECRET workspace routing discovery failed');
+    explaining(w, SENTENCE);
+
+    const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+    expect(result.ok).toBe(false);
+    expect(w.runner.stopped).toEqual(['%1']);
+    const record = w.registry.get(IDS[0] as never);
+    expect(record?.state).toBe('stopped');
+    expect(record?.cause).toEqual({ kind: 'start_failed', explained: SENTENCE });
+    expect(JSON.stringify(record)).not.toContain('FIXTURE_SECRET');
+  });
+
+  test('GAP(deliver) settleStartup a first turn that cannot be typed leaves the same sentence on the record', async () => {
+    const w = await world();
+    w.runner.deliver = async () => {
+      throw new Error('FIXTURE_SECRET pane refused');
+    };
+    killedWithItsSession(w, 'Error: workspace routing discovery failed');
+    explaining(w, SENTENCE);
+
+    await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+    expect(w.registry.get(IDS[0] as never)?.cause).toEqual({ kind: 'start_failed', explained: SENTENCE });
+  });
+
+  test('GAP(deliver) settleStartup no sentence, an unreadable screen or a sentence longer than the cause allows leaves a plain start_failed', async () => {
+    const exited = "the ferret's pane exited while its harness was still starting";
+    const tooLong = 'x'.repeat(START_EXPLAINED_MAX + 1);
+    for (const [prepare, why] of [
+      [(w: World) => explaining(w, undefined), exited],
+      [(w: World) => explaining(w, tooLong), tooLong],
+      [
+        (w: World) => {
+          w.runner.lastScreen = async () => {
+            throw new Error('FIXTURE_SECRET unreadable');
+          };
+        },
+        exited,
+      ],
+    ] as const) {
+      const w = await world();
+      w.runner.settled = died(true);
+      killedWithItsSession(w, 'Error: workspace routing discovery failed');
+      prepare(w);
+
+      const result = await w.service.start({ folder: '/work', by: 'owner', prompt: 'Build the thing.' }, PERSON_ORIGIN);
+
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error.reason).toBe(`${why}${NEVER_RAN}`);
+      expect(w.registry.get(IDS[0] as never)?.cause).toEqual({ kind: 'start_failed' });
+    }
   });
 
   test('GAP(deliver) settleStartup a first turn that cannot be typed takes the harness explanation too; a harness that throws or says nothing keeps the fixed sentence', async () => {
@@ -1569,5 +1661,296 @@ describe('structured questions: FerretHarness.askedQuestion reads the hook’s q
     const { seam, file } = await asking();
     await writeFile(file, 'x'.repeat(262_145), { mode: 0o600 });
     expect(await seam.askedQuestion!()).toBeUndefined();
+  });
+});
+
+describe('mig-harness-home a relaunch whose conversation the harness proves absent starts a new one and says so', () => {
+  /** Spies on which launch the harness was asked for, and gives it a `hasConversation` answer per conversation id. */
+  const spied = (w: World, answer: (conversation: string) => Promise<boolean | undefined>): string[] => {
+    const calls: string[] = [];
+    const start = w.harness.start.bind(w.harness);
+    const resume = w.harness.resume.bind(w.harness);
+    w.harness.start = async (spec, runner, env) => {
+      calls.push('start');
+      return await start(spec, runner, env);
+    };
+    w.harness.resume = async (spec, runner, env, conversation) => {
+      calls.push(`resume ${conversation}`);
+      return await resume(spec, runner, env, conversation);
+    };
+    Object.assign(w.harness, {
+      hasConversation: async (_spec: unknown, conversation: string) => await answer(conversation),
+    });
+    return calls;
+  };
+
+  test('a converted ferret whose transcript was left behind is started anew (never `--resume` of nothing), told so in its turn and its history', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    const before = w.registry.get(id as never)?.harnessConversation;
+    expect(before).toBe(`conv-${id}`);
+    const calls = spied(w, async () => false);
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    // A real harness asked to resume a conversation it does not have fails the launch; this one is started instead.
+    expect(calls).toEqual(['start']);
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    // The agent is told first, then handed its turn exactly as any revive is.
+    const text = w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text);
+    expect(text).toEqual([`${CONVERSATION_NOT_FOUND} ${turnFileInstruction(turnFile(w, id, 1))}`]);
+    // And the owner can read it in the ferret's history, naming the conversation that is gone.
+    expect(w.history.filter(event => event.type === 'session.conversation_not_found')).toEqual([
+      { ferret: id, type: 'session.conversation_not_found', data: { conversation: before } },
+    ]);
+    expect(w.history.some(event => event.type === 'session.resumed')).toBe(true);
+  });
+
+  test('a conversation the harness has, or cannot tell about, is resumed as asked and nothing extra is said', async () => {
+    for (const answer of [
+      async () => true,
+      async () => undefined,
+      async () => {
+        throw new Error('the home could not be read');
+      },
+    ]) {
+      const w = await world();
+      const id = await started(w);
+      await w.service.stop(id as never, 'now');
+      const calls = spied(w, answer);
+      const typed = w.runner.deliveries.length;
+
+      expect((await revive(w, id)).ok).toBe(true);
+
+      expect(calls).toEqual([`resume conv-${id}`]);
+      expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+        turnFileInstruction(turnFile(w, id, 1)),
+      ]);
+      expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+    }
+  });
+
+  test('an interactive ferret with no message types nothing, but its history still says the old conversation is gone', async () => {
+    const w = await world();
+    const id = await started(w, undefined, { options: { mode: 'interactive' } });
+    await w.service.stop(id as never, 'now');
+    const calls = spied(w, async () => false);
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start']);
+    expect(w.runner.deliveries).toEqual([]);
+    expect(w.history.map(event => event.type)).toContain('session.conversation_not_found');
+  });
+
+  test('a history that cannot be written never undoes the new conversation: the ferret runs and is still told', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    spied(w, async () => false);
+    const push = w.history.push.bind(w.history);
+    w.history.push = (...events) => {
+      if (events.some(event => event.type === 'session.conversation_not_found')) throw new Error('the disk is full');
+      return push(...events);
+    };
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(w.registry.get(id as never)?.state).toBe('working');
+    expect(w.runner.deliveries.slice(typed)[0]?.delivery.text.startsWith(CONVERSATION_NOT_FOUND)).toBe(true);
+  });
+
+  test('a harness that offers no answer keeps every resume as it was', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    expect('hasConversation' in w.harness).toBe(false);
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(w.harness.launched.at(-1)?.harnessConversation).toBe(`conv-${id}`);
+  });
+});
+
+describe('run 8: a relaunch with NO conversation to resume starts a new one and says so', () => {
+  /** A harness that, as Codex does, mints its conversation after launch and names none: the record never gets one. */
+  const codexLike = (w: World): string[] => {
+    const calls: string[] = [];
+    const start = w.harness.start.bind(w.harness);
+    w.harness.start = async (spec, runner, env) => {
+      calls.push('start');
+      const started = await start(spec, runner, env);
+      if (!started.ok) return started;
+      const { harnessConversation: _minted, ...unnamed } = started.value;
+      return ok(unnamed);
+    };
+    const resume = w.harness.resume.bind(w.harness);
+    w.harness.resume = async (spec, runner, env, conversation) => {
+      calls.push(`resume ${conversation}`);
+      return await resume(spec, runner, env, conversation);
+    };
+    return calls;
+  };
+
+  test('an autonomous ferret is told in its revive turn, and its history says the conversation was unknown', async () => {
+    // Proof run 8: akari (Codex, converted with no conversation id: v4 never found its rollout) was restarted with no
+    // conversation_not_found and no notice, so an autonomous agent silently forgot everything.
+    const w = await world();
+    const calls = codexLike(w);
+    const id = await started(w);
+    expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+    await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start', 'start']);
+    const text = w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text);
+    expect(text).toEqual([`${CONVERSATION_UNKNOWN} ${turnFileInstruction(turnFile(w, id, 1))}`]);
+    expect(w.history.filter(event => event.type === 'session.conversation_not_found')).toEqual([
+      { ferret: id, type: 'session.conversation_not_found', data: { unknown: true } },
+    ]);
+  });
+
+  test('an interactive ferret types nothing, but its history still says so; a first start says nothing', async () => {
+    const w = await world();
+    codexLike(w);
+    const id = await started(w, undefined, { options: { mode: 'interactive' } });
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+    await w.service.stop(id as never, 'now');
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(w.runner.deliveries).toEqual([]);
+    expect(w.history.map(event => event.type)).toContain('session.conversation_not_found');
+  });
+
+  test('a ferret whose conversation is known and resumable is resumed with nothing extra said', async () => {
+    const w = await world();
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    const typed = w.runner.deliveries.length;
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 1)),
+    ]);
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+  });
+});
+
+describe('codex-resume-id: the conversation a Codex-like launch provably wrote is recorded and resumed', () => {
+  /** A harness that names no conversation at launch (as Codex) and proves one only once `proof` holds it. */
+  const provingCodex = (w: World, proof: { id?: string; throws?: boolean }) => {
+    const calls: string[] = [];
+    const asked: string[] = [];
+    const start = w.harness.start.bind(w.harness);
+    w.harness.start = async (spec, runner, env) => {
+      calls.push('start');
+      const started = await start(spec, runner, env);
+      if (!started.ok) return started;
+      const { harnessConversation: _minted, ...unnamed } = started.value;
+      return ok(unnamed);
+    };
+    const resume = w.harness.resume.bind(w.harness);
+    w.harness.resume = async (spec, runner, env, conversation) => {
+      calls.push(`resume ${conversation}`);
+      return await resume(spec, runner, env, conversation);
+    };
+    Object.assign(w.harness, {
+      hasConversation: async (_spec: unknown, conversation: string) => conversation === proof.id,
+      provedConversation: async (ferret: string) => {
+        asked.push(ferret);
+        if (proof.throws === true) throw new Error('the sessions folder could not be read');
+        return proof.id === undefined
+          ? undefined
+          : { id: proof.id, file: `/agent-homes/${ferret}/sessions/rollout.jsonl`, home: `/agent-homes/${ferret}` };
+      },
+    });
+    return { calls, asked };
+  };
+
+  test('start, rollout proved, stop records it, resume uses resume <id>: nothing is said about a new conversation', async () => {
+    const w = await world();
+    const proof: { id?: string } = {};
+    const { calls } = provingCodex(w, proof);
+    const id = await started(w);
+    expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+    // The first turn writes the rollout; the harness can prove it from now on.
+    proof.id = 'native-019a';
+    await w.service.stop(id as never, 'now');
+    const record = w.registry.get(id as never);
+    expect(record?.harnessConversation).toBe('native-019a');
+    expect(record?.transcript).toMatchObject({
+      identity: 'correlated',
+      harnessSessionId: 'native-019a',
+      file: `/agent-homes/${id}/sessions/rollout.jsonl`,
+      home: `/agent-homes/${id}`,
+    });
+    const typed = w.runner.deliveries.length;
+
+    expect((await revive(w, id)).ok).toBe(true);
+
+    expect(calls).toEqual(['start', 'resume native-019a']);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe('native-019a');
+    expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
+      turnFileInstruction(turnFile(w, id, 1)),
+    ]);
+    expect(w.history.some(event => event.type === 'session.conversation_not_found')).toBe(false);
+    expect(w.history.filter(event => event.type === 'session.conversation_recorded')).toEqual([
+      { ferret: id, type: 'session.conversation_recorded', data: { conversation: 'native-019a' } },
+    ]);
+  });
+
+  test('a Restart of a RUNNING ferret (the live pane replaced) records the proved conversation and resumes it', async () => {
+    const w = await world();
+    const proof: { id?: string } = {};
+    const { calls } = provingCodex(w, proof);
+    const id = await started(w);
+    proof.id = 'native-live';
+    const relaunched = await w.service.resume(id as never, undefined, {
+      origin: PERSON_ORIGIN,
+      actor: 'daemon',
+      replaceLiveTerminal: true,
+    });
+    expect(relaunched.ok).toBe(true);
+    expect(calls).toEqual(['start', 'resume native-live']);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe('native-live');
+  });
+
+  test('nothing proved (none written yet, or any doubt) records nothing: a new conversation, said as unknown', async () => {
+    for (const proof of [{}, { throws: true }]) {
+      const w = await world();
+      const { calls } = provingCodex(w, proof);
+      const id = await started(w);
+      await w.service.stop(id as never, 'now');
+      expect(w.registry.get(id as never)?.harnessConversation).toBeUndefined();
+      expect(w.registry.get(id as never)?.transcript).toBeUndefined();
+      const typed = w.runner.deliveries.length;
+
+      expect((await revive(w, id)).ok).toBe(true);
+
+      expect(calls).toEqual(['start', 'start']);
+      expect(w.runner.deliveries.slice(typed)[0]?.delivery.text.startsWith(CONVERSATION_UNKNOWN)).toBe(true);
+      expect(w.history.some(event => event.type === 'session.conversation_recorded')).toBe(false);
+    }
+  });
+
+  test('idempotent, and Claude-like harnesses are untouched: a record that names its conversation is never re-proved', async () => {
+    const w = await world();
+    const asked: string[] = [];
+    Object.assign(w.harness, {
+      provedConversation: async (ferret: string) => {
+        asked.push(ferret);
+        return { id: 'someone-else', file: '/x/rollout.jsonl', home: '/x' };
+      },
+    });
+    // FakeHarness names its conversation at launch, as Claude Code does.
+    const id = await started(w);
+    await w.service.stop(id as never, 'now');
+    expect((await revive(w, id)).ok).toBe(true);
+    expect(asked).toEqual([]);
+    expect(w.registry.get(id as never)?.harnessConversation).toBe(`conv-${id}`);
+    expect(w.history.some(event => event.type === 'session.conversation_recorded')).toBe(false);
   });
 });

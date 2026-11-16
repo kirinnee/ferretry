@@ -38,3 +38,6 @@ export const ferretPath = (_daemonId: DaemonId | undefined, ferret: string): str
 /** A project's lanes, edited on this plugin's own board screen (`/d/<daemon>/board/<project>?lanes=1`). */
 export const projectLanesPath = (projectId: string, daemon?: string): string =>
   `${daemonAddress(daemon)}/board/${encodeURIComponent(projectId)}?lanes=1`;
+/** One ask in the Agenda, opened at its ferret's agenda (`agenda/:ferret/:ask`, the screen a buzz lands on). */
+export const agendaAskPath = (ferret: string, ask: string, daemon?: string): string =>
+  `${daemonAddress(daemon)}/agenda/${encodeURIComponent(ferret)}/${encodeURIComponent(ask)}`;

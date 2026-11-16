@@ -446,3 +446,35 @@ describe('G95 a read that stops waiting leaves its parked prompt', () => {
     expect(prompts).toBe(1);
   });
 });
+
+describe('a quiet read: the page asking for what a person has not yet pressed', () => {
+  test('ferret page: a quiet read refused for a step-up raises NO prompt and sends nothing again; the refusal is the answer', async () => {
+    const { fake, asked } = handler([true]);
+    const { client, sends } = daemon([STEP_UP, OK], fake);
+    await client.start();
+    const failure = await client
+      .forPackage('board')
+      .call('GET /v1/board', { quiet: true })
+      .catch((error: unknown) => error);
+    expect((failure as DaemonCallError).code).toBe('grant_step_up_required');
+    expect(asked).toEqual([]);
+    expect(sends()).toHaveLength(1);
+  });
+
+  test('ferret page: a quiet read still asks for the UNLOCK (unlockOnOpen is the owner’s own switch), then reads again', async () => {
+    const { fake, asked } = handler([true]);
+    const { client, sends } = daemon([UNLOCK, OK], fake);
+    await client.start();
+    expect(await client.forPackage('board').call('GET /v1/board', { quiet: true })).toEqual({ cards: [] });
+    expect(asked.map(entry => entry.need.kind)).toEqual(['unlock']);
+    expect(sends()).toHaveLength(2);
+  });
+
+  test('ferret page: a press on the same route is NOT quiet: it asks for the step-up at once, so a protected panel still needs it before it acts', async () => {
+    const { fake, asked } = handler([true]);
+    const { client } = daemon([STEP_UP, OK], fake);
+    await client.start();
+    await client.forPackage('board').call('POST /v1/board', { quiet: true });
+    expect(asked.map(entry => entry.origin)).toEqual(['explicit']);
+  });
+});

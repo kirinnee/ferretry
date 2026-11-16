@@ -92,7 +92,7 @@ afterEach(() => {
 });
 
 describe('S-0010 the Add skills page lists the skills of every subscribed catalog, grouped, with a filter and Refresh', () => {
-  it('groups each catalog’s skills under its name and publisher, skills only, and filters by catalog', async () => {
+  it('S-0010 groups each catalog’s skills under its name and publisher, skills only, and filters by catalog', async () => {
     const { view } = await open(two());
     expect(q('h1')?.textContent).toBe('Add skills');
     expect(q('[data-add-skills-scope]')?.textContent).toBe(
@@ -218,7 +218,7 @@ describe('S-0010 the Add skills page lists the skills of every subscribed catalo
 });
 
 describe('S-0255 a skill row names the skill, its version and summary, and offers Install or says Installed', () => {
-  it('shows Install for a skill not installed here and Installed for one that is', async () => {
+  it('S-0255 shows Install for a skill not installed here and Installed for one that is', async () => {
     const installed = {
       ...installRecord('skill', 'pdf-tools'),
       provenance: {
@@ -242,7 +242,7 @@ describe('S-0255 a skill row names the skill, its version and summary, and offer
 });
 
 describe('S-0262 the page reads the machine through the client the shell built for it', () => {
-  it('lists installs through the daemon-bound client when the host names none, and places nothing without a project', async () => {
+  it('S-0262 lists installs through the daemon-bound client when the host names none, and places nothing without a project', async () => {
     const { view, fake } = await open(
       { list: async () => [studio], browse: browseOk },
       noInstalls,

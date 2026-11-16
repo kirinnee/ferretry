@@ -213,6 +213,12 @@ function sameBinding(current: PaneFacts, original: PaneFacts): boolean {
   );
 }
 
+/** `#{cursor_x}|#{cursor_y}` as two whole numbers, or nothing when tmux answered something else. */
+function cursorOf(stdout: string): readonly [number, number] | readonly [] {
+  const match = /^(\d+)\|(\d+)\s*$/u.exec(stdout);
+  return match === null ? [] : [Number(match[1]), Number(match[2])];
+}
+
 /** Whether a tmux session is a ferret's: `fy-…`, and not one of Terminals' own shells (`fy-webterm-…`). */
 function isFerretSession(session: string): boolean {
   return session.startsWith(FERRET_TMUX_PREFIX) && !session.startsWith(TERMINAL_TMUX_PREFIX);
@@ -244,7 +250,13 @@ export interface TmuxRunnerOptions {
    * The turn watch's read (`Runner.look`, U4): every look is an act on the pane (`kernel.act(terminal %n, 'read')`, so a
    * hold refuses it), its screen masked inside one `Redaction.read` before it is parsed. Absent: `look` answers nothing.
    */
-  readonly look?: { readonly act: ActRunner; readonly redaction: Redaction; readonly digest: FrameDigest };
+  readonly look?: {
+    readonly act: ActRunner;
+    readonly redaction: Redaction;
+    readonly digest: FrameDigest;
+    /** Gives the event loop back between a big screen's readings (the kernel clock's zero sleep); absent: no yield. */
+    readonly yieldToLoop?: () => Promise<void>;
+  };
 }
 
 /** Which of the harness's blocking surfaces a frame is: a tool-permission prompt, a dialog, or neither (a question form is neither). */
@@ -525,15 +537,21 @@ export class TmuxRunner implements Runner {
             kind: 'content' as const,
             data: { alive: true, dead: true, promptReady: false, activeWork: false, visible: '', history: '' } as never,
           };
-        const [visible, history] = await Promise.all([
+        const [visible, history, cursor] = await Promise.all([
           tmux.execute(['capture-pane', '-p', '-t', handle]),
           tmux.execute(['capture-pane', '-p', '-S', '-', '-t', handle]),
+          tmux.execute(['display-message', '-p', '-t', handle, '#{cursor_x}|#{cursor_y}']),
         ]);
+        const [cursorX, cursorY] = cursor.code === 0 ? cursorOf(cursor.stdout) : [];
         if (visible.code !== 0) return { kind: 'content' as const };
         const earlier = history.code === 0 ? tailAtLine(history.stdout, FORM_HISTORY_CHARS) : '';
-        return await watch.redaction.read(scope => {
-          const shown = maskedScreen(scope, visible.stdout);
-          const state = paneStateFrom({ dead: false }, shown, earlier === '' ? '' : maskedScreen(scope, earlier));
+        return await watch.redaction.read(async scope => {
+          const shown = await maskedScreen(scope, visible.stdout, watch.yieldToLoop);
+          const state = paneStateFrom(
+            { dead: false },
+            shown,
+            earlier === '' ? '' : await maskedScreen(scope, earlier, watch.yieldToLoop),
+          );
           return {
             kind: 'content' as const,
             data: {
@@ -544,6 +562,7 @@ export class TmuxRunner implements Runner {
               visible: state.visible,
               history: state.history,
               ...(blockingOf(shown) === undefined ? {} : { blocking: blockingOf(shown) }),
+              ...(cursorX === undefined || cursorY === undefined ? {} : { cursorX, cursorY }),
             } satisfies RunnerFormCapture as never,
           };
         });
@@ -616,9 +635,12 @@ export class TmuxRunner implements Runner {
           if (this.#stopEpoch === epoch) this.#frames.set(handle, frame);
         }
         const visible = frame.visible;
-        return await watch.redaction.read(scope => ({
+        return await watch.redaction.read(async scope => ({
           kind: 'content' as const,
-          data: turnLookOf(paneStateFrom(activity, maskedScreen(scope, visible)), watch.digest) as never,
+          data: turnLookOf(
+            paneStateFrom(activity, await maskedScreen(scope, visible, watch.yieldToLoop)),
+            watch.digest,
+          ) as never,
         }));
       })
       .catch(() => undefined);
@@ -790,12 +812,47 @@ export class TmuxRunner implements Runner {
       });
       return err('real_harness');
     }
-    if ((await this.options.tmux.execute(['has-session', '-t', session])).code === 0) return err('failed');
-    // Started without the handle, so the server never holds a ferret's values in its own environment.
-    if ((await this.options.tmux.execute(['start-server'])).code !== 0) return err('unavailable');
-    const before = await this.options.tmux.execute(['show-options', '-gv', 'update-environment']);
+    // A session that is still there is refused (it is somebody's ferret), EXCEPT the corpse of this ferret's last run: a
+    // polite stop only sends the interrupt and `remain-on-exit` keeps the dead pane, so a Resume / Restart would otherwise
+    // meet its own old session and fail "duplicate session" for ever. Only a session whose every pane, in EVERY window
+    // (`list-panes -s`), is dead is cleared. Every target is the EXACT name (`=`): a bare name is a tmux prefix match, so
+    // `fy-abc` could name `fy-abcd` and the check or the kill would land on another ferret's session.
+    const exact = `=${session}`;
+    if ((await this.options.tmux.execute(['has-session', '-t', exact])).code === 0) {
+      const panes = await this.options.tmux.execute(['list-panes', '-s', '-t', exact, '-F', '#{pane_dead}']);
+      const flags = panes.stdout
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line !== '');
+      if (panes.code !== 0 || flags.length === 0 || !flags.every(flag => flag === '1')) return err('failed');
+      await this.options.tmux.execute(['kill-session', '-t', exact]);
+    }
+    // Started without the handle, so the server never holds a ferret's values in its own environment. ONE client does
+    // all of it: a server with no session exits at once (`exit-empty`), so a bare `start-server` does not outlive the
+    // call that made it, and the read that follows would find no server on a machine that had none (every reboot).
+    // Inside the one client the server is alive for each command after it; it is kept alive past the client by turning
+    // `exit-empty` off, and the launch script (or the failure path below) puts the value read here back.
+    const before = await this.options.tmux.execute([
+      'start-server',
+      ';',
+      'show-options',
+      '-sv',
+      'exit-empty',
+      ';',
+      'set-option',
+      '-s',
+      'exit-empty',
+      'off',
+      ';',
+      'show-options',
+      '-gv',
+      'update-environment',
+    ]);
     if (before.code !== 0) return err('unavailable');
-    const kept = before.stdout
+    const [exitEmptyLine = '', ...optionLines] = before.stdout.split('\n');
+    const exitEmpty = exitEmptyLine.trim() === 'off' ? 'off' : 'on';
+    const kept = optionLines
+      .join('\n')
       .split(/\s+/u)
       .map(name => name.trim())
       .filter(name => name !== '');
@@ -816,6 +873,7 @@ export class TmuxRunner implements Runner {
         ...args,
       ]),
       scriptLine(['set-option', '-g', 'update-environment', kept.join(' ')]),
+      scriptLine(['set-option', '-s', 'exit-empty', exitEmpty]),
     ].join('');
     const created = await this.options.spawn.run(
       TMUX_PROGRAM,
@@ -825,7 +883,17 @@ export class TmuxRunner implements Runner {
     const [paneId = '', pid = ''] = created.stdout.trim().split('|');
     if (created.exitCode !== 0 || !PANE_ID.test(paneId)) {
       // Whatever the script did, the option is put back from a client that holds no values.
-      await this.options.tmux.execute(['set-option', '-g', 'update-environment', kept.join(' ')]);
+      await this.options.tmux.execute([
+        'set-option',
+        '-g',
+        'update-environment',
+        kept.join(' '),
+        ';',
+        'set-option',
+        '-s',
+        'exit-empty',
+        exitEmpty,
+      ]);
       return err('failed');
     }
     await this.options.tmux.execute(remainOnExitArguments(session));

@@ -578,3 +578,73 @@ describe('SecretDirectory, changes taking turns', () => {
     should(outcomes).deepEqual(['full', 'unreadable']);
   });
 });
+
+describe('the identity of a write, and one entry opened alone', () => {
+  /** Seals with a fresh nonce each time, as the real cipher does: a replacement is a different write. */
+  class NonceCipher extends FakeSecretCipher {
+    #seals = 0;
+
+    override async seal(
+      _name: string,
+      plaintext: string,
+    ): Promise<{ readonly iv: string; readonly ciphertext: string }> {
+      this.#seals += 1;
+      return { iv: `nonce-${String(this.#seals)}`, ciphertext: [...plaintext].reverse().join('') };
+    }
+
+    override async openAll(
+      entries: Readonly<Record<string, { readonly iv: string; readonly ciphertext: string }>>,
+    ): Promise<ReadonlyMap<string, string>> {
+      return new Map(
+        Object.entries(entries).map(([name, sealed]) => [name, [...sealed.ciphertext].reverse().join('')]),
+      );
+    }
+  }
+
+  const world = () => {
+    const documents = new MemorySecretDocuments();
+    const cipher = new NonceCipher();
+    return {
+      documents,
+      store: new SecretDirectory(documents, cipher, CLOCK),
+      vault: new SecretVault(documents, cipher),
+    };
+  };
+
+  it('should answer the identity of the write it just made, and that same identity afterwards', async () => {
+    const { store } = world();
+    const first = await store.putIdentified('TOKEN', TOKEN);
+    should(await store.writeIdentity('TOKEN')).equal(first);
+    const second = await store.putIdentified('TOKEN', 'another-value-0123');
+    should(second).not.equal(first);
+    should(await store.writeIdentity('TOKEN')).equal(second);
+  });
+
+  it('should answer no identity for a name that holds nothing', async () => {
+    const { store } = world();
+    should(await store.writeIdentity('MISSING')).equal(undefined);
+    await store.put('OTHER', TOKEN);
+    should(await store.writeIdentity('MISSING')).equal(undefined);
+  });
+
+  it('should open one entry with the identity of that very write, and nothing else', async () => {
+    const { store, vault } = world();
+    const identity = await store.putIdentified('TOKEN', TOKEN);
+    await store.put('OTHER', 'other-value-0123');
+    should(await vault.openEntry('TOKEN')).deepEqual({ write: identity, value: TOKEN });
+  });
+
+  it('should answer nothing for a name that is not held, or for a store never written', async () => {
+    const { store, vault } = world();
+    should(await vault.openEntry('TOKEN')).equal(undefined);
+    await store.put('OTHER', TOKEN);
+    should(await vault.openEntry('TOKEN')).equal(undefined);
+  });
+
+  it('should refuse to open an entry of a document written by a cipher it does not open', async () => {
+    const refused = await new SecretVault(new ForeignCipherDocuments(), new FakeSecretCipher())
+      .openEntry('TOKEN')
+      .catch((error: unknown) => error);
+    should(refused).be.instanceOf(SecretStoreError);
+  });
+});

@@ -13,11 +13,15 @@ export {
   type WorkFolders,
   WorkFoldersPort,
 } from '@ferretry/kernel/contract';
+export * from './app-hooks.ts';
+export * from './agent-address.ts';
+export * from './file-reference.ts';
 export * from './instructions-report.ts';
 export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';
 export * from './launch-origin.ts';
+export * from './live-read.ts';
 export * from './transcript-bytes.ts';
 export * from './port.ts';
 export * from './records.ts';

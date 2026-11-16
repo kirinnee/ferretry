@@ -3,7 +3,7 @@
  * pane, live, from today's Console tab) and the Processes list. Each reads through this half's client by route key.
  */
 
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import type { PanelIntent, PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, type ReactNode, useMemo, useState } from 'react';
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { type DaemonConnection, daemonSessionScope } from '../../shell.ts';
@@ -26,7 +26,8 @@ export function TerminalsPanel({
   connection,
   subject,
   dependencies,
-}: Omit<PanelBase, 'client'> & { readonly dependencies: TerminalDeckDependencies }) {
+  intent,
+}: Omit<PanelBase, 'client'> & { readonly dependencies: TerminalDeckDependencies; readonly intent?: PanelIntent }) {
   const keys = usePhoneKeyBar();
   const scope = useMemo(() => daemonSessionScope(connection, subject), [connection, subject]);
   return column([
@@ -39,6 +40,7 @@ export function TerminalsPanel({
         dependencies,
         interceptInput: keys.interceptInput,
         onInputPort: keys.onInputPort,
+        ...(intent === undefined ? {} : { intent }),
       }),
     ),
     createElement('div', { key: 'bar' }, keys.bar),

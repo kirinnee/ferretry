@@ -30,8 +30,11 @@ const reader = (anything = false): RuntimeHomeReader => ({
   skills: async () => [
     { name: 'mine', manifest: MINE, managed: false },
     { name: 'ours', manifest: OURS, managed: true },
+    // 87e1e90689: an installed skill is listed only under an account whose home LINKS it, as the home's reader says.
+    { name: 'tool', manifest: ASSET, managed: true },
   ],
-  skillManifest: async name => (anything || name === 'mine' || name === 'ours' ? doc(name) : undefined),
+  skillManifest: async name =>
+    anything || name === 'mine' || name === 'ours' || name === 'tool' ? doc(name) : undefined,
   skillTree: async () => undefined,
   skillFile: async () => ({ ok: false, reason: 'unreadable' }),
 });

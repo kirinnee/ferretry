@@ -3,7 +3,6 @@ import should from 'should';
 import type { LoginFile, ProviderPresetCatalog, ProviderQuotaReading } from '../../../contract/index.ts';
 import type { CredentialStatusView } from '../../../daemon/lib/credentials/credential-status.ts';
 import {
-  attributedTranscripts,
   type CredentialEntry,
   FleetCredentialCatalog,
   type FleetCredentialCatalogDeps,
@@ -581,21 +580,6 @@ describe('FleetCredentialsService — Test and the presets', () => {
   });
 });
 
-describe('attributedTranscripts — only a session this daemon launched on the login', () => {
-  it('should name the transcripts of sessions on the login’s runtimes, once each and in order', () => {
-    const sessions = [
-      { agent: 'b', transcript: { home: '/h', file: '/h/b.jsonl' } },
-      { agent: 'a', transcript: { home: '/h', file: '/h/a.jsonl' } },
-      { agent: 'a', transcript: { home: '/h', file: '/h/a.jsonl' } },
-      { agent: 'other', transcript: { home: '/h', file: '/h/other.jsonl' } },
-      { agent: 'a', transcript: { home: '/h' } },
-      { agent: 'a' },
-    ];
-    should(attributedTranscripts({ usedBy: ['a', 'b'] }, sessions)).eql(['/h/a.jsonl', '/h/b.jsonl']);
-    should(attributedTranscripts({ usedBy: [] }, sessions)).eql([]);
-  });
-});
-
 describe('FleetCredentialsService — launchStore', () => {
   it('should hand a host-kept Claude login the EMPTY selector without looking at any store', async () => {
     let inspected = 0;
@@ -639,5 +623,50 @@ describe('FleetCredentialsService — launchStore', () => {
     const { service } = serviceOf();
 
     await should(service.launchStore('ghost')).rejected();
+  });
+});
+
+describe('FleetCredentialsService — launchStores', () => {
+  it('should name what each stored login needs to be signed in, and leave out what has nothing to name', async () => {
+    const logins = files({
+      ...Object.fromEntries([...FILES].map(([id, file]) => [id, file as unknown as Record<string, unknown>])),
+      'codex-you': { harness: 'codex', store: 'host' },
+    });
+    const { service } = serviceOf({}, {}, logins);
+
+    should(await service.launchStores()).eql([
+      { id: 'claude-work', variables: { [CLAUDE_SECURE_STORAGE_VARIABLE]: '/fy/fleet/credentials/claude-work' } },
+      { id: 'claude-you', variables: { [CLAUDE_SECURE_STORAGE_VARIABLE]: '' } },
+      { id: 'codex-team', variables: {}, signInFile: '/fy/fleet/credentials/codex-team/auth.json' },
+    ]);
+  });
+});
+
+describe('FleetCredentialsService — an environment login in the list, and the kept list', () => {
+  const environment = {
+    catalog: async () => ({ presets: [] }) as ProviderPresetCatalog,
+    presets: async () => [{ id: 'zai-glm', label: 'Z.ai GLM', docs: 'https://docs.example/zai' } as never],
+    secretNames: async () => new Set<string>(['ZAI_API_KEY']),
+    test: async () => ({}) as never,
+  };
+
+  it('should describe an environment login’s variables and the secrets held for them', async () => {
+    const { service } = serviceOf({ environment });
+    const list = await service.list();
+    const glm = list.logins.find(login => login.id === 'glm');
+    should(glm?.environment?.variables).containDeep([{ name: 'ANTHROPIC_AUTH_TOKEN' }]);
+    should(list.logins.find(login => login.id === 'claude-work')?.environment).be.undefined();
+  });
+
+  it('should answer the same list again while it is fresh, and make a new one once it is stale', async () => {
+    let now = 1_000;
+    const { service, seen } = serviceOf({ listCache: { now: () => now, freshMs: 100 } });
+    await service.list();
+    const asked = seen.length;
+    await service.list();
+    should(seen.length).equal(asked);
+    now += 500;
+    await service.list();
+    should(seen.length).be.above(asked);
   });
 });

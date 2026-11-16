@@ -5,6 +5,7 @@ import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import type { StepContext } from '../steps/index.ts';
 import type { RuntimeIds } from '../v4/ferrets.ts';
+import { rebaseV4Path } from '../v4/rebase.ts';
 
 export function agentHomesRoot(harness: 'claude' | 'codex') {
   const declaration = harness === 'claude' ? CLAUDE_CODE_AGENT_HOMES : CODEX_AGENT_HOMES;
@@ -43,14 +44,20 @@ export function previewFolder(ctx: StepContext, folder: string, worktrees: reado
 export function rewriteTranscript(
   ctx: StepContext,
   harness: 'claude' | 'codex',
-  transcript: TranscriptProvenance,
+  recorded: TranscriptProvenance,
   ids: z.infer<typeof RuntimeIds> | undefined,
 ): TranscriptProvenance | undefined {
+  // The pointer was written with v4's home where it was then: a moved or copied home has it re-based onto `--from` first.
+  const transcript: TranscriptProvenance = {
+    ...recorded,
+    home: rebaseV4Path(ctx.v4.home, recorded.home),
+    ...(recorded.file === undefined ? {} : { file: rebaseV4Path(ctx.v4.home, recorded.file) }),
+  };
   const homes = join(ctx.v4.fleet, 'homes');
   const local = inside(homes, transcript.home);
   if (local === undefined || local.length === 0 || local.includes(sep)) return undefined;
   const entry = Object.values(ids?.runtimes ?? {}).find(
-    value => resolve(homes, value.home ?? value.id) === resolve(transcript.home),
+    value => resolve(homes, rebaseV4Path(ctx.v4.home, value.home ?? value.id)) === resolve(transcript.home),
   );
   const id = entry?.id ?? (z.uuid().safeParse(local).success ? local : undefined);
   if (id === undefined) return undefined;

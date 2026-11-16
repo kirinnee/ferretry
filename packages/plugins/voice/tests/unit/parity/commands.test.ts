@@ -24,13 +24,13 @@ async function run(verb: 'voice' | 'voice enhance', args: string[]) {
     } as never,
     io: { out: text => out.push(text), err: () => undefined, isTty: false },
   });
-  const code = await half?.verbs[verb]({ args, options: {} });
+  const code = await half?.verbs[verb === 'voice' ? 'voice [text...]' : verb]({ args, options: {} });
   return { code, calls, out: out.join('') };
 }
 
 describe('fy voice', () => {
   test('V-0453 bare fy stt is fy voice: it cleans up the text it is given', async () => {
-    expect(manifest.actions.cli.map(entry => entry.verb)).toContain('voice');
+    expect(manifest.actions.cli.map(entry => entry.verb)).toContain('voice [text...]');
     const answered = await run('voice', ['helo', 'wold']);
     expect(answered.code).toBe(0);
     expect(answered.calls[0]?.route).toBe('POST /v1/stt/enhance');

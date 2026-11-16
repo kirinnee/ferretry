@@ -9,6 +9,7 @@ import {
   resolveLayout,
   type Viewport,
 } from '../layout/layout.ts';
+import { useDeviceControls } from '../compose/device-controls.ts';
 import { type RouteTable, routeTable } from '../router/routes.ts';
 import {
   applyTextScale,
@@ -153,6 +154,17 @@ function useAppliedTheme(
   }, [browser, dark, density, preference, ownerTheme]);
 }
 
+/** Settings › This device › Motion: `reduced` stills every animation (`<html data-motion="reduced">`, styles/index.css). */
+function useAppliedMotion(browser: ShellWindow): void {
+  const { device } = useDeviceControls();
+  const motion = device.motion;
+  useEffect(() => {
+    const root = browser.document.documentElement;
+    if (motion === 'reduced') root.dataset.motion = 'reduced';
+    else delete root.dataset.motion;
+  }, [browser, motion]);
+}
+
 export interface ShellProviderProps {
   readonly runtime: ShellRuntime;
   readonly themes: ThemePreferenceStore;
@@ -206,6 +218,7 @@ export function ShellProvider({
   const viewport: Viewport = phone ? 'phone' : 'wide';
   const plan = useMemo(() => planFrame(resolveLayout(layout.layout, viewport), views), [layout, viewport, views]);
   useAppliedTheme(browser, preference, dark, plan.density, served?.theme);
+  useAppliedMotion(browser);
   // The device context sits ABOVE the shell context, so `WithoutShell` (which hides only the shell) never hides it.
   const device = useMemo<DeviceContextValue>(
     () => ({

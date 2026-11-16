@@ -1,23 +1,31 @@
 import { describe, it } from 'bun:test';
 import type { Instant } from '@ferretry/std';
 import should from 'should';
-import type { PacksFile, ReplacedRouting } from '../../../../contract/index.ts';
-import { GuideFileService } from '../../../../daemon/lib/cleanup/file.ts';
+import type { PacksFile, ReplacedRouting, RoutingFile } from '../../../../contract/index.ts';
+import { GuideFileService, type GuideWrite } from '../../../../daemon/lib/cleanup/file.ts';
 
 const NOW = '2026-10-22T12:00:00.000Z';
 const SUGGESTED = { by: 'opus', via: 'claude-main', at: '2026-10-22T11:00:00.000Z' as Instant };
 const PROMPT = 'Planning and review: opus at max. Chores: haiku.';
 
-/** packs.yaml in memory (the parsed file), written through the same edits the real writer is given. */
-function world(initial: PacksFile | undefined, kept?: ReplacedRouting) {
+/**
+ * packs.yaml in memory (the parsed file), written through the same edit the real writer is given: the `routing`
+ * section alone (`undefined` takes it out), every other key left as it is. `answer` is what the writer says.
+ */
+function world(initial: PacksFile | undefined, kept?: ReplacedRouting, answer?: () => GuideWrite | Error) {
   const state = { file: initial, writes: 0, etags: [] as string[] };
   let replaced: ReplacedRouting | undefined = kept;
   const service = new GuideFileService({
     read: async () => ({ file: state.file ?? {}, etag: `etag-${String(state.writes)}` }),
-    write: async (file, etag) => {
+    write: async (routing: RoutingFile | undefined, etag) => {
       state.etags.push(etag);
-      state.file = file;
+      const said = answer?.() ?? { kind: 'written' as const };
+      if (said instanceof Error) throw said;
+      if (said.kind === 'held') return said;
+      const { routing: _was, ...rest } = state.file ?? {};
+      state.file = routing === undefined ? rest : { ...rest, routing };
       state.writes += 1;
+      return said;
     },
     replaced: {
       read: async () => replaced,
@@ -183,5 +191,66 @@ describe('GuideFileService.accept and undo', () => {
     // Assert
     should(actual).deepEqual({ savedAt: NOW, source: 'file' });
     should(subject.state.writes).equal(0);
+  });
+});
+
+describe('GuideFileService when the writer does not put the edit into effect', () => {
+  const HELD: GuideWrite = { kind: 'held', sentences: ['the prompt names a secret'] };
+
+  it('should report an accept the owner must confirm as held, and keep no undo for what is not in effect', async () => {
+    // Arrange
+    const subject = world({ routing: { prompt: 'Mine.' } }, undefined, () => HELD);
+
+    // Act
+    const accepted = await subject.service.accept({ prompt: PROMPT, suggested: SUGGESTED });
+
+    // Assert
+    should(accepted.outcome).equal('held');
+    should(accepted.message).containEql('waits for you to confirm it');
+    should(accepted.message).containEql('the prompt names a secret');
+    should(subject.state.file).deepEqual({ routing: { prompt: 'Mine.' } });
+    should(subject.replaced()).be.undefined();
+  });
+
+  it('should leave the undo it had when a later accept is held', async () => {
+    // Arrange
+    const before: ReplacedRouting = { format: 1, text: 'Old.', savedAt: NOW as Instant, source: 'file' };
+    const subject = world({ routing: { prompt: 'Mine.' } }, before, () => HELD);
+
+    // Act
+    await subject.service.accept({ prompt: PROMPT, suggested: SUGGESTED });
+
+    // Assert
+    should(subject.replaced()).deepEqual(before);
+  });
+
+  it('should keep the undo and report held when an undo is held, so it can be tried again', async () => {
+    // Arrange
+    const kept: ReplacedRouting = { format: 1, text: 'Old.', savedAt: NOW as Instant, source: 'file' };
+    const subject = world({ routing: { prompt: 'Mine.' } }, kept, () => HELD);
+
+    // Act
+    const undone = await subject.service.undo();
+
+    // Assert
+    should(undone.outcome).equal('held');
+    should(subject.replaced()).deepEqual(kept);
+  });
+
+  it('should refuse, and keep the undo it had, when the file moved since it was read', async () => {
+    // Arrange
+    const moved = new Error('packs.yaml changed since it was last read; nothing was saved. Try again.');
+    const kept: ReplacedRouting = { format: 1, text: 'Old.', savedAt: NOW as Instant, source: 'file' };
+    const subject = world({ routing: { prompt: 'Mine.' } }, kept, () => moved);
+
+    // Act
+    const failed = await subject.service.accept({ prompt: PROMPT, suggested: SUGGESTED }).catch((e: unknown) => e);
+    const failedUndo = await subject.service.undo().catch((e: unknown) => e);
+
+    // Assert
+    should(failed).equal(moved);
+    should(failedUndo).equal(moved);
+    should(subject.replaced()).deepEqual(kept);
+    should(subject.state.file).deepEqual({ routing: { prompt: 'Mine.' } });
   });
 });

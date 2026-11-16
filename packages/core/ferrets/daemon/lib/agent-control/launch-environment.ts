@@ -1,5 +1,7 @@
-import type { FerretId, FerretRecord } from '../../../contract/index.ts';
+import type { FerretDetails, FerretId, FerretRecord } from '../../../contract/index.ts';
 import { LAUNCH_SWITCH_VARIABLES } from '../../../contract/index.ts';
+import { effectiveMode } from '../registry/registry.ts';
+import { HYPERMEDIA_ENV } from '../session/peers/fleet.ts';
 
 /** What a ferret's launch environment is kept in: the switches it was launched with, per ferret. */
 export interface LaunchEnvironmentRecord {
@@ -41,8 +43,31 @@ export class LaunchEnvironmentStore implements LaunchEnvironmentRecord {
  * does not contribute yet is simply absent from the record, and `instructions` reads it as off: Pack always records
  * `FY_PACK`, so the record is known, and a switch it does not hold was not handed to the pane.
  */
-export function switchesOfRecord(record: FerretRecord | undefined): Readonly<Record<string, string>> {
-  return record?.mode === undefined ? {} : { FY_SESSION_MODE: record.mode };
+export function switchesOfRecord(
+  record: FerretRecord | undefined,
+  details?: FerretDetails,
+): Readonly<Record<string, string>> {
+  return sessionModeSwitch(record === undefined ? undefined : effectiveMode(record, details));
+}
+
+/**
+ * The mode a pane is handed (`FY_SESSION_MODE`, v4 parity): the wrappers and `instructions` read it. The ONE spelling
+ * of it, shared by what a launch puts in the pane's environment and what the record implies, so the stored switch and
+ * the derived one always agree and a launch never makes a ferret read as changed. No mode hands the pane nothing
+ * (unattended, as the wrappers read an unset variable).
+ */
+export function sessionModeSwitch(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
+  return mode === undefined ? {} : { FY_SESSION_MODE: mode };
+}
+
+/**
+ * The per-ferret switch a LAUNCH decides itself, from the ferret's mode: Hypermedia is ON for an interactive ferret and
+ * OFF for an auto one (a worker, a warden, a miner; docs/hypermedia.md). It goes into the launch environment FIRST, so
+ * an owner's switch (Conversation's `conversation-hypermedia` part) still wins, and the pane is handed it and
+ * `instructions` reads it back from the record. A ferret with no mode is an auto one (the start's own default).
+ */
+export function modeSwitchDefaults(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
+  return { [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0' };
 }
 
 /** The launch variables a launch records: the section switches and the mode, as the launch put them in its environment. */

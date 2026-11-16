@@ -70,13 +70,24 @@ describe('which ferrets are over, and which kind they are', () => {
     expect(isStopped(ferret('c', { state: 'stopped' }))).toBe(true);
   });
 
-  test('a kind of ferret is its mode; All is every mode; a ferret with no mode shows only under All', () => {
+  test('a kind of ferret is its mode; All is every mode; a ferret whose record names no mode is an agent, as the daemon reads it', () => {
     const agent = ferret('a', { mode: 'auto' });
     const person = ferret('p', { mode: 'interactive' });
     const unmoded = ferret('u', { mode: undefined });
     expect([agent, person, unmoded].map(row => matchesMode(row, 'all'))).toEqual([true, true, true]);
-    expect([agent, person, unmoded].map(row => matchesMode(row, 'auto'))).toEqual([true, false, false]);
+    expect([agent, person, unmoded].map(row => matchesMode(row, 'auto'))).toEqual([true, false, true]);
     expect([agent, person, unmoded].map(row => matchesMode(row, 'interactive'))).toEqual([false, true, false]);
+  });
+
+  test('the segment counts classify every listed ferret into exactly one kind: Interactive + Agents = All', () => {
+    const running = [
+      ferret('a', { mode: 'auto' }),
+      ferret('b', { mode: undefined }),
+      ferret('c', { mode: undefined }),
+      ferret('p', { mode: 'interactive' }),
+    ];
+    const { counts } = ferretListView(running, { mode: 'all', showStopped: false });
+    expect(counts).toEqual({ all: 4, auto: 3, interactive: 1 });
   });
 });
 

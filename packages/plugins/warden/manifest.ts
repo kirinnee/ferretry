@@ -8,7 +8,7 @@ import { appAction, definePlugin, panel, route, screen, settingsTab } from '@fer
 import { AsksPort } from '@ferretry/core-asks/contract';
 import { ACTIONS_ROW_SLOT, FerretChanged, FerretsPort } from '@ferretry/core-ferrets/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
-import { UsagePort } from './contract/others.ts';
+import { AccountsPort, LoginsPort, UsagePort } from './contract/others.ts';
 import {
   cap,
   WARDEN_CONFIGURED_AUDIT,
@@ -57,7 +57,9 @@ export default definePlugin({
 
   needs: { ferrets: FerretsPort, conversation: ConversationPort, asks: AsksPort },
   /**
-   * Optional (D2 #19): Usage and Board as before; Terminals for the liveness look at each ferret's own pane (off:
+   * Optional (D2 #19): Usage and Logins give the auto-move its quota facts (with Runtimes' catalog), and Accounts gives
+   * its one owner-hold yes or no (off or silent: a ferret is never moved, because a hold that cannot be checked is a
+   * hold); Board as before; Terminals for the liveness look at each ferret's own pane (off:
    * `dead_monitor`, `sus_*` and `agent_frozen` do not run), Browsers to close the browsers left under it (off: that
    * check does not run).
    * Runtimes and Voice are read by the settings tab only (britnee, optional uses): the runtime list for the
@@ -67,6 +69,8 @@ export default definePlugin({
    */
   uses: {
     usage: UsagePort,
+    logins: LoginsPort,
+    accounts: AccountsPort,
     board: BoardPort,
     terminals: TerminalsPort,
     browsers: BrowsersPort,
@@ -150,6 +154,14 @@ export default definePlugin({
         audit: { record: WARDEN_CONFIGURED_AUDIT },
         guard: { none: 'settings only' },
       }),
+      route('POST /v1/warden/jev-key', {
+        minimum: 'operator',
+        caller: 'person',
+        capability: wardenConfigure,
+        noStore: true,
+        audit: { record: WARDEN_CONFIGURED_AUDIT },
+        guard: { none: 'names a reference, never a value' },
+      }),
     ],
     // Today's ferret Actions menu row ("Ask the Warden to investigate now…"), contributed rather than written in.
     app: [
@@ -171,8 +183,10 @@ export default definePlugin({
       // Ferrets' own pages: the Warden's word about a ferret in its Info, and its row in the Actions ▾ menu.
       panel('ferret.side', { id: 'ferret-warden', order: 30 }),
       panel(ACTIONS_ROW_SLOT, { id: 'ask-warden-row', order: 90 }),
+      // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
+      panel('onboarding.step', { id: 'onboarding-step', order: 60 }),
     ],
-    settings: [settingsTab('warden', { label: 'Warden', order: 60 })],
+    settings: [settingsTab('warden', { group: 'supervision', label: 'Warden', order: 60 })],
   },
 
   data: {
@@ -184,6 +198,7 @@ export default definePlugin({
 
   hooks: { takes: [{ hook: FerretChanged }, { hook: TurnEnded }] },
 
+  onboarding: [{ id: 'warden', title: 'Warden', order: 60 }],
   doctor: ['warden-sweep'],
   // It reads reports and the Jev guard model over the network; it starts wardens (ferrets) through Ferrets, not a process.
   permissions: { roots: [], network: ['api.typesafe.ai'], spawn: [], secrets: ['JEV_API_KEY'] },

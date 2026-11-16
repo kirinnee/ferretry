@@ -1,5 +1,6 @@
 import type { ConfigCollectionDef, ConfigFileDef } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { selectedComponents } from '@ferretry/plugin-runtimes/contract';
 import manifest from '../manifest.ts';
 import {
   CODEX_CONFIG,
@@ -24,6 +25,7 @@ import { HostCodexProbe } from './adapters/probe.ts';
 import { CodexAppServerCatalog } from './adapters/app-server-catalog.ts';
 import { HeldFastCatalog } from './adapters/held-catalog.ts';
 import { codexUpdateRoutes, HarnessUpdateService, locateCodex } from './lib/index.ts';
+import { codexDoctor } from './lib/doctor.ts';
 import { fastStartDecision } from './lib/fast-mode.ts';
 import { codexHooksSource, codexSettingsSource } from './lib/profile-components.ts';
 import { codexProjectApprovals } from './lib/project-approvals.ts';
@@ -144,16 +146,20 @@ export default implementDaemon(manifest, {
 
     return {
       routes,
+      // Which `codex` this host runs and by which rule (today's `codex` row), by the same location every start uses.
+      doctor: { 'codex-paths': codexDoctor(locate) },
       // `approvedProjectServers` is always `not-taken` (Codex takes no `.mcp.json` server's sign-in, as today); MCP
       // answers `not-taken` for a Codex launch without asking, so this is the contract's answer, not MCP's gate.
       provides: { codex: { view, discovery, approvedProjectServers: codexProjectApprovals } },
       hooks: {
         // Runtimes' read of the `settings` components a profile names for Codex: this plugin's own items, live, no cache.
-        'runtimes.components.settings.codex:components': codexSettingsSource(() =>
-          kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+        'runtimes.components.settings.codex:components': codexSettingsSource(
+          () => kernel.config.collection(CODEX_SETTINGS as ConfigCollectionDef<SettingsItem>),
+          listener => kernel.config.watch(CODEX_SETTINGS, listener),
         ),
-        'runtimes.components.hooks.codex:components': codexHooksSource(() =>
-          kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
+        'runtimes.components.hooks.codex:components': codexHooksSource(
+          () => kernel.config.collection(CODEX_HOOKS as ConfigCollectionDef<HooksItem>),
+          listener => kernel.config.watch(CODEX_HOOKS, listener),
         ),
         'start.decide': async input => {
           // Only a fast Codex start looks at the catalog; any other start is answered without touching it.
@@ -168,6 +174,7 @@ export default implementDaemon(manifest, {
         },
         'harnesses:codex': codexHarness({
           kernel,
+          selected: async runtime => await selectedComponents(ctx.uses.runtimes.current(), runtime),
           locate,
           probe,
           permissionMode: () => paths().permissionMode,

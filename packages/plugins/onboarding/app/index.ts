@@ -38,12 +38,15 @@ const daemonlessPlaceholder = (): null => null;
  */
 export default provideToShell(
   implementApp(manifest, {
-    build: ({ client }) => ({
-      screens: { onboarding: daemonlessPlaceholder, steps: stepsScreen(client) },
-      panels: {},
-      settings: { setup: setupTab(client) },
-      renderers: {},
-    }),
+    build: ({ client }) => {
+      const steps = stepsScreen(client);
+      return {
+        screens: { onboarding: daemonlessPlaceholder, handoff: daemonlessPlaceholder, steps, setup: steps },
+        panels: {},
+        settings: { setup: setupTab(client) },
+        renderers: {},
+      };
+    },
   }),
   {
     // A just-paired machine with steps not looked at yet opens its steps page by itself (shell contract S3 device view).
@@ -52,12 +55,14 @@ export default provideToShell(
         ((await loadViews()).createStepsOpener as () => AppComponent<DeviceViewProps>)(),
       ) as NonNullable<ShellProvides['device']>[string],
     },
-    daemonless: ports => ({
-      onboarding: lazyComponent<DaemonlessScreenProps>(async () =>
+    daemonless: ports => {
+      // `/onboarding` and the hand-off link's `/setup` are one page: the same view answers both addresses.
+      const firstRun = lazyComponent<DaemonlessScreenProps>(async () =>
         ((await loadViews()).createOnboardingRoute as (ports: DaemonlessPorts) => AppComponent<DaemonlessScreenProps>)(
           ports,
         ),
-      ) as DaemonlessViews[string],
-    }),
+      ) as DaemonlessViews[string];
+      return { onboarding: firstRun, handoff: firstRun };
+    },
   },
 );

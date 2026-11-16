@@ -19,6 +19,7 @@ import {
   PROFILE_COMPONENTS_KEY,
   ProfileCodexHooksSource,
   ProfileCodexSettingsSource,
+  RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
 
 /**
@@ -37,6 +38,9 @@ export default definePlugin({
   kinds: ['harness', 'command', 'view'],
 
   provides: { codex: CodexPort },
+  // Which settings components a runtime's profile selects (`RuntimesApi.layers`), read live and late (Runtimes takes this
+  // plugin's component sources, so it cannot be a build edge): only those items reach that runtime's home.
+  uses: { runtimes: RuntimesPort },
 
   actions: {
     routes: [
@@ -60,20 +64,66 @@ export default definePlugin({
     cli: [
       verb('harness codex status', {
         summary: 'where codex is, how it was installed, its version, and whether Ferretry verified it',
+        args: [],
+        options: [{ flag: '--json', help: 'print the protocol payload instead of the human rendering' }],
       }),
-      verb('harness codex update', { summary: 'update codex, with the command for how it was installed' }),
-      verb('harness codex settings ls', { summary: 'the Codex settings items on this machine' }),
-      verb('harness codex settings show', { summary: 'one settings item and where it is used' }),
-      verb('harness codex settings add', { summary: 'add a settings item' }),
+      verb('harness codex update', {
+        summary: 'update codex, with the command for how it was installed',
+        args: [],
+        options: [
+          { flag: '--to <version>', help: 'install this version, or "verified" for the one Ferretry verified' },
+          { flag: '--yes', help: 'do not ask before updating' },
+          {
+            flag: '--allow-unverified',
+            help: 'install a version Ferretry has not verified yet (--yes never implies this)',
+          },
+        ],
+      }),
+      verb('harness codex settings ls', {
+        summary: 'the Codex settings items on this machine',
+        args: [],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness codex settings show', {
+        summary: 'one settings item and where it is used',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
+      }),
+      verb('harness codex settings add', {
+        summary: 'add a settings item',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
       verb('harness codex settings edit', {
         summary: 'change a settings item; every runtime that uses it changes too',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--file <path>', help: "the item's text, from a local file" },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
       }),
-      verb('harness codex settings rm', { summary: 'remove a settings item' }),
+      verb('harness codex settings rm', {
+        summary: 'remove a settings item',
+        args: [{ name: 'name', help: 'the settings item’s name' }],
+        options: [
+          { flag: '--remove-from-profiles', help: 'take it out of every profile that has it first' },
+          { flag: '--dry-run', help: 'show what would change, and change nothing' },
+          { flag: '-y, --yes', help: 'go ahead without asking' },
+          { flag: '--json', help: 'print the answer as JSON' },
+        ],
+      }),
     ],
   },
 
   ui: {
-    settings: [settingsTab('codex', { label: 'Codex', order: 21 })],
+    settings: [settingsTab('codex', { group: 'tools', label: 'Codex', order: 21 })],
     // The first-run step's body (Onboarding's steps screen offers this slot): the same view as the Settings tab.
     panels: [panel('onboarding.step', { id: 'onboarding-step', order: 21 })],
   },

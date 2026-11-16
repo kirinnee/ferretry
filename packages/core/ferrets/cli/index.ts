@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { implementCli, type VerbInvocation } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
+import { HISTORY_CLAIM_HELD_EXIT_CODE } from '../contract/conversation-lease.ts';
+import { hostLeaseStore } from './adapters/history/host-lease-store.ts';
+import { HistoryController } from './lib/history/controller.ts';
+import { historyClaimRequest } from './lib/history/request.ts';
 import { ClientRestartGateway, ClientSessionApi } from './lib/client.ts';
 import { instructionsReport, renderInstructionsReport } from '../contract/instructions-report.ts';
 import { moveOptions } from './lib/move/commands.ts';
@@ -42,6 +46,9 @@ import { ClientWorktreeGateway } from './lib/worktrees/gateway.ts';
 /** The binary's name, for sentences that name a command. */
 const BINARY = 'fy';
 
+/** The variable a runtime's wrapper exports its own name in, read to name the runtime in a refusal. */
+const RUNTIME_NAME_ENV = 'FY_RUNTIME';
+
 /**
  * Whether a failed read lost the daemon (as against the daemon answering no): the shell's transport failures carry no
  * HTTP status. A wait that loses the daemon ends with its own exit code instead of looking like a ferret that ended.
@@ -61,6 +68,11 @@ const STOP_USAGE = [
   `  ${BINARY} stop cascade <ferret>    stop a ferret and every helper under it`,
   `  ${BINARY} stop children <ferret>   stop every helper under a ferret and keep it running`,
   `  ${BINARY} stop label <label>       stop every ferret with that label, whatever its lineage`,
+];
+const HISTORY_USAGE = [
+  'the conversations every runtime of a harness shares:',
+  `  ${BINARY} history claim --harness <claude|codex> --pid <pid> [--from-arguments --] <conversation or harness arguments>`,
+  `      claim a conversation for one writer; refused (exit ${HISTORY_CLAIM_HELD_EXIT_CODE}) while another is writing it`,
 ];
 const SESSION_USAGE = [
   "act on a ferret's own standing with this daemon:",
@@ -103,9 +115,11 @@ function refuseElsewhere(invocation: VerbInvocation, names: readonly string[], v
  * folder `fy` was run in unless `--cwd` names another.
  */
 export default implementCli(manifest, {
-  build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes }) {
+  build({ client, io: terminal, env, clock, sleep, exists, readText, readBytes, ownState, readEnvironment }) {
     const api = new ClientSessionApi(client);
-    const environment: SessionEnvironment = { cwd: process.cwd() };
+    // The folder `fy` was typed in: the shell hands it as `PWD` (its real working directory, never a parent's stale
+    // variable), so a start from work/alpha begins in work/alpha, as today.
+    const environment: SessionEnvironment = { cwd: env?.PWD ?? process.cwd() };
 
     const verb =
       (work: (invocation: VerbInvocation, presenter: SessionPresenter, io: VerbIo) => Promise<void>) =>
@@ -133,9 +147,13 @@ export default implementCli(manifest, {
     });
 
     const status = verb(async (invocation, presenter) => {
-      const [id] = invocation.args;
-      if (on(invocation, 'subtree'))
-        return await new SessionSubtreeController(api, presenter, environment).execute(id, json(invocation));
+      // The shell cannot know `--subtree` is a switch, so `status --subtree wren` arrives as the option VALUE `wren`
+      // (v4 took the id as the positional): either spelling names the ferret.
+      const spaced = text(invocation, 'subtree');
+      const named = spaced === undefined || spaced === 'true' || spaced === 'false' ? undefined : spaced;
+      const subtree = on(invocation, 'subtree') || named !== undefined;
+      const id = invocation.args[0] ?? named;
+      if (subtree) return await new SessionSubtreeController(api, presenter, environment).execute(id, json(invocation));
       if (id === undefined)
         throw new SessionCommandError('missing the ferret id: status <id>, or status --subtree <id>');
       await new SessionStatusController(api, presenter).execute(id, json(invocation));
@@ -213,6 +231,7 @@ export default implementCli(manifest, {
           ...(harness === undefined ? {} : { harness }),
           ...(login === undefined ? {} : { login }),
           ...(pack === undefined ? {} : { pack }),
+          ...(role === 'start' && on(invocation, 'detach') ? { detach: true } : {}),
           ...(cwd === undefined ? {} : { cwd }),
           ...(prompt === undefined ? {} : { prompt }),
           ...(initialAttachments.length === 0 ? {} : { initialAttachments }),
@@ -421,6 +440,20 @@ export default implementCli(manifest, {
       });
     });
 
+    // `fy history claim` (V-0283): the wrapper's claim before it `exec`s a resumed harness. It reads and writes the lease
+    // files itself and asks the daemon nothing, so a person's own terminal is covered with no daemon running; a failure
+    // of any kind answers 1 (or 2 for words it cannot read), never the held status, so a wrapper launches anyway.
+    const historyClaim = verb(async (invocation, _presenter, io) => {
+      const request = historyClaimRequest(invocation);
+      if (ownState === undefined) throw new Error('this shell gives no state home to keep conversation leases in');
+      const runtime = readEnvironment?.([RUNTIME_NAME_ENV])[RUNTIME_NAME_ENV];
+      const session = env?.FY_SESSION_ID;
+      await new HistoryController(hostLeaseStore(ownState), io, {
+        ...(session === undefined || session === '' ? {} : { session }),
+        ...(runtime === undefined || runtime === '' ? {} : { runtime }),
+      }).claim(request);
+    });
+
     // `fy ferret move <id>` (today's `fy migrate`, §1.4): one destructive call under a logical request id.
     const move = verb(async (invocation, presenter, io) => {
       const id = first(invocation, 'ferret id or callsign');
@@ -464,6 +497,8 @@ export default implementCli(manifest, {
         'worktree fork <branch>': worktreeFork,
         'worktree add <branch>': worktreeFork,
         'ferret move <id>': move,
+        history: usage(HISTORY_USAGE),
+        'history claim [words...]': historyClaim,
       },
     };
   },

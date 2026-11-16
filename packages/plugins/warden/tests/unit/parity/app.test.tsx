@@ -9,6 +9,8 @@
 import { describe, expect, test } from 'bun:test';
 import { interact, mount, must } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { createElement, type FunctionComponent, Suspense } from 'react';
+import { renderToString } from 'react-dom/server';
 import { WARDEN_AUTO_MOVE_TRIGGERS, WARDEN_CONFIG } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import app from '../../../app/index.ts';
@@ -200,18 +202,24 @@ describe('app half: components the plugin owns', () => {
   });
 });
 
+/**
+ * Draws a lazy view inside Suspense as the shell does, in one synchronous server render (no `act`, so its module cannot
+ * arrive mid-draw), and proves it suspends: only the fallback shows.
+ */
+function expectSuspends(view: FunctionComponent<unknown>, props: unknown): void {
+  const html = renderToString(
+    createElement(Suspense, { fallback: createElement('p', null, 'loading') }, createElement(view, props as never)),
+  );
+  expect(html).toContain('loading');
+}
+
 describe('app half: the screen and the Settings tab', () => {
-  test('S-0283 S-0288 WardenOverviewRoute and WardenRoute are host routes today; the plugin owns only the lazy view behind the warden screen', async () => {
+  test('S-0283 S-0288 WardenOverviewRoute and WardenRoute are host routes today; the plugin owns only the lazy view behind the warden screen', () => {
     const screen = half.screens.warden;
     expect(typeof screen).toBe('function');
-    let thrown: unknown;
-    try {
-      screen({} as never);
-    } catch (reason) {
-      thrown = reason;
-    }
-    expect(typeof (thrown as PromiseLike<unknown>).then).toBe('function');
-    await (thrown as Promise<unknown>);
+    // A lazy view suspends through React's use() (lazy.ts), so it is drawn the way the shell draws it, inside Suspense:
+    // until its module arrives only the fallback shows.
+    expectSuspends(screen as unknown as FunctionComponent<unknown>, {});
   });
 
   test('S-0410 the screen warden is declared at /warden with a nav entry and implemented by the app half', () => {
@@ -225,23 +233,18 @@ describe('app half: the screen and the Settings tab', () => {
     expect(Object.keys(half.settings)).toEqual(manifest.ui.settings.map(tab => tab.id));
   });
 
-  test('the dashboard strip and verdicts (daemon.status) and the Warden’s two contributions to Ferrets’ pages (ferret.side, ferrets.actions-row) are declared and implemented as lazy panels', async () => {
+  test('the dashboard strip and verdicts (daemon.status) and the Warden’s two contributions to Ferrets’ pages (ferret.side, ferrets.actions-row) are declared and implemented as lazy panels', () => {
     expect(manifest.ui.panels).toEqual([
       { slot: 'daemon.status', id: 'warden-strip', order: 60 },
       { slot: 'daemon.status', id: 'warden-verdicts', order: 61 },
       { slot: 'ferret.side', id: 'ferret-warden', order: 30 },
       { slot: 'ferrets.actions-row', id: 'ask-warden-row', order: 90 },
+      { slot: 'onboarding.step', id: 'onboarding-step', order: 60 },
     ]);
     expect(Object.keys(half.panels)).toEqual(manifest.ui.panels.map(panel => panel.id));
     for (const panel of Object.values(half.panels)) {
-      let thrown: unknown;
-      try {
-        panel({});
-      } catch (reason) {
-        thrown = reason;
-      }
-      expect(typeof (thrown as PromiseLike<unknown>).then).toBe('function');
-      await (thrown as Promise<unknown>);
+      // The first-run step draws only for its own subject, so every panel is asked as that step.
+      expectSuspends(panel as unknown as FunctionComponent<unknown>, { subject: 'warden.warden' });
     }
   });
 

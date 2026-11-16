@@ -143,6 +143,30 @@ describe('CombinedSignInGrants', () => {
     should(ledger.pinned('rule:sr_1:1').size).equal(0);
   });
 
+  it('should tell the rule source of every script, and have nothing to stop when it takes none', () => {
+    const ledger = new SignInGrantLedger();
+    const told: string[] = [];
+    const rules = fake('rule', ledger, []).source;
+    const watching: SignInGrantSource = {
+      ...rules,
+      running: () => {
+        told.push('running');
+        return () => void told.push('ended');
+      },
+      scriptedOn: host => void told.push(`on ${String(host)}`),
+    };
+
+    const both = new CombinedSignInGrants(fake('plan', ledger, []).source, watching, ledger);
+    both.running()();
+    both.scriptedOn('github.com');
+    both.scriptedOn(undefined);
+    const deaf = new CombinedSignInGrants(fake('plan', ledger, []).source, rules, ledger);
+    deaf.running()();
+    deaf.scriptedOn('github.com');
+
+    should(told).deepEqual(['running', 'ended', 'on github.com', 'on undefined']);
+  });
+
   it(`I220 should refuse the ${String(FILLS_PER_HOUR_PER_SIGN_IN + 1)}th fill of one sign-in in an hour across a plan line and a rule`, () => {
     const ledger = new SignInGrantLedger();
     for (let index = 0; index < FILLS_PER_HOUR_PER_SIGN_IN; index++) {

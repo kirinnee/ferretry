@@ -133,6 +133,7 @@ import { askFormFor } from './ask-renderers.tsx';
 import { agendaAge, agendaReference } from './agenda-board.tsx';
 import { AgendaCard, type AgendaCardOrigin } from './agenda-card.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
+import { CardReferenceScope } from './agenda-board-hooks.tsx';
 import { agendaProse } from './agenda-prose.tsx';
 import { ResolvedRow } from './agenda-resolved.tsx';
 import { ResolvedItemView } from './resolved-item-view.tsx';
@@ -187,7 +188,7 @@ const answerCard = (
   action: InboxAction,
 ): void => {
   inbox.deferred.schedule(card, action);
-  const editor = inbox.laneEditor?.(card.item, action);
+  const editor = inbox.laneEditor?.(card.daemonId, card.item, action);
   if (editor !== undefined) onNavigate(editor);
 };
 
@@ -204,19 +205,21 @@ const renderInboxCard = (
   act: (action: InboxAction) => void,
 ) => (
   <Fragment key={card.key}>
-    <AgendaCard
-      error={failureFor(inbox.deferredState.failed, card.key)}
-      item={card.item}
-      key={card.key}
-      onAct={act}
-      {...(card.item.signInRuleSuggestion === undefined
-        ? { onSnooze: (until: string) => act(snoozeAction(until)) }
-        : {})}
-      origin={inboxCardOrigin(card, onNavigate)}
-      swipeHints={false}
-      {...askFormFor(inbox, card, onNavigate)}
-      {...(now === undefined ? {} : { now })}
-    />
+    <CardReferenceScope daemonId={card.daemonId}>
+      <AgendaCard
+        error={failureFor(inbox.deferredState.failed, card.key)}
+        item={card.item}
+        key={card.key}
+        onAct={act}
+        {...(card.item.signInRuleSuggestion === undefined
+          ? { onSnooze: (until: string) => act(snoozeAction(until)) }
+          : {})}
+        origin={inboxCardOrigin(card, onNavigate)}
+        swipeHints={false}
+        {...askFormFor(inbox, card, onNavigate)}
+        {...(now === undefined ? {} : { now })}
+      />
+    </CardReferenceScope>
   </Fragment>
 );
 
@@ -347,50 +350,52 @@ function OpenItem({
   const machineFerrets = isMachineAgendaId(card.view.config.id) ? ferretsOf(card.item.context) : [];
   return (
     <Fragment key={card.key}>
-      <div
-        className="fy-inbox-open"
-        data-inbox-gate={isGateItem(card.item) ? '' : undefined}
-        data-inbox-open={card.key}
-        key={card.key}
-      >
-        {isGateItem(card.item) ? (
-          <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
-        ) : (
-          <InboxWhoLine card={card} onNavigate={onNavigate} />
-        )}
-        {machineFerrets.length === 0 ? null : <MachineNotes ferrets={machineFerrets} item={card.item} />}
-        <AgendaItemView
-          busy={false}
-          closeLabel="Back to the Inbox"
-          daemonId={card.daemonId}
-          error={failureFor(inbox.deferredState.failed, card.key) ?? conversation.error}
-          ferret={inboxWho(card).ferret}
-          formKey={card.key}
-          history={history}
-          itemKey={card.key}
-          {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
-          {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
-          {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
-          {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
-          howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
-          tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
-          item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
-          onAct={act}
-          onClose={place.onClose}
-          onNext={skip}
-          {...(onProgress === undefined ? {} : { onProgress })}
-          {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
-          position={{ index: place.index, total: place.total }}
-          quoteScope={scopeOf(card)}
-          {...askFormFor(inbox, card, onNavigate)}
-          renderProse={agendaProse(copyWriter)}
-          // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
-          // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
-          swipeable={place.swipeable}
-          {...(now === undefined ? {} : { now })}
-          {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
-        />
-      </div>
+      <CardReferenceScope daemonId={card.daemonId}>
+        <div
+          className="fy-inbox-open"
+          data-inbox-gate={isGateItem(card.item) ? '' : undefined}
+          data-inbox-open={card.key}
+          key={card.key}
+        >
+          {isGateItem(card.item) ? (
+            <GateMeta card={card} item={card.item} onNavigate={onNavigate} />
+          ) : (
+            <InboxWhoLine card={card} onNavigate={onNavigate} />
+          )}
+          {machineFerrets.length === 0 ? null : <MachineNotes ferrets={machineFerrets} item={card.item} />}
+          <AgendaItemView
+            busy={false}
+            closeLabel="Back to the Inbox"
+            daemonId={card.daemonId}
+            error={failureFor(inbox.deferredState.failed, card.key) ?? conversation.error}
+            ferret={inboxWho(card).ferret}
+            formKey={card.key}
+            history={history}
+            itemKey={card.key}
+            {...(lifecycle.versions === undefined ? {} : { versions: lifecycle.versions })}
+            {...(lifecycle.merge === undefined ? {} : { merge: lifecycle.merge })}
+            {...(lifecycle.lineageTitles === undefined ? {} : { lineageTitles: lifecycle.lineageTitles })}
+            {...(askTap === undefined ? {} : { startAt: 'ask' as const, startTap: askTap })}
+            howToTestFor={cardId => inbox.howToTestFor?.(card.daemonId, cardId)}
+            tools={<CardTools act={act} dismissable={card.item.signInRuleSuggestion === undefined} skip={skip} />}
+            item={machineFerrets.length === 0 ? card.item : withoutMachineRepeats(card.item)}
+            onAct={act}
+            onClose={place.onClose}
+            onNext={skip}
+            {...(onProgress === undefined ? {} : { onProgress })}
+            {...(canSnooze ? { onSnooze: (until: string) => act(snoozeAction(until)) } : {})}
+            position={{ index: place.index, total: place.total }}
+            quoteScope={scopeOf(card)}
+            {...askFormFor(inbox, card, onNavigate)}
+            renderProse={agendaProse(copyWriter)}
+            // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
+            // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
+            swipeable={place.swipeable}
+            {...(now === undefined ? {} : { now })}
+            {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+          />
+        </div>
+      </CardReferenceScope>
     </Fragment>
   );
 }
@@ -533,7 +538,7 @@ function CardTools({
  * an answer, and the upload into the item's own conversation (the daemon carries them to the card's ferret). A host
  * that can upload hands these in; absent either, the box is words alone.
  *
- * @pending agenda: answer uploads, the sign-in rule sweep and push delivery run through ports
+ * @pending agenda: answer uploads and push delivery run through ports
  */
 export interface AnswerFilePorts {
   readonly answerFiles?: ((daemon: DaemonConnection) => Promise<boolean>) | undefined;
@@ -1129,6 +1134,12 @@ export interface AgendaInboxPageProps {
    * item. The host draws it (it holds the clients); absent, the open item has no composer.
    */
   readonly renderComposer?: (card: InboxCard, answerForm: (() => void) | undefined) => ReactNode;
+  /**
+   * Draws `children` (an open card, or its composer) over Board's hooks for THE CARD'S machine, not the page's: the
+   * Inbox is every machine's, so Done · closes, a notice's Start and Close and `&F12` are read per card's daemon.
+   * Absent: the card draws without Board.
+   */
+  readonly cardBoard?: (daemonId: DaemonId, children: ReactNode) => ReactNode;
   /** How "Clear all from agent ferrets" reaches the machines. Absent: the Agents filter has no such button. */
   readonly clearPort?: ClearPort;
   /** How a "Not good" takes files (`AnswerFilePorts`). Absent: its box is words alone. */
@@ -1496,6 +1507,7 @@ export function AgendaInboxPage({
   onClearFrom,
   withFerretsOpen = false,
   renderComposer,
+  cardBoard,
   clearPort,
   answerPorts,
   onItemOpened,
@@ -1621,6 +1633,7 @@ export function AgendaInboxPage({
       ? inbox.reading && !empty
       : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readConversation };
+  const boarded = (card: InboxCard, node: ReactNode): ReactNode => cardBoard?.(card.daemonId, node) ?? node;
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -1912,11 +1925,13 @@ export function AgendaInboxPage({
   if (resolvedMachine !== null && resolvedConnection !== undefined) {
     return (
       <main aria-label="Inbox" className="fy-attn-inbox" data-agenda-inbox="card">
-        <ResolvedItemView
-          row={resolvedMachine}
-          connection={resolvedConnection}
-          onClose={() => setResolvedMachine(null)}
-        />
+        <CardReferenceScope daemonId={resolvedMachine.daemonId}>
+          <ResolvedItemView
+            row={resolvedMachine}
+            connection={resolvedConnection}
+            onClose={() => setResolvedMachine(null)}
+          />
+        </CardReferenceScope>
         <AgendaUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );
@@ -2002,7 +2017,7 @@ export function AgendaInboxPage({
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);
                 const previous = index > 0 ? order[index - 1] : undefined;
-                return (
+                const opened = (
                   <OpenItem
                     act={act}
                     key={card.key}
@@ -2020,6 +2035,7 @@ export function AgendaInboxPage({
                     skip={skipCard}
                   />
                 );
+                return boarded(card, opened);
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
@@ -2067,9 +2083,12 @@ export function AgendaInboxPage({
                   ref={composerRoot}
                 >
                   <FocusHandoff key={deck[0].key} flag={composerHandoff} root={composerRoot} />
-                  {renderComposer(
+                  {boarded(
                     deck[0],
-                    deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    renderComposer(
+                      deck[0],
+                      deck[0].item.kind === 'form' ? () => answerForm(host, deck[0] as InboxCard) : undefined,
+                    ),
                   )}
                 </div>
               )}

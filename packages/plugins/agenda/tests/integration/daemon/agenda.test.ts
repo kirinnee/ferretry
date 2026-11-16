@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { AsksChanged } from '@ferretry/core-asks/contract';
+import { fakeConversation } from '@ferretry/plugin-conversation/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { owner, type TestCaller, testHost } from '@ferretry/kernel/testing';
 import { as, gateLikeAdmission } from '../../support/gate.ts';
@@ -31,20 +32,42 @@ function access() {
   return { api, buzzed, cleared };
 }
 
-async function world(options: { access?: ReturnType<typeof access> | 'off' } = {}) {
+async function world(
+  options: { access?: ReturnType<typeof access> | 'off'; conversation?: ReturnType<typeof fakeConversation> } = {},
+) {
   const asks = new FakeAsks();
   const ferrets = new FakeFerrets();
   ferrets.add({ id: ferretId('f1') });
   ferrets.add({ id: ferretId('f2') });
   ferrets.add({ id: ferretId('h1'), parent: ferretId('f1') });
+  // The daemon half is kept so a test can hand it a hook the test host has no offerer for (`turn.ended` is Conversation's).
+  const built: { half?: ReturnType<NonNullable<typeof agenda.build>> } = {};
+  const implementation = {
+    ...agenda,
+    build: (ctx: Parameters<NonNullable<typeof agenda.build>>[0]) => {
+      built.half = agenda.build?.(ctx);
+      return built.half as NonNullable<typeof built.half>;
+    },
+  } as typeof agenda;
   const acc = options.access === 'off' ? undefined : (options.access ?? access());
   const host = await testHost({
-    plugins: [agenda],
+    plugins: [implementation],
     gate: gateLikeAdmission(),
     fakes: { asks, ferrets },
-    ...(acc === undefined ? {} : { uses: { access: acc.api } }),
+    uses: {
+      ...(acc === undefined ? {} : { access: acc.api }),
+      ...(options.conversation === undefined ? {} : { conversation: options.conversation }),
+    },
   });
-  return { host, asks, ferrets, acc };
+  /** A ferret's round ended: the hook's taker run, and what it started given the turns to finish. */
+  const turnEnded = async (payload: unknown): Promise<void> => {
+    built.half?.hooks?.['turn.ended']?.(payload as never);
+    for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+    // The check waits for the transcript to settle (2 s on the driven clock) before it reads.
+    await host.clock.advance(2000);
+    for (let i = 0; i < 20; i += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  return { host, asks, ferrets, acc, turnEnded };
 }
 
 describe('POST /v1/push/seen', () => {
@@ -171,19 +194,27 @@ describe('the roll-up and clearing', () => {
     expect((await host.request('GET', '/v1/agenda/open', { query: { limit: '0' }, ...as(owner()) })).status).toBe(400);
   });
 
-  test('clear-agents counts on a dry run, dismisses on a clear, never touches a lead or a card’s ask, and refuses a ferret', async () => {
-    const { host, asks } = await world();
-    await raiseAsk(asks, 'h1', 'e1');
-    await raiseAsk(asks, 'h1', 'e2');
-    await raiseAsk(asks, 'h1', 'e3', { source: 'card' });
-    await raiseAsk(asks, 'f1', 'e4');
+  test('clear-agents counts on a dry run, dismisses on a clear, reaches an auto ferret whatever its role, never an interactive one or a card’s ask, and refuses a ferret', async () => {
+    const { host, asks, ferrets } = await world();
+    // v4's rule is the ferret's mode, not its lineage: an autonomous lead is an agent ferret, a helper with no mode is not.
+    ferrets.add({ id: ferretId('w1'), mode: 'auto' });
+    ferrets.add({ id: ferretId('w2'), mode: 'auto', parent: ferretId('f1') });
+    ferrets.add({ id: ferretId('w3'), mode: 'interactive' });
+    await raiseAsk(asks, 'w1', 'e1');
+    await raiseAsk(asks, 'w1', 'e2');
+    await raiseAsk(asks, 'w1', 'e3', { source: 'card' });
+    await raiseAsk(asks, 'w2', 'e4');
+    await raiseAsk(asks, 'w3', 'e5');
+    await raiseAsk(asks, 'h1', 'e6');
+    await raiseAsk(asks, 'f1', 'e7');
     const dry = await host.request('POST', '/v1/agenda/clear-agents', { body: { dryRun: true }, ...as(owner()) });
-    expect(dry.json()).toEqual({ cleared: 2, ferrets: 1 });
-    expect((await asks.open({ ferret: 'h1' as never })).length).toBe(3);
+    expect(dry.json()).toEqual({ cleared: 3, ferrets: 2 });
+    expect((await asks.open({ ferret: 'w1' as never })).length).toBe(3);
     const done = await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as(owner()) });
-    expect(done.json()).toEqual({ cleared: 2, ferrets: 1 });
-    expect((await asks.open({ ferret: 'h1' as never })).map(ask => String(ask.source))).toEqual(['card']);
-    expect((await asks.open({ ferret: 'f1' as never })).length).toBe(1);
+    expect(done.json()).toEqual({ cleared: 3, ferrets: 2 });
+    expect((await asks.open({ ferret: 'w1' as never })).map(ask => String(ask.source))).toEqual(['card']);
+    expect((await asks.open({ ferret: 'w2' as never })).length).toBe(0);
+    for (const kept of ['w3', 'h1', 'f1']) expect((await asks.open({ ferret: kept as never })).length).toBe(1);
     expect(
       (await host.request('POST', '/v1/agenda/clear-agents', { body: {}, ...as({ kind: 'ferret', id: 'f1' }) })).status,
     ).toBe(403);
@@ -274,3 +305,174 @@ function lazyAgenda(): AgendaApi {
 }
 
 agendaConformance('daemon half', lazyAgenda);
+
+describe('the turn-end check', () => {
+  const ASKING = [
+    { kind: 'message', role: 'user', text: 'ship it' },
+    { kind: 'message', role: 'assistant', text: 'Shipped.\n\n## Waiting on you\n- Approve the release\n' },
+  ] as never;
+  const ended = (ferret: string, outcome: 'completed' | 'interrupted' | 'failed' = 'completed') => ({
+    ferret: ferretId(ferret),
+    turn: 't1',
+    outcome,
+    endedAt: '2026-11-15T00:00:00.000Z' as never,
+  });
+  async function checked() {
+    const conversation = fakeConversation();
+    for (const ferret of ['f1', 'f2', 'h1']) conversation.setEvents(ferretId(ferret), ASKING);
+    return { ...(await world({ conversation })), conversation };
+  }
+  const sentTo = async (conversation: ReturnType<typeof fakeConversation>, ferret: string) =>
+    (await conversation.sends(ferretId(ferret))).sends;
+
+  test('a ferret whose finished reply asks the owner for something it did not raise gets ONE nudge, as the daemon’s own words', async () => {
+    const { turnEnded, conversation } = await checked();
+    await turnEnded(ended('f1'));
+    await turnEnded(ended('f1'));
+    const sends = await sentTo(conversation, 'f1');
+    expect(sends.map(send => [send.sendId.replace(/-[0-9a-f]{16}-/u, '-DIGEST-'), send.senderKind])).toEqual([
+      ['attention-nudge-f1-DIGEST-0', 'daemon'],
+    ]);
+    expect(sends[0]?.message).toContain('[attention check]');
+    expect(sends[0]?.message).toContain('- Approve the release');
+  });
+
+  test('a ferret is nudged once until another sender reaches it, then it may be nudged again', async () => {
+    let at = '2026-11-06T09:00:00.000Z';
+    const conversation = fakeConversation({ now: () => at as never });
+    conversation.setEvents(ferretId('f1'), ASKING);
+    const { turnEnded } = await world({ conversation });
+    await turnEnded(ended('f1'));
+    await turnEnded({ ...ended('f1'), turn: 't2' });
+    expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    at = '2026-11-06T10:00:00.000Z';
+    await conversation.send(ferretId('f1'), { kind: 'owner' }, { message: 'go ahead', sendId: 'owner-1' });
+    await turnEnded({ ...ended('f1'), turn: 't3' });
+    expect((await sentTo(conversation, 'f1')).map(send => send.senderKind)).toEqual(['daemon', 'human', 'daemon']);
+  });
+
+  test('an interrupted or failed round, a helper and a stopped ferret are not nudged', async () => {
+    const { turnEnded, conversation, ferrets } = await checked();
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+    await turnEnded(ended('f1', 'interrupted'));
+    await turnEnded(ended('f1', 'failed'));
+    await turnEnded(ended('h1'));
+    await turnEnded(ended('f2'));
+    for (const ferret of ['f1', 'f2', 'h1']) expect(await sentTo(conversation, ferret)).toEqual([]);
+  });
+
+  test('says nothing, and breaks nothing, when Conversation is off', async () => {
+    const { turnEnded } = await world();
+    await turnEnded(ended('f1'));
+  });
+});
+
+describe('the rest nudge job', () => {
+  const resting = (id: string, ferret: string) => ({
+    id,
+    subject: `Ask ${id}?`,
+    title: `Ask ${id}`,
+    source: 'agent-raised',
+    sourceRef: null,
+    raisedBy: 'agent',
+    parked: { reason: 'replied', at: '2020-01-01T00:00:00.000Z' },
+    resting: { sub: 'waiting-on-ferret', at: '2020-01-01T00:00:00.000Z' },
+    ferret,
+  });
+  async function silent(ferrets: readonly string[] = ['f1']) {
+    const conversation = fakeConversation();
+    const w = await world({ conversation });
+    w.asks.snapshots = async () =>
+      ferrets.map(ferret => ({ sessionId: ferret, items: [resting('A1', ferret)] })) as never;
+    return { ...w, conversation };
+  }
+  const sentTo = async (conversation: ReturnType<typeof fakeConversation>, ferret: string) =>
+    (await conversation.sends(ferretId(ferret))).sends;
+
+  test('is a job; a ferret silent on an item the owner replied to is nudged once as the daemon’s own words, then waits for the backoff', async () => {
+    const { host, conversation } = await silent();
+    expect(host.jobIds()).toContain('rest-nudge');
+
+    await host.runJob('rest-nudge');
+    await host.runJob('rest-nudge');
+
+    const sends = await sentTo(conversation, 'f1');
+    expect(sends.map(send => [send.sendId.startsWith('agenda-rest-nudge-f1-A1.'), send.senderKind])).toEqual([
+      [true, 'daemon'],
+    ]);
+    expect(sends[0]?.message).toContain('[attention check] The owner replied on !A1 «Ask A1»');
+  });
+
+  test('never reaches a stopped ferret, and says nothing, and breaks nothing, when Conversation is off', async () => {
+    const { host, conversation, ferrets } = await silent(['f1', 'f2']);
+    ferrets.add({ id: ferretId('f2'), state: 'stopped' });
+
+    await host.runJob('rest-nudge');
+
+    expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    expect(await sentTo(conversation, 'f2')).toEqual([]);
+
+    const off = await world();
+    off.asks.snapshots = async () => [{ sessionId: 'f1', items: [resting('A1', 'f1')] }] as never;
+    await off.host.runJob('rest-nudge');
+  });
+
+  test('boards that cannot be read fail the sweep, which the kernel reports and retries', async () => {
+    const { host, asks } = await silent();
+    asks.snapshots = async () => {
+      throw new Error('the board is damaged');
+    };
+
+    await expect(host.runJob('rest-nudge')).rejects.toThrow('the board is damaged');
+  });
+
+  describe('forgetting counters', () => {
+    const counter = { since: '2020-01-01T00:00:00.000Z', nudges: 2, at: '2020-01-01T01:00:00.000Z', sendId: 's1' };
+    const stored = (host: { state(name: string): { files: Map<string, string> } }) =>
+      JSON.parse(host.state('agenda').files.get('rest-nudges.json') ?? '{"ferrets":{}}').ferrets as Record<
+        string,
+        Record<string, unknown>
+      >;
+
+    test('closing the last nudged item drops its record on the next sweep, with no ferret nudged', async () => {
+      const { host, asks, conversation } = await silent();
+      await host.runJob('rest-nudge');
+      expect(Object.keys(stored(host))).toEqual(['f1']);
+
+      asks.snapshots = async () => [{ sessionId: 'f1', items: [] }] as never;
+      await host.runJob('rest-nudge');
+
+      expect(stored(host)).toEqual({});
+      expect(await sentTo(conversation, 'f1')).toHaveLength(1);
+    });
+
+    test('a ferret that is gone loses its records, and one whose board could not be read keeps them', async () => {
+      const { host, asks } = await silent();
+      host
+        .state('agenda')
+        .files.set(
+          'rest-nudges.json',
+          JSON.stringify({ format: 1, ferrets: { f1: { A1: counter }, f9: { A1: counter } } }),
+        );
+
+      asks.snapshots = async () => [] as never;
+      await host.runJob('rest-nudge');
+
+      expect(Object.keys(stored(host))).toEqual(['f1']);
+    });
+
+    test('an unchanged file is not rewritten by a sweep', async () => {
+      const { host, asks } = await silent();
+      asks.snapshots = async () => [{ sessionId: 'f1', items: [resting('A1', 'f1')] }] as never;
+      const text = JSON.stringify({
+        format: 1,
+        ferrets: { f1: { A1: { ...counter, at: new Date(host.clock.now()).toISOString(), sendId: 'planted' } } },
+      });
+      host.state('agenda').files.set('rest-nudges.json', text);
+
+      await host.runJob('rest-nudge');
+
+      expect(host.state('agenda').files.get('rest-nudges.json')).toBe(text);
+    });
+  });
+});

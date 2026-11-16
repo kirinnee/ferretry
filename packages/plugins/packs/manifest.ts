@@ -1,8 +1,10 @@
-import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
+import { AUDIT_KINDS, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { CONVERSATION_ROW_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
+import { LoginsPort } from '@ferretry/plugin-logins/contract';
 import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
+import { UsagePort } from '@ferretry/plugin-usage/contract';
 import {
   PACK_REPLACED,
   PACK_RUNS,
@@ -13,7 +15,6 @@ import {
   PacksPort,
   packConfigure,
   packUse,
-  UsagePort,
 } from './contract/index.ts';
 
 /**
@@ -32,7 +33,7 @@ import {
  *
  * It shapes a start only through `start.decide` (admission: depth and how many children a parent may have, whichever
  * command started the child) and `launch.parts` (the `FY_PACK` switch and the routing line a launch carries, which
- * Ferrets cannot ask a plugin's port for). Usage and Runtimes are optional: with them off there are no recommendations.
+ * Ferrets cannot ask a plugin's port for). Usage, Logins and Runtimes are optional: with Runtimes off there are no recommendations, with Logins or Usage off no quota is known.
  */
 export default definePlugin({
   id: PACKS,
@@ -45,7 +46,7 @@ export default definePlugin({
 
   needs: { ferrets: FerretsPort },
   // Conversation is optional: the Pack card is drawn in its transcript, and with Conversation off there is no transcript.
-  uses: { usage: UsagePort, runtimes: RuntimesPort, conversation: ConversationPort },
+  uses: { usage: UsagePort, runtimes: RuntimesPort, logins: LoginsPort, conversation: ConversationPort },
   provides: { packs: PacksPort },
 
   actions: {
@@ -109,6 +110,8 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/result', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec1: what a finished ferret reported is its words, so a device narrowed off `fleet.use` is refused.
+        capability: cap('fleet', 'use'),
         noStore: true,
         audit: { skip: 'a read of what a finished ferret reported' },
         guard: 'secrets',
@@ -132,36 +135,78 @@ export default definePlugin({
     cli: [
       verb('recommend [task...]', {
         summary: 'the routing prompt and the models that can run a piece of work here now (Pack mode)',
+        args: [
+          {
+            name: 'task',
+            help: 'the part to hand to a sub-ferret (echoed back; nothing is matched against it)',
+            optional: true,
+            variadic: true,
+          },
+        ],
+        options: [{ flag: '--json', help: 'print the payload' }],
       }),
       verb('pack [id]', {
         summary:
           'a table of every live ferret in a pack: model, state, card and its last line (defaults to the calling ferret)',
+        args: [{ name: 'id', help: 'a ferret in the pack; defaults to the calling ferret', optional: true }],
+        options: [{ flag: '--json', help: 'print the answer as JSON' }],
       }),
-      verb('guide', { summary: 'the routing prompt Pack mode picks helper models with' }),
+      verb('guide', { summary: 'the routing prompt Pack mode picks helper models with', args: [] }),
       verb('guide show', {
         summary: 'the routing prompt in effect, where it came from, and whether a clean-up can be undone',
+        args: [],
+        options: [{ flag: '--json', help: 'print the routing prompt' }],
       }),
       verb('guide inventory', {
         summary: 'what Clean up is shown: every runtime, its models, readiness and quota, and every model',
+        args: [],
+        options: [{ flag: '--json', help: 'print the inventory' }],
       }),
       verb('guide clean-up', {
         summary:
           'have a short-lived ferret rewrite the routing prompt to fit (one model run), then review it as a diff',
+        args: [],
+        options: [
+          { flag: '--prompt <text>', help: 'the rough prompt to clean up (default: the one in effect)' },
+          { flag: '--prompt-file <file>', help: 'read the rough prompt from a file' },
+          {
+            flag: '--runtime <runtime>',
+            help: 'run it on this runtime (default: the ready one with the most quota left)',
+          },
+          { flag: '--model <model>', help: "run it on this model (default: the runtime's own)" },
+          { flag: '-y, --apply', help: 'accept the rewrite as soon as it is checked' },
+          { flag: '--json', help: 'print the run and its checked rewrite' },
+        ],
       }),
       verb('guide write', {
         summary: 'have a short-lived ferret write the routing prompt from a short idea (one model run), then review it',
+        args: [],
+        options: [
+          {
+            flag: '--idea <text>',
+            help: 'what you want, in your words, up to 4,000 characters ("cheap models for chores, Opus for planning"); optional',
+          },
+          {
+            flag: '--runtime <runtime>',
+            help: 'run it on this runtime (default: the ready one with the most quota left)',
+          },
+          { flag: '--model <model>', help: "run it on this model (default: the runtime's own)" },
+          { flag: '-y, --apply', help: 'accept the prompt as soon as it is checked' },
+          { flag: '--json', help: 'print the run and its checked prompt' },
+        ],
       }),
       verb('guide accept <run>', {
         summary: 'write a run’s checked rewrite as the routing prompt (undo puts the old one back)',
+        args: [{ name: 'run', help: 'the run id guide clean-up or guide write printed' }],
       }),
-      verb('guide undo', { summary: 'put back the routing prompt the last accepted clean-up replaced' }),
+      verb('guide undo', { summary: 'put back the routing prompt the last accepted clean-up replaced', args: [] }),
     ],
   },
 
   ui: {
     screens: [],
     // Settings › Agents › Pack mode: the switch, who decides, the limits, the probe and the routing prompt.
-    settings: [settingsTab('pack', { label: 'Pack mode', order: 40 })],
+    settings: [settingsTab('pack', { group: 'agent-settings', label: 'Pack mode', order: 40 })],
     // A parent's view of the helpers it started, beside the ferret.
     panels: [
       panel('ferret.side', { id: 'helpers', order: 40 }),

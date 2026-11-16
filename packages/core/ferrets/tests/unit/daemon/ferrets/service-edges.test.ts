@@ -181,3 +181,80 @@ test('a start with a task but no first-turn effect record is refused, quoting no
     },
   });
 });
+
+test('resolve names the ferret an id or callsign addresses, and says unknown for one nobody holds', async () => {
+  const f = additivesFixture();
+  const name = f.registry.get(f.id)!.name;
+  expect(await f.service.resolve(f.id)).toEqual({ kind: 'ferret', id: f.id });
+  expect(await f.service.resolve(name)).toEqual({ kind: 'ferret', id: f.id });
+  expect(await f.service.resolve('nobody-has-this-name')).toEqual({ kind: 'unknown' });
+});
+
+test('a sitrep for a ferret nobody holds is undefined, and asks nothing of the sources', async () => {
+  const f = additivesFixture({ empty: true });
+  let asked = 0;
+  f.ports.sitrepSources = () => [
+    {
+      lines: async () => {
+        asked += 1;
+        return [];
+      },
+    },
+  ];
+  expect(await f.service.sitrep(ferretId('ghost'))).toBeUndefined();
+  expect(asked).toBe(0);
+});
+
+test('a sitrep carries the ferret, every source’s lines in order, and the ids of its open asks', async () => {
+  const f = additivesFixture();
+  f.ports.sitrepSources = () => [
+    { lines: async () => [{ kind: 'doing', text: 'reading the brief' }] },
+    { lines: async () => [{ kind: 'note', text: 'waiting on review' }] },
+  ];
+  f.ports.asks = { open: async () => [{ id: 'A3' }, { id: 'A9' }] as never };
+
+  const sitrep = await f.service.sitrep(f.id);
+
+  expect(sitrep?.ferret.id).toBe(f.id);
+  expect(sitrep?.lines).toEqual([
+    { kind: 'doing', text: 'reading the brief' },
+    { kind: 'note', text: 'waiting on review' },
+  ]);
+  expect(sitrep?.blockers).toEqual(['A3', 'A9']);
+});
+
+test('a sitrep still answers when a source or the asks cannot be read: that part is empty, the rest stands', async () => {
+  const f = additivesFixture();
+  f.ports.sitrepSources = () => [
+    {
+      lines: async () => {
+        throw new Error('board is down');
+      },
+    },
+    { lines: async () => [{ kind: 'note', text: 'still here' }] },
+  ];
+  f.ports.asks = {
+    open: async () => {
+      throw new Error('asks is down');
+    },
+  };
+
+  const sitrep = await f.service.sitrep(f.id);
+
+  expect(sitrep?.lines).toEqual([{ kind: 'note', text: 'still here' }]);
+  expect(sitrep?.blockers).toEqual([]);
+});
+
+test('resolve refuses a callsign two ferrets hold, naming each by id so the sender can choose', async () => {
+  const f = additivesFixture();
+  const twin = ferretId('fern-twin');
+  f.registry.put({ ...f.registry.get(f.id)!, name: 'zed' });
+  f.registry.put({ ...f.registry.get(f.id)!, id: twin, name: 'zed' });
+
+  const answer = await f.service.resolve('zed');
+
+  expect(answer).toEqual({
+    kind: 'ambiguous',
+    message: `the name zed is held by 2 sessions on this machine: ${f.id} (stopped), ${twin} (stopped); address one by its session id`,
+  });
+});

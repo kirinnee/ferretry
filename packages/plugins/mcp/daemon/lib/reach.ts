@@ -4,8 +4,9 @@
  * The kernel asks the resolver, with nothing about the request, at every outbound fetch. It answers three sets and
  * no other host:
  *
- * 1. the hosts of the servers a person may sign in to NOW (configured items with `auth: oauth`, and project servers
- *    with a web address), refreshed every time the sign-in service lists its servers. It is NOT refreshed on a
+ * 1. the hosts of the servers with a web address NOW (every configured item with a `url`, and project servers with a
+ *    web address): the ones a person may sign in to and the ones a check reaches. Refreshed every time the sign-in
+ *    service lists its servers, and before a check reaches a web address. It is NOT refreshed on a
  *    configuration change (the plan said it would be): a removed server stays answered until the next list, which
  *    every start makes before it fetches anything, so nothing reaches it that a list would not;
  * 2. the issuer and token and revocation endpoint hosts of the sign-ins already recorded in `state/mcp/oauth.json`
@@ -88,14 +89,14 @@ export class SignInReach implements McpDiscoveryRecorder {
     this.discovering.delete(flowId);
   }
 
-  /** The sign-in's server list, noting every server that may sign in. */
+  /** The servers' list, noting every server with a web address: one to sign in to, and one a check may reach. */
   observeServers(source: McpOAuthServers): McpOAuthServers {
     return {
       list: async () => {
         const listed = await source.list();
         this.servers = new Set(
           listed.flatMap(server => {
-            const host = server.url !== undefined && server.auth === 'oauth' ? hostOf(server.url) : undefined;
+            const host = server.url !== undefined ? hostOf(server.url) : undefined;
             return host === undefined ? [] : [host];
           }),
         );

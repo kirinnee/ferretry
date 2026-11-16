@@ -424,7 +424,7 @@ act; this one does not. The controls are: the unlock period (shorten it), `stepU
 per-act prompt back on), and **revocation** — revoking the device ends every session it holds and every
 unlock at once, from the machine or from any other device.
 
-- **A start that is a terminal in disguise is decided as one** (review R2-H1). `POST /v1/sessions` with
+- **A start that is a terminal in disguise is decided as one** (review R2-H1). `POST /v1/ferrets` with
   harness flags of its own, or with a working directory outside every registered project and the
   managed-worktree root, is a `terminal.use` act: covered by the unlock under the defaults, and asked
   per act when `stepUpOnActions` is on or the unlock is off — exactly as opening a terminal is. A plain

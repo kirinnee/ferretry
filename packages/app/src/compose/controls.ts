@@ -10,7 +10,7 @@
  *   - FIELD-BY-FIELD tolerant parsing. A hand-edited or older payload degrades
  *     to the default for that field alone; one bad field must never discard the
  *     reader's other controls.
- *   - `density` and `dashboardView` absent means `null`, not a written default,
+ *   - `density` absent means `null`, not a written default,
  *     so the first-load pointer policy stays free to choose compact on a phone
  *     and full on a desktop.
  *   - `chatWidth` absent means `'readable'` (Compact, 720px), the session redesign's
@@ -97,21 +97,8 @@ export const MAX_DAEMON_SCOPES = 20;
 export const RETRY_DAEMON_SCOPES = 5;
 
 export type ModeFilter = 'all' | InteractionMode;
-export type DashboardView = 'cards' | 'table';
 export type Density = 'full' | 'compact' | 'minimal';
 /** The persisted form of the shell's conversation-width choice. */
-/**
- * WHICH SESSIONS THE LIST SHOWS — Settings › Behaviour › "Sessions list".
- *
- *   all      every paired machine's sessions, with one Needs you group across them (the default);
- *   current  only the machine on screen, as the list always was.
- *
- * A property of this device's screen, like the rest: another browser keeps its own answer.
- */
-export type SessionsListScope = 'all' | 'current';
-
-export const SESSIONS_LIST_SCOPES: readonly SessionsListScope[] = ['all', 'current'];
-
 export type ChatWidthPreference = 'full' | 'balanced' | 'readable';
 
 /**
@@ -122,14 +109,12 @@ export interface DeviceControls {
   /** Instant client-side filter over the session list. */
   readonly query: string;
   readonly mode: ModeFilter;
-  /** Remote-control sessions only — a real filter, not a search term. */
-  readonly rcOnly: boolean;
-  readonly includeFinished: boolean;
-  /** null = follow the viewport (cards when narrow). */
-  readonly dashboardView: DashboardView | null;
   /** null = use the first-load device default without persisting it. */
   readonly density: Density | null;
-  /** Gather the sessions with open Attention into a "Needs you" group at the top. Default on. */
+  /**
+   * Gather the ferrets with open Attention into a "Needs you" group at the top of the ferret list. Default on. Read by
+   * Ferrets' list (`features/list/ferret-list.tsx`), set in Settings › This device › "Group Needs you at the top".
+   */
   readonly groupNeedsYou: boolean;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
@@ -139,9 +124,6 @@ export interface DeviceControls {
   readonly composerPhoneEnterKey: ComposerEnterKeyPreference | null;
   /** Reduced motion: follow the operating system, or always reduce it on this device. */
   readonly motion: MotionPreference;
-  readonly sidebarCollapsed: boolean;
-  /** Every paired machine's sessions in the list, or only the machine on screen's. */
-  readonly sessionsList: SessionsListScope;
   /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Interactive. */
   readonly sessionsMode: ModeFilter | null;
   /**
@@ -174,15 +156,11 @@ export interface DeviceControls {
    * mean what, never which element holds the draft, the selection or dictation.
    */
   readonly composerVimMode: boolean;
-  /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
-  readonly openLinksIn: OpenLinksIn;
   /**
-   * Keep the interactive chats and the most recently opened ones fresh in the background, so switching
-   * to one is instant (`lib/background-fresh.ts`). On by default; per device.
+   * Where an ordinary tap on an external link opens (`OpenLinksIn`). Read at the moment of the tap by Browsers' link
+   * provider (`shell.links`, S7), set in Settings › This device › "Open links in".
    */
-  readonly keepChatsFresh: boolean;
-  /** …but not while the browser says the link is cellular. Where it cannot say, this changes nothing. */
-  readonly keepChatsFreshNotOnCellular: boolean;
+  readonly openLinksIn: OpenLinksIn;
 }
 
 /** What a screen renders: device preferences plus THIS daemon's project scope. */
@@ -197,17 +175,12 @@ export interface UiControls extends DeviceControls {
 export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   query: '',
   mode: 'all',
-  rcOnly: false,
-  includeFinished: false,
-  dashboardView: null,
   density: null,
   groupNeedsYou: true,
   chatWidth: 'readable',
   composerEnterKey: null,
   composerPhoneEnterKey: null,
   motion: 'system',
-  sidebarCollapsed: false,
-  sessionsList: 'all',
   sessionsMode: null,
   machineOrder: Object.freeze([]),
   wardenDaemon: null,
@@ -215,8 +188,6 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   skillSuggestions: true,
   composerVimMode: false,
   openLinksIn: 'browser',
-  keepChatsFresh: true,
-  keepChatsFreshNotOnCellular: false,
 });
 
 /**
@@ -297,9 +268,6 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.mode === 'all' || fields.mode === 'auto' || fields.mode === 'interactive'
         ? fields.mode
         : DEFAULT_DEVICE_CONTROLS.mode,
-    rcOnly: readFlag(fields.rcOnly, DEFAULT_DEVICE_CONTROLS.rcOnly),
-    includeFinished: readFlag(fields.includeFinished, DEFAULT_DEVICE_CONTROLS.includeFinished),
-    dashboardView: fields.dashboardView === 'cards' || fields.dashboardView === 'table' ? fields.dashboardView : null,
     density:
       fields.density === 'full' || fields.density === 'compact' || fields.density === 'minimal' ? fields.density : null,
     groupNeedsYou: readFlag(fields.groupNeedsYou, DEFAULT_DEVICE_CONTROLS.groupNeedsYou),
@@ -309,8 +277,6 @@ const readDeviceControls = (value: unknown): DeviceControls => {
         : DEFAULT_DEVICE_CONTROLS.chatWidth,
     composerEnterKey:
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
-    sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
-    sessionsList: fields.sessionsList === 'current' ? 'current' : DEFAULT_DEVICE_CONTROLS.sessionsList,
     sessionsMode:
       fields.sessionsMode === 'all' || fields.sessionsMode === 'auto' || fields.sessionsMode === 'interactive'
         ? fields.sessionsMode
@@ -332,11 +298,6 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.openLinksIn === 'panel' || fields.openLinksIn === 'computer'
         ? fields.openLinksIn
         : DEFAULT_DEVICE_CONTROLS.openLinksIn,
-    keepChatsFresh: readFlag(fields.keepChatsFresh, DEFAULT_DEVICE_CONTROLS.keepChatsFresh),
-    keepChatsFreshNotOnCellular: readFlag(
-      fields.keepChatsFreshNotOnCellular,
-      DEFAULT_DEVICE_CONTROLS.keepChatsFreshNotOnCellular,
-    ),
   };
 };
 

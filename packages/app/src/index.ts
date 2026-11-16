@@ -18,6 +18,7 @@ export {
   type ConnectPorts,
   type DaemonlessPorts,
   type PairedList,
+  type ChooseDaemonOptions,
   type ChosenDaemon,
   type DaemonlessScreenProps,
   type DaemonlessViews,
@@ -25,6 +26,7 @@ export {
   type BackgroundViewProps,
   type DeviceViewProps,
   type DirectoryFetch,
+  type HostedRelayState,
   type PairedOver,
   type PairingAttempt,
   type PairingCarriers,
@@ -110,12 +112,7 @@ export {
 export { fillPath, HEALTH_ROUTE, INVENTORY_ROUTE, type ShellPluginClient } from './client/daemon-client.ts';
 export type { BlockReason, InventoryEntry, Standing } from './client/inventory.ts';
 export { UPDATE_DAEMON_COMMAND } from './client/sentences.ts';
-export {
-  DaemonCallError,
-  isCarrierOutage,
-  type SocketListeners,
-  type TransportSocket,
-} from './client/transport.ts';
+export { DaemonCallError, isCarrierOutage, type SocketListeners, type TransportSocket } from './client/transport.ts';
 export type { View } from './surfaces/halves.ts';
 export type { GeneratedSurfaces, SurfaceEntry } from './surfaces/registry.ts';
 
@@ -148,11 +145,26 @@ export {
 export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from './layout/slots.ts';
 /** @public Layouts' Settings tab reads and writes this device's own layout choice (§5.3: the app's saved data, no route). */
 export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts';
-/** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2). */
-export { PanelSlot, useSlotHasPanels } from './shell/views.tsx';
+/** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2); `PanelReplace` lets them stand in for a body the screen can draw itself. */
+export { PanelReplace, PanelSlot, useSlotHasPanels, useSlotPanels } from './shell/views.tsx';
+/** @public The ferret page's body: the chat beside the `ferret.side` panels, or on a phone one at a time behind chips and "+" (§5.2). */
+export { FerretWorkspace } from './shell/ferret-workspace.tsx';
+/** @public A panel of a ferret's page asks its workspace to bring another panel of the same ferret on screen (a phone shows one at a time; §5.2). */
+export {
+  type FerretWorkspaceActions,
+  FerretWorkspaceActionsProvider,
+  useFerretWorkspace,
+} from './shell/ferret-workspace-actions.tsx';
+/** @public A panel acts on its host's one-shot request (`PanelIntent`), once per request id and only for the action it owns (§5.2). */
+export { usePanelIntent } from './shell/panel-intent.ts';
 export { forSubject } from './shell/for-subject.ts';
 /** @public A plugin's command bar entries (its app half's `shell.commands`), built per daemon by the bar (§5.1). */
-export type { PluginCommandContext, PluginCommandSource } from './shell/command-sources.ts';
+export {
+  type DestinationDecl,
+  destinationCommands,
+  type PluginCommandContext,
+  type PluginCommandSource,
+} from './shell/command-sources.ts';
 /** @public An app hook another half offers (`<offerer>.<name>`): the provider's `shell.hooks`, the offerer's `useAppHook` (§5.2). */
 export { type AppHookContext, type AppHookProvider, type AppHookProviders, useAppHook } from './shell/app-hooks.ts';
 /** @public This device's theme, read on any screen, daemon-less ones included (§5.2: a device setting; shell contract S9). */

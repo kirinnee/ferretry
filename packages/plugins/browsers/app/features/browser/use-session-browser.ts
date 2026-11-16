@@ -2,7 +2,7 @@
  * THIS SESSION'S BROWSER PAGES, as the daemon lists them — for the browser surface list, for proving
  * `%browser:` references, and for bringing a page's tab into the person's view.
  *
- * One read of `GET /v1/sessions/:sessionId/browser` through the daemon's client, again on every
+ * One read of `GET /v1/ferrets/:ferretId/browser` through the daemon's client, again on every
  * `browsers.page-changed` event of the session — or every {@link PAGE_POLL_MS} while there is no live feed and every
  * {@link PAGE_LIVE_POLL_MS} as the safety net while there is, and never while the tab is hidden
  * (`startFeedAwarePoll`, today's feed-aware poll). The status lists every page that belongs to the session — the agent's and the person's, popups included — and nothing

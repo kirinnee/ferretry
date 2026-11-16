@@ -5,20 +5,28 @@
 
 import type { AppComponent, PanelProps, PluginClient, ScreenProps, SettingsProps } from '@ferretry/kernel/manifest';
 import { AgendaFleet, fleetIn } from '../lib/agenda-fleet.ts';
+import { createAgendaMessagePanel } from './agenda-message-panel.tsx';
 import { createAgendaAskScreen } from './agenda-ask-screen.tsx';
+import { createAgendaLinePanel } from './agenda-line-panel.tsx';
 import { createAgendaModePanel } from './agenda-mode-panel.tsx';
 import { createAgendaPanel } from './agenda-panel.tsx';
 import { createAgendaScreen } from './agenda-screen.tsx';
 import { createAgendaSettings } from './agenda-settings.tsx';
+import { NotificationMutePanel } from './notification-mute-panel.tsx';
 
 export interface AgendaSurfaces {
   readonly screens: { readonly agenda: AppComponent<ScreenProps>; readonly 'agenda-ask': AppComponent<ScreenProps> };
   readonly panels: {
     readonly 'ferret-agenda': AppComponent<PanelProps>;
+    readonly 'ferret-agenda-line': AppComponent<PanelProps>;
     readonly 'ferret-agenda-mode': AppComponent<PanelProps>;
+    readonly 'agenda-message': AppComponent<PanelProps>;
   };
   readonly settings: { readonly agenda: AppComponent<SettingsProps> };
 }
+
+/** Agenda's `device.settings` panels (no daemon, no client): drawn once, under no shell. */
+export const deviceSettingsPanels = { 'notification-mute': NotificationMutePanel };
 
 /** `holder` is the half's own: every machine's surfaces built with it share one fleet (alone, a fleet of its own). */
 export const createSurfaces = (client: PluginClient, holder?: object): AgendaSurfaces => {
@@ -26,7 +34,12 @@ export const createSurfaces = (client: PluginClient, holder?: object): AgendaSur
   const runtime = fleet.runtimeOf(client);
   return {
     screens: { agenda: createAgendaScreen(runtime, fleet), 'agenda-ask': createAgendaAskScreen(runtime, fleet) },
-    panels: { 'ferret-agenda': createAgendaPanel(runtime), 'ferret-agenda-mode': createAgendaModePanel(runtime) },
+    panels: {
+      'ferret-agenda': createAgendaPanel(runtime),
+      'ferret-agenda-line': createAgendaLinePanel(runtime),
+      'ferret-agenda-mode': createAgendaModePanel(runtime),
+      'agenda-message': createAgendaMessagePanel(runtime),
+    },
     settings: { agenda: createAgendaSettings(runtime) },
   };
 };

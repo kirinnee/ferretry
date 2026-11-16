@@ -98,9 +98,21 @@ export const stoodInLoginSentence = (named: readonly StoodInLogin[]): string =>
       '; ',
     )}, so a runtime that uses ${named.length === 1 ? 'it' : 'them'} would be written with a stand-in in place of ${named.length === 1 ? 'its' : 'their'} variables (fix the login in Logins first, or remove the runtime that uses it)`;
 
+/** A runtime file whose login is not on this machine: kept on disk, left out of the model, and never started. */
+interface UnavailableRuntime {
+  readonly runtime: string;
+  readonly login: string;
+}
+
 /** What the files assemble to, and every part that is a stand-in rather than a document read. */
 export interface RuntimesModel {
   readonly model: AccountModel;
+  /**
+   * The runtimes whose login is not here (a deletion the owner still holds, a login held out of a preview, a file
+   * edited by hand). Each is UNAVAILABLE: set aside so one of them never takes the whole fleet down, while its file is
+   * untouched and no change writes it.
+   */
+  readonly unavailable: readonly UnavailableRuntime[];
   /**
    * Plain sentences naming what stands in (names only, never a value) for a component that could not be read; empty when
    * every one was read. While it is not empty NOTHING is written: a home built from it would replace what is there.
@@ -285,10 +297,22 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
         `the ${kind} component "${name}" could not be read from the part of Ferretry that owns it: ${reading.reason}`,
       );
   }
+  // A runtime on a login that is not here is unavailable, not a fault of the whole machine: the login's deletion may be
+  // HELD for the owner, or held out of a preview, and the other runtimes must still load. It is only set aside here; its
+  // file stays on disk and nothing writes it from the model.
+  const unavailable: UnavailableRuntime[] = [];
+  const present = new Map<string, RuntimeFile>();
+  for (const [name, file] of files.runtimes) {
+    if (Object.hasOwn(credentials, file.login)) present.set(name, file);
+    else unavailable.push({ runtime: name, login: file.login });
+  }
+  const defaultRuntime = files.settings?.defaultRuntime;
   const document = {
     version: 1,
     machine: {
-      ...(files.settings?.defaultRuntime === undefined ? {} : { defaultRuntime: files.settings.defaultRuntime }),
+      ...(defaultRuntime === undefined || unavailable.some(set => set.runtime === defaultRuntime)
+        ? {}
+        : { defaultRuntime }),
       ...(files.settings?.autoResume === undefined ? {} : { autoResume: files.settings.autoResume }),
     },
     credentials,
@@ -303,11 +327,12 @@ export function assembleRuntimesModel(files: RuntimesFiles): RuntimesModel {
         },
       ]),
     ),
-    runtimes: Object.fromEntries([...files.runtimes].map(([name, file]) => [name, runtimeOf(file)])),
+    runtimes: Object.fromEntries([...present].map(([name, file]) => [name, runtimeOf(file)])),
   };
   const model = AccountModelSchema.parse(document);
   return {
     model,
+    unavailable,
     unreadable,
     stoodInLogins,
     sources:

@@ -112,7 +112,10 @@ test('all four v4 audit files become one v5 audit.jsonl, oldest first, every lin
 
   const report = await gateStep.run(f.ctx());
   expect(report.status).toBe('converted');
-  expect(report.kept).toContainEqual({ what: 'audit records', count: 4 });
+  expect(report.kept).toContainEqual({
+    what: 'audit records (the Gate kept-bucket history is left behind by owner ruling, see not carried)',
+    count: 4,
+  });
   expect(report.note).toContain('2 unreadable audit line(s) skipped');
   expect(JSON.stringify(report)).not.toContain('FAKE');
 
@@ -161,6 +164,9 @@ test('a home with no gate files converts to nothing; a dry run counts and writes
   expect(report.status).toBe('converted');
   expect(report.note).toStartWith('dry run: nothing written');
   expect(report.sealed).toEqual([{ file: V5_ADMIN_TOKEN, bytes: FAKE_ADMIN.length }]);
-  expect(report.kept).toContainEqual({ what: 'audit records', count: 1 });
+  expect(report.kept).toContainEqual({
+    what: 'audit records (the Gate kept-bucket history is left behind by owner ruling, see not carried)',
+    count: 1,
+  });
   expect(await stat(f.to).catch(() => undefined)).toBeUndefined();
 });

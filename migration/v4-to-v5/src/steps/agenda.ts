@@ -14,7 +14,8 @@
  *   `gateAttachedChangedAt` are dropped (v5 deleted the standalone gate item and the older-app mirror; a card's gate
  *   rides `cardAsks`); a closed item whose disposition is `replied` (v5 has no such disposition) is closed as `done`.
  *   Every other byte of the item is kept in its order. v5's new optional fields (`raisedObligations`,
- *   `generatedSubject`, `ownAskRepliedTo`) are absent, as on any board v5 never touched.
+ *   `ownAskRepliedTo`) are absent, as on any board v5 never touched; `generatedSubject` is set ONLY on a daemon-raised
+ *   `card-agenda:<card>` item (its subject, as the daemon wrote it), so answering its card ask rests it like a 5.0 one.
  * - The history (`agenda-history.jsonl`): the same JSONL records; a `version` record of a `replied` close becomes
  *   `done`, and the ledger's byte cursor is recomputed over the rewritten bytes. Bytes past v4's committed cursor
  *   (never committed; v4 cuts them at its next append) are not carried.
@@ -24,10 +25,22 @@
  * - The held answers (`agenda-replies.json`) and the per-device seen marks (`agenda-seen.json`): identical formats,
  *   carried byte for byte. One v4 would set aside as damaged goes to v5's set-aside folder instead.
  *
+ * - The change queue (`agenda-changes.pending.json`): agenda-change notices v4 delivers at a ferret's next turn end. It is
+ *   QUEUED state (a quiet window has no turns, so it never drains), so it is carried to the same name under
+ *   `state/asks/ferrets/<ferret>/`, which v5's outbox reads at boot and delivers on its first drain. Each event gets the
+ *   items edits above and loses its retry bookkeeping. A queue v5's strict reader would not accept is set aside whole.
+ *
  * A v4 that did not stop cleanly leaves a write-ahead intent; the step then fails, naming the file.
  */
 import { BuzzRecordSchema, BUZZES, SEEN, SeenFileSchema } from '@ferretry/plugin-agenda/contract';
-import { AskItemSchema, AskVersionsFiles } from '@ferretry/core-asks/contract';
+import {
+  AgendaItemSchema,
+  AgendaSnapshotSchema,
+  AskItemSchema,
+  AskVersionsFiles,
+  parseCardAgendaReference,
+  ResolvedAgendaItemSchema,
+} from '@ferretry/core-asks/contract';
 import { Database } from 'bun:sqlite';
 import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -98,13 +111,17 @@ interface Tally {
   setAside: number;
   notNamed: number;
   retired: number;
+  /** Change events carried in the per-ferret queues, and the ferrets whose queue could not be read by v5. */
+  changesCarried: number;
+  changeQueues: number;
+  changesSetAside: string[];
   cardAskItems: Set<string>;
 }
 
 type Json = Record<string, unknown>;
 
 /** One item as v5 reads it: the deprecated gate fields dropped, a `replied` close made `done`. Key order kept. */
-function v5Item(item: Json, closed: boolean, tally: Tally): Json {
+function v5Item(item: Json, closed: boolean, tally: Pick<Tally, 'gateFields' | 'repliedClosed'>): Json {
   const out: Json = {};
   for (const [key, value] of Object.entries(item)) {
     if ((DEPRECATED_ITEM_FIELDS as readonly string[]).includes(key)) {
@@ -114,6 +131,19 @@ function v5Item(item: Json, closed: boolean, tally: Tally): Json {
     out[key] = key === 'disposition' && closed && value === 'replied' ? 'done' : value;
   }
   if (closed && item.disposition === 'replied') tally.repliedClosed++;
+  // A card agenda v4's daemon opened (`card-agenda:<card>`) is born in v5 with the subject it wrote kept as its own
+  // (`generatedSubject`), exactly as a 5.0-raised one: without it the item reads as asking the owner a question of its
+  // own, and answering its card ask leaves it in Needs you. v4's subject IS what the daemon wrote (v4 had no way for
+  // anyone else to reword it into a different generated one), so it is carried as it stands.
+  if (
+    out.generatedSubject === undefined &&
+    out.raisedBy === 'daemon' &&
+    out.source === 'task' &&
+    typeof out.subject === 'string' &&
+    parseCardAgendaReference(typeof out.sourceRef === 'string' ? out.sourceRef : undefined) !== undefined
+  ) {
+    out.generatedSubject = out.subject;
+  }
   return out;
 }
 
@@ -292,24 +322,131 @@ async function refuseUnfinished(ctx: StepContext, dir: string): Promise<void> {
       throw new Refused(
         `${named(ctx, join(dir, name))} is an unfinished agenda commit: v4 did not stop cleanly; start v4 once so it recovers, stop it, and convert again`,
       );
-  const changes = await regularFile(join(dir, PENDING_CHANGES));
-  if (changes === undefined) return;
-  let empty = false;
+}
+
+/** v5's outbox (`FileAgendaChangeOutbox`) reads exactly these effects: its envelope, with Asks' own snapshot schemas. */
+const V5_CHANGE_KINDS = [
+  'created',
+  'refreshed',
+  'progressed',
+  'needs-info',
+  'discussing',
+  'replied',
+  'surfaced',
+  'info-added',
+  'reopened',
+  'parked',
+  'unparked',
+  'woke',
+  'rested',
+  'nudged',
+  'answered',
+  'logged',
+  'merged',
+  'split',
+  'resolved',
+  'dismissed',
+] as const;
+/** `DAEMON_AGENDA_CAUSES` (packages/core/asks/daemon/lib/agenda/state-machine.ts), the same list in v4. */
+const V5_DAEMON_CAUSES = [
+  'source-reconciliation',
+  'warden-escalation',
+  'system',
+  'harness-prompt',
+  'input-request',
+  'secure-copy',
+  'login-recipe',
+  'phone-approval',
+] as const;
+const V5ChangeEffectSchema = z.strictObject({
+  id: z.string().min(1),
+  event: z.strictObject({
+    change: z.enum(V5_CHANGE_KINDS),
+    actor: z.discriminatedUnion('kind', [
+      z.strictObject({ kind: z.literal('human') }),
+      z.strictObject({
+        kind: z.literal('agent'),
+        sessionId: z.string(),
+        name: z.string().nullable(),
+        overSubFerret: z.literal(true).optional(),
+      }),
+      z.strictObject({ kind: z.literal('daemon'), cause: z.enum(V5_DAEMON_CAUSES) }),
+    ]),
+    via: z.enum(['board', 'conversation']),
+    snapshot: AgendaSnapshotSchema,
+    item: AgendaItemSchema.optional(),
+    addressed: ResolvedAgendaItemSchema.optional(),
+  }),
+});
+
+const asRecord = (value: unknown): Json | undefined =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined;
+
+/**
+ * One queued change event as v5 reads it: its items get the same two edits as a board's (deprecated gate fields
+ * dropped, a `replied` close made `done`), and its retry bookkeeping is reset (v5 delivers afresh). Undefined when
+ * v5's strict reader would not accept it.
+ */
+function v5ChangeEffect(effect: unknown, tally: Pick<Tally, 'gateFields' | 'repliedClosed'>): Json | undefined {
+  const source = asRecord(effect);
+  const event = asRecord(source?.event);
+  const snapshot = asRecord(event?.snapshot);
+  if (source === undefined || event === undefined || snapshot === undefined) return undefined;
+  const list = (value: unknown, closed: boolean): unknown =>
+    Array.isArray(value)
+      ? value.map(each => {
+          const record = asRecord(each);
+          return record === undefined ? each : v5Item(record, closed, tally);
+        })
+      : value;
+  const one = (value: unknown, closed: boolean): unknown => {
+    const record = asRecord(value);
+    return record === undefined ? value : v5Item(record, closed, tally);
+  };
+  const next: Json = {
+    ...event,
+    snapshot: { ...snapshot, items: list(snapshot.items, false), resolved: list(snapshot.resolved, true) },
+  };
+  if (event.item !== undefined) next.item = one(event.item, asRecord(event.item)?.resolvedAt !== undefined);
+  if (event.addressed !== undefined) next.addressed = one(event.addressed, true);
+  const { retry: _retry, ...rest } = source;
+  const out = { ...rest, event: next };
+  return V5ChangeEffectSchema.safeParse(out).success ? out : undefined;
+}
+
+/**
+ * v4's queue of agenda-change notices (`agenda-changes.pending.json`): QUEUED state, delivered at a ferret's next turn
+ * end, so it is carried, never refused. v5's Asks keeps the same queue under the same name, reads it at boot and
+ * delivers it on its first drain. A queue v5 could not read is set aside whole, kept byte for byte, and named in the report.
+ */
+async function carryChanges(ctx: StepContext, ferret: string, dir: string, tally: Tally): Promise<void> {
+  const bytes = await regularFile(join(dir, PENDING_CHANGES));
+  if (bytes === undefined) return;
+  let value: unknown;
   try {
-    const value: unknown = JSON.parse(changes.toString('utf8'));
-    empty = Array.isArray(value) && value.length === 0;
+    value = JSON.parse(bytes.toString('utf8'));
   } catch {
-    empty = false;
+    value = undefined;
   }
-  if (!empty)
-    throw new Refused(
-      `${named(ctx, join(dir, PENDING_CHANGES))} holds agenda changes v4 never delivered: start v4 once so it delivers them, stop it, and convert again`,
-    );
+  if (Array.isArray(value) && value.length === 0) return;
+  const converted = Array.isArray(value)
+    ? value.map(each => v5ChangeEffect(each, { gateFields: 0, repliedClosed: 0 }))
+    : [];
+  if (Array.isArray(value) && converted.every(each => each !== undefined)) {
+    await ctx.v5.opaque(v5AgendaFile(ferret, PENDING_CHANGES), JSON.stringify(converted));
+    tally.changeQueues++;
+    tally.changesCarried += converted.length;
+    return;
+  }
+  await ctx.v5.opaque(v5SetAside(ferret, `${PENDING_CHANGES}.unreadable-v4`), bytes);
+  tally.setAside++;
+  tally.changesSetAside.push(ferret);
 }
 
 async function convertFolder(ctx: StepContext, folder: Folder, scratch: string, tally: Tally): Promise<void> {
   const { ferret, dir } = folder;
   await refuseUnfinished(ctx, dir);
+  await carryChanges(ctx, ferret, dir, tally);
   const names = (await readdir(dir, { withFileTypes: true })).filter(entry => !entry.isSymbolicLink());
 
   // The version archives: copies brought to v4's shape first, so the read below sees what v4 saw.
@@ -554,6 +691,10 @@ export const agendaStep: Step = {
       why: 'its resting state: nothing left to deliver',
     },
     {
+      what: 'the retry bookkeeping of a queued agenda change (attempts, next attempt, last error)',
+      why: 'v5 delivers a carried change afresh; the change itself is kept',
+    },
+    {
       what: 'agenda-versions/A<n>.jsonl beside an initialised archive',
       why: 'a draft archive v4 already imported into the SQLite file',
     },
@@ -590,6 +731,9 @@ export const agendaStep: Step = {
       setAside: 0,
       notNamed: 0,
       retired: 0,
+      changesCarried: 0,
+      changeQueues: 0,
+      changesSetAside: [],
       cardAskItems: new Set(),
     };
     const scratch = await mkdtemp(join(tmpdir(), 'fy-agenda-'));
@@ -608,6 +752,12 @@ export const agendaStep: Step = {
         { what: 'uncommitted history bytes not carried', count: tally.uncommittedBytes },
         { what: 'version archives', count: tally.archives },
         { what: 'version snapshots of a replied close rewritten as done', count: tally.archiveSnapshots },
+        { what: 'agenda-change queues carried (v5 delivers them at its first drain)', count: tally.changeQueues },
+        { what: 'queued agenda changes carried', count: tally.changesCarried },
+        {
+          what: `agenda-change queues v5 cannot read, set aside byte for byte (ferrets: ${tally.changesSetAside.join(', ') || 'none'})`,
+          count: tally.changesSetAside.length,
+        },
         { what: 'held-answer files', count: tally.replies },
         { what: 'held answers and batches', count: tally.heldAnswers },
         { what: 'per-device seen-mark files', count: tally.seen },

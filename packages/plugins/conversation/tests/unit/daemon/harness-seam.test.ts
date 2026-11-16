@@ -14,6 +14,7 @@ import type {
   RunnerComposerCleared,
   RunnerComposerSubmitted,
   RunnerDelivery,
+  RunnerFormCapture,
   RunnerHeldAt,
   RunnerPaneObservation,
 } from '@ferretry/core-ferrets/contract';
@@ -28,6 +29,7 @@ import { err, ok, type Result } from '@ferretry/std';
 import {
   CONVERSATION_STATE,
   ConversationPort,
+  STUCK_FRAME_STATES,
   parseMessageAttachments,
   parsePeerEnvelope,
 } from '../../../contract/index.ts';
@@ -106,6 +108,8 @@ interface Script {
   clearComposer?: (text: string) => Promise<Result<RunnerComposerCleared, HarnessDeliveryFailure>>;
   submitComposer?: (text: string, strict?: boolean) => Promise<Result<RunnerComposerSubmitted, HarnessDeliveryFailure>>;
   stopActive?: () => Promise<Result<RunnerPaneObservation | undefined, HarnessRefusal>>;
+  /** The pane's masked frame, when a test gives the harness a form seam to capture it with. */
+  formCapture?: () => Promise<Result<RunnerFormCapture, HarnessRefusal>>;
 }
 
 /** Ferrets with the harness seam: every open is recorded with the caller it was given. */
@@ -174,6 +178,20 @@ class HarnessFerrets extends FakeFerrets {
                 file =>
                   `/state/ferrets/${ferret}/attachments/${file.folder === undefined ? '' : `${file.folder}/`}${file.name}`,
               );
+            },
+          }),
+      ...(this.script.formCapture === undefined
+        ? {}
+        : {
+            form: {
+              capture: async () =>
+                await (this.script.formCapture?.() as Promise<Result<RunnerFormCapture, HarnessRefusal>>),
+              key: async () => {
+                throw new Error('a stuck send never drives a form');
+              },
+              paste: async () => {
+                throw new Error('a stuck send never drives a form');
+              },
             },
           }),
       stopActive: async () => {
@@ -266,10 +284,11 @@ async function conversation(
       return { ...built, routes: wrapped } as typeof built;
     },
   } as typeof served;
+  const clock = fixedClock('2026-11-08T09:00:00Z');
   const host = await testHost({
     plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
     fakes: { ferrets, asks: new FakeAsks() },
-    clock: fixedClock('2026-11-08T09:00:00Z'),
+    clock,
   });
   const asking = async () =>
     await writeAskedQuestion(
@@ -285,6 +304,7 @@ async function conversation(
     ferrets,
     acted,
     state,
+    clock,
     asking,
     writes,
     // The Warden's view: the one consumer that may press the composer, a send's Enter and cancel, and speak as itself.
@@ -473,14 +493,34 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     await host.stop();
   });
 
-  test('composer_unreadable: 409 send_refused saying nothing was typed; record taken back', async () => {
+  test('composer_unreadable: the owner’s send is KEPT, answered as waiting on an unreadable box, never dropped', async () => {
     const { host, ferrets, api } = await conversation();
     ferrets.script.deliver = async () => err({ refused: 'composer_unreadable' });
 
     const response = await send(host);
 
-    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
-    expect(response.json<{ error: string }>().error).toContain('so nothing was typed');
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({
+      disposition: 'queued',
+      sendId: 'req-1',
+      fate: 'accepted',
+      waitReason: 'unreadable',
+    });
+    expect((await live(api)).map(row => (row as { fate?: string }).fate)).toEqual(['accepted']);
+    // The same id again is the same kept message: answered the same, and typed nothing more.
+    const again = await send(host);
+    expect(again.json()).toMatchObject({ disposition: 'queued', fate: 'accepted', waitReason: 'unreadable' });
+    expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('composer_unreadable from the Warden is still refused and taken back: its sweep re-plans its own', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => err({ refused: 'composer_unreadable' });
+
+    const sent = await api().send(F1, { kind: 'warden' }, { message: 'nudge', sendId: 'w-1' });
+
+    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
     expect(await live(api)).toEqual([]);
     await host.stop();
   });
@@ -523,7 +563,6 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     // A busy pane goes to the queue (its own describe); a dialog is the not_ready that is answered at once.
     ['not_ready', { refused: 'not_ready', why: 'dialog' }, 'send_refused'],
     ['composer_occupied', { refused: 'composer_occupied', draft: 'mine' }, 'composer_occupied'],
-    ['composer_unreadable', { refused: 'composer_unreadable' }, 'send_refused'],
     ['unconfirmed', { unconfirmed: true, stranded: false }, 'send_unconfirmed'],
     ['held', { refused: 'held' }, 'held'],
   ])('the port answers %s with the route’s code', async (_name, failure, code) => {
@@ -913,6 +952,56 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     expect((await api().sends(F1)).sends.map(row => row.by)).toEqual([{ kind: 'ferretry', feature: 'Warden' }]);
     await host.stop();
   });
+
+  test('Agenda’s send is typed bare, ledgered as the daemon’s own shown as Ferretry’s Agenda (never the owner’s, never a ferret’s)', async () => {
+    const { host, ferrets, api, apiFor } = await conversation(
+      new HarnessFerrets(),
+      OPEN,
+      {},
+      { consumers: ['agenda'] },
+    );
+
+    // The Warden's view is refused the Agenda's voice; the Agenda's own view is not.
+    expect((await api().send(F1, { kind: 'agenda' }, { message: 'x', sendId: 's-x' })).ok).toBe(false);
+    const sent = await apiFor('agenda').send(
+      F1,
+      { kind: 'agenda' },
+      { message: '[attention check] raise it', sendId: 's-a' },
+    );
+
+    expect(sent.ok).toBe(true);
+    expect(ferrets.delivered).toEqual([{ text: '[attention check] raise it' }]);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
+      ['s-a', 'daemon', undefined],
+    ]);
+    expect((await api().sends(F1)).sends.map(row => row.by)).toEqual([{ kind: 'ferretry', feature: 'Agenda' }]);
+    await host.stop();
+  });
+
+  test.each([
+    ['stopped', { state: 'stopped', cause: { kind: 'stopped' } }],
+    ['finished', { state: 'stopped', cause: { kind: 'completed' } }],
+    ['crashed', { state: 'stopped', cause: { kind: 'agent_crashed', exitCode: 1 } }],
+  ] as const)(
+    'an Agenda send to a ferret that is %s is refused: nothing is revived, typed or recorded, never under the owner’s name',
+    async (_name, over) => {
+      const ferrets = new HarnessFerrets();
+      const { host, api, apiFor } = await conversation(ferrets, OPEN, over, { consumers: ['agenda'] });
+
+      const sent = await apiFor('agenda').send(
+        F1,
+        { kind: 'agenda' },
+        { message: '[attention check] x', sendId: 's-a' },
+      );
+
+      expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+      expect(JSON.stringify(sent)).toContain('never revives it');
+      expect(ferrets.resumes).toEqual([]);
+      expect(ferrets.delivered).toEqual([]);
+      expect((await api().sends(F1)).sends).toEqual([]);
+      await host.stop();
+    },
+  );
 
   test('D2 #19 a Warden send to a stopped ferret revives it rather than typing at a pane; a relaunch that carries nothing types nothing and its record is taken back', async () => {
     const ferrets = new HarnessFerrets();
@@ -2390,12 +2479,12 @@ test('RV5 RETRY ROUTE: a ferret is refused owner_only before the pending handler
   }
 });
 
-test('RV5 RETRY ROUTE: a person still gets the pending answer (the public route is not wired yet)', async () => {
+test('RV5 RETRY ROUTE: a person reaches the wired Retry, which refuses a send it has no record of', async () => {
   const w = await conversation();
   try {
     const response = await w.host.request('POST', '/v1/ferrets/f1/sends/pending/retry', { as: owner(), body: {} });
-    expect(response.status).toBe(503);
-    expect(response.json()).toMatchObject({ code: 'conversation_terminal_unavailable' });
+    expect(response.status).toBe(409);
+    expect(response.json()).toMatchObject({ code: 'send_refused' });
   } finally {
     await w.host.stop();
   }
@@ -2508,3 +2597,142 @@ for (const senderKind of ['human', 'daemon'] as const)
       }
     });
   });
+
+describe('a route that names a ferret takes its callsign as well as its id', () => {
+  test('a send to a callsign reaches that ferret, in any case and with the composer’s colon', async () => {
+    const { host, ferrets, api } = await conversation(new HarnessFerrets(), OPEN, { name: 'joslin' });
+
+    const named = await send(host, 'req-name', 'joslin');
+    const spelled = await send(host, 'req-case', encodeURIComponent(':Joslin'));
+
+    expect(named.status).toBe(200);
+    expect(named.json()).toMatchObject({ ferret: 'f1', sendId: 'req-name' });
+    expect(spelled.status).toBe(200);
+    expect(spelled.json()).toMatchObject({ ferret: 'f1', sendId: 'req-case' });
+    expect(ferrets.delivered.map(each => each.text)).toEqual(['hello there', 'hello there']);
+    expect((await api().sends(F1)).sends.map(row => row.sendId).sort()).toEqual(['req-case', 'req-name']);
+    await host.stop();
+  });
+
+  test('a callsign nobody holds is a 404, not a send', async () => {
+    const { host, ferrets } = await conversation(new HarnessFerrets(), OPEN, { name: 'joslin' });
+
+    const response = await send(host, 'req-none', 'nobody');
+
+    expect(response.status).toBe(404);
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('a callsign two live ferrets hold is refused with both ids, and nothing is typed', async () => {
+    const ferrets = new HarnessFerrets();
+    ferrets.add({ id: ferretId('f2'), name: 'joslin', state: 'working' });
+    const { host } = await conversation(ferrets, OPEN, { name: 'joslin' });
+
+    const response = await send(host, 'req-two', 'joslin');
+
+    expect(response.status).toBe(409);
+    expect(JSON.stringify(response.json())).toContain('ambiguous_name');
+    expect(JSON.stringify(response.json())).toContain('f2');
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+});
+
+/**
+ * NEVER LOST (the 5.0 form of v4's six-and-a-half-hour stall). A box the reader cannot prove empty typed nothing, and the
+ * send used to answer 409 and DROP the message — the owner's and a ferret's alike. Both are now kept `untyped`, typed by
+ * the tracker the first time the box reads clear, said stuck past the limit, and the screen they met kept for later.
+ */
+describe('a send to a box that cannot be read is kept and delivered once it reads clear', () => {
+  /** Lets the tracker's scheduled looks, fired by the driven clock, run to the end. */
+  const settle = async (): Promise<void> => {
+    for (let index = 0; index < 40; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  /** Moves the clock in the tracker's own steps, so every look it schedules on the way is taken. */
+  const pass = async (clock: { advance(by: number): Promise<void> }, ms: number): Promise<void> => {
+    for (let gone = 0; gone < ms; gone += 5_000) {
+      await clock.advance(5_000);
+      await settle();
+    }
+  };
+
+  test('an owner send and an agent send are both kept, then typed once the frame reads clear', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    let readable = false;
+    ferrets.script.deliver = async () => (readable ? ok('turn-started') : err({ refused: 'composer_unreadable' }));
+
+    const owners = await send(host, 'owner-1', 'f1', { message: 'from the owner' });
+    const agents = await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'from the lead', sendId: 'lead-1' },
+    );
+
+    expect(owners.json()).toMatchObject({ fate: 'accepted', waitReason: 'unreadable' });
+    expect(agents).toMatchObject({ ok: true, value: { fate: 'accepted', waitReason: 'unreadable' } });
+    const kept = (await api().sends(F1)).sends.filter(row => row.withdrawn !== true);
+    expect(kept.map(row => [row.sendId, row.fate])).toEqual([
+      ['owner-1', 'accepted'],
+      ['lead-1', 'accepted'],
+    ]);
+
+    // Still unreadable: tried again, nothing typed.
+    await pass(clock, 15_000);
+    expect(ferrets.delivered.length).toBeGreaterThan(2);
+    const tries = ferrets.delivered.length;
+
+    // The frame reads clear: each message is typed once more — this time it lands — and never again.
+    readable = true;
+    await pass(clock, 15_000);
+    const typed = ferrets.delivered.slice(tries).map(delivery => delivery.text);
+    expect(typed.filter(text => text === 'from the owner')).toHaveLength(1);
+    expect(typed.filter(text => text.endsWith('from the lead'))).toHaveLength(1);
+    // Never typed again once it landed (the fake keeps no transcript, so the lead's typed send is later said
+    // unconfirmed to it — that notice is the only other thing typed).
+    await pass(clock, 30_000);
+    const after = ferrets.delivered.slice(tries).map(delivery => delivery.text);
+    expect(after.filter(text => text === 'from the owner' || text.endsWith('from the lead'))).toHaveLength(2);
+    await host.stop();
+  });
+
+  test('past the stuck limit the row says so, the agent sender is told once, and one masked frame is kept', async () => {
+    const { host, ferrets, api, clock, state } = await conversation();
+    ferrets.script.deliver = async () =>
+      // The notice to the sender lands; the stuck message itself keeps meeting an unreadable box.
+      ferrets.delivered.at(-1)?.text.includes('has not been delivered yet') === true
+        ? ok('turn-started')
+        : err({ refused: 'composer_unreadable' });
+    ferrets.script.formCapture = async () =>
+      ok({
+        alive: true,
+        dead: false,
+        promptReady: false,
+        activeWork: false,
+        visible: '  ⏵⏵ bypass permissions on\n',
+        history: '',
+        cursorX: 0,
+        cursorY: 23,
+      });
+
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'are you there', sendId: 'lead-1' });
+    await pass(clock, 125_000);
+
+    const [row] = (await api().sends(F1)).sends.filter(entry => entry.sendId === 'lead-1');
+    expect(row).toMatchObject({ fate: 'accepted' });
+    expect(row?.stuckAt).toBeDefined();
+    const notices = ferrets.delivered.filter(delivery => delivery.text.includes('has not been delivered yet'));
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.text).toContain('Do not send it again');
+    const frame = await state.read(STUCK_FRAME_STATES[0], 'f1');
+    const text = frame.ok && frame.value !== undefined ? new TextDecoder().decode(frame.value) : '';
+    expect(text).toContain('stuck send lead-1 to ferret f1');
+    expect(text).toContain('cursor=0,23');
+    expect(text).toContain('bypass permissions on');
+    // Still tried after it was said: nothing gives a stuck message up but the hold ceiling.
+    const tries = ferrets.delivered.length;
+    await pass(clock, 10_000);
+    expect(ferrets.delivered.length).toBeGreaterThan(tries);
+    await host.stop();
+  }, 30_000);
+});

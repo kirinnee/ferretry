@@ -386,3 +386,71 @@ describe('what the card source is told is a card ask', () => {
     expect(card.applied).toEqual([]);
   });
 });
+
+describe('a card ask an item carries, read through the Asks port', () => {
+  const ref = { ferret: 'f1', id: 'A1' } as never;
+
+  it('should list the carried gate as an open ask of the card source on its carrier, and the carrier once otherwise', async () => {
+    // Arrange
+    const half = await world(board().providers);
+
+    // Act
+    const forCard = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
+    const everything = await half.asks.open({ ferret: 'f1' as FerretId });
+
+    // Assert
+    expect(forCard.map(ask => [ask.id, ask.source, ask.entry, ask.state] as string[])).toEqual([
+      ['A1', 'card', reference, 'open'],
+    ]);
+    expect(everything.map(ask => `${ask.id}:${ask.source}`)).toEqual(['A1:ferret']);
+  });
+
+  it('should withdraw only the named gate from the carrier and leave the carrier itself open', async () => {
+    // Arrange
+    const half = await world(board().providers);
+
+    // Act
+    await half.asks.close(ref, 'withdrawn', reference as never);
+
+    // Assert
+    expect((await stateOf(half))?.items.map(item => [item.id, item.cardAsks])).toEqual([['A1', undefined]]);
+    expect(await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never })).toHaveLength(0);
+  });
+
+  it('should withdraw every carried gate when no entry is named, and still keep the carrier', async () => {
+    // Arrange
+    const half = await world(board().providers);
+
+    // Act
+    await half.asks.close(ref, 'withdrawn');
+
+    // Assert
+    expect((await stateOf(half))?.items.map(item => item.id)).toEqual(['A1']);
+    expect(await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never })).toHaveLength(0);
+  });
+});
+
+describe('an ask the card source raised itself, read through the Asks port', () => {
+  it('should be listed once, as its own ask, never again as a carrier of card asks', async () => {
+    // Arrange
+    const half = await world(board().providers);
+    const raised = await half.asks.raise({
+      source: 'card' as never,
+      ref: {},
+      entry: 'gate:F13:to-test:1' as never,
+      kind: 'yesno',
+      subject: 'Is the badge right?',
+      why: 'The card waits in To test.',
+      raisedBy: { kind: 'daemon' },
+      ferret: 'f1',
+    });
+
+    // Act
+    const forCard = await half.asks.open({ ferret: 'f1' as FerretId, source: 'card' as never });
+
+    // Assert
+    expect(forCard.filter(ask => ask.id === raised.id).map(ask => [ask.source, ask.entry])).toEqual([
+      ['card' as never, 'gate:F13:to-test:1' as never],
+    ]);
+  });
+});

@@ -177,6 +177,30 @@ describe('runFy', () => {
     should(transport.sent.map(sent => sent.path)).deepEqual(['/v1/cards/a']);
   });
 
+  it('V-0429 hands a plugin verb the words as typed, `--` included, beside the parsed args and options', async () => {
+    const manifest = definePlugin({
+      ...boardManifest,
+      actions: { ...boardManifest.actions, cli: [verb('card show')] },
+    });
+    const heard: (readonly string[] | undefined)[] = [];
+    const half = implementCli(manifest, {
+      build: () => ({
+        verbs: {
+          'card show': async invocation => {
+            heard.push(invocation.words);
+            return 0;
+          },
+        },
+      }),
+    });
+    const { world } = fakeWorld({
+      registry: registryOf(entry(manifest, 'h-board', half)),
+      inventory: inventoryOf({ id: 'board', contract: 'h-board' }),
+    });
+    await runFy(['card', 'show', '--with', 'A', 'B', '--', 'sh', '-c', 'exit 0'], world);
+    should(heard).deepEqual([['--with', 'A', 'B', '--', 'sh', '-c', 'exit 0']]);
+  });
+
   it('S58 --as-owner inside a pane prints its stderr line before acting', async () => {
     const manifest = definePlugin({ ...boardManifest, actions: { ...boardManifest.actions, cli: [verb('board')] } });
     const half = implementCli(manifest, {
@@ -277,7 +301,7 @@ describe('runFy', () => {
 
       // Assert
       should(code).equal(0);
-      should(io.stdout()).equal('fy card move: move a card\n');
+      should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
       should(calls.args).be.undefined();
       should(connects).deepEqual([]);
     });
@@ -289,13 +313,13 @@ describe('runFy', () => {
     should(calls.args).deepEqual(['-h']);
   });
 
-  it('should print a verb’s summary for --help after it', async () => {
+  it('should print a verb’s usage and summary for --help after it', async () => {
     const { world, io } = fakeWorld({ registry: registryOf(boardEntry()) });
     should(await runFy(['card', 'move', '--help'], world)).equal(0);
-    should(io.stdout()).equal('fy card move: move a card\n');
+    should(io.stdout()).startWith('Usage: fy card move [options]\n\nmove a card\n');
   });
 
-  it('should list a verb’s declared options under its summary for --help, and print nothing for a verb that declares none', async () => {
+  it('should list a verb’s declared options under its summary for --help, and only -h for a verb that declares none', async () => {
     const withOptions = definePlugin({
       id: 'sized',
       title: 'Sized',
@@ -321,10 +345,12 @@ describe('runFy', () => {
     const { world, io } = fakeWorld({ registry: registryOf(skeletonEntry(withOptions)) });
     should(await runFy(['size', '--help'], world)).equal(0);
     should(io.stdout()).equal(
-      "fy size: size a thing\n\noptions:\n  --at <tokens|auto>\n      squeeze it at this many tokens (e.g. 250k); auto leaves the thing's own trigger\n",
+      "Usage: fy size [options]\n\nsize a thing\n\nOptions:\n  --at <tokens|auto>  squeeze it at this many tokens (e.g. 250k); auto leaves\n                      the thing's own trigger\n  -h, --help          show this help\n",
     );
     should(await runFy(['plain', '-h'], world)).equal(0);
-    should(io.stdout().endsWith('fy plain: a verb with no options\n')).be.true();
+    should(io.stdout()).containEql(
+      'Usage: fy plain [options]\n\na verb with no options\n\nOptions:\n  -h, --help  show this help\n',
+    );
   });
 
   it('should run an alias as the verb it names, with the arguments carried over', async () => {

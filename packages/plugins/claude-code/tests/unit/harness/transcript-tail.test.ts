@@ -41,6 +41,30 @@ describe('parseTail', () => {
     expect(JSON.stringify(records)).not.toContain('SECRET');
   });
 
+  test('a system api_error record is an error record carrying only its code, never the message', () => {
+    const system = (n: number, subtype: string, extra: object) =>
+      line({ type: 'system', subtype, timestamp: AT(n), ...extra });
+    const records = parseTail(
+      [
+        system(1, 'api_error', { error: { type: 'overloaded_error', message: 'SECRET-MESSAGE sk-live-123' } }),
+        system(2, 'error', { error: { code: 429, message: 'SECRET-MESSAGE' } }),
+        system(3, 'api_error', { error: { code: 'two words, so text', message: 'SECRET-MESSAGE' } }),
+        system(4, 'api_error', { error: 'SECRET-MESSAGE as a bare string' }),
+        line({ type: 'system', subtype: 'api_error', error: { type: 'no_timestamp' } }),
+        system(5, 'informational', { content: 'not an error' }),
+      ].join('\n'),
+      false,
+    );
+    expect(records).toEqual([
+      { kind: 'error', at: AT(1), code: 'overloaded_error' },
+      { kind: 'error', at: AT(2), code: '429' },
+      { kind: 'error', at: AT(3) },
+      { kind: 'error', at: AT(4) },
+      { kind: 'error', code: 'no_timestamp' },
+    ]);
+    expect(JSON.stringify(records)).not.toContain('SECRET');
+  });
+
   test('one call counted once: every record of a reply names its call, and its tokens are the call’s own', () => {
     const records = parseTail(
       [

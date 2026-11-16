@@ -14,13 +14,14 @@ import {
   type RestartStatus,
 } from '../../../contract/index.ts';
 import type { SessionRestartSubsystem } from '../runtime/mounts/session-restart.ts';
-import { type RestartPorts, RestartService, type RestartSubject } from '../session/restart/service.ts';
+import { RestartBlocked, type RestartPorts, RestartService, type RestartSubject } from '../session/restart/service.ts';
 
 /**
  * Restarting ferrets (docs/launch-settings.md): today's `RestartService` over Ferrets' own records.
  *
- * A restart is a same-login resume with the conversation kept: the ferret is stopped and resumed through its own
- * `FerretsApi`, so the harness, the runner and the login are the ones it already had. It is never forced: a ferret
+ * A restart is a same-login resume with the conversation kept, through the ferret's own `FerretsApi`, that replaces its
+ * live pane: the runtime and its login are proved able to start BEFORE the old harness is stopped, so a ferret whose
+ * login needs sign-in keeps running and its restart waits (`blocked`) until it can start. It is never forced: a ferret
  * is restarted only at a your-turn or in a declared wait, and every other one is queued in `restarts.json` for the
  * drain to try again.
  */
@@ -41,9 +42,17 @@ export interface FerretRestartHost {
    * never recorded what it was told, or when it cannot be read (a restart is advice taken on proof, never on a guess).
    */
   outdated(ferret: FerretId): Promise<readonly LaunchInstructionSectionId[]>;
-  stop(ferret: FerretId, reason: string): Promise<void>;
-  /** Resumes the ferret FOR `origin`: the one the restart was admitted for, never one the host makes up. */
+  /**
+   * Relaunches the RUNNING ferret FOR `origin` (the one the restart was admitted for, never one the host makes up), as a
+   * resume that replaces its live pane: everything that can refuse without launching (the runtime and its login, the
+   * folder, the start gate, the harness) is judged BEFORE the old harness is stopped, so a refusal leaves it running.
+   */
   resume(ferret: FerretId, origin: LaunchOrigin): Promise<Result<FerretId, StartFailure>>;
+  /**
+   * Whether the ferret's runtime can start now (it resolves and may be spent, its harness and runner are on, its login is
+   * usable), touching nothing: asked before a restart replaces the live pane.
+   */
+  startable(ferret: FerretId): Promise<Result<void, StartFailure>>;
   history(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   loadQueue(): Promise<readonly RestartQueueEntry[]>;
   saveQueue(entries: readonly RestartQueueEntry[]): Promise<void>;
@@ -73,12 +82,18 @@ function restartPorts(host: FerretRestartHost): RestartPorts {
     outdated: async id => await host.outdated(id as FerretId),
     restart: async (id, origin, requestedBy) => {
       const ferret = id as FerretId;
-      await host.stop(ferret, 'restart');
+      // Proved first, touching nothing: a runtime that cannot start (a login that needs sign-in, a runtime switched off)
+      // leaves the ferret running and the restart waiting (`blocked`) until the owner fixes it.
+      const startable = await host.startable(ferret);
+      if (!startable.ok) throw new RestartBlocked(startable.error.reason);
+      // Any other refusal is still judged before the old harness is stopped (the resume replaces the live pane), so it
+      // leaves the ferret running too; it gives up, as a folder the fence refuses never clears by itself.
       const resumed = await host.resume(ferret, origin);
       if (!resumed.ok) throw new Error(resumed.error.reason);
       await host.history(ferret, 'session.restarted', requestedBy === undefined ? {} : { requestedBy });
     },
     gaveUp: async (id, reason) => await host.history(id as FerretId, 'session.restart_gave_up', { reason }),
+    blocked: async (id, reason) => await host.history(id as FerretId, 'session.restart_blocked', { reason }),
     queue: { load: async () => await host.loadQueue(), save: async entries => await host.saveQueue(entries) },
     now: () => host.now(),
   };
