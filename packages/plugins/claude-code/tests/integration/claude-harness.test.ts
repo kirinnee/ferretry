@@ -724,7 +724,7 @@ describe('ClaudeHarness', () => {
       ['a-risky', { settings: {}, flags: ['--dangerously-skip-permissions', '--session-id', 'evil', '--verbose'] }],
     ]);
 
-    test('a start and a resume pass them as separate words in item name order, ahead of the launch’s own flags', async () => {
+    test('a start and a resume pass them as one word per flag in item name order, ahead of the launch’s own flags', async () => {
       const { harness } = withItems(items);
       const started: { command?: readonly string[] } = {};
       const resumed: { command?: readonly string[] } = {};
@@ -734,7 +734,7 @@ describe('ClaudeHarness', () => {
 
       for (const command of [started.command ?? [], resumed.command ?? []]) {
         const at = command.indexOf('/opt/bin/claude');
-        expect(command.slice(at + 1, at + 5)).toEqual(['--verbose', '--add-dir', '/data', '--some-future-flag']);
+        expect(command.slice(at + 1, at + 4)).toEqual(['--verbose', '--add-dir=/data', '--some-future-flag']);
         expect(command.indexOf('--some-future-flag')).toBeLessThan(command.indexOf('--settings'));
       }
     });

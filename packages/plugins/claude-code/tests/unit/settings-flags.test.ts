@@ -20,9 +20,25 @@ import {
 import { launchFlagsLoosen } from '../../contract/launch-flags.ts';
 
 describe('launchFlagsKept: any flag passes, the ones the launch decides are dropped', () => {
-  test('an arbitrary flag the plugin has never heard of is kept, in order, as its own word', () => {
-    const words = ['--some-future-flag', 'a value with spaces', '--verbose', '--add-dir', '/a', '/b', 'constructor'];
-    expect(launchFlagsKept(words)).toEqual(words);
+  test('an arbitrary flag the plugin has never heard of is kept, in order, each value attached to its flag', () => {
+    expect(
+      launchFlagsKept([
+        '--some-future-flag',
+        'a value with spaces',
+        '--verbose',
+        '--add-dir',
+        '/a',
+        '--add-dir=/b',
+        '--x',
+        'constructor',
+      ]),
+    ).toEqual([
+      '--some-future-flag=a value with spaces',
+      '--verbose',
+      '--add-dir=/a',
+      '--add-dir=/b',
+      '--x=constructor',
+    ]);
   });
 
   test('the permission mode, in either spelling, and both skip switches are dropped with their value', () => {
@@ -39,6 +55,15 @@ describe('launchFlagsKept: any flag passes, the ones the launch decides are drop
     ).toEqual(['--verbose', '--debug']);
   });
 
+  test('an `=`-form owned flag drops only itself: the flag and the value right after it stay', () => {
+    expect(launchFlagsKept(['--permission-mode=plan', '--model', 'opus'])).toEqual(['--model=opus']);
+    expect(launchFlagsKept(['--session-id=abc', '--verbose', '--add-dir', '/a'])).toEqual([
+      '--verbose',
+      '--add-dir=/a',
+    ]);
+    expect(launchFlagsKept(['--permission-mode=plan', '--keep=1'])).toEqual(['--keep=1']);
+  });
+
   test('the conversation flags are dropped, so a settings flag cannot break resume or attribution', () => {
     expect(
       launchFlagsKept(['--session-id', 'abc', '--resume', 'abc', '-r', '--continue', '-c', '--fork-session', '--x']),
@@ -47,15 +72,40 @@ describe('launchFlagsKept: any flag passes, the ones the launch decides are drop
     expect(launchFlagsKept(['--resume', '--x', '--session-id=abc', '-r=abc', '--y'])).toEqual(['--x', '--y']);
   });
 
-  test('the home’s two files are dropped: --settings with its value, --mcp-config with every word up to the next flag', () => {
+  test('a short owned flag is dropped in EVERY spelling: attached value, `=`, and inside a cluster', () => {
+    expect(launchFlagsKept(['-rabc', '-r=abc', '-cfoo', '-dr', '-rc', '-vc', '-r', 'abc', '--keep'])).toEqual([
+      '--keep',
+    ]);
+  });
+
+  test('the home’s two files are dropped: --settings and --mcp-config with their value, and nothing else is eaten', () => {
     expect(
       launchFlagsKept(['--settings', 'other.json', '--mcp-config', 'a.json', 'b.json', '--keep', '--settings']),
     ).toEqual(['--keep']);
+    expect(launchFlagsKept(['--settings=x.json', '--mcp-config=y.json', '--keep'])).toEqual(['--keep']);
   });
 
   test('a value flag with no word after it, and no words at all, are safe', () => {
     expect(launchFlagsKept(['--permission-mode'])).toEqual([]);
     expect(launchFlagsKept([])).toEqual([]);
+  });
+});
+
+describe('launchFlagsKept: an item word is a flag or the value right after one, so no word can change how the launch parses', () => {
+  test('a bare -- is refused, so the launch’s flags can never become positionals', () => {
+    expect(launchFlagsKept(['--', '--keep'])).toEqual(['--keep']);
+    expect(launchFlagsKept(['--keep', '--'])).toEqual(['--keep']);
+    expect(launchFlagsKept(['--model', '--'])).toEqual(['--model']);
+  });
+
+  test('a subcommand or positional that does not follow a flag is refused, however it is placed', () => {
+    expect(launchFlagsKept(['mcp', '--keep', 'update'])).toEqual(['--keep=update']);
+    expect(launchFlagsKept(['doctor', 'install'])).toEqual([]);
+    expect(launchFlagsKept(['--a', 'one', 'two', '--b'])).toEqual(['--a=one', '--b']);
+  });
+
+  test('the word after a bare flag is attached to it, so it can never be read as a subcommand', () => {
+    expect(launchFlagsKept(['--verbose', 'mcp'])).toEqual(['--verbose=mcp']);
   });
 });
 

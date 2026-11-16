@@ -35,6 +35,7 @@ import { componentFileSource, instructionsSource, MAX_COMPONENT_BYTES } from './
 import { carryFlags, type FlagOutcome } from './component-flags.ts';
 import { carryAssetReferences, type CarriedAsset, v5AssetPath } from './component-assets.ts';
 import { join } from 'node:path';
+import { findFlagSecrets } from '@ferretry/std/credential-words';
 import { Document, isMap, isScalar, isSeq, Pair, parse, Scalar, type YAMLMap } from 'yaml';
 import type { KeptItem, NotCarried, StepReport } from '../report.ts';
 import {
@@ -825,7 +826,10 @@ async function planHarnessComponent(
   }
 
   if (Object.keys(body).length > 0) {
-    const secrets = documentCredentialPaths(body);
+    // The kernel refuses a raw secret given to a flag (rule W, `findFlagSecrets`): a carried flag word that holds one is
+    // held here too, by position only, so neither the value nor the flag's name reaches the report.
+    const flagSecrets = findFlagSecrets({ flags: body.flags ?? [] }).map(found => found.path.join('.'));
+    const secrets = [...new Set([...documentCredentialPaths(body), ...flagSecrets])];
     if (secrets.length > 0)
       entry.reasons.push(
         `the value at ${secrets.join(', ')} looks like a credential, so it was held; store it with \`fy secret set NAME\` and write \${secret:NAME}`,

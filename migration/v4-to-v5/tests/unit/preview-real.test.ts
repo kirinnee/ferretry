@@ -472,6 +472,28 @@ describe('every v4 settings flag is carried into the item `flags` (a settings it
     await expect(stat(join(f.to, 'config/claude-code/settings/key.yaml'))).rejects.toThrow();
   });
 
+  // The kernel's rule W refuses a raw secret given to a flag, so the converter must not write one it would refuse.
+  test.each([
+    ['--password', 'Xk9pL2mQ8vR4tZ7wNb3J'],
+    ['--client-secret', 'aZ8kQ2pL9mX4vR7tN3bW'],
+  ] as const)(
+    'a %s flag word the kernel refuses is held, never converted, and its value never reported',
+    async (flag, value) => {
+      await text('layout-version', '2\n');
+      await text(
+        'config/components/settings/w.yaml',
+        `harness: codex\nflags:\n  - --search\n  - ${flag}\n  - ${value}\n`,
+      );
+      await text('config/profiles/default.yaml', 'contents:\n  - settings/w\n');
+      const report = await done();
+      const step = settingsOf(report);
+      expect(step.status).toBe('pending');
+      expect(namedIn(step)).toContain('config/components/settings/w.yaml');
+      expect(JSON.stringify(report)).not.toContain(value);
+      await expect(stat(join(f.to, 'config/codex/settings/w.yaml'))).rejects.toThrow();
+    },
+  );
+
   test('a hooks component with flags, and a flag that is not text, are still held: v5 has no word to carry them as', async () => {
     await text('layout-version', '2\n');
     await text('config/components/hooks/h.yaml', 'harness: claude\nflags:\n  - --verbose\n');

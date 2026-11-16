@@ -202,7 +202,7 @@ describe('the Codex harness', () => {
       const command = seen[0]?.spec.command ?? [];
       const at = command.indexOf('--some-future-flag');
 
-      should(command.slice(at, at + 4)).eql(['--some-future-flag', '--search', '-c', 'model_verbosity="low"']);
+      should(command.slice(at, at + 3)).eql(['--some-future-flag', '--search', '-cmodel_verbosity="low"']);
       should(at).be.below(command.indexOf('--model'));
       should(command.indexOf('--model')).be.below(command.indexOf('--no-alt-screen'));
     });
@@ -216,6 +216,22 @@ describe('the Codex harness', () => {
       should(command).not.containEql('--full-auto');
       should(command).not.containEql('approval_policy="never"');
       should(command.filter(argument => argument.startsWith('approval_policy='))).eql(['approval_policy="on-request"']);
+    });
+
+    it('cannot loosen the launch: its permission is passed as explicit flags, exactly one of each, after the items’ flags', async () => {
+      const spelled = new Map<string, unknown>([
+        ['a', { settings: {}, flags: ['-sdanger-full-access', '-anever', '--yolo', '-pwork', '--some-future-flag'] }],
+      ]);
+      const { harness } = harnessOver(LOCATED, spelled);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf(), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command.filter(word => /^(--ask-for-approval|--sandbox|-s|-a|-p|--yolo|--profile)/u.test(word))).eql([
+        '--ask-for-approval=on-request',
+        '--sandbox=workspace-write',
+      ]);
+      should(command.indexOf('--some-future-flag')).be.below(command.indexOf('--ask-for-approval=on-request'));
     });
 
     it('reach a resume too, after the conversation id', async () => {

@@ -18,33 +18,43 @@ import {
   settingsItemLoosens,
 } from '../../contract/index.ts';
 import { launchFlagsLoosen } from '../../contract/launch-flags.ts';
+import { codexPermissionArguments } from '../../daemon/lib/fixed-layer.ts';
+import { buildCodexLaunchArgv } from '../../daemon/lib/launch.ts';
 import { settingsDocument, settingsFlags } from '../../daemon/lib/settings.ts';
 
 describe('launchFlagsKept: any flag passes, the ones the launch decides are dropped', () => {
-  test('an arbitrary flag the plugin has never heard of is kept, in order, as its own word', () => {
-    const words = [
-      '--some-future-flag',
-      'a value with spaces',
-      '--search',
-      '-c',
-      'model_verbosity="low"',
-      '-p',
-      'work',
-    ];
-    expect(launchFlagsKept(words)).toEqual(words);
+  test('an arbitrary flag the plugin has never heard of is kept, in order, each value attached to its flag', () => {
+    expect(
+      launchFlagsKept([
+        '--some-future-flag',
+        'a value with spaces',
+        '--search',
+        '-c',
+        'model_verbosity="low"',
+        '--debug',
+      ]),
+    ).toEqual(['--some-future-flag=a value with spaces', '--search', '-cmodel_verbosity="low"', '--debug']);
   });
 
   test('a -c override of an ordinary key is kept, in every spelling', () => {
-    const words = [
-      '-c',
-      'tui.notifications=true',
-      '--config',
-      'a.b=1',
+    expect(
+      launchFlagsKept([
+        '-c',
+        'tui.notifications=true',
+        '--config',
+        'a.b=1',
+        '--config=c.d=2',
+        '-cmcp_servers.other.command="x"',
+        '-c',
+        'mcp_servers.other.command="x"',
+      ]),
+    ).toEqual([
+      '-ctui.notifications=true',
+      '--config=a.b=1',
       '--config=c.d=2',
-      '-c',
-      'mcp_servers.other.command="x"',
-    ];
-    expect(launchFlagsKept(words)).toEqual(words);
+      '-cmcp_servers.other.command="x"',
+      '-cmcp_servers.other.command="x"',
+    ]);
   });
 
   test('the approval and sandbox switches are dropped with their value', () => {
@@ -66,7 +76,28 @@ describe('launchFlagsKept: any flag passes, the ones the launch decides are drop
     ).toEqual(['--search', '--debug']);
   });
 
-  test('a -c override of the approval policy, the sandbox or the Ferretry tools server is dropped, whatever its spelling', () => {
+  test('every ATTACHED short form of an owned flag is dropped, the first two characters naming the flag', () => {
+    expect(
+      launchFlagsKept([
+        '-sdanger-full-access',
+        '-s=danger-full-access',
+        '-anever',
+        '-a=never',
+        '-cmcp_servers.ferretry.enabled=false',
+        '-capproval_policy="never"',
+        '-pwork',
+        '--keep',
+      ]),
+    ).toEqual(['--keep']);
+  });
+
+  test('--yolo and a profile (--profile, -p, --profile=, -p<name>, and the `profile` key) are dropped', () => {
+    expect(
+      launchFlagsKept(['--yolo', '--profile', 'x', '--profile=x', '-p', 'x', '-px', '-c', 'profile="x"', '--keep']),
+    ).toEqual(['--keep']);
+  });
+
+  test('a -c override of the approval policy, the sandbox, the profile or the Ferretry tools server is dropped, whatever its spelling', () => {
     expect(
       launchFlagsKept([
         '-c',
@@ -78,15 +109,106 @@ describe('launchFlagsKept: any flag passes, the ones the launch decides are drop
         'mcp_servers.ferretry.command="x"',
         '-c',
         'mcp_servers.ferretry={command="x"}',
+        '-c',
+        '"approval_policy" = "never"',
+        '-c',
+        'mcp_servers . "ferretry".command="x"',
         '--keep',
       ]),
     ).toEqual(['--keep']);
   });
 
-  test('a -c with nothing after it, and no words at all, are safe', () => {
-    expect(launchFlagsKept(['--keep', '-c'])).toEqual(['--keep', '-c']);
+  test('a -c override of the WHOLE mcp_servers table is dropped, and one of another server is kept', () => {
+    expect(
+      launchFlagsKept([
+        '-c',
+        'mcp_servers={ferretry={command="x"}}',
+        '-cmcp_servers={}',
+        '-c',
+        'mcp_servers.other.x=1',
+      ]),
+    ).toEqual(['-cmcp_servers.other.x=1']);
+  });
+
+  test('a -c with no assignment (nothing to keep), and no words at all, are safe', () => {
+    expect(launchFlagsKept(['--keep', '-c'])).toEqual(['--keep']);
     expect(launchFlagsKept(['--sandbox'])).toEqual([]);
     expect(launchFlagsKept([])).toEqual([]);
+  });
+
+  test('an `=`-form owned flag drops only itself: the flag right after it stays', () => {
+    expect(launchFlagsKept(['--ask-for-approval=never', '--model', 'x'])).toEqual(['--model=x']);
+    expect(launchFlagsKept(['--sandbox=read-only', '--config=a=1', '--keep'])).toEqual(['--config=a=1', '--keep']);
+  });
+});
+
+describe('launchFlagsKept: an item word is a flag or the value right after one, so no word can change how the launch parses', () => {
+  test('a bare -- is refused', () => {
+    expect(launchFlagsKept(['--', '--keep'])).toEqual(['--keep']);
+    expect(launchFlagsKept(['--keep', '--', '-c', 'a=1'])).toEqual(['--keep', '-ca=1']);
+  });
+
+  test('a subcommand or positional that does not follow a flag is refused, however it is placed', () => {
+    expect(launchFlagsKept(['resume', '--last'])).toEqual(['--last']);
+    expect(launchFlagsKept(['exec', 'logout', 'mcp'])).toEqual([]);
+    expect(launchFlagsKept(['--a', 'one', 'two', '--b'])).toEqual(['--a=one', '--b']);
+  });
+
+  test('the word after a bare flag is attached to it, so it can never be read as a subcommand', () => {
+    expect(launchFlagsKept(['--search', 'resume'])).toEqual(['--search=resume']);
+  });
+
+  test('a launch word is never the value of an item flag: the flags the item leaves valueless stay valueless', () => {
+    const words = launchFlagsKept(['--search', '--model']);
+    expect(words).toEqual(['--search', '--model']);
+    const argv = buildCodexLaunchArgv({
+      executable: 'codex',
+      settingsFlags: ['--add-dir'],
+      harnessFlags: codexPermissionArguments('auto'),
+    });
+    // The word after the items is flag-shaped (Codex refuses a value that starts with `-`, so the start fails).
+    expect(argv).toEqual(['codex', '--add-dir', '--ask-for-approval=on-request', '--sandbox=workspace-write']);
+    expect(argv[2]?.startsWith('--')).toBe(true);
+  });
+
+  test('a launch with resume keeps the conversation first, whatever the items hold', () => {
+    expect(
+      buildCodexLaunchArgv({
+        executable: 'codex',
+        resume: 'abc',
+        settingsFlags: ['resume', 'exec', '--last', '--', '--keep'],
+      }),
+    ).toEqual(['codex', 'resume', 'abc', '--last', '--keep']);
+  });
+});
+
+describe('the launch passes its permission as explicit flags, which Codex refuses to see twice', () => {
+  test('auto and skip spell their approval policy and sandbox as attached flags', () => {
+    expect(codexPermissionArguments('auto')).toEqual(['--ask-for-approval=on-request', '--sandbox=workspace-write']);
+    expect(codexPermissionArguments('skip')).toEqual(['--ask-for-approval=never', '--sandbox=danger-full-access']);
+  });
+
+  test('no spelling of an item flag survives next to them: the launch carries exactly one of each', () => {
+    const items = [
+      '--sandbox=danger-full-access',
+      '-sdanger-full-access',
+      '-s',
+      'danger-full-access',
+      '--ask-for-approval',
+      'never',
+      '-anever',
+      '--yolo',
+      '--full-auto',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '-pwork',
+      '--search',
+    ];
+    const argv = buildCodexLaunchArgv({
+      executable: 'codex',
+      settingsFlags: items,
+      harnessFlags: codexPermissionArguments('auto'),
+    });
+    expect(argv).toEqual(['codex', '--search', '--ask-for-approval=on-request', '--sandbox=workspace-write']);
   });
 });
 
@@ -113,6 +235,31 @@ describe('launchFlagsLoosen: only a permission switch the item did not already c
     expect(
       launchFlagsLoosen([], ['--dangerously-bypass-approvals-and-sandbox', '-a', 'never', '-s', 'x']),
     ).toHaveLength(3);
+  });
+
+  test('every attached form, --yolo, a profile and the whole mcp_servers table are held too', () => {
+    expect(
+      launchFlagsLoosen(
+        [],
+        [
+          '-sdanger-full-access',
+          '-anever',
+          '--yolo',
+          '-pwork',
+          '-c',
+          'mcp_servers={x={}}',
+          '-cmcp_servers.ferretry.enabled=false',
+        ],
+      ),
+    ).toEqual([
+      'a launch flag sets the permission mode (-s)',
+      'a launch flag sets the permission mode (-a)',
+      'a launch flag sets the permission mode (--yolo)',
+      'a launch flag sets the permission mode (-p)',
+      'a launch flag sets the permission mode (-c mcp_servers)',
+      'a launch flag sets the permission mode (-c mcp_servers.ferretry.enabled)',
+    ]);
+    expect(launchFlagsLoosen([], ['--profile=x', '-c', 'profile="x"'])).toHaveLength(2);
   });
 
   test('any other flag or -c key, and a switch the item already had, loosens nothing', () => {

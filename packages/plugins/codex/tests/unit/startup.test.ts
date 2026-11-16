@@ -198,7 +198,7 @@ describe('the whole Codex launch argv', () => {
     ]);
   });
 
-  it('puts the settings items’ flags before every argument the launch sets, as their own words, any flag', () => {
+  it('puts the settings items’ flags before every argument the launch sets, each one word with its value attached, any flag', () => {
     expect(
       buildCodexLaunchArgv({
         executable: 'codex',
@@ -212,12 +212,9 @@ describe('the whole Codex launch argv', () => {
       'codex',
       'resume',
       'conv-1',
-      '--some-future-flag',
-      'a value with spaces',
-      '-c',
-      'model_verbosity="low"',
-      '-m',
-      'cheap',
+      '--some-future-flag=a value with spaces',
+      '-cmodel_verbosity="low"',
+      '-mcheap',
       // The launch's own model and effort come after, so they win over an item's.
       '--model',
       'gpt-6.1-sol',

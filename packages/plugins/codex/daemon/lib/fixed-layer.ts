@@ -15,6 +15,18 @@ const CODEX_HIDDEN_NOTICES = [
   'hide_gpt-5.1-codex-max_migration_prompt',
 ] as const;
 
+/**
+ * The launch's permission as EXPLICIT flags, attached so no word before them can take either as its value. Codex refuses a
+ * repeated `--ask-for-approval` or `--sandbox` (and `--full-auto` / `--yolo` / the bypass switch beside them), so a
+ * settings item that slipped one past `launchFlagsKept` makes the start fail instead of loosening it, and an explicit
+ * flag outranks a `-c` pair or a profile. Deliberately NOT part of {@link codexFixedArguments}: the `permission-mode`
+ * section of the launch record already fingerprints the mode these spell.
+ */
+export function codexPermissionArguments(permissionMode: HarnessConfig['permissionMode']): readonly string[] {
+  const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[permissionMode];
+  return [`--ask-for-approval=${approvalPolicy}`, `--sandbox=${sandboxMode}`];
+}
+
 export function codexFixedArguments(permissionMode: HarnessConfig['permissionMode'], cwd: string): readonly string[] {
   const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[permissionMode];
   return [

@@ -143,11 +143,15 @@ export function launchCommand(inputs: CommandInputs): readonly string[] {
 
 /** Claude itself and its flags: what the seed `exec`s. */
 function claudeCommand(inputs: CommandInputs): readonly string[] {
+  const itemFlags = launchFlagsKept(inputs.flags ?? []);
   return [
     inputs.binary,
     // The items' flags come BEFORE every flag the launch sets: Claude takes the last of a repeated flag, and the ones the
     // launch decides (permission mode, conversation, settings and MCP files) are dropped from them (`launchFlagsKept`).
-    ...launchFlagsKept(inputs.flags ?? []),
+    ...itemFlags,
+    // A flag the items leave valueless at their end (`--model`, `--add-dir`) takes the NEXT word whatever it is. This
+    // disposable copy of the overlay, one attached word, is what it takes; the real pair after it is never eaten.
+    ...(itemFlags.length === 0 ? [] : [`--settings=${inputs.home}/${HOME_FILES.overlay}`]),
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
