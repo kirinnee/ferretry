@@ -19,12 +19,12 @@
  * Seam grammar: `hook:<name>[:<key>]` (R1; the bare name covers every key), `read:<hook>` (R2), `port:<name>` (R3),
  * `code:<repo path>:<identifier>` (R4; `<identifier>` may be `*` for the whole file).
  */
-import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { HookDef } from '../../packages/core/kernel/contract/index.ts';
 import type { Manifest } from '../../packages/core/kernel/manifest/index.ts';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import { readPendingMerged, readPendingMergedBase } from '../gen/lib/pending-files.ts';
 import { contractPath } from '../gen/lib/workspace.ts';
 
 const CHECK = 'unwired-seams';
@@ -393,15 +393,20 @@ export function parseUnwired(text: string, where: string): UnwiredEntry[] | unde
  */
 export function readBaseUnwired(root: string, ref: string): UnwiredEntry[] | undefined {
   if (ref.startsWith('file:')) {
-    const file = ref.slice(5);
-    return existsSync(file) ? parseUnwired(readFileSync(file, 'utf8'), file) : undefined;
+    const merged = readPendingMergedBase(root, ref);
+    return merged === undefined ? undefined : parseUnwired(merged, ref.slice(5));
   }
-  const shown = spawnSync('git', ['show', `${ref}:${PORTS_PENDING}`], { cwd: root, encoding: 'utf8' });
-  if (shown.status !== 0)
+  let merged: string | undefined;
+  try {
+    merged = readPendingMergedBase(root, ref);
+  } catch {
+    merged = undefined;
+  }
+  if (merged === undefined)
     throw new Error(
       `the base ${ref} cannot be read, so nothing proves the unwired list did not grow; fetch the base or pass a readable --base`,
     );
-  return parseUnwired(shown.stdout, `${ref}:${PORTS_PENDING}`);
+  return parseUnwired(merged, `${ref}:${PORTS_PENDING}`);
 }
 
 export const check: Check = {
@@ -409,11 +414,11 @@ export const check: Check = {
   summary:
     'a hook, port or unbound seam that is offered and not wired is listed with a card, and the list only shrinks',
   async run(ctx) {
-    const file = join(ctx.root, PORTS_PENDING);
     let entries: UnwiredEntry[] = [];
     let base: UnwiredEntry[] | undefined;
     try {
-      entries = existsSync(file) ? (parseUnwired(readFileSync(file, 'utf8'), PORTS_PENDING) ?? []) : [];
+      const merged = readPendingMerged(ctx.root);
+      entries = merged === undefined ? [] : (parseUnwired(merged, PORTS_PENDING) ?? []);
       base = readBaseUnwired(ctx.root, ctx.base ?? 'origin/rebuild/5.0');
     } catch (error) {
       return [{ check: CHECK, where: PORTS_PENDING, message: error instanceof Error ? error.message : String(error) }];

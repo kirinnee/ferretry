@@ -154,7 +154,7 @@ Every line must hold. A line the owner defers goes by name into the after-merge 
 What 5.0 merges without is [after-merge.json](after-merge.json): three counts and the named items, each with an owner.
 
 - `parityOpen`: parity rows outside Appendix D still `[ ]` in `docs/design/rebuild-parity.tsv`.
-- `portsPendingLines`: the open-gap lines in `ports-pending.json`.
+- `portsPendingLines`: the open-gap lines in every `ports-pending.json` (one per owning package, spine §7).
 - `guaranteesMissing`: kept Appendix D rows with no id-named test. Before-merge line 1 needs it at 0, so the change
   that closes the last row lowers it to 0, and from then on it stays 0.
 - `items`: lane P of the kernel contract, the Ferrets/Conversation seam lanes F1 and F2, the review follow-up sweep,
