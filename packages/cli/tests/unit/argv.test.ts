@@ -101,7 +101,8 @@ describe('parseArgs: a declared switch never takes a value', () => {
     const parsed = parseArgs(['--allow-scratch', 'say hello', '--runtime', 'rt'], NEW);
     should(parsed.args).deepEqual(['say hello']);
     should(parsed.options).deepEqual({ 'allow-scratch': true, runtime: 'rt' });
-    should(parsed.swallowed).be.undefined();
+    // Only the VALUE option took a word; the switch took none.
+    should(parsed.swallowed).deepEqual([{ option: 'runtime', word: 'rt', at: 1 }]);
   });
 
   it('should keep the prompt as a word when the switch is written AFTER it', () => {
