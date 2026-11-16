@@ -15,7 +15,7 @@ export interface SessionConversationLeases {
   /**
    * Moves the lease of the conversation `command` names off this daemon's own pid onto the PANE's `pid` (the process
    * the pane runs, read after it opened). A pane the daemon launches never runs the runtime wrapper, so nothing else
-   * ever does: left on the daemon's pid, the lease reads as dead to a terminal claim the moment the daemon restarts while
+   * ever does. Only `SessionLifecycleService.start` calls this (other launch paths hold no lease yet, unit c58-36d): left on the daemon's pid, the lease reads as dead to a terminal claim the moment the daemon restarts while
    * the pane is still writing. Throws when it cannot — no pid, or another writer holds the conversation — and the caller
    * stops the pane (fail closed). Nothing to do for a command that names no conversation.
    */

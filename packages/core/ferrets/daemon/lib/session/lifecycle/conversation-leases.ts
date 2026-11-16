@@ -69,7 +69,8 @@ function fields(document: unknown): Readonly<Record<string, unknown>> | undefine
  * must be the pane's, not this daemon's, or a restarted daemon's dead pid would let it take the conversation while the
  * pane writes. So the lease names this daemon's pid only from `claim` (before any pane exists) until
  * {@link ConversationLeases.moveToPane}, which the lifecycle calls as soon as the pane has opened (a pane the daemon
- * launches never runs the runtime wrapper, so no wrapper claim ever moves it). That is the whole of what a session can
+ * launches never runs the runtime wrapper, so no wrapper claim ever moves it). Only `SessionLifecycleService.start` holds
+ * a lease at all in 5.0: `FerretsService.launch` paths (`fy new`, resume, revive, Restart, move) hold none (unit c58-36d). That is the whole of what a session can
  * claim for: its OWN lease. A claim for another session's conversation names a different session, so a live holder
  * refuses it whoever asks, and only a holder that is over lets it take the conversation.
  */

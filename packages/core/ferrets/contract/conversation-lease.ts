@@ -19,8 +19,9 @@ import { z } from 'zod';
  * turns into not launching (75, `EX_TEMPFAIL`). Every other failure of `fy` launches anyway, because a lease bug must
  * never stop a person's own CLI from starting — except a wrapper run for a session (`FY_SESSION_ID` set), which fails
  * closed with 75 too (the Warden leaves a 75 alone, so it is never revived into the same refusal). A pane the DAEMON
- * launches runs the real harness binary, not this wrapper: its lease is moved onto the pane's pid by the daemon itself
- * (`SessionConversationLeases.moveToPane`).
+ * launches runs the real harness binary, not this wrapper. Only a start through `SessionLifecycleService.start` (the
+ * fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the other
+ * launch paths (`fy new`, resume, Warden revive, Restart, move relaunch) hold none yet — unit c58-36d.
  */
 export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
 

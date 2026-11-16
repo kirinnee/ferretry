@@ -360,6 +360,7 @@ export class SessionLifecycleService {
   /**
    * Moves the session's conversation lease onto the pane's own pid. FAIL CLOSED: a pane whose conversation the
    * daemon cannot hold under that process is stopped before anything else can write, and the start fails with the reason.
+   * If the stop itself fails the pane may still be writing: the session is `kill_failed` and its lease stays held.
    */
   private async holdConversationOnPane(record: SessionLifecycleRecord): Promise<void> {
     const leases = this.ports.leases;
@@ -368,7 +369,14 @@ export class SessionLifecycleService {
       const pid = await this.ports.launcher.panePid?.(record);
       await leases.moveToPane(record.config.id, record.config.command, pid);
     } catch (error) {
-      await this.ports.launcher.stop(record).catch(() => undefined);
+      try {
+        await this.ports.launcher.stop(record);
+      } catch (stopError) {
+        // The pane may still be alive and writing, so its lease stays held (as in `stop`): record both reasons.
+        const reason = `${failureMessage(error)}; stopping the pane failed: ${failureMessage(stopError)}`;
+        await this.persist(transitionSessionRecord(record, 'kill_failed', this.ports.clock.now(), reason));
+        throw new Error(reason);
+      }
       throw await this.recordFailure(record, error);
     }
   }

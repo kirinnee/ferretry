@@ -406,8 +406,9 @@ const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
  *
  * EXCEPT a wrapper run for a session (`FY_SESSION_ID` set): a harness this wrapper cannot check must not write
  * unchecked, so there the failure is closed — the same status (75, which the Warden does not revive), with the
- * reason said. A pane the DAEMON launches runs the real harness binary and never this wrapper; the daemon
- * moves that session's lease onto the pane's pid itself (`SessionConversationLeases.moveToPane`).
+ * reason said. A pane the DAEMON launches runs the real harness binary and never this wrapper. Only a lifecycle
+ * start (the fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the
+ * other launch paths hold none yet (unit c58-36d).
  */
 const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
   const fy = shellPath(fyCommand);
