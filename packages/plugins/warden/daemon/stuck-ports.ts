@@ -1,5 +1,5 @@
 import type { QueuedMessage } from './lib/protocol.ts';
-import type { FerretId } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import type { ConversationApi } from '@ferretry/plugin-conversation/contract';
 import type {
   InboxSend,
@@ -44,7 +44,7 @@ function stuckInputSendOf(send: Awaited<ReturnType<typeof readSends>>[number]): 
   };
 }
 
-/** What the stalled mark can do on this machine: Ferrets offers no health mark yet, so it is said in the journal only. */
+/** Where the stalled mark is said: the journal, beside the health mark Ferrets puts on the ferret. */
 export interface StalledMarkLog {
   record(type: string, data: Readonly<Record<string, string>>): void;
 }
@@ -54,13 +54,15 @@ export interface StalledMarkLog {
  * `warden` caller may ask for, the taken-back pointer the send path reads, and the machine notice. Everything is
  * through Conversation's contract, never around it.
  *
- * GAP(warden): Ferrets offers no `stalled` health mark, so `markStalled` / `clearStalled` are journalled
- * (`fleet.warden_input_stalled` / `…_unstalled`) and mark nothing; the notice and the flag carry the news.
+ * `markStalled` / `clearStalled` put Ferrets' `stalled` health mark on the ferret (`FerretsApi.markStalled`, the Warden's
+ * alone: only a running ferret, never over a more telling mark) and are journalled as well
+ * (`fleet.warden_input_stalled` / `…_unstalled`). Without Ferrets' member they are journalled only.
  */
 export function conversationStuckInput(
   conversation: ConversationApi,
   notice: Pick<StuckInputList, 'add' | 'remove'>,
   log: StalledMarkLog,
+  ferrets?: Pick<FerretsApi, 'markStalled'>,
 ): WardenStuckInputPort {
   return {
     sends: async sessionId => (await readSends(conversation, sessionId as FerretId)).map(stuckInputSendOf),
@@ -74,9 +76,11 @@ export function conversationStuckInput(
       : { retracted: async (sessionId: string) => await conversation.retractedDraft?.(sessionId as FerretId) }),
     markStalled: async (sessionId, reason) => {
       log.record('fleet.warden_input_stalled', { sessionId, reason });
+      await ferrets?.markStalled?.(sessionId as FerretId, true);
     },
     clearStalled: async sessionId => {
       log.record('fleet.warden_input_unstalled', { sessionId });
+      await ferrets?.markStalled?.(sessionId as FerretId, false);
     },
     add: async entry => await notice.add(entry),
     remove: async sessionId => await notice.remove(sessionId),
@@ -89,6 +93,8 @@ export function conversationStuckInput(
  * that is provably ours is the same single Enter `resubmitStuck` presses for the open send whose text the tracker saw
  * typed. The deliverer's own look is not on Conversation's port, so `deliveryLook` does nothing here: the queue's
  * deliverer already looks on its own schedule and at every turn boundary.
+ *
+ * GAP(warden): the deliverer's owner is core/mailbox (S2b, PR 1726, moves it there); the look becomes a member of that port when it lands.
  */
 export function conversationStuckInbox(
   conversation: ConversationApi,
