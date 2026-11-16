@@ -887,6 +887,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     );
   const fileBrowser = sessionFilesystemRoutes({
     filesystem: sessionFilesystemOf,
+    // `scope=media` (F-0327): the ferret's `media/` folder on the sessions root, held open the same way and no wider.
+    media: ferret =>
+      new SessionFilesystem(new KernelSessionRootPinner(sessionFiles.mediaRoot(ferret)), sessionGit, () =>
+        kernel.clock.nowMs(),
+      ),
     redaction: kernel.redaction,
     reach: async call => {
       const id = await pathFerret(call);
