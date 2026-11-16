@@ -74,7 +74,7 @@ export interface AuthoritySurface {
 
 /** The roots whose handle carries the declared link exception. */
 const FLEET_ROOT_NAMES: ReadonlySet<string> = new Set(['fleet', 'harness-home']);
-const KERNEL_PORTS = '/packages/core/kernel/contract/ports.ts';
+const KERNEL_PORTS = '/packages/core/kernel/contract/ports/roots.ts';
 
 const textOf = (node: Node | undefined): string | undefined => (node as { text?: string } | undefined)?.text;
 const has = (node: Node, key: string): Node | undefined => (node as unknown as Record<string, Node | undefined>)[key];
