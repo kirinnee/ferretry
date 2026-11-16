@@ -1,15 +1,19 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import {
-  QUEUE_CARRY_STATE,
-  QUEUE_SHARD_STATE,
-  QUEUE_STATE,
   type QueueSegmentHeader,
   QueueSegmentHeaderSchema,
   type SegmentMessage,
-} from '../../../contract/index.ts';
-import type { QueuedMessage } from '../../seams/protocol.ts';
+} from '@ferretry/core-mailbox/contract';
+import { QUEUE_CARRY_STATE, QUEUE_SHARD_STATE, QUEUE_STATE } from '../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import { type HeldMessage, UNROTATED_SEGMENT, type QueueEvent, QueueEventSchema, SegmentFold } from '../lib/model.ts';
+import {
+  type HeldMessage,
+  UNROTATED_SEGMENT,
+  type QueueEvent,
+  QueueEventSchema,
+  SegmentFold,
+} from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from '../lib/ports.ts';
 import { mergeByOrder, ROTATE_EVENTS, rotationOf, SealedShards, shardName, shardThrough } from '../lib/rotation.ts';
 

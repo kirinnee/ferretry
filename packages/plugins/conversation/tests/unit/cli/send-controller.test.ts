@@ -3,7 +3,7 @@ import should from 'should';
 import { CommandError } from '../../../cli/lib/errors.ts';
 import { SendMessageController, WAIT_ROUND_MS } from '../../../cli/lib/send/controller.ts';
 import type { SendGateway } from '../../../cli/lib/send/ports.ts';
-import type { SendRecord, SendRequest, SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendRequest, SendResult } from '@ferretry/core-mailbox/contract';
 import { at } from '../../support/instant.ts';
 
 const result = (overrides: Partial<SendResult> = {}): SendResult =>

@@ -1,4 +1,4 @@
-import type { HarnessDialog, PermissionRequest, SessionState, SessionTurnState } from './protocol.ts';
+import type { HarnessDialog, PermissionRequest, SessionState, SessionTurnState } from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent } from './transcript-types.ts';
 import {
   isTurnStatus,

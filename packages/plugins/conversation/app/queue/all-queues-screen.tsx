@@ -17,7 +17,8 @@ import { type FerretSummary, FerretSummarySchema, FerretsChanged } from '@ferret
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { z } from 'zod';
-import { MessageSent, QueueChanged, type QueuedMessage } from '../../contract/index.ts';
+import { QueueChanged, type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { MessageSent } from '../../contract/index.ts';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import { useSendOutbox } from '../composer/send-outbox-wiring.ts';
 import { NO_OUTBOX, POLL_MS, QueuePageView, type QueueRowHandlers } from './queue-page.tsx';

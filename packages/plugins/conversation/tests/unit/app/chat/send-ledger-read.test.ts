@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { SendListResponseSchema } from '../../../../contract/index.ts';
+import { SendListResponseSchema } from '@ferretry/core-mailbox/contract';
 import { fakeClient } from '../../../support/app/fake-client.ts';
 import {
   LEDGER_UNREAD_GRACE_MS,
