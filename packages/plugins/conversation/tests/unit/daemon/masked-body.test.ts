@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { jsonResponse, type Redaction, textResponse } from '@ferretry/kernel/contract';
@@ -97,7 +97,7 @@ async function ownersConversation() {
   } as typeof daemon;
   return await testHost({
     plugins: [implementation],
-    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailbox(), ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
     secrets: [SECRET],
   });
@@ -164,7 +164,7 @@ describe('the daemon masks its secrets-guarded answers', () => {
     } as typeof daemon;
     const host = await testHost({
       plugins: [implementation],
-      fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+      fakes: { mailbox: new FakeMailbox(), ferrets, asks: new FakeAsks() },
       clock: fixedClock('2026-11-07T09:00:00Z'),
       secrets: [SECRET],
     });

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import { HypermediaResultSchema, HypermediaStateSchema } from '@ferretry/core-mailbox/contract';
 import daemon from '../../../../daemon/index.ts';
@@ -28,7 +28,7 @@ async function world() {
   const host = await testHost({
     plugins: [implementation],
     fakes: {
-      mailbox: new FakeMailboxQueue(),
+      mailbox: new FakeMailbox(),
       ferrets: {
         get: async (id: string) => summaries[id],
         list: async () => [],

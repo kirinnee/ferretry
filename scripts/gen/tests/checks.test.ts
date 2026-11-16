@@ -386,6 +386,24 @@ describe('context-imports', () => {
     expect(found).toContain('alpha/daemon/build.ts:2: ./generated/other.ts');
   });
 
+  test("only Conversation's tests may import the Mailbox's daemon half: its own daemon half, and any other package's tests, are still refused", async () => {
+    const f = ws([
+      {
+        id: 'conversation',
+        files: {
+          'tests/send.test.ts': `import '@ferretry/core-mailbox/daemon';\n`,
+          'daemon/host.ts': `import '@ferretry/core-mailbox/daemon';\n`,
+        },
+      },
+      { id: 'mailbox', core: true },
+      { id: 'other', files: { 'tests/send.test.ts': `import '@ferretry/core-mailbox/daemon';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('conversation/tests/send.test.ts');
+    expect(found).toContain('conversation/daemon/host.ts:1: @ferretry/core-mailbox/daemon');
+    expect(found).toContain('other/tests/send.test.ts:1: @ferretry/core-mailbox/daemon');
+  });
+
   test('a cli half may import its own generated verb list and no other generated file', async () => {
     const f = ws([
       {
