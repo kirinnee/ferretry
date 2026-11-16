@@ -65,6 +65,8 @@ export interface ProfileItem {
   readonly name: string;
   /** Generic, one tool's, or `mixed` for a profile written before scopes. */
   readonly scope: HarnessScope | 'mixed';
+  /** A component's: how many runtimes use it through a profile. A profile in the library has none. */
+  readonly usedByRuntimes?: number;
 }
 
 const COMPONENT_KIND_SET: ReadonlySet<string> = new Set(COMPONENT_KINDS);
@@ -93,6 +95,7 @@ export function libraryItems(catalog: AccountCatalog, editing?: string): readonl
       kind: component.kind,
       name: component.name,
       scope: component.scope,
+      usedByRuntimes: component.usedBy.runtimes.length,
     })),
     ...catalog.profiles.profiles
       .filter(profile => profile.name !== editing)

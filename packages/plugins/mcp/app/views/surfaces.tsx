@@ -8,6 +8,7 @@ import type { ReactNode } from 'react';
 import { useFerretWorkspace } from '@ferretry/app';
 import { ContextNote } from '@ferretry/app/ui';
 import { createAddMcpRowPanel } from './add-mcp-row.tsx';
+import { createComponentStatusPanel } from './component-status.tsx';
 import { McpServersPanel } from './servers-panel.tsx';
 import { McpSettings } from './servers-settings.tsx';
 
@@ -28,11 +29,16 @@ export interface McpSurfaces {
   readonly panels: {
     readonly 'mcp-servers': AppComponent<PanelProps>;
     readonly 'add-mcp-row': AppComponent<PanelProps>;
+    readonly 'component-status': AppComponent<PanelProps>;
   };
   readonly settings: { readonly mcp: AppComponent<SettingsProps> };
 }
 
 export const createSurfaces = (client: PluginClient): McpSurfaces => ({
-  panels: { 'mcp-servers': mcpServersPanel(client), 'add-mcp-row': createAddMcpRowPanel(client) },
+  panels: {
+    'mcp-servers': mcpServersPanel(client),
+    'add-mcp-row': createAddMcpRowPanel(client),
+    'component-status': createComponentStatusPanel(client),
+  },
   settings: { mcp: mcpSettings(client) },
 });

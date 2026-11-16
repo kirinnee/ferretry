@@ -14,7 +14,12 @@ import {
 } from '../../../../plugins/conversation/contract/slots.ts';
 import { ACCESS_DEVICE_NOTE_SLOT, ACCOUNTS_CONTRIBUTED_SLOTS } from '../../../../plugins/accounts/contract/slots.ts';
 import { LOGINS_CONTRIBUTED_SLOTS } from '../../../../plugins/logins/contract/slots.ts';
-import { ADD_RUNTIME_LOGIN_SLOT, RUNTIMES_SLOTS } from '../../../../plugins/runtimes/contract/slots.ts';
+import {
+  ADD_RUNTIME_LOGIN_SLOT,
+  ADD_RUNTIME_SLOTS,
+  COMPONENT_MCP_SLOT,
+  RUNTIMES_SLOTS,
+} from '../../../../plugins/runtimes/contract/slots.ts';
 import { generated } from '../../../src/generated/surfaces.ts';
 import { viewsOf } from '../../../src/layout/engine.ts';
 import { isSlotName } from '../../../src/layout/slots.ts';
@@ -115,8 +120,8 @@ describe('the slot Agenda offers and Conversation fills', () => {
 
 describe('the slots Runtimes’ Add runtime page offers and Logins fills', () => {
   test('Logins writes the two names Runtimes owns, and puts one panel in each', () => {
-    expect([...LOGINS_CONTRIBUTED_SLOTS]).toEqual([...RUNTIMES_SLOTS]);
-    for (const slot of RUNTIMES_SLOTS) {
+    expect([...LOGINS_CONTRIBUTED_SLOTS]).toEqual([...ADD_RUNTIME_SLOTS]);
+    for (const slot of ADD_RUNTIME_SLOTS) {
       expect(isSlotName(slot)).toBe(true);
       expect(slot.startsWith('runtimes.')).toBe(true);
       const contributors = (viewsOf(entries).panels.get(slot) ?? []).map(panel => `${panel.plugin}.${panel.id}`);
@@ -131,8 +136,17 @@ describe('the slots Runtimes’ Add runtime page offers and Logins fills', () =>
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('runtimes.')),
     );
-    expect(contributed.length).toBe(2);
+    expect(contributed.length).toBe(3);
     for (const slot of contributed) expect(named).toContain(slot);
+  });
+
+  test('MCP puts its one status panel under each MCP row of Runtimes’ Profiles library, through the name Runtimes owns', () => {
+    expect(isSlotName(COMPONENT_MCP_SLOT)).toBe(true);
+    expect(COMPONENT_MCP_SLOT.startsWith('runtimes.')).toBe(true);
+    const contributors = (viewsOf(entries).panels.get(COMPONENT_MCP_SLOT) ?? []).map(
+      panel => `${panel.plugin}.${panel.id}`,
+    );
+    expect(contributors).toEqual(['mcp.component-status']);
   });
 
   test('Logins imports nothing of Runtimes: Runtimes needs Logins, so the two agree by name and this test pairs them', () => {

@@ -5,7 +5,12 @@ import { SealedDocumentsPort, VaultPort } from '@ferretry/core-vault/contract';
 import { CatalogItems } from '@ferretry/plugin-catalogs/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
 import { ProjectsPort } from '@ferretry/plugin-projects/contract';
-import { PROFILE_COMPONENTS_KEY, ProfileMcpSource, RuntimesPort } from '@ferretry/plugin-runtimes/contract';
+import {
+  COMPONENT_MCP_SLOT,
+  PROFILE_COMPONENTS_KEY,
+  ProfileMcpSource,
+  RuntimesPort,
+} from '@ferretry/plugin-runtimes/contract';
 import {
   MCP_AUDIT,
   MCP_CONFIG,
@@ -250,6 +255,8 @@ export default definePlugin({
       panel('ferret.side', { id: 'mcp-servers', order: 40 }),
       // Ferrets' Actions ▾ menu: MCP's own row, "Add MCP server…".
       panel(ACTIONS_ROW_SLOT, { id: 'add-mcp-row', order: 10 }),
+      // Runtimes' Profiles library offers this under each MCP server's row (its contract/slots.ts): where it stands.
+      panel(COMPONENT_MCP_SLOT, { id: 'component-status', order: 10 }),
     ],
     settings: [settingsTab('mcp', { group: 'tools', label: 'MCP servers', order: 50 })],
   },

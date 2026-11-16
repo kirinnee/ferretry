@@ -1,5 +1,5 @@
 import { skeletonSentence } from '@ferretry/kernel/contract';
-import { Component, type ErrorInfo, type ReactNode, Suspense, useMemo } from 'react';
+import { Component, type ErrorInfo, type ReactNode, Suspense, useMemo, useSyncExternalStore } from 'react';
 import type { PanelRef, ScreenRef } from '../layout/engine.ts';
 import { useRouter } from '../router/router.tsx';
 import { useOptionalShell, useRuntimeVersion, useShell, WithoutShell } from './context.tsx';
@@ -279,4 +279,21 @@ const NO_PANELS: readonly PanelRef[] = [];
 export function useSlotHasPanels(slot: string): boolean {
   const shell = useOptionalShell();
   return shell !== null && shell.plan.panels(slot).length > 0;
+}
+
+const NEVER_CHANGES = () => () => undefined;
+const NO_VERSION = () => 0;
+
+/**
+ * Whether the layout places a panel in `slot` AND its plugin may run on `daemon` (not off, missing, paused or needing an
+ * update there): for an OPTIONAL row or toolbar slot, where the shell's one "X is off on this daemon" line under every
+ * row would be noise, not information. Re-reads when the runtime changes (an inventory read that allows or blocks the
+ * plugin). False outside a shell. A screen that WANTS the blocked line uses {@link useSlotHasPanels} and `PanelSlot`.
+ */
+export function useSlotHasUsablePanels(daemon: string, slot: string): boolean {
+  const shell = useOptionalShell();
+  useSyncExternalStore(shell?.runtime.subscribe ?? NEVER_CHANGES, shell?.runtime.version ?? NO_VERSION);
+  if (shell === null) return false;
+  const { runtime, plan } = shell;
+  return plan.panels(slot).some(panel => runtime.blockedLine(daemon, panel.plugin) === undefined);
 }
