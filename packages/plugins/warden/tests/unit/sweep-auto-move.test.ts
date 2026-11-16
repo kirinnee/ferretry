@@ -9,6 +9,9 @@ import { at, enabled, harness, NOW, session } from './sweep-harness.ts';
 const moving = (changes: Partial<WardenConfig['autoMove']> = {}): WardenConfig =>
   enabled({ autoMove: { ...DEFAULT_WARDEN_CONFIG.autoMove, enabled: true, ...changes } });
 
+/** Moving by rule switched off (it is ON by default), so a test about a VERDICT's move sees only the verdict's. */
+const verdictsOnly = (): WardenConfig => moving({ enabled: false });
+
 /** A ferret sitting on a usage limit that has not reset: nothing the detector flags yet. */
 const limited = (id = 's1'): WardenFleetSession => {
   const view = session({ id, status: 'rate_limited', state: { quota: { resetAt: Date.parse('2099-01-01') } } });
@@ -28,6 +31,7 @@ function mover(
     readonly hold?: () => Promise<string | undefined> | string | undefined;
     readonly facts?: () => void;
     readonly ledger?: { value: unknown };
+    readonly resumed?: string[];
   } = {},
 ) {
   const stored = guard.ledger ?? { value: undefined };
@@ -42,6 +46,9 @@ function mover(
     stopJobs: async () => ({ stopped: [], survivors: [] }),
     move: async (sessionId, request) => {
       moved.push({ sessionId, agent: request.agent });
+    },
+    resume: async sessionId => {
+      guard.resumed?.push(sessionId);
     },
     agentOf: async sessionId => moved.find(entry => entry.sessionId === sessionId)?.agent ?? 'claude-a-wrapper',
     ledger: {
@@ -83,7 +90,7 @@ describe('moving a ferret that hit a limit, in the sweep', () => {
   it('should move nothing while the setting is off', async () => {
     // Arrange
     const moved: { sessionId: string; agent: string }[] = [];
-    const subject = harness({ config: enabled(), fleet: [limited()], autoMove: mover(moved) });
+    const subject = harness({ config: moving({ enabled: false }), fleet: [limited()], autoMove: mover(moved) });
 
     // Act
     await subject.service.run({ force: false });
@@ -91,6 +98,87 @@ describe('moving a ferret that hit a limit, in the sweep', () => {
     // Assert
     should(moved).deepEqual([]);
     should(subject.state().actions ?? []).deepEqual([]);
+  });
+
+  it('should move a rate-limited ferret when warden.yaml says nothing about moving: it is on by default', async () => {
+    // Arrange
+    const moved: { sessionId: string; agent: string }[] = [];
+    const subject = harness({ config: enabled(), fleet: [limited()], autoMove: mover(moved) });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(moved).deepEqual([{ sessionId: 's1', agent: 'claude-b-wrapper' }]);
+  });
+
+  describe('a ferret with nowhere to go, once its limit has reset, with Jev and investigations off', () => {
+    const reset = (id = 's1'): WardenFleetSession => {
+      const view = limited(id);
+      return { ...view, state: { ...view.state, quota: { resetAt: NOW - 60_000 } } };
+    };
+    const alone = { runtimes: [runtime('claude-a')], credentials: [credential('claude-a-login')], tools: [] };
+    /** Both triage layers off: nothing but rules runs. */
+    const noJev = (autoMove: Partial<WardenConfig['autoMove']> = {}): WardenConfig => ({
+      ...moving(autoMove),
+      layers: { jev: false, llm: false },
+    });
+
+    it('should be resumed by rule and listed as an automatic resume', async () => {
+      // Arrange
+      const resumed: string[] = [];
+      const subject = harness({
+        config: noJev(),
+        fleet: [reset()],
+        autoMove: mover([], alone, { resumed }),
+      });
+
+      // Act
+      await subject.service.run({ force: false });
+
+      // Assert
+      should(resumed).deepEqual(['s1']);
+      should(subject.state().actions?.map(action => [action.action, action.outcome, action.actor])).containEql([
+        'resume',
+        'done',
+        'auto',
+      ]);
+    });
+
+    it('should not also be handed to an investigation as a quota reset nobody acted on', async () => {
+      // Arrange: the investigation layer is on, so a flag still standing would be investigated (and cost money).
+      const resumed = harness({
+        config: moving(),
+        fleet: [reset()],
+        autoMove: mover([], alone, { resumed: [] }),
+      });
+      const left = harness({ config: moving({ enabled: false }), fleet: [reset()], autoMove: mover([], alone) });
+
+      // Act
+      await resumed.service.run({ force: false });
+      await left.service.run({ force: false });
+
+      // Assert
+      should(resumed.spawns).have.length(0);
+      should(left.spawns).have.length(1);
+    });
+
+    it('should stay flagged for Jev when moving is switched off, and be resumed by nobody here', async () => {
+      // Arrange
+      const resumed: string[] = [];
+      const subject = harness({
+        config: noJev({ enabled: false }),
+        fleet: [reset()],
+        autoMove: mover([], alone, { resumed }),
+      });
+
+      // Act
+      await subject.service.run({ force: false });
+
+      // Assert
+      should(resumed).deepEqual([]);
+      should((subject.state().lastAnomalies ?? []).map(anomaly => anomaly.kind)).containEql('quota_reset_passed');
+    });
   });
 
   it('should move a ferret past its hard budget when asked to, and only when budgets are a trigger', async () => {
@@ -250,7 +338,7 @@ describe('a MOVE verdict, in the sweep', () => {
   };
   const run = async (login: string, fleet?: Parameters<typeof mover>[1]) => {
     const subject = harness({
-      config: enabled(),
+      config: verdictsOnly(),
       fleet: [stuck()],
       reports: reports(login),
       state: verdict(),
@@ -306,7 +394,7 @@ describe('a MOVE verdict, in the sweep', () => {
   it('should name the login it was routed to, and why, when that move is refused', async () => {
     // Arrange
     const subject = harness({
-      config: enabled(),
+      config: verdictsOnly(),
       fleet: [stuck()],
       reports: reports('claude-b-wrapper'),
       state: verdict(),
@@ -329,7 +417,7 @@ describe('a MOVE verdict, in the sweep', () => {
   describe('and what the owner has open', () => {
     const verdictOn = (autoMove: WardenAutoMoveService) =>
       harness({
-        config: enabled(),
+        config: verdictsOnly(),
         fleet: [stuck()],
         reports: reports('claude-b-wrapper'),
         state: verdict(),
@@ -421,7 +509,7 @@ describe('a MOVE verdict, in the sweep', () => {
     // Arrange
     const nameless = stuck();
     const subject = harness({
-      config: enabled(),
+      config: verdictsOnly(),
       fleet: [{ ...nameless, config: { ...nameless.config, agent: undefined, harness: undefined } }],
       reports: reports('claude-b-wrapper'),
       state: verdict(),
@@ -440,7 +528,7 @@ describe('a MOVE verdict, in the sweep', () => {
     // Arrange
     const flagged = session({ id: 's1', status: 'rate_limited', state: { quota: { resetAt: NOW - 60_000 } } });
     const subject = harness({
-      config: enabled(),
+      config: verdictsOnly(),
       fleet: [{ ...flagged, config: { ...flagged.config, agent: 'claude-a-wrapper', harness: 'claude' } }],
       autoMove: mover([], three),
     });
