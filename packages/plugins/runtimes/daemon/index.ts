@@ -152,6 +152,10 @@ export const unavailableAssembly: RuntimesAssembler = ctx => {
   return services;
 };
 
+/** What `machineBrowserPorts()` refuses with while the machine view holds only the schema default (nothing carries the setting). */
+const BROWSER_PORTS_UNSET =
+  'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds';
+
 /** The homes of a daemon whose assembly offers none: no home is published, so no reader is handed out. */
 const noHomes: RuntimeHomesApi = { homes: async () => [], home: () => undefined };
 
@@ -522,8 +526,12 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         catalog: async () => (await assembly.catalog.runtimes()).runtimes,
         tools: async () => (await assembly.catalog.machine(undefined)).tools,
         // Two settings only, never the rest of the machine view: Browsers' loopback firewall and Logins' shared-ports fact.
+        // No file of Runtimes holds `browserPorts` (not carried yet, see ports-pending), so `random` here is only the schema
+        // default and nobody's choice: say that Runtimes cannot say, never pass the default off as a setting. A reader reads a
+        // refusal as "unknown" and fails closed (Logins: shared host), where a made-up `random` would turn that guard off.
         machineBrowserPorts: async () => {
           const { browserPorts, browserFirewallFailure } = await assembly.catalog.machine(undefined);
+          if (browserPorts === 'random') throw new Error(BROWSER_PORTS_UNSET);
           return { browserPorts, browserFirewallFailure };
         },
       };

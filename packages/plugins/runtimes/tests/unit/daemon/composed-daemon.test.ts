@@ -992,19 +992,16 @@ describe('the homes the composed daemon provides', () => {
     expect((await port.tools()).length).toBeGreaterThan(0);
   });
 
-  it('the provided port answers machineBrowserPorts() as the machine read does: random and warn on a machine that set neither', async () => {
+  it('machineBrowserPorts() says it cannot say while the machine view holds only the schema default (no file of Runtimes carries the setting)', async () => {
     const { host } = await compose();
 
+    // The machine read still shows the default; the port refuses to pass that default off as a setting somebody made.
     const machine = (await host.request('GET', '/v1/runtimes/machine')).json<MachineBrowserPorts>();
+    expect(machine.browserPorts).toBe('random');
 
-    expect(await host.provided(RuntimesPort).machineBrowserPorts()).toEqual({
-      browserPorts: machine.browserPorts,
-      browserFirewallFailure: machine.browserFirewallFailure,
-    });
-    expect(await host.provided(RuntimesPort).machineBrowserPorts()).toEqual({
-      browserPorts: 'random',
-      browserFirewallFailure: 'warn',
-    });
+    await expect(host.provided(RuntimesPort).machineBrowserPorts()).rejects.toThrow(
+      'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
+    );
   });
 
   it('machineBrowserPorts() carries the two settings the machine view holds and nothing else of it', async () => {

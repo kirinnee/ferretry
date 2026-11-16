@@ -101,9 +101,12 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   /** The harness CLIs on this machine and whether each is installed, as `GET /v1/runtimes/machine` answers. */
   tools(): Promise<readonly MachineTool[]>;
   /**
-   * The machine's loopback-port facts, read-only: which ports the agent browser binds (`browserPorts`) and what Browsers
-   * does when its own account's firewall check failed (`browserFirewallFailure`). Browsers reads them for the loopback
-   * firewall doctor and Logins reads `shared` from them. Only these two settings, never the rest of the machine view.
+   * The machine's loopback-port settings, read-only: the `browserPorts` setting and what Browsers does when its own
+   * account's firewall check failed (`browserFirewallFailure`). Browsers reads them for the loopback firewall doctor and
+   * Logins reads `shared` from them. Only these two settings, never the rest of the machine view.
+   *
+   * REJECTS while no file of Runtimes holds `browserPorts` (the value is only the schema default `random`; the setting is
+   * not carried yet): Runtimes cannot say, and a reader must treat that as unknown and fail closed, never as `random`.
    */
   machineBrowserPorts(): Promise<MachineBrowserPorts>;
 }

@@ -33,7 +33,10 @@ export interface FakeRuntimes extends RuntimesApi {
   setAssetSkills(assetSkills: RuntimeAssetSkills): void;
   /** The runtimes `catalog()` and the machine tools `tools()` answer (none until set). */
   setCatalog(runtimes: readonly RuntimeView[], tools?: readonly MachineTool[]): void;
-  /** What `machineBrowserPorts()` answers (`random` and `warn` until set, the machine's defaults). */
+  /**
+   * What `machineBrowserPorts()` answers (`random` and `warn` until set: a machine whose setting says `random`). The real
+   * Runtimes REJECTS while it holds no `browserPorts` setting; a test of that case makes the fake's method reject.
+   */
   setMachineBrowserPorts(next: MachineBrowserPorts): void;
   /** What `checkEnvironment(runtime)` answers for a runtime (nothing for any other). */
   setCheckEnvironment(runtime: RuntimeId, environment: RuntimeCheckEnvironment): void;
