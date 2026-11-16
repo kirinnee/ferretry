@@ -246,8 +246,10 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
 ];
 
 /**
- * THE PER-FERRET SECTIONS of the appended system prompt: passive learning ({@link PASSIVE_LEARNING_ENV}),
- * hypermedia ({@link HYPERMEDIA_ENV}) and Pack mode ({@link PACK_ENV}).
+ * THE PER-FERRET SECTIONS of the appended system prompt: hypermedia ({@link HYPERMEDIA_ENV}), Pack mode
+ * ({@link PACK_ENV}) and the agenda ({@link AGENDA_ENV}). The notify and board rules (Agenda and Board's
+ * `instructions/*.md`, for `role: lead`) and the lessons teaching (Lessons' launch part) are said by those
+ * plugins, not here.
  *
  * A runtime's wrapper is materialised once and serves every ferret launched on it, so a section cannot
  * be a static launch argument: it would be on for all of them or none. The daemon writes each switch
@@ -261,14 +263,11 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
  * They are system instructions rather than the tools server's MCP `initialize` text because a
  * harness weighs the system prompt far above a server's instructions, which an agent can ignore.
  *
- * Passive learning: whether this ferret is told to file lessons. A running ferret switched on or off
- * is told so with a queued, non-interrupting message, because its environment is fixed.
+ * Passive learning (`FY_LEARNING_PASSIVE`, written by Lessons' launch part): whether this ferret is told to
+ * file lessons. A running ferret switched on or off is told so with a queued, non-interrupting message,
+ * because its environment is fixed.
  */
 export { PASSIVE_LEARNING_ENV };
-
-/** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
-export const LESSONS_INSTRUCTION = (fy: string): string =>
-  `Lessons: when the owner corrects you or you learn a lasting preference of theirs, file one imperative rule: \`${fy} lesson suggest "<rule>" --scope global|repo\` (or lessons_suggest); global = every ferret, repo = this project. File each once.`;
 
 /**
  * HYPERMEDIA — a per-FERRET section of the appended system prompt, carried exactly like passive learning
@@ -337,7 +336,7 @@ export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
 
 /** One per-ferret section: the name a surface shows it by, the variable that turns it on, and its text. */
 export interface FerretSection {
-  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda' | 'learning'>;
+  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda'>;
   readonly env: string;
   readonly text: string;
   /** A switch that, when `1`, keeps the section out even though {@link env} is on: a sub-ferret has no agenda. */
@@ -349,7 +348,6 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
   { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION(fy) },
   { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
   { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy), unlessEnv: SUB_FERRET_ENV },
-  { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
 ];
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
@@ -439,36 +437,9 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
   ].join('\n');
 
 /**
- * NOTIFY — how an agent tells the human something outside a reply. Every agent runtime gets it, in a
- * rule short enough to sit in every prompt; the bigger, switchable teaching of an agenda is
- * {@link AGENDA_INSTRUCTION}. docs/notifications.md quotes this text verbatim.
- */
-export const NOTIFY_INSTRUCTION = (fy: string): string =>
-  `Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet notice. Add \`--buzz\` only when it must reach their phone now. Never notify progress or chatter.`;
-
-/**
- * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
- * agent runtime's prompt. The board is OPT-IN (owner, 2026-11-01: "board is overkill — most ferrets should not
- * use tasks or boards — ask before doing that"): a card only where the project's board is switched on, under a
- * card the ferret holds, or on the owner's Yes; otherwise the ferret asks first. The daemon ENFORCES it
- * (`board/opt-in.ts`), and the rule says it overrides other instructions, because a person's own CLAUDE.md that
- * says to record every task was outvoting it. The board moves what a signal moves (a
- * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
- * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
- * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
- * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy card
- * new` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
- * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
- * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
- * docs/board.md quotes this text verbatim.
- */
-export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Task only if the project\'s board is on (\`${fy} board\`), under your task (\`--parent\`), or on the owner's Yes (\`--approval <ask>\`). Public=the owner's asks ("everything I asked?"): top-level, never \`--private\`; private=your helper tasks. Tasks (&F<n>) never ask: answers, tests, Done ride the task's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related task. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
-
-/**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
- * writes {@link SUB_FERRET_ENV} `1` for `role: helper` or a `parent`, and the wrapper then swaps the notify and
- * board rules for {@link SUB_FERRET_INSTRUCTION} and leaves out the agenda section: the daemon refuses a
+ * writes {@link SUB_FERRET_ENV} `1` for `role: helper` or a `parent`, and the wrapper then adds
+ * {@link SUB_FERRET_INSTRUCTION} (a lead's notify and board rules come from the plugins' instruction files) and leaves out the agenda section: the daemon refuses a
  * sub-ferret the agenda and the board's moves, so a prompt that taught them would only teach refusals.
  */
 export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
@@ -483,19 +454,16 @@ export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
     `With a task: each step, \`${fy} task show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's task? \`${fy} task claim <id>\`, don't ask. No task? Make none.`,
   ].join('\n');
 
-/** What a lead is told after the base instruction: the notify rule, then the board rules. */
-export const LEAD_RULES_INSTRUCTION = (fy: string): string => `${NOTIFY_INSTRUCTION(fy)}\n\n${BOARD_INSTRUCTION(fy)}`;
-
 /**
  * What every agent runtime is told, whoever it is: the tools and the settings rules. The wrapper appends
- * a lead's {@link LEAD_RULES_INSTRUCTION} or a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
+ * a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
  */
 export const AGENT_BASE_INSTRUCTION = (fy: string): string =>
   `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'notify' | 'board' | 'sub-ferret';
+  readonly id: 'tools' | 'settings' | 'sub-ferret';
   readonly text: string;
 }
 
@@ -506,12 +474,7 @@ export interface AlwaysOnSection {
 export const ALWAYS_ON_SECTIONS = (fy: string, subFerret = false): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
-  ...(subFerret
-    ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }]
-    : [
-        { id: 'notify' as const, text: NOTIFY_INSTRUCTION(fy) },
-        { id: 'board' as const, text: BOARD_INSTRUCTION(fy) },
-      ]),
+  ...(subFerret ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }] : []),
 ];
 
 /**
@@ -537,7 +500,7 @@ export function instructionDigest(text: string): string {
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings, notify and board sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools and settings sections always (and the sub-ferret section for a sub-ferret) (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`. The question tool is never left in (owner !A527), so `questions` is always
  * `false`. It describes an AGENT runtime's wrapper, the only kind a session can be started on.
  */
