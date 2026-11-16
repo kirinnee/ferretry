@@ -71,6 +71,11 @@ export const StartDecideInputSchema = z.strictObject({
   runtime: z.string().optional(),
   login: z.string().optional(),
   folder: z.string().min(1),
+  /**
+   * The directory the launch will really be in, every link resolved (the kernel's bound identity); absent when none was
+   * bound. `folder` stays the spelling that was asked for: a taker that judges WHERE reads this one.
+   */
+  realFolder: z.string().min(1).optional(),
   /** Who asked for the start. */
   by: z.enum(['owner', 'ferret', 'pack', 'board', 'warden', 'resume']),
   /** The model the start NAMED (`options.model`); absent when it named none (the harness then picks its own). */
@@ -83,6 +88,8 @@ export const StartDecideInputSchema = z.strictObject({
    * refuses a number larger than it before anything is written, as v4's start did.
    */
   compactAt: CompactAtSchema.optional(),
+  /** The start's `options.allowScratch` ({@link StartOptionsSchema}); absent on a resume and on a start that asked no check. */
+  allowScratch: z.boolean().optional(),
 });
 export type StartDecideInput = z.infer<typeof StartDecideInputSchema>;
 

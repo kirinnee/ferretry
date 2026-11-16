@@ -78,6 +78,28 @@ and edits no shared one. Ferrets is the first plugin on this shape
 Other plugins adopt the same folder when a feature there would otherwise edit its root; the generator
 picks up any package with a `daemon/features/*.feature.ts`.
 
+## One feature, one folder
+
+**IMPORTANT.** One feature lives in its own plugin folder. Touching a shared or cross-plugin file (another plugin,
+`packages/core/*`, `packages/app`, root configs, scripts) is the exception: the PR body must name each such file and say
+why.
+
+Why: parallel work collides on shared files. In one week of merges into `rebuild/5.0-after`, `ports-pending.json` was
+touched by 53 PRs, `knip.production.json` by 15, the core ferrets daemon `index.ts` by 12 and its `service.ts` by 11. Each
+of those is a merge conflict waiting for the next PR. Splitting `ports-pending.json` into one file per owning package took
+it to zero. Prefer that shape: when a shared list keeps growing, give each plugin its own file and let one reader compose
+them.
+
+Enforced on every pull request into `rebuild/5.0-after` by `scripts/ci/one-folder.ts` (the `One Folder` workflow, `.github/workflows/one-folder.yaml`):
+
+- The PR's own diff (merge-base, so a merge from the base never counts) is split into the home package, which is the one
+  with the most changed lines, or the ones on a `Home: <package>[, <package>]` line of the body, and everything else.
+- Every other file must appear under a `## Outside files` heading of the PR body, by path or glob, with a reason:
+  `- packages/core/kernel/src/x.ts: the new port has to be registered here`.
+- Never needs a reason: `bun.lock`, `nix/ferretry.nix` and `nix/bun-deps.inputs` when a `package.json` changed, generated
+  registries.
+- Editing the body re-runs the job, so fixing the body clears it. The PR template carries the empty section.
+
 ## The PWA renders on the client only
 
 `packages/pwa` is client-rendered. Its app root, when it is assembled, **must mount with

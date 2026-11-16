@@ -22,10 +22,19 @@ function deepMergeSettings(base: Record<string, unknown>, overlay: Record<string
   return merged;
 }
 
+const inNameOrder = (items: ReadonlyMap<string, SettingsItem>): readonly SettingsItem[] =>
+  [...items].toSorted(([left], [right]) => left.localeCompare(right)).map(([, item]) => item);
+
+/**
+ * The launch flags the selected settings items carry, item by item in name order (the order their settings merge in, so
+ * the later item's flag comes later on the command line). Every word is its own argv word, whatever it holds.
+ */
+export const settingsFlags = (items: ReadonlyMap<string, SettingsItem>): readonly string[] =>
+  inNameOrder(items).flatMap(item => item.flags ?? []);
+
 /** Every item's settings merged, in the order of the items' names. */
 export function settingsDocument(items: ReadonlyMap<string, SettingsItem>): Record<string, unknown> {
   let document: Record<string, unknown> = {};
-  for (const [, item] of [...items].toSorted(([left], [right]) => left.localeCompare(right)))
-    document = deepMergeSettings(document, item.settings);
+  for (const item of inNameOrder(items)) document = deepMergeSettings(document, item.settings);
   return document;
 }

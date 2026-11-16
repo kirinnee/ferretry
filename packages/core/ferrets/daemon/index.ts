@@ -533,6 +533,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!bound.ok) return err(bound.error.message);
       return ok({
         insideStateHome: bound.value.insideStateHome,
+        realPath: bound.value.realPath,
         verify: async () => {
           const held = await bound.value.verify();
           return held.ok ? ok(undefined) : err(held.error.message);

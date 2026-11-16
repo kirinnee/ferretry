@@ -1,0 +1,5 @@
+{
+  "entry": ["tests/**/*.test.{ts,tsx}", "app/views/*.tsx", "tests/**/fixtures/**/*.{ts,tsx}"],
+  "project": ["**/*.{ts,tsx}"],
+  "ignore": ["app/lib/agenda-source-refs.ts"]
+}

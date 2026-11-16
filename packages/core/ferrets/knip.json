@@ -1,0 +1,34 @@
+{
+  "entry": [
+    "tests/**/*.test.{ts,tsx}",
+    "tests/**/fixtures/**/*.{ts,tsx}",
+    "app/views/*.tsx",
+    "daemon/features/*.feature.ts"
+  ],
+  "project": ["**/*.{ts,tsx}"],
+  "ignore": [
+    "daemon/lib/session/events/service.ts",
+    "daemon/lib/session/peers/reads.ts",
+    "daemon/lib/session/observer/facts.ts",
+    "daemon/lib/session/observer/observer.ts",
+    "daemon/lib/session/observer/plan.ts",
+    "daemon/lib/session/observer/protocol.ts",
+    "daemon/lib/session/observer/restart.ts",
+    "daemon/adapters/session/observer/index.ts",
+    "daemon/adapters/session/observer/session-worker-runtime.ts",
+    "daemon/adapters/session/observer/worker-observer-host.ts",
+    "daemon/adapters/session/observer/worker-supervisor.ts",
+    "daemon/lib/session/peers/turn.ts",
+    "daemon/lib/session/peers/transcript.ts",
+    "daemon/lib/session/peers/question.ts",
+    "daemon/lib/session/peers/send.ts",
+    "daemon/lib/session/restart/index.ts",
+    "daemon/adapters/session/archive/index.ts",
+    "daemon/lib/session/directory/session-directory.ts",
+    "daemon/lib/session/runtime-control/index.ts",
+    "daemon/lib/session/runtime-control/service.ts"
+  ],
+  "allowed": {
+    "entry:daemon/features/*.feature.ts": "a Ferrets feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap."
+  }
+}

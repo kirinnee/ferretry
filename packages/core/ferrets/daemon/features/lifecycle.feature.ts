@@ -7,7 +7,13 @@ import {
   jsonResponse,
   queryValue,
 } from '@ferretry/kernel/contract';
-import { type FerretId, lookupStartRequest, StartRequestsFile, withStartRequest } from '../../contract/index.ts';
+import {
+  type FerretId,
+  lookupStartRequest,
+  StartRequestsFile,
+  startFingerprintText,
+  withStartRequest,
+} from '../../contract/index.ts';
 import { confirmRestore } from '../lib/route-security/restore.ts';
 import { terminalLaunchRefusal } from '../lib/route-security/launch.ts';
 import { stateHomeLaunchRefusal } from '../lib/route-security/state-home.ts';
@@ -23,7 +29,8 @@ function register(f: FerretsContext): FeatureContribution | undefined {
   const { kernel, registry, service, ready, pathFerret, mayAct, body, parseJson, stateHomeReach, knownLaunchRoots } = f;
 
   /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
-  const payloadDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+  const payloadDigest = (text: string): string =>
+    createHash('sha256').update(startFingerprintText(text), 'utf8').digest('hex');
   /** Starts under one request id run one at a time, so a retry racing its original cannot start a second ferret. */
   const startsInFlight = new Map<string, Promise<unknown>>();
   const oneAtATime = async <T>(requestId: string, work: () => Promise<T>): Promise<T> => {

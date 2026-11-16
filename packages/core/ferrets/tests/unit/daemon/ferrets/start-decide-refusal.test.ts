@@ -118,6 +118,24 @@ describe('a start.decide refusal carrying a code', () => {
     expect(both).toMatchObject({ model: 'opus-5', fast: true });
   });
 
+  test('(no guarantees row) allowScratch reaches the taker only when the start set it, is a request fact kept out of the ferret’s files, and a relaunch asks none', async () => {
+    const seen: StartDecideInput[] = [];
+    const h = await fresh(() => ({ allow: true }), seen);
+    await start(h, {});
+    const asked = await start(h, { allowScratch: false });
+    await start(h, { allowScratch: true });
+    const [plain, ask, allowed] = seen;
+    expect(plain).not.toHaveProperty('allowScratch');
+    expect(ask).toMatchObject({ allowScratch: false });
+    expect(allowed).toMatchObject({ allowScratch: true });
+    const id = asked.json<{ id: string }>().id;
+    for (const [file, text] of h.state('ferrets').files)
+      if (file.includes(id)) expect(String(text)).not.toContain('allowScratch');
+    await h.request('POST', `/v1/ferrets/${id}/stop`, { body: {} });
+    await h.request('POST', `/v1/ferrets/${id}/resume`, { body: {} });
+    for (const input of seen.filter(each => each.by === 'resume')) expect(input).not.toHaveProperty('allowScratch');
+  });
+
   test('(no guarantees row) the start.decide offer sets no timeout of its own: a start waits the kernel default, not 15 s', () => {
     const offer = manifest.hooks?.offers?.find(candidate => candidate.hook.name === StartDecide.name);
     expect(offer).toBeDefined();
