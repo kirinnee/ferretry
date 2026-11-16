@@ -1039,7 +1039,7 @@ describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
 });
 
 describe('launchInstructions', () => {
-  it('should name every section the wrapper would compose for an interactive ferret, with each size, and leave its question tool in', () => {
+  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (!A527)', () => {
     // Arrange
     const binary = 'zz';
     const env = {
@@ -1094,7 +1094,7 @@ describe('launchInstructions', () => {
         },
       ],
       mode: 'interactive',
-      questions: true,
+      questions: false,
     });
   });
 

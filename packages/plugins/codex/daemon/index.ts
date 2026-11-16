@@ -178,6 +178,7 @@ export default implementDaemon(manifest, {
           locate,
           probe,
           permissionMode: () => paths().permissionMode,
+          questionTool: () => paths().questionTool,
           historyDirectory: async () => {
             const home = await homeDirectory();
             return home === '' ? undefined : `${home}/.codex/sessions`;
