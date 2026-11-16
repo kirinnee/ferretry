@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { FormKey, RuntimeSwitchFrame, RuntimeSwitchPane } from '@ferretry/core-ferrets/contract';
+import type { FormKey, PickerKey, RuntimeSwitchFrame, RuntimeSwitchPane } from '@ferretry/core-ferrets/contract';
 import { codexRuntimeSwitch, VerifiedPickerTransport } from '../../daemon/lib/ferret-runtime-switch.ts';
 import type { CodexPickerDrivePort } from '../../daemon/lib/picker-drive.ts';
 
@@ -15,7 +15,7 @@ const IDLE = '› Ask Codex to do anything';
 /** A pane that answers the screens it was given in order (the last one stays), and records what it was told. */
 class ScriptedPane implements RuntimeSwitchPane {
   readonly typed: string[] = [];
-  readonly pressed: FormKey[] = [];
+  readonly pressed: (FormKey | PickerKey)[] = [];
   stops = 0;
   #observations = 0;
 
@@ -39,6 +39,10 @@ class ScriptedPane implements RuntimeSwitchPane {
     this.pressed.push(key);
   }
 
+  async pickerKey(key: PickerKey): Promise<void> {
+    this.pressed.push(key);
+  }
+
   async stop(): Promise<void> {
     this.stops += 1;
   }
@@ -52,7 +56,7 @@ const build = (pane: RuntimeSwitchPane) => codexRuntimeSwitch({ choices, sleeper
 const transportOver = (pane: ScriptedPane): CodexPickerDrivePort => ({
   openPicker: async () => await pane.command('/model'),
   readPane: async () => await pane.observe(),
-  sendKey: async key => await pane.key(key as FormKey),
+  sendKey: async key => await pane.pickerKey(key as PickerKey),
 });
 
 const quickRow = { number: 1, name: 'gpt-5.6-codex' };

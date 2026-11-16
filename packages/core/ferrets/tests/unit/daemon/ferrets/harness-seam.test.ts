@@ -537,6 +537,12 @@ describe('structured questions: the form seam and the asked-question file', () =
     expect(await f.seam.form!.paste('free text')).toEqual({ ok: true, value: undefined });
     expect(f.runner.formKeys).toEqual([{ handle: f.handle, key: 'Down' }]);
     expect(f.runner.formPastes).toEqual([{ handle: f.handle, text: 'free text' }]);
+    // A picker's row digit is its own member, never a form key.
+    expect(await f.seam.form!.pickerKey!('3')).toEqual({ ok: true, value: undefined });
+    expect(f.runner.pickerKeys).toEqual([{ handle: f.handle, key: '3' }]);
+    f.runner.fail = { kind: 'held', code: 'input_pending' };
+    expect(await f.seam.form!.pickerKey!('4')).toEqual({ ok: false, error: { refused: 'input_pending' } });
+    expect(f.runner.pickerKeys).toHaveLength(1);
     f.runner.fail = { kind: 'held', code: 'input_pending' };
     expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'input_pending' } });
     f.runner.fail = { kind: 'held', code: 'input_pending' };
@@ -546,6 +552,8 @@ describe('structured questions: the form seam and the asked-question file', () =
     expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'not_ready', why: 'exited' } });
     (f.runner as { formKey?: unknown }).formKey = undefined;
     (f.runner as { formPaste?: unknown }).formPaste = undefined;
+    (f.runner as { pickerKey?: unknown }).pickerKey = undefined;
+    expect(await f.seam.form!.pickerKey!('3')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
     expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
     expect(await f.seam.form!.paste('x')).toEqual({ ok: false, error: { refused: 'plugin_unavailable' } });
   });
@@ -555,6 +563,7 @@ describe('structured questions: the form seam and the asked-question file', () =
     await f.service.stop(f.id, 'now');
     expect(await f.seam.form!.key('Enter')).toEqual({ ok: false, error: { refused: 'no_pane' } });
     expect(await f.seam.form!.paste('x')).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    expect(await f.seam.form!.pickerKey!('3')).toEqual({ ok: false, error: { refused: 'no_pane' } });
     expect(await f.seam.form!.capture()).toEqual({ ok: false, error: { refused: 'no_pane' } });
     expect(f.runner.formKeys).toEqual([]);
   });

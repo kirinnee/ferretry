@@ -11,6 +11,7 @@ import type {
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
+  HarnessRuntimeSwitch,
   HarnessTranscriptBytes,
   HarnessTranscriptStamp,
   HarnessTranscriptTail,
@@ -63,6 +64,7 @@ import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
 import { HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
+import { CLAUDE_RUNTIME_SWITCH } from '../lib/harness/runtime-switch.ts';
 import {
   compareLaunchSettings,
   type LaunchSettingsInputs,
@@ -612,6 +614,14 @@ export class ClaudeHarness implements Harness {
     const found = await this.transcriptFile(ferret);
     if (found === undefined) return undefined;
     return { file: found.file, size: found.stat.size, mtimeMs: Date.parse(found.stat.modified) };
+  }
+
+  /**
+   * Live model, effort and fast-mode switching of a running ferret (`Harness.runtimeSwitch`). Claude Code switches by typed
+   * command, so there is no picker to drive and nothing per ferret to hold: the same switch serves every pane.
+   */
+  runtimeSwitch(): HarnessRuntimeSwitch {
+    return CLAUDE_RUNTIME_SWITCH;
   }
 
   /**

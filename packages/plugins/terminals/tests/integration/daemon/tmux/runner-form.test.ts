@@ -142,6 +142,43 @@ describe('structured questions: the runner’s form seam', () => {
     expect(world.acts).toEqual([]);
   });
 
+  it('formKey refuses a digit: the form seam is navigation only, so a permission prompt cannot be answered by one', async () => {
+    const world = subject();
+    await expect(world.runner.formKey(world.handle, '1' as never)).rejects.toThrow();
+    expect(keys(world)).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+
+  it('pickerKey types ONE row digit, acted on the exact pane as a keys write', async () => {
+    const world = subject();
+    await world.runner.pickerKey(world.handle, '3');
+    expect(keys(world)).toEqual(['3']);
+    expect(world.acts.map(act => act.op)).toEqual(['keys']);
+  });
+
+  it('pickerKey refuses anything but a row digit before anything is typed', async () => {
+    const world = subject();
+    await expect(world.runner.pickerKey(world.handle, 'Enter' as never)).rejects.toThrow();
+    await expect(world.runner.pickerKey(world.handle, '0' as never)).rejects.toThrow();
+    await expect(world.runner.pickerKey(world.handle, 'y' as never)).rejects.toThrow();
+    expect(keys(world)).toEqual([]);
+    expect(world.acts).toEqual([]);
+  });
+
+  it('pickerKey under a Vault hold types NOTHING, and for a pane that is gone rejects not_ready/exited', async () => {
+    const held = subject();
+    held.hold();
+    expect(await failureOf(held.runner.pickerKey(held.handle, '1'))).toEqual({ kind: 'held', code: 'input_pending' });
+    expect(keys(held)).toEqual([]);
+    const gone = subject();
+    gone.server.alive = false;
+    expect(await failureOf(gone.runner.pickerKey(gone.handle, '1'))).toMatchObject({
+      kind: 'not_ready',
+      why: 'exited',
+    });
+    expect(keys(gone)).toEqual([]);
+  });
+
   it('formKey under a Vault hold types NOTHING and rejects held with the hold’s code', async () => {
     const world = subject();
     world.hold();
