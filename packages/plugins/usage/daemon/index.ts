@@ -30,6 +30,7 @@ import { HttpAnalyticsPricingFeed } from './adapters/analytics/pricing-feed-sour
 import { openAnalyticsIndexStore } from './adapters/analytics/sqlite-analytics-store.ts';
 import { StatePricingConfiguration } from './adapters/pricing/pricing-state.ts';
 import { CachedUsageFeed } from './adapters/usage/cached-usage-feed.ts';
+import { StateCompactionHistory } from './adapters/usage/state-compaction-history.ts';
 import { AnalyticsTranscriptSpend } from './adapters/usage/provider-quota/analytics-spend.ts';
 import { endedStatus, type WatchedOutcome } from './lib/analytics/ended-status.ts';
 import { JscStackSampler } from './adapters/performance/jsc-stack-sampler.ts';
@@ -190,6 +191,7 @@ export default implementDaemon(manifest, {
 
     // ── budgets: measured each minute from each ferret's turns; a pause is a hold on a login ───────────────────────────────
     const sessions = new FerretBudgetSessions(needs.ferrets);
+    const compactionHistory = new StateCompactionHistory(kernel.state);
     const pauses = new PausesStore(kernel.state);
     const told = new ToldStore(kernel.state);
     const meter = new SpendMeter({
@@ -555,6 +557,9 @@ export default implementDaemon(manifest, {
         // Logins' list and check show each login's standing against its budget; Logins cannot see Usage (Usage
         // needs Logins), so it asks here, and gets the very standing `GET /v1/usage/budgets` answers.
         'logins.budget:usage': { view: login => budget.view(login) },
+        // Ferrets' live readout estimates a running compaction from how long this daemon's finished ones took, and
+        // keeps each finished one here: the history is Usage's file (RULING #27, Q6), the readout only asks.
+        'ferrets.compaction-history:usage': compactionHistory,
         // A turn ended: its ferret may now be finished, so a pass is owed after the records settle.
         'turn.ended': payload => {
           outcomes.set(payload.ferret, payload.outcome);

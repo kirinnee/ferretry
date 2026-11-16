@@ -1,38 +1,43 @@
 import { describe, it } from 'bun:test';
+import type { CompactionRecord } from '@ferretry/core-ferrets/contract';
+import type { StateDamage, StatePort, StateRead } from '@ferretry/kernel/contract';
 import should from 'should';
-import { FileCompactionHistory } from '../../../../../daemon/adapters/session/live/index.ts';
-import type { FileSystemPort } from '../../../../../daemon/lib/ports.ts';
-import type { CompactionRecord } from '../../../../../daemon/lib/session/live/compaction.ts';
+import { COMPACTION_HISTORY_STATE } from '../../../contract/index.ts';
+import { StateCompactionHistory } from '../../../daemon/adapters/usage/state-compaction-history.ts';
 
 /**
- * The compaction duration history over a file port.
+ * The compaction duration history over the kernel's state port (v4's `file-compaction-history` test, moved with it).
  *
- * WHAT IT HAS TO GET RIGHT. The history only feeds an estimate, so losing it must cost nothing but
- * precision: an absent, corrupt or unreadable file is an empty history. And two compactions finishing
- * together must both be kept.
+ * WHAT IT HAS TO GET RIGHT. The history only feeds an estimate, so losing it must cost nothing but precision: an absent,
+ * damaged or unreadable file is an empty history. And two compactions finishing together must both be kept.
  */
 
-const FILE = '/state/compaction-history.json';
-
 interface Disk {
-  text: string | undefined;
-  readFails: boolean;
-  writes: number;
+  value: { entries: readonly CompactionRecord[] } | undefined;
+  mode: 'ok' | 'damaged' | 'throws';
+  writeFails: boolean;
+  declared: string[];
 }
 
-const portOver = (disk: Disk): FileSystemPort =>
+/** The state port over memory, with a slow write so two unserialized writers would both read the same old document. */
+const portOver = (disk: Disk): StatePort =>
   ({
-    readText: async () => {
-      if (disk.readFails) throw new Error('EIO');
-      return disk.text;
+    read: async (file: { path: string }) => {
+      disk.declared.push(file.path);
+      if (disk.mode === 'throws') throw new Error('EIO');
+      if (disk.mode === 'damaged') {
+        const damage: StateDamage = { file: file.path, reason: 'unparsable', sentence: 'the file does not parse' };
+        return { ok: false, error: damage } satisfies StateRead<unknown>;
+      }
+      return { ok: true, value: disk.value } satisfies StateRead<unknown>;
     },
-    writeTextAtomic: async (_file: string, text: string) => {
-      disk.writes += 1;
-      // A slow disk, so two unserialized writers would both read the same old document.
+    write: async (file: { path: string }, value: Disk['value']) => {
+      disk.declared.push(file.path);
+      if (disk.writeFails) throw new Error('ENOSPC');
       await new Promise(resolve => setImmediate(resolve));
-      disk.text = text;
+      disk.value = value;
     },
-  }) as unknown as FileSystemPort;
+  }) as unknown as StatePort;
 
 const entry = (durationMs: number, over: Partial<CompactionRecord> = {}): CompactionRecord => ({
   harness: 'claude',
@@ -41,25 +46,18 @@ const entry = (durationMs: number, over: Partial<CompactionRecord> = {}): Compac
   ...over,
 });
 
-const subject = (disk: Disk = { text: undefined, readFails: false, writes: 0 }) => ({
-  disk,
-  history: new FileCompactionHistory(portOver(disk), FILE),
-});
+const fresh = (): Disk => ({ value: undefined, mode: 'ok', writeFails: false, declared: [] });
 
-describe('FileCompactionHistory', () => {
-  it('should read an absent, unreadable, unparseable or malformed file as an empty history', async () => {
-    for (const disk of [
-      { text: undefined, readFails: false, writes: 0 },
-      { text: undefined, readFails: true, writes: 0 },
-      { text: '{not json', readFails: false, writes: 0 },
-      { text: '{"version":2,"entries":[]}', readFails: false, writes: 0 },
-      { text: '{"version":1,"entries":[{"harness":"claude","durationMs":-1,"at":"x"}]}', readFails: false, writes: 0 },
-    ] satisfies Disk[]) {
+const subject = (disk: Disk = fresh()) => ({ disk, history: new StateCompactionHistory(portOver(disk)) });
+
+describe('StateCompactionHistory', () => {
+  it('should read an absent, damaged or unreadable file as an empty history', async () => {
+    for (const disk of [fresh(), { ...fresh(), mode: 'damaged' as const }, { ...fresh(), mode: 'throws' as const }]) {
       should(await subject(disk).history.durations('claude', undefined)).deepEqual([]);
     }
   });
 
-  it('should keep what it records and answer for the harness asked about', async () => {
+  it('should keep what it records, in the declared file, and answer for the harness asked about', async () => {
     // Arrange
     const { history, disk } = subject();
 
@@ -70,7 +68,7 @@ describe('FileCompactionHistory', () => {
     // Assert
     should(await history.durations('claude', undefined)).deepEqual([10_000]);
     should(await history.durations('codex', undefined)).deepEqual([20_000]);
-    should(JSON.parse(disk.text as string).version).equal(1);
+    should(new Set(disk.declared)).deepEqual(new Set([COMPACTION_HISTORY_STATE.path]));
   });
 
   it("should use a model's own durations once it has three, and its harness's until then", async () => {
@@ -94,7 +92,7 @@ describe('FileCompactionHistory', () => {
     const durations = await history.durations('claude', undefined);
 
     // Assert
-    should(JSON.parse(disk.text as string).entries).have.length(50);
+    should(disk.value?.entries).have.length(50);
     should(durations).have.length(20);
     should(durations[0]).equal(41_000);
     should(durations[19]).equal(60_000);
@@ -113,12 +111,8 @@ describe('FileCompactionHistory', () => {
 
   it('should refuse a write that fails without poisoning the writes after it', async () => {
     // Arrange
-    const disk: Disk = { text: undefined, readFails: false, writes: 0 };
-    const failing = {
-      ...portOver(disk),
-      writeTextAtomic: async () => Promise.reject(new Error('ENOSPC')),
-    } as FileSystemPort;
-    const broken = new FileCompactionHistory(failing, FILE);
+    const disk = fresh();
+    const broken = new StateCompactionHistory(portOver({ ...disk, writeFails: true }));
     const { history } = subject(disk);
 
     // Act

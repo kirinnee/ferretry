@@ -23,7 +23,7 @@
  * no file watch on a root: GAP(live)).
  */
 import type { Redaction } from '@ferretry/kernel/contract';
-import type { FerretId, FerretRecord, Runner, RunnerHandle } from '../../contract/index.ts';
+import type { CompactionHistorySource, FerretId, FerretRecord, Runner, RunnerHandle } from '../../contract/index.ts';
 import { FerretLiveActivitySchema, type SessionLiveActivity } from '../lib/protocol/session-live.ts';
 import type { ClockPort } from '../lib/ports.ts';
 import type { SessionId } from '../lib/session-id.ts';
@@ -46,8 +46,11 @@ export interface LiveEventsDeps {
   /** Runs `tick` every `intervalMs` until the answer is called (`kernel.clock.every`). */
   readonly every: (intervalMs: number, tick: () => void) => () => void;
   readonly redaction: Pick<Redaction, 'read'>;
-  /** Compaction history is Usage's (RULING #27, Q6): absent here, and live frames work without it. */
-  readonly history?: CompactionHistory;
+  /**
+   * Compaction history is Usage's (RULING #27, Q6), asked through the `ferrets.compaction-history` hook each time it is
+   * needed (never at build: Usage may be built after Ferrets). `undefined`: no provider, and live frames work without it.
+   */
+  readonly history: () => CompactionHistorySource | undefined;
 }
 
 /** The longest verb a frame carries (the schema's own bound). */
@@ -89,6 +92,15 @@ class MaskedLiveActivity implements LiveActivitySource {
   }
 }
 
+/**
+ * The history the readout reads, bound to whoever provides it AT THE TIME OF THE ASK: no provider is an empty history
+ * (the readout then says `typical`) and a finished compaction is not kept.
+ */
+const hookHistory = (provider: LiveEventsDeps['history']): CompactionHistory => ({
+  durations: async (harness, model) => (await provider()?.durations(harness, model)) ?? [],
+  record: async entry => await provider()?.record(entry),
+});
+
 /** One look at a live ferret's pane as the live readout reads it: the status lines of the masked frame, or nothing. */
 const paneOf = async (deps: LiveEventsDeps, id: SessionId): Promise<PaneState | undefined> => {
   const record = deps.record(id as unknown as FerretId);
@@ -115,7 +127,7 @@ export function buildLiveEvents(deps: LiveEventsDeps): {
     },
     deps.transcript.tail,
     deps.clock,
-    deps.history,
+    hookHistory(deps.history),
   );
   return {
     live: new MaskedLiveActivity(live, deps.redaction),

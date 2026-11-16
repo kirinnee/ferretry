@@ -8,8 +8,9 @@ import should from 'should';
 import {
   type LiveActivityReads,
   StorageLiveActivitySource,
-} from '../../../../../daemon/adapters/session/live/index.ts';
-import type { CompactionHistory, CompactionRecord } from '../../../../../daemon/lib/session/live/compaction.ts';
+} from '../../../../../daemon/adapters/session/live/storage-live-activity.ts';
+import type { CompactionRecord } from '../../../../../contract/index.ts';
+import type { CompactionHistory } from '../../../../../daemon/lib/session/live/compaction.ts';
 import type { SessionTranscriptTail, TranscriptTailResult } from '../../../../../daemon/lib/session/peers/reads.ts';
 import type { PaneState } from '../../../../../daemon/lib/session/peers/tmux.ts';
 import type { TranscriptEvent } from '../../../../../daemon/lib/session/peers/transcript.ts';

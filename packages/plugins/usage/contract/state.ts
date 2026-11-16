@@ -1,3 +1,4 @@
+import { CompactionRecordSchema } from '@ferretry/core-ferrets/contract';
 import { defineState } from '@ferretry/kernel/contract';
 import { ProviderQuotaReadingSchema } from '@ferretry/plugin-logins/contract';
 import { z } from 'zod';
@@ -24,6 +25,20 @@ export const PAUSE_TOLD_STATE = defineState({
   store: 'json',
   format: 1,
   schema: PauseToldFileSchema,
+});
+
+/**
+ * How long this daemon's compactions have taken (F-0130), so the live readout's "usually ~Ns" is a measured number that
+ * survives a restart. Ferrets asks for it through `ferrets.compaction-history`; Usage owns the file (RULING #27, Q6).
+ * Losing it costs only precision, so a damaged file reads as no history and is rewritten by the next entry.
+ */
+export const CompactionHistoryFileSchema = z.strictObject({ entries: z.array(CompactionRecordSchema) });
+export const COMPACTION_HISTORY_STATE = defineState({
+  name: 'compaction-history',
+  path: 'compaction-history.json',
+  store: 'json',
+  format: 1,
+  schema: CompactionHistoryFileSchema,
 });
 
 /** The owner's rate catalog and the sources it may sync from (today's `analyticsPricing` key of `config/daemon.json`). */
