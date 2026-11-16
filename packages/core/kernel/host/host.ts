@@ -168,6 +168,7 @@ const NO_SCRATCH: ScratchPort = {
   },
 };
 import { buildSnapshot, type DataPluginManifest } from './snapshot.ts';
+import { configEtagKey } from './config/etag.ts';
 import { type DaemonIdentity, daemonNameFrom, loadIdentity } from './identity.ts';
 import {
   createSessionLayer,
@@ -237,6 +238,8 @@ export interface HostAdapters {
   readonly config: (
     declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
     judge?: ConfigJudge,
+    /** The key of every config etag, derived from the daemon's identity (`config/etag.ts`); absent, a per-service one. */
+    etagKey?: Uint8Array,
   ) => HostConfig;
   /** Unrestricted; the host narrows each to the manifest's `permissions`. */
   readonly spawn: SpawnPort;
@@ -572,6 +575,7 @@ async function bootLocked(
         return false;
       }
     },
+    await configEtagKey(identity),
   );
   await config.reload();
   // The modeline of every file points an editor at its schema, so the schemas are there once a daemon serves.

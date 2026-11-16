@@ -87,21 +87,30 @@ const privateIpv4 = (address: string): boolean => {
 /**
  * An IP LITERAL that is not on the public internet: private, shared (`100.64/10`), loopback, link-local
  * or unspecified IPv4; and in IPv6, the unspecified `[::]`, loopback `[::1]`, unique-local `fc00::/7`,
- * link-local `fe80::/10`, site-local `fec0::/10`, and an IPv4-mapped `[::ffff:…]` whose IPv4 is any of
- * the above. The URL parser has already normalised the spelling. A NAME that resolves to one of these
- * is not caught — that is a declared residual risk (docs/mcp-oauth.md).
+ * link-local `fe80::/10`, site-local `fec0::/10`, and an IPv4-mapped `[::ffff:…]`, IPv4-translated
+ * `[::ffff:0:…]`, NAT64 `[64:ff9b::…]` or IPv4-compatible `[::…]` literal whose embedded IPv4 is any of
+ * the above. The URL parser has already normalised the spelling. A NAME that resolves to one of these is
+ * not caught — that is a declared residual risk (docs/mcp-oauth.md).
  */
 export const isPrivateLiteral = (hostname: string): boolean => {
   if (!hostname.startsWith('[')) return privateIpv4(hostname);
   const address = hostname.slice(1, -1).toLowerCase();
   if (address === '::' || address === '::1') return true;
   if (/^(f[cd]|fe[89ab]|fe[c-f])/u.test(address)) return true;
-  const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u.exec(address);
-  if (mapped === null) return false;
-  const high = Number.parseInt(mapped[1] as string, 16);
-  const low = Number.parseInt(mapped[2] as string, 16);
+  const embedded = EMBEDDED_IPV4.exec(address);
+  if (embedded === null) return false;
+  const high = Number.parseInt(embedded[1] as string, 16);
+  const low = Number.parseInt(embedded[2] as string, 16);
   return privateIpv4(`${String(high >> 8)}.${String(high & 0xff)}.${String(low >> 8)}.${String(low & 0xff)}`);
 };
+
+/**
+ * The four IPv6 spellings that carry an IPv4 address in their last 32 bits, as the URL parser prints
+ * them: IPv4-mapped `::ffff:a:b`, IPv4-translated `::ffff:0:a:b` (`::ffff:0:0/96`), NAT64
+ * `64:ff9b::a:b` (`64:ff9b::/96`) and the deprecated IPv4-compatible `::a:b` (`::/96`). A host that
+ * translates the last two groups reaches that IPv4. (`::` and `::1` have one group and are judged apart.)
+ */
+const EMBEDDED_IPV4 = /^(?:::ffff:(?:0:)?|64:ff9b::|::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u;
 
 /**
  * Whether the daemon may talk to `endpoint` on behalf of the server at `serverUrl`.
@@ -116,8 +125,9 @@ export function endpointAllowed(endpoint: string, serverUrl: string): boolean {
   const url = new URL(endpoint);
   const server = new URL(serverUrl);
   // `localhost.` and `127.0.0.1.` are the same hosts as without the dot: judged without it.
-  const serverHost = withoutTrailingDot(server.hostname);
-  const urlHost = withoutTrailingDot(url.hostname);
+  const serverHost = judgedHost(server.hostname);
+  const urlHost = judgedHost(url.hostname);
+  if (serverHost === undefined || urlHost === undefined) return false;
   const serverLocal = isLoopbackHost(serverHost);
   if (url.username !== '' || url.password !== '' || url.hash !== '') return false;
   if (url.protocol === 'http:') return serverLocal && isLoopbackHost(urlHost);
@@ -126,7 +136,17 @@ export function endpointAllowed(endpoint: string, serverUrl: string): boolean {
   return !isLoopbackHost(urlHost) && !isPrivateLiteral(urlHost);
 }
 
-const withoutTrailingDot = (hostname: string): string => (hostname.endsWith('.') ? hostname.slice(0, -1) : hostname);
+/**
+ * The host as it is judged: without any trailing dot (`localhost..` is the same name to a resolver that
+ * tolerates empty labels), then read by the URL parser AGAIN so a spelling the first read left as a name
+ * (`127.1...`, `0x7f.1...`) becomes the address it is (`127.0.0.1`). `undefined` when nothing is left to
+ * judge (`..`) or what is left is not a host: the caller refuses.
+ */
+const judgedHost = (hostname: string): string | undefined => {
+  const stripped = hostname.replace(/\.+$/u, '');
+  if (stripped === '' || !URL.canParse(`https://${stripped}`)) return undefined;
+  return new URL(`https://${stripped}`).hostname;
+};
 
 // ── The documents ────────────────────────────────────────────────────────────────────────────────
 

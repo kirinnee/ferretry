@@ -123,6 +123,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
   return (
     declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
     judge?: ConfigJudge,
+    etagKey?: Uint8Array,
   ): HostConfig => {
     const service = createConfigFiles({
       home,
@@ -132,6 +133,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       log,
       binary,
       ...(judge === undefined ? {} : { judge }),
+      ...(etagKey === undefined ? {} : { etagKey }),
     });
     return {
       port: plugin => service.port(plugin),
