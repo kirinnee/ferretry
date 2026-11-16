@@ -274,6 +274,53 @@ describe('StatePort: jsonl files', () => {
     expect(second?.size).toBeGreaterThan(first?.size ?? 0);
   });
 
+  describe('AA version: a stamp nobody can set back (&F4319)', () => {
+    const WAY_BACK = 1_700_000_000_123_456_789n;
+    /** The memory host answering the stamp a real filesystem would: a device and a nanosecond ctime. */
+    async function stamped(changedAtNs: bigint | undefined, device: bigint | null = 7n) {
+      const { port, fs, path } = memoryStore();
+      await port.append(logFile, { count: 1 });
+      const info = await fs.info(path('log.jsonl'));
+      if (info === undefined) throw new Error('the journal was not written');
+      fs.info = async () => ({
+        ...info,
+        ...(device === null ? {} : { device }),
+        ...(changedAtNs === undefined ? {} : { changedAtNs }),
+      });
+      return { port, fs, path, info };
+    }
+
+    test('should put the device and the ctime in the etag, so a change of either is a new etag', async () => {
+      const first = await (await stamped(WAY_BACK)).port.version(logFile);
+      const sameCtime = await (await stamped(WAY_BACK)).port.version(logFile);
+      const movedCtime = await (await stamped(WAY_BACK + 1n)).port.version(logFile);
+      const movedDevice = await (await stamped(WAY_BACK, 8n)).port.version(logFile);
+
+      expect(sameCtime?.etag).toBe(first?.etag);
+      expect(movedCtime?.etag).not.toBe(first?.etag);
+      expect(movedDevice?.etag).not.toBe(first?.etag);
+    });
+
+    test('should call a fine, old stamp settled', async () => {
+      expect((await (await stamped(WAY_BACK)).port.version(logFile))?.settled).toBe(true);
+    });
+
+    test('should not call a whole-millisecond ctime settled: its filesystem stamps coarsely', async () => {
+      expect((await (await stamped(1_700_000_000_123_000_000n)).port.version(logFile))?.settled).toBe(false);
+    });
+
+    test('should not call a ctime within a few ticks of now settled: a later write would share it', async () => {
+      const now = BigInt(Date.now()) * 1_000_000n + 1n;
+      expect((await (await stamped(now - 1_000_000n + 1n)).port.version(logFile))?.settled).toBe(false);
+      expect((await (await stamped(now + 5_000_000_000n)).port.version(logFile))?.settled).toBe(false);
+    });
+
+    test('should not call a file settled when the host stamps no ctime or no device', async () => {
+      expect((await (await stamped(undefined)).port.version(logFile))?.settled).toBe(false);
+      expect((await (await stamped(WAY_BACK, null)).port.version(logFile))?.settled).toBe(false);
+    });
+  });
+
   test('AA update takes an async transform, and answering the current value itself writes nothing', async () => {
     const { port, fs, path } = memoryStore();
     await port.write(counterFile, { count: 1 });

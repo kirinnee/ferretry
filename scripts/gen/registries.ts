@@ -21,7 +21,8 @@
  * from a fresh generation (`registries-fresh`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
+import { type FolderRegistrySpec, folderRegistries, ident, importPath } from './lib/folder-registry.ts';
 import { buildGraph, hookOrder } from './lib/graph.ts';
 import type { StartGraph } from './lib/graph.ts';
 import {
@@ -124,13 +125,6 @@ export async function buildModel(root: string, precise = true): Promise<Model> {
     hashes: effectiveHashes(canonical, consumed, member),
   };
 }
-
-function importPath(fromFile: string, target: string): string {
-  const rel = relative(dirname(fromFile), target).split(sep).join('/');
-  return rel.startsWith('.') ? rel : `./${rel}`;
-}
-
-const ident = (prefix: string, id: string): string => `${prefix}_${id.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 function hashesLiteral(model: Model, ids: readonly string[]): string {
   const lines = ids
@@ -442,7 +436,25 @@ function hashesJson(model: Model): string {
 
 /** A package's feature folder: every `*.feature.ts` in it is one feature the package's daemon half registers. */
 export const FEATURES_DIR = 'daemon/features';
-export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/daemon/generated/features.ts`;
+const FEATURES_OUT = 'daemon/generated/features.ts';
+export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/${FEATURES_OUT}`;
+
+/** The feature list's shape: one default import per file, default-exported as one `as const` array. */
+const FEATURE_REGISTRY: FolderRegistrySpec = {
+  dir: FEATURES_DIR,
+  glob: '*.feature.ts',
+  out: FEATURES_OUT,
+  prefix: 'feature',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      `/** Every feature of this package's daemon half, by file name (${FEATURES_DIR}/*.feature.ts). */`,
+      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      '',
+    ].join('\n'),
+};
 
 /**
  * `<package>/daemon/generated/features.ts`, one per package that has `daemon/features/*.feature.ts`: the files that
@@ -450,28 +462,7 @@ export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/daemon
  * one feature; the package's `build()` registers the lot.
  */
 export function featureRegistries(model: Model): ReadonlyMap<string, string> {
-  const out = new Map<string, string>();
-  for (const pkg of model.ws.packages) {
-    const dir = join(pkg.dir, FEATURES_DIR);
-    if (!existsSync(dir)) continue;
-    const files = [...new Bun.Glob('*.feature.ts').scanSync({ cwd: dir, onlyFiles: true })].sort();
-    if (files.length === 0) continue;
-    const outRel = featureRegistryPath(pkg.rel);
-    const target = join(model.ws.root, outRel);
-    const names = files.map(file => ident('feature', file.replace(/\.feature\.ts$/, '')));
-    out.set(
-      outRel,
-      [
-        HEADER,
-        ...files.map((file, at) => `import ${names[at]} from '${importPath(target, join(dir, file))}';`),
-        '',
-        `/** Every feature of this package's daemon half, by file name (${FEATURES_DIR}/*.feature.ts). */`,
-        `export default [${names.join(', ')}] as const;`,
-        '',
-      ].join('\n'),
-    );
-  }
-  return out;
+  return folderRegistries(model.ws.packages, FEATURE_REGISTRY);
 }
 
 /** The global registries, keyed by root-relative path. */

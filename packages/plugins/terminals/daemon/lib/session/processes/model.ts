@@ -4,7 +4,8 @@ import type {
   SessionProcessState,
 } from '../../protocol/session-processes.ts';
 import { classifyPaneProcesses, type PaneProcess, type PaneProcessRole } from './pane-processes.ts';
-import { claudeTaskId, commandLabel, liveOutputAvailability, outputFileOf } from './commands.ts';
+import { commandLabel } from '@ferretry/std';
+import { claudeTaskId, liveOutputAvailability, outputFileOf } from './commands.ts';
 import type { ProcessDetailRow } from './ports.ts';
 
 /**
