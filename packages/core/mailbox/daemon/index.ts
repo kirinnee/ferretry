@@ -36,17 +36,23 @@ export default implementDaemon(manifest, {
     // The slot's value only exists once Conversation has built, so everything over it is made on first use: the queue
     // (the one writer, which needs only the host's queue store) first, the send half (which needs all of the host) after.
     let queued:
-      | { readonly host: MailboxHost; readonly queue: SessionQueueService; readonly api: MailboxQueueApi }
+      | {
+          readonly host: MailboxHost;
+          readonly queue: SessionQueueService;
+          readonly store: NotifyingSessionQueueStore;
+          readonly api: MailboxQueueApi;
+        }
       | undefined;
     const queueParts = () => {
       if (queued !== undefined) return queued;
       const host = requireMailboxHost(source);
+      const store = new NotifyingSessionQueueStore(host.queue, {
+        publish: async (id, _type, data) => {
+          await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+        },
+      });
       const queue = new SessionQueueService({
-        store: new NotifyingSessionQueueStore(host.queue, {
-          publish: async (id, _type, data) => {
-            await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
-          },
-        }),
+        store,
         clock: { now: () => kernel.clock.now() },
         serial: new KeyedSerialExecutor(),
       });
@@ -71,7 +77,7 @@ export default implementDaemon(manifest, {
           }
         },
       };
-      queued = { host, queue, api };
+      queued = { host, queue, store, api };
       return queued;
     };
     let made:
@@ -79,11 +85,12 @@ export default implementDaemon(manifest, {
       | undefined;
     const parts = () => {
       if (made !== undefined) return made;
-      const { host, queue, api: queueApi } = queueParts();
+      const { host, queue, store, api: queueApi } = queueParts();
       const send = buildSendHalf({
         kernel,
         ferrets: needs.ferrets,
         queue,
+        queueStore: store,
         clock: { now: () => kernel.clock.now() },
         ledger: host.ledger,
         channel: host.channel,
@@ -142,7 +149,8 @@ export default implementDaemon(manifest, {
         'retractedDraft',
       ].map(key => [key, deferred(key as keyof MailboxApi, () => parts().api)]),
     ]) as unknown as MailboxApi;
-    kernel.lifecycle.onStop(() => made?.send.stop());
+    // Stopping lets the hand-over already begun finish (never half a typing), and leaves no timer of the queue running.
+    kernel.lifecycle.onStop(async () => await made?.send.stop());
     return {
       routes: Object.fromEntries(
         manifest.actions.routes.map(route => {

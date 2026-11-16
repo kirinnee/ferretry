@@ -266,6 +266,8 @@ export class QueueDeliverer {
    * Holding — for a reason, or behind a message still unproven — answers `false`.
    */
   private async handOverNext(id: SessionId, messages: readonly QueuedMessage[]): Promise<boolean> {
+    // Nothing waiting is nothing to read a screen for: a restart looks at every session once, and each look reads a pane.
+    if (!messages.some(message => message.state === 'queued')) return false;
     let view: DeliveryView;
     try {
       view = await this.ports.view(id);

@@ -318,7 +318,11 @@ describe('BG-051 a direct send that today goes as a turn file writes the file an
   test('BG-051 every peer send to Codex goes by file, because the banner makes it more than one line', async () => {
     const { host, ferrets, api, row } = await conversation(f => f.add({ id: F1, state: 'idle', harness: 'codex' }));
 
-    await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE short', sendId: 's-peer' });
+    await api().send(
+      F1,
+      { kind: 'ferret', ferret: F2 },
+      { message: 'FIXTURE short', sendId: 's-peer', label: 'blocker' },
+    );
 
     expect(ferrets.documents).toHaveLength(1);
     expect(ferrets.documents[0]?.document).toContain('FIXTURE short');
@@ -438,22 +442,23 @@ describe('BG-053 a send queued by file is ledgered native-file, with the pointer
     await host.stop();
   });
 
-  test('BG-053 a file that cannot be written types nothing: the busy refusal stands and the id may start over', async () => {
-    const { host, ferrets, api } = await conversation(f => {
+  test('BG-053 a file that cannot be written types nothing: the message waits on busy and goes by file once the disk allows', async () => {
+    const { host, ferrets, api, advance } = await conversation(f => {
       f.busy = true;
       f.queueFile = 'failing';
     });
 
     const sent = await api().send(F1, { kind: 'owner' }, { message: long(1_500), sendId: 'send-q-3' });
 
-    expect(sent.ok).toBe(false);
+    // Nothing could be typed (the pane is busy and the queue cannot take the file): the message waits in the mailbox.
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'busy' } });
     expect(JSON.stringify(sent)).not.toContain('FIXTURE_SECRET');
     expect(ferrets.queued).toEqual([]);
-    // The row was taken back (nothing was typed), so the same id starts over and goes by file once the disk allows.
+    // The row was taken back (nothing was typed); the mailbox hands it over again, under the same id, once the disk allows.
     expect((await api().sends(F1)).sends).toMatchObject([{ sendId: 'send-q-3', withdrawn: true }]);
     ferrets.queueFile = 'offered';
-    const again = await api().send(F1, { kind: 'owner' }, { message: long(1_500), sendId: 'send-q-3' });
-    expect(again).toMatchObject({ ok: true, value: { disposition: 'queued', fate: 'queued' } });
+    await advance(65_000, 5_000);
+    expect((await api().sends(F1)).sends).toMatchObject([{ sendId: 'send-q-3', fate: 'queued' }]);
     expect(ferrets.queued.map(entry => entry.text)).toEqual([queuedPayloadInstruction(ferrets.fileOf('send-q-3'))]);
     await host.stop();
   });
@@ -1022,7 +1027,8 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
     expect(JSON.stringify(sent)).toContain('no runtime is free to relaunch it');
     expect(await rowOf(api, 's-revive-no')).toMatchObject({ withdrawn: true });
     ferrets.resumeAs = 'carries';
-    const again = await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE refused', sendId: 's-revive-no' });
+    // The failed message keeps its id (the mailbox is a record: the same id twice is one message); a fresh id starts over.
+    const again = await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE refused', sendId: 's-revive-no-2' });
     expect(again).toMatchObject({ ok: true, value: { disposition: 'revived' } });
     await host.stop();
   });
@@ -1069,7 +1075,11 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
   test('M3 a peer’s send to a stopped ferret revives it with the peer’s banner in front of the message', async () => {
     const { host, ferrets, api } = await conversation(stopped);
 
-    await api().send(F3, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE peer wake', sendId: 's-revive-peer' });
+    await api().send(
+      F3,
+      { kind: 'ferret', ferret: F2 },
+      { message: 'FIXTURE peer wake', sendId: 's-revive-peer', label: 'blocker' },
+    );
 
     expect(ferrets.resumed[0]?.message).toContain('FIXTURE peer wake');
     expect(ferrets.resumed[0]?.message).not.toBe('FIXTURE peer wake');
@@ -1085,7 +1095,7 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
     const sent = await api().send(
       F3,
       { kind: 'ferret', ferret: F2 },
-      { message: 'FIXTURE peer wake', sendId: 's-peer-fail' },
+      { message: 'FIXTURE peer wake', sendId: 's-peer-fail', label: 'blocker' },
     );
 
     expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
@@ -1118,7 +1128,11 @@ describe('M3 a send to a stopped ferret revives it and carries the message', () 
     });
 
     await api().send(F3, { kind: 'owner' }, { message: 'FIXTURE one', sendId: 's-origin-owner' });
-    await api().send(F3, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE two', sendId: 's-origin-ferret' });
+    await api().send(
+      F3,
+      { kind: 'ferret', ferret: F2 },
+      { message: 'FIXTURE two', sendId: 's-origin-ferret', label: 'blocker' },
+    );
     await warden().send(F3, { kind: 'warden' }, { message: 'FIXTURE three', sendId: 's-origin-warden' });
 
     expect(ferrets.resumed.map(resumed => resumed.origin)).toEqual([
@@ -1219,7 +1233,7 @@ describe('m2 a turn document is written once and says whose it is', () => {
     const { host, ferrets, api, warden } = await conversation();
 
     await warden().send(F1, { kind: 'warden' }, { message: long(600), sendId: 's-by-warden' });
-    await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: long(600), sendId: 's-by-peer' });
+    await api().send(F1, { kind: 'ferret', ferret: F2 }, { message: long(600), sendId: 's-by-peer', label: 'blocker' });
     await api().send(F1, { kind: 'owner' }, { message: long(600), sendId: 's-by-owner' });
 
     expect(ferrets.authors[0]).toEqual({ kind: 'ferretry', feature: 'Warden' });
@@ -1316,15 +1330,16 @@ describe('ask.delivery:ferret answers an agenda ask through this same send path'
     await host.stop();
   });
 
-  test('an answer that was not typed (the composer is occupied) says so, so Asks holds it and tries again', async () => {
+  test('an answer into an occupied composer is accepted and waits in the mailbox, which types it once the box is clear', async () => {
     const { host, ferrets, built } = await conversation();
     ferrets.occupiedBy = 'the owner is half way through typing this';
     const hook = delivery(built);
 
-    const failure = await hook.send('f1', 'yes', 'ask-4').catch((error: unknown) => error);
+    // The mailbox owns ordering and waiting, so the composer is never a reason to hold the answer back in Asks.
+    await hook.send('f1', 'yes', 'ask-4');
 
-    expect((failure as Error).name).toBe('AskNotTypedError');
     expect(ferrets.typed).toEqual([]);
+    expect(await hook.receipt('f1', 'ask-4')).toEqual({ state: 'pending' });
     await host.stop();
   });
 });

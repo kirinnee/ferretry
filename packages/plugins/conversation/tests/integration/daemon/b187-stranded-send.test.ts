@@ -162,7 +162,10 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
 
 /** The direct peer send of the incident: typed, nothing drawn within the fill's window, settled unconfirmed. */
 async function strandedSend(world: Awaited<ReturnType<typeof rig>>, sendId: string) {
-  const sent = await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: MESSAGE, sendId });
+  // A blocker goes at once, through the mailbox's first look: a plain action would be held a minute to batch.
+  const sent = await world
+    .api()
+    .send(F1, { kind: 'ferret', ferret: F2 }, { message: MESSAGE, sendId, label: 'blocker' });
   expect(sent).toMatchObject({ ok: false, error: { code: 'send_unconfirmed' } });
   const row = await world.stored(sendId);
   expect(row).toMatchObject({ path: 'direct', fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
@@ -195,10 +198,9 @@ describe('B187 a stranded direct send', () => {
     expect(await world.stored('s-nelly')).toMatchObject({ fate: 'delivered' });
     expect(ferrets.pane.draft).toBeUndefined();
 
-    // The queue is clear: the two messages that waited behind it were typed, in order.
+    // The queue is clear: the two messages that waited behind it were typed together, as ONE combined turn, in order.
     expect(ferrets.pane.typed.filter(typed => typed.includes('FIXTURE later'))).toEqual([
-      expect.stringContaining('FIXTURE later A'),
-      expect.stringContaining('FIXTURE later B'),
+      expect.stringMatching(/\[2 messages from ferrets[\s\S]*FIXTURE later A[\s\S]*FIXTURE later B/u),
     ]);
     await world.host.stop();
   });

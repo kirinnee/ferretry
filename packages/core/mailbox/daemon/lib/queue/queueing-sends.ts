@@ -1,9 +1,7 @@
-import type { QueueAuthor, SendSenderKind } from '../../../contract/index.ts';
-import type { ClockPort } from '../../../contract/index.ts';
+import type { InteractionMode, QueueAuthor, SendResult, SendSenderKind } from '../../../contract/index.ts';
 import type { SessionId } from '../../../contract/index.ts';
-import type { SendMessageRequest, SendOutcome } from '../delivery/service.ts';
-import { type SendLedger, SendRefused, type SendTarget } from '../../../contract/index.ts';
-import { answerOf } from '../../../contract/index.ts';
+import type { SendMessageRequest } from '../delivery/service.ts';
+import { SendRefused } from '../../../contract/index.ts';
 import type { QueueDeliverer } from './deliverer.ts';
 import { boardOnly } from '../../../contract/index.ts';
 import type { SessionQueue } from '../../../contract/index.ts';
@@ -22,9 +20,8 @@ import type { SessionQueue } from '../../../contract/index.ts';
  * owner's own chat — so it is not enqueued to sit there for ever: it takes the direct send path it took
  * before, until each such producer posts to the session's board instead.
  *
- * The answer has the shape the direct path's has, so no producer changes: `queued`, under the request's own
- * id, which is the id the deliverer hands over with — the send ledger, and every receipt read from it, sees
- * the same message when it is typed.
+ * What the caller is answered is the Mailbox's to say (it reads the queue and the ledger under the message's
+ * own id): this class returns only what the direct path answered, and nothing for a message it queued.
  */
 
 export interface QueueingSendsPorts {
@@ -32,15 +29,13 @@ export interface QueueingSendsPorts {
   readonly deliverer: Pick<QueueDeliverer, 'enqueued'>;
   /** The direct send path: what the queue does not carry, and the refusals only a person can lift. */
   readonly direct: {
-    send(request: SendMessageRequest): Promise<SendOutcome>;
+    send(request: SendMessageRequest): Promise<SendResult>;
     authorize(id: SessionId, attachmentIds: readonly string[]): Promise<void>;
   };
   /** The session a message is for, as the send path reads it. */
-  target(id: SessionId): Promise<SendTarget | undefined>;
-  /** The send ledger, which says what the hand-over did under the message's own id. */
-  readonly ledger: Pick<SendLedger, 'list'>;
-  readonly clock: ClockPort;
-  sleep(milliseconds: number): Promise<void>;
+  target(id: SessionId): Promise<{ readonly mode: InteractionMode } | undefined>;
+  /** A wait that can be given up: the timer is not left running once the deliverer's first look is back. */
+  timer(milliseconds: number): { readonly done: Promise<void>; cancel(): void };
 }
 
 /**
@@ -66,7 +61,8 @@ export class QueueingSends {
     return sender === 'daemon' ? { kind: 'ferretry', ...feature } : { kind: 'owner', ...feature };
   }
 
-  async send(request: SendMessageRequest): Promise<SendOutcome> {
+  /** Queues the message, and answers what the direct path answered when it took that path instead. */
+  async send(request: SendMessageRequest): Promise<SendResult | undefined> {
     const target = await this.ports.target(request.id);
     if (target === undefined) throw new SendRefused(`session ${request.id} does not exist`);
     const sender: SendSenderKind =
@@ -76,7 +72,7 @@ export class QueueingSends {
     if (boardOnly({ sender }, target.mode))
       return await this.ports.direct.send({ ...request, origin: 'daemon', by: this.authorOf(sender) });
     await this.ports.direct.authorize(request.id, request.attachmentIds ?? []);
-    const { message } = await this.ports.queue.enqueue(request.id, {
+    await this.ports.queue.enqueue(request.id, {
       id: request.sendId,
       sender,
       ...(request.senderReference === undefined ? {} : { from: request.senderReference }),
@@ -84,27 +80,16 @@ export class QueueingSends {
       text: request.message,
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
+      ...(request.label === undefined ? {} : { label: request.label }),
       // `now` keeps its place in the queue: the deliverer stops the turn when this message's turn comes.
       ...(request.now === true ? { interrupt: true } : {}),
     });
-    await Promise.race([
-      this.ports.deliverer.enqueued(request.id).catch(() => undefined),
-      this.ports.sleep(QUEUE_ANSWER_WAIT_MS),
-    ]);
-    const handed = (await this.ports.ledger.list(request.id)).find(record => record.sendId === message.id);
-    const { disposition } = answerOf(handed);
-    return {
-      target,
-      disposition,
-      record: handed ?? {
-        sendId: message.id,
-        acceptedAt: message.enqueuedAt,
-        acceptedTurn: target.turn,
-        path: 'native-inline',
-        message: message.text,
-        fate: 'accepted',
-        senderKind: sender,
-      },
-    };
+    const waited = this.ports.timer(QUEUE_ANSWER_WAIT_MS);
+    try {
+      await Promise.race([this.ports.deliverer.enqueued(request.id).catch(() => undefined), waited.done]);
+    } finally {
+      waited.cancel();
+    }
+    return undefined;
   }
 }

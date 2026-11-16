@@ -60,6 +60,8 @@ class CompactingFerrets extends FakeFerrets {
     { id: 'u-0', role: 'user', text: 'the work so far', at: '2026-11-10T21:00:00Z' as Instant },
   ];
   stored: FerretTurnDocument[] = [];
+  /** The time the harness writes its user record at: the mailbox holds a peer's message a minute, so it is not the start. */
+  now: () => Instant = () => START as Instant;
 
   async harness(ferret: FerretId): Promise<FerretHarness | undefined> {
     if ((await this.get(ferret)) === undefined) return undefined;
@@ -72,7 +74,7 @@ class CompactingFerrets extends FakeFerrets {
         // The idle path types, presses Enter and the harness writes its user record for the message.
         this.transcript = [
           ...this.transcript,
-          { id: `u-${pane.typed.length}`, role: 'user', text: delivery.text, at: START as Instant },
+          { id: `u-${pane.typed.length}`, role: 'user', text: delivery.text, at: this.now() },
         ];
         return ok('turn-started' as const);
       },
@@ -126,6 +128,7 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
   ferrets.add({ id: F1, state: 'idle' });
   ferrets.add({ id: F2, state: 'idle' });
   const clock = fixedClock(START);
+  ferrets.now = () => clock.now();
   const implementation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {

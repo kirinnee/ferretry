@@ -97,6 +97,9 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
+  // The Mailbox looks at every ferret once at boot (what a restart left open moves again): let that look finish on the
+  // empty queue, so the messages a test seeds next are not delivered under it.
+  for (let index = 0; index < 20; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
   const api = () => host.provided(ConversationPort);
   /** The port as Ferretry's Warden holds it: the only consumer that may speak as the Warden or press a pane. */
   const warden = () => host.provided(ConversationPort, 'warden');
