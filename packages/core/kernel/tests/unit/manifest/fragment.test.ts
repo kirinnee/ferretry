@@ -49,4 +49,27 @@ describe('manifestFragment', () => {
     const noTools: readonly [] = fragment.agentTools;
     expect(noTools).toEqual([]);
   });
+
+  test('a section name that is not one of the manifest sections is a type error, at every level', () => {
+    // A misspelt section would otherwise compile and be dropped, type and runtime: the fragment would contribute nothing.
+    const get = route('GET /a', descriptor);
+    // @ts-expect-error `agentTool` is not a section (`agentTools` is), even though `routes` matches
+    manifestFragment({ routes: [get], agentTool: [] });
+    // @ts-expect-error `setting` is not a `ui` section (`settings` is), even though `panels` matches
+    manifestFragment({ ui: { panels: [], setting: [] } });
+    // @ts-expect-error `take` is not a `hooks` section (`takes` is), even though `offers` matches
+    manifestFragment({ hooks: { offers: [], take: [] } });
+    // @ts-expect-error `publish` is not a `data` section (`publishes` is), even though `subscribes` matches
+    manifestFragment({ data: { subscribes: [], publish: [] } });
+  });
+
+  test('a fragment with every name right still compiles and keeps the literal of what it named', () => {
+    const fragment = manifestFragment({
+      routes: [route('GET /a', descriptor)],
+      ui: { panels: [panel('ferret.toolbar', { id: 'a', order: 1 })] },
+    });
+    const key: 'GET /a' = fragment.routes[0].key;
+    expect(key).toBe('GET /a');
+    expect(fragment.ui.panels).toHaveLength(1);
+  });
 });

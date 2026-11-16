@@ -89,11 +89,27 @@ export interface ManifestFragment<Parts extends FragmentParts> {
 
 const none = <List>(): List => [] as unknown as List;
 
+/** `Parts` with every key `Shape` does not name turned into `never`, so a misspelt key is an error and a right one is kept. */
+type Known<Parts, Shape> = { readonly [K in keyof Parts]: K extends keyof Shape ? Parts[K] : never };
+
+/**
+ * The typo guard. With a bare `Parts` an excess-property check fires only when NO key matches, so `{ routes, agentTool }`
+ * would compile and the misspelt section be dropped, type and runtime. Checking each level's keys against
+ * {@link FragmentParts} catches it at the top and inside `ui`, `hooks` and `data`, and leaves every literal as written.
+ */
+type Exact<Parts extends FragmentParts> = Known<Parts, FragmentParts> & {
+  readonly ui?: Known<NonNullable<Parts['ui']>, NonNullable<FragmentParts['ui']>>;
+  readonly hooks?: Known<NonNullable<Parts['hooks']>, NonNullable<FragmentParts['hooks']>>;
+  readonly data?: Known<NonNullable<Parts['data']>, NonNullable<FragmentParts['data']>>;
+};
+
 /**
  * One feature's slice of the manifest; a section it does not declare is empty. The cast is the one place the declared
  * parts meet the type that says "named sections keep their literal, the rest are `readonly []`": each branch below is that.
  */
-export function manifestFragment<const Parts extends FragmentParts>(parts: Parts): ManifestFragment<Parts> {
+export function manifestFragment<const Parts extends FragmentParts>(
+  parts: Parts & Exact<Parts>,
+): ManifestFragment<Parts> {
   const { ui, hooks, data } = parts;
   const fragment = {
     routes: parts.routes ?? none(),
