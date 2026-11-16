@@ -261,7 +261,9 @@ test('an agent’s send that revives a stopped ferret keeps the agent’s origin
     const before = runner.starts;
     const answer = await h.request('POST', `/v1/ferrets/${childId}/send`, {
       headers: { ...asAgent(leadId), 'x-fy-request-id': 'fixture-send-revive' },
-      body: { message: 'fixture message' },
+      // A blocker goes at once: the mailbox holds a ferret's plain `action` for a minute to batch it, and the revive (and
+      // its refusal) would come with the hold's end.
+      body: { message: 'fixture message', label: 'blocker' },
     });
     expect(answer.status).toBeGreaterThanOrEqual(400);
     expect(runner.starts).toBe(before);

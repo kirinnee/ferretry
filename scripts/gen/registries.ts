@@ -18,7 +18,8 @@
  *
  * Imports are RELATIVE paths: the workspace links with Bun's isolated linker, so the kernel cannot resolve a plugin
  * package by name. Generated files are git-ignored. `--check` writes nothing and exits 1 when a file on disk differs
- * from a fresh generation (`registries-fresh`).
+ * from a fresh generation (`registries-fresh`), and says which line is out of place and where it goes, so a line added by
+ * hand in its sorted place passes and generation stays optional.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
@@ -29,6 +30,7 @@ import {
   ident,
   importPath,
 } from './lib/folder-registry.ts';
+import { entryLines, entryList, explainStale } from './lib/entry-lines.ts';
 import { buildGraph, hookOrder } from './lib/graph.ts';
 import type { StartGraph } from './lib/graph.ts';
 import {
@@ -167,27 +169,23 @@ function halfRegistry(
     imports.push(`import ${name} from '${importPath(out, file)}';`);
     names.push(name);
   }
-  const generation = sha256(
-    startOrder(model)
-      .map(id => `${id}=${model.hashes.get(id)?.effective ?? ''}`)
-      .join('\n'),
-  );
   return [
     HEADER,
     sdk === undefined ? '' : `import type { ${typeName} } from '${importPath(out, sdk)}';`,
     ...imports,
     '',
     `/** Every ${half} half, in start order (§7.6). */`,
-    `export const ${exportName}: readonly ${typeName}<any>[] = [${names.join(', ')}];`,
+    ...entryList(`export const ${exportName}: readonly ${typeName}<any>[] = [`, names, '];'),
     '',
     '/** Start order: needs and taken hooks first, then kernel, core, and id (§7.6). */',
-    `export const startOrder: readonly string[] = ${JSON.stringify(startOrder(model))};`,
+    ...entryList(
+      'export const startOrder: readonly string[] = [',
+      startOrder(model).map(other => JSON.stringify(other)),
+      '];',
+    ),
     '',
     '/** Canonical and effective contract hash per package, and the member-surface hash where it has member routes (§9.6). */',
     `export const contractHashes: Readonly<Record<string, { readonly canonical: string; readonly effective: string; readonly member?: string }>> = ${hashesLiteral(model, startOrder(model))};`,
-    '',
-    '/** One value for the whole build: changes when any effective hash or the start order changes. */',
-    `export const generation = ${JSON.stringify(generation)};`,
     '',
   ].join('\n');
 }
@@ -222,7 +220,12 @@ function commandsRegistry(model: Model): string {
     ...imports,
     '',
     '/** Every subsystem with a CLI half, in start order (§7.5). */',
-    `export const registry: CommandRegistry = {\n${kernelEntry}\n  plugins: [\n${entries.join('\n')}\n  ],\n};`,
+    'export const registry: CommandRegistry = {',
+    kernelEntry,
+    '  plugins: [',
+    ...entries,
+    '  ],',
+    '};',
     '',
   ].join('\n');
 }
@@ -291,7 +294,26 @@ function slimEntry(model: Model): string {
     "import type { ToolDoor } from '../lib/entry/tool-door.ts';",
     '',
     "/** What the agent tool door's guard reads: the same facts `surfacesOf(registry)` builds from the manifests (§9.6). */",
-    `export const toolDoor: ToolDoor = ${JSON.stringify({ contracts, titles, tools }, null, 2)};`,
+    'export const toolDoor: ToolDoor = {',
+    '  contracts: {',
+    ...entryLines(
+      Object.entries(contracts).map(([id, hash]) => `${JSON.stringify(id)}: ${JSON.stringify(hash)}`),
+      '    ',
+    ),
+    '  },',
+    '  titles: {',
+    ...entryLines(
+      Object.entries(titles).map(([id, title]) => `${JSON.stringify(id)}: ${JSON.stringify(title)}`),
+      '    ',
+    ),
+    '  },',
+    '  tools: [',
+    ...entryLines(
+      tools.map(tool => JSON.stringify(tool)),
+      '    ',
+    ),
+    '  ],',
+    '};',
     '',
     '/** The serve module and the line it says on `initialize`, loaded only by the invocation that runs them. */',
     'export const serveHalf = {',
@@ -335,7 +357,12 @@ function surfacesRegistry(model: Model): string {
     ...imports,
     '',
     '/** Every subsystem, in start order, with its effective contract hash and what it consumes (§9.6). */',
-    `export const generated: GeneratedSurfaces = {\n  appVersion: ${JSON.stringify(version)},\n  surfaces: [\n${entries.join('\n')}\n  ],\n};`,
+    'export const generated: GeneratedSurfaces = {',
+    `  appVersion: ${JSON.stringify(version)},`,
+    '  surfaces: [',
+    ...entries,
+    '  ],',
+    '};',
     '',
   ].join('\n');
 }
@@ -378,7 +405,11 @@ function glossary(model: Model): string {
     '  readonly insteadOf?: readonly string[];',
     '}',
     '',
-    `export const glossary: readonly GlossaryEntry[] = ${JSON.stringify(words, null, 2)};`,
+    ...entryList(
+      'export const glossary: readonly GlossaryEntry[] = [',
+      words.map(word => JSON.stringify(word)),
+      '];',
+    ),
     '',
   ].join('\n');
 }
@@ -457,7 +488,11 @@ const FEATURE_REGISTRY: FolderRegistrySpec = {
       ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
       '',
       `/** Every feature of this package's daemon half, by file name (${FEATURES_DIR}/*.feature.ts). */`,
-      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      ...entryList(
+        'export default [',
+        entries.map(entry => entry.name),
+        '] as const;',
+      ),
       '',
     ].join('\n'),
 };
@@ -494,7 +529,11 @@ const CONTRACT_LISTS: Readonly<Record<string, (entries: readonly FolderEntry[]) 
       ],
       body: [
         "/** Every slot Ferrets' pages offer, in one list a test can pair: the account slots, then one per `slots/*.slot.ts`. */",
-        `export const FERRET_SLOTS = [${[...(account === undefined ? [] : ['...FERRET_ACCOUNT_SLOTS']), ...slots.map(entry => `${entry.name}.slot`)].join(', ')}] as const;`,
+        ...entryList(
+          'export const FERRET_SLOTS = [',
+          [...(account === undefined ? [] : ['...FERRET_ACCOUNT_SLOTS']), ...slots.map(entry => `${entry.name}.slot`)],
+          '] as const;',
+        ),
         'export type FerretSlot = (typeof FERRET_SLOTS)[number];',
       ],
     };
@@ -516,6 +555,47 @@ const CONTRACT_LISTS: Readonly<Record<string, (entries: readonly FolderEntry[]) 
         ...record('FERRETS_PROVIDED_APP_HOOKS', 'The hooks Ferrets provides', '.provided-hook.ts'),
       ],
     };
+  },
+};
+
+/**
+ * Every `export const X = defineState(...)` of one state file, in declaration order. A `defineState(` that is not such an
+ * export (a local, a re-export, a call inside a helper) would be a state the manifest never declares, so it is refused
+ * here, naming the file, rather than left out of the list.
+ */
+export function declaredStates(file: string, text: string): readonly string[] {
+  const exported = [...text.matchAll(/^export const (\w+)\s*=\s*defineState\b/gm)].map(match => match[1] as string);
+  const calls = [...text.matchAll(/^[^/*\n]*\bdefineState\s*[<(]/gm)].length;
+  if (calls !== exported.length)
+    throw new Error(
+      `${file}: ${calls} defineState call(s) but ${exported.length} \`export const X = defineState(\`: export each one`,
+    );
+  return exported;
+}
+
+/**
+ * Ferrets' state files: `contract/state/<area>.state.ts` each declare their area's files with `export const X = defineState(...)`.
+ * `contract/generated/state.ts` re-exports them all (the committed `contract/state.ts` re-exports that) and lists every declared
+ * state, file by file, as `FERRETS_STATE`, which the manifest spreads into `data.state`: a state file is a new file and no list is edited.
+ */
+const STATE_REGISTRY: FolderRegistrySpec = {
+  dir: 'contract/state',
+  glob: '*.state.ts',
+  out: 'contract/generated/state.ts',
+  prefix: 'state',
+  emit: ({ entries, read }) => {
+    const declared = entries.map(entry => ({ entry, names: declaredStates(entry.file, read(entry.file)) }));
+    return [
+      HEADER,
+      ...declared.flatMap(({ entry, names }) =>
+        names.length === 0 ? [] : [`import { ${names.join(', ')} } from '${entry.importPath}';`],
+      ),
+      ...declared.map(({ entry }) => `export * from '${entry.importPath}';`),
+      '',
+      '/** Every state file Ferrets declares, in file-name order then declaration order (contract/state/*.state.ts). */',
+      `export const FERRETS_STATE = [${declared.flatMap(({ names }) => names).join(', ')}] as const;`,
+      '',
+    ].join('\n');
   },
 };
 
@@ -542,9 +622,12 @@ const contractFolder = (folder: string): FolderRegistrySpec => ({
  */
 export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRACT): ReadonlyMap<string, string> {
   const ferrets = ws.packages.filter(pkg => pkg.rel === home);
-  return new Map(
-    ['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [...folderRegistries(ferrets, contractFolder(folder))]),
-  );
+  return new Map([
+    ...['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [
+      ...folderRegistries(ferrets, contractFolder(folder)),
+    ]),
+    ...folderRegistries(ferrets, STATE_REGISTRY),
+  ]);
 }
 
 /** The kinds of action a manifest fragment holds, in the order the merged `actions` lists them. */
@@ -568,9 +651,14 @@ const MANIFEST_ACTIONS_REGISTRY: FolderRegistrySpec = {
       '',
       '/** Every manifest fragment of this package (manifest/actions/*.actions.ts), merged in file-name order. */',
       'export default {',
-      ...ACTION_KINDS.map(
-        kind => `  ${kind}: [${entries.map(entry => `...${entry.name}.${kind}`).join(', ')}] as const,`,
-      ),
+      ...ACTION_KINDS.flatMap(kind => [
+        ...entryList(
+          `  ${kind}: [`,
+          entries.map(entry => `...${entry.name}.${kind}`),
+          '  ] as const,',
+          '    ',
+        ),
+      ]),
       '} as const;',
       '',
     ].join('\n'),
@@ -607,7 +695,8 @@ const FERRETS_API_REGISTRY: FolderRegistrySpec = {
       ...entries.map(entry => `export type * from '${entry.importPath}';`),
       '',
       '/** The Ferrets port: every slice under contract/ports/*.port.ts, composed. */',
-      `export interface FerretsApi extends ${entries.map(entry => sliceApiName(entry.file)).join(', ')} {}`,
+      // One declaration per slice: interfaces of one name merge, so a slice is one line of its own and no `extends` list is edited.
+      ...entries.map(entry => `export interface FerretsApi extends ${sliceApiName(entry.file)} {}`),
       '',
     ].join('\n'),
 };
@@ -632,7 +721,11 @@ const CLI_VERBS_REGISTRY: FolderRegistrySpec = {
       ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
       '',
       "/** Every verb file of this package's CLI half, by file name (cli/verbs/*.verb.ts). */",
-      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      ...entryList(
+        'export default [',
+        entries.map(entry => entry.name),
+        '] as const;',
+      ),
       '',
     ].join('\n'),
 };
@@ -698,9 +791,21 @@ export function generatePackage(model: Model, id: string): ReadonlyMap<string, s
     `export const halves = { ${halves.join(', ')} } as const;`,
     '/** The `contract/testing` module of every package this one consumes, by id. Nothing else is loaded. */',
     `export const contractTesting: Readonly<Record<string, Record<string, unknown>>> = {\n${fakes.join('\n')}\n};`,
-    `export const consumes: readonly string[] = ${JSON.stringify(consumed)};`,
-    `export const needs: Readonly<Record<string, string>> = ${JSON.stringify(needs)};`,
-    `export const uses: Readonly<Record<string, string>> = ${JSON.stringify(uses)};`,
+    ...entryList(
+      'export const consumes: readonly string[] = [',
+      consumed.map(other => JSON.stringify(other)),
+      '];',
+    ),
+    ...entryList(
+      'export const needs: Readonly<Record<string, string>> = {',
+      Object.entries(needs).map(([key, name]) => `${JSON.stringify(key)}: ${JSON.stringify(name)}`),
+      '};',
+    ),
+    ...entryList(
+      'export const uses: Readonly<Record<string, string>> = {',
+      Object.entries(uses).map(([key, name]) => `${JSON.stringify(key)}: ${JSON.stringify(name)}`),
+      '};',
+    ),
     `export const contractHashes = ${hashesLiteral(model, [id, ...consumed])};`,
     '',
   );
@@ -749,7 +854,16 @@ async function main(args: readonly string[]): Promise<number> {
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);
   if (args.includes('--check')) {
     const stale = staleFiles(model.ws.root, files, false);
-    for (const rel of stale) console.error(`❌ registries-fresh: ${rel} differs from a fresh generation`);
+    for (const rel of stale) {
+      console.error(`❌ registries-fresh: ${rel} differs from a fresh generation`);
+      const path = join(model.ws.root, rel.replace(/ \(missing\)$/, ''));
+      if (existsSync(path))
+        for (const sentence of explainStale(
+          readFileSync(path, 'utf8'),
+          files.get(rel.replace(/ \(missing\)$/, '')) ?? '',
+        ))
+          console.error(`   ${sentence}`);
+    }
     return stale.length === 0 ? 0 : 1;
   }
   writeFiles(model.ws.root, files);

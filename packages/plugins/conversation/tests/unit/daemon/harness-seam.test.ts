@@ -4,6 +4,7 @@ import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
+  FerretChangedPayload,
   DeliveryOutcome,
   FerretHarness,
   FerretId,
@@ -35,7 +36,6 @@ import {
   type HarnessGate,
   HARNESS_OPEN,
   INTERRUPT_UNAVAILABLE,
-  NOT_READY_SENTENCES,
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
@@ -238,12 +238,14 @@ async function conversation(
     readonly enterStanding?: CallStanding;
     /** Plugin ids that need the conversation port and nothing else, so `apiFor(id)` is what the kernel binds for them. */
     readonly consumers?: readonly string[];
+    /** The state a daemon that ran before this one left on disk: the queue and the ledger a restart finds again. */
+    readonly state?: ReturnType<typeof memoryStatePort>;
   } = {},
 ) {
   ferrets.add({ id: F1, state: 'working', ...f1 });
   ferrets.add({ id: CALLER, name: LEAD_NAME, state: 'working' });
   const acted: string[] = [];
-  const base = memoryStatePort(CONVERSATION_STATE);
+  const base = options.state ?? memoryStatePort(CONVERSATION_STATE);
   /** Set to make every appended line fail (the send ledger appends each accept, settle and withdrawal). */
   const writes: { fail: boolean; onLines?: (() => void) | undefined } = { fail: false };
   const state: typeof base = {
@@ -290,12 +292,14 @@ async function conversation(
     },
   } as typeof served;
   /** The send routes are the Mailbox's now: a test that stamps a standing on one wraps the Mailbox's half. */
+  const half: { mailbox?: ReturnType<NonNullable<typeof mailboxDaemon.build>> } = {};
   const mailbox = {
     ...mailboxDaemon,
     build: (ctx: Parameters<NonNullable<typeof mailboxDaemon.build>>[0]) => {
       const build = mailboxDaemon.build;
       if (build === undefined) throw new Error('the mailbox daemon half has no build');
       const built = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct() } });
+      half.mailbox = built;
       const stamped = [
         [SEND_ROUTE, options.sendStanding],
         [ENTER_ROUTE, options.enterStanding],
@@ -336,6 +340,8 @@ async function conversation(
     clock,
     asking,
     writes,
+    /** Ferrets saying one of its ferrets changed: what the Mailbox's `ferret.changed` taker is handed. */
+    changed: (payload: FerretChangedPayload) => half.mailbox?.hooks?.['ferret.changed']?.(payload),
     // The Warden's view: the one consumer that may press the composer, a send's Enter and cancel, and speak as itself.
     api: () => host.provided(ConversationPort, WARDEN),
     // Any other plugin's view of the same Conversation.
@@ -345,8 +351,26 @@ async function conversation(
 
 /** The sends a ferret still holds: a refusal before any key leaves only a withdrawn tombstone, which this leaves out. */
 const live = async (
-  api: () => { sends(ferret: FerretId): Promise<{ sends: readonly { withdrawn?: boolean | undefined }[] }> },
+  api: () => {
+    sends(ferret: FerretId): Promise<{ sends: readonly { sendId: string; withdrawn?: boolean | undefined }[] }>;
+  },
 ) => (await api().sends(F1)).sends.filter(row => row.withdrawn !== true);
+
+/**
+ * Lets the driven clock run in the queue's own steps, so every look it schedules on the way is taken. A ferret's `action`
+ * is held a minute to ride with others, and an `fyi` up to ten, so a peer's message is typed only after that time has passed.
+ */
+const passed = async (clock: { advance(by: number): Promise<void> }, ms = 60_000): Promise<void> => {
+  for (let gone = 0; gone < ms; gone += 5_000) {
+    await clock.advance(5_000);
+    for (let index = 0; index < 10; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  }
+};
+
+/** Every distinct (ferret, caller) the seam was opened for: the mailbox looks before it types, so a send opens it twice. */
+const opened = (ferrets: HarnessFerrets) => [
+  ...new Map(ferrets.opens.map(open => [`${open.ferret}/${open.caller}`, open])).values(),
+];
 
 const send = async (
   host: Awaited<ReturnType<typeof conversation>>['host'],
@@ -408,7 +432,7 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
     await host.stop();
   });
 
-  test('no pane: 409 send_refused saying to revive it; the record is taken back so the id may start over', async () => {
+  test('no pane: 409 send_refused saying to revive it; the message is failed in the mailbox and a fresh id starts over', async () => {
     const { host, ferrets, api } = await conversation();
     ferrets.script.deliver = async () => err({ refused: 'no_pane' });
 
@@ -418,7 +442,8 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
     expect(response.json<{ error: string }>().error).toContain('has no live agent to type into; revive it first');
     expect(await live(api)).toEqual([]);
     ferrets.script.deliver = async () => ok('turn-started');
-    expect((await send(host)).status).toBe(200);
+    // The failed message keeps its id (the mailbox is a record: the same id twice is one message); a fresh id starts over.
+    expect((await send(host, 'req-2')).status).toBe(200);
     expect(ferrets.delivered).toHaveLength(2);
     await host.stop();
   });
@@ -502,35 +527,41 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
 
 describe('the closed taxonomy of a delivery, as today’s send routes answer it', () => {
   test.each(['busy', 'dialog', 'exited'] as const)(
-    'not_ready (%s), and no queue to fall back on: 409 send_refused with its ONE fixed sentence; nothing typed, so the record is taken back',
+    'not_ready (%s), and no queue to fall back on: nothing typed, the message waits for a prompt and goes once the pane is ready',
     async why => {
-      const { host, ferrets, api } = await conversation();
+      const { host, ferrets, api, clock } = await conversation();
       ferrets.script.deliver = async () => err({ refused: 'not_ready', why });
       // A runner that cannot queue: only a busy pane is offered the queue at all.
       ferrets.script.queue = async () => err({ refused: 'plugin_unavailable' });
 
       const response = await send(host);
 
-      expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
-      expect(response.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES[why]);
+      // Nothing was typed, so the message is not refused: it waits for the pane to come to a prompt.
+      expect(response.status).toBe(200);
+      expect(response.json()).toMatchObject({
+        disposition: 'queued',
+        sendId: 'req-1',
+        waitReason: why === 'exited' ? 'stopped' : why,
+      });
       expect(await live(api)).toEqual([]);
       expect(ferrets.queued).toEqual(why === 'busy' ? ['hello there'] : []);
-      // The id may start over once the pane is ready.
+      // Once the pane is ready it is typed, under the same id, once.
       ferrets.script.deliver = async () => ok('turn-started');
-      expect((await send(host)).status).toBe(200);
+      await passed(clock, 65_000);
+      expect((await live(api)).map(row => row.sendId)).toEqual(['req-1']);
       await host.stop();
     },
   );
 
-  test('composer_occupied: 409 composer_occupied with the person’s draft in the body; nothing typed, record taken back', async () => {
+  test('composer_occupied: the message waits on the person’s draft; nothing typed, record taken back', async () => {
     const { host, ferrets, api } = await conversation();
     ferrets.script.deliver = async () => err({ refused: 'composer_occupied', draft: 'half a thought' });
 
     const response = await send(host);
 
-    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'composer_occupied']);
-    expect(response.json<{ draft?: string }>().draft).toBe('half a thought');
-    expect(response.json<{ error: string }>().error).toContain('already holds unsent text ("half a thought")');
+    // A person's text in the box is a reason to wait, not to refuse: the message is kept and goes when the box is clear.
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', fate: 'accepted', waitReason: 'draft' });
     expect(await live(api)).toEqual([]);
     await host.stop();
   });
@@ -556,13 +587,13 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     await host.stop();
   });
 
-  test('composer_unreadable from the Warden is still refused and taken back: its sweep re-plans its own', async () => {
+  test('composer_unreadable from the Warden waits in the mailbox: nothing is kept untyped for the tracker', async () => {
     const { host, ferrets, api } = await conversation();
     ferrets.script.deliver = async () => err({ refused: 'composer_unreadable' });
 
     const sent = await api().send(F1, { kind: 'warden' }, { message: 'nudge', sendId: 'w-1' });
 
-    expect(sent).toMatchObject({ ok: false, error: { code: 'send_refused' } });
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'unreadable' } });
     expect(await live(api)).toEqual([]);
     await host.stop();
   });
@@ -602,9 +633,6 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
   });
 
   test.each<[string, HarnessDeliveryFailure, string]>([
-    // A busy pane goes to the queue (its own describe); a dialog is the not_ready that is answered at once.
-    ['not_ready', { refused: 'not_ready', why: 'dialog' }, 'send_refused'],
-    ['composer_occupied', { refused: 'composer_occupied', draft: 'mine' }, 'composer_occupied'],
     ['unconfirmed', { unconfirmed: true, stranded: false }, 'send_unconfirmed'],
     ['held', { refused: 'held' }, 'held'],
   ])('the port answers %s with the route’s code', async (_name, failure, code) => {
@@ -616,6 +644,23 @@ describe('the closed taxonomy of a delivery, as today’s send routes answer it'
     expect(sent).toMatchObject({ ok: false, error: { code } });
     await host.stop();
   });
+
+  test.each<[string, HarnessDeliveryFailure, string]>([
+    // A busy pane goes to the queue (its own describe); a dialog and a person's draft are reasons to wait, not to refuse.
+    ['not_ready', { refused: 'not_ready', why: 'dialog' }, 'dialog'],
+    ['composer_occupied', { refused: 'composer_occupied', draft: 'mine' }, 'draft'],
+  ])(
+    'the port keeps the message when the pane answers %s, and says it waits on %s',
+    async (_name, failure, waitReason) => {
+      const { host, ferrets, api } = await conversation();
+      ferrets.script.deliver = async () => err(failure);
+
+      const sent = await api().send(F1, { kind: 'owner' }, { message: 'nudge', sendId: 's-1' });
+
+      expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason } });
+      await host.stop();
+    },
+  );
 
   test('the port’s retry of an unconfirmed send answers send_unconfirmed again and types nothing', async () => {
     const { host, ferrets, api } = await conversation();
@@ -772,25 +817,26 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
     await host.stop();
   });
 
-  test('the queue refused before a key (a draft in the way): 409 composer_occupied, the record taken back', async () => {
+  test('the queue refused before a key (a draft in the way): the message waits on the draft, the record taken back', async () => {
     const { host, ferrets, api } = await conversation();
     await busy(ferrets, async () => err({ refused: 'composer_occupied', draft: 'half a thought' }));
 
     const response = await send(host);
 
-    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'composer_occupied']);
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', waitReason: 'draft' });
     expect(await live(api)).toEqual([]);
     await host.stop();
   });
 
-  test('the queue is tried ONCE: a queue that finds the pane busy too is the busy refusal, not a second try', async () => {
+  test('the queue is tried ONCE: a queue that finds the pane busy too leaves the message waiting on busy, not a second try', async () => {
     const { host, ferrets, api } = await conversation();
     await busy(ferrets, async () => err({ refused: 'not_ready', why: 'busy' }));
 
     const response = await send(host);
 
-    expect([response.status, response.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
-    expect(response.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES.busy);
+    expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', waitReason: 'busy' });
     expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
     expect(await live(api)).toEqual([]);
     await host.stop();
@@ -810,7 +856,7 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
   });
 
   test('a peer’s send to a working lead is queued under its banner, through the port', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, ferrets, api, clock } = await conversation();
     await busy(ferrets, async () => ok('held'));
 
     const sent = await api().send(
@@ -819,20 +865,25 @@ describe('a send to a ferret still working on its turn goes to the harness’s o
       { message: 'done: abc123', sendId: 's-1', label: 'action' },
     );
 
-    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', fate: 'queued' } });
+    // A ferret's action is held a minute in the mailbox, then put in the working lead's own queue.
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', fate: 'accepted' } });
+    await passed(clock);
     expect(ferrets.queued).toEqual([`${banner('message', 'action')}done: abc123`]);
     await host.stop();
   });
 
-  test.each(['dialog', 'exited'] as const)('not_ready (%s) is never queued', async why => {
-    const { host, ferrets } = await conversation();
-    ferrets.script.deliver = async () => err({ refused: 'not_ready', why });
-    ferrets.script.queue = async () => ok('held');
+  test.each(['dialog', 'exited'] as const)(
+    'not_ready (%s) is never queued: the message waits for a prompt',
+    async why => {
+      const { host, ferrets } = await conversation();
+      ferrets.script.deliver = async () => err({ refused: 'not_ready', why });
+      ferrets.script.queue = async () => ok('held');
 
-    expect((await send(host)).status).toBe(409);
-    expect(ferrets.queued).toEqual([]);
-    await host.stop();
-  });
+      expect((await send(host)).status).toBe(200);
+      expect(ferrets.queued).toEqual([]);
+      await host.stop();
+    },
+  );
 });
 
 describe('ruling #45: the queue is told WHICH send it carries, so a message that goes by file is named by its row', () => {
@@ -861,7 +912,7 @@ describe('ruling #45: the queue is told WHICH send it carries, so a message that
   const long = `FIXTURE long report\n${'x'.repeat(4_000)}`;
 
   test('the send row’s id reaches the harness queue, exactly, for a request id and for a minted one', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, ferrets, api, clock } = await conversation();
     ferrets.script.deliver = async () => err({ refused: 'not_ready', why: 'busy' });
     ferrets.script.queue = async () => ok('held');
 
@@ -869,6 +920,7 @@ describe('ruling #45: the queue is told WHICH send it carries, so a message that
     // No request id on the call: the port mints the send's id, and that SAME id is the one the queue is handed.
     const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'minted' });
     expect(sent).toMatchObject({ ok: true });
+    await passed(clock);
 
     const rowIds = (await api().sends(F1)).sends.map(row => row.sendId);
     expect(ferrets.queueOptions).toEqual(rowIds.map(sendId => ({ sendId })));
@@ -900,26 +952,25 @@ describe('ruling #45: the queue is told WHICH send it carries, so a message that
     await host.stop();
   });
 
-  test('a long payload whose file cannot be written: the busy refusal, NOTHING typed, the record taken back, and the same id may go again', async () => {
-    const { host, ferrets, api } = await conversation();
+  test('a long payload whose file cannot be written: the message waits on busy, NOTHING typed, the record taken back, and it goes once the write works', async () => {
+    const { host, ferrets, api, clock } = await conversation();
     const files = new Map<string, string>();
     const typed: string[] = [];
     byFile(ferrets, files, typed, false);
 
     const refused = await send(host, 'req-long', 'f1', { message: long });
 
-    expect([refused.status, refused.json<{ code: string }>().code]).toEqual([409, 'send_refused']);
-    expect(refused.json<{ error: string }>().error).toBe(NOT_READY_SENTENCES.busy);
+    expect(refused.status).toBe(200);
+    expect(refused.json()).toMatchObject({ disposition: 'queued', waitReason: 'busy' });
     expect(typed).toEqual([]);
     expect(files.size).toBe(0);
     expect(await live(api)).toEqual([]);
     // Tried ONCE: a second queue attempt would be a second chance to double-type.
     expect([ferrets.delivered.length, ferrets.queued.length]).toEqual([1, 1]);
 
-    // Nothing was typed, so the same id starts over, and now the write works.
+    // Nothing was typed, so it goes again, under the same id, once the write works.
     byFile(ferrets, files, typed);
-    const retried = await send(host, 'req-long', 'f1', { message: long });
-    expect(retried.status).toBe(200);
+    await passed(clock, 65_000);
     expect(typed).toEqual([POINTER('req-long')]);
     await host.stop();
   });
@@ -945,16 +996,17 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     const sent = await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
 
     expect(sent.ok).toBe(true);
-    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
     await host.stop();
   });
 
   test('the port’s send by a ferret is ledgered as that ferret’s message, not the owner’s', async () => {
-    const { host, api } = await conversation();
+    const { host, api, clock } = await conversation();
 
     await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
     await api().send(F1, { kind: 'owner' }, { message: 'hi', sendId: 's-2' });
 
+    await passed(clock);
     const rows = (await api().sends(F1)).sends;
     expect(rows.map(row => [row.sendId, row.senderKind, row.from])).toEqual(
       expect.arrayContaining([
@@ -970,7 +1022,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
 
     await api().send(F1, { kind: 'owner' }, { message: 'hi', sendId: 's-1' });
 
-    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
     await host.stop();
   });
 
@@ -986,7 +1038,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
     expect(sent.ok).toBe(true);
     // Bare: no peer banner, so the agent does not read it as a teammate, and no sender id is named.
     expect(ferrets.delivered).toEqual([{ text: 'are you stuck?' }]);
-    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
       ['s-w', 'daemon', undefined],
     ]);
@@ -1148,7 +1200,7 @@ describe('a send has no target rule: no caller reaches Ferrets, and a ferret is 
 
     await send(host);
 
-    expect(ferrets.opens).toEqual([{ ferret: F1, caller: undefined }]);
+    expect(opened(ferrets)).toEqual([{ ferret: F1, caller: undefined }]);
     await host.stop();
   });
 });
@@ -1170,11 +1222,17 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
 
   // Gate's standing for a ferret's own `fys_` token: `ferret:<id>` and the ferret credential, as admission stamps them.
   test('a ferret’s `fy send` through the route: 200, delivered once, under its banner and label', async () => {
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
+    const { host, clock, ferrets, api } = await conversation(
+      undefined,
+      OPEN,
+      {},
+      { sendStanding: ferretStanding(CALLER) },
+    );
 
     const response = await send(host, 'req-cli', 'f1', CLI_BODY, asFerret(CALLER));
 
     expect(response.status).toBe(200);
+    await passed(clock);
     expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from, row.fromName])).toEqual([
       ['req-cli', 'agent', CALLER, LEAD_NAME],
@@ -1183,9 +1241,9 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
   });
 
   test.each(['action', 'blocker'] as const)(
-    'a peer’s %s label types at once, as the seam types (the port)',
+    'a peer’s %s label is typed under its banner (the port; an action is held a minute to batch)',
     async label => {
-      const { host, ferrets, api } = await conversation();
+      const { host, clock, ferrets, api } = await conversation();
 
       const sent = await api().send(
         F1,
@@ -1194,6 +1252,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
       );
 
       expect(sent.ok).toBe(true);
+      if (label === 'action') await passed(clock);
       expect(ferrets.delivered).toEqual([{ text: `${banner('message', label)}psst` }]);
       expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
         ['s-1', 'agent', CALLER],
@@ -1203,7 +1262,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
   );
 
   test('the port’s send with `now: false`, `replyExpected: false` and an action label goes', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
 
     const sent = await api().send(
       F1,
@@ -1212,6 +1271,7 @@ describe('the CLI’s own send body goes: `now: false` and a label are not extra
     );
 
     expect(sent.ok).toBe(true);
+    await passed(clock);
     expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}psst` }]);
     await host.stop();
   });
@@ -1239,16 +1299,23 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
   });
 
   test('the port: a send with no label is typed under the plain banner', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
 
     await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'psst', sendId: 's-1' });
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message')}psst` }]);
+    await passed(clock);
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}psst` }]);
     await host.stop();
   });
 
   test('the ROUTE: a ferret’s own credential (Gate’s `ferret:<id>` standing) types the CLI body under the banner, label and all', async () => {
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
+    const { host, clock, ferrets, api } = await conversation(
+      undefined,
+      OPEN,
+      {},
+      { sendStanding: ferretStanding(CALLER) },
+    );
 
     const response = await send(
       host,
@@ -1259,6 +1326,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     );
 
     expect(response.status).toBe(200);
+    await passed(clock);
     expect(ferrets.delivered).toEqual([
       {
         text: '[message · action from ferret kamila (session lead) — not from the owner] To reply: fy send kamila "<reply>"\nhello there',
@@ -1307,25 +1375,28 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     await host.stop();
   });
 
-  test('the ROUTE: a warden’s send is no peer’s — typed bare, ledgered as the person, its label not honoured', async () => {
+  test('the ROUTE: a warden’s send is no peer’s — typed bare, ledgered as the daemon’s, its label not honoured', async () => {
     const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: wardenStanding(CALLER) });
 
     await send(host, 'req-wdn', 'f1', { message: 'hello there', now: false, label: 'action' });
 
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    // The Warden's token names no ferret: the daemon's words, never the person's (its lane is the daemon's, not the owner's).
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
-      ['req-wdn', 'human', undefined],
+      ['req-wdn', 'daemon', undefined],
     ]);
     await host.stop();
   });
 
   test('the ROUTE: a ferret credential names the sender before the actor does, so an actor cannot be moved to forge one', async () => {
     const standing: CallStanding = { ...ferretStanding(CALLER), actor: ferretActor(ferretId('someone-else')) };
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: standing });
+    const { host, clock, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: standing });
 
     await send(host, 'req-frg', 'f1', { message: 'hello there' }, asFerret(CALLER));
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message')}hello there` }]);
+    await passed(clock);
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action')}hello there` }]);
     expect((await api().sends(F1)).sends.map(row => row.from)).toEqual([CALLER]);
     await host.stop();
   });
@@ -1343,19 +1414,21 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
-      ['req-old', 'human', undefined],
+      ['req-old', 'daemon', undefined],
     ]);
     await host.stop();
   });
 
   test('the app reads the typed text back as FROM that ferret (parsePeerEnvelope round-trip)', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
 
     await api().send(
       F1,
       { kind: 'ferret', ferret: CALLER },
       { message: 'ship it\nthen tell me', sendId: 's-1', label: 'action' },
     );
+
+    await passed(clock);
 
     const typed = ferrets.delivered[0]?.text ?? '';
     expect(parsePeerEnvelope(typed)).toMatchObject({
@@ -1366,30 +1439,36 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
   });
 
   test('the answer a recipient is parked on is typed as a reply', async () => {
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {
+    const { host, clock, ferrets, api } = await conversation(undefined, OPEN, {
       waiting: { since: '2026-11-08T08:00:00.000Z' as Instant, peer: CALLER, peerName: LEAD_NAME },
     });
 
     await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'done', sendId: 's-1', label: 'action' });
+
+    await passed(clock);
 
     expect(ferrets.delivered).toEqual([{ text: `${banner('reply', 'action')}done` }]);
     await host.stop();
   });
 
   test('a sender Ferrets cannot find now is still named by its id, never typed in the owner’s voice', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
     const gone = ferretId('gone-1');
 
     await api().send(F1, { kind: 'ferret', ferret: gone }, { message: 'psst', sendId: 's-1' });
 
-    expect(ferrets.delivered).toEqual([{ text: `${banner('message', undefined, 'gone-1', 'gone-1')}psst` }]);
+    await passed(clock);
+
+    expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'action', 'gone-1', 'gone-1')}psst` }]);
     await host.stop();
   });
 
   test('a ferret sending to itself is typed as the bare message', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
 
     await api().send(F1, { kind: 'ferret', ferret: F1 }, { message: 'note to self', sendId: 's-1' });
+
+    await passed(clock);
 
     expect(ferrets.delivered).toEqual([{ text: 'note to self' }]);
     await host.stop();
@@ -1421,12 +1500,21 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
   };
 
   // A label is a ferret's: the route does not honour the owner's, so the real route is called AS a ferret.
-  test('fy send --kind fyi through the real route is typed at once under its FYI banner, not refused 503', async () => {
-    const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: ferretStanding(CALLER) });
+  test('fy send --kind fyi through the real route is held for the receiver’s turn to end, then typed under its FYI banner', async () => {
+    const { host, ferrets, api, clock } = await conversation(
+      undefined,
+      OPEN,
+      {},
+      { sendStanding: ferretStanding(CALLER) },
+    );
 
     const response = await send(host, 'req-fyi', 'f1', { message: 'psst', label: 'fyi', now: false });
 
+    // An fyi never interrupts: it is held until its receiver's turn ends (ten minutes at most), then typed.
     expect(response.status).toBe(200);
+    expect(response.json()).toMatchObject({ disposition: 'queued', fate: 'accepted' });
+    expect(ferrets.delivered).toEqual([]);
+    await passed(clock, 10 * 60_000 + 5_000);
     expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate, row.senderKind])).toEqual([
       ['req-fyi', 'accepted', 'agent'],
@@ -1434,8 +1522,8 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     await host.stop();
   });
 
-  test('an fyi through the port is typed the same way', async () => {
-    const { host, ferrets, api } = await conversation();
+  test('an fyi through the port is held and typed the same way', async () => {
+    const { host, ferrets, api, clock } = await conversation();
 
     const sent = await api().send(
       F1,
@@ -1444,6 +1532,8 @@ describe('a send carrying files or an fyi label types, and a file reaches the ag
     );
 
     expect(sent).toMatchObject({ ok: true, value: { sendId: 's-1' } });
+    expect(ferrets.delivered).toEqual([]);
+    await passed(clock, 10 * 60_000 + 5_000);
     expect(ferrets.delivered).toEqual([{ text: `${banner('message', 'fyi')}psst` }]);
     await host.stop();
   });
@@ -1894,7 +1984,7 @@ describe('send path: the send-now and reply flags are carried', () => {
 
     const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
 
-    expect(sent).toMatchObject({ ok: false, error: { code: 'session_launching' } });
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'launching' } });
     expect(ferrets.stopsActive).toBe(0);
     expect(ferrets.delivered).toEqual([]);
     expect((await api().sends(F1)).sends).toEqual([]);
@@ -1908,7 +1998,7 @@ describe('send path: the send-now and reply flags are carried', () => {
 
     const sent = await api().send(F1, { kind: 'owner' }, { message: 'now!', sendId: 's-now', now: true });
 
-    expect(sent).toMatchObject({ ok: false, error: { code: 'input_pending' } });
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'unreadable' } });
     expect(ferrets.stopsActive).toBe(0);
     expect((await api().sends(F1)).sends).toEqual([]);
     await host.stop();
@@ -1967,7 +2057,7 @@ describe('send path: the send-now and reply flags are carried', () => {
   });
 
   test('a reply request from a ferret is typed under the question banner, and a plain one under the message banner', async () => {
-    const { host, ferrets, api } = await conversation();
+    const { host, clock, ferrets, api } = await conversation();
 
     await api().send(
       F1,
@@ -1980,9 +2070,15 @@ describe('send path: the send-now and reply flags are carried', () => {
       { message: 'fyi only', sendId: 's-m', replyExpected: false },
     );
 
-    expect(ferrets.delivered.map(entry => entry.text)).toEqual([
-      `[question from ferret ${LEAD_NAME} (session lead) — not from the owner] ${LEAD_NAME} is waiting for your answer. Reply with: fy send ${LEAD_NAME} "<reply>"\nwhat do you think?`,
-      `${banner('message')}fyi only`,
+    await passed(clock);
+
+    // A question is a blocker, which goes at once; the plain note is an action, held a minute. (The tracker's notice that the
+    // question could not be proven, in a test with no transcript, is not what is asked about.)
+    expect(
+      ferrets.delivered.map(entry => entry.text).filter(text => !text.startsWith('Ferretry could not confirm')),
+    ).toEqual([
+      `[question · blocker from ferret ${LEAD_NAME} (session lead) — not from the owner] ${LEAD_NAME} is waiting for your answer. Reply with: fy send ${LEAD_NAME} "<reply>"\nwhat do you think?`,
+      `${banner('message', 'action')}fyi only`,
     ]);
     await host.stop();
   });
@@ -2021,7 +2117,7 @@ describe('m2 one lane per ferret: typing, the acts and an interrupt press keys o
     await host.stop();
   });
 
-  test('m2 a send Ferrets refuses as dialog is refused and frees the lane: the interrupt behind it waits for that answer, then runs', async () => {
+  test('m2 a send Ferrets refuses as dialog is kept waiting and frees the lane: the interrupt behind it waits for that answer, then runs', async () => {
     const ferrets = new HarnessFerrets();
     // Ferrets answers `not_ready` `dialog` the moment its look shows a permission prompt (its own test); here the answer
     // is held on a deferred so the order is visible: the lane is held until Ferrets answers, and freed by the refusal.
@@ -2043,7 +2139,7 @@ describe('m2 one lane per ferret: typing, the acts and an interrupt press keys o
 
     answer();
     const [sent] = await Promise.all([sending, stopping]);
-    expect(sent.ok).toBe(false);
+    expect(sent).toMatchObject({ ok: true, value: { waitReason: 'dialog' } });
     expect(ferrets.interrupts).toBe(1);
     await host.stop();
   });
@@ -2381,10 +2477,16 @@ describe('the port binds the Warden claim to the consumer the kernel built it fo
 
     const sent = await w.apiFor('warden').send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-w' });
     expect(sent.ok).toBe(true);
-    expect((await w.apiFor('warden').sendRecord(F1, 's-w'))?.senderKind).toBe('daemon');
+    // The world's box holds a person's draft, so both messages wait in the mailbox, each under who sent it.
+    expect((await w.apiFor('warden').queue(F1)).messages.map(entry => [entry.id, entry.sender])).toEqual([
+      ['s-w', 'daemon'],
+    ]);
 
     expect((await w.apiFor('board').send(F1, { kind: 'owner' }, { message: 'hi', sendId: 's-o' })).ok).toBe(true);
-    expect((await w.apiFor('board').sendRecord(F1, 's-o'))?.senderKind).toBe('human');
+    expect((await w.apiFor('board').queue(F1)).messages.map(entry => [entry.id, entry.sender])).toEqual([
+      ['s-w', 'daemon'],
+      ['s-o', 'human'],
+    ]);
     await w.host.stop();
   });
 
@@ -2712,29 +2814,29 @@ describe('a send to a box that cannot be read is kept and delivered once it read
     );
 
     expect(owners.json()).toMatchObject({ fate: 'accepted', waitReason: 'unreadable' });
-    expect(agents).toMatchObject({ ok: true, value: { fate: 'accepted', waitReason: 'unreadable' } });
+    // A ferret's action is held a minute to batch, then meets the same unreadable box and is kept, as the owner's was.
+    expect(agents).toMatchObject({ ok: true, value: { disposition: 'queued', fate: 'accepted' } });
+    await pass(clock, 60_000);
     const kept = (await api().sends(F1)).sends.filter(row => row.withdrawn !== true);
-    expect(kept.map(row => [row.sendId, row.fate])).toEqual([
-      ['owner-1', 'accepted'],
-      ['lead-1', 'accepted'],
-    ]);
+    // One thing is in flight per ferret: the owner's kept message is the one open, and the lead's goes behind it.
+    expect(kept.map(row => [row.sendId, row.fate])).toEqual([['owner-1', 'accepted']]);
 
     // Still unreadable: tried again, nothing typed.
     await pass(clock, 15_000);
     expect(ferrets.delivered.length).toBeGreaterThan(2);
     const tries = ferrets.delivered.length;
 
-    // The frame reads clear: each message is typed once more — this time it lands — and never again.
+    // The frame reads clear: the owner's message is typed once more — this time it lands — and never again. The lead's
+    // goes behind it (one thing in flight per ferret) and is not typed while the owner's is still unproven.
     readable = true;
     await pass(clock, 15_000);
     const typed = ferrets.delivered.slice(tries).map(delivery => delivery.text);
     expect(typed.filter(text => text === 'from the owner')).toHaveLength(1);
-    expect(typed.filter(text => text.endsWith('from the lead'))).toHaveLength(1);
-    // Never typed again once it landed (the fake keeps no transcript, so the lead's typed send is later said
-    // unconfirmed to it — that notice is the only other thing typed).
+    expect(typed.filter(text => text.endsWith('from the lead'))).toHaveLength(0);
+    // Never typed again once it landed (the fake keeps no transcript, so the owner's typed send stays unproven).
     await pass(clock, 30_000);
     const after = ferrets.delivered.slice(tries).map(delivery => delivery.text);
-    expect(after.filter(text => text === 'from the owner' || text.endsWith('from the lead'))).toHaveLength(2);
+    expect(after.filter(text => text === 'from the owner')).toHaveLength(1);
     await host.stop();
   });
 
@@ -2758,7 +2860,7 @@ describe('a send to a box that cannot be read is kept and delivered once it read
       });
 
     await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'are you there', sendId: 'lead-1' });
-    await pass(clock, 125_000);
+    await pass(clock, 190_000);
 
     const [row] = (await api().sends(F1)).sends.filter(entry => entry.sendId === 'lead-1');
     expect(row).toMatchObject({ fate: 'accepted' });
@@ -2777,6 +2879,108 @@ describe('a send to a box that cannot be read is kept and delivered once it read
     expect(ferrets.delivered.length).toBeGreaterThan(tries);
     await host.stop();
   }, 30_000);
+});
+
+describe('the mailbox is armed at boot, told when a ferret changes, and stopped with the daemon', () => {
+  const settled = async (): Promise<void> => {
+    for (let index = 0; index < 20; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const occupied = (ferrets: HarnessFerrets) => {
+    ferrets.script.deliver = async () => err({ refused: 'composer_occupied', draft: 'half a thought' });
+  };
+
+  test('a message that waits on a draft is typed the moment its ferret changes, not at the next periodic look', async () => {
+    const { host, ferrets, api, clock, changed } = await conversation();
+    occupied(ferrets);
+
+    const sent = await api().send(F1, { kind: 'owner' }, { message: 'when you can', sendId: 's-1' });
+    expect(sent).toMatchObject({ ok: true, value: { disposition: 'queued', waitReason: 'draft' } });
+    ferrets.script.deliver = async () => ok('turn-started');
+    const waited = clock.now();
+    changed({ ferret: F1, state: 'idle', change: 'state' });
+    await settled();
+
+    // No periodic look was waited for: the clock has not moved, and the message is typed.
+    expect(clock.now()).toBe(waited);
+    expect(ferrets.delivered.map(entry => entry.text)).toContain('when you can');
+    expect((await live(api)).map(row => row.sendId)).toEqual(['s-1']);
+    await host.stop();
+  });
+
+  test('a queued send is typed exactly once: the deliverer’s own queue entry is not read as a repeat of itself', async () => {
+    const { host, ferrets, api, changed } = await conversation();
+    occupied(ferrets);
+
+    await api().send(F1, { kind: 'owner' }, { message: 'type me once', sendId: 's-once' });
+    // Refused for the draft: accepted and on disk, never typed.
+    expect(await live(api)).toEqual([]);
+    ferrets.script.deliver = async () => ok('turn-started');
+    const attempts = ferrets.delivered.length;
+    changed({ ferret: F1, state: 'idle', change: 'state' });
+    await settled();
+
+    // Dropping `queued` from the repeat check makes the queue's own entry look like a repeat: nothing typed, yet marked delivered.
+    expect(ferrets.delivered.slice(attempts).map(entry => entry.text)).toEqual(['type me once']);
+    expect((await live(api)).map(row => row.sendId)).toEqual(['s-once']);
+    await host.stop();
+  });
+
+  test('who sent a message decides its lane: the Warden is the daemon’s, a ferret is a ferret’s, never the owner’s', async () => {
+    const { host, ferrets, api } = await conversation();
+    occupied(ferrets);
+
+    await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-warden' });
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'from a peer', sendId: 's-peer' });
+    await api().send(F1, { kind: 'owner' }, { message: 'from me', sendId: 's-owner' });
+
+    const lanes = (await api().queue(F1)).messages.map(entry => [entry.id, entry.lane]);
+    expect(lanes).toEqual([
+      ['s-warden', 'ferretry'],
+      ['s-peer', 'action'],
+      ['s-owner', 'owner'],
+    ]);
+    await host.stop();
+  });
+
+  test('a ferret that changes with nothing waiting for it reads no screen', async () => {
+    const { host, ferrets, changed } = await conversation();
+
+    changed({ ferret: F1, state: 'idle', change: 'state' });
+    await settled();
+
+    expect(ferrets.opens).toEqual([]);
+    await host.stop();
+  });
+
+  test('a message accepted before the daemon stopped is delivered after boot: nothing is lost', async () => {
+    const first = await conversation();
+    occupied(first.ferrets);
+    await first.api().send(F1, { kind: 'owner' }, { message: 'before the crash', sendId: 's-1' });
+    // Accepted and on disk, never typed: the box was never free.
+    expect(await live(first.api)).toEqual([]);
+    expect((await first.api().queue(F1)).messages.map(entry => [entry.id, entry.state])).toEqual([['s-1', 'queued']]);
+    await first.host.stop();
+
+    // A new daemon over the same files, its box now clear: arming at boot looks at every ferret once.
+    const second = await conversation(undefined, OPEN, {}, { state: first.state });
+    await settled();
+
+    expect(second.ferrets.delivered.map(entry => entry.text)).toEqual(['before the crash']);
+    expect((await live(second.api)).map(row => row.sendId)).toEqual(['s-1']);
+    await second.host.stop();
+  });
+
+  test('stopping the daemon leaves no timer of the queue running', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    occupied(ferrets);
+
+    await api().send(F1, { kind: 'owner' }, { message: 'waits', sendId: 's-1' });
+    // The message waits on a draft, so the deliverer has asked to be woken to look again.
+    expect(clock.pending()).toBeGreaterThan(0);
+    await host.stop();
+
+    expect(clock.pending()).toBe(0);
+  });
 });
 
 /**
@@ -2798,7 +3002,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   };
   const AS_F1 = asFerret('f1');
   const GEN = 'gen-1';
-  const SENT = `${banner('message')}ship the report`;
+  const SENT = `${banner('message', 'blocker')}ship the report`;
   const LEAD = { kind: 'ferret', ferret: CALLER } as const;
   const AT = '2026-11-08T09:00:00.500Z';
   /** What the Claude plugin reads out of the transcript: the harness's receipt, then the delivery. */
@@ -2833,13 +3037,13 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     const world = await conversation();
     const { host, ferrets, api, clock } = world;
     await poll(host);
-    await api().send(F1, LEAD, { message: 'first', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'first', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
     ferrets.reviewEntries = [unrelated];
     await pass(clock, 11_000);
     await poll(host);
-    await api().send(F1, LEAD, { message: 'second', sendId: 'lead-2' });
+    await api().send(F1, LEAD, { message: 'second', sendId: 'lead-2', label: 'blocker' });
     await poll(host);
     expect(await claim(host, 'lead-2')).toMatchObject({
       data: { claimed: true, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
@@ -2853,15 +3057,15 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
       // The first expires at 12s (its tracker look lands a second later): the lane is broken and the first is typed; the
       // second's grant (11s) is still live, so it is neither typed nor read as never claimed.
       await pass(clock, 2_000);
-      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message', 'blocker')}first`]);
       expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'accepted' });
       // The second waits out its own grant + write budget + receipt window (11s + 2s + 10s), then is typed exactly once.
       await pass(clock, 9_000);
-      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message', 'blocker')}first`]);
       await pass(clock, 1_000);
       expect(ferrets.delivered.map(entry => entry.text)).toEqual([
-        `${banner('message')}first`,
-        `${banner('message')}second`,
+        `${banner('message', 'blocker')}first`,
+        `${banner('message', 'blocker')}second`,
       ]);
       expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
     } finally {
@@ -2879,14 +3083,14 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
           ...receipt,
           id: 'queue-operation:2',
           at: '2026-11-08T09:00:12.500Z',
-          text: `${banner('message')}second`,
+          text: `${banner('message', 'blocker')}second`,
           data: { ...receipt.data, channelSendId: 'lead-2' },
         },
         {
           ...delivery,
           id: 'u-2',
           at: '2026-11-08T09:00:12.700Z',
-          text: `${banner('message')}second`,
+          text: `${banner('message', 'blocker')}second`,
           data: { channelSendId: 'lead-2' },
         },
       ];
@@ -2894,7 +3098,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
       // The look at the second send is its own deadline (11s + 2s + 10s): the receipt is read then, and it is delivered.
       await pass(clock, 12_000);
       expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'delivered' });
-      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message', 'blocker')}first`]);
     } finally {
       await host.stop();
     }
@@ -2903,8 +3107,8 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('REGRESSION: both identical channel sends require and receive their own user proof', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2', label: 'blocker' });
     await poll(host);
     await claim(host, 'lead-1');
     await claim(host, 'lead-2');
@@ -2929,14 +3133,16 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
 
-    const sent = await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    const sent = await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
 
     // The answer names the channel (so the sender is never told something was typed), and so does a repeat of the same send.
     expect(sent).toMatchObject({
       ok: true,
       value: { disposition: 'sent', fate: 'accepted', sendId: 'lead-1', path: 'channel' },
     });
-    expect(await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' })).toMatchObject({
+    expect(
+      await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' }),
+    ).toMatchObject({
       ok: true,
       value: { sendId: 'lead-1', path: 'channel' },
     });
@@ -2959,7 +3165,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a receipt alone (a busy ferret) makes it queued and it is still never typed', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     await claim(host, 'lead-1');
     ferrets.reviewEntries = [unrelated, receipt];
@@ -2974,7 +3180,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a CLAIMED message with no receipt in the window marks the channel broken and is typed ONCE; nothing more is channelled', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     // The server claimed (and wrote) it, but Claude refused the channel: no enqueue line ever appears.
     expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
@@ -2988,8 +3194,8 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     // The server is still polling (it does not know Claude dropped the channel): the broken channel routes nothing.
     await poll(host);
-    await api().send(F1, LEAD, { message: 'second thing', sendId: 'lead-2' });
-    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT, `${banner('message')}second thing`]);
+    await api().send(F1, LEAD, { message: 'second thing', sendId: 'lead-2', label: 'blocker' });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT, `${banner('message', 'blocker')}second thing`]);
     expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
     expect((await poll(host)).data).toEqual({ messages: [] });
     await host.stop();
@@ -2998,7 +3204,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('withdraw racing a delayed poll response: the late claim is refused, so exactly one transport carries the message', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     // The poll answer carrying it has LEFT the daemon, and is delayed on its way to the server.
     expect((await poll(host)).data).toEqual({ messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }] });
     ferrets.reviewEntries = [unrelated];
@@ -3017,7 +3223,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a claim from an older subscriber generation is refused once a newer server polled', async () => {
     const { host, api } = await conversation();
     await poll(host, 'old');
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host, 'old');
 
     // The server restarted: a new generation polls and is offered the unclaimed message again.
@@ -3033,7 +3239,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a fall back that cannot type (the bind failed) leaves the row on the typing path, retried and typed once when it works', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     ferrets.reviewEntries = [unrelated];
     await pass(clock, 5_000);
     // From here every try to reach the pane fails, as a failed bind or a refusal in between would.
@@ -3059,7 +3265,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a claim granted late (past the receipt window of the send) is waited out: grant + write budget + window pass before anything is typed, then it is typed ONCE', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     ferrets.reviewEntries = [unrelated];
     await pass(clock, 9_000);
@@ -3086,7 +3292,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a claim granted in the instant between the last look and the typing keeps the row on the channel: nothing is typed inside the write budget', async () => {
     const { host, ferrets, api, clock, writes } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     let racing = false;
     let granted: ReturnType<typeof claim> | undefined;
@@ -3122,8 +3328,8 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('two IDENTICAL channel sends do not share one receipt: only lead-1 was enqueued, so lead-2 is typed once and lead-1 never', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2', label: 'blocker' });
     await poll(host);
     await claim(host, 'lead-1');
     await claim(host, 'lead-2');
@@ -3141,7 +3347,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a slow receipt that shows up just before the typing means nothing is typed', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
     await poll(host);
     await claim(host, 'lead-1');
     ferrets.reviewEntries = [unrelated];
@@ -3200,7 +3406,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a ferret that is not connected is typed to, as before', async () => {
     const { host, ferrets, api } = await conversation();
 
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
 
     expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct' });
@@ -3212,7 +3418,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     const { host, api } = await conversation(ferrets, OPEN, { harness: 'codex' });
     await poll(host);
 
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1', label: 'blocker' });
 
     expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
     await host.stop();
@@ -3257,7 +3463,7 @@ describe('a send waits for a safe pane and is typed within a second of it cleari
     [
       'compacting its context',
       ok({ alive: true, dead: false, promptReady: false, activeWork: true, compacting: true }),
-      'busy',
+      'compacting',
     ],
     [
       'parked on a dialog',
@@ -3305,7 +3511,7 @@ describe('a send waits for a safe pane and is typed within a second of it cleari
     const kept = await api().send(
       F1,
       { kind: 'ferret', ferret: CALLER },
-      { message: 'ship the report', sendId: 'lead-1' },
+      { message: 'ship the report', sendId: 'lead-1', label: 'blocker' },
     );
 
     expect(kept).toMatchObject({ ok: true, value: { fate: 'accepted', waitReason: 'draft' } });
@@ -3313,7 +3519,7 @@ describe('a send waits for a safe pane and is typed within a second of it cleari
     expect(ferrets.delivered).toEqual([]);
     pane = ok({ alive: true, dead: false, promptReady: true, activeWork: false });
     await pass(clock, 1_000);
-    expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}ship the report`]);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message', 'blocker')}ship the report`]);
     await host.stop();
   });
 });

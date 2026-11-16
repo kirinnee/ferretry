@@ -6,7 +6,7 @@ import {
   FileSessionTransferTargetPlanStore,
 } from '../../../../../daemon/adapters/transfer/index.ts';
 import { type TransferPortsParts, transferPorts } from '../../../../../daemon/modules/transfer.ts';
-import { TransferPlanFiles } from '../../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../../contract/state/transfer-plan.state.ts';
 import type { TransferAttachmentStore } from '../../../../../daemon/lib/transfer/ports.ts';
 
 /**

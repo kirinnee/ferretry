@@ -37,10 +37,7 @@ export * from './subtree.ts';
 export * from './fork.ts';
 export * from './handover.ts';
 export * from './move.ts';
-export * from './handover-state.ts';
-export * from './transfer-state.ts';
 export * from './sessions-root.ts';
-export * from './move-state.ts';
 
 /**
  * The ferret view (today's session view, moved here whole): what `GET /v1/ferrets/:ferretId` describes for a reader,
@@ -57,9 +54,7 @@ export {
 } from './view/session-live.ts';
 export * from './view/session-search.ts';
 export * from './pins.ts';
-export * from './ferret-files.ts';
 export * from './session-restart.ts';
-export * from './start-requests.ts';
 export * from './worktrees.ts';
 export * from './view/event-stream.ts';
 export * from './view/runtime-control.ts';

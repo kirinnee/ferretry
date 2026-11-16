@@ -35,6 +35,8 @@ test('an edit through the port and a PATCH through the route each publish one qu
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
+  // The Mailbox looks at every ferret once at boot: let that look finish on the empty queue before messages are seeded.
+  for (let index = 0; index < 20; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
   const queued = (id: string) => ({
     v: 1 as const,
     kind: 'enqueued' as const,

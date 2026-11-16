@@ -217,6 +217,7 @@ export class QueueDeliverer {
     const polls = more || remaining.some(message => this.unsettled(message));
     const holdEndsIn = this.earliestHold(remaining, now);
     const lookMs = this.lookEvery(id, remaining, now);
+    if (this.stopped) return;
     if (polls || holdEndsIn !== undefined) {
       this.open.add(id);
       const delay = polls ? Math.min(lookMs, holdEndsIn ?? Infinity) : (holdEndsIn ?? lookMs);
@@ -309,6 +310,8 @@ export class QueueDeliverer {
    * Holding — for a reason, or behind a message still unproven — answers `false`.
    */
   private async handOverNext(id: SessionId, messages: readonly QueuedMessage[]): Promise<boolean> {
+    // Nothing waiting is nothing to read a screen for: a restart looks at every session once, and each look reads a pane.
+    if (!messages.some(message => message.state === 'queued')) return false;
     let view: DeliveryView;
     try {
       view = await this.ports.view(id);

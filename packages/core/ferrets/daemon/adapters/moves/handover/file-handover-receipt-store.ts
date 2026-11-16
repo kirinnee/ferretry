@@ -1,6 +1,6 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { SessionHandoverReceiptSchema } from '../../../../contract/handover.ts';
-import { HandoverFiles } from '../../../../contract/handover-state.ts';
+import { HandoverFiles } from '../../../../contract/state/handover.state.ts';
 import { handoverPlanId, isTerminalHandoverPhase } from '../../../lib/moves/handover/policy.ts';
 import { SessionIdSchema } from '../../../lib/session-id.ts';
 import {
