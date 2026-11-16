@@ -302,6 +302,134 @@ describe('daemon setup', () => {
     expect(await runDaemonSetup(deps, flags)).toBe(1);
     expect(warn).toEqual(['Account changes are switched off.']);
   });
+
+  test('V-0241 says an executed change in its own words and exits 0', async () => {
+    const executed = { outcome: 'executed', executor: 'setup', summary: 'Imported claude-default.' };
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: scan(), [ROUTE.apply]: executed });
+    const { deps, report, warn } = setup(fake.client, person('y', 'n', '').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(0);
+    expect(report).toContain('Imported claude-default.');
+    expect(warn).toEqual([]);
+  });
+
+  test('V-0241 exits non-zero and says so when the change did not apply as a setup import', async () => {
+    const other = { outcome: 'login-changed', result: 'applied' };
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: scan(), [ROUTE.apply]: other });
+    const { deps, warn } = setup(fake.client, person('y', 'n', '').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(1);
+    expect(warn).toEqual(['The change did not apply as a setup import.']);
+  });
+
+  test('V-0241 exits non-zero when it saved but the shared history could not be set up', async () => {
+    const partial = {
+      outcome: 'applied',
+      apply: {
+        outcome: 'committed-with-history-failure',
+        failedHarness: 'claude-code',
+        reason: 'permission denied',
+        committed: {
+          accountCount: 1,
+          operationCount: 3,
+          manifestPath: '/fy/m.json',
+          manifest: { version: 1, generatedAt: '2026-11-16T00:00:00.000Z', accounts: [] },
+          prunedWrappers: [],
+          sharedHistory: [],
+        },
+      },
+    };
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: scan(), [ROUTE.apply]: partial });
+    const { deps, warn } = setup(fake.client, person('y', 'n', '').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(1);
+    expect(warn).toEqual(['Saved, but the shared claude-code history could not be set up: permission denied']);
+  });
+
+  test('V-0241 says when a tool cannot be installed from here, and names the command when an install fails', async () => {
+    const missing = scan({
+      tools: [
+        { harness: 'claude-code', label: 'Claude Code', installed: true },
+        {
+          harness: 'codex',
+          label: 'Codex',
+          installed: false,
+          install: { kind: 'no-package-manager', reason: 'No npm was found.', manualCommand: 'npm i -g @openai/codex' },
+        },
+      ],
+      harnesses: [harness('claude-code', true), harness('codex', false)],
+    } as Partial<SetupScan>);
+    const fake = daemon({
+      [ROUTE.machine]: machine(),
+      [ROUTE.scan]: [missing, scan()],
+      [ROUTE.install]: {
+        outcomes: [
+          {
+            harness: 'codex',
+            outcome: 'failed',
+            cause: 'no-package-manager',
+            reason: 'No npm was found.',
+            manualCommand: 'npm i -g @openai/codex',
+          },
+        ],
+      },
+    });
+    const { deps, report, warn } = setup(fake.client, person('y', 'n', 'n').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(0);
+    expect(report).toContain(
+      'Codex cannot be installed from here: No npm was found.\n  Run it yourself: npm i -g @openai/codex',
+    );
+    expect(warn).toEqual(['Codex was not installed: No npm was found.\n  Run it yourself: npm i -g @openai/codex']);
+  });
+
+  test('V-0241 reports each tool’s notes, and a duplicate only for a tool that is being imported', async () => {
+    const noted = scan({
+      notes: [{ harness: 'claude-code', text: 'CLAUDE.md and AGENTS.md say the same thing.' }],
+      duplicates: [
+        { harness: 'claude-code', existing: 'claude-main', suggested: 'claude-default' },
+        { harness: 'codex', existing: 'codex-main', suggested: 'codex-default' },
+      ],
+    } as Partial<SetupScan>);
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: noted, [ROUTE.apply]: committed });
+    const { deps, report } = setup(fake.client, person('y', 'n', '').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(0);
+    expect(report).toContain('Claude Code: CLAUDE.md and AGENTS.md say the same thing.');
+    expect(report).toContain(
+      'claude-main already uses that Claude Code login and profile, so no new runtime is added.',
+    );
+    expect(report.join('\n')).not.toContain('codex-main');
+  });
+
+  test('V-0241 changes nothing, and says so, when a machine that is set up declines everything', async () => {
+    const again = scan({ format: 'present' } as Partial<SetupScan>);
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: again });
+    const { deps, report } = setup(fake.client, person('n', 'n').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(0);
+    expect(report.at(-1)).toBe('Nothing was imported. Your runtimes are unchanged.');
+    expect(fake.routes()).toEqual([ROUTE.machine, ROUTE.scan]);
+  });
+
+  test('V-0241 stages an accepted update even when no tool is imported again', async () => {
+    const again = scan({
+      format: 'present',
+      updates: [{ reference: 'instructions/main', sources: ['CLAUDE.md', 'AGENTS.md'] }],
+    } as Partial<SetupScan>);
+    const fake = daemon({ [ROUTE.machine]: machine(), [ROUTE.scan]: again, [ROUTE.apply]: committed });
+    const { deps } = setup(fake.client, person('n', 'n', 'y').prompt);
+    expect(await runDaemonSetup(deps, flags)).toBe(0);
+    expect(fake.calls.find(call => call.route === ROUTE.propose)?.body).toEqual({
+      change: { kind: 'setup.import', include: [], acceptedUpdates: ['instructions/main'] },
+    });
+  });
+
+  test('V-0241 rethrows what is not an Error instead of saying it as a sentence', async () => {
+    const client: PluginClient = {
+      call: async () => {
+        throw 'not an error';
+      },
+      subscribe: () => () => {},
+    };
+    const { deps, warn } = setup(client, person().prompt);
+    await expect(runDaemonSetup(deps, flags)).rejects.toBe('not an error');
+    expect(warn).toEqual([]);
+  });
 });
 
 describe('renderHarnessScan', () => {
@@ -318,6 +446,29 @@ describe('renderHarnessScan', () => {
         '  MCP servers: none',
         '  Skills: review',
         '  Moved to the secret store, never copied as text: env.ANTHROPIC_API_KEY',
+      ].join('\n'),
+    );
+  });
+
+  test('names the instructions, the settings, what is missing and what went wrong, and why a login is not usable', () => {
+    const text = renderHarnessScan({
+      ...harness('codex', true, 'not-shareable'),
+      account: { state: 'not-shareable', reason: 'It is kept in the keychain.' },
+      instructions: { name: 'main', source: 'AGENTS.md', bytes: 120 },
+      settings: { source: 'config.toml', count: 4, hooks: 1 },
+      missingCommands: ['rg'],
+      problems: ['config.toml line 3 could not be read'],
+    } as never);
+    expect(text).toBe(
+      [
+        'Codex',
+        '  Your login: not shareable (It is kept in the keychain.)',
+        '  Instructions: AGENTS.md',
+        '  Settings: config.toml (4 setting(s), 1 hook(s))',
+        '  MCP servers: none',
+        '  Skills: none',
+        '  Command not found on this machine: rg',
+        '  Problem: config.toml line 3 could not be read',
       ].join('\n'),
     );
   });

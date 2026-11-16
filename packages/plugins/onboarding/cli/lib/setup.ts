@@ -77,7 +77,7 @@ export function renderHarnessScan(scan: HarnessScan): string {
       ? `signed in${account.email ? ` as ${account.email}` : ''}`
       : account.state.replace(/-/gu, ' ');
   const lines = [
-    `Your login: ${login}`,
+    `Your login: ${login}${account.reason ? ` (${account.reason})` : ''}`,
     ...(scan.instructions === undefined ? [] : [`Instructions: ${scan.instructions.source}`]),
     ...(scan.settings === undefined
       ? []
