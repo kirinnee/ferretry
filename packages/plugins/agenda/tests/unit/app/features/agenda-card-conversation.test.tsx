@@ -20,7 +20,6 @@ const draw = (fake = fakeInbox(), answerForm?: () => void) => {
     <AgendaCardConversation
       {...(answerForm === undefined ? {} : { answerForm })}
       card={card}
-      daemon="alpha"
       inbox={{ replied: fake.replied, repliedState: fake.replied.getSnapshot() }}
     />,
   );
