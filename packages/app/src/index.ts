@@ -9,7 +9,8 @@
 export * from './fy-render/index.ts';
 
 // ─── reaching a daemon: what Access and Connections provide (§4.8, §4.13) ─────────────────────────────────────────
-export { localQr, MAX_QR_VERSION, QrEncodeError, type QrMatrix } from './ui/local-qr.ts';
+// The encoder itself is `@ferretry/std/qr` (one copy, so the Catalogs CLI can draw with it too); this is the app halves' seam.
+export { localQr, MAX_QR_VERSION, QrEncodeError, type QrMatrix } from '@ferretry/std/qr';
 export {
   CARRIER_TAKERS,
   CLAIM_TAKERS,
@@ -428,6 +429,7 @@ export * from './scroll/transcript-follow.ts';
 export * from './scroll/use-stick-to-bottom.ts';
 export { RECONNECTING_GRACE_MS } from './shared/reconnecting-grace.ts';
 export * from './passkey/ceremony.ts';
+export { browserDeviceName, defaultDeviceName, deviceNameSuffix } from './session/device-name.ts';
 
 // ─── a member session to a publisher this browser is not paired with (Connections provides; not implemented yet) ───
 // `setMemberCarriers` is deliberately NOT exported: only the shell's composition root (`main.tsx`) installs carriers.

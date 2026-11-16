@@ -40,7 +40,8 @@ import type { QrScanHost } from '../../lib/pair-scan.ts';
 import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import { type PairingArrival, pairingDaemonHost, pairingSeedFromUrl, type PairingSeed } from '../../lib/pairing.ts';
 import { DeviceKeyUnsupportedError } from '../../lib/device-keys.ts';
-import { browserDeviceName, normalizedDeviceName } from '../../lib/device-name.ts';
+import { browserDeviceName } from '@ferretry/app';
+import { normalizedDeviceName } from '../../lib/device-name.ts';
 import { PairScanner } from './pair-scanner.tsx';
 
 /** Exchanges the code; `deviceName` is what the person called this device on the confirm screen. */

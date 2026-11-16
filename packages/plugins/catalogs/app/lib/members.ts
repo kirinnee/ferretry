@@ -4,20 +4,12 @@
  * use, so a page that never shares anything opens no database.
  */
 
-import { WebCryptoRelayCrypto } from '@ferretry/app';
+import { browserDeviceName, WebCryptoRelayCrypto } from '@ferretry/app';
 import { SharedController } from '../features/shared/shared-controller.ts';
 import { IndexedDbMemberKeyStore, mintMemberKeys, webCryptoMemberKeyGenerator } from './member-keys.ts';
 import { currentMemberTransport } from './member-transport.ts';
 
 let controller: SharedController | undefined;
-
-/**
- * How this browser is named on a publisher's People list: "Browser" and a random suffix, so one person's devices can be
- * told apart when it is time to revoke one. GAP(access): today also names the user agent (Access's device naming).
- */
-export function memberClientName(random: (length: number) => Uint8Array): string {
-  return `Browser ${Array.from(random(2), byte => byte.toString(16).padStart(2, '0')).join('')}`;
-}
 
 export function sharedMembers(): SharedController {
   controller ??= (() => {
@@ -32,7 +24,9 @@ export function sharedMembers(): SharedController {
       origin: globalThis.location.origin,
       crypto,
       now: () => new Date(),
-      clientName: () => memberClientName(length => crypto.randomBytes(length)),
+      // What a person would call this browser ("Chrome on macOS · K7Q2"): the shell's one device naming, which Access
+      // also pairs with, so one person's browsers can be told apart on a publisher's People list.
+      clientName: browserDeviceName,
     });
   })();
   return controller;

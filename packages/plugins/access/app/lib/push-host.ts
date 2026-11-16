@@ -7,7 +7,7 @@
  * switch and the banner must agree), so they are made once; the enrolment is made per machine, because its worker is
  * labelled with the machine's name.
  */
-import { browserDeviceName } from './device-name.ts';
+import { browserDeviceName } from '@ferretry/app';
 import {
   containerPushEnrolment,
   DaemonPushDevices,

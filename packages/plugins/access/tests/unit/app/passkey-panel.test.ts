@@ -15,7 +15,7 @@ import {
   unsupportedSentence,
   webAuthnSupported,
 } from '../../../app/lib/passkey-panel.ts';
-import { PasskeyCeremonyError } from '../../../app/lib/passkeys.ts';
+import { PasskeyCeremonyError } from '@ferretry/app';
 
 const ORIGIN = 'https://ferretry.example.test';
 

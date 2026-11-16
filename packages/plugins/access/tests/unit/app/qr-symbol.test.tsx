@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test';
 import should from 'should';
 import { QrSymbol } from '../../../app/components/qr-symbol.tsx';
-import { encodeQr } from '../../../app/lib/qr-code.ts';
+import { localQr } from '@ferretry/app';
 import { render } from '../../support/app/react.ts';
 
-const matrix = encodeQr('https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fhost.test;code=7F3K-Q2ND;fp=fy');
+const matrix = localQr('https://ferretry.pages.dev/pair#v1;url=https%3A%2F%2Fhost.test;code=7F3K-Q2ND;fp=fy');
 
 describe('QrSymbol', () => {
   it('draws the symbol with the standard quiet zone inside its own viewBox', () => {
