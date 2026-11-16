@@ -39,10 +39,21 @@ const PLACED: Record<string, readonly PlacedPanel[]> = {
 };
 
 /** The Default profile's page, with the panels placed in the slots (none: outside a shell). */
-const open = async (slots: Record<string, readonly PlacedPanel[]> | undefined): Promise<ParentNode> => {
+const open = async (
+  slots: Record<string, readonly PlacedPanel[]> | undefined,
+  blocked: Record<string, string> = {},
+): Promise<ParentNode> => {
   const machine = scriptedMachine({ preview: PREVIEW as never });
   const tab = <ProfilesTab {...tabProps(machine)} />;
-  mounted = await mountSettled(slots === undefined ? tab : <WithSlotPanels slots={slots}>{tab}</WithSlotPanels>);
+  mounted = await mountSettled(
+    slots === undefined ? (
+      tab
+    ) : (
+      <WithSlotPanels slots={slots} blocked={blocked}>
+        {tab}
+      </WithSlotPanels>
+    ),
+  );
   await click(mounted.container, '[data-profile-row="Default"]');
   return mounted.container;
 };
@@ -63,6 +74,33 @@ describe('the Profiles library’s MCP rows', () => {
     expect(root.querySelector('[data-library-item="mcp/notes"] [data-fake-status="notes:0"]')?.textContent).toBe(
       'true',
     );
+  });
+
+  it('with MCP off on this daemon, draws no footer under any row and never mounts the panel (so no MCP read)', async () => {
+    const drawn: string[] = [];
+    const placed: Record<string, readonly PlacedPanel[]> = {
+      [COMPONENT_MCP_SLOT]: [
+        {
+          plugin: 'mcp',
+          id: 'component-status',
+          view: props => {
+            drawn.push(String(props['subject']));
+            return <span data-fake-status="x" />;
+          },
+        },
+      ],
+    };
+    const root = await open(placed, { mcp: 'MCP servers is off on this daemon.' });
+    expect(root.querySelector('[data-library-item="mcp/github"]')).not.toBeNull();
+    expect(footers(root)).toEqual([]);
+    expect(root.querySelector(`[data-slot="${COMPONENT_MCP_SLOT}"]`)).toBeNull();
+    expect(root.textContent).not.toContain('is off on this daemon');
+    expect(drawn).toEqual([]);
+  });
+
+  it('with another plugin blocked and MCP usable, the footer is drawn as before', async () => {
+    const root = await open(PLACED, { board: 'Board is off on this daemon.' });
+    expect(footers(root)).toEqual(['github', 'notes']);
   });
 
   it('draws nothing under a row that is not an MCP server’s', async () => {

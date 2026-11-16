@@ -16,9 +16,12 @@ export interface PlacedPanel {
  */
 export function WithSlotPanels({
   slots,
+  blocked = {},
   children,
 }: {
   readonly slots: Readonly<Record<string, readonly PlacedPanel[]>>;
+  /** Plugins the shell reports blocked on every daemon, by the one line it would show (`blockedLine`); default none. */
+  readonly blocked?: Readonly<Record<string, string>>;
   readonly children: ReactNode;
 }) {
   const everyPanel = Object.values(slots).flat();
@@ -29,7 +32,7 @@ export function WithSlotPanels({
       subscribe: () => () => undefined,
       version: () => 0,
       titleOf: (plugin: string) => plugin,
-      blockedLine: () => undefined,
+      blockedLine: (_daemon: string, plugin: string) => blocked[plugin],
       reach: () => ({}),
       place: () => null,
       half: (_daemon: string, plugin: string) => ({

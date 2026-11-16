@@ -146,7 +146,7 @@ export { FRAME_SLOTS, isFrameSlot, isSlotName, PANEL_SLOTS, SHELL_ITEMS } from '
 /** @public Layouts' Settings tab reads and writes this device's own layout choice (§5.3: the app's saved data, no route). */
 export { type DeviceLayout, useDeviceLayout } from './shell/use-device-layout.ts';
 /** @public A plugin screen mounts the panels contributed to a slot it offers (§5.2); `PanelReplace` lets them stand in for a body the screen can draw itself. */
-export { PanelReplace, PanelSlot, useSlotHasPanels, useSlotPanels } from './shell/views.tsx';
+export { PanelReplace, PanelSlot, useSlotHasPanels, useSlotHasUsablePanels, useSlotPanels } from './shell/views.tsx';
 /** @public The ferret page's body: the chat beside the `ferret.side` panels, or on a phone one at a time behind chips and "+" (§5.2). */
 export { FerretWorkspace } from './shell/ferret-workspace.tsx';
 /** @public A panel of a ferret's page asks its workspace to bring another panel of the same ferret on screen (a phone shows one at a time; §5.2). */

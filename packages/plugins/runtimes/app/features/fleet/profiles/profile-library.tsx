@@ -5,7 +5,7 @@
  * a pointer. On a phone the same list opens as a picker sheet from the contents' **Add** button.
  */
 
-import { PanelSlot, useSlotHasPanels } from '@ferretry/app';
+import { PanelSlot, useSlotHasUsablePanels } from '@ferretry/app';
 import { GripVertical } from 'lucide-react';
 import { type DragEvent, type ReactNode, useId } from 'react';
 import { createPortal } from 'react-dom';
@@ -160,8 +160,10 @@ function LibraryRows({
  */
 function McpStatusFooter({ name, usedByRuntimes }: { readonly name: string; readonly usedByRuntimes: number }) {
   const daemon = currentDaemon();
-  const placed = useSlotHasPanels(COMPONENT_MCP_SLOT);
-  if (daemon === null || !placed) return null;
+  // Optional footer: placed AND its plugin usable on THIS daemon — with MCP off, the shell's "is off" line under every
+  // row would be noise, so nothing is drawn (and the panel never mounts, so it never reads).
+  const usable = useSlotHasUsablePanels(daemon ?? '', COMPONENT_MCP_SLOT);
+  if (daemon === null || !usable) return null;
   return (
     <div className="col-span-2 min-w-0" data-library-mcp-status={name}>
       <PanelSlot daemon={daemon} slot={COMPONENT_MCP_SLOT} subject={name} props={{ usedByRuntimes }} />
