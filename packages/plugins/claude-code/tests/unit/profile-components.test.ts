@@ -23,6 +23,22 @@ describe('the Claude Code settings source', () => {
     held.delete('strict');
     expect(await source.read('strict')).toBeUndefined();
   });
+
+  it('projects an item’s launch flags beside its document, a copy, and none when it has none', async () => {
+    const held = new Map<string, SettingsItem>([
+      ['fast', { settings: {}, flags: ['--verbose', '--model', 'x'] }],
+      ['plain', { settings: { theme: 'dark' }, flags: [] }],
+      ['bare', { settings: { theme: 'dark' } }],
+    ]);
+    const source = claudeSettingsSource(() => held);
+
+    const fast = await source.read('fast');
+    expect(fast).toEqual({ harness: 'claude-code', document: {}, flags: ['--verbose', '--model', 'x'] });
+    (fast as { flags: string[] }).flags.push('--mutated');
+    expect(held.get('fast')?.flags).toEqual(['--verbose', '--model', 'x']);
+    expect(await source.read('plain')).toEqual({ harness: 'claude-code', document: { theme: 'dark' } });
+    expect(await source.read('bare')).toEqual({ harness: 'claude-code', document: { theme: 'dark' } });
+  });
 });
 
 describe('the Claude Code hooks source', () => {
