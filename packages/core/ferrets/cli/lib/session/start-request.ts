@@ -58,6 +58,8 @@ export interface StartFlags extends StartNumericFlags {
   readonly harnessFlags?: readonly string[];
   /** `fy new --auto`: let Ferretry choose the runtime. */
   readonly auto?: boolean;
+  /** `fy new`'s temporary-folder check: `false` asks it, `true` is `--allow-scratch`; absent asks none. */
+  readonly allowScratch?: boolean;
   readonly harness?: string;
   readonly login?: string;
   readonly pack?: string;
@@ -167,6 +169,7 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     ...(compactAt?.ok === true ? { compactAt: compactAt.value } : {}),
     ...(flags.remoteControl === undefined ? {} : { remoteControl: flags.remoteControl }),
     ...(flags.auto === true ? { auto: true } : {}),
+    ...(flags.allowScratch === undefined ? {} : { allowScratch: flags.allowScratch }),
     ...(flags.harnessFlags === undefined || flags.harnessFlags.length === 0
       ? {}
       : { harnessFlags: [...flags.harnessFlags] }),

@@ -1,0 +1,7 @@
+{
+  "entry": ["app/views/surfaces.tsx"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:app/views/surfaces.tsx": "loaded lazily by `import(`./views/${\"surfaces\"}.tsx`)` in app/index.ts, a template import knip cannot follow."
+  }
+}
