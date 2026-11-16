@@ -6,6 +6,7 @@
  */
 
 import type { AgendaId } from '@ferretry/core-asks/contract';
+import { type DaemonFerretScope, daemonFerretScope } from '@ferretry/app';
 
 export type DaemonId = string & { readonly daemonId: unique symbol };
 
@@ -59,3 +60,11 @@ export const daemonSessionKey = (scope: DaemonSessionScope): string =>
   JSON.stringify(
     scope.item === undefined ? [scope.daemonId, scope.sessionId] : [scope.daemonId, scope.sessionId, scope.item],
   );
+
+/**
+ * The app's name for the same identity: its composers register under `(daemonId, ferretId[, item])`
+ * (`daemonFerretScope`), this half's scopes say `sessionId`. A quote, a draft read or a draft spend reaches a
+ * composer only by this scope, so every Agenda call into the app's composer targets maps through here.
+ */
+export const ferretScopeOf = (scope: DaemonSessionScope): DaemonFerretScope =>
+  daemonFerretScope(scope, scope.sessionId, scope.item);

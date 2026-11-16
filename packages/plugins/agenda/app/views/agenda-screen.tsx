@@ -19,6 +19,7 @@ import { inboxSourceFromSearch } from '../lib/agenda-inbox-list.ts';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { answerFilePorts } from '../lib/answer-file-ports.ts';
 import { inboxConversationReader } from '../lib/inbox-conversation.ts';
 import { useLayoutMode, useRouter } from '../shell.ts';
 
@@ -52,6 +53,7 @@ export function createAgendaScreen(runtime: AgendaRuntime, fleet?: AgendaFleet) 
               inbox={inbox}
               phone={phone}
               clearPort={runtime.clearPort}
+              answerPorts={answerFilePorts({ daemon, client: runtime.client }, fleet)}
               onNavigate={to => navigate(to)}
               open={
                 asked?.target == null

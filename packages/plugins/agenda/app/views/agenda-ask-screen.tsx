@@ -15,6 +15,7 @@ import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
 import { useAgendaLinks } from '../lib/agenda-links.ts';
 import type { AgendaFleet } from '../lib/agenda-fleet.ts';
 import type { AgendaRuntime } from '../lib/agenda-runtime.ts';
+import { answerFilePorts } from '../lib/answer-file-ports.ts';
 import { inboxConversationReader } from '../lib/inbox-conversation.ts';
 import { AgendaIdSchema } from '@ferretry/core-asks/contract';
 import { useLayoutMode, useRouter } from '../shell.ts';
@@ -47,6 +48,7 @@ export function createAgendaAskScreen(runtime: AgendaRuntime, fleet?: AgendaFlee
             inbox={inbox}
             phone={phone}
             clearPort={runtime.clearPort}
+            answerPorts={answerFilePorts({ daemon, client: runtime.client }, fleet)}
             {...(open === undefined ? {} : { open })}
             onOpenSettled={opened =>
               navigate(opened || ferret === undefined ? links.agenda(daemon) : links.chat(daemon, ferret), {
