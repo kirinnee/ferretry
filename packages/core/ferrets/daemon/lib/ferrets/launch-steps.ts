@@ -161,6 +161,15 @@ export const GUARD_UNHELD = 'the ferret was stopped: a check its launch needs co
 
 const allowed = ok(undefined);
 
+/** Runs one guard callback; a synchronous throw and a rejection both answer undefined (a callback may not be async). */
+async function attempt<T>(call: () => Promise<T>): Promise<T | undefined> {
+  try {
+    return await call();
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Asks `guards` (outermost first) as the last step before the harness starts. The first refusal ends the walk: later
  * guards and the harness are never asked. A guard that throws refuses the launch with a fixed sentence (never launch
@@ -171,8 +180,9 @@ export async function beforePane(
   launch: GuardedLaunch,
 ): Promise<Result<void, StartFailure>> {
   for (const guard of guards) {
-    if (guard.beforePane === undefined) continue;
-    const verdict = await guard.beforePane(launch).catch(() => undefined);
+    const ask = guard.beforePane;
+    if (ask === undefined) continue;
+    const verdict = await attempt(() => ask.call(guard, launch));
     if (verdict === undefined) return err({ code: 'failed', reason: GUARD_UNCHECKED });
     if (!verdict.allow) return err({ code: verdict.code, reason: verdict.reason });
   }
@@ -189,8 +199,9 @@ export async function paneOpened(
   launch: OpenedLaunch,
 ): Promise<Result<void, StartFailure>> {
   for (const guard of [...guards].reverse()) {
-    if (guard.paneOpened === undefined) continue;
-    const verdict = await guard.paneOpened(launch).catch(() => undefined);
+    const ask = guard.paneOpened;
+    if (ask === undefined) continue;
+    const verdict = await attempt(() => ask.call(guard, launch));
     if (verdict === undefined) return err({ code: 'failed', reason: GUARD_UNHELD });
     if (!verdict.allow) return err({ code: verdict.code, reason: verdict.reason });
   }
@@ -199,5 +210,9 @@ export async function paneOpened(
 
 /** Frees what each guard holds for `ferret`, innermost first. One that throws never stops the rest or fails a stop. */
 export async function released(guards: readonly LaunchGuard[], ferret: FerretId): Promise<void> {
-  for (const guard of [...guards].reverse()) await guard.released?.(ferret).catch(() => undefined);
+  for (const guard of [...guards].reverse()) {
+    const free = guard.released;
+    if (free === undefined) continue;
+    await attempt(() => free.call(guard, ferret));
+  }
 }

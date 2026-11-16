@@ -177,6 +177,21 @@ describe('beforePane', () => {
     expect(log).toEqual(['throws.beforePane']);
   });
 
+  test('a NON-async guard that throws synchronously refuses with the same fixed sentence', async () => {
+    const result = await beforePane(
+      [
+        {
+          id: 'sync',
+          beforePane: () => {
+            throw new Error('FIXTURE_SECRET at /home/x');
+          },
+        },
+      ],
+      before,
+    );
+    expect(result).toEqual({ ok: false, error: { code: 'failed', reason: GUARD_UNCHECKED } });
+  });
+
   test('allows with no guards, and skips a guard with no beforePane', async () => {
     expect((await beforePane([], before)).ok).toBe(true);
     expect((await beforePane([{ id: 'only-release', released: async () => {} }], before)).ok).toBe(true);
@@ -205,7 +220,46 @@ describe('paneOpened', () => {
   });
 });
 
+describe('paneOpened (synchronous throw)', () => {
+  test('a NON-async guard that throws synchronously is returned with the fixed sentence', async () => {
+    const result = await paneOpened(
+      [
+        {
+          id: 'sync',
+          paneOpened: () => {
+            throw new Error('FIXTURE_SECRET at /home/x');
+          },
+        },
+      ],
+      opened,
+    );
+    expect(result).toEqual({ ok: false, error: { code: 'failed', reason: GUARD_UNHELD } });
+  });
+});
+
 describe('released', () => {
+  test('a NON-async release that throws synchronously never skips the guards outside it', async () => {
+    const log: string[] = [];
+    await released(
+      [
+        {
+          id: 'outer',
+          released: async () => {
+            log.push('outer');
+          },
+        },
+        {
+          id: 'inner',
+          released: () => {
+            throw new Error('sync');
+          },
+        },
+      ],
+      ferretId('f1'),
+    );
+    expect(log).toEqual(['outer']);
+  });
+
   test('frees innermost first and goes on after a guard whose release throws', async () => {
     const log: string[] = [];
     await released([guard('outer', log), guard('inner', log, { released: new Error('disk gone') })], ferretId('f1'));
