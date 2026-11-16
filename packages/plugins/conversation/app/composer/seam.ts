@@ -111,7 +111,10 @@ export const withReferencePrefix = <T extends { readonly send: (...args: never[]
     },
   });
 
-// ─── shapes owned elsewhere (GAPs) ────────────────────────────────────────────────────────────────────────────────
+// ─── shapes owned elsewhere ───────────────────────────────────────────────────────────────────────────────────────
+
+/** The context window a ferret has used: the Ferrets contract's own shape. */
+export type { FerretContext } from '@ferretry/core-ferrets/contract';
 
 /** Copy of today's `session-screens.ts` `canSubmitComposer` (C3 ports the rest of that file). */
 export const canSubmitComposer = (draft: string, disabled: boolean, sending: boolean): boolean =>

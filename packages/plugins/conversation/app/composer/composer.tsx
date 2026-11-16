@@ -18,8 +18,6 @@ import {
   Markdown,
   PanelSlot,
   useSlotHasPanels,
-  useAppHook,
-  PendingLocationChip,
   type ReferenceSurface,
   registerComposerQuoteTarget,
   shiftedComposerEnterAction,
@@ -36,9 +34,7 @@ import {
   useKeyboardOpen,
   type ViewerImage,
 } from '@ferretry/app/ui';
-import type { FerretContext } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { ACCESS_HOW_TO_ENABLE_LOCATION_HOOK, ACCESS_PROVIDED_APP_HOOKS } from '@ferretry/plugin-access/contract';
 import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type ComposerAccount, type ComposerToolsProps, transformTextIndex } from '../../contract/index.ts';
@@ -56,6 +52,7 @@ import {
   DEFAULT_COMPOSER_SUGGESTIONS,
   useComposerAutocomplete,
 } from './composer-autocomplete.ts';
+import { ComposerLocationChip } from './composer-location-chip.tsx';
 import { ComposerAutocompletePopover } from './composer-autocomplete-popover.tsx';
 import { type ComposerHarness, createComposerAutocompleteProviders } from './composer-autocomplete-providers.ts';
 import { useComposerDockLayout } from './composer-dock-layout.ts';
@@ -76,6 +73,7 @@ import {
   type DaemonFerretScope,
   daemonFerretKey,
   daemonFerretScope,
+  type FerretContext,
   REINSERT_TRANSCRIPTION_EVENT,
   referencesOf,
   reinsertTranscriptionText,
@@ -469,17 +467,10 @@ export function Composer({
 }: ComposerProps) {
   const client = useOptionalConversationClient() ?? UNCONNECTED;
   const clientDaemon = daemonOfClient(client);
-  // A daemon is its id, not the object that names it: the chat page builds a fresh `daemonConnection(...)` every
-  // render, and a scope (and with it the draft stream, the send's mark and the saved draft) rebuilt from it each time
-  // forgot every send and reloaded the sent words.
+  // A daemon is its id, not the object that names it: the chat page builds a fresh `daemonConnection(...)` every render,
+  // and a scope rebuilt from it each time forgot every send and reloaded the sent words.
   const daemonId = daemonProp?.daemonId ?? clientDaemon ?? '';
   const daemon = useMemo(() => daemonConnection(daemonId), [daemonId]);
-  // "How to turn location back on" is Access's per-device guide (its `access.how-to-enable-location` hook): without
-  // Access on this machine the chip keeps its generic steps.
-  const locationSteps = useAppHook(daemonId, ACCESS_HOW_TO_ENABLE_LOCATION_HOOK, 'access');
-  const howToEnableLocation = ACCESS_PROVIDED_APP_HOOKS[ACCESS_HOW_TO_ENABLE_LOCATION_HOOK](locationSteps)
-    ? locationSteps
-    : undefined;
   const ownApi = useMemo(() => composerApi(client), [client]);
   const api = apiProp ?? ownApi;
   const isDetached = detached !== undefined;
@@ -1487,10 +1478,10 @@ export function Composer({
         </div>
       )}
       {location === null ? null : (
-        <PendingLocationChip
+        <ComposerLocationChip
+          daemon={daemonId}
           disabled={sending}
           draft={location}
-          {...(howToEnableLocation === undefined ? {} : { howToEnable: howToEnableLocation })}
           onPlace={place =>
             setLocation(current =>
               current?.kind === 'ready' ? { kind: 'ready', fix: { ...current.fix, place } } : current,
