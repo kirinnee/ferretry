@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
+import type { FleetEventBacklog } from '../../../../../daemon/lib/session/events/service.ts';
 import {
   type FleetBacklogPasses,
-  type FleetEventBacklog,
   SharedFleetBacklog,
-} from '../../../../../daemon/lib/session/events/index.ts';
+} from '../../../../../daemon/lib/session/events/shared-backlog.ts';
 
 /**
  * Live feeds opening together, seen from the domain.
