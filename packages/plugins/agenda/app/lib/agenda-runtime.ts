@@ -17,7 +17,10 @@ import { DaemonAgendaStore } from './agenda-store.ts';
 import { AgendaFerretStore } from './ferret-store.ts';
 import { type DaemonConnection, daemonConnection, THIS_MACHINE } from './machine.ts';
 
-/** What the Inbox calls the one machine when the shell does not name it. */
+/**
+ * The harness fallback for the machine's name. A machine's real name comes from `useEveryDaemon()` (the Inbox's machine
+ * names and the Needs-you panel read it there), so this is only what a runtime built with no shell says.
+ */
 const THIS_MACHINE_NAME = 'This machine';
 
 export interface AgendaRuntime {

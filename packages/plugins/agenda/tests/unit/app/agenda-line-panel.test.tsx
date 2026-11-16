@@ -20,14 +20,30 @@ interface Scripted extends PluginClient {
 }
 
 /** A daemon with the ferret's agenda (`open` asks), its agenda-mode switch and no other ferrets. */
-const daemon = (options: { readonly mode: boolean | 'refused'; readonly open?: number }): Scripted => {
+const daemon = (options: {
+  readonly mode: boolean | 'refused';
+  readonly open?: number;
+  /** The daemon holds the owner's answers for this long (ms) before it sends them; Send now releases them. */
+  readonly heldFor?: number;
+}): Scripted => {
   const calls: string[] = [];
+  let released = false;
   return {
     calls,
     call: async (route: string) => {
       calls.push(route);
-      if (route === 'GET /v1/ferrets/:ferretId/agenda')
+      if (route === 'POST /v1/ferrets/:ferretId/agenda/replies') {
+        released = true;
         return { ...projectionSnapshot(options.open ?? 2, 0), sessionId: FERRET };
+      }
+      if (route === 'GET /v1/ferrets/:ferretId/agenda')
+        return {
+          ...projectionSnapshot(options.open ?? 2, 0),
+          sessionId: FERRET,
+          ...(options.heldFor === undefined || released
+            ? {}
+            : { replies: { pending: ['A1'], dueAt: new Date(Date.now() + options.heldFor).toISOString() } }),
+        };
       if (route === 'GET /v1/ferrets/:ferretId/agenda-mode') {
         if (options.mode === 'refused') throw Object.assign(new Error('refused'), { status: 403, code: 'forbidden' });
         return { enabled: options.mode, restartRequired: false, note: 'Takes effect at the next launch.' };
@@ -119,6 +135,40 @@ describe('the ferret-agenda-line panel', () => {
     const root = await draw(client, FERRET);
     await settled(client, root);
     expect(root.querySelector('[data-agenda-line]')).toBeNull();
+  });
+
+  it('says the machine holds the owner’s answers on the line, and Send now releases them', async () => {
+    const client = daemon({ mode: true, open: 2, heldFor: 60_000 });
+    const root = await draw(client, FERRET);
+    await settleUntil(
+      () => root.querySelector('[data-agenda-replies]') !== null,
+      () => `no held-replies notice; drew: ${root.textContent ?? ''}`,
+      interact,
+    );
+    expect(root.querySelector('[data-agenda-replies]')?.textContent).toContain('Sending to session in 1 min…');
+
+    await interact(() => (root.querySelector('[data-agenda-send-now]') as HTMLButtonElement).click());
+    await settleUntil(
+      () => client.calls.includes('POST /v1/ferrets/:ferretId/agenda/replies'),
+      () => `Send now never reached the daemon; calls: ${client.calls.join(', ')}`,
+      interact,
+    );
+    await settleUntil(
+      () => root.querySelector('[data-agenda-replies]') === null,
+      () => `the notice stayed after the answers left; drew: ${root.textContent ?? ''}`,
+      interact,
+    );
+  });
+
+  it('draws no held-replies notice while nothing is held', async () => {
+    const client = daemon({ mode: true, open: 2 });
+    const root = await draw(client, FERRET);
+    await settleUntil(
+      () => root.querySelector('[data-agenda-line]') !== null,
+      () => `no line; drew: ${root.textContent ?? ''}`,
+      interact,
+    );
+    expect(root.querySelector('[data-agenda-replies]')).toBeNull();
   });
 
   it('draws nothing and reads nothing without a ferret', async () => {

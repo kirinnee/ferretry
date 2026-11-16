@@ -245,7 +245,7 @@ export interface Agenda {
   /** Wire this into the Composer: a message went, so the open item closes. */
   readonly composer: {
     readonly onSent: () => void;
-    /** The open item is a form: Send answers it with this instead of chatting (`useFormComposer`). */
+    /** The open item is a form: Send answers it with this instead of chatting (the ask's reply box, `AgendaCardConversation`). */
     readonly answerForm?: () => void;
     /** The open form's picks key, present with `answerForm`. */
     readonly formKey?: string;
