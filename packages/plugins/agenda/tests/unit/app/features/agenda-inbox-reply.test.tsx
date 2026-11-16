@@ -1,11 +1,10 @@
 import { ensureDom } from '@ferretry/app/testing';
 ensureDom();
-import { afterEach, describe, expect, it } from 'bun:test';
-import { AgendaInboxComposer } from '../../../../app/features/agenda/agenda-inbox-composer.tsx';
+import { describe, expect, it } from 'bun:test';
+import { type ReactElement, useEffect, useState } from 'react';
 import { AgendaInboxPage } from '../../../../app/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../../../../app/hooks/use-agenda-inbox.ts';
 import type { InboxCard } from '../../../../app/lib/agenda-inbox.ts';
-import { daemonConnection } from '../../../../app/shell.ts';
 import {
   agendaItem,
   choices,
@@ -16,10 +15,8 @@ import {
 } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
 import { sessionView } from '../../../support/app/sessions.ts';
-import { fakeComposerDrafts as documentDraftStore, WithFakeComposer } from '../../../support/app/composer-port.tsx';
 
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
-const daemon = daemonConnection({ daemonId: 'workshop' });
 
 const shipIt = inboxCard(
   agendaItem('A2', { subject: 'Ship it?', ask: choices('Ship', 'Hold'), waitingSince: '2026-08-01T10:00:00.000Z' }),
@@ -34,7 +31,56 @@ const rebase = inboxCard(
   sessionView('sess-1', { config: { teammate: 'kai', name: 'Fix the build' } as never }),
 );
 
-const draftScope = (card: InboxCard) => ({ daemonId: daemon.daemonId, sessionId: card.view.config.id });
+interface ReplyBoxProps {
+  readonly card: InboxCard;
+  readonly send: (sessionId: string, request: { message: string }) => Promise<unknown>;
+  readonly onReplied: (sent: { words: string; sendId?: string | undefined; disposition?: string | undefined }) => void;
+  readonly restore: string | undefined;
+  readonly onRestored: () => void;
+}
+
+/**
+ * A stand-in for Conversation's reply panel (the real one is `AgendaCardConversation`, mounted from the ask): a box and
+ * Send that hand the words to the conversation, report what it accepted through `onReplied`, show a refusal under the
+ * box, and take back the words of an undone reply once.
+ */
+function ReplyBox({ card, send, onReplied, restore, onRestored }: ReplyBoxProps): ReactElement {
+  const [words, setWords] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (restore === undefined) return;
+    setWords(restore);
+    onRestored();
+  }, [restore, onRestored]);
+  const submit = async (): Promise<void> => {
+    try {
+      const answer = (await send(card.view.config.id, { message: words })) as
+        | { readonly sendId?: string; readonly disposition?: string }
+        | undefined;
+      setError(null);
+      setWords('');
+      onReplied({ words, sendId: answer?.sendId, disposition: answer?.disposition });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The message was not sent.');
+    }
+  };
+  return (
+    <form
+      className="fy-composer"
+      onSubmit={event => {
+        event.preventDefault();
+        void submit();
+      }}
+    >
+      <textarea data-live-editor="" onChange={event => setWords(event.currentTarget.value)} value={words} />
+      {error === null ? null : (
+        <p className="fy-composer-error" role="alert">
+          {error}
+        </p>
+      )}
+    </form>
+  );
+}
 
 interface Sent {
   readonly sessionId: string;
@@ -50,8 +96,7 @@ interface Rig {
 }
 
 /**
- * The page, the Inbox's composer under the open card (bound to the host composer the suites use: the real one is
- * Conversation's), and the toast, over the fake inbox.
+ * The page, a stand-in reply box under the open card (the real one is Conversation's), and the toast, over the fake inbox.
  */
 const rig = async (
   cards: readonly InboxCard[],
@@ -67,38 +112,33 @@ const rig = async (
     },
   };
   const mounted = await mount(
-    <WithFakeComposer>
-      <InboxHarness
-        cards={cards}
-        fake={fake}
-        render={inbox => {
-          latest = inbox;
-          return (
-            <AgendaInboxPage
-              clock={fake.clock.now}
-              inbox={inbox}
-              initialOpen={cards[0]?.key}
-              now={NOW}
-              onNavigate={() => undefined}
-              phone
-              reducedMotion
-              renderComposer={card => (
-                <AgendaInboxComposer
-                  clientFor={async () => api}
-                  compact
-                  connection={daemon}
-                  itemId={card.item.id}
-                  onReplied={message => inbox.replied.mark(card, message)}
-                  onRestored={() => inbox.replied.takeRestore(card.key)}
-                  restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
-                  view={card.view}
-                />
-              )}
-            />
-          );
-        }}
-      />
-    </WithFakeComposer>,
+    <InboxHarness
+      cards={cards}
+      fake={fake}
+      render={inbox => {
+        latest = inbox;
+        return (
+          <AgendaInboxPage
+            clock={fake.clock.now}
+            inbox={inbox}
+            initialOpen={cards[0]?.key}
+            now={NOW}
+            onNavigate={() => undefined}
+            phone
+            reducedMotion
+            renderComposer={card => (
+              <ReplyBox
+                card={card}
+                onReplied={message => inbox.replied.mark(card, message)}
+                onRestored={() => inbox.replied.takeRestore(card.key)}
+                restore={inbox.repliedState.restores.find(each => each.key === card.key)?.text}
+                send={api.send}
+              />
+            )}
+          />
+        );
+      }}
+    />,
   );
   await settle();
   return { fake, sent, mounted, latest: () => must(latest, 'the inbox') };
@@ -146,11 +186,6 @@ const undo = async (mounted: Mounted): Promise<void> => {
 
 const keys = (cards: readonly InboxCard[]): string[] => cards.map(card => card.key);
 
-afterEach(() => {
-  documentDraftStore.clear(draftScope(shipIt));
-  documentDraftStore.clear(draftScope(rebase));
-});
-
 describe('a reply from an Inbox card moves the Inbox on', () => {
   it('takes the card off every list at once, opens the next one and says so in a toast', async () => {
     const run = await rig([shipIt, rebase], async () => ({ disposition: 'queued', sendId: 'm1' }));
@@ -161,7 +196,7 @@ describe('a reply from an Inbox card moves the Inbox on', () => {
 
     await send(run.mounted);
 
-    expect(run.sent).toEqual([{ sessionId: 'sess-2', message: '^A2 only after lunch' }]);
+    expect(run.sent).toEqual([{ sessionId: 'sess-2', message: 'only after lunch' }]);
     const inbox = run.latest();
     expect(keys(inbox.cards)).toEqual([rebase.key]);
     expect(inbox.total).toBe(1);

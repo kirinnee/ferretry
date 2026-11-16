@@ -1,12 +1,12 @@
 /**
- * THE INBOX CARD'S TEXT CAN BE HIGHLIGHTED AND ITS COMPOSER HAS THE MIC, in a real browser, on a phone and a desktop,
+ * THE INBOX CARD'S TEXT CAN BE HIGHLIGHTED, in a real browser, on a phone and a desktop,
  * in light and dark.
  *
  * The owner (2026-11-01, &B127): "inbox texts can't be highlighted. inbox's composer doesn't have the voice option!"
  *
  *  - The swipe deck's card text computes `user-select: text`; a double click highlights a word of it; its buttons stay
  *    `user-select: none`.
- *  - The Inbox composer draws the chat composer's mic (a "Dictat…" button; the label says unavailable where the browser cannot).
+ *    (The mic of the reply box is Conversation's composer's, proved there.)
  *
  * Set `FY_INBOX_TEXT_VOICE_SHOTS_DIR` to keep `<viewport>-<scheme>-<case>.png`.
  */
@@ -88,14 +88,13 @@ const open = async (name: string, scheme: 'light' | 'dark'): Promise<{ tab: Page
   await tab.goto(`${origin}/?theme=studio-${scheme}`);
   try {
     await tab.waitForSelector('.fy-attn-deck__top', { timeout: 4_000 });
-    await tab.waitForSelector('button[aria-label^="Dictat"]', { timeout: 4_000 });
   } catch (error) {
     throw new Error(`the scene did not draw: ${String(error)}\n${problems.join('\n')}`);
   }
   return { tab, close: async () => await context.close() };
 };
 
-describe('the Inbox card’s text and composer', () => {
+describe('the Inbox card’s text', () => {
   for (const { name } of VIEWPORTS)
     for (const scheme of ['light', 'dark'] as const) {
       const label = `${name}, ${scheme}`;
@@ -121,16 +120,6 @@ describe('the Inbox card’s text and composer', () => {
           expect(selected, 'the paragraph is highlighted').toContain('Each login has a limit');
           if (shotsDir !== '')
             await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-card-text-selected.png`) });
-        } finally {
-          await close();
-        }
-      });
-
-      it(`draws the chat composer’s mic in the Inbox composer (${label})`, async () => {
-        const { tab, close } = await open(name, scheme);
-        try {
-          expect(await tab.locator('button[aria-label^="Dictat"]').count()).toBe(1);
-          if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${scheme}-composer-mic.png`) });
         } finally {
           await close();
         }

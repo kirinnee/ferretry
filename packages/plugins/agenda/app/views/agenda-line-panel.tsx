@@ -6,14 +6,17 @@
  * own view lays over the message list, which a slot above the composer cannot reach: a tapped row opens the item on its
  * own page (the ask page, with the ferret's conversation under it), the same place the ferret's Agenda tab sends it.
  * The agenda exists only while the ferret works in agenda mode (`GET /v1/ferrets/:ferretId/agenda-mode`): with it off,
- * and with nothing sending, the panel draws nothing.
+ * and with nothing sending, the panel draws nothing. While the machine holds the owner's answers the line's right end
+ * says so ("Sending to Zoe in 8 s…") and offers Send now.
  */
 
 import type { PanelProps } from '@ferretry/kernel/manifest';
 import { useEffect, useMemo, useState } from 'react';
 import { AgendaBoardProviders, useAgendaBoardHooks } from '../features/agenda/agenda-board-hooks.tsx';
+import { AgendaRepliesNotice } from '../features/agenda/agenda-replies-notice.tsx';
 import { useAgenda } from '../features/agenda/agenda.tsx';
 import { useAgendaSnapshot } from '../hooks/use-agenda.ts';
+import { useAgendaReplies } from '../hooks/use-agenda-replies.ts';
 import { useFerretAgenda } from '../hooks/use-ferret-agenda.ts';
 import { readSessionAgenda } from '../lib/agenda-api.ts';
 import { AgendaClientContext } from '../lib/agenda-client-context.tsx';
@@ -47,12 +50,30 @@ function AgendaLine({ runtime, ferret }: { readonly runtime: AgendaRuntime; read
   const named = useFerretAgenda(runtime, ferret);
   const snapshot = useAgendaSnapshot(runtime.agenda, scope);
   const agendaMode = useAgendaMode(runtime, ferret);
+  const replies = useAgendaReplies(runtime.agenda, runtime.connection, scope);
+  const ferretName = named?.name ?? ferret;
+  // The slot is handed only while something is held: a slot that is present at all makes the line draw a status end.
+  const held = replies.secondsLeft !== null || replies.heldForTurn || replies.heldForComposer;
   const agenda = useAgenda({
     agendaMode,
     client: runtime.agenda,
     connection: runtime.connection,
-    ferret: named?.name ?? ferret,
+    ferret: ferretName,
     onOpenItem: item => navigate(agendaConversationPath(daemon, ferret, item.id)),
+    ...(held
+      ? {
+          repliesSlot: (
+            <AgendaRepliesNotice
+              ferret={ferretName}
+              heldForComposer={replies.heldForComposer}
+              heldForTurn={replies.heldForTurn}
+              onSendNow={replies.sendNow}
+              secondsLeft={replies.secondsLeft}
+              sending={replies.sending}
+            />
+          ),
+        }
+      : {}),
     scope,
     snapshot,
     status: runtime.agenda.store.status(scope),
