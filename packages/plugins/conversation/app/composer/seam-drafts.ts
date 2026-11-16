@@ -3,11 +3,11 @@
  * apart so its owner can fold them in one place.
  *
  *   - DraftStreamClient .... the part of the half's client the shared draft reads, edits and streams through.
- *   - GAP(app-shell) ....... `PluginClient.socket` takes a query and reports the close code, so the stream names an
- *     Agenda item's own draft (`?item=`) and tells the daemon's "read the whole draft again" close (4413) from any
- *     other. It does not yet pass where a returning composer's copy stood (`?generation=&epoch=&rev=`), so every
- *     reconnect asks for the whole draft; a shell that reports no close code leaves it spelled in the reason, and a
- *     reason that is not a number reads as an ordinary disconnect.
+ *   - `PluginClient.socket` takes a query and reports the close code, so the stream names an Agenda item's own draft
+ *     (`?item=`), says where a returning composer's copy stood (`?generation=&epoch=&rev=`, all or none) so a
+ *     reconnect reads only what moved, and tells the daemon's "read the whole draft again" close (4413) from any
+ *     other. A shell that reports no close code leaves it spelled in the reason, and a reason that is not a number
+ *     reads as an ordinary disconnect.
  */
 import type { PluginClient } from '@ferretry/kernel/manifest';
 

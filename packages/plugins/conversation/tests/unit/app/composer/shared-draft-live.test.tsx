@@ -89,11 +89,14 @@ class FakeDaemon {
   items: DraftItem[] = [];
   readonly history: { op: TextOp; id?: string }[] = [];
   readonly streams: FakeStream[] = [];
+  /** The query each stream was opened with, in order: where a returning composer said its copy stood. */
+  readonly queries: (Readonly<Record<string, string>> | undefined)[] = [];
   devices: string[] = [];
   refuseNext = false;
 
   readonly open: DaemonStreamOpener = (request: StreamRequest) => {
     const peer = `peer-${this.streams.length + 1}`;
+    this.queries.push(request.query);
     const stream: FakeStream = {
       peer,
       device: this.devices.shift() ?? 'Somewhere',
@@ -104,7 +107,7 @@ class FakeDaemon {
       alive: true,
     };
     this.streams.push(stream);
-    // GAP(app-shell): the client socket carries no position, so every stream starts from the whole draft.
+    // Whatever position the composer sent, the stream starts from the whole draft: a resync is always safe.
     stream.deliver({
       kind: 'snapshot',
       snapshot: {
@@ -368,6 +371,26 @@ describe('useSharedDraft', () => {
     expect(devices.hooks.phone?.live).toBe(true);
     expect(devices.texts.phone).toBe('on the train, then the office');
     expect(daemonSide.history).toHaveLength(2);
+    devices.unmount();
+  });
+
+  test('a phone that comes back says where its copy stood, so the daemon sends what moved and not the whole draft', async () => {
+    const daemonSide = new FakeDaemon();
+    const devices = mountDevices(daemonSide, { phone: '', laptop: '' });
+    await settle();
+    devices.type('phone', 'on the train');
+    await settle();
+
+    daemonSide.kill(daemonSide.streams[0] as FakeStream);
+    await settle();
+    run(() => devices.timers.advance(1_000));
+    await settle();
+
+    // The first stream had nothing to say; the reconnect names the generation, epoch and rev the copy agreed at.
+    const firstOfPhone = daemonSide.queries[0];
+    const phoneAgain = daemonSide.queries.at(-1) as Record<string, string>;
+    expect(firstOfPhone).toBeUndefined();
+    expect(phoneAgain).toEqual({ generation: G, epoch: '0', rev: String(daemonSide.history.length) });
     devices.unmount();
   });
 
@@ -924,6 +947,25 @@ describe('openSharedDraftStream', () => {
     await openSharedDraftStream(client, daemonFerretScope(daemon, 'sess-one', 'A5'), undefined, handlers);
     await openSharedDraftStream(client, scope, undefined, handlers);
     expect(requests.map(request => request.query)).toEqual([{ item: 'A5' }, undefined]);
+  });
+
+  test('says where a returning composer’s copy stood: generation, epoch and rev together, with the item and without', async () => {
+    const requests: StreamRequest[] = [];
+    const client = clientOf(request => {
+      requests.push(request);
+      return fakeSession().session;
+    });
+    const handlers = { onFrame: () => undefined, onClosed: () => undefined };
+    const position = { generation: 'gen-1', epoch: 2, rev: 17 };
+    await openSharedDraftStream(client, scope, position, handlers);
+    await openSharedDraftStream(client, daemonFerretScope(daemon, 'sess-one', 'A5'), position, handlers);
+    expect(requests.map(request => request.query)).toEqual([
+      { generation: 'gen-1', epoch: '2', rev: '17' },
+      { item: 'A5', generation: 'gen-1', epoch: '2', rev: '17' },
+    ]);
+    // Never half a position: it is all three or none.
+    for (const query of requests.map(request => request.query ?? {}))
+      expect(['generation', 'epoch', 'rev'].filter(name => name in query)).toHaveLength(3);
   });
 
   test('reports the close code the shell gives, even when the reason spells none, and reads the reason when it gives none', async () => {

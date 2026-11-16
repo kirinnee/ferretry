@@ -688,6 +688,55 @@ describe('whose turn it is', () => {
   });
 });
 
+describe('the activity line, from the pane', () => {
+  const SNAPSHOT = 'GET /v1/ferrets/:ferretId/snapshot';
+  const FRAME = ['some earlier output', '✽ Pontificating… (42s · ↓ 3.1k tokens · esc to interrupt)', '> '].join('\n');
+  const working = () =>
+    ferretView('shared', { state: { turnState: 'working', turnStateAt: '2026-10-16T08:00:00.000Z' } });
+  const settle = () => runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+
+  test('reads the visible pane through Terminals’ snapshot route while the ferret works, and hands the line what it said', async () => {
+    const client = fakeClient({ [SNAPSHOT]: () => FRAME });
+    const page = draw({ session: working() }, client);
+    await settle();
+
+    expect(client.callsTo(SNAPSHOT)[0]?.params).toEqual({ ferretId: 'shared' });
+    // The visible screen, captured now: not the whole scrollback, not the stored final frame.
+    expect(client.callsTo(SNAPSHOT)[0]?.query).toEqual({ live: 'true', scope: 'screen' });
+    expect(page.root.findByType(Transcript).props.activity).toEqual({
+      harness: 'claude',
+      verb: 'Pontificating…',
+      elapsed: '42s',
+      tokens: '↓ 3.1k tokens',
+    });
+  });
+
+  test('says less, and no error, when the pane cannot be read', async () => {
+    const client = fakeClient({
+      [SNAPSHOT]: () => {
+        throw new Error('the terminal would not answer');
+      },
+    });
+    const page = draw({ session: working() }, client);
+    await settle();
+
+    expect(client.callsTo(SNAPSHOT).length).toBeGreaterThan(0);
+    expect(page.root.findByType(Transcript).props.activity).toBeNull();
+    expect(page.root.findByType(Transcript).props.busy).toBe(true);
+  });
+
+  test('reads nothing for a ferret that is not working, and nothing under an agenda item', async () => {
+    const idle = fakeClient({ [SNAPSHOT]: () => FRAME });
+    draw({ session: ferretView('shared', { state: { turnState: 'your-turn' } }) }, idle);
+    const embedded = fakeClient({ [SNAPSHOT]: () => FRAME });
+    draw({ embedded: true, session: working() }, embedded);
+    await settle();
+
+    expect(idle.callsTo(SNAPSHOT)).toHaveLength(0);
+    expect(embedded.callsTo(SNAPSHOT)).toHaveLength(0);
+  });
+});
+
 describe('search within the conversation', () => {
   const searchPort = {
     search: async () => ({ v: 1 as const, ferret: 'shared', query: 'x', file: 'f', matches: [], truncated: false }),
