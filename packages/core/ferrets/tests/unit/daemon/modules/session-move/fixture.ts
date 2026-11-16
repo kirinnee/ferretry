@@ -32,6 +32,7 @@ export function sessionMoveNeedsForTest(overrides: Partial<SessionMoveNeeds> = {
     spawn: refusing('spawn'),
     host: refusing('host'),
     clock: fixedClock(),
+    log: { warn: () => {} },
     storage: refusing('storage'),
     sessions: refusing('sessions'),
     resume: refusing('resume'),

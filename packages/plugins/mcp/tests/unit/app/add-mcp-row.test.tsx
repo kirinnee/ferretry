@@ -193,6 +193,7 @@ describe('mcp#0 the dialog names the login and the ferret from Ferrets’ own re
   it('mcp#1 on the panel path a reload nobody reported names the ferret in lower case mid-sentence', async () => {
     const root = await addOnLogin({ [FERRET]: new Error('down') });
     await click(root, '[data-add-mcp-reload]');
+    await click(root, '[data-add-mcp-reload-confirm]');
     expect(root.querySelector('[role="alert"]')?.textContent).toContain('whether this ferret reloaded');
   });
 });

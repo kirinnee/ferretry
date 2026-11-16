@@ -20,6 +20,7 @@ cross-harness move is still refused (`409 harness_mismatch`), and the refusal na
 - **Who.** `session.migrating` and `session.migrated` (and `session.migrate_failed`) carry `by`: `owner` (the CLI
   or the app), `session:<id>` (a ferret that called the move, by its session id) or `warden` (the Warden's own
   move). The Warden's token cannot call the route; its moves are labelled by the Warden itself.
+- **A refused move** is journalled as `session.move_refused` (`to`, `verdict`, `cause`, `blockers`, `by`) and changes nothing else.
 - **A restart** is the same move onto the same login, so it carries `by` too: the person who asked
   (`owner`) or the ferret that ran `fy restart` (`session:<id>`). A restart that has to wait for a busy
   ferret keeps who asked in the queue and names them when it finally runs.
