@@ -14,7 +14,7 @@ import {
   type WaitHeartbeat,
   type WaitHeartbeatSink,
 } from '../../../../../daemon/lib/session/monitor/index.ts';
-import type { DeclaredWait } from '../../../../../daemon/lib/session/signal/index.ts';
+import type { DeclaredWait } from '../../../../../daemon/lib/session/signal/types.ts';
 
 /**
  * What one tick of the declared-wait watcher actually does, and what it refuses to claim.

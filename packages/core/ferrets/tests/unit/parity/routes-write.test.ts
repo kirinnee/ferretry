@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import type { TestHost } from '@ferretry/kernel/testing';
 import {
   AgentPinsFile,
@@ -14,14 +14,17 @@ import {
 import { FakeHarness, FakeRunner } from '../../../contract/testing/index.ts';
 import { FY_REQUEST_ID_HEADER } from '../../../daemon/lib/protocol/headers.ts';
 import { as, host, record } from '../daemon/ferrets/route-fixture.ts';
+import { cleanupTempDirectories } from '../../integration/daemon/support/repository.ts';
+import { worktreeRouteWorld } from '../../support/daemon/worktree-world.ts';
 
 /**
  * The POST routes of Ferrets (R rows), each driven through the real handler on the host (`h.request`): the success
  * shape the descriptor promises, the refusals its minimum and caller imply, and the state the call leaves behind.
  *
  * Not here, and why (the lead has the list): send, sends/*, interrupt, composer, answer belong to Conversation,
- * permission and dialog to Claude Code; fork, handover, handover/cancel, conversion-preview, move, move/ask-to-stop-jobs
- * and the two worktree writes answer a refusal or a "not built yet" for every request this plugin can receive in 5.0.
+ * permission and dialog to Claude Code; fork, handover, handover/cancel, conversion-preview, move and move/ask-to-stop-jobs
+ * answer a refusal or a "not built yet" for every request this plugin can receive in 5.0. The managed worktrees ARE
+ * built (the last describe: real Git over the kernel's real roots).
  */
 
 const startId = (n: string) => ({ [FY_REQUEST_ID_HEADER]: `parity-${n}` });
@@ -412,5 +415,91 @@ describe('R-0371 POST /v1/ferrets/:ferretId/signal', () => {
     const stopped = await say(h, id, { kind: 'waiting' });
     expect([stopped.status, codeOf(stopped)]).toEqual([409, 'signal_refused']);
     await h.stop();
+  });
+});
+
+describe('the managed worktrees write and check routes (real Git over the real roots)', () => {
+  afterAll(async () => {
+    await cleanupTempDirectories();
+  });
+
+  test('R-0410 POST /v1/worktrees answers 200 { worktree, cwd }: a checkout under the managed root, recorded and owned', async () => {
+    const world = await worktreeRouteWorld('r0410');
+    const made = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feat/new', sessionId: 'ses-1' },
+    });
+    expect(made.status).toBe(200);
+    const body = made.json as { worktree: Record<string, unknown>; cwd: string };
+    expect(Object.keys(body).sort()).toEqual(['cwd', 'worktree']);
+    expect(body.worktree).toMatchObject({
+      branch: 'feat/new',
+      repositoryRoot: world.repository.root,
+      relativeCwd: '',
+      initialHead: world.repository.head,
+      branchPreexisted: false,
+      ownerSessionId: 'ses-1',
+      sharedWith: [],
+    });
+    expect(String(body.worktree.path).startsWith(world.io.managedRoot)).toBe(true);
+    expect(body.cwd).toBe(body.worktree.path as string);
+    const listed = (await world.call('GET /v1/worktrees')).json as {
+      worktrees: { path: string }[];
+      managedRoot: string;
+    };
+    expect(listed.worktrees.map(row => row.path)).toEqual([body.worktree.path as string]);
+  });
+
+  test('R-0410 a body that is not a managed-worktree request is a 400 and nothing is made', async () => {
+    const world = await worktreeRouteWorld('r0410-bad');
+    const refused = await world.call('POST /v1/worktrees', { body: { sourceCwd: world.repository.root, branch: 'x' } });
+    expect([refused.status, (refused.json as { code: string }).code]).toEqual([400, 'invalid_request']);
+    expect(((await world.call('GET /v1/worktrees')).json as { worktrees: unknown[] }).worktrees).toEqual([]);
+  });
+
+  test('R-0211 GET /v1/worktrees/removal answers 200 with the verdict for a checkout the registry holds, and its blockers say why', async () => {
+    const world = await worktreeRouteWorld('r0211');
+    const made = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feat/check', sessionId: 'ses-1' },
+    });
+    const path = (made.json as { worktree: { path: string } }).worktree.path;
+    const verdict = await world.call('GET /v1/worktrees/removal', { query: { path } });
+    expect(verdict.status).toBe(200);
+    expect(verdict.json).toMatchObject({
+      removable: false,
+      path,
+      branch: 'feat/check',
+      head: world.repository.head,
+      // A fresh checkout has no pushed commit: the one blocker a person may knowingly accept.
+      blockers: [{ code: 'unpushed_commits', override: 'accept_unpushed_commits' }],
+      branchDeletion: { deletable: false },
+    });
+  });
+
+  test('R-0411 POST /v1/worktrees/remove answers 200 { path, branch, branchRetained, removedAt } and takes the checkout off the disk', async () => {
+    const world = await worktreeRouteWorld('r0411');
+    const made = await world.call('POST /v1/worktrees', {
+      body: { sourcePath: world.repository.root, branch: 'feat/gone', sessionId: 'ses-1' },
+    });
+    const path = (made.json as { worktree: { path: string } }).worktree.path;
+    const refused = await world.call('POST /v1/worktrees/remove', {
+      body: { path, overrides: [], deleteBranch: false, confirmations: [] },
+    });
+    expect([refused.status, (refused.json as { code: string }).code]).toEqual([409, 'unsafe_remove']);
+    const removed = await world.call('POST /v1/worktrees/remove', {
+      body: { path, overrides: ['accept_unpushed_commits'], deleteBranch: false, confirmations: [] },
+    });
+    expect(removed.status).toBe(200);
+    expect(removed.json).toEqual({
+      path,
+      branch: 'feat/gone',
+      branchRetained: true,
+      removedAt: expect.any(String),
+      branchBlockers: [],
+    });
+    expect(await Bun.file(path).exists()).toBe(false);
+    const listed = (await world.call('GET /v1/worktrees')).json as {
+      worktrees: { path: string; removedAt?: string }[];
+    };
+    expect(listed.worktrees.map(row => [row.path, row.removedAt !== undefined])).toEqual([[path, true]]);
   });
 });

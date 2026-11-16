@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import type { SessionId } from './session-id.ts';
+import type { SessionId } from '../../../daemon/lib/session-id.ts';
 import type { StateHome } from './state-home.ts';
 /** Today's `protocol/src/lib/state-home-layout.ts` layout marker file name. */
 const LAYOUT_VERSION_FILENAME = 'layout-version';
