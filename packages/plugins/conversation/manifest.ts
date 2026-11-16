@@ -28,13 +28,13 @@ import {
   LinkKept,
   MAILBOX_HOST_KEY,
   MailboxHosts,
+  MailboxPort,
   MESSAGE_SENT_AUDIT,
   MessageBeforeSend,
   MessageSent,
   QUESTION_ANSWERED_AUDIT,
   QUEUE_CANCELLED_AUDIT,
   QUEUE_EDITED_AUDIT,
-  QueueChanged,
   QuestionAnswered,
   QuestionAsked,
   PromptAskRefSchema,
@@ -114,7 +114,7 @@ export default definePlugin({
     },
   ],
 
-  needs: { ferrets: FerretsPort, asks: AsksPort },
+  needs: { ferrets: FerretsPort, asks: AsksPort, mailbox: MailboxPort },
   // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
   // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
   uses: { claudeCode: ClaudeCodePort },
@@ -529,7 +529,7 @@ export default definePlugin({
     state: CONVERSATION_STATE,
     config: [CONVERSATION_CONFIG],
     readModels: ['transcript', 'queue', 'sends', 'logs', 'search', 'links'],
-    publishes: [QueueChanged, MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
+    publishes: [MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
     subscribes: [AskAnswered, AsksChanged],
   },
 

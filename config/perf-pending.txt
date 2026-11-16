@@ -2,23 +2,3 @@
 # Each moves its budget to <package>/tests/perf/ and keeps its correctness checks in unit at a small size; then
 # its line goes. A listed file that no longer holds a budget, or a budget in an unlisted file, fails the gate.
 # This list only shrinks; empty means the unit tier holds no timing claim.
-packages/cli/tests/unit/sleep.test.ts
-packages/cli/tests/unit/update/view.test.ts
-packages/core/ferrets/tests/unit/daemon/ferrets/deliver-turns.test.ts
-packages/core/ferrets/tests/unit/daemon/ferrets/last-snapshot-stop.test.ts
-packages/core/ferrets/tests/unit/daemon/session/observer/turn-watch-budget.test.ts
-packages/core/ferrets/tests/unit/daemon/session/snapshot/last-snapshot-capture.test.ts
-packages/core/ferrets/tests/unit/daemon/session/snapshot/screen-mask.test.ts
-packages/core/gate/tests/unit/daemon/build.test.ts
-packages/core/kernel/tests/unit/host-config/adversarial-bound.test.ts
-packages/core/kernel/tests/unit/host-config/agent-config.test.ts
-packages/core/kernel/tests/unit/host-config/check-memo.test.ts
-packages/core/kernel/tests/unit/host-config/issue-cap.test.ts
-packages/core/kernel/tests/unit/host-config/real-schema-bound.test.ts
-packages/core/kernel/tests/unit/host/config-alias-boot.test.ts
-packages/core/kernel/tests/unit/host/config-real-schema-boot.test.ts
-packages/core/kernel/tests/unit/parity/jobs.test.ts
-packages/core/vault/tests/unit/daemon/secrets/read-scope.test.ts
-packages/std/tests/unit/credential-words-linear.test.ts
-packages/std/tests/unit/raw-secrets.test.ts
-packages/std/tests/unit/yaml-text.test.ts
