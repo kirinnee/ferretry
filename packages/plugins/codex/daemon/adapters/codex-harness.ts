@@ -11,7 +11,7 @@
  * composes them. A new member goes into a part, never here.
  */
 import { harnessContext, type CodexHarness, type CodexHarnessOptions } from '../harness/parts/context.ts';
-import { CODEX_HARNESS_PARTS } from '../harness/parts/index.ts';
+import { CODEX_HARNESS_PARTS } from '../harness/parts/list.ts';
 
 export type { CodexHarness, CodexHarnessOptions };
 

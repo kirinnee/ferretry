@@ -493,6 +493,11 @@ const settle = async (rounds = 20): Promise<void> => {
   for (let round = 0; round < rounds; round += 1) await new Promise(resolve => setImmediate(resolve));
 };
 
+/** Quiet rounds (about 6 ms each) after which a pump with nothing to wait for takes the daemon to be done. */
+const QUIET_ROUNDS = 6;
+/** Quiet rounds a pump that waits for a reply the daemon must send allows before it calls the reply lost. */
+const WAIT_ROUNDS = 4_000;
+
 export const BOX_KEY = toBase64Url(new Uint8Array(32).fill(7));
 export const CLIENT_NAME = 'Firefox on a Mac';
 
@@ -554,7 +559,7 @@ export class BrowserEnd {
         payload: session.utf8Bytes(JSON.stringify(pending.hello)),
       }),
     );
-    await this.pump();
+    await this.pump(() => this.#hello !== undefined);
     const frame = this.#hello;
     if (frame === undefined) throw new Error('no daemon hello');
     const hello = session.decodeDaemonHello(frame.payload);
@@ -586,6 +591,7 @@ export class BrowserEnd {
 
   async join(who: Browser, code: string, extra: Record<string, unknown> = {}): Promise<void> {
     const proof = await this.sign(who, session.memberJoinMessage(this.transcript, who.memberKey, BOX_KEY));
+    const seen = this.records.length;
     await this.send({
       t: 'join',
       protocol: session.SESSION_PROTOCOL_ID,
@@ -596,11 +602,12 @@ export class BrowserEnd {
       proof,
       ...extra,
     });
-    await this.pump();
+    await this.pump(() => this.records.length > seen);
   }
 
   async joinOptions(who: Browser, code: string, origin = APP_ORIGIN, signer: Browser = who): Promise<void> {
     const proof = await this.sign(signer, session.memberJoinOptionsMessage(this.transcript, who.memberKey, origin));
+    const seen = this.records.length;
     await this.send({
       t: 'join-options',
       protocol: session.SESSION_PROTOCOL_ID,
@@ -609,13 +616,14 @@ export class BrowserEnd {
       origin,
       proof,
     });
-    await this.pump();
+    await this.pump(() => this.records.length > seen);
   }
 
   async member(who: Browser, keyId: string, signer: Browser = who): Promise<void> {
     const proof = await this.sign(signer, session.memberAuthMessage(this.transcript, keyId, who.appSession));
+    const seen = this.records.length;
     await this.send({ t: 'member', protocol: session.SESSION_PROTOCOL_ID, keyId, appSession: who.appSession, proof });
-    await this.pump();
+    await this.pump(() => this.records.length > seen);
   }
 
   #nextId = 1;
@@ -633,7 +641,8 @@ export class BrowserEnd {
       path,
       ...(body === undefined ? {} : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
     });
-    await this.pump();
+    const answered = (): boolean => this.records.some(entry => entry.message.t === 'res' && entry.message.id === id);
+    await this.pump(answered);
     const answer = this.records.find(entry => entry.message.t === 'res' && entry.message.id === id)?.message;
     if (answer === undefined)
       throw new Error(`no answer to ${method} ${path}${this.end === undefined ? '' : ` (ended ${this.end.code})`}`);
@@ -653,10 +662,16 @@ export class BrowserEnd {
     };
   }
 
-  /** Pull everything the daemon has queued for this end, until it is quiet. */
-  async pump(): Promise<void> {
+  /**
+   * Pull everything the daemon has queued for this end. With no `until` it stops once the daemon has been quiet for a
+   * few rounds (what a test uses to prove nothing more comes). With one it waits for that very thing the daemon is
+   * bound to send, however long the daemon's own async crypto takes under load, and gives up only after
+   * {@link WAIT_ROUNDS} quiet rounds (a count of rounds, not a clock), so a daemon that never answers still fails.
+   */
+  async pump(until?: () => boolean): Promise<void> {
+    const patience = until === undefined ? QUIET_ROUNDS : WAIT_ROUNDS;
     let idle = 0;
-    while (idle < 6 && this.end === undefined) {
+    while (idle < patience && this.end === undefined) {
       await settle(4);
       let pulled = false;
       for (let next = this.link.outbound.next(); next !== undefined; next = this.link.outbound.next()) {
@@ -667,6 +682,7 @@ export class BrowserEnd {
         pulled = true;
         await this.#receive(next.bytes);
       }
+      if (until?.() === true) return;
       if (pulled) idle = 0;
       else {
         idle += 1;

@@ -1,3 +1,3 @@
 kind	path	limit	expires	reason
 composition	daemon/adapters/claude-harness.ts	-	-	the one class that implements Harness for Claude Code
-registry	daemon/harness/parts/index.ts	-	-	the Claude Code harness parts registry; a new part is an import line plus an entry line, so it needs a Contract change section until it is reshaped to one line per part (H6 follow-up)
+registry	daemon/harness/parts/index.ts	-	-	the Claude Code harness parts registry: one sorted `export * as <name>` line per part; list.ts builds the ordered list from it
