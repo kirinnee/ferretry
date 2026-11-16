@@ -10,7 +10,6 @@ import { dirname, join } from 'node:path';
 const ROOT = join(import.meta.dir, '..', '..');
 const CHECK_BASE = join(ROOT, 'scripts/ci/check-base.sh');
 const UNIT_BUDGETS = join(ROOT, 'scripts/validate/unit-budgets.sh');
-const ANCHOR = '7573243d27c42a4cdb23cdfdee7bd954c911c7e6';
 const ZERO = '0'.repeat(40);
 const dirs: string[] = [];
 afterEach(() => {
@@ -50,7 +49,11 @@ const LISTED = 'packages/x/tests/unit/x.test.ts';
 const ADDED = 'packages/y/tests/unit/y.test.ts';
 const BUDGET = 'const start = performance.now();\n';
 
-/** A remote whose first commit is the anchor's stand-in (borrowing the real repository's objects so ANCHOR resolves). */
+/**
+ * A remote whose first commit is the anchor's stand-in (FY_CHECK_BASE_TEST_ANCHOR): the real anchor is not in a
+ * one-commit CI checkout, so borrowing this repository's objects only worked on a full local clone.
+ */
+const anchors = new Map<string, string>();
 const remote = (): string => {
   const dir = mkdtempSync(join(tmpdir(), 'fy-check-base-'));
   dirs.push(dir);
@@ -58,8 +61,9 @@ const remote = (): string => {
   mkdirSync(origin);
   git(origin, 'init', '--quiet', '-b', 'main');
   git(origin, 'config', 'uploadpack.allowAnySHA1InWant', 'true');
-  const objects = git(ROOT, 'rev-parse', '--path-format=absolute', '--git-common-dir');
-  put(origin, '.git/objects/info/alternates', `${join(objects, 'objects')}\n`);
+  put(origin, 'docs/rebuild/after-merge.json', '{}\n');
+  anchors.set(origin, commit(origin, 'the anchor stand-in'));
+  git(origin, 'rm', '--quiet', 'docs/rebuild/after-merge.json');
   return origin;
 };
 const commit = (origin: string, message: string): string => {
@@ -83,7 +87,9 @@ const candidate = (origin: string): string => {
 const ci = (work: string, event: Record<string, string>) => {
   const envFile = join(work, '..', `github-env-${Math.random()}`);
   writeFileSync(envFile, '');
+  const origin = git(work, 'remote', 'get-url', 'origin');
   const selected = run(work, ['bash', CHECK_BASE], {
+    FY_CHECK_BASE_TEST_ANCHOR: anchors.get(origin) ?? '',
     FY_PR_BASE_SHA: '',
     FY_PUSH_BEFORE: '',
     FY_DEFAULT_BRANCH: 'main',
@@ -138,7 +144,7 @@ test('a pull request into a base without after-merge.json still rejects; FY_CHEC
   const base = withList(origin, false);
   const result = ci(candidate(origin), { FY_PR_BASE_SHA: base });
   rejected(result, base);
-  expect(result.exported.FY_CHECK_BASE).toBe(ANCHOR);
+  expect(result.exported.FY_CHECK_BASE).toBe(anchors.get(origin));
 });
 
 test('the introduction: a base without perf-pending.txt is the bootstrap and accepts the list', () => {

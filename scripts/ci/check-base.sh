@@ -20,6 +20,9 @@ list="docs/rebuild/after-merge.json"
 zero="0000000000000000000000000000000000000000"
 # The commit that wrote the approved baseline (docs/rebuild/merge-bar.md, !A480). Never moved forward by hand.
 ANCHOR="7573243d27c42a4cdb23cdfdee7bd954c911c7e6"
+# Tests only (scripts/ci/check-base.test.ts): a throwaway repository cannot hold the real anchor in a one-commit CI
+# checkout, so the test names its own stand-in. No workflow may set it (scripts/test/ci-sets.ts refuses one that does).
+ANCHOR="${FY_CHECK_BASE_TEST_ANCHOR:-${ANCHOR}}"
 
 # Whether a given commit holds the list, fetching it first. An empty or all-zero commit holds nothing.
 holds_list() {
