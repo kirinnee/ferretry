@@ -11,6 +11,7 @@ import {
   SKIP_UNRECORDED,
   TERMINALS_WORDS,
   TerminalAskOwnerInputSchema,
+  AttachmentsStateSchema,
   TerminalChanged,
   TerminalCloseInputSchema,
   TerminalListInputSchema,
@@ -24,6 +25,21 @@ import {
   TerminalWaitInputSchema,
   USE,
 } from './contract/index.ts';
+
+/** Where jobs live: an opaque named tree the wrapper in the pane writes into, and the registry of live attachments. */
+export const JobFiles = defineState({ name: 'jobs', path: 'jobs/*', store: 'opaque', format: 1 });
+export const JobAttachments = defineState({
+  name: 'job-attachments',
+  path: 'job-attachments.json',
+  store: 'json',
+  format: 1,
+  schema: AttachmentsStateSchema,
+  onDamaged: { narrower: 'no attachment is known; a running attach carries on and re-registers nothing' },
+});
+
+const GUARD_NONE_JOBS = {
+  none: 'job ids, pids and acknowledgements only; no job output or command text',
+} as const;
 
 /** Every terminal tool: a ferret's call (or the owner's tools), on `terminal.use`, kept as one `agent.tool` entry. */
 const TOOL = {
@@ -197,6 +213,78 @@ export default definePlugin({
         noStore: true,
         audit: SKIP_UNRECORDED,
         guard: GUARD_NONE,
+      }),
+      route('GET /v1/ferrets/:ferretId/jobs', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('POST /v1/ferrets/:ferretId/jobs', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.terminalOpened },
+        guard: 'secrets',
+      }),
+      route('GET /v1/ferrets/:ferretId/jobs/:jobId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('GET /v1/ferrets/:ferretId/jobs/:jobId/output', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: 'secrets',
+      }),
+      route('POST /v1/ferrets/:ferretId/jobs/:jobId/stop', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: { record: AUDIT.terminalInput },
+        guard: 'secrets',
+      }),
+      route('GET /v1/ferrets/:ferretId/job-attachments', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_READ,
+        guard: GUARD_NONE_JOBS,
+      }),
+      route('POST /v1/ferrets/:ferretId/job-attachments', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE_JOBS,
+      }),
+      route('DELETE /v1/ferrets/:ferretId/job-attachments/:attachmentId', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE_JOBS,
+      }),
+      route('POST /v1/ferrets/:ferretId/job-attachments/detach', {
+        minimum: 'operator',
+        caller: 'any',
+        capability: USE.terminal,
+        noStore: true,
+        audit: SKIP_UNRECORDED,
+        guard: GUARD_NONE_JOBS,
       }),
     ],
     sockets: [
@@ -417,6 +505,79 @@ export default definePlugin({
         summary: 'attach to the terminal a ferret runs in (Ctrl-b d detaches)',
         args: [{ name: 'id', help: 'session id' }],
       }),
+      verb('job run', {
+        summary: 'start a background job in the keeper and attach to it; exits with the job\'s exit code (75 if the attachment broke)',
+        args: [
+          {
+            name: 'command',
+            help: 'the command, after --: ONE word is a shell command line as written (pipes work), several words are an argv',
+            variadic: true,
+          },
+        ],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--name <name>', help: 'its name: a lowercase letter, then letters, digits or dashes' },
+        ],
+      }),
+      verb('job attach', {
+        summary: 'stream a job\'s log until it ends, then exit with its exit code; a signal only detaches (exit 75), the job runs on',
+        args: [{ name: 'job', help: "the job's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--from-start', help: 'print the whole log first (default: its last 100 lines)' },
+          { flag: '--tail <n>', help: 'print only the last N lines first' },
+        ],
+      }),
+      verb('job logs', {
+        summary: 'print a job\'s log without following it',
+        args: [{ name: 'job', help: "the job's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--tail <n>', help: 'only the last N lines' },
+        ],
+      }),
+      verb('job wait', {
+        summary: 'block until a job ends and print its exit; exits with its exit code (124 on timeout)',
+        args: [{ name: 'job', help: "the job's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--timeout <duration>', help: 'give up after this long: 30, 30s, 5m, 2h' },
+        ],
+      }),
+      verb('job stop', {
+        summary: 'stop a job: SIGTERM to its tree, then SIGKILL after a grace period',
+        args: [{ name: 'job', help: "the job's name or id" }],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+        ],
+      }),
+      verb('job ls', {
+        summary: 'list a session\'s running and recent jobs with exit codes and ages',
+        args: [],
+        options: [
+          {
+            flag: '-s, --session <id>',
+            help: 'act on this session yourself; without it, act as the agent session this runs inside',
+          },
+          { flag: '--all', help: 'every retained job, not just the running ones and the latest finished' },
+          { flag: '--json', help: 'print the result as JSON' },
+        ],
+      }),
     ],
   },
 
@@ -454,6 +615,10 @@ export default definePlugin({
         format: 1,
         schema: TerminalsStateSchema,
       }),
+      /** Jobs: `<ferret>/<job>/{job.json,output.log,exit.json}`; the wrapper in the pane writes the last two itself. */
+      JobFiles,
+      /** The live `fy job attach` clients, so a move can ask a ferret's attachments to let go. */
+      JobAttachments,
     ],
     config: [
       defineConfig({

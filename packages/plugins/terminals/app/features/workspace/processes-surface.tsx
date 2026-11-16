@@ -27,6 +27,7 @@ import {
   processTitle,
   stopSessionProcess,
 } from '../../lib/session-processes.ts';
+import { JobsSection } from './jobs-section.tsx';
 import { ProcessDetail } from './process-detail.tsx';
 import { dotTone, KIND_LABEL, KIND_MEANING, STATE_LABEL } from './process-vocabulary.ts';
 import { type ProcessListState, type ProcessOutputReader, processListOf } from './use-session-processes.ts';
@@ -382,6 +383,9 @@ export function ProcessesSurface({
           </ul>
         ) : (
           body()
+        )}
+        {compact && open !== undefined ? null : (
+          <JobsSection client={client} scope={scope} {...(clock === undefined ? {} : { now: clock })} />
         )}
         {list === null && state.status === 'loading' ? <ListTree aria-hidden="true" className="sr-only" /> : null}
       </div>

@@ -5,6 +5,8 @@ import { TerminalToolsClient } from './lib/agent-tools/client.ts';
 import { TerminalVerbs } from './lib/agent-tools/controller.ts';
 import { UsageError, Words } from './lib/args.ts';
 import { AttachController } from './lib/attach/controller.ts';
+import { RealJobProcess, RealJobSignals, RealJobTimers } from './adapters/jobs/process-ports.ts';
+import { JobVerbs } from './lib/jobs/controller.ts';
 import { TerminalSlotsController } from './lib/terminal-slots/controller.ts';
 
 /**
@@ -12,7 +14,13 @@ import { TerminalSlotsController } from './lib/terminal-slots/controller.ts';
  * terminal-slot commands and `fy attach`). Composition only: every verb is a controller over the plugin's client.
  */
 export default implementCli(manifest, {
-  build: ({ client, io }) => {
+  build: ({ client, io, env }) => {
+    const jobs = new JobVerbs(client, io, {
+      self: new RealJobProcess(),
+      signals: new RealJobSignals(),
+      timers: new RealJobTimers(),
+      sessionId: env?.FY_SESSION_ID,
+    });
     const verbs = new TerminalVerbs(new TerminalToolsClient(client), io);
     const slots = new TerminalSlotsController(client, io);
     const attach = new AttachController(
@@ -44,6 +52,12 @@ export default implementCli(manifest, {
         'terminal handover': async invocation => await verbs.handover(invocation),
         'terminal control': async invocation => await verbs.control(invocation),
         attach: async invocation => await attach.attach(invocation),
+        'job run': async invocation => await jobs.run(invocation),
+        'job attach': async invocation => await jobs.attach(invocation),
+        'job logs': async invocation => await jobs.logs(invocation),
+        'job wait': async invocation => await jobs.wait(invocation),
+        'job stop': async invocation => await jobs.stopJob(invocation),
+        'job ls': async invocation => await jobs.ls(invocation),
       },
     };
   },

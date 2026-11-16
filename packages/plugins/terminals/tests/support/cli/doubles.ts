@@ -4,6 +4,7 @@ export interface RecordedCall {
   readonly route: string;
   readonly params?: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  readonly query?: Readonly<Record<string, string>>;
 }
 
 /** A plugin client that records every route call and answers from `reply`. It never reaches a daemon. */
@@ -15,6 +16,7 @@ export function recordingClient(reply: (call: RecordedCall) => unknown) {
         route,
         ...(init?.params === undefined ? {} : { params: init.params }),
         ...(init?.body === undefined ? {} : { body: init.body }),
+        ...(init?.query === undefined ? {} : { query: init.query }),
       };
       calls.push(call);
       return (await reply(call)) as Answer;
