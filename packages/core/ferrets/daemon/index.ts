@@ -53,6 +53,7 @@ import { outdatedMark } from './lib/fleet-list/outdated-mark.ts';
 import { FerretsService, type FerretsPorts } from './lib/ferrets/service.ts';
 import { helperDecision, noHelperAdmission } from './lib/ferrets/helper-admission.ts';
 import { createSessionEvent, encodeSessionEvent, parseSessionEvent } from './lib/storage/journal.ts';
+import { stopUnconfirmedIn } from './lib/ferrets/restart-guards.ts';
 import { type SessionId, tryParseSessionId } from './lib/session-id.ts';
 import { DEFAULT_CALLSIGN_POOL, NameAllocator, SystemCallsignIssuer } from './lib/names/index.ts';
 import type { NameClaim } from './lib/names/types.ts';
@@ -441,6 +442,11 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
     // lifecycle's launch of the same ferret never interleave, and a cut-off is read from and written to both halves.
     serial: sessionFiles.serial,
     cutOffMark: sessionFiles.cutOffMark,
+    // A resume refuses over a stop nobody confirmed: the state document says `kill_failed` (a missing one says nothing).
+    stopUnconfirmed: async ferret => {
+      const id = tryParseSessionId(ferret);
+      return id !== undefined && stopUnconfirmedIn(await sessionStore.readState(id));
+    },
     harness: key => {
       const found = hooks.provider(Harnesses, key);
       return found === 'unavailable' ? undefined : found;
