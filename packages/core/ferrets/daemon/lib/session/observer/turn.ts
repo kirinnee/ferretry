@@ -48,6 +48,8 @@ export interface TurnLook {
   readonly transcript: readonly TranscriptEvent[] | undefined;
   /** One live frame of the agent's pane, or `undefined` when there is no pane to read. */
   readonly pane: TurnPaneEvidence | undefined;
+  /** Whether the ferret's owner stores an open question (`turn.question-open`); absent when nothing answers. */
+  readonly questionOpen?: boolean | undefined;
 }
 
 /** The turn part's answer: the observation to remember for the next look, and the change to record. */
@@ -78,6 +80,7 @@ export function stepTurn(
           state: facts,
           transcript: look.transcript === undefined ? 'unknown' : transcriptTurnPhase(look.transcript),
           pane: look.pane,
+          questionOpen: look.questionOpen,
         })
       : undefined;
   const next = settleTurnState(facts.turnState, observation, previous, live);

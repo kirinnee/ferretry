@@ -60,8 +60,10 @@ describe('conversation manifest', () => {
       'reference.catalog',
       'reference.catalog',
       'mailbox.host',
+      'turn.question-open',
     ]);
     expect(manifest.hooks.takes[11]?.key).toBe('ferret');
+    expect(manifest.hooks.takes[12]?.key).toBe('question');
     expect(manifest.hooks.takes[9]?.key).toBe(':');
     expect(manifest.hooks.takes[10]?.key).toBe('@');
     expect(manifest.hooks.takes[0]?.key).toBe('question');
