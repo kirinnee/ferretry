@@ -766,7 +766,8 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   // parses (`-pabc=def12345`). That over-hides `-port=80`, which is the safe side. A longer flag that itself names a
   // credential (`-password=$X`) is still that flag's and reads as it always did, as do `-port 80` (two words) and
   // `--password=$X` (no one-letter flag in it).
-  const gluedFlagOwnsWord = glued !== null && PLAIN_FLAG.test(gluedFlag) && tests.namesSecret(gluedFlag);
+  const gluedFlagOwnsWord =
+    glued !== null && /^-pass(?:word|wd)?$/iu.test(gluedFlag) && pointsElsewhere(unquoted(gluedValue));
   const stuckName = gluedFlagOwnsWord ? '' : (STUCK_FLAG_NAMES.get(stuckFlag) ?? '');
   // A quoted value with a blank in it stuck to the letter (`-p'a b'`) is read as a longer flag glued to a value by the
   // other reading (`-p'a` and `b'`); a letter with a known meaning hides it however short it is. A quoted value with no
@@ -776,7 +777,7 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   if (glued !== null && secretValue(gluedFlag, gluedValue, tests)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).
-    if (stuckHidden && secretValue('', gluedFlag.slice(stuckFlag.length), tests))
+    if (stuckHidden && (stuckName !== '' || secretValue('', gluedFlag.slice(stuckFlag.length), tests)))
       return hidden(`${stuckFlag}${HIDDEN_VALUE_TEXT}`);
     // A token in the flag's own part (`--x;ghp_…,tokens v`) is cut with the word, not shown beside the cut value.
     if (secretValue('', gluedFlag, tests)) return hidden(HIDDEN_VALUE_TEXT);

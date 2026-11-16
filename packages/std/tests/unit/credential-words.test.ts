@@ -154,6 +154,24 @@ describe('CFG-LEAK-R -p<password>: the stuck reading is judged first', () => {
   test('-port 80 (two words) and --password=$X read as they always did', () => {
     expect(shown('-port', '80')).toEqual(['-port', '80']);
     expect(shown('--password=$X')).toEqual(['--password=$X']);
+    expect(shown('-password=$X')).toEqual(['-password=$X']);
+    expect(shown('-p$X')).toEqual(['-p$X']);
+    expect(shown("-p'short'")).toEqual(["-p'short'"]);
+    expect(shown(`-P${VALUE}`)).toEqual([`-P${VALUE}`]);
+  });
+
+  test.each([
+    '-pmonkey=abc1',
+    '-pturkey=12345',
+    '-pPassword=abc',
+    '-ptoken=x1',
+    '-p_auth=xyz12',
+    '-pmy.secret=a',
+    '-pmonkey abc',
+    '-password=abc',
+    '-pmonkey=abcdefgh1',
+  ])('%s is cut whole from the letter on, never shown beside the cut value', word => {
+    expect(shown(word)).toEqual([`-p${HIDDEN_VALUE_TEXT}`]);
   });
 });
 

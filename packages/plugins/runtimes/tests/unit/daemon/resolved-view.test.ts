@@ -470,6 +470,8 @@ interface FamilyCase {
   readonly flag: string;
   readonly secret: boolean;
   readonly body: string;
+  /** Mysql reads `-password=<value>` as `-p` plus the value, so a lowercase `-password` word with no pointer is cut whole from the letter on. */
+  readonly overHidden: boolean;
 }
 
 function familyCases(): readonly FamilyCase[] {
@@ -509,6 +511,7 @@ function familyCases(): readonly FamilyCase[] {
                     spelling.named &&
                     (!('lowerOnly' in spelling) || flag === spelling.flag)),
                 body,
+                overHidden: flag === '-password' && separator !== 'next word' && !value.includes('$'),
               });
             }
           }
@@ -523,6 +526,13 @@ function familyCases(): readonly FamilyCase[] {
 function familyBreach(family: FamilyCase, shown: readonly { value: string; hidden?: true }[]): string | undefined {
   const values = shown.map(word => word.value);
   if (values.length !== family.words.length) return `${family.label}: ${String(values.length)} words shown`;
+  if (family.overHidden) {
+    if (values[family.flagAt] !== `-p${HIDDEN}` || shown[family.flagAt]?.hidden !== true)
+      return `${family.label}: not cut from the letter on`;
+    return values.some(value => family.body !== '' && value.includes(family.body))
+      ? `${family.label}: shows ${family.body}`
+      : undefined;
+  }
   for (const [index, word] of family.words.entries()) {
     const touched = index === family.flagAt || index === family.valueAt;
     if (!touched || !family.secret) {
@@ -555,6 +565,10 @@ describe('resolvedEntries — every command-line shape of a flag and its value (
       const line = shownServer(family.words);
       if (!line.startsWith(`run-server ${BEFORE} `)) return [`${family.label}: lost its start`];
       if (family.words.at(-1) === AFTER && !line.endsWith(` ${AFTER}`)) return [`${family.label}: lost ${AFTER}`];
+      if (family.overHidden)
+        return line.includes(`${BEFORE} -p${HIDDEN}`) && !(family.body !== '' && line.includes(family.body))
+          ? []
+          : [`${family.label}: not cut from the letter on`];
       if (!family.secret) return line === ['run-server', ...family.words].join(' ') ? [] : [`${family.label}: changed`];
       if (line.includes(family.body)) return [`${family.label}: shows ${family.body}`];
       return line.includes(`${BEFORE} ${family.flag}`) && line.includes(HIDDEN)
@@ -926,7 +940,7 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
       ...words.map(as),
       hid(`--env=API_KEY=${HIDDEN}`),
       hid(`--env=API_KEY=${HIDDEN}`),
-      hid(`-password=${HIDDEN}`),
+      hid(`-p${HIDDEN}`),
     ]);
   });
 

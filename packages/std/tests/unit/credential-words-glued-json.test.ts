@@ -42,15 +42,20 @@ describe('a password stuck to a one-letter flag that means "password"', () => {
 });
 
 describe('a one-letter flag name is read only when the value is stuck to the letter', () => {
-  test('should leave a longer single-dash flag glued to its value as it always was, and -P a port', () => {
+  test('should leave a longer single-dash flag glued to a pointer as it always was, and -P a port', () => {
     // Arrange
-    const words = ['-password=$DB_PASSWORD', '-password short', `-P${VALUE}`];
+    const words = ['-password=$DB_PASSWORD', `-P${VALUE}`];
 
     // Act
     const actual = words.map(word => shown(word));
 
     // Assert
     expect(actual).toEqual(words);
+  });
+
+  test('should cut a -password word that is no pointer: mysql reads it as -p plus the value (the safe side)', () => {
+    expect(shown('-password short')).toBe(`-p${HIDDEN}`);
+    expect(shown('-password=abc')).toBe(`-p${HIDDEN}`);
   });
 
   test('should cut a value with a plain = in it stuck to -p, though a longer flag glued to a value also parses', () => {
