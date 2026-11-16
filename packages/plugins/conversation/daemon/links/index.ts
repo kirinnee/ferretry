@@ -1,6 +1,6 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { ConfigFileDef, ConfigPort, RootHandle, StatePort } from '@ferretry/kernel/contract';
-import { err, type Instant, ok } from '@ferretry/std';
+import { err, type Instant, ok, type Result } from '@ferretry/std';
 import {
   CONVERSATION_CONFIG,
   type ConversationConfig,
@@ -25,14 +25,23 @@ import { linkRoutes } from './routes.ts';
 
 export * from './lib/service.ts';
 
+/** The harness plugin's own copy-on-link: `source` is the file's path below the harness's history folder (`projects/…`). */
+export type LinkImporter = (
+  harness: string,
+  input: { readonly id: string; readonly source: string },
+) => Promise<Result<void, { readonly reason: string }>>;
+
 export interface LinkNeeds {
   readonly state: StatePort;
   /** The `harness-history` root, read-only. */
   readonly history: RootHandle;
   readonly harnesses: () => readonly LinkHarness[];
   readonly keeper: LinkKeeper;
-  /** The `imports` root, where an owner-requested copy of a conversation file is written. */
-  readonly imports: RootHandle;
+  /**
+   * Asks a harness plugin to copy one conversation of the owner's own history into ITS shared history pool
+   * (`FerretsApi.importConversation`): the harness owns its pool, Conversation writes no other plugin's state.
+   */
+  readonly importer: LinkImporter;
   readonly now: () => Instant;
   readonly yieldToLoop?: () => Promise<void>;
   readonly clockMs: () => number;
@@ -87,17 +96,16 @@ const finder = (state: StatePort): FinderCache => ({
 });
 
 /**
- * Ferretry's own copy of a conversation, below the `imports` root at the same relative path. The harness-history root is
- * read-only (G162), so the original is never changed; the copy is written whole, so it is the file as it was when asked.
+ * Ferretry's own copy of a conversation of the owner's computer, in the harness's shared history pool at the same
+ * relative path, which the ferret then resumes. The harness plugin makes it (it owns its pool): it reads the owner's
+ * history through its read-only root, so the original is never written, linked or locked, and the copy is written whole.
  */
-const copier = (history: RootHandle, imports: RootHandle): LinkCopier => ({
-  async copy({ source }) {
-    const from = history.resolve(source);
-    const to = imports.resolve(source);
-    if (!from.ok || !to.ok) return err({ reason: 'That conversation file is outside the folders Ferretry may use.' });
-    const bytes = await history.readBytes(from.value);
-    await imports.writeText(to.value, new TextDecoder('utf-8').decode(bytes));
-    return ok(undefined);
+const copier = (harnesses: () => readonly LinkHarness[], importer: LinkImporter): LinkCopier => ({
+  async copy({ harness, id, source }) {
+    const home = harnesses().find(each => each.key === harness)?.home;
+    if (home === undefined || !source.startsWith(`${home}/`))
+      return err({ reason: 'That conversation file is outside the folders Ferretry may use.' });
+    return await importer(harness, { id, source: source.slice(home.length + 1) });
   },
 });
 
@@ -116,7 +124,7 @@ export function buildLinks(needs: LinkNeeds) {
     ledger: ledger(needs.state),
     finder: finder(needs.state),
     keeper: needs.keeper,
-    copier: copier(needs.history, needs.imports),
+    copier: copier(needs.harnesses, needs.importer),
     now: needs.now,
     keptPublished: needs.kept,
     keepInSync: needs.keepInSync,

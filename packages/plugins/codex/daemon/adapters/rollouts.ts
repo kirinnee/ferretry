@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { openTranscriptBytes } from '@ferretry/core-ferrets/contract';
 import type {
+  ConversationImport,
   FoundConversation,
   Harness,
   HarnessTailRecord,
@@ -11,13 +12,15 @@ import type {
   TurnUsage,
 } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts, RootHandle } from '@ferretry/kernel/contract';
-import { seconds, type Instant, type JsonValue } from '@ferretry/std';
+import { err, ok, seconds, type Instant, type JsonValue, type Result } from '@ferretry/std';
 import { CODEX_ROLLOUTS, type CodexRolloutBinding as Binding } from '../../contract/index.ts';
 import { CodexTranscriptParser } from '../lib/transcript/codex.ts';
 import { ProofCache } from '../lib/transcript/proof-cache.ts';
 import { selectCodexRollout } from '../lib/transcript/rollout.ts';
 import { markCutWindow, tailRecordOf } from '../lib/transcript/tail-record.ts';
 
+/** The largest rollout copy-on-link copies: a copy is held whole in memory (the owner's rollouts are tens of MB at most). */
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 const MAX_ROLLOUTS = 4_000;
 const MAX_DIRECTORIES = 8_000;
 /**
@@ -512,24 +515,28 @@ export class CodexRollouts {
     read: async (ferret, after, limit) => {
       const rollout = await this.owned(ferret);
       if (rollout === undefined) return [];
-      const entries = this.events(rollout).map((event, index): TranscriptEntry => ({
-        id: `${rollout.id}:${event.line}:${event.blockIndex ?? index}:${event.kind}`,
-        at: (event.timestamp ?? rollout.modified) as Instant,
-        role: event.role === 'developer' ? 'system' : event.role,
-        ...('text' in event ? { text: event.text } : {}),
-        data: event as unknown as JsonValue,
-      }));
+      const entries = this.events(rollout).map(
+        (event, index): TranscriptEntry => ({
+          id: `${rollout.id}:${event.line}:${event.blockIndex ?? index}:${event.kind}`,
+          at: (event.timestamp ?? rollout.modified) as Instant,
+          role: event.role === 'developer' ? 'system' : event.role,
+          ...('text' in event ? { text: event.text } : {}),
+          data: event as unknown as JsonValue,
+        }),
+      );
       const start = after === undefined ? 0 : entries.findIndex(entry => entry.id === after) + 1;
       if (after !== undefined && start === 0) return [];
       const page = entries.slice(start, limit === undefined ? undefined : start + Math.max(0, limit));
       // Each string is masked ON ITS OWN, never the page's JSON: a secret holding a quote, a backslash, a newline or a
       // control character is ESCAPED by JSON.stringify and so would not match its own words (ports-pending, G162).
       return await this.kernel.redaction.read(scope =>
-        page.map((entry): TranscriptEntry => ({
-          ...entry,
-          ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
-          ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
-        })),
+        page.map(
+          (entry): TranscriptEntry => ({
+            ...entry,
+            ...(entry.text === undefined ? {} : { text: scope.text(entry.text) }),
+            ...(entry.data === undefined ? {} : { data: scrubStrings(entry.data, scope.text) as JsonValue }),
+          }),
+        ),
       );
     },
     find: async (ferret, id) => (await this.transcript.read(ferret)).find(entry => entry.id === id),
@@ -581,6 +588,43 @@ export class CodexRollouts {
       return await this.kernel.redaction.read(scope => JSON.parse(scope.text(JSON.stringify(turns))) as TurnUsage[]);
     },
   };
+
+  /**
+   * Copy-on-link (docs/design/shared-history.md, 3.2): the owner's own `~/.codex/sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`
+   * copied into the shared pool at the same relative path, so a ferret started on it resumes the copy. The original is read
+   * through the read-only `harness-history` root and is never written, linked or locked; the copy is written whole and only
+   * if the pool has nothing at that name. The rollout's own header must name the id (a file name is never identity).
+   */
+  async import(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    const named = new RegExp(`^sessions/\\d{4}/\\d{2}/\\d{2}/rollout-[^/]*-${input.id}\\.jsonl$`, 'u');
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(input.id) || !named.test(input.source))
+      return refuse('That is not a Codex rollout file of this id.');
+    try {
+      const directory = await this.historyDirectory();
+      if (directory === undefined || !directory.startsWith('/'))
+        return refuse("Codex's history folder is not known on this machine.");
+      const history = this.kernel.roots.root('harness-history', { subfolder: directory });
+      const from = history.resolve(input.source);
+      const pool = this.kernel.roots.historyPool();
+      const to = pool.resolve(input.source);
+      if (!from.ok || !to.ok) return refuse('That rollout file is outside the folders Ferretry may use.');
+      if ((await pool.lstat(to.value)) !== undefined) return ok(undefined);
+      const found = await history.stat(from.value);
+      if (found?.kind !== 'file') return refuse('That rollout file is not there any more.');
+      if (found.size > MAX_IMPORT_BYTES) return refuse('That rollout file is too large to copy (over 256 MB).');
+      const head = await window(history, from.value, 0, HEAD_BYTES);
+      if (head === undefined || metadata(head)?.id !== input.id)
+        return refuse('That rollout file does not belong to that conversation.');
+      const folder = pool.resolve(input.source.slice(0, input.source.lastIndexOf('/')));
+      if (!folder.ok) return refuse('That rollout file is outside the folders Ferretry may use.');
+      await pool.makeDirectory(folder.value, { mode: 0o700 });
+      await pool.writeBytes(to.value, await history.readBytes(from.value, MAX_IMPORT_BYTES), { exclusive: true });
+      return ok(undefined);
+    } catch {
+      return refuse('The rollout could not be copied.');
+    }
+  }
 
   readonly conversations: Harness['conversations'] = {
     list: async folder => {

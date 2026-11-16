@@ -1,5 +1,5 @@
 import type { AsksApi } from '@ferretry/core-asks/contract';
-import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
+import type { FerretId, FerretsApi, HarnessKey } from '@ferretry/core-ferrets/contract';
 import { ApiError, type KernelPorts, type RouteHandler } from '@ferretry/kernel/contract';
 import type { ToolHandler } from '@ferretry/kernel/manifest';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
@@ -141,7 +141,6 @@ export function buildReading(deps: {
 }): ReadingHalf {
   const { kernel, ferrets, asks } = deps;
   const history = kernel.roots.root('harness-history');
-  const imports = kernel.roots.root('imports');
 
   /**
    * The ferret's own harness transcript as RAW bytes (G162): `undefined` while no transcript is proved, `unsupported`
@@ -195,7 +194,9 @@ export function buildReading(deps: {
   const links = buildLinks({
     state: kernel.state,
     history,
-    imports,
+    importer: async (harness, input) =>
+      (await ferrets.importConversation?.(harness as HarnessKey, input)) ??
+      err({ reason: 'No harness is offering to keep a copy of that conversation.' }),
     harnesses,
     keeper,
     now: () => kernel.clock.now(),

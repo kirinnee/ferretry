@@ -27,6 +27,7 @@ import type {
   RunnerHandle,
   SitrepLine,
   BoundTranscriptReader,
+  ConversationImport,
   HarnessTranscriptBytes,
   TurnUsage,
 } from './kinds.ts';
@@ -653,6 +654,15 @@ export interface FerretsApi {
   children(ferret: FerretId): readonly FerretId[];
   /** The harness keys currently provided under `harnesses` (a plugin off is absent). */
   harnesses(): readonly HarnessKey[];
+  /**
+   * Additive (shared history): asks the harness `harness` to copy one conversation of the owner's own history into its
+   * shared pool (`Harness.importConversation`). Conversation's alone (it writes no other plugin's state: the harness does);
+   * any other plugin is refused 403 `forbidden`. A harness that is off, or offers none, answers a refusal sentence.
+   */
+  importConversation?(
+    harness: HarnessKey,
+    input: ConversationImport,
+  ): Promise<Result<void, { readonly reason: string }>>;
   /**
    * Starts a ferret FOR `origin`: who the start is for, as the admitted credential decided it (required, no default). An
    * agent's start never binds a folder inside the daemon's state home.

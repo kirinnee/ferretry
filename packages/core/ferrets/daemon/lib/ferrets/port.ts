@@ -15,6 +15,8 @@ import type { FerretsService } from './service.ts';
 
 /** The plugin that may speak as Ferretry's Warden through this port. */
 const WARDEN_PLUGIN = 'warden';
+/** The plugin that copies a kept conversation into a harness's pool, so the only one that may ask for it. */
+const CONVERSATION_PLUGIN = 'conversation';
 /** The plugin that owns runtimes, and so the only one that tells Ferrets one was renamed. */
 const RUNTIMES_PLUGIN = 'runtimes';
 
@@ -112,6 +114,13 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),
+    importConversation: async (harness, input) => {
+      if (consumer !== CONVERSATION_PLUGIN)
+        throw new ApiError(403, 'only the Conversation plugin copies a conversation into a harness pool', 'forbidden');
+      // Read once into a fresh object: only the two names the copy is made of reach the harness.
+      const { id, source } = input;
+      return await service.importConversation(harness, { id, source });
+    },
     start: async (asked, askedOrigin): Promise<Result<FerretId, StartFailure>> => {
       // Fail closed: a launch whose origin was not stated (a plugin's cast) is refused, never taken as a person's. The
       // origin is read ONCE into a fresh object, as the request is.

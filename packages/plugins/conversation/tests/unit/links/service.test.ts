@@ -179,9 +179,10 @@ describe('links', () => {
     expect(await service.preview('claude-code', 'nope-nope')).toBeUndefined();
   });
 
-  test('Q19 keeping links the conversation: the ledger names the ferret, the harness file is only read', async () => {
+  test('Q19 keeping links the conversation: it is copied into the harness pool first, the ledger names the ferret and the original is only read', async () => {
     const kept: Array<[string, string]> = [];
-    const { service, stored } = build(kept);
+    const copies: Array<{ id: string; source: string }> = [];
+    const { service, stored } = build(kept, {}, copies);
     const result = await service.keep({
       harness: 'claude-code',
       runtime: 'default',
@@ -194,8 +195,11 @@ describe('links', () => {
         harness: 'claude-code',
         ferret: 'login-page' as FerretId,
         linkedAt: '2026-02-02T00:00:00.000Z' as Instant,
+        copied: true,
       },
     ]);
+    // The copy is asked of the harness for the file the computer holds, whether or not the caller asked for one.
+    expect(copies).toEqual([{ id: ID, source: `.claude/projects/-work-app/${ID}.jsonl` }]);
     expect(kept).toEqual([['login-page', ID]]);
     const again = await service.keep({
       harness: 'claude-code',

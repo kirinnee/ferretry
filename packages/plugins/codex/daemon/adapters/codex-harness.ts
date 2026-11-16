@@ -371,6 +371,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     resume: async (spec, runner, env, harnessConversation) => await launch(spec, runner, env, harnessConversation),
     // A ferret converted from v4 names a conversation whose rollout was left behind: proved absent, Ferrets starts anew.
     hasConversation: async (spec, harnessConversation) => await rollouts.has(spec.ferret, harnessConversation),
+    importConversation: async input => await rollouts.import(input),
     // Codex names its conversation after launch: the one this launch provably wrote, so Ferrets records it for a resume.
     provedConversation: async ferret => await rollouts.provedConversation(ferret),
 

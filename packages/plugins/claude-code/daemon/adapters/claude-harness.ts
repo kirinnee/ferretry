@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type {
   ConversationFinder,
+  ConversationImport,
   Delivery,
   DialogReader,
   FoundConversation,
@@ -109,6 +110,8 @@ const MAX_PROJECT_FOLDERS = 1_000;
 /** The same, for the shared pool, which holds the folders of every ferret on this harness. */
 const MAX_POOL_PROJECT_FOLDERS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+/** The largest transcript copy-on-link copies (the owner's biggest was 939 MB; p99 was 12 MB): a copy is held whole in memory. */
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
@@ -290,6 +293,39 @@ export class ClaudeHarness implements Harness {
       return elsewhere ? undefined : false;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Copy-on-link (docs/design/shared-history.md, 3.2): the owner's own `~/.claude/projects/<folder>/<id>.jsonl` copied
+   * into the shared pool at the same relative path, so a ferret started on it resumes the copy. The original is read
+   * through the read-only `harness-history` root and is never written, linked or locked; the copy is written whole and
+   * only if the pool has nothing at that name (a pooled file is never overwritten).
+   */
+  async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    if (!isConversationId(input.id) || !new RegExp(`^projects/[^/]+/${input.id}\\.jsonl$`, 'u').test(input.source))
+      return refuse('That is not a Claude Code conversation file of this id.');
+    try {
+      const historyHome = await this.deps.historyHome();
+      if (!historyHome.startsWith('/')) return refuse("Claude Code's history folder is not known on this machine.");
+      const history = this.deps.roots.root('harness-history', { subfolder: historyHome });
+      const from = history.resolve(input.source);
+      const pool = this.deps.roots.historyPool();
+      const to = pool.resolve(input.source);
+      if (!from.ok || !to.ok) return refuse('That conversation file is outside the folders Ferretry may use.');
+      if ((await pool.lstat(to.value)) !== undefined) return ok(undefined);
+      const found = await history.stat(from.value);
+      if (found?.kind !== 'file') return refuse('That conversation file is not there any more.');
+      if (found.size > MAX_IMPORT_BYTES) return refuse('That conversation file is too large to copy (over 256 MB).');
+      const folder = pool.resolve(input.source.slice(0, input.source.lastIndexOf('/')));
+      if (!folder.ok) return refuse('That conversation file is outside the folders Ferretry may use.');
+      await pool.makeDirectory(folder.value, { mode: 0o700 });
+      const bytes = await history.readBytes(from.value, MAX_IMPORT_BYTES);
+      await pool.writeBytes(to.value, bytes, { exclusive: true });
+      return ok(undefined);
+    } catch {
+      return refuse('The conversation could not be copied.');
     }
   }
 
