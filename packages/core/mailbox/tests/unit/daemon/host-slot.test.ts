@@ -3,10 +3,12 @@ import type { MailboxHost } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import { MAILBOX_HOST_MISSING, MailboxHostMissingError, requireMailboxHost } from '../../../daemon/lib/host-slot.ts';
 
-const HOST: MailboxHost = {
+const HOST = {
   queue: { messages: async () => [], append: async () => undefined },
-  ledger: {} as MailboxHost['ledger'],
-};
+  ledger: {},
+  channel: {},
+  gate: { send: true, interrupt: true },
+} as unknown as MailboxHost;
 
 /** The half built over a provider lookup and a log that remembers what was said. */
 function half(provided: MailboxHost | 'unavailable') {
@@ -14,12 +16,17 @@ function half(provided: MailboxHost | 'unavailable') {
   if (daemon.build === undefined) throw new Error('the Mailbox daemon has no build');
   const built = daemon.build({
     hooks: { provider: () => provided },
-    kernel: { log: { error: (message: string) => errors.push(message) } },
+    needs: { ferrets: {} },
+    kernel: {
+      log: { error: (message: string) => errors.push(message), warn: () => undefined },
+      lifecycle: { onStop: () => undefined },
+      redaction: {},
+    },
   } as never) as unknown as {
     doctor: { 'mailbox-host': () => Promise<{ state: string; detail: string; fix?: string }> };
     beforeListen: (ctx: never) => Promise<void>;
   };
-  const ctx = { kernel: { log: { error: (message: string) => errors.push(message) } } } as never;
+  const ctx = { kernel: { log: { error: (message: string) => errors.push(message), warn: () => undefined } } } as never;
   return { built, ctx, errors };
 }
 

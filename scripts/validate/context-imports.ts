@@ -105,6 +105,16 @@ export function refusal(edge: ImportEdge): string | undefined {
   )
     return undefined;
 
+  // ONE EXEMPTION: the send path is one path split by ownership (Conversation keeps the files, the Mailbox the rules), and
+  // its integration proof drives the real halves together. Only Conversation's tests may reach the Mailbox's daemon half.
+  if (
+    from === 'tests' &&
+    edge.fromPkg.name === '@ferretry/plugin-conversation' &&
+    toPkg.name === '@ferretry/core-mailbox' &&
+    to === 'daemon'
+  )
+    return undefined;
+
   // Another package.
   switch (to) {
     case 'kernel-contract':
