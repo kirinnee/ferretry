@@ -84,10 +84,38 @@ export class DaemonCallError extends Error {
     readonly carrier?: true,
     /** The failure this one stands for, kept so the original reason is never lost (S12). */
     cause?: unknown,
+    /**
+     * Whether the request that died on the carrier may have reached the daemon: `unsent` (proved not to have left, so
+     * sending it again is safe and the person is told so) or `unknown` (it may have). Only a carrier outage carries
+     * one; Conversation reads it off the chain (`carrierDelivery`).
+     */
+    readonly delivery?: CarrierFate,
   ) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'DaemonCallError';
   }
+}
+
+/** What is known of a request that died on the carrier: it never left (`unsent`), or it may have (`unknown`). */
+export type CarrierFate = 'unsent' | 'unknown';
+
+/**
+ * The fate the session transport proved for a transport failure it threw. A side table keyed by the failure itself,
+ * because the failure is a session error whose `name` the client reads ({@link isCarrierGone}) and so cannot be
+ * wrapped. `unknown` is never downgraded: once a failure is in doubt it stays in doubt.
+ */
+const failureFates = new WeakMap<object, CarrierFate>();
+
+/** Records the fate of a transport failure. A non-object has nowhere to be recorded and is left as it is. */
+export function markCarrierFate(error: unknown, fate: CarrierFate): void {
+  if (typeof error !== 'object' || error === null) return;
+  if (failureFates.get(error) === 'unknown') return;
+  failureFates.set(error, fate);
+}
+
+/** The fate {@link markCarrierFate} recorded for a failure, or `undefined` when none was proved. Total. */
+export function carrierFateOf(error: unknown): CarrierFate | undefined {
+  return typeof error === 'object' && error !== null ? failureFates.get(error) : undefined;
 }
 
 /** The machine code a carrier outage carries; no daemon says it. */

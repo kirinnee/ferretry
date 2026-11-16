@@ -1,10 +1,13 @@
-import type {
-  DaemonTransport,
-  RawEvent,
-  SocketListeners,
-  TransportAnswer,
-  TransportRequest,
-  TransportSocket,
+import {
+  type CarrierFate,
+  type DaemonTransport,
+  isCarrierGone,
+  markCarrierFate,
+  type RawEvent,
+  type SocketListeners,
+  type TransportAnswer,
+  type TransportRequest,
+  type TransportSocket,
 } from '../client/transport.ts';
 import {
   type DeviceKeyRotation,
@@ -250,6 +253,17 @@ function lostUnder(opened: OpenedSession, reason: unknown, signal: AbortSignal |
   opened.socket.requestLost?.();
 }
 
+/** How many request ids stay in doubt (v4's `#unknownFatesRemembered`): a retry comes quickly or not at all. */
+const DOUBTED_REMEMBERED = 64;
+
+const REQUEST_ID_HEADER = 'x-fy-request-id';
+
+/** The logical request id a retried act carries, or `undefined` for a request that has none (a read). */
+function requestIdOf(request: TransportRequest): string | undefined {
+  const value = request.headers?.[REQUEST_ID_HEADER];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 export class SessionTransport implements DaemonTransport {
   readonly #options: SessionTransportOptions;
   readonly #reconnect = new Set<() => void>();
@@ -258,6 +272,8 @@ export class SessionTransport implements DaemonTransport {
   readonly #opened = new Map<RequestLane, number>();
   /** Every stream this transport opened and has not seen end, each as how to end it (R568). */
   readonly #streams = new Set<(reason: string) => void>();
+  /** Request ids whose request may have been executed (an attempt that died after leaving), oldest first. */
+  readonly #doubted = new Set<string>();
   /** Identical reads in flight are sent once (R519). */
   readonly #sharing = sharingIdenticalReads(request => this.#send(request));
 
@@ -336,7 +352,45 @@ export class SessionTransport implements DaemonTransport {
     return this.#sharing(given);
   }
 
+  /**
+   * ONE REQUEST, ITS FAILURE TOLD WHERE IT DIED. A failure before `session.request` carried the record (no session to
+   * open, a refused claim, a rotation that could not be amended) proves the request never left: `unsent`. A failure at
+   * or after it may have been executed: `unknown`. A carrier failure is marked with that fate
+   * ({@link markCarrierFate}), so the client can say "not sent — send it again" only when it is true.
+   *
+   * DELIVERY IS DECIDED ACROSS ATTEMPTS, NOT ONE (today's relay-carrier `#unknownFates`): the typed client retries a
+   * request under the SAME request id, so an attempt that died after leaving, followed by one that never opened,
+   * would otherwise read as proven unsent. An id that has ever been in doubt stays in doubt.
+   */
   async #send(given: TransportRequest): Promise<TransportAnswer> {
+    const id = requestIdOf(given);
+    let left = false;
+    try {
+      return await this.#attempt(given, () => {
+        left = true;
+      });
+    } catch (reason) {
+      if (isCarrierGone(reason)) {
+        const doubted = left || (id !== undefined && this.#doubted.has(id));
+        if (doubted && id !== undefined) this.#remember(id);
+        const fate: CarrierFate = doubted ? 'unknown' : 'unsent';
+        markCarrierFate(reason, fate);
+      }
+      throw reason;
+    }
+  }
+
+  /** Remembers a request id as in doubt, most recent last; the oldest is forgotten past the bound. */
+  #remember(id: string): void {
+    this.#doubted.delete(id);
+    this.#doubted.add(id);
+    if (this.#doubted.size > DOUBTED_REMEMBERED) {
+      const [oldest] = this.#doubted;
+      this.#doubted.delete(oldest as string);
+    }
+  }
+
+  async #attempt(given: TransportRequest, onLeaving: () => void): Promise<TransportAnswer> {
     const lane = requestLane(encodeBody(given.body));
     const session = await this.#requestSession(lane);
     const rotation = this.#options.rotation;
@@ -362,6 +416,7 @@ export class SessionTransport implements DaemonTransport {
       ...(body === undefined ? {} : { body }),
     };
     let answer: RelayTunnelAnswer;
+    onLeaving();
     try {
       answer = await session.session.request(record, request.signal);
     } catch (reason) {

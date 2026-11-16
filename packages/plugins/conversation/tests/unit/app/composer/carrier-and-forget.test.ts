@@ -17,6 +17,25 @@ describe('S12 a send that died on the carrier', () => {
     expect(carrierDelivery(Object.assign(new Error('x'), { delivery: 'unsent' }))).toBe('unsent');
   });
 
+  it('a request the transport proved never left reads "not sent — send it again"', () => {
+    const unsent = new DaemonCallError(0, 'carrier_outage', 'the session closed', undefined, true, undefined, 'unsent');
+    expect(carrierDelivery(unsent)).toBe('unsent');
+    expect(carrierDelivery(new Error('wrapped', { cause: unsent }))).toBe('unsent');
+  });
+
+  it('a request that may have left still reads "checking whether it arrived"', () => {
+    const doubted = new DaemonCallError(
+      0,
+      'carrier_outage',
+      'the session closed',
+      undefined,
+      true,
+      undefined,
+      'unknown',
+    );
+    expect(carrierDelivery(doubted)).toBe('unknown');
+  });
+
   it('a daemon’s refusal, or anything else, is not an outage', () => {
     expect(carrierDelivery(new DaemonCallError(409, 'conflict', 'no'))).toBeUndefined();
     expect(carrierDelivery(new Error('plain'))).toBeUndefined();
