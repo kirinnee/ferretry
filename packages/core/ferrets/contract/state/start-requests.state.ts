@@ -1,6 +1,6 @@
 import { defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { type FerretId, FerretIdSchema } from './ids.ts';
+import { type FerretId, FerretIdSchema } from '../ids.ts';
 
 /**
  * Which ferret each start request id produced (today's start retry contract, `session-control.ts`): the protocol

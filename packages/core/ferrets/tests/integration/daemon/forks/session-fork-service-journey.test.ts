@@ -7,7 +7,7 @@ import type { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import type { JsonValue } from '@ferretry/std';
 import { ForkFiles } from '../../../../contract/index.ts';
-import { TransferPlanFiles } from '../../../../contract/transfer-state.ts';
+import { TransferPlanFiles } from '../../../../contract/state/transfer-plan.state.ts';
 import type { SessionTransferPlan } from '../../../../contract/transfer.ts';
 import {
   forkReceiptName,

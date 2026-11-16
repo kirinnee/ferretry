@@ -5,7 +5,7 @@ import { err } from '@ferretry/std';
 import type { SessionHandoverReceipt } from '../../../../../contract/handover.ts';
 import type { SessionTransferPlan } from '../../../../../contract/transfer.ts';
 import should from 'should';
-import { HandoverFiles } from '../../../../../contract/handover-state.ts';
+import { HandoverFiles } from '../../../../../contract/state/handover.state.ts';
 import { memoryHandoverState } from '../../../../support/daemon/handover-state.ts';
 import { FileHandoverReceiptStore } from '../../../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { handoverPlanId } from '../../../../../daemon/lib/moves/handover/policy.ts';

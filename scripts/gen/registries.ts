@@ -519,6 +519,47 @@ const CONTRACT_LISTS: Readonly<Record<string, (entries: readonly FolderEntry[]) 
   },
 };
 
+/**
+ * Every `export const X = defineState(...)` of one state file, in declaration order. A `defineState(` that is not such an
+ * export (a local, a re-export, a call inside a helper) would be a state the manifest never declares, so it is refused
+ * here, naming the file, rather than left out of the list.
+ */
+export function declaredStates(file: string, text: string): readonly string[] {
+  const exported = [...text.matchAll(/^export const (\w+)\s*=\s*defineState\b/gm)].map(match => match[1] as string);
+  const calls = [...text.matchAll(/^[^/*\n]*\bdefineState\s*[<(]/gm)].length;
+  if (calls !== exported.length)
+    throw new Error(
+      `${file}: ${calls} defineState call(s) but ${exported.length} \`export const X = defineState(\`: export each one`,
+    );
+  return exported;
+}
+
+/**
+ * Ferrets' state files: `contract/state/<area>.state.ts` each declare their area's files with `export const X = defineState(...)`.
+ * `contract/generated/state.ts` re-exports them all (the committed `contract/state.ts` re-exports that) and lists every declared
+ * state, file by file, as `FERRETS_STATE`, which the manifest spreads into `data.state`: a state file is a new file and no list is edited.
+ */
+const STATE_REGISTRY: FolderRegistrySpec = {
+  dir: 'contract/state',
+  glob: '*.state.ts',
+  out: 'contract/generated/state.ts',
+  prefix: 'state',
+  emit: ({ entries, read }) => {
+    const declared = entries.map(entry => ({ entry, names: declaredStates(entry.file, read(entry.file)) }));
+    return [
+      HEADER,
+      ...declared.flatMap(({ entry, names }) =>
+        names.length === 0 ? [] : [`import { ${names.join(', ')} } from '${entry.importPath}';`],
+      ),
+      ...declared.map(({ entry }) => `export * from '${entry.importPath}';`),
+      '',
+      '/** Every state file Ferrets declares, in file-name order then declaration order (contract/state/*.state.ts). */',
+      `export const FERRETS_STATE = [${declared.flatMap(({ names }) => names).join(', ')}] as const;`,
+      '',
+    ].join('\n');
+  },
+};
+
 const contractFolder = (folder: string): FolderRegistrySpec => ({
   dir: `contract/${folder}`,
   glob: '*.ts',
@@ -542,9 +583,12 @@ const contractFolder = (folder: string): FolderRegistrySpec => ({
  */
 export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRACT): ReadonlyMap<string, string> {
   const ferrets = ws.packages.filter(pkg => pkg.rel === home);
-  return new Map(
-    ['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [...folderRegistries(ferrets, contractFolder(folder))]),
-  );
+  return new Map([
+    ...['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [
+      ...folderRegistries(ferrets, contractFolder(folder)),
+    ]),
+    ...folderRegistries(ferrets, STATE_REGISTRY),
+  ]);
 }
 
 /** The kinds of action a manifest fragment holds, in the order the merged `actions` lists them. */

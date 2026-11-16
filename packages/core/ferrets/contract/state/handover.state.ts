@@ -1,5 +1,5 @@
 import { defineState } from '@ferretry/kernel/contract';
-import { SessionHandoverReceiptSchema } from './handover.ts';
+import { SessionHandoverReceiptSchema } from '../handover.ts';
 
 /**
  * `<sourceSessionId>/handover.json`: the durable cross-harness handover receipt, one per PREDECESSOR (the party that
