@@ -9,8 +9,14 @@
  * right-click alone.
  */
 
+import { PanelSlot } from '@ferretry/app';
 import { type ReactNode, useContext, useRef, useState } from 'react';
-import type { FerretNeedsYou, FerretSummary } from '../../../contract/index.ts';
+import {
+  FERRET_LIST_ROW_MARK_SLOT,
+  type FerretListRowMarkSlotProps,
+  type FerretNeedsYou,
+  type FerretSummary,
+} from '../../../contract/index.ts';
 import { ferretTitles } from '../../lib/ferret-title.ts';
 import { StatusMark } from '../../lib/status-mark.tsx';
 import { RouteLink } from '../../ui.ts';
@@ -105,6 +111,23 @@ export function FerretRow({ ferret, daemon, active, needsYou, onNavigate, overla
           <span className="fy-sbar__dir" data-sbar-dir="">
             <bdi>{ferretDirectory(ferret)}</bdi>
           </span>
+          {/* Marks other plugins own (Usage: the account's quota) are drawn through the slot Ferrets offers. */}
+          {ferret.runtime === undefined ? null : (
+            <span className="fy-sbar__marks" data-sbar-marks="">
+              <PanelSlot
+                daemon={daemon}
+                props={
+                  {
+                    ferret: ferret.id,
+                    runtime: ferret.runtime,
+                    ...(ferret.login === undefined ? {} : { login: ferret.login }),
+                  } satisfies FerretListRowMarkSlotProps
+                }
+                slot={FERRET_LIST_ROW_MARK_SLOT}
+                subject={ferret.id}
+              />
+            </span>
+          )}
         </span>
       </RouteLink>
       {openMenu === undefined ? null : (
