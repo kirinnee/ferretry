@@ -203,9 +203,13 @@ assert.ok(
     'nscloud-ubuntu-24.04-amd64-8x16-with-cache',
   ),
 );
-assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
-// A dispatch picks Quick's shape so main's 4x8 can be measured on a branch; the input never moves a PR or main.
-for (const [shape, pushShape] of [['8x16', '4x8']] as const) {
+// Main runs Quick on the pull-request shape: the unit groups do not fit a 4x8 (dispatch run 43825305638).
+assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
+// A dispatch picks Quick's shape so another one can be measured on a branch; the input never moves a PR or main.
+for (const [shape, pushShape] of [
+  ['8x16', '8x16'],
+  ['4x8', '8x16'],
+] as const) {
   const quickShape = (github: object, input: string) =>
     evaluate(runsOnExpression('quick'), github, {}, {}, { quick_shape: input });
   assert.ok(quickShape(event('workflow_dispatch'), '4x8').includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
@@ -230,7 +234,7 @@ const dispatchShape = (input: string) => ({
     { quick_shape: input },
   ),
 });
-assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', "a 4x8 dispatch must run main's part limits");
+assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', 'a 4x8 dispatch runs three parts at once');
 assert.equal(dispatchShape('8x16').FY_CI_QUICK_PARALLEL, '6');
 assert.ok(runsOnOf('int').includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
 const prRunner = (name: string) =>

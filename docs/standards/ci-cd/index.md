@@ -48,18 +48,18 @@ every subsequent push with that label runs it again, proving the exact head SHA.
 Adding any other label is a no-op and uses its own concurrency group, so it cannot
 cancel a running set.
 
-| Set / job                                                | PR runner           | Other events                          | Work                                                        |
-| -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | five unit groups + scripts tests side by side; unit ledger  |
-| Static Checks                                            | Namespace 8x16      | Namespace 8x16                        | format, every pre-commit gate, build checks                 |
-| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
-| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
-| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
-| E2E shards                                               | Namespace 2x4       | GitHub                                | journeys and advisory policy as before                      |
-| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                   |
-| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)    | machine budgets on a quiet dedicated VM                     |
-| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
-| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
+| Set / job                                                | PR runner           | Other events                           | Work                                                        |
+| -------------------------------------------------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------- |
+| Quick Checks                                             | Namespace 8x16      | Namespace 8x16 on main; dispatch picks | six unit groups + scripts tests side by side; unit ledger   |
+| Static Checks                                            | Namespace 8x16      | Namespace 8x16                         | format, every pre-commit gate, build checks                 |
+| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                         | six isolated groups, then the integration ledger            |
+| Full Gates                                               | Namespace 4x8       | GitHub                                 | both Knip checks and route agreement (Knip needs >4GB)      |
+| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                 | cross-compile, upload the binaries, then SIT on those bytes |
+| E2E shards                                               | Namespace 2x4       | GitHub                                 | journeys and advisory policy as before                      |
+| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                 | existing geometry assertions and evidence                   |
+| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)     | machine budgets on a quiet dedicated VM                     |
+| Linux smoke and macOS jobs                               | GitHub              | GitHub                                 | stock platform proofs; existing macOS policy                |
+| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                 | seconds of API/shell work, no Nix                           |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -226,10 +226,13 @@ run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <
   their own. Local typechecks keep their ordinary non-incremental default.
   The Quick summary records the cache action's exact hit/miss output (or unknown),
   so partial/missing cache paths remain visible rather than inferred from speed.
-  Main's Quick uses Namespace 4x8, with up to three parts and two gate hooks at once;
-  Knip is outside Quick, and units finish before builds/typechecks start, limiting
-  memory overlap. A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) lets a branch
-  measure main's 4x8 shape before merge; pull requests and main ignore it.
+  Main's Quick uses the pull-request 8x16 too. The six unit groups and the scripts tests do
+  not fit a 4x8: dispatch run 43825305638 took 8.4 min with three parts at once and the
+  real-tree TypeScript guard (`scripts/gen/tests/fleet-link-callers.test.ts`) hit its 180 s
+  timeout, where the 8x16 ran the same parts in 3.8 min. Main's Quick runs only when no pull
+  request proved the merged tree, so it is the fallback and must be the shape that is green.
+  A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) measures another shape;
+  pull requests and main ignore it.
 - **Measure instances, not just step time.** One unit-minute is one vCPU with 2 GB RAM
   for a billed minute, with a one-minute minimum per instance. Namespace instance
   lifetime includes boot/teardown; cache snapshots bill attached GB × instance-hours.
@@ -392,7 +395,7 @@ waits on the entire CI workflow on `main`, where Quick and Full both always run.
 
 | Job              | Check name                           | Work                                                                                                                                                |
 | ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`          | Quick Checks                         | `quick.sh`: five unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                 |
+| `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                  |
 | `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build                                                             |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |

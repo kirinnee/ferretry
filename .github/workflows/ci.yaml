@@ -33,8 +33,8 @@ on:
     inputs:
       quick_shape:
         description: >-
-          Quick Checks machine for this dispatch only: 8x16 (the pull-request shape) or 4x8 (what main's push run
-          uses, so a branch can measure main's shape before merge). Pull requests and main ignore it.
+          Quick Checks machine for this dispatch only: 8x16 (the shape of every pull request and main push) or 4x8
+          (to measure a smaller shape). Pull requests and main ignore it.
         type: choice
         options: ['8x16', '4x8']
         default: '8x16'
@@ -80,13 +80,14 @@ jobs:
       FY_SCOPE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
       FY_SCOPE_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       FY_SCOPE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-    # Main only refreshes the cache and waits for the full release gates; its smaller Quick
-    # machine preserves tsc/Nix cache commits without paying 8 units on every main push.
-    # A dispatch picks its own shape (`quick_shape`), so main's 4x8 can be measured on a branch before merge.
+    # One shape on every event, main included: the six unit groups and the scripts tests do not fit a 4x8 (measured on
+    # dispatch run 43825305638: 8.4 min and the real-tree TypeScript guard in scripts/gen/tests/fleet-link-callers.test.ts
+    # timed out at 180 s with three parts at once; the 8x16 ran the same parts in 3.8 min). Main's Quick only runs when no
+    # pull request proved the merged tree, so it is the fallback and must be the shape that is green.
+    # A dispatch may still pick a shape (`quick_shape`) to measure one.
     runs-on: >-
       ${{ fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]',
-        (github.event_name == 'push' && github.ref == 'refs/heads/main' && '4x8')
-        || (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
+        (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
         || '8x16')) }}
     steps:
       - uses: actions/checkout@v5
@@ -116,7 +117,7 @@ jobs:
           # first groups end). Measured: six and four at a time ran the kernel-heavy groups equally fast (252-283 s), so
           # the CPU is not oversubscribed; the board watcher-stall budget miss seen in both was heap state, not cores
           # (see config/test-groups.json's board placement in docs/standards/ci-cd).
-          FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}
+          FY_CI_QUICK_PARALLEL: ${{ (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8') && '3' || '6' }}
           # The tsc cache is the Static Checks job's (typecheck runs there); quick.sh still empties a local one on main.
           FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
           FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
