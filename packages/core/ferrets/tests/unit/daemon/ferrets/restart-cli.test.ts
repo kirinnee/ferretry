@@ -170,15 +170,21 @@ describe('Restart CLI on a 5.0 ferret', () => {
     await h.stop();
   });
 
-  test('another runtime still answers that it is not built yet', async () => {
-    const { h } = await boot();
+  test('another runtime is a MOVE, not a Restart: the fake Runtimes names no catalogue, so it refuses before anything is written', async () => {
+    const { h, runner, id, handle } = await boot();
+    const documents = async () => [
+      h.state('ferrets').raw(FerretConfigFile, id),
+      h.state('ferrets').raw(FerretStateFile, id),
+    ];
+    const before = await documents();
 
-    const answer = await h.request('POST', '/v1/ferrets/lead/move', {
-      headers: { 'x-fy-request-id': 'other' },
-      body: { agent: 'codex-two' },
-    });
+    const answer = await restart(h, id, { agent: 'claude-two' });
 
-    expect(answer.status).toBeGreaterThanOrEqual(400);
+    // `move-login.test.ts` holds the move itself; here only that a Restart's own rules do not apply to it.
+    expect(answer.status).toBe(503);
+    expect(answer.json<{ code: string }>().code).toBe('agent_unavailable');
+    expect(await documents()).toEqual(before);
+    expect(await runner.alive(handle)).toBe(true);
     await h.stop();
   });
 });

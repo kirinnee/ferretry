@@ -22,6 +22,7 @@ export const RESTAMPED_RECORD_KEYS = [
   'launchReasoningEffort',
   'launchFast',
   'launchSettings',
+  'updatedAt',
 ] as const;
 
 /** `current` with only the restamped keys put back to what `before` held (a key `before` lacked is dropped). */

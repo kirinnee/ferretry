@@ -8,7 +8,7 @@ import {
   PERSON_ORIGIN,
 } from '../../../../contract/index.ts';
 import { ferretId } from '../../../../contract/testing/index.ts';
-import { ferretsMoveResume } from '../../../../daemon/lib/ferrets/move-resume.ts';
+import { serviceMove } from './service-move.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 import { additivesFixture } from './additives-fixture.ts';
 
@@ -84,7 +84,7 @@ describe('a SUCCESSFUL project-folder move (the retarget) keeps the birth it fou
       const f = additivesFixture({ birth });
       await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
       const before = f.runner.starts;
-      const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+      const resume = serviceMove(f.service, ferret => f.registry.get(ferret), target);
       expect((await resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).disposition).toBe('revived');
       expect(f.runner.starts).toBe(before + 1);
       expect(f.registry.get(f.id)?.runtime).toBe('claude-two');
