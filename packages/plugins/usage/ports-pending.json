@@ -13,7 +13,6 @@
       "[own] GAP(usage): SessionQuotaResolver in app/lib/usage.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/session-dashboard*.tsx), so it stays until that branch lands (owner: nelly)",
       "[own] GAP(usage): usage.yaml is kept out of the agent config tools (kernel agent-reach.ts) because usageLoosens does not hold a timeZone change, and today any time-zone change was held (it moves when budgets reset); port that rule, then map usage.yaml into the reach with its T-0034 row (owner: usage port)",
       "[cross: ferrets] GAP(ferrets): Info › Usage draws today's context readout without its used-token words (“124K of 200K tokens”) and without the row hints: the live read (`GET /v1/ferrets/:ferretId/live`) carries the percent and the window but no used-token count. MISSING SEAM: Ferrets' live read has no used-token count for Usage's readout.",
-      "[own] GAP(usage): the quota readout's top panel is never drawn (the frame draws no top slot, and v4 shows no quota in a top bar); Usage re-homes it where v4 shows it: inside session rows, daemon pickers and runtime buttons",
       "[hand-over: runtimes] GAP(usage): parity rows the Runtimes batch found are not its own, re-owned by britnee ruling (none removed), each still `[ ]` in docs/design/rebuild-parity.tsv: J-0227 (the housekeeping pass trigger: the ingestion nudge and its slow backstop in usage/daemon/index.ts need a Usage jobs test that names the row)."
     ]
   }
