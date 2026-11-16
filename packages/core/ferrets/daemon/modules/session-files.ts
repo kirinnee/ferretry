@@ -48,6 +48,8 @@ import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 import { SessionConfigSchema } from '../lib/protocol/session.ts';
+import { markedHealth } from '../lib/ferrets/health-mark.ts';
+import { MEDIA_FOLDER, QUESTION_ASKED_FILE } from '../lib/ferrets/session-stores/pane-files.ts';
 import { repointedSessionConfig, sessionRuntimeFacts } from '../lib/ferrets/runtime-repoint.ts';
 
 /** The id a lineage question about a ferret that does not exist yet carries; it names no real session. */
@@ -125,12 +127,6 @@ export interface SessionFilesDeps {
 
 /** The folder of a ferret's own session folder its opening attachments are written to (one of `FERRET_READABLE_FOLDERS`). */
 const ATTACHMENTS_FOLDER = 'attachments';
-
-/** The folder of a ferret's own session folder its agent puts media in (`FY_MEDIA_DIR`; today's `SessionPaths.media`). */
-const MEDIA_FOLDER = 'media';
-
-/** The file Claude Code's question hook writes in a ferret's session folder (today's `SessionPaths.questionAsked`). */
-const QUESTION_ASKED_FILE = 'question-asked.json';
 
 /**
  * Ferrets' per-ferret private session files, all on the internal `sessions` root (`state/ferrets/sessions/<ferret>/`):
@@ -232,6 +228,16 @@ export class SessionFiles {
           return value === undefined ? kept : { ...kept, compactAt: value };
         });
       },
+      // The Warden's stalled mark: `health` alone, decided on what the locked read-modify-write reads.
+      markStalled: async (ferret, stalled) => {
+        let changed = false;
+        await this.deps.storage.updateState(parseSessionId(ferret), current => {
+          const next = markedHealth(current, stalled);
+          changed = next !== undefined;
+          return next ?? current;
+        });
+        return changed;
+      },
       runtimeFacts: async ferret => sessionRuntimeFacts(await this.deps.storage.readConfig(parseSessionId(ferret))),
       // A rename's re-point (v4's `renameSessions`): read first, outside the lock, so a config that does not name the old
       // runtime is never rewritten; the write is the storage's locked read-modify-write and re-checks what it reads.
@@ -242,22 +248,6 @@ export class SessionFiles {
         return true;
       },
       askedQuestion: async ferret => await this.readAskedQuestion(parseSessionId(ferret)),
-      // Claude Code's question hook records the question it asks here (`FY_QUESTION_FILE`, today's `questionAsked`):
-      // inside the ferret's own folder on the sessions root, never in its work tree.
-      questionFile: async ferret => {
-        const named = this.root(parseSessionId(ferret)).resolve(QUESTION_ASKED_FILE);
-        if (!named.ok) throw new Error('the question file of this ferret could not be named');
-        return named.value;
-      },
-      // The agent's "show this" folder (`FY_MEDIA_DIR`, F-0327): `media/` in the ferret's own session folder, made `0700`.
-      mediaFolder: async ferret => {
-        const id = parseSessionId(ferret);
-        const named = this.root(id).resolve(MEDIA_FOLDER);
-        if (!named.ok) throw new Error('the media folder of this ferret could not be named');
-        await new OwnFolder(this.root(id)).ensure();
-        await new OwnFolder(this.mediaRoot(id)).ensure();
-        return named.value;
-      },
       assign: async (ferret, prompt) => {
         const id = parseSessionId(ferret);
         return firstTurnInstruction(await this.taskStore(id).writeAssignedTask(id, assignedTaskDocument(prompt)));

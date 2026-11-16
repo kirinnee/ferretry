@@ -24,6 +24,7 @@ describe('the Terminals host-fs seam', () => {
   test('only the pinned adapters reach it, so a new file that wants raw fs access is noticed', () => {
     // The seam hands free-path readFile/open/readdir to its importers and the banned-globals check cannot see an
     // import of it. A new importer must be added here on purpose, with a reviewer looking at what it reads.
+    // job-files.ts reads only a job's own log and exit record (open/readFile/stat on paths the state port handed out).
     expect(importers()).toEqual(
       [
         'daemon/adapters/cgroups/disk-scheduler.ts',
@@ -31,6 +32,7 @@ describe('the Terminals host-fs seam', () => {
         'daemon/adapters/cgroups/host-facts.ts',
         'daemon/adapters/cgroups/proc-placements.ts',
         'daemon/adapters/cgroups/service-weights.ts',
+        'daemon/adapters/jobs/job-files.ts',
         'daemon/adapters/session/processes/listening.ts',
         'daemon/adapters/session/processes/output-file.ts',
         'daemon/adapters/session/processes/process-incarnation.ts',

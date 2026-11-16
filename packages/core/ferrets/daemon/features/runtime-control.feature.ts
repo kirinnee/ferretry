@@ -1,5 +1,5 @@
 import { milliseconds } from '@ferretry/std';
-import { Harnesses, type FerretId } from '../../contract/index.ts';
+import { Harnesses, RUNTIME_START_KEY, RuntimeStart, type FerretId } from '../../contract/index.ts';
 import { createSessionDirectory } from '../lib/session/directory/index.ts';
 import { FerretRuntimeControl, runtimeQuarantineState } from '../lib/session/runtime-control/index.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
@@ -49,9 +49,14 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     stopHeld: async ferret =>
       await service.stopHeld(ferret, 'now', 'a runtime control left its picker open', { kind: 'stopped' }),
     serial: sessionFiles.serial,
-    // GAP(ferrets): the published accounts are Runtimes' to read and Ferrets does not need Runtimes, so none are offered
-    // here: a live Codex catalog is described by what the app-server advertises alone (no tier or context from the account).
-    accounts: { accounts: async () => [] },
+    // What the runtime this ferret was started on serves: Runtimes' to say (Ferrets cannot import it), asked by the name on the
+    // ferret's own record, never by anything a caller sent. No recorded runtime, or none that can say, is no account.
+    served: async ferret => {
+      const runtime = registry.get(ferret)?.runtime;
+      if (runtime === undefined) return undefined;
+      const source = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+      return source === 'unavailable' ? undefined : await source.catalog?.(runtime);
+    },
     clock: { now: () => kernel.clock.now() },
     sleeper: { sleep: async delay => await kernel.clock.sleep(milliseconds(delay)) },
     clientName: CLIENT_NAME,

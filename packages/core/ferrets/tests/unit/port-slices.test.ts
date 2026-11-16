@@ -89,6 +89,7 @@ interface FerretsApiAtBase {
   paneLimits?(): Promise<readonly FerretPaneLimit[]>;
   runtimeRecords?(): Promise<readonly FerretRuntimeRecord[]>;
   repointRuntime?(rename: FerretRuntimeRename): Promise<number>;
+  markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
   runtimeControl?: RuntimeControlApi['runtimeControl'];
 }
 

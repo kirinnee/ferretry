@@ -6,6 +6,7 @@
  * host.
  */
 import type { CompactAt } from '../../protocol/compact-at.ts';
+import type { RuntimeSwitchAccount } from '../../../../contract/kinds/runtime-switch.ts';
 import type { HarnessKind } from './fleet.ts';
 
 export type { HarnessKind } from './fleet.ts';
@@ -97,13 +98,16 @@ export interface AccountInventoryPort {
  * refused rather than resolved: two accounts sharing an executable name is a manifest defect, and
  * silently picking the first was how the source attached one account's quota to another's session.
  */
-export function findAccountByAgent(accounts: readonly CoreAccount[], agent: string): CoreAccount | undefined {
+export function findAccountByAgent<Account extends { readonly agent: string }>(
+  accounts: readonly Account[],
+  agent: string,
+): Account | undefined {
   const matches = accounts.filter(account => account.agent === agent);
   return matches.length === 1 ? matches[0] : undefined;
 }
 
 /** The models an account may actually be asked for right now. */
-export function servableModels(account: CoreAccount): readonly CoreAccountModel[] {
+export function servableModels(account: RuntimeSwitchAccount): RuntimeSwitchAccount['models'] {
   return account.available ? account.models.filter(model => model.available) : [];
 }
 
