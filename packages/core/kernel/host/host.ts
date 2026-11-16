@@ -35,6 +35,7 @@ import {
 import type { ConfigDef, PortToken } from '../contract/define.ts';
 import type { ApiRequest, ApiResponse } from '../contract/http.ts';
 import { ApiError, errorResponse } from '../contract/http.ts';
+import { bootBuild } from './build-identity.ts';
 import type { ConfigStatus } from './config/service.ts';
 import { type ConfigFileMove, configChangedPayload } from './config/state-change.ts';
 import { CONFIG_FILE_READ, configFrameShown } from './config/bus-frame.ts';
@@ -284,6 +285,8 @@ export interface Listening {
 export interface HostOptions {
   readonly home: string;
   readonly version: string;
+  /** Names this run in every conditional tag; default: a fresh id per boot ({@link bootBuild}). */
+  readonly build?: string;
   // biome-ignore lint/suspicious/noExplicitAny: the generated registry is `DaemonImplementation<any>[]` (each half typed by its own manifest).
   readonly implementations: readonly DaemonImplementation<any>[];
   readonly adapters: HostAdapters;
@@ -1380,6 +1383,7 @@ async function bootLocked(
     admission: () => bound.admission,
     outputGuard: () => bound.outputGuard,
     version: options.version,
+    build: bootBuild(options.version, options.build),
     ...(adapters.compressor === undefined ? {} : { compressor: adapters.compressor }),
   };
   const dispatcher = new Dispatcher(bindings, { routes, sockets, memberRoutes });

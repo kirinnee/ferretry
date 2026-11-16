@@ -40,11 +40,3 @@ export async function parseBody<Schema extends z.ZodType>(
     .join('; ');
   throw new ApiError(400, `the request body is invalid — ${detail}`, 'invalid_request', result.error.issues);
 }
-
-/** Whether `If-None-Match` names this tag. GET compares weakly (RFC 9110 §13.1.2), so `W/` is ignored. */
-export function namesTag(ifNoneMatch: string, etag: string): boolean {
-  return ifNoneMatch
-    .split(',')
-    .map(candidate => candidate.trim())
-    .some(candidate => candidate === '*' || candidate.replace(/^W\//u, '') === etag);
-}

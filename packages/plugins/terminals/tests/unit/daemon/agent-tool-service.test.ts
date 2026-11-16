@@ -249,7 +249,7 @@ describe('the tools that need a terminal', () => {
       raise: {} as never,
     });
     expect(answer.input).toEqual({ id: 'r-1' });
-    expect(answer.summary).toContain('!r-1');
+    expect(answer.summary).toContain('^r-1');
   });
 
   it('B14 raises a phone approval for the terminal this session has, and tells the ferret to wait, never a number', async () => {

@@ -428,7 +428,7 @@ describe('standing sign-in rules: the wire', () => {
     ]);
   });
 
-  // Invariant 36 (R3c §14): lifetime bounds are signed, a page rule's and a terminal rule's (!A197).
+  // Invariant 36 (R3c §14): lifetime bounds are signed, a page rule's and a terminal rule's (^A197).
   it('should bound a page rule between one hour and 90 days, and a terminal rule to 7 days', () => {
     // Arrange
     const ending = (seconds: number): string => new Date(Date.parse(CREATED) + seconds * 1_000).toISOString();
@@ -499,7 +499,7 @@ describe('standing sign-in rules: the wire', () => {
     should(canonicalSignInRule(sudoBody({ expiresAt: ending(SIGN_IN_RULE_TERMINAL_MAX_SECONDS + 1) })).ok).be.false();
   });
 
-  // Invariant 24 (R3c §14, restored by !A197): terminal rules are sudo, su or doas only, the password only.
+  // Invariant 24 (R3c §14, restored by ^A197): terminal rules are sudo, su or doas only, the password only.
   it('should take a terminal rule only for one sudo, su or doas key, typing the password alone', () => {
     // Arrange
     const at = (placeKeys: string[]): SignInRuleBody => sudoBody({ pins: { ...sudoBody().pins, placeKeys } });

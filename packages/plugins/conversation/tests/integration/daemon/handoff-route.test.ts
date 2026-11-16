@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretId, FerretTurnDocument, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -38,7 +39,7 @@ async function world(documents: readonly FerretTurnDocument[]) {
   ferrets.documents = documents;
   const host = await testHost({
     plugins: [daemon, wardenStandIn],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
   const get = async (name: string, ferret = 'f1') =>

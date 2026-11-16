@@ -29,7 +29,7 @@
 .fy-agenda-msg-kind {
   font-weight: var(--weight-strong);
 }
-/* The `!A45` reference, drawn by the shared Markdown renderer (so proof and click are the grammar's own) and
+/* The `^A45` reference, drawn by the shared Markdown renderer (so proof and click are the grammar's own) and
    dressed as a pill. Unproved, it is the same pill holding plain text. */
 .fy-agenda-msg-chip {
   background: color-mix(in srgb, var(--accent) 14%, transparent);

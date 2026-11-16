@@ -15,7 +15,7 @@ import {
 } from '../../../../daemon/lib/agenda/state-machine.ts';
 
 /**
- * THE AGENDA AS A CHANNEL (docs/agenda.md § States), the owner's rules on !A304: any reply or answer rests an item,
+ * THE AGENDA AS A CHANNEL (docs/agenda.md § States), the owner's rules on ^A304: any reply or answer rests an item,
  * waiting on its ferret; the ferret's answer brings it back to its old place; only the ferret's done (or the owner's
  * explicit done or dismiss) closes it; a new ask re-enters fresh; a blocker wakes a snooze.
  */

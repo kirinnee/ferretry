@@ -1,4 +1,7 @@
 import { Database } from 'bun:sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Result } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
 import type { StateFileDef } from '../contract/define.ts';
@@ -40,6 +43,22 @@ export class MemoryStateFolder {
   readonly modified = new Map<string, number>();
   private crashArmed = false;
   crashed = false;
+  private realRoot: string | undefined;
+
+  /**
+   * A real, empty folder that stands for this store on the disk, made on the first `pathOf` and removed when the process
+   * exits. The files themselves stay in memory; only the path handed out to a caller that opens one itself (the
+   * conversation leases' lock) is real, so such a caller finds nothing there and a launch that leases a conversation runs
+   * under a test host.
+   */
+  realFolder(): string {
+    if (this.realRoot === undefined) {
+      const root = mkdtempSync(join(tmpdir(), 'fy-memory-state-'));
+      process.once('exit', () => rmSync(root, { recursive: true, force: true }));
+      this.realRoot = root;
+    }
+    return this.realRoot;
+  }
 
   constructor(readonly nowMs: () => number = () => 0) {}
 
@@ -384,7 +403,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
     pathOf(file, name) {
       guard(file);
       if (file.store !== 'opaque') throw new TypeError(`state ${file.name}: only an opaque file's path is handed out`);
-      return `/memory-state/${pathOf(file, name)}`;
+      return `${folder.realFolder()}/${pathOf(file, name)}`;
     },
     sqlite(file, name): SqliteHandle {
       guard(file);

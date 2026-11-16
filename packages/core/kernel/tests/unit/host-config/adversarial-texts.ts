@@ -120,3 +120,42 @@ export function adversarialTexts(cap: number): readonly (readonly [label: string
     ['many unclosed flows', fill(cap, '[\n')],
   ];
 }
+
+/**
+ * The shapes whose answer depends on their size: small, each is READ where at the size cap it is REFUSED (a guard on
+ * nesting depth, on a key that is not a string, on a duplicate key), so the small run would pass through another path.
+ * Each maps to the first refusal the shape gets at the size cap, and to the smallest size (a multiple of 8 KiB, found
+ * by reading each shape at 8, 16, 32 and 64 KiB) at which it is refused the same way: no clock reads them there.
+ */
+export const REFUSED_AT_THE_CAP: ReadonlyMap<string, { readonly message: string; readonly crossesAt: number }> =
+  new Map([
+    [
+      'block lists nested on one line',
+      { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 },
+    ],
+    ['flow lists nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 }],
+    ['flow mappings nested', { message: 'the file is too deeply nested or too large to read', crossesAt: 32_768 }],
+    ['mappings and lists as keys, beside many anchors', { message: 'a key is not a plain string', crossesAt: 65_536 }],
+    ['a !!set of many keys', { message: 'a key is written twice in the same mapping', crossesAt: 16_384 }],
+    ['many unclosed flows', { message: 'the file is too deeply nested or too large to read', crossesAt: 16_384 }],
+  ]);
+
+/**
+ * Every hostile shape at about `small` bytes, except that a shape in `REFUSED_AT_THE_CAP` is built at the size at which
+ * it takes the same path as at the size cap, so a small run answers what the full-size run does.
+ */
+export function compactAdversarialTexts(small: number): readonly (readonly [label: string, text: string])[] {
+  const crossing = new Map<number, ReadonlyMap<string, string>>();
+  const at = (size: number): ReadonlyMap<string, string> => {
+    const have = crossing.get(size);
+    if (have !== undefined) return have;
+    const made = new Map(adversarialTexts(size));
+    crossing.set(size, made);
+    return made;
+  };
+  return adversarialTexts(small).map(([label, text]) => {
+    const crossesAt = REFUSED_AT_THE_CAP.get(label)?.crossesAt;
+    if (crossesAt === undefined || crossesAt <= small) return [label, text] as const;
+    return [label, at(crossesAt).get(label) ?? text] as const;
+  });
+}

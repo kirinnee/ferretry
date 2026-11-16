@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretChangedPayload } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -104,7 +105,7 @@ async function conversation() {
   } as typeof daemon;
   const host = await testHost({
     plugins: [implementation],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
   const changed = (payload: FerretChangedPayload) => built.half?.hooks['ferret.changed'](payload);

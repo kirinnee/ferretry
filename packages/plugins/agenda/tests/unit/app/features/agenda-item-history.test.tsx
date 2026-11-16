@@ -155,7 +155,7 @@ describe('the Conversation of an open agenda item', () => {
   });
 
   test('draws Ferretry’s own words under its name', async () => {
-    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into !A2.', daemon: true }]);
+    const root = await draw([{ kind: 'ferret', key: 'd', at: AT, text: 'Closed as merged into ^A2.', daemon: true }]);
     const row = must(root.querySelector('[data-history="daemon"]'), 'daemon row');
     expect(row.querySelector('header')?.textContent).toContain('Ferretry');
     expect(row.textContent).not.toContain('Lizzette');

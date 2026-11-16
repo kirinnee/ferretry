@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import {
   OPENING_ATTACHMENTS_KEY,
@@ -32,7 +33,10 @@ async function builtHalf(): Promise<Half> {
       return built;
     },
   } as typeof daemon;
-  const host = await testHost({ plugins: [captured], fakes: { ferrets: new FakeFerrets(), asks: new FakeAsks() } });
+  const host = await testHost({
+    plugins: [captured],
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets: new FakeFerrets(), asks: new FakeAsks() },
+  });
   await host.stop();
   if (half === undefined) throw new Error('the host did not build the conversation half');
   return half;

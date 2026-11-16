@@ -73,7 +73,7 @@ const mountPage = async (
   const choose = (which: string) => chooseFromMenu(view.container, 'filter', which);
   const rowIds = (): string[] =>
     [...view.container.querySelectorAll('[data-agenda-parked]')].map(
-      row => row.textContent?.match(/!(A\d+)/u)?.[1] ?? '',
+      row => row.textContent?.match(/\^(A\d+)/u)?.[1] ?? '',
     );
   return { view, fake, menu, openMenu, option, choose, rowIds, loads, navigated };
 };
@@ -144,7 +144,7 @@ describe('AgendaInboxPage Snoozed and Replied filters', () => {
     );
     expect(rowIds()).toEqual(['A2']);
     expect(must(view.container.querySelector('[data-agenda-undo]'), 'toast').textContent).toContain(
-      '!A3 is back on your list',
+      '^A3 is back on your list',
     );
     await interact(() => fake.clock.advance(6_000));
     await interact(async () => {
@@ -277,9 +277,9 @@ describe('AgendaInboxPage counts what it lists', () => {
       parkedWhole: true,
     });
     await choose('snoozed');
-    await typeInto(await openFind(view.container), '!A7');
+    await typeInto(await openFind(view.container), '^A7');
     const found = [...view.container.querySelectorAll('[data-find-row]')];
-    expect(found.map(row => row.textContent?.match(/!(A\d+)/u)?.[1])).toEqual(['A7']);
+    expect(found.map(row => row.textContent?.match(/\^(A\d+)/u)?.[1])).toEqual(['A7']);
     expect(found.map(row => row.querySelector('[data-find-chip]')?.getAttribute('data-find-chip'))).toEqual([
       'snoozed',
     ]);
@@ -306,7 +306,7 @@ describe('AgendaInboxPage snooze from the open item', () => {
     );
     expect(view.container.querySelector('[data-agenda-view="A1"]')).toBeNull();
     expect(must(view.container.querySelector('[data-agenda-undo]'), 'toast').textContent).toContain(
-      'Snoozed !A1 until',
+      'Snoozed ^A1 until',
     );
     await interact(() => fake.clock.advance(6_000));
     await interact(async () => {

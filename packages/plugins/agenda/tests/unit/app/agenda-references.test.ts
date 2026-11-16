@@ -1,5 +1,5 @@
 /**
- * WHAT AGENDA PROVES IN AN ASK'S WORDS (`!A3`, `:agent`, `@file`): each only from the evidence in hand, on top of the
+ * WHAT AGENDA PROVES IN AN ASK'S WORDS (`^A3`, `:agent`, `@file`): each only from the evidence in hand, on top of the
  * surface the ask sits in, and never over a kind that surface already proves.
  */
 import { describe, test } from 'bun:test';
@@ -103,7 +103,7 @@ describe('agendaReferenceSurface :agent', () => {
   });
 });
 
-describe('agendaReferenceSurface !A3', () => {
+describe('agendaReferenceSurface ^A3', () => {
   test('should prove an item on the ferret’s own ledger, open or resolved, and open it', () => {
     const opened: string[] = [];
     const surface = agendaReferenceSurface({}, facts({ ferret: ferretPage({ openAsk: id => opened.push(id) }) }));

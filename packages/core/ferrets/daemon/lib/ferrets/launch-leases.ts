@@ -17,7 +17,7 @@ export interface FerretLaunchLeases {
    * reads the pid, so the lease must name the pane's and not a daemon that may restart while the pane keeps writing.
    * Throws when another writer holds the conversation, or when `pid` is unknown (the caller then stops the pane).
    */
-  moveToPane(ferret: FerretId, conversation: string, pid: number | undefined): Promise<void>;
+  moveConversationToPane(ferret: FerretId, conversation: string, pid: number | undefined): Promise<void>;
   /** Frees every conversation `ferret` holds. */
   release(ferret: FerretId): Promise<void>;
 }

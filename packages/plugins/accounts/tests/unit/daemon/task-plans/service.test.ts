@@ -222,7 +222,7 @@ async function staged(w: ReturnType<typeof world>, plan: TaskPlan, approval: Tas
   return answer.staged;
 }
 
-/** Stages a selection and commits it with the passkey bound to it: how any ticked line is approved (!A244). */
+/** Stages a selection and commits it with the passkey bound to it: how any ticked line is approved (^A244). */
 async function allowed(w: ReturnType<typeof world>, plan: TaskPlan, approval: TaskPlanApproval, caller = PHONE) {
   const held = await staged(w, plan, approval, caller);
   return await w.service.commit(caller, SESSION, plan.id, held.stage, proofFor(w.service.boundSubjectOf(held.stage)));
@@ -453,7 +453,7 @@ describe('TaskPlanService: only the owner answers', () => {
 });
 
 describe('TaskPlanService: approving', () => {
-  it('should stage paste lines too, and approve them only with a passkey bound to that stage (!A244)', async () => {
+  it('should stage paste lines too, and approve them only with a passkey bound to that stage (^A244)', async () => {
     const w = world();
     await w.rules.load();
     const plan = await w.service.propose(SESSION, { lines: [{ ...PASTE, uses: 3 }, PAGE_PASTE] });
@@ -843,7 +843,7 @@ describe('TaskPlanService: the paste-plan routes, kept', () => {
     const plan = await w.service.propose(SESSION, { lines: [WORK_LINE, PASTE] });
 
     should((await refused(w.service.approveCopyItems(HOST, SESSION, plan.id, [1]))).code).equal('bad_request');
-    // Allowing a paste needs the bound passkey now (!A244): the one-step route only declines.
+    // Allowing a paste needs the bound passkey now (^A244): the one-step route only declines.
     should(await refused(w.service.approveCopyItems(HOST, SESSION, plan.id, [0]))).match({
       status: 409,
       code: 'needs_passkey',

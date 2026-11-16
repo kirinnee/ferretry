@@ -26,7 +26,7 @@ test('CLI ownState is optional and exposes only own declared opaque state operat
   ]);
   await own.createPrivateDirectory(Tree, 'one');
   await own.write(Tree, 'redirect' as never, 'one/index.html');
-  expect(own.pathOf(Tree, 'one/index.html')).toBe('/memory-state/pair-open/one/index.html');
+  expect(own.pathOf(Tree, 'one/index.html')).toEndWith('/pair-open/one/index.html');
   expect(await own.stat(Tree, 'one/index.html')).toEqual({ kind: 'file', modifiedMs: 42 });
   expect(await own.list(Tree)).toEqual(['one']);
   await expect(own.removeEmptyDirectory(Tree, 'one')).rejects.toThrow();

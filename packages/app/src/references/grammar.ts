@@ -2,8 +2,10 @@
  * One canonical reference grammar and proof gate for every Markdown surface.
  *
  * References are authored as plain sigil tokens:
- *   `:agent`  `@file[:line[-end]]`  `&task`  `!attention`  `%surface:key`
+ *   `:agent`  `@file[:line[-end]]`  `&task`  `^attention`  `%surface:key`
  *   `/skill` or `$skill`
+ *
+ * `^A3` is the attention sigil; the old `!A3` is still READ (an alias) and never written.
  *
  * A reference is a TOKEN, never a Markdown link. `[label](#fy-reference?…)`
  * written by hand is not a reference and never becomes one: the renderer only
@@ -52,7 +54,9 @@
  * Ported from kteam's `src/lib/references.ts`.
  */
 
-/** An agenda item id: `A` and a positive number (`!A3`). */
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS, askReference } from '@ferretry/core-asks/contract';
+
+/** An agenda item id: `A` and a positive number (`^A3`). */
 export type AgendaId = string;
 /** A paired daemon's durable id. */
 export type DaemonId = string;
@@ -184,7 +188,9 @@ const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const TASK_ID = new RegExp(`^${TASK_ID_BODY}$`, 'iu');
 const TASK_TOKEN = new RegExp(`^&(${TASK_ID_BODY})$`, 'iu');
 const AGENDA_ID = new RegExp(`^${AGENDA_ID_BODY}$`, 'u');
-const AGENDA_TOKEN = new RegExp(`^!(${AGENDA_ID_BODY})$`, 'u');
+// The attention sigil is `ASK_REFERENCE_SIGIL` (core-asks owns the spelling); the legacy one is READ as an alias.
+const ATTENTION_SIGIL_CLASS = ASK_REFERENCE_SIGIL_CLASS;
+const AGENDA_TOKEN = new RegExp(`^${ATTENTION_SIGIL_CLASS}(${AGENDA_ID_BODY})$`, 'u');
 /**
  * A surface key is deliberately dot-free. Daemon terminal ids are twelve hex
  * characters and page keys are `page-<n>`, so a dot buys nothing — and it would
@@ -222,7 +228,7 @@ const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
   `:${AGENT_NAME_BODY}${BOUNDARY_AFTER}`,
   `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
-  `!${AGENDA_ID_BODY}${BOUNDARY_AFTER}`,
+  `${ATTENTION_SIGIL_CLASS}${AGENDA_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
   `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
@@ -256,7 +262,7 @@ export function isReferenceLeftBoundary(previous: string | undefined): boolean {
  * whose first character is the whole prefix. `/` is absent because it opens the
  * harness command line, which is not a reference family.
  */
-export const DIRECT_REFERENCE_SIGILS = [':', '&', '!', '$'] as const;
+export const DIRECT_REFERENCE_SIGILS = [':', '&', ASK_REFERENCE_SIGIL, '$'] as const;
 export type DirectReferenceSigil = (typeof DIRECT_REFERENCE_SIGILS)[number];
 
 /**
@@ -275,8 +281,8 @@ const DIRECT_SIGIL_PREFIX = {
   // Every prefix of an agent name is itself a valid agent name.
   ':': new RegExp(`^${AGENT_NAME_BODY}$`, 'iu'),
   '&': /^[BFIC][0-9]{0,9}$/iu,
-  // Case-sensitive, exactly as `AGENDA_TOKEN` is: `!a3` is not a reference.
-  '!': /^A(?:[1-9][0-9]*)?$/u,
+  // Case-sensitive, exactly as `AGENDA_TOKEN` is: `^a3` is not a reference. The legacy `!` never opens a picker.
+  [ASK_REFERENCE_SIGIL]: /^A(?:[1-9][0-9]*)?$/u,
   // Lowercase only, which is what keeps `$HOME` and `$PATH` out of the picker.
   $: new RegExp(`^${SKILL_NAME_BODY}$`, 'u'),
 } as const satisfies { readonly [Sigil in DirectReferenceSigil]: RegExp };
@@ -469,7 +475,7 @@ export function formatReference(reference: Reference | ResolvedReference): strin
     }
     case 'attention':
       if (!AGENDA_ID.test(reference.id)) throw new TypeError('invalid attention reference');
-      return `!${reference.id}`;
+      return askReference(reference.id);
     case 'surface':
       if (!validSurfaceReference(reference)) throw new TypeError('invalid surface reference');
       return `%${reference.surface}:${reference.key}`;
@@ -757,7 +763,7 @@ export function referenceTitle(reference: ResolvedReference): string {
     case 'task':
       return `Open task &${reference.id}`;
     case 'attention':
-      return `Open agenda item !${reference.id}`;
+      return `Open agenda item ${askReference(reference.id)}`;
     case 'surface':
       return `Open this session's ${reference.surface} ${reference.key}`;
     case 'skill':

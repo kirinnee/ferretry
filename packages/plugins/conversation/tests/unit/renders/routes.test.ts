@@ -18,6 +18,7 @@ const call = (
   body: unknown,
   params: Record<string, string> = {},
   headers: Record<string, string> = {},
+  build?: string,
 ) => {
   const arrival = testArrival(caller === 'device' ? device('d1') : owner());
   const request = {
@@ -26,6 +27,7 @@ const call = (
     query: new Map(),
     headers: new Map(Object.entries(headers)),
     arrival,
+    ...(build === undefined ? {} : { build }),
     text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   } as unknown as ApiRequest;
   const credential =
@@ -84,6 +86,23 @@ describe('the render routes', () => {
     );
     expect(cached.status).toBe(304);
     expect(cached.body).toBe('');
+  });
+
+  test('the tag names the daemon build: the same payload under another build with the same semver is a 200', async () => {
+    const saved = JSON.parse((await built.routes['POST /v1/renders'](call('ferret', save))).body) as { id: string };
+    const params = { id: saved.id };
+    const held = (await built.routes['GET /v1/renders/:id'](call('device', {}, params, {}, '5.0.0+aaa'))).headers.get(
+      'etag',
+    ) as string;
+    const same = await built.routes['GET /v1/renders/:id'](
+      call('device', {}, params, { 'if-none-match': held }, '5.0.0+aaa'),
+    );
+    expect(same.status).toBe(304);
+    const upgraded = await built.routes['GET /v1/renders/:id'](
+      call('device', {}, params, { 'if-none-match': held }, '5.0.0+bbb'),
+    );
+    expect(upgraded.status).toBe(200);
+    expect(upgraded.headers.get('etag')).not.toBe(held);
   });
 
   test('a path id outside the grammar is a 400 and an unknown one a 404', async () => {

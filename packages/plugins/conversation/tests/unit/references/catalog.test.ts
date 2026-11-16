@@ -62,7 +62,7 @@ describe('reference.catalog route', () => {
   });
 
   it('accepts every prefix of the reference grammar, the skill slash included', async () => {
-    for (const prefix of [':', '@', '&', '!', '/', '$', '%terminal', '%browser'])
+    for (const prefix of [':', '@', '&', '^', '/', '$', '%terminal', '%browser'])
       expect((await answerOf({}, { prefix })).prefix).toBe(prefix as ReferenceCatalogPrefix);
   });
 
@@ -78,7 +78,7 @@ describe('reference.catalog route', () => {
     };
     const nonsense = { entries: async () => [{ label: 'no token' }] } as unknown as ReferenceCatalogProvider;
     for (const provider of [throws, nonsense]) {
-      const refused = await answerOf({ '!': provider }, { prefix: '!' }).catch((error: unknown) => error);
+      const refused = await answerOf({ '^': provider }, { prefix: '^' }).catch((error: unknown) => error);
       expect(refused).toBeInstanceOf(ApiError);
       expect((refused as ApiError).status).toBe(502);
     }

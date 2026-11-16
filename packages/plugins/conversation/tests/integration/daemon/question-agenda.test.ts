@@ -1,3 +1,4 @@
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import {
   type AskDraft,
@@ -140,6 +141,7 @@ function daemon(options: {
     log: { info: () => undefined, warn: (line: string) => void warned.push(line) },
   } as never;
   const half = buildConversationA({
+    mailbox: new FakeMailboxQueue(),
     kernel,
     ferrets: (options.ferrets ?? {
       get: async () => ({ id: 'cody', state: 'working' }),

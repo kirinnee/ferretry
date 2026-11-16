@@ -85,7 +85,7 @@ describe('the reply delivery', () => {
     await delivery.changed(SESSION, changeOf({ addressed: resolved({ kind: 'reply' }) }));
 
     // Assert
-    should(added).eql([[SESSION, 'A3', '[done !A3 «The relay fix is ready»] The owner marked this done.']]);
+    should(added).eql([[SESSION, 'A3', '[done ^A3 «The relay fix is ready»] The owner marked this done.']]);
   });
 
   it('should keep a bare "Got it" on an info item to the board, telling the ferret nothing', async () => {
@@ -126,7 +126,7 @@ describe('the reply delivery', () => {
     await delivery.changed(SESSION, changeOf({ change: 'needs-info', item }));
 
     // Assert
-    should(added).eql([[SESSION, 'A3~2', '[needs more info !A3 «The relay fix is ready»] which account?']]);
+    should(added).eql([[SESSION, 'A3~2', '[needs more info ^A3 «The relay fix is ready»] which account?']]);
   });
 
   it('should tell a wish to discuss with the binary the ferret runs', async () => {
@@ -156,7 +156,7 @@ describe('the reply delivery', () => {
     await delivery.changed(SESSION, changeOf({ change: 'answered', item }));
 
     // Assert
-    should(added).eql([[SESSION, 'A3~3', '[answer to !A3 «The relay fix is ready»] yes']]);
+    should(added).eql([[SESSION, 'A3~3', '[answer to ^A3 «The relay fix is ready»] yes']]);
   });
 
   it("should tell nothing for a rested answer on another ferret's item or without an answer", async () => {

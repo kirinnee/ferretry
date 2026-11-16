@@ -129,7 +129,7 @@ describe('TwoFactorSeedController add', () => {
       { padded: padInputValue(KEY), totpAcknowledged: true, label: 'authenticator' },
     ]);
     should(calls[2]).eql(['confirmInApp', 'GITHUB_WORK', STAGE, { session: 'session-one' }]);
-    should(said[1]).containEql('!A7').and.containEql('(session session-one)');
+    should(said[1]).containEql('^A7').and.containEql('(session session-one)');
     should(sleeps).eql([1_000, 1_000]);
     should(said.at(-1)).equal('Saved: Ferretry makes the codes for GITHUB_WORK now.');
     should(said.join('\n')).not.containEql(KEY);

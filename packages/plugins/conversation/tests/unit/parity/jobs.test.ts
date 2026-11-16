@@ -3,6 +3,7 @@
  * arms each now. Every timer here goes through the kernel clock. A loop that waits on a seam is `test.skip` naming the
  * seam; a row the parity owner rule placed here but that another plugin arms says so.
  */
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -45,7 +46,7 @@ async function conversation() {
   } as typeof daemon;
   const host = await testHost({
     plugins: [implementation],
-    fakes: { ferrets, asks },
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
   return { host, state, listed: () => listed };

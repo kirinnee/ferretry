@@ -23,7 +23,12 @@
  */
 
 import { type TranscriptEntry, type LedgerSendRecord } from './transcript.ts';
-import { type AgendaItem, type AgendaMessagePart, parseAgendaMessage } from '@ferretry/core-asks/contract';
+import {
+  ASK_REFERENCE_SIGIL_CLASS,
+  type AgendaItem,
+  type AgendaMessagePart,
+  parseAgendaMessage,
+} from '@ferretry/core-asks/contract';
 import { bulletPoints, describePrevious, FIELD_LABEL, itemAtVersion, POINT_FIELDS } from './agenda-revisions.ts';
 
 /**
@@ -87,11 +92,12 @@ export type HistoryEvent =
       readonly fromChat?: true;
     };
 
-const citesPattern = (id: AgendaItem['id']): RegExp => new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u');
+const citesPattern = (id: AgendaItem['id']): RegExp =>
+  new RegExp(`(?:^|[^\\w])${ASK_REFERENCE_SIGIL_CLASS}${id}(?![\\w])`, 'u');
 
 /** A plain reply without the reference the composer put in front of it: the bubble says what the owner typed. */
 export const withoutLeadingReference = (text: string, id: AgendaItem['id']): string => {
-  const stripped = text.replace(new RegExp(`^\\s*!${id}(?![\\w])[\\s:,—-]*`, 'u'), '');
+  const stripped = text.replace(new RegExp(`^\\s*${ASK_REFERENCE_SIGIL_CLASS}${id}(?![\\w])[\\s:,—-]*`, 'u'), '');
   return stripped.trim() === '' ? text.trim() : stripped.trim();
 };
 

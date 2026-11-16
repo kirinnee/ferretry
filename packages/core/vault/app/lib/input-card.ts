@@ -16,6 +16,7 @@ import {
   inputValueProblem,
   padInputValue,
 } from './input-wire.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 type Sensitivity = InputRequestView['sensitivity'];
 
@@ -53,8 +54,8 @@ const needsWords = (request: InputRequestView): string => {
 /** `!A7 · Hadi needs a password` — the ask reference first, because it is how the owner names the card. */
 export const titleWords = (request: InputRequestView, agentName: string): string =>
   request.source === undefined
-    ? `!${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`
-    : `!${request.agendaItemId} · ${agentName} wants to paste a sealed value`;
+    ? `${ASK_REFERENCE_SIGIL}${request.agendaItemId} · ${agentName} needs ${needsWords(request)}`
+    : `${ASK_REFERENCE_SIGIL}${request.agendaItemId} · ${agentName} wants to paste a sealed value`;
 
 /** Where a value goes, as the owner writes it: `%terminal:dev`, `%browser:app`, or "the secret NAME". */
 export const targetRef = (request: InputRequestView): string =>

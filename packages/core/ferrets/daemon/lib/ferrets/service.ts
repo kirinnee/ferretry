@@ -2572,7 +2572,7 @@ export class FerretsService implements FerretsApi {
   ): Promise<Result<undefined, StartFailure>> {
     if (conversation === undefined) return ok(undefined);
     try {
-      await this.ports.leases?.moveToPane(ferret, conversation, pid);
+      await this.ports.leases?.moveConversationToPane(ferret, conversation, pid);
       return ok(undefined);
     } catch (error) {
       return error instanceof ConversationLeaseHeldError

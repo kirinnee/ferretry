@@ -11,8 +11,7 @@ import {
 } from '../../../../daemon/queue/lib/deliverer.ts';
 import type { DeliveryView, HandOver } from '@ferretry/core-mailbox/contract';
 import type { QueueEvent } from '@ferretry/core-mailbox/contract';
-import { SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
-import type { SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
+import { type SessionQueueStore, SessionQueueService } from '@ferretry/core-mailbox/contract';
 import type { SendFate } from '../../../../daemon/seams/ledger-types.ts';
 import { KeyedSerialExecutor } from '../../../../daemon/seams/keyed-serial-executor.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
