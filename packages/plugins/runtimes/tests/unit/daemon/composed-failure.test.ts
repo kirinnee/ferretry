@@ -147,7 +147,7 @@ describe('the remedy after a rolled-back change is true whether the landed file 
   it('BG-027 a default-runtime change names runtimes.yaml and never says to remove it', async () => {
     const { landed, text } = await rolledBack({
       kind: 'machine.settings',
-      agentPermissions: 'auto',
+      agentPermissions: 'skip',
       defaultRuntime: 'claude-work',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
