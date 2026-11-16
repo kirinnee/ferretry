@@ -1,4 +1,4 @@
-import type { QueuedMessage } from '../wire-send.ts';
+import type { QueuedMessage } from '../../wire-send.ts';
 import { type SendPageQuery, windowPage } from '../send/page.ts';
 
 /**

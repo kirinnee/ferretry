@@ -1,11 +1,17 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { defaultQueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
-import { foldQueue, type QueueEvent, type QueuedMessage } from '@ferretry/core-mailbox/contract';
-import { QueueRefused, SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
-import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
-import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
+import {
+  defaultQueueCoalesceSettings,
+  foldQueue,
+  QueueRefused,
+  type QueueEvent,
+  type QueuedMessage,
+  SessionQueueService,
+  type SessionQueueStore,
+} from '../../../contract/index.ts';
+import { type FerretId as SessionId } from '@ferretry/core-ferrets/contract';
+import { ferretId as parseSessionId } from '@ferretry/core-ferrets/contract/testing';
 
 const ID = parseSessionId('session-1');
 

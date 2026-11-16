@@ -1,12 +1,18 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import { QUEUE_CHANGED_EVENT, type QueueChangedEventData } from '@ferretry/core-mailbox/contract';
 import should from 'should';
-import { NotifyingSessionQueueStore, type QueueChangePublisher } from '../../../../daemon/queue/lib/notifying-store.ts';
-import { foldQueue, type QueueEvent, type QueuedMessage } from '@ferretry/core-mailbox/contract';
-import { SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
-import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
-import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
+import {
+  foldQueue,
+  QUEUE_CHANGED_EVENT,
+  type QueueChangedEventData,
+  type QueueEvent,
+  type QueuedMessage,
+  SessionQueueService,
+  type SessionQueueStore,
+} from '../../../../contract/index.ts';
+import { NotifyingSessionQueueStore, type QueueChangePublisher } from '../../../../daemon/lib/queue/notifying-store.ts';
+import { type FerretId as SessionId } from '@ferretry/core-ferrets/contract';
+import { ferretId as parseSessionId } from '@ferretry/core-ferrets/contract/testing';
 import { at } from '../../../support/instant.ts';
 
 const ID = parseSessionId('session-1');

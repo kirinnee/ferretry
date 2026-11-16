@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -43,7 +44,7 @@ async function conversation() {
   } as typeof daemon;
   const host = await testHost({
     plugins: [implementation],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-10-30T04:40:00Z'),
   });
   const changed = (payload: Parameters<NonNullable<typeof built.half>['hooks']['ferret.changed']>[0]) =>

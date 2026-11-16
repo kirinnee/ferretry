@@ -1,4 +1,4 @@
-import type { SendRecord as SendRecordView } from '../wire-send.ts';
+import type { SendRecord as SendRecordView } from '../../wire-send.ts';
 
 /**
  * ONE PAGE OF A SESSION'S SENDS, newest first.

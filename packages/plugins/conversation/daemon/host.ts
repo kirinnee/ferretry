@@ -12,15 +12,19 @@ import {
   type SitrepLineSource,
 } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
-import type { Instant } from '@ferretry/std';
+import type { Instant, Result } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
 import {
   type MailboxHost,
   parseMessageAttachments,
   PEER_MESSAGE_LABELS,
   type PeerMessageLabel,
-  QueueChanged,
+  type MailboxQueueApi,
+  type MailboxRefusal,
+  QueueRefused,
+  type QueueRefusal,
   type QueuedMessage,
+  type SessionQueue,
   type SendRecord,
   type SendResult,
 } from '@ferretry/core-mailbox/contract';
@@ -103,7 +107,6 @@ import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
 import { answerOf } from '@ferretry/core-mailbox/contract';
-import { NotifyingSessionQueueStore, QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import { sessionAnswerRoutes } from './questions/lib/mounts/session-answer.ts';
 import { sessionCompactAtRoutes } from './turns/lib/mounts/session-compact-at.ts';
 import { SessionCompactAtError, SessionCompactAtService } from './turns/compact-at/lib/service.ts';
@@ -345,6 +348,8 @@ export function buildConversationA(deps: {
   readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
   /** Which of the harness seam's two actions are live (see {@link HarnessGate}). */
   readonly gate: HarnessGate;
+  /** The Mailbox's port: the queue lives there. */
+  readonly mailbox: MailboxQueueApi;
   /** The stored originals a send may name (part b's store). Absent: a send that names a file is refused. */
   readonly attachments?: AttachmentSource;
   /** A Codex ferret's parsed transcript tail (part b's reader), for the question watch. Absent: Codex is not watched. */
@@ -353,9 +358,8 @@ export function buildConversationA(deps: {
     limit?: number,
   ) => Promise<readonly TranscriptEvent[] | 'unreadable' | undefined>;
 }): ConversationAHalf {
-  const { kernel, ferrets, asks, hooks, gate } = deps;
+  const { kernel, ferrets, asks, hooks, gate, mailbox } = deps;
   const clock: ClockPort = { now: () => kernel.clock.now() };
-  const queueSerial = new KeyedSerialExecutor();
   const draftSerial = new KeyedSerialExecutor();
   /** The one lane of each ferret's `question.json`: its writer, the exact-id clear and the withdrawal (r4 #2). */
   const questionSerial = new KeyedSerialExecutor();
@@ -422,15 +426,16 @@ export function buildConversationA(deps: {
       error: String(failure.error),
     }),
   );
-  const queue = new SessionQueueService({
-    store: new NotifyingSessionQueueStore(queueStore, {
-      publish: async (id, _type, data) => {
-        await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
-      },
-    }),
-    clock,
-    serial: queueSerial,
-  });
+  /** The queue as this half reads it: the Mailbox owns it (its one writer), so every read and change goes through its port. */
+  const queued = (outcome: Result<QueuedMessage, MailboxRefusal>): QueuedMessage => {
+    if (outcome.ok) return outcome.value;
+    throw new QueueRefused(outcome.error.code as QueueRefusal, outcome.error.message);
+  };
+  const queue: Pick<SessionQueue, 'list' | 'edit' | 'cancel'> = {
+    list: async id => (await mailbox.queue(id)).messages,
+    edit: async (id, messageId, text) => queued(await mailbox.editQueued(id, messageId, { text })),
+    cancel: async (id, messageId) => queued(await mailbox.cancelQueued(id, messageId)),
+  };
   const ledger = new StateSendLedger(kernel.state, clock);
   const channel = new StateSendChannel(kernel.state);
 

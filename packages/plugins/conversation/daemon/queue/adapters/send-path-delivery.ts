@@ -1,5 +1,5 @@
 import type { SendDisposition } from '@ferretry/core-mailbox/contract';
-import type { QueueDelivery, QueueTransport } from '../lib/deliverer.ts';
+import type { QueueDelivery, QueueTransport } from '../lib/index.ts';
 import type { DeliveryView, HandOver, OwnDraft } from '@ferretry/core-mailbox/contract';
 import type { SendMessageRequest, SessionSendService } from '../../delivery/lib/service.ts';
 import type { SendTracker } from '../../delivery/lib/tracker.ts';

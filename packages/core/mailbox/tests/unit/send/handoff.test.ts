@@ -52,6 +52,17 @@ describe('reading what an agent was sent', () => {
     ]);
   });
 
+  it('should join with one slash whatever slashes the folder ends in, and leave a path otherwise as it was given', () => {
+    should(handoffFolders('/fy/state/sessions/s1//', '/fy/state/attachments/d/s1/')).deepEqual([
+      '/fy/state/sessions/s1/turns',
+      '/fy/state/sessions/s1/channel',
+      '/fy/state/sessions/s1/attachments',
+      '/fy/state/attachments/d/s1/',
+    ]);
+    // Not node:path: a `..` is not resolved. Callers pass clean paths, so this is pinned, not relied on.
+    should(handoffFolders('/fy/state/sessions/../s1', '/x')[0]).equal('/fy/state/sessions/../s1/turns');
+  });
+
   it('should let Claude read them without asking, and grant no folder or write beyond them', () => {
     should(handoffReadArguments('claude-code', folders)).deepEqual([
       '--allowedTools=Read(//fy/state/sessions/s1/turns/**)',

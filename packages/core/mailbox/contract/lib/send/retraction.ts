@@ -1,5 +1,5 @@
-import type { SessionId } from '../session-id.ts';
-import type { SendRecord } from '../stores.ts';
+import type { SessionId } from '../../session-id.ts';
+import type { SendRecord } from '../../stores.ts';
 
 /**
  * &B153 — PROVING A HARNESS TOOK A DELIVERED POINTER BACK, rather than a person recalling it.
