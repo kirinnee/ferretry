@@ -210,6 +210,13 @@ describe('MCP sign-in discovery', () => {
       });
       should(
         authorizationServerFrom(
+          metadata({ token_endpoint_auth_methods_supported: ['none'] }),
+          'https://auth.example.com/tenant',
+          SERVER,
+        ),
+      ).containEql({ tokenAuthMethods: ['none'] });
+      should(
+        authorizationServerFrom(
           metadata({ registration_endpoint: undefined, revocation_endpoint: undefined, scopes_supported: undefined }),
           'https://auth.example.com/tenant',
           SERVER,
@@ -279,6 +286,45 @@ describe('MCP sign-in discovery — review hardening', () => {
     // The URL parser normalises `[::ffff:127.0.0.1]` to `[::ffff:7f00:1]` before the check sees it.
     for (const endpoint of ['https://[::ffff:127.0.0.1]/t', 'https://[::]/t', 'https://100.100.100.100/t'])
       should(endpointAllowed(endpoint, SERVER)).be.false();
+  });
+
+  it('L1: reads the IPv4 inside an IPv4-translated or NAT64 literal, whatever the spelling', () => {
+    for (const host of [
+      '[::ffff:0:7f00:1]', // ::ffff:0:0/96 → 127.0.0.1
+      '[::ffff:0:a9fe:a9fe]', // → 169.254.169.254
+      '[::ffff:0:a00:1]', // → 10.0.0.1
+      '[64:ff9b::7f00:1]', // 64:ff9b::/96 → 127.0.0.1
+      '[64:ff9b::a9fe:a9fe]', // → 169.254.169.254
+      '[64:ff9b::c0a8:101]', // → 192.168.1.1
+    ])
+      should(isPrivateLiteral(host)).be.true();
+    // The dotted spellings reach the same hosts: the URL parser rewrites them into the groups above.
+    for (const endpoint of ['https://[::ffff:0:127.0.0.1]/t', 'https://[64:ff9b::127.0.0.1]/t'])
+      should(isPrivateLiteral(new URL(endpoint).hostname)).be.true();
+    // A public IPv4 inside the same prefixes stays public, and other prefixes are not decoded.
+    for (const host of ['[::ffff:0:808:808]', '[64:ff9b::808:808]', '[64:ff9b:1::7f00:1]', '[::ffff:1:7f00:1]'])
+      should(isPrivateLiteral(host)).be.false();
+  });
+
+  it('L1: does not let a public server aim the daemon at a translated or NAT64 loopback literal', () => {
+    for (const endpoint of [
+      'https://[::ffff:0:7f00:1]/t',
+      'https://[64:ff9b::7f00:1]/t',
+      'https://[64:ff9b::a9fe:a9fe]/t',
+    ])
+      should(endpointAllowed(endpoint, SERVER)).be.false();
+    should(endpointAllowed('https://[64:ff9b::808:808]/t', SERVER)).be.true();
+    // A server that is itself private may name them.
+    should(endpointAllowed('https://[64:ff9b::7f00:1]/t', 'https://10.0.0.5/mcp')).be.true();
+  });
+
+  it('L1: judges a host with several trailing dots as the host without them', () => {
+    for (const host of ['localhost..', 'localhost...', 'LOCALHOST..', 'app.localhost..'])
+      should(endpointAllowed(`https://${host}/token`, SERVER)).be.false();
+    should(endpointAllowed('https://localhost../token', 'https://localhost../mcp')).be.true();
+    should(endpointAllowed('http://localhost../token', 'http://localhost../mcp')).be.true();
+    should(endpointAllowed('https://10.0.0.1../token', SERVER)).be.false();
+    should(endpointAllowed('https://auth.example.com../token', SERVER)).be.true();
   });
 
   it('L2: matches a resource path by whole segments', () => {
