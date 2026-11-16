@@ -112,3 +112,16 @@ describe('narrowing', () => {
     expect(outcome).toBe('403 grant_not_granted');
   });
 });
+
+describe('the --open redirect page', () => {
+  test('G26 POST /v1/pair/redirect is pinned to the host: the admin bearer on a carried arrival is refused', async () => {
+    const redirect = await declaredRoute('POST /v1/pair/redirect');
+    expect(redirect.privilegedOnly).toBe(true);
+    const w = world();
+    for (const carrier of ['relay', 'tunnel', 'webrtc', 'direct'])
+      expect(admit(w, redirect, { bearer: ADMIN, arrival: carried(carrier), method: 'POST' }).outcome).toBe(
+        '403 forbidden',
+      );
+    expect(admit(w, redirect, { bearer: ADMIN, arrival: local(), method: 'POST' }).outcome).toBe('admitted');
+  });
+});

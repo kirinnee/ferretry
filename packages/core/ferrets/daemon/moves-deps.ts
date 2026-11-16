@@ -29,11 +29,10 @@ import type { SessionId } from './lib/session-id.ts';
  *             harness — Conversation / the harness plugins; gateway — the managed worktree host (unbound in `index.ts`);
  *             accounts, planner, runtime, view, readableHandoffs — Ferrets' session services (`environment` and `createLifecycle` are bound by `index.ts` on the `sessions` root; the lifecycle's pane launcher is an adapter over Ferrets' own launch and stop, bound there).
  *   handover: sessions, startAccount, planner — Ferrets' session services / Runtimes.
- *   move:     preflight, askAgent, sessions, planner (resume and launch are bound by `index.ts`) — Ferrets' session services; accounts,
- *             accountResolver, transcripts, transcriptProvenance, codexRollouts, toolkit, conversionCheck,
- *             harnessVersion, rolloutFormat, locateHarness, persistedReasoningEffort,
- *             contextWindowForSession — Runtimes / Conversation / the harness plugins; paneIdentity — Terminals;
- *             signals — the kernel has no signal capability for a pid; host.procWorkingDirectory — no cwd read.
+ *   move:     askAgent — Ferrets' queue; transcripts — Conversation; signals — the kernel has no signal capability for a pid
+ *             (the Terminals runner's `signalDescendant`); host.procWorkingDirectory — no cwd read.
+ *             A Restart and a move onto another login are bound (`restart`, `login`, `pane`, `paneIdentity`, `sessions`).
+ *             Converting onto another harness is not built: it waits for the harnesses' `exportConversation`/`adoptConversation`.
  */
 
 const unavailable = (what: string): ApiError =>
@@ -61,25 +60,20 @@ function unboundFn<T extends (...args: never[]) => unknown>(what: string): T {
 /** What `index.ts` hands over: the one storage the moves share, opened over the kernel's state port. */
 /** What Ferrets binds of the MOVE's own needs (the rest stay fail-closed skeletons; see the GAP list above). */
 type MoveOwn = Partial<
-  Pick<
-    SessionMoveNeeds,
-    'sessions' | 'preflight' | 'pane' | 'restart' | 'paneIdentity' | 'transcripts' | 'accountResolver'
-  >
+  Pick<SessionMoveNeeds, 'sessions' | 'preflight' | 'pane' | 'restart' | 'login' | 'paneIdentity' | 'transcripts'>
 >;
 
 export interface MovesOwn {
   readonly storage: DaemonStorage;
-  /** The binary name a person drives, which an account resolution is typed with. */
+  /** The binary name a person drives, which the gate recognises a ferret's own `fy` calls by. */
   readonly clientName: string;
-  /** The move's relaunch, bound by Ferrets to its own resume; unbound, a move refuses before it writes anything. */
-  readonly resume?: SessionMoveNeeds['resume'];
   /** The relaunch-settings read, over the ferret's own harness (W2-c); unbound, the read answers 503. */
   readonly launch?: SessionMoveNeeds['launch'];
   /** The session environment on each ferret's own folder of the `sessions` root; unbound, a fork refuses before it writes. */
   readonly environment?: SessionForkNeeds['environment'];
   /** One lifecycle for one session on its own folder; unbound, a fork refuses before it writes. */
   readonly createLifecycle?: SessionForkNeeds['createLifecycle'];
-  /** What a Restart (a move onto the runtime the ferret is already on) is built from; unbound, it answers 503 before it writes. */
+  /** What a Restart and a move onto another login are built from; unbound, they answer 503 before they write. */
   readonly move?: MoveOwn;
 }
 
@@ -147,14 +141,12 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
     },
     move: {
       state: kernel.state,
-      roots: kernel.roots,
       spawn: kernel.spawn,
       host,
       clock: kernel.clock,
       log: kernel.log.child('ferrets'),
       storage,
       sessions: unbound('The session directory'),
-      resume: own.resume ?? unbound('Resuming a ferret'),
       launch: own.launch ?? unbound('Launching a ferret'),
       // The gate: the pane's process tree below the root its runner names, over the kernel's own host facts. The project's
       // configured servers are not read (no cwd read yet), so a server it cannot explain stays unclassified, never assumed.
@@ -167,27 +159,12 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
         }),
       ),
       askAgent: unboundFn('Queueing a message'),
-      planner: unbound('The session planner'),
-      sessionDirectory,
-      conversationId: () => randomUUID(),
-      accounts: unbound('The account inventory'),
-      accountResolver: unbound('The account resolution'),
       transcripts: unbound('The transcript reader'),
-      transcriptProvenance: unbound('The transcript evidence'),
-      codexRollouts: unbound('The Codex rollout index'),
-      toolkit: unbound('The transcript converter'),
-      conversionCheck: unbound('The conversion check'),
-      harnessVersion: unbound('The harness version probe'),
-      rolloutFormat: unbound('The rollout format probe'),
-      locateHarness: unboundFn('Locating the harness'),
-      readableHandoffs: unboundFn('The readable hand-off folders'),
       paneIdentity: unboundFn('The pane identity'),
-      persistedReasoningEffort: unboundFn('The persisted reasoning effort'),
-      contextWindowForSession: unboundFn('The context window'),
       signals: unbound('Signalling a process'),
       pane: unboundFn('The ferret pane'),
       restart: unbound('Restarting a ferret'),
-      clientName: own.clientName,
+      login: unbound('Moving a ferret onto another login'),
       // Last, so what Ferrets binds replaces the fail-closed skeleton above it.
       ...own.move,
     },

@@ -72,7 +72,13 @@ async function disk() {
 }
 
 /** The CLI's view: it removes through the state, and the DAEMON's writer (over the same disk here) makes the page. */
-const cliOf = (port: StatePort) => ({ state: port, make: (page: string) => stateRedirectWriter(port).write(page) });
+const cliOf = (port: StatePort) => ({
+  state: port,
+  make: (page: string) => stateRedirectWriter(port, daemonClock).write(page),
+});
+
+/** The daemon's clock, which never fires here: the sweeps these cases prove are run by hand. */
+const daemonClock = { nowMs: () => Date.now(), after: () => undefined };
 
 const OLD = PAIRING_REDIRECT_STALE_AFTER_MS + 60_000;
 
@@ -89,8 +95,8 @@ describe('the shipped opener, with a stand-in launcher on a private PATH', () =>
     process.env.PATH = `${bin}:${originalPath ?? ''}`;
     const link = 'https://ferretry.example.invalid/pair#v1;u;f;code=7F3K-Q2ND';
 
-    const opened = await desktopBrowserOpener(await temp('fy-access-statehome-'), cliOf(port)).open(link);
-    const refused = await desktopBrowserOpener(await temp('fy-access-statehome-'), undefined).open(link);
+    const opened = await desktopBrowserOpener(cliOf(port)).open(link);
+    const refused = await desktopBrowserOpener(undefined).open(link);
     // The launcher is a detached child: wait for what it HAS DONE (written its argument), never for a time.
     while (!(await Bun.file(asked).exists())) await Bun.sleep(10);
     const given = await readFile(asked, 'utf8');
@@ -130,9 +136,11 @@ describe('the redirect page the CLI writes into the state tree', () => {
       remove: (file, name) => port.remove(file, name),
       removeEmptyDirectory: (file, name) => port.removeEmptyDirectory(file, name),
       createPrivateDirectory: (file, name) => port.createPrivateDirectory(file, name),
+      list: file => port.list(file),
+      stat: (file, name) => port.stat(file, name),
     };
 
-    await stateRedirectWriter(failing)
+    await stateRedirectWriter(failing, daemonClock)
       .write('<p>x</p>')
       .then(
         () => should.fail(undefined, undefined, 'the write should have failed'),
@@ -155,9 +163,11 @@ describe('the redirect page the CLI writes into the state tree', () => {
         throw new Error('busy');
       },
       createPrivateDirectory: (file, name) => port.createPrivateDirectory(file, name),
+      list: file => port.list(file),
+      stat: (file, name) => port.stat(file, name),
     };
 
-    await stateRedirectWriter(stuck)
+    await stateRedirectWriter(stuck, daemonClock)
       .write('<p>x</p>')
       .then(
         () => should.fail(undefined, undefined, 'the write should have failed'),
@@ -176,7 +186,7 @@ describe('the redirect page the CLI writes into the state tree', () => {
         removeEmptyDirectory: (file: Parameters<typeof port.removeEmptyDirectory>[0], name: string) =>
           port.removeEmptyDirectory(file, name),
       },
-      make: (page: string) => stateRedirectWriter(port).write(page),
+      make: (page: string) => stateRedirectWriter(port, daemonClock).write(page),
     };
 
     await createPairingRedirectPage(cli, '<p>x</p>').then(

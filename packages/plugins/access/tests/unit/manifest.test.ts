@@ -27,6 +27,8 @@ describe('access manifest', () => {
     expect(redirect?.minimum).toBe('admin-token');
     expect(redirect?.noStore).toBe(true);
     expect(redirect?.capability).toBeUndefined();
+    // Pinned to the host: a relayed arrival carrying the admin bearer is refused by the gate (R262).
+    expect(redirect?.privilegedOnly).toBe(true);
   });
   test('revoking a device only narrows, so it is never harder than granting', () => {
     expect(byKey.get('DELETE /v1/pair/devices/:deviceId')?.capability?.narrowing).toBe(true);

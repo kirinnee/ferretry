@@ -9,7 +9,8 @@ import {
   PERSON_ORIGIN,
 } from '../../../../contract/index.ts';
 import { ferretId } from '../../../../contract/testing/index.ts';
-import { ferretsMoveResume } from '../../../../daemon/lib/ferrets/move-resume.ts';
+import { ferretsRestartResume } from '../../../../daemon/lib/ferrets/move-resume.ts';
+import { serviceMove } from './service-move.ts';
 import type { BoundLaunchFolder } from '../../../../daemon/lib/ferrets/service.ts';
 import { additivesFixture } from './additives-fixture.ts';
 
@@ -115,7 +116,7 @@ describe('a move’s relaunch', () => {
       await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
       insideStateHome(f);
       const before = f.runner.starts;
-      const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+      const resume = serviceMove(f.service, ferret => f.registry.get(ferret), target);
       await expect(resume.resume({ origin, id: f.id as never, policy })).rejects.toThrow(REFUSED);
       expect(f.runner.starts).toBe(before);
     });
@@ -124,7 +125,7 @@ describe('a move’s relaunch', () => {
     const f = additivesFixture();
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
     insideStateHome(f);
-    const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+    const resume = serviceMove(f.service, ferret => f.registry.get(ferret), target);
     expect((await resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).disposition).toBe('revived');
     expect(f.runner.starts).toBe(2);
   });
@@ -133,10 +134,17 @@ describe('a move’s relaunch', () => {
     const f = additivesFixture();
     await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
     const before = f.runner.starts;
-    const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+    const relaunch = ferretsRestartResume(f.service, ferret => f.registry.get(ferret));
     for (const origin of [undefined, null, 'owner', {}, { kind: 'owner' }])
       await expect(
-        resume.resume({ origin, id: f.id as never, policy } as unknown as Parameters<typeof resume.resume>[0]),
+        relaunch({
+          origin,
+          id: f.id as never,
+          message: undefined,
+          expectHandle: f.registry.get(f.id)?.handle,
+          conversation: { kind: 'resume' },
+          onto: { runtime: 'claude-two', conversation: 'conv-fern' },
+        } as unknown as Parameters<typeof relaunch>[0]),
       ).rejects.toThrow(/did not say who it is relaunching for/u);
     expect(f.runner.starts).toBe(before);
   });
@@ -194,7 +202,7 @@ describe('a ferret first started by an agent', () => {
     const before = f.runner.starts;
     const policy = { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true } as const;
     const target = async () => ({ runtime: 'claude-two', harness: 'claude-code' as const, conversation: 'conv-fern' });
-    const resume = ferretsMoveResume(f.service, ferret => f.registry.get(ferret), target);
+    const resume = serviceMove(f.service, ferret => f.registry.get(ferret), target);
     await expect(resume.resume({ origin: PERSON_ORIGIN, id: f.id as never, policy })).rejects.toThrow(
       REFUSED_AGENT_BORN,
     );

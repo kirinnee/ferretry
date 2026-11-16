@@ -105,6 +105,8 @@ export default definePlugin({
       // The daemon makes `fy pair --open`'s redirect page, so it is pinned before the write returns (docs/pairing.md).
       route('POST /v1/pair/redirect', {
         minimum: 'admin-token',
+        // Pinned to the host by the carrier it arrived on: the admin bearer over a relay, a tunnel or WebRTC is refused.
+        privilegedOnly: true,
         caller: 'person',
         noStore: true,
         audit: SKIP_UNRECORDED,

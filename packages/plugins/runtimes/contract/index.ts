@@ -20,6 +20,7 @@ import {
 import { RUNTIME_HOME_READ_MODELS, type RuntimeHomesApi } from './homes.ts';
 import { RUNTIME_LAYER_READ_MODELS, type RuntimeLayersApi } from './layers.ts';
 import type { MachineTool, RuntimeView } from './wire/index.ts';
+import type { BrowserFirewallFailureSchema, BrowserPortsSettingSchema } from './wire/shared.ts';
 
 export * from './codex-launch.ts';
 export * from './component-source.ts';
@@ -99,9 +100,23 @@ export interface RuntimesApi extends RuntimeHomesApi, RuntimeLayersApi {
   catalog(): Promise<readonly RuntimeView[]>;
   /** The harness CLIs on this machine and whether each is installed, as `GET /v1/runtimes/machine` answers. */
   tools(): Promise<readonly MachineTool[]>;
+  /**
+   * The machine's loopback-port settings, read-only: the `browserPorts` setting and what Browsers does when its own
+   * account's firewall check failed (`browserFirewallFailure`). Browsers reads them for the loopback firewall doctor and
+   * Logins reads `shared` from them. Only these two settings, never the rest of the machine view.
+   *
+   * REJECTS while no file of Runtimes holds `browserPorts` (the value is only the schema default `random`; the setting is
+   * not carried yet): Runtimes cannot say, and a reader must treat that as unknown and fail closed, never as `random`.
+   */
+  machineBrowserPorts(): Promise<MachineBrowserPorts>;
 }
-/** The two members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
-export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools'>;
+/** What {@link RuntimesApi.machineBrowserPorts} answers (Runtimes' own copy of the two schemas, `wire/shared.ts`). */
+export interface MachineBrowserPorts {
+  readonly browserPorts: z.infer<typeof BrowserPortsSettingSchema>;
+  readonly browserFirewallFailure: z.infer<typeof BrowserFirewallFailureSchema>;
+}
+/** The members of {@link RuntimesApi} that read the published catalogue rather than the configuration files. */
+export type RuntimeFactsApi = Pick<RuntimesApi, 'catalog' | 'tools' | 'machineBrowserPorts'>;
 export const RuntimesPort = definePort<RuntimesApi>('runtimes');
 export { FerretsPort };
 
@@ -113,6 +128,7 @@ export const RUNTIMES_READ_MODELS = [
   'resolve',
   'catalog',
   'tools',
+  'machineBrowserPorts',
   ...RUNTIME_HOME_READ_MODELS,
   ...RUNTIME_LAYER_READ_MODELS,
 ] as const;
