@@ -540,10 +540,11 @@ export default implementCli(manifest, {
     const move = verb(async (invocation, presenter, io) => {
       const id = first(invocation, 'ferret id or callsign');
       const progress = on(invocation, 'json') ? NO_PROGRESS : new PlainProgress(line => io.diagnostic(line));
-      await new MoveController(new ClientMoveGateway(client, () => randomUUID()), presenter, progress).execute(
-        id,
-        moveOptions(invocation),
-      );
+      await new MoveController(
+        new ClientMoveGateway(client, () => randomUUID(), process.pid),
+        presenter,
+        progress,
+      ).execute(id, moveOptions(invocation));
     });
 
     return {

@@ -62,3 +62,10 @@ describe('codexIndexNames', () => {
     ]);
   });
 });
+
+describe('the cheap scan for name records', () => {
+  test('a line that mentions a title but is not a record is skipped, and the records around it still count', () => {
+    const text = `${lines({ type: 'custom-title', customTitle: 'Mine' })}\nthis line says custom-title but is not JSON\n${lines({ type: 'ai-title', aiTitle: 'Theirs' })}`;
+    expect(transcriptNames('claude', text)).toEqual({ chosen: 'Mine', generated: 'Theirs' });
+  });
+});

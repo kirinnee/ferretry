@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -13,18 +13,50 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-const repo = (files: Record<string, string>): string => {
+/** `base`: the pending list at the base commit; null = the base holds no list (the bootstrap). */
+const repo = (files: Record<string, string>, base: string | null = null): string => {
   const root = mkdtempSync(join(tmpdir(), 'fy-unit-budgets-'));
   roots.push(root);
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
   }
-  spawnSync('git', ['init', '--quiet'], { cwd: root });
+  const git = (...args: string[]) =>
+    spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], {
+      cwd: root,
+    });
+  git('init', '--quiet');
+  // The BASE commit holds only the base's pending list (or nothing); the files above are the working tree on top of it.
+  const pending = join(root, 'config/perf-pending.txt');
+  const working = base === null ? undefined : base;
+  const keep = join(root, '.base-keep');
+  writeFileSync(keep, '');
+  if (working !== undefined) {
+    const current = (() => {
+      try {
+        return readFileSync(pending, 'utf8');
+      } catch {
+        return undefined;
+      }
+    })();
+    mkdirSync(dirname(pending), { recursive: true });
+    writeFileSync(pending, working);
+    git('add', '.base-keep', 'config/perf-pending.txt');
+    git('commit', '--quiet', '-m', 'base');
+    if (current === undefined) rmSync(pending);
+    else writeFileSync(pending, current);
+  } else {
+    git('add', '.base-keep');
+    git('commit', '--quiet', '-m', 'base');
+  }
   return root;
 };
-const run = (root: string) => {
-  const result = spawnSync('bash', [SCRIPT], { cwd: root, encoding: 'utf8' });
+const run = (root: string, base?: string) => {
+  const result = spawnSync('bash', [SCRIPT], {
+    cwd: root,
+    encoding: 'utf8',
+    env: { ...process.env, FY_CHECK_BASE: base ?? 'HEAD' },
+  });
   return { status: result.status, out: `${result.stdout}${result.stderr}` };
 };
 const UNIT = 'packages/plugins/x/tests/unit/x.test.ts';
@@ -82,4 +114,41 @@ test('a fake clock may read a clock with a reasoned marker, and one without a re
 test('the perf tier may hold any budget', () => {
   const result = run(repo({ [PERF]: 'expect(performance.now() - start).toBeLessThan(100);\n' }));
   expect(result.status).toBe(0);
+});
+
+// THE RATCHET: the pending list may only shrink against the base's list.
+const BUDGET = 'const t = performance.now();\n';
+const OTHER = 'packages/plugins/y/tests/unit/y.test.ts';
+
+test('a new pending entry absent from the base list is refused', () => {
+  const result = run(repo({ [UNIT]: BUDGET, 'config/perf-pending.txt': `${UNIT}\n` }, '# none\n'));
+  expect(result.status).toBe(1);
+  expect(result.out).toContain(`${UNIT} is not on the list at`);
+});
+
+test('re-adding an entry the base list had removed is refused', () => {
+  const result = run(
+    repo({ [UNIT]: BUDGET, [OTHER]: BUDGET, 'config/perf-pending.txt': `${UNIT}\n${OTHER}\n` }, `${OTHER}\n`),
+  );
+  expect(result.status).toBe(1);
+  expect(result.out).toContain(`${UNIT} is not on the list at`);
+  expect(result.out).not.toContain(`${OTHER} is not on the list`);
+});
+
+test('shrinking the list passes', () => {
+  const result = run(repo({ [UNIT]: BUDGET, 'config/perf-pending.txt': `${UNIT}\n` }, `# kept\n${UNIT}\n${OTHER}\n`));
+  expect(result.status).toBe(0);
+  expect(result.out).toContain('(config/perf-pending.txt): 1');
+});
+
+test('a base with no list is the bootstrap: the current list is accepted', () => {
+  const result = run(repo({ [UNIT]: BUDGET, 'config/perf-pending.txt': `${UNIT}\n` }));
+  expect(result.status).toBe(0);
+});
+
+test('a base that cannot be read fails instead of skipping the ratchet', () => {
+  const root = repo({ [UNIT]: BUDGET, 'config/perf-pending.txt': `${UNIT}\n` });
+  const result = run(root, 'refs/does-not-exist');
+  expect(result.status).toBe(1);
+  expect(result.out).toContain('cannot read the base refs/does-not-exist');
 });

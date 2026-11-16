@@ -14,6 +14,14 @@ export interface HostFileInfo {
   readonly regularFile: boolean;
   readonly directory: boolean;
   readonly symlink?: boolean;
+  /** The device the file lives on. Absent where the host has no such thing (the in-memory host). */
+  readonly device?: bigint;
+  /**
+   * The status-change time to the nanosecond. Every write, rename and truncate moves it and no caller can set it back
+   * (`utimes` sets the modification time, never this), so unlike {@link modifiedAtMs} it cannot be forged. Absent
+   * where the host has no such clock.
+   */
+  readonly changedAtNs?: bigint;
 }
 
 export interface HostDirEntry {
@@ -122,14 +130,16 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
     },
     async info(path) {
       try {
-        const stats = await lstat(path);
+        const stats = await lstat(path, { bigint: true });
         return {
-          size: stats.size,
-          modifiedAtMs: stats.mtimeMs,
-          inode: stats.ino,
+          size: Number(stats.size),
+          modifiedAtMs: Number(stats.mtimeNs) / 1_000_000,
+          inode: Number(stats.ino),
           regularFile: stats.isFile(),
           directory: stats.isDirectory(),
           symlink: stats.isSymbolicLink(),
+          device: stats.dev,
+          changedAtNs: stats.ctimeNs,
         };
       } catch (error) {
         if (isMissing(error)) return undefined;
