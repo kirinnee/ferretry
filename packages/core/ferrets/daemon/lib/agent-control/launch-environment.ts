@@ -1,5 +1,5 @@
 import type { FerretDetails, FerretId, FerretRecord } from '../../../contract/index.ts';
-import { LAUNCH_SWITCH_VARIABLES } from '../../../contract/index.ts';
+import { LAUNCH_SWITCH_VARIABLES, SUB_FERRET_ENV } from '../../../contract/index.ts';
 import { effectiveMode } from '../registry/registry.ts';
 import { HYPERMEDIA_ENV } from '../session/peers/fleet.ts';
 
@@ -68,6 +68,17 @@ export function sessionModeSwitch(mode: FerretRecord['mode']): Readonly<Record<s
  */
 export function modeSwitchDefaults(mode: FerretRecord['mode']): Readonly<Record<string, string>> {
   return { [HYPERMEDIA_ENV]: mode === 'interactive' ? '1' : '0' };
+}
+
+/**
+ * Whether the pane is a sub-ferret (`FY_SUB_FERRET`), from the record's `role`: a helper is one, a lead is not. The
+ * wrapper reads it to swap the lead's Notify and Board rules for the Sub-ferret section and to leave the Agenda section
+ * out. The ONE spelling, put in the environment AFTER the parts, so no part or login file can move it: it is the
+ * record's own fact. It follows `role` (not `parent`) so a helper started with no parent (a Pack's clean-up builder) is
+ * limited the same way, and `role` defaults to `helper` whenever a start names a parent.
+ */
+export function subFerretSwitch(role: FerretRecord['role']): Readonly<Record<string, string>> {
+  return { [SUB_FERRET_ENV]: role === 'helper' ? '1' : '0' };
 }
 
 /** The launch variables a launch records: the section switches and the mode, as the launch put them in its environment. */

@@ -186,7 +186,7 @@ describe('the chat search bar', () => {
     Object.defineProperty(globalThis, 'requestAnimationFrame', {
       configurable: true,
       writable: true,
-      value: (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 16),
+      value: (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 16), // not-a-budget: a stub of requestAnimationFrame handing the callback a timestamp
     });
     try {
       await mounted.render(<Scene search={port(() => found([40]))} />);

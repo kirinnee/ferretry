@@ -125,6 +125,7 @@ export function mcpFileOnly(handle: RootHandle): RootHandle {
     copyShared: refuse('copy'),
     linkCredential: refuse('link a credential'),
     linkHistory: refuse('link a history entry'),
+    moveToHistoryPool: refuse('link a history entry'),
     ensurePrivateDirectory: refuse('make a folder'),
     makeDirectory: refuse('make a folder'),
     pin: refuse('hold a folder open'),

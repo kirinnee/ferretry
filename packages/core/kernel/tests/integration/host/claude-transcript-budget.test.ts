@@ -14,7 +14,7 @@ import { testHost } from '../../../testing/index.ts';
 
 /**
  * M4 / audit A fix 1, the plan's turn-budget case: the REAL Ferrets, the REAL Claude Code harness and the REAL Usage halves,
- * as the generated registry builds them, over a fixture Claude transcript in the ferret's own home. The transcript's
+ * as the generated registry builds them, over a fixture Claude transcript in the shared history pool (Claude writes through the home's projects link). The transcript's
  * `usage` record (1200 input, 300 output tokens on a priced model) is read back by the harness, handed to Usage through
  * Ferrets' `turnUsage`, priced from the owner's catalog, and a daily budget below that figure TRIPS: the login is paused
  * and a new start on it is refused. Before the transcript exists the same budget is not reached, so the pause is the
@@ -148,7 +148,7 @@ test('M4 a Claude transcript with spend trips the daily budget; the same ferret 
     expect(before.budgets).toHaveLength(1);
     expect(before.budgets[0]?.pause).toBeUndefined();
 
-    // Claude writes its usage into the transcript; the same tick now measures it.
+    // Claude writes through its projects link into the pool; fixture injection must name that real destination.
     const at = host.clock.now();
     const record = (inputTokens: number, outputTokens: number) =>
       JSON.stringify({
@@ -161,11 +161,12 @@ test('M4 a Claude transcript with spend trips the daily budget; the same ferret 
           usage: { input_tokens: inputTokens, output_tokens: outputTokens },
         },
       });
-    host.putRoot(
-      'agent-homes',
-      `${id}/projects/-work-project/${binding.id}.jsonl`,
-      `${record(1200, 100)}\n${record(0, 300)}\n`,
-    );
+    host
+      .state('claude-code')
+      .files.set(
+        `history-pool/projects/-work-project/${binding.id}.jsonl`,
+        `${record(1200, 100)}\n${record(0, 300)}\n`,
+      );
     await host.runJob('usage-budget');
 
     const after = (await host.request('GET', '/v1/usage/budgets')).json<{

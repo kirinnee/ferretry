@@ -11,7 +11,7 @@ import { interact, mount, must } from '@ferretry/app/testing';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { createElement, type FunctionComponent, Suspense } from 'react';
 import { renderToString } from 'react-dom/server';
-import { WARDEN_AUTO_MOVE_TRIGGERS, WARDEN_CONFIG } from '../../../contract/index.ts';
+import { WARDEN_AUTO_MOVE_TRIGGERS, WARDEN_CONFIG, WARDEN_DIALOG_RULES } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import app from '../../../app/index.ts';
 import { WardenCombinedTotals } from '../../../app/features/warden/warden-combined-totals.tsx';
@@ -279,7 +279,7 @@ describe('app half: the screen and the Settings tab', () => {
   });
 
   test('S-0577 S-0579 the clone-settings file list and the settings-search catalog are shell catalogs; the plugin declares the warden config document and tab they read', () => {
-    expect(manifest.data.config).toEqual([WARDEN_CONFIG]);
+    expect(manifest.data.config).toEqual([WARDEN_CONFIG, WARDEN_DIALOG_RULES]);
     expect(tabDecl).toMatchObject({ id: 'warden', order: 60 });
   });
 });

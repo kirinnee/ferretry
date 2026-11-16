@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { ferretsStep } from '../../src/steps/ferrets.ts';
-import { agentHomesRoot } from '../../src/v5/harness-paths.ts';
+import { historyPoolRoot } from '../../src/v5/harness-paths.ts';
 import { AT, FAKE_HASH, fixture, RUNTIME } from './ferret-fixture.ts';
 
 type Json = Record<string, unknown>;
@@ -236,7 +236,7 @@ test('config, state, pins, details and pinned ferrets are written and v5 reads e
   expect(config.transcript).toEqual(ferret.transcript);
   expect(JSON.stringify(config)).not.toContain(f.from);
   expect((config.conversion as Json).fromFile).toBe(
-    join(f.to, agentHomesRoot('codex'), '_shared', 'sessions/2026/11/01/rollout-fake.jsonl'),
+    join(f.to, historyPoolRoot('codex'), 'sessions/2026/11/01/rollout-fake.jsonl'),
   );
 
   // state.json keeps the v4 status ferret.json's state was decided from; a key v5 does not list (queue) is dropped.

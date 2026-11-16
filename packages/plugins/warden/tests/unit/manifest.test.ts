@@ -2,11 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import manifest from '../../manifest.ts';
 
 describe('warden manifest', () => {
-  test('declares the ten warden routes; a warden may read but never run, configure, name the Jev key or leave', () => {
+  test('declares the twelve warden routes; a warden may read but never run, configure, name the Jev key, leave or teach a screen', () => {
     const routes = manifest.actions.routes;
-    expect(routes).toHaveLength(10);
+    expect(routes).toHaveLength(12);
     for (const route of routes) {
-      const reads = route.method === 'GET' && route.path !== '/v1/warden/config';
+      // The owner's two dialog routes read screen titles and rows, so even the read is the owner's (operator, person).
+      const reads =
+        route.method === 'GET' && route.path !== '/v1/warden/config' && !route.path.startsWith('/v1/warden/dialog/');
       expect(route.minimum).toBe(reads ? 'authenticated' : 'operator');
     }
   });
@@ -14,6 +16,8 @@ describe('warden manifest', () => {
     const person = manifest.actions.routes.filter(route => route.caller === 'person').map(route => route.path);
     expect(person.sort()).toEqual([
       '/v1/warden/config',
+      '/v1/warden/dialog/learn',
+      '/v1/warden/dialog/rules',
       '/v1/warden/investigate',
       '/v1/warden/jev-key',
       '/v1/warden/leave',
@@ -23,6 +27,7 @@ describe('warden manifest', () => {
     const guarded = manifest.actions.routes.filter(route => route.guard === 'secrets').map(route => route.path);
     expect(guarded.sort()).toEqual([
       '/v1/warden/agenda',
+      '/v1/warden/dialog/learn',
       '/v1/warden/report',
       '/v1/warden/run',
       '/v1/warden/status',

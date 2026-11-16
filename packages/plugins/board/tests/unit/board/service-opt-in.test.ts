@@ -102,7 +102,7 @@ describe('the board is opt-in', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).startWith('The ferretry board is off, so this work needs no card');
-    should(error.message).containEql('fy ask -k yesno "Track this on the board?"');
+    should(error.message).containEql('fy agenda add -k yesno "Track this on the board?"');
     should(ports.store.cards.size).equal(0);
   });
 

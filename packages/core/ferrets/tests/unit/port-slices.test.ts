@@ -9,7 +9,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import type { Instant, Result } from '@ferretry/std';
 import type { HarnessHistorySource } from '../../contract/history.ts';
 import type { FerretState, FerretSummary, HarnessKey, PackId } from '../../contract/ids.ts';
-import type { RunnerHandle, TurnUsage } from '../../contract/kinds.ts';
+import type { ConversationImport, RunnerHandle, TurnUsage } from '../../contract/kinds.ts';
 import type { LaunchOrigin } from '../../contract/launch-origin.ts';
 import type {
   AutoResumeReport,
@@ -46,6 +46,10 @@ interface FerretsApiAtBase {
   mayTouch(caller: FerretId, target: FerretId): boolean;
   children(ferret: FerretId): readonly FerretId[];
   harnesses(): readonly HarnessKey[];
+  importConversation?(
+    harness: HarnessKey,
+    input: ConversationImport,
+  ): Promise<Result<void, { readonly reason: string }>>;
   historySources?(): Promise<
     readonly { readonly harness: HarnessKey; readonly sources: readonly HarnessHistorySource[] }[]
   >;

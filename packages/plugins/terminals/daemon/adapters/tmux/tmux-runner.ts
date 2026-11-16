@@ -36,6 +36,7 @@ import {
 import { targetRef } from '@ferretry/core-vault/contract';
 import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { sessionTarget } from '../../lib/tmux/address.ts';
+import { tmuxStartDirectory } from '../../lib/tmux/format-escape.ts';
 import { maskedScreen } from '../../lib/tmux/screen-mask.ts';
 import { killSessionArguments, paneActivityFormat, remainOnExitArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../lib/tmux/contracts.ts';
@@ -867,7 +868,7 @@ export class TmuxRunner implements Runner {
         '-s',
         session,
         '-c',
-        spec.cwd,
+        tmuxStartDirectory(spec.cwd),
         '--',
         program,
         ...args,

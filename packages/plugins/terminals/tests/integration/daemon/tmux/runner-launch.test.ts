@@ -5,6 +5,7 @@ import should from 'should';
 import { TmuxRunner } from '../../../../daemon/adapters/tmux/tmux-runner.ts';
 import type { TmuxCommandResult } from '../../../../daemon/lib/tmux/contracts.ts';
 import { RealHarnessRefusedError, type TmuxLaunchGuard } from '../../../../daemon/lib/tmux/index.ts';
+import { scriptWords } from '../support/script-words.ts';
 import { subject } from './runner-world.ts';
 
 const done = (stdout = ''): TmuxCommandResult => ({ code: 0, stdout, stderr: '' });
@@ -360,5 +361,24 @@ describe('TmuxRunner delivery', () => {
     // Assert
     should(actual).be.instanceOf(Error);
     should(world.server.submitted).deepEqual([]);
+  });
+});
+
+describe('TmuxRunner start directory', () => {
+  it('should escape every # of the cwd in the new-session -c it writes to the launch script', async () => {
+    // Arrange: tmux expands formats in `-c`, so a folder named like a command must reach it doubled.
+    const world = launching();
+    const hostile = { ...world.spec, cwd: fenced('/r/#(touch pwned)/#{session_name}') };
+
+    // Act
+    const started = await world.runner.start(hostile);
+
+    // Assert
+    should(started.ok).equal(true);
+    const words = scriptWords(String(world.spawned[0]?.stdin));
+    const at = words.indexOf('new-session');
+    should(at).be.aboveOrEqual(0);
+    should(words[words.indexOf('-c', at) + 1]).equal('/r/##(touch pwned)/##{session_name}');
+    should(words).not.containEql('/r/#(touch pwned)/#{session_name}');
   });
 });

@@ -565,9 +565,9 @@ export default definePlugin({
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },
 
-  // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
-  // names for an attachment, once (§7.7). Transcripts are read only through the harness's `TranscriptReader`.
+  // Conversation reads the owner's history through `harness-history` (links); copy-on-link is the harness plugin's own act
+  // (`FerretsApi.importConversation`). Transcripts are read only through the harness's `TranscriptReader`.
   doctor: ['conversation-store', 'conversation-search-index'],
   workers: ['pdf-decrypt'],
-  permissions: { roots: ['harness-history', 'imports'] },
+  permissions: { roots: ['harness-history'] },
 });
