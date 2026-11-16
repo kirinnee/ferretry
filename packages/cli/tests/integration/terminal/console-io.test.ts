@@ -45,6 +45,18 @@ describe('ConsoleIo', () => {
     should(err.mock.calls).eql([['note\n']]);
   });
 
+  it('can ask a question only where stdin and stdout are both a terminal, so a script is never asked', () => {
+    const io = new ConsoleIo();
+    setTty(process.stdin, true);
+    setTty(process.stdout, true);
+    should(typeof io.ask).eql('function');
+    setTty(process.stdout, false);
+    should(io.ask).be.undefined();
+    setTty(process.stdin, false);
+    setTty(process.stdout, true);
+    should(io.ask).be.undefined();
+  });
+
   it('is a terminal only when stdin and stdout both are', () => {
     const io = new ConsoleIo();
     setTty(process.stdin, true);

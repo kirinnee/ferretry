@@ -388,7 +388,7 @@ describe('resume turn documents', () => {
     const actual = resumeTurnDocument('Fix the failing test', SETTINGS);
 
     // Assert
-    should(actual).equal(`Fix the failing test\n\n${SETTINGS.turnProtocolReminder}\n`);
+    should(actual).equal(`Fix the failing test\n`);
   });
 
   it('should point the agent at the file rather than paste the turn into a composer', () => {
