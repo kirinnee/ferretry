@@ -185,6 +185,11 @@ moment (its turn is the owner's, or it declared a wait), once the inventory agre
   restarts by itself once the owner signs the login in (`fy login signin <login>`). Any other refusal (a folder the
   fence refuses never clears by itself) also leaves the ferret running, and gives up (`session.restart_gave_up`, with
   the reason), as does a launch that fails after the stop.
+- **`when: "now"` is the owner's choice to interrupt.** The request's optional `when` is `idle` (the default, and
+  what an absent field means) or `now`: with `now` a ferret that is mid-turn is restarted at once instead of
+  queued `mid-turn`, its turn interrupted and its conversation resumed. Everything else above still holds (the
+  runtime is proved first, a `blocked` restart is queued, the caller's own session waits). The Add MCP form
+  offers the choice and asks before sending `now`.
 - **The caller's own session is always queued.** A ferret that runs `fy restart` never restarts itself
   mid-turn: the CLI sends its own session id and the daemon waits until its turn has ended.
 - **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
