@@ -62,11 +62,15 @@ function fakeRunner() {
   return { runner, seen };
 }
 
-const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
+const harnessOver = (
+  location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>,
+  questionTool?: boolean,
+) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
   const records: unknown[] = [];
   const harness = codexHarness({
+    ...(questionTool === undefined ? {} : { questionTool: () => questionTool }),
     selected: selectEverything,
     kernel: {
       roots,
@@ -195,14 +199,14 @@ describe('the Codex harness', () => {
     should(resumed.ok && resumed.value.harnessConversation).equal('conv-1');
   });
 
-  describe('the question tool, per ferret (v4: interactive Codex gets --enable default_mode_request_user_input)', () => {
+  describe('the question tool (!A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in)', () => {
     const FEATURE = ['--enable', 'default_mode_request_user_input'];
     const withFeature = (command: readonly string[]): boolean =>
       command.some((argument, at) => argument === '--enable' && command[at + 1] === 'default_mode_request_user_input');
 
     for (const call of ['start', 'resume'] as const) {
-      const launch = async (mode: 'interactive' | 'auto' | undefined) => {
-        const { harness, records } = harnessOver(LOCATED);
+      const launch = async (mode: 'interactive' | 'auto' | undefined, questionTool?: boolean) => {
+        const { harness, records } = harnessOver(LOCATED, questionTool);
         const { runner, seen } = fakeRunner();
         const spec = specOf(mode === undefined ? {} : { mode });
         const launched =
@@ -211,16 +215,25 @@ describe('the Codex harness', () => {
         return { command: seen[0]?.spec.command ?? [], records };
       };
 
-      it(`a ${call} of an interactive ferret enables it, as the Runtimes wrapper does`, async () => {
-        const { command } = await launch('interactive');
+      it(`a ${call} enables nothing by default, an interactive ferret included`, async () => {
+        for (const mode of ['interactive', 'auto', undefined] as const) {
+          const { command } = await launch(mode);
+          should(withFeature(command)).be.false();
+          should(command.includes('--enable')).be.false();
+          should(withFeature((await launch(mode, false)).command)).be.false();
+        }
+      });
+
+      it(`a ${call} of an interactive ferret enables it once when questionTool is on`, async () => {
+        const { command } = await launch('interactive', true);
         should(withFeature(command)).be.true();
         should(command.filter(argument => argument === '--enable')).eql(['--enable']);
         should(command.indexOf('--enable') + 1).equal(command.indexOf(FEATURE[1] as string));
       });
 
-      it(`a ${call} of an auto ferret, or one with no mode, does not`, async () => {
-        should(withFeature((await launch('auto')).command)).be.false();
-        should(withFeature((await launch(undefined)).command)).be.false();
+      it(`a ${call} of an auto ferret, or one with no mode, never enables it, even with questionTool on`, async () => {
+        should(withFeature((await launch('auto', true)).command)).be.false();
+        should(withFeature((await launch(undefined, true)).command)).be.false();
       });
 
       it(`a ${call} records the same launch settings whatever the mode, so no ferret reads as outdated for it`, async () => {
@@ -231,10 +244,13 @@ describe('the Codex harness', () => {
       });
     }
 
-    it('names the feature the Runtimes wrapper names, and only for interactive', () => {
-      should(codexQuestionArguments('interactive')).eql(FEATURE);
-      should(codexQuestionArguments('auto')).eql([]);
-      should(codexQuestionArguments(undefined)).eql([]);
+    it('names the feature only for an interactive ferret with the setting on', () => {
+      should(codexQuestionArguments('interactive', true)).eql(FEATURE);
+      should(codexQuestionArguments('auto', true)).eql([]);
+      should(codexQuestionArguments(undefined, true)).eql([]);
+      should(codexQuestionArguments('interactive', false)).eql([]);
+      should(codexQuestionArguments('auto', false)).eql([]);
+      should(codexQuestionArguments(undefined, false)).eql([]);
       should(CODEX_QUESTIONS_FEATURE).equal('default_mode_request_user_input');
     });
 

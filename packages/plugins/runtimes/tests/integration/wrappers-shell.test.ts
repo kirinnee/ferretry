@@ -14,7 +14,6 @@ import {
   AGENT_TOOLS_INSTRUCTION,
   BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
-  CODEX_QUESTIONS_FEATURE,
   fixedLayerFor,
   HYPERMEDIA_INSTRUCTION,
   LEAD_RULES_INSTRUCTION,
@@ -61,7 +60,7 @@ const render = (input: RuntimeWrapperInput, options: { readonly secretsFile?: st
 
 /** What the wrapper's question line leaves in "$@" for a launch with the given mode, run for real in sh. */
 const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, launchArgs: readonly string[]) => {
-  const line = wrapper.split('\n').find(candidate => candidate.includes('FY_SESSION_MODE'));
+  const line = wrapper.split('\n').find(candidate => candidate.startsWith('set -- ') && candidate.includes('"$@"'));
   if (line === undefined) return undefined;
   const { stdout } = Bun.spawnSync(['sh', '-c', `${line}\nprintf '%s\\n' "$@"`, 'wrapper', ...launchArgs], {
     env: mode === undefined ? {} : { FY_SESSION_MODE: mode },
@@ -73,7 +72,7 @@ const argumentsAfterQuestionLine = (wrapper: string, mode: string | undefined, l
 const MAX_ROUTING_PROMPT_CHARS = 1_200;
 
 describe('the question tool, per ferret (O3)', () => {
-  it("should withhold Claude's question tool, before the prompt, unless the ferret is interactive", () => {
+  it("should withhold Claude's question tool, before the prompt, from every ferret, interactive included (!A527)", () => {
     // Arrange
     const wrapper = render(account({ flags: [CLAUDE_NO_QUESTIONS_FLAG, '--model', 'x'] }));
 
@@ -87,21 +86,19 @@ describe('the question tool, per ferret (O3)', () => {
       CLAUDE_NO_QUESTIONS_FLAG,
       'do the thing',
     ]);
-    should(argumentsAfterQuestionLine(wrapper, 'interactive', ['do the thing'])).deepEqual(['do the thing']);
+    should(argumentsAfterQuestionLine(wrapper, 'interactive', ['do the thing'])).deepEqual([
+      CLAUDE_NO_QUESTIONS_FLAG,
+      'do the thing',
+    ]);
   });
 
-  it("should enable Codex's question feature only for an interactive ferret", () => {
+  it("should never enable Codex's question feature from the wrapper, whatever the ferret's mode (!A527)", () => {
     // Arrange
     const wrapper = render(account({ kind: 'codex' }));
 
     // Act + Assert
-    should(argumentsAfterQuestionLine(wrapper, 'interactive', ['task'])).deepEqual([
-      '--enable',
-      CODEX_QUESTIONS_FEATURE,
-      'task',
-    ]);
-    should(argumentsAfterQuestionLine(wrapper, 'auto', ['task'])).deepEqual(['task']);
-    should(argumentsAfterQuestionLine(wrapper, undefined, ['task'])).deepEqual(['task']);
+    should(wrapper).not.containEql('default_mode_request_user_input');
+    should(wrapper).not.containEql('FY_SESSION_MODE');
   });
 
   it("should leave a non-agent runtime alone: it behaves like the person's own CLI", () => {

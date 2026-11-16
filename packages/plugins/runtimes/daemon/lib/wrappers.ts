@@ -24,14 +24,12 @@ import {
   binaryName,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CODEX_QUESTIONS_FEATURE,
   FERRET_SECTIONS,
   LEAD_RULES_INSTRUCTION,
   SUB_FERRET_ENV,
   SUB_FERRET_INSTRUCTION,
   PACK_ENV,
   PACK_ROUTING_ENV,
-  SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
@@ -618,14 +616,14 @@ function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
 }
 
 /**
- * The question tool, per ferret (O3). Prepended to `"$@"` in the `=` / non-variadic spelling so the
- * prompt that follows is never swallowed as a tool name. A launch with no mode is unattended.
+ * The question tool (owner !A527): withheld from EVERY agent ferret, an interactive one included, so none stops on a form
+ * only the pane shows; it asks through the agenda. Prepended to `"$@"` in the `=` / non-variadic spelling so the prompt
+ * that follows is never swallowed as a tool name. Codex needs no line: its `request_user_input` stays off outside Plan
+ * mode unless `--enable default_mode_request_user_input` is passed, which only the Codex harness's opt-in does.
+ * GAP(runtimes): this wrapper has no opt-in; the `questionTool` setting governs the harness launch only.
  */
 function questionLines(harness: HarnessKind): string[] {
-  const interactive = `[ "\${${SESSION_MODE_ENV}:-}" = interactive ]`;
-  return harness === 'claude'
-    ? [`${interactive} || set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`]
-    : [`! ${interactive} || set -- --enable ${CODEX_QUESTIONS_FEATURE} "$@"`];
+  return harness === 'claude' ? [`set -- ${CLAUDE_NO_QUESTIONS_FLAG} "$@"`] : [];
 }
 
 /** What {@link renderCommandScript} needs: the command plus its target's declared wrapper name. */

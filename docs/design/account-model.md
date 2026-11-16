@@ -1262,12 +1262,14 @@ Each is easy to change later.
   are created **with the agent flag on**: running agents is Ferretry's purpose, and the person's own
   `claude` stays their own CLI.
 - **O3 — `--disallowed-tools=AskUserQuestion`** belongs to the Claude fixed layer (agent runtimes
-  only), but is **per ferret**: an unattended (`auto`) ferret has nobody to answer, so the wrapper
-  withholds the tool; an **interactive** ferret has the owner and keeps it, and the PWA shows its
-  question as an answerable card. The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
-  ferret's launch environment at creation and the generated wrapper prepends the flag at exec time
-  unless it is `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
-  behind `default_mode_request_user_input`, so the same line passes `--enable` for an interactive
+  only). **Superseded by owner !A527: it is now withheld from EVERY ferret, an interactive one included**
+  (no ferret stops on a form only the pane shows; it asks through the agenda), and the generated wrapper always
+  prepends the flag. A per-harness `questionTool: true` (docs/launch-settings.md) gives an interactive ferret the tool
+  back on the harness launch path, where the PWA shows its question as an answerable card. The original text follows.
+  The daemon writes `FY_SESSION_MODE` (`interactive`|`auto`) into the
+  ferret's launch environment at creation and the generated wrapper prepended the flag at exec time
+  unless it was `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
+  behind `default_mode_request_user_input`, so the same line passed `--enable` for an interactive
   ferret only. **Codex 0.164 exits on that flag unless `--no-daemon` is also passed** ("Cannot use the shared
   background server: This session requires default_mode_request_user_input"); 0.145 rejects `--no-daemon`, so
   the wrapper has to add it only where it is accepted.

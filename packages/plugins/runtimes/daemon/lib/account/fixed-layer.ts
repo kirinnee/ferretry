@@ -5,8 +5,8 @@
  * Only agent runtimes get it (F1). Its contents are exactly three things and never a credential or
  * an identity (F3): no trust prompt, no onboarding screens, and the permission mode from the
  * machine's **Agent permissions** (F4). Two carried-over launch flags join it because nobody is
- * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (owner question O3,
- * now per ferret — an interactive ferret has the owner and keeps its question tool) and Codex's `--no-alt-screen`.
+ * there to answer an UNATTENDED agent: Claude's `--disallowed-tools=AskUserQuestion` (withheld from every ferret,
+ * owner !A527) and Codex's `--no-alt-screen`.
  *
  * It also puts the Ferretry tools in every agent runtime — the `fy mcp serve` MCP server, through which
  * an agent drives terminals and browser pages by name — and a short instruction saying they exist and
@@ -203,10 +203,9 @@ const CODEX_PERMISSIONS: Readonly<
 };
 
 /**
- * O3: an unattended (`auto`) ferret has nobody to answer a question, so the tool that asks one is
- * withheld. An INTERACTIVE ferret has the owner, so it keeps it — which makes this per FERRET, not per
- * runtime: the wrapper (`../wrappers.ts`) applies the flag at exec time unless the daemon-written
- * {@link SESSION_MODE_ENV} is `interactive`. A launch with no mode is treated as unattended.
+ * Owner !A527 (was O3): the tool that asks a question is withheld from EVERY agent ferret, an interactive one
+ * included, so none stops on a form only the pane shows; it asks through the agenda. The wrapper
+ * (`../wrappers.ts`) applies the flag at exec time.
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
@@ -238,9 +237,6 @@ export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV
 export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
 };
-
-/** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
-export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
 export { SESSION_MODE_ENV };
@@ -565,9 +561,8 @@ export function instructionDigest(text: string): string {
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
  * the wrapper would not build: the tools, settings, notify and board sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
- * entry whose variable is exactly `1`, and the question tool only for a launch whose
- * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
- * AGENT runtime's wrapper, the only kind a session can be started on.
+ * entry whose variable is exactly `1`. The question tool is never left in (owner !A527), so `questions` is always
+ * `false`. It describes an AGENT runtime's wrapper, the only kind a session can be started on.
  */
 export function launchInstructions(fy: string, env: Readonly<Record<string, string>>): SessionLaunchInstructions {
   const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
@@ -588,7 +583,7 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
         }),
     ],
     mode,
-    questions: mode === 'interactive',
+    questions: false,
   };
 }
 

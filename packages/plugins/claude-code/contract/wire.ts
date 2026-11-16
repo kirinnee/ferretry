@@ -319,6 +319,12 @@ export const HarnessConfigSchema = z.strictObject({
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
   permissionMode: PermissionModeSchema.default('auto'),
+  /**
+   * Opt a harness's question tool back in (owner !A527: off by default, so no ferret stops on a prompt only the pane
+   * shows). `true` gives an INTERACTIVE ferret the tool again; an auto ferret never has it. It makes ferrets block
+   * rather than act, so it is never held.
+   */
+  questionTool: z.boolean().default(false),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 

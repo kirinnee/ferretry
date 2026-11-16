@@ -1699,10 +1699,18 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
   });
 
-  describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
+  describe('the question tool (!A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
     const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
-    const launched = async (call: 'start' | 'resume', mode: 'interactive' | 'auto' | undefined) => {
-      const { harness } = build();
+    const optedIn = {
+      file: () => ({ searchPaths: [], permissionMode: 'auto', questionTool: true }),
+      collection: () => new Map(),
+    };
+    const launched = async (
+      call: 'start' | 'resume',
+      mode: 'interactive' | 'auto' | undefined,
+      config?: typeof optedIn,
+    ) => {
+      const { harness } = build(config === undefined ? {} : { config });
       const started: { command?: readonly string[] } = {};
       const more = mode === undefined ? {} : { mode };
       const result =
@@ -1714,13 +1722,17 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     };
 
     for (const call of ['start', 'resume'] as const) {
-      test(`a ${call} of an interactive ferret keeps the question tool`, async () => {
-        expect(await launched(call, 'interactive')).not.toContain(NO_QUESTIONS);
+      test(`a ${call} withholds it exactly once from every ferret by default, an interactive one included`, async () => {
+        for (const mode of ['interactive', 'auto', undefined] as const)
+          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
       });
 
-      test(`a ${call} of an auto ferret, or one with no mode, withholds it exactly once`, async () => {
+      test(`a ${call} with questionTool on keeps it for an interactive ferret only`, async () => {
+        expect(await launched(call, 'interactive', optedIn)).not.toContain(NO_QUESTIONS);
         for (const mode of ['auto', undefined] as const)
-          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
+          expect((await launched(call, mode, optedIn)).filter(argument => argument === NO_QUESTIONS)).toEqual([
+            NO_QUESTIONS,
+          ]);
       });
     }
 
