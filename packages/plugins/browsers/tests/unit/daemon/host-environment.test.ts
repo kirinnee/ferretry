@@ -27,6 +27,10 @@ describe('browsers host environment', () => {
     expect(JSON.stringify(host.environment)).not.toContain('secret');
   });
 
+  it('says the uid this daemon runs as, or none where the platform has no uids', () => {
+    expect(processHost({}).uid()).toBe(process.getuid?.());
+  });
+
   it('is not given the whole environment by default', () => {
     process.env.GITHUB_TOKEN = 'ghp_unit_test_secret';
     try {

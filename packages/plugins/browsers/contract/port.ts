@@ -124,11 +124,6 @@ export interface BrowsersApi {
   /** Secure copy's reach (docs/secure-copy.md): present for Accounts only. */
   readonly copy?: BrowsersCopyApi;
   state(): Promise<BrowserStateView>;
-  /**
-   * Today's machine.browserPorts fact for Codex sign-in: shared is setting !== 'random' (per-user or explicit).
-   * Optional until the provider is ported; a consumer without this fact must treat host ports as shared.
-   */
-  browserPorts?(): Promise<{ readonly shared: boolean }>;
   /** The pages one ferret holds, by id and name only. */
   pagesOf(ferret: FerretId): Promise<readonly BrowserPageRef[]>;
   /**
@@ -145,8 +140,8 @@ export interface BrowsersApi {
    * `random` (today's `FleetLoginService` reading). Logins takes it as an optional use (lead decision 19, L2); an
    * absent method means the host is treated as shared, which fails closed.
    *
-   * GAP (card F1931): Browsers does not provide it yet — 5.0 serves Browsers no read of the machine's `browserPorts`
-   * (Runtimes keeps it and no contract serves it), so Browsers cannot say, and leaves it absent rather than guess.
+   * Provided to Logins alone, from Runtimes' read-only `machineBrowserPorts`; Runtimes off or unable to say answers
+   * `shared: true`.
    */
   browserPorts?(): Promise<{ readonly shared: boolean }>;
   /**

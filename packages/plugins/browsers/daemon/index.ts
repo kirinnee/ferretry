@@ -38,6 +38,9 @@ import { BrowserLoginWindowService } from './worker/control/adapters/login-windo
 import { ProcListenerProver } from './worker/control/adapters/listener-prover.ts';
 import { NodeBrowserLoginRuntime, XvfbDisplay } from './worker/control/adapters/login-runtime.ts';
 import { loopbackFirewallDoctor } from './proxy/firewall/doctor.ts';
+import { FileLoopbackMarkerReader } from './proxy/firewall/marker-reader.ts';
+import { type LoopbackMarkerReader, readLoopbackFirewall } from './proxy/firewall/state.ts';
+import type { BrowserPortsSetting } from './proxy/wire/ports.ts';
 import { BrowserProfileStore } from './worker/control/adapters/profile-store.ts';
 import type { StartWorker } from './worker/client.ts';
 import { NodeSessionBrowserLauncher } from './worker/launcher.ts';
@@ -74,6 +77,10 @@ export interface BrowsersSeams {
   readonly identities?: TypedIdentities;
   /** Hands one address to the operating system's opener; by default `open`, `xdg-open` or `rundll32` through `kernel.spawn`. */
   readonly opener?: DetachedLauncherPort;
+  /** The root-owned loopback firewall marker; by default `/run/ferretry/loopback-firewall.json`, read afresh. */
+  readonly marker?: LoopbackMarkerReader;
+  /** The uid this daemon runs as; by default the process's. `undefined`: no uids here, so no firewall row. */
+  readonly uid?: () => number | undefined;
 }
 
 /** The daemon half, composed once: every piece below is built here and nowhere else. */
@@ -150,15 +157,20 @@ export function buildBrowsers(
         listenerProver,
         stageDirectory: host.stageDirectory,
         // GAP (card F1931, finding 10): no `ports`, `checkFirewall` or `limits` (today's fyd.ts 8728-8736).
-        // - `ports`/`checkFirewall`: 5.0 serves Browsers no read of the machine's `browserPorts` or
-        //   `browserFirewallFailure` (no file of Runtimes holds them in 5.0, so a machine-settings change that moves
-        //   either is refused, and no contract serves them), so every launch takes random
-        //   ports. That fails safe: nothing is bound at a fixed port, so there is nothing for the loopback firewall to
-        //   fence and nothing for its check to refuse.
+        // - `ports`/`checkFirewall`: Runtimes now serves `machineBrowserPorts` (the doctor row and Logins read it), but the
+        //   launcher does not bind the fixed ports it names nor run the firewall check before a start, so every launch
+        //   still takes random ports. That fails safe: nothing is bound at a fixed port, and nothing is refused.
         // - `limits`: there is no kernel ferret-limits port that wraps a program in the shared browser slice, so the
         //   agent Chrome runs outside the shared browser memory slice docs/ferret-limits.md promises.
       },
     );
+  // The machine's `browserPorts` setting, read from Runtimes live on every ask (never kept). It throws when Runtimes is off
+  // or cannot say; each reader below turns that into its own fail-safe.
+  const machinePorts = async (): Promise<BrowserPortsSetting> => {
+    const runtimes = ctx.uses.runtimes.current();
+    if (runtimes === undefined) throw new Error('Runtimes is not serving the machine’s browser ports');
+    return (await runtimes.machineBrowserPorts()).browserPorts;
+  };
   // Who each page signs in, in memory only (I154): ONE ledger, cleared by the runtime whenever an act may have changed
   // it, whoever made it (I155), and read and written by every browser tool.
   const identities = seams.identities ?? new TypedIdentities(() => kernel.clock.nowMs());
@@ -341,10 +353,15 @@ export function buildBrowsers(
       'GET /v1/ferrets/:ferretId/browser/stream': streamSocket(kernel.redaction, pages, stream, ferretGuard, gate),
     },
     doctor: {
-      // GAP (card F1931 finding 10, above): every launch takes random ports, so there is nothing fixed to fence and no
-      // row — exactly as today's report left the row out for random ports. When Runtimes serves `browserPorts`, this
-      // reads `readLoopbackFirewall` there and the row appears.
-      'loopback-firewall': loopbackFirewallDoctor(async () => undefined),
+      // The marker judged against the ports the machine's setting names, for this account's uid. No row while the ports
+      // are random, while Runtimes is off or cannot say, or on a host with no uids (a warning, never a gate).
+      'loopback-firewall': loopbackFirewallDoctor(async () => {
+        const uid = (seams.uid ?? host.uid)();
+        if (uid === undefined) return undefined;
+        return await readLoopbackFirewall(machinePorts, uid, seams.marker ?? new FileLoopbackMarkerReader(), () =>
+          kernel.clock.nowMs(),
+        );
+      }),
     },
     tools: withAddressRuleTools({ ...toolHandlers(tools), ...target.tools }),
     provides: {
@@ -359,6 +376,15 @@ export function buildBrowsers(
               }
             : {}),
           state: async () => pages.overview(),
+          // For Logins alone: whether this host shares its loopback ports with other local users, which is so whenever the
+          // machine's `browserPorts` is not `random`. Runtimes off or unable to say counts as shared (fails closed).
+          ...(needer.id === 'logins'
+            ? {
+                browserPorts: async () => ({
+                  shared: (await machinePorts().catch(() => 'per-user' as const)) !== 'random',
+                }),
+              }
+            : {}),
           // Ids and names only, for any caller and whatever the switches say. NEVER add a page's address here (#42 SF2):
           // this read asks no "What agents may control › Browsers" switch, so Accounts' `account_hint {name}` would show an
           // agent its page's host while Browsers is off. The address waits for its own Browsers-owned read that asks

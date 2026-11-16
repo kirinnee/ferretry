@@ -35,7 +35,8 @@
     "lucide-react": "^0.468.0",
     "@ferretry/plugin-access": "workspace:*",
     "@ferretry/plugin-catalogs": "workspace:*",
-    "@ferretry/plugin-connections": "workspace:*"
+    "@ferretry/plugin-connections": "workspace:*",
+    "@ferretry/plugin-runtimes": "workspace:*"
   },
   "sideEffects": false,
   "devDependencies": {

@@ -8,6 +8,7 @@ import { PairingWindowPort } from '@ferretry/plugin-access/contract';
 import { ShareWindowPort } from '@ferretry/plugin-catalogs/contract';
 import { ConnectionsPort } from '@ferretry/plugin-connections/contract';
 import { ConversationPort, ReferenceCatalog } from '@ferretry/plugin-conversation/contract';
+import { RuntimesPort } from '@ferretry/plugin-runtimes/contract';
 import { TerminalsPort } from '@ferretry/plugin-terminals/contract';
 import {
   AUDIT,
@@ -71,6 +72,12 @@ export default definePlugin({
     ferrets: FerretsPort,
     agentControl: AgentControlPort,
     terminals: TerminalsPort,
+    /**
+     * The machine's `browserPorts` and `browserFirewallFailure` (read-only, `machineBrowserPorts`): the loopback firewall
+     * doctor judges this account's fixed ports, and Logins is told whether the host shares its ports. Off or unreadable,
+     * the doctor says nothing and the host counts as shared (fails closed).
+     */
+    runtimes: RuntimesPort,
     conversation: ConversationPort,
     /**
      * Whether a credential was live, and which origins are the app's (docs/pairing.md, "Never show it to an agent"): Access's

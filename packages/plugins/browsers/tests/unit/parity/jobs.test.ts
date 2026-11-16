@@ -262,11 +262,11 @@ describe('the daemon’s waits on the kernel clock', () => {
 });
 
 describe('the periodic loopback firewall check', () => {
-  test('J-0105 GAP: not armed — with no browserPorts reading the host gets random ports, and a reading of random reads no marker and says nothing', async () => {
+  test('J-0105 GAP: the tick is not armed — a reading of random reads no marker and says nothing', async () => {
     // GAP (card F1931): today re-reads the marker every five minutes (`setInterval(checkLoopbackFirewall, …)`), and
-    // reads nothing while `browserPorts` is random. 5.0 gives Browsers no read of the machine's `browserPorts`
-    // (Runtimes keeps it, and no contract serves it), so every launch takes random ports and there is nothing to
-    // fence; the tick is armed when that fact is served (finding 10).
+    // reads nothing while `browserPorts` is random. Runtimes now serves the machine's `browserPorts` (the doctor row
+    // reads it), but the launcher binds no fixed ports and runs no check before a start, so the five-minute tick is
+    // still not armed (finding 10).
     let markerReads = 0;
     const said: string[] = [];
     const watch = new LoopbackFirewallWatch(
