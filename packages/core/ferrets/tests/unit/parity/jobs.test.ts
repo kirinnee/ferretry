@@ -54,6 +54,7 @@ import ferrets, { TURN_WATCH_JOB } from '../../../daemon/index.ts';
 import { FileHandoverReceiptStore } from '../../../daemon/adapters/moves/handover/file-handover-receipt-store.ts';
 import { fleetEventsAccept, HistoryEventSource } from '../../../daemon/modules/fleet-events.ts';
 import { AUTO_RESUME_JOB } from '../../../daemon/modules/auto-resume.ts';
+import { INTERRUPTED_LAUNCH_JOB } from '../../../daemon/modules/interrupted-launches.ts';
 import { MONITOR_TICK_JOB } from '../../../daemon/modules/monitor.ts';
 import { type SessionHandoverNeeds, sessionHandoverModule } from '../../../daemon/modules/session-handover.ts';
 import type { SessionDirectorySubsystem } from '../../../daemon/lib/session/directory/subsystem.ts';
@@ -614,6 +615,44 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
     await tick(h);
     await tick(h);
     expect(agenda.slice(heardBefore)).toEqual([{ ferret: id, state: 'idle', previous: 'working', change: 'state' }]);
+    await h.stop();
+  });
+});
+
+describe('interrupted launches (c58-56)', () => {
+  const statusOf = (h: TestHost, id: FerretId): unknown =>
+    JSON.parse(h.state('ferrets').raw(FerretStateFile, id) ?? '{}').status;
+
+  test('a document the dead daemon left starting, whose terminal is gone, is recorded failed when the job runs', async () => {
+    const { h: first, runner } = await host();
+    const id = await start(first, 'finch');
+    await first.settle();
+    const document = JSON.parse(first.state('ferrets').raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
+    first.state('ferrets').plant(FerretStateFile, JSON.stringify({ ...document, status: 'starting' }), id);
+    runner.reboot();
+    await first.clock.advance(60_000);
+    const h = await first.restart();
+    expect(h.jobIds()).toContain(INTERRUPTED_LAUNCH_JOB);
+    expect(INTERRUPTED_LAUNCH_JOB).toBe('ferrets.interrupted-launches');
+    expect(statusOf(h, id)).toBe('starting');
+
+    await h.runJob(INTERRUPTED_LAUNCH_JOB);
+    await h.settle();
+    expect(statusOf(h, id)).toBe('failed');
+    expect(h.state('ferrets').raw(FerretHistoryFiles, id)).toContain('session.launch_interrupted');
+    await h.stop();
+  });
+
+  test('a launch this very process is making is never failed by the job', async () => {
+    const { h } = await host();
+    const id = await start(h, 'robin');
+    await h.settle();
+    const document = JSON.parse(h.state('ferrets').raw(FerretStateFile, id) ?? '{}') as Record<string, unknown>;
+    h.state('ferrets').plant(FerretStateFile, JSON.stringify({ ...document, status: 'starting' }), id);
+
+    await h.runJob(INTERRUPTED_LAUNCH_JOB);
+    await h.settle();
+    expect(statusOf(h, id)).toBe('starting');
     await h.stop();
   });
 });
