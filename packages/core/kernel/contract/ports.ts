@@ -749,7 +749,8 @@ export interface RootPublishOptions {
 
 /** What a {@link RootHandle.publish} came to: the file the name now reaches, or that someone else's was there first. */
 export type RootPublished =
-  { readonly outcome: 'published'; readonly identity: RootIdentity } | { readonly outcome: 'exists' };
+  | { readonly outcome: 'published'; readonly identity: RootIdentity }
+  | { readonly outcome: 'exists' };
 
 /**
  * One regular file opened ONCE and held (`RootHandle.openBytes`): every read and stat goes through that descriptor
@@ -1214,7 +1215,8 @@ export type WorkerStateGrant = StateFileDef | { readonly def: StateFileDef; read
  * `subfolder` / `ferret` stays on the main thread; the worker only ever names the root). One grant per root name.
  */
 export type WorkerRootGrant =
-  RootName | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
+  | RootName
+  | { readonly name: RootName; readonly scope?: { readonly ferret?: FerretId; readonly subfolder?: string } };
 
 export interface WorkerStartOptions {
   readonly name?: string;
@@ -1737,7 +1739,9 @@ export type CommandLocation =
  * (a foreign handle and a secret-derived PATH answer alike).
  */
 export type HandleCommandLookup =
-  { readonly kind: 'found'; readonly path: string } | { readonly kind: 'absent' } | { readonly kind: 'unprovable' };
+  | { readonly kind: 'found'; readonly path: string }
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'unprovable' };
 
 /** {@link PathsPort.checkDirectory} accepted: the canonical path. */
 export interface CheckedDirectory {

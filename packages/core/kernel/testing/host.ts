@@ -2455,7 +2455,8 @@ async function start(world: World): Promise<TestHost> {
     name =>
       (
         built.find(b => b.manifest.id === id)?.half?.resolvers as
-          Readonly<Record<string, (() => readonly string[]) | undefined>> | undefined
+          | Readonly<Record<string, (() => readonly string[]) | undefined>>
+          | undefined
       )?.[name];
 
   const kernelFor = (manifest: Manifest): KernelPorts => {

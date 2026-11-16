@@ -117,10 +117,12 @@ export class MemoryHistoryRoots implements RootsPort {
         const names = new Set<string>();
         for (const key of files.keys())
           if (key.startsWith(prefix)) names.add(key.slice(prefix.length).split('/')[0] ?? '');
-        return [...names].map((entryName): RootEntry => ({
-          name: entryName,
-          ...(stat(`${prefix}${entryName}`) as RootStat),
-        }));
+        return [...names].map(
+          (entryName): RootEntry => ({
+            name: entryName,
+            ...(stat(`${prefix}${entryName}`) as RootStat),
+          }),
+        );
       },
     };
     return handle as RootHandle;
