@@ -101,7 +101,7 @@ export function planContext(plan: Pick<TaskPlan, 'lines'>): string {
 
 /** How the card is answered: ticked on the card, or staged at the machine, and always confirmed with the passkey. */
 export function planHowToResolve(plan: Pick<TaskPlan, 'id' | 'lines'>): string {
-  return `Tick the lines you allow on the card in the app and confirm them with your passkey, or stage them at the machine: \`fy plan approve ${plan.id} <numbers>\`.`;
+  return `Tick the lines you allow on the item in the app and confirm them with your passkey, or stage them at the machine: \`fy plan approve ${plan.id} <numbers>\`.`;
 }
 
 /**
@@ -147,6 +147,6 @@ export function answeredTell(
   plan: Pick<TaskPlan, 'expiresAt'>,
 ): string {
   return approved.length === 0
-    ? `${agendaItemId}: the owner declined your task plan; each sign-in and paste will ask them.`
-    : `${agendaItemId}: the owner allowed ${lineList(approved)} of your task plan, until ${plan.expiresAt}. Raise browser_request_input / terminal_request_input and secure.paste as usual; the rest ask the owner.`;
+    ? `${agendaItemId}: the owner declined your sign-in plan; each sign-in and paste will ask them.`
+    : `${agendaItemId}: the owner allowed ${lineList(approved)} of your sign-in plan, until ${plan.expiresAt}. Raise browser_request_input / terminal_request_input and secure.paste as usual; the rest ask the owner.`;
 }

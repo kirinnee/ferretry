@@ -233,7 +233,7 @@ describe('account_propose', () => {
   });
 });
 
-describe('task_plan', () => {
+describe('signin_plan', () => {
   const CALL = {
     lines: [
       {
@@ -248,7 +248,7 @@ describe('task_plan', () => {
   it('should raise the plan as the calling ferret and tell it only its own view of the plan', async () => {
     const { tools, seen, run } = world();
 
-    const answer = await run(tools.task_plan, CALL);
+    const answer = await run(tools.signin_plan, CALL);
 
     should(answer.isError).not.equal(true);
     should(seen.plans).eql([['F1', CALL]]);
@@ -264,10 +264,21 @@ describe('task_plan', () => {
     });
   });
 
+  it('should answer the same under its old name task_plan, on the same handler', async () => {
+    const named = world();
+    const asked = await named.run(named.tools.signin_plan, CALL);
+    const old = world();
+    const answered = await old.run(old.tools.task_plan, CALL);
+
+    should(old.tools.task_plan).equal(old.tools.signin_plan);
+    should(answered).eql(asked);
+    should(old.seen.plans).eql(named.seen.plans);
+  });
+
   it('should hand the service an empty call when none is given, so its own schema refuses it', async () => {
     const { tools, seen, run } = world();
 
-    await run(tools.task_plan, undefined);
+    await run(tools.signin_plan, undefined);
 
     should(seen.plans).eql([['F1', {}]]);
   });
@@ -275,7 +286,7 @@ describe('task_plan', () => {
   it('should refuse a call that is not a ferret’s, and raise nothing', async () => {
     const { tools, seen, run } = world();
 
-    const answer = await run(tools.task_plan, CALL, PERSON);
+    const answer = await run(tools.signin_plan, CALL, PERSON);
 
     should(answer.isError).equal(true);
     should(answer.text).containEql('Only an agent');
@@ -289,7 +300,7 @@ describe('task_plan', () => {
     ]) {
       const { tools, run } = world({ planError: error });
 
-      const answer = await run(tools.task_plan, CALL);
+      const answer = await run(tools.signin_plan, CALL);
 
       should(answer.isError).equal(true);
       should(answer.text).equal(error.message);
@@ -299,7 +310,7 @@ describe('task_plan', () => {
   it('should never quote an error it does not own', async () => {
     const { tools, run } = world({ planError: new Error(`agenda said ${SENTINEL}`) });
 
-    const answer = await run(tools.task_plan, CALL);
+    const answer = await run(tools.signin_plan, CALL);
 
     should(answer.isError).equal(true);
     should(answer.text).equal('The owner could not be asked right now; nothing was changed.');
@@ -309,7 +320,7 @@ describe('task_plan', () => {
   it('should mask the answer through the redactor', async () => {
     const { tools, run } = world({ redact: async text => text.replaceAll('A193', '[card]') });
 
-    const answer = await run(tools.task_plan, CALL);
+    const answer = await run(tools.signin_plan, CALL);
 
     should(answer.text).containEql('(^[card])').and.not.containEql('A193');
   });

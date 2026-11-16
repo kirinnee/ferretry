@@ -385,7 +385,7 @@ function AddKeyForm({
       onSubmit={event => void submit(event)}
     >
       <p className="m-0 text-cell text-muted">
-        This only writes down WHICH way the site asks, so a card can say so. It holds no code and no key.
+        This only writes down WHICH way the site asks, so a sign-in item can say so. It holds no code and no key.
       </p>
       <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
         Kind

@@ -601,7 +601,7 @@ describe('TaskPlanService: approving', () => {
     should(errors.map(error => error.code)).eql(Array.from({ length: 5 }, () => 'bad_request'));
     should(errors.map(error => error.message)).match([
       /pick one of the accounts first/u,
-      /accounts the card lists/u,
+      /accounts the input lists/u,
       /did not ask for codes/u,
       /no automatic codes/u,
       /no such line/u,
@@ -775,7 +775,7 @@ describe('TaskPlanService: life, revoke and the session ending', () => {
 
     should(w.service.get(HOST, SESSION, live.id).state).equal('ended');
     should(w.service.get(HOST, SESSION, waiting.id).state).equal('ended');
-    should(w.closed).containEql('A2: The task plan ended with its session.');
+    should(w.closed).containEql('A2: The sign-in plan ended with its session.');
     should(w.rules.list(HOST)).eql([]);
     should(w.service.approvedSignIns(SESSION)).eql([]);
   });
@@ -791,7 +791,7 @@ describe('TaskPlanService: life, revoke and the session ending', () => {
     w.ms.now += 180_000;
     w.service.sweep();
     should(w.service.get(HOST, SESSION, waiting.id).state).equal('expired');
-    should(w.closed).containEql('A2: The task plan expired.');
+    should(w.closed).containEql('A2: The sign-in plan expired.');
     should(w.service.get(HOST, SESSION, live.id).state).equal('approved');
     w.ms.now += 7_200_000;
     w.service.sweep();

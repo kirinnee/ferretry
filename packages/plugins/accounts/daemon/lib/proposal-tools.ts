@@ -76,6 +76,8 @@ const refusalWords = (error: unknown, fallback: string): string => {
 
 export function proposalTools(deps: ProposalToolDeps): {
   readonly account_propose: ToolHandler;
+  readonly signin_plan: ToolHandler;
+  /** The old name of `signin_plan`, on the same handler: an old instruction still works. */
   readonly task_plan: ToolHandler;
 } {
   const say = async (text: string, isError: boolean, data?: unknown): Promise<ToolResult> => {
@@ -145,7 +147,7 @@ export function proposalTools(deps: ProposalToolDeps): {
     }
   });
 
-  const task_plan = guarded(async (ferret, input) => {
+  const signin_plan = guarded(async (ferret, input) => {
     const plan = await deps.plans.propose(ferret, input as Parameters<TaskPlanService['propose']>[1]);
     return await say(
       `Asked the owner to approve ${plural(plan.lines.length, 'line')} in advance (${ASK_REFERENCE_SIGIL}${plan.agendaItemId}). Keep raising browser_request_input / terminal_request_input as usual: covered sign-ins and pastes are filled for you once the owner approves; anything else still asks.`,
@@ -154,5 +156,5 @@ export function proposalTools(deps: ProposalToolDeps): {
     );
   });
 
-  return { account_propose, task_plan };
+  return { account_propose, signin_plan, task_plan: signin_plan };
 }

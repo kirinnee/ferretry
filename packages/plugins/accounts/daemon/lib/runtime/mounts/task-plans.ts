@@ -73,7 +73,7 @@ function owned<T>(work: () => T): T {
 
 const owner = (context: RouteContext): PasteRuleCaller => ({
   kind: 'owner',
-  actor: ownerActorOf(context, 'approves or changes a task plan'),
+  actor: ownerActorOf(context, 'approves or changes a sign-in plan'),
 });
 
 const ID = /^[0-9a-f]{32}$/u;
@@ -91,7 +91,7 @@ function stageOf(context: RouteContext): TaskPlanStageId {
   if (!parsed.success)
     throw new ApiError(
       404,
-      'that task plan selection is not waiting for a passkey',
+      'that sign-in plan selection is not waiting for a passkey',
       TASK_PLAN_ERROR_CODES.stageNotFound,
     );
   return parsed.data;
@@ -122,7 +122,7 @@ const proofDemand = (): ApiResponse =>
   jsonResponse(
     {
       error:
-        'approving a sign-in on a task plan needs a passkey confirmation for this one selection, from a paired device',
+        'approving a sign-in on a sign-in plan needs a passkey confirmation for this one selection, from a paired device',
       code: STEP_UP_REQUIRED_CODE,
       demand: { capability: 'terminal', axis: 'configure', act: STEP_UP_ACTS.approveTaskPlan },
     } satisfies StepUpRequiredBody,

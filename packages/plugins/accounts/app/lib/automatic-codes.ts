@@ -129,7 +129,7 @@ export const seedFailureWords = (error: unknown): string => {
   const failure = (error !== null && typeof error === 'object' ? error : {}) as HttpFailure;
   if (failure.code === TWO_FACTOR_ERROR_CODES.passkeyRequired) return NEEDS_PASSKEY_WORDS;
   if (failure.code === TWO_FACTOR_ERROR_CODES.notThisCardsAccount)
-    return 'This card is for another account now. Close the panel and open it again.';
+    return 'This item is for another account now. Close the panel and open it again.';
   if (failure.code === TWO_FACTOR_ERROR_CODES.mismatch)
     return 'That key says it is for another account: tick the second box to save it here anyway.';
   if (failure.code === TWO_FACTOR_ERROR_CODES.notAKey) return 'That is not a 2FA key Ferretry can make codes from.';
@@ -151,5 +151,5 @@ export const DISMISSED_WORDS = 'You did not confirm with your passkey, so nothin
 /** What a saved key says: that it was saved, and whether the daemon typed its first code into the card. */
 export const savedSeedWords = (saved: Pick<TwoFactorSeedSaved, 'typed' | 'mismatch'>, label: string): string =>
   saved.typed === true
-    ? `Saved. Ferretry typed the first code for ${label} into the card.`
+    ? `Saved. Ferretry typed the first code for ${label} into the input.`
     : `Saved. Ferretry will make ${label}’s codes from now on.`;

@@ -106,7 +106,7 @@ export class TaskPlanAsksAdapter implements TaskPlanAgendaPort {
   }
 
   async close(sessionId: string, id: string, note: string): Promise<void> {
-    await this.asks.close(sessionId, id, note === 'The task plan expired.' ? 'expired' : 'withdrawn');
+    await this.asks.close(sessionId, id, note === 'The sign-in plan expired.' ? 'expired' : 'withdrawn');
   }
 }
 

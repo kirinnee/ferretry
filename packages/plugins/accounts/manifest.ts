@@ -37,7 +37,7 @@ import {
 
 /** Every Accounts tool is a ferret's call, kept as one `agent.tool` entry; none answers a value. */
 const TOOL = { minimum: 'authenticated', caller: 'any', audit: { record: AUDIT.agentTool } } as const;
-const NO_VALUE = { none: 'ids, places and card state only; a saved value never leaves the Vault' } as const;
+const NO_VALUE = { none: 'ids, places and item state only; a saved value never leaves the Vault' } as const;
 
 /**
  * Accounts (§2.3): your website accounts — saved sign-ins, one-tap fill, 2FA codes, standing rules and login recipes.
@@ -612,11 +612,18 @@ export default definePlugin({
         guard: NO_VALUE,
         summary: "propose a sign-in's recipe and/or suggest a standing rule; the owner decides",
       }),
-      tool('task_plan', {
+      tool('signin_plan', {
         ...TOOL,
         capability: USE.secrets,
         guard: NO_VALUE,
         summary: 'ask the owner once to pre-approve the sign-ins and pastes your work needs',
+      }),
+      // The old name of signin_plan, on the same handler: an old instruction still works.
+      tool('task_plan', {
+        ...TOOL,
+        capability: USE.secrets,
+        guard: NO_VALUE,
+        summary: 'old name of signin_plan',
       }),
     ],
     cli: [
@@ -687,7 +694,7 @@ export default definePlugin({
             flag: '--i-understand-one-factor',
             help: 'I understand this makes the sign-in one factor, with no one to approve a code.',
           },
-          { flag: '--open', help: "open the plan's card in this machine's browser to confirm with your passkey" },
+          { flag: '--open', help: "open the plan's item in this machine's browser to confirm with your passkey" },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
@@ -726,7 +733,7 @@ export default definePlugin({
             flag: '--i-understand-one-factor',
             help: 'I understand this makes the sign-in one factor, with no one to approve a code.',
           },
-          { flag: '--open', help: "open the plan's card in this machine's browser to confirm with your passkey" },
+          { flag: '--open', help: "open the plan's item in this machine's browser to confirm with your passkey" },
           { flag: '--json', help: 'print the protocol payload instead of the human rendering' },
         ],
       }),
@@ -840,7 +847,7 @@ export default definePlugin({
         args: [{ name: 'id', help: 'the account’s id: a short name you choose' }],
         options: [
           { flag: '--label <text>', help: 'the name you read it by, e.g. "sudo on kirin-box"' },
-          { flag: '--username <text>', help: 'the username (plain text, shown on cards)' },
+          { flag: '--username <text>', help: 'the username (plain text, shown on items)' },
           { flag: '--no-password', help: 'save it without a password for now' },
           { flag: '--domain <host>', help: 'where the sign-in happens, e.g. accounts.google.com (repeatable)' },
           { flag: '--for <host>', help: 'what it is for, e.g. app.vercel.com (repeatable)' },
@@ -1021,7 +1028,7 @@ export default definePlugin({
           { flag: '--label <text>', help: 'what you call it, e.g. "Authy backup" (required, except with --totp)' },
           {
             flag: '-s, --session <id>',
-            help: "with --totp: the session whose card in the app's Inbox confirms it (defaults to the current session; at your own terminal, your most recently active one)",
+            help: "with --totp: the session whose item in the app's Inbox confirms it (defaults to the current session; at your own terminal, your most recently active one)",
           },
           { flag: '--i-understand-totp', help: 'with --totp: skip the typed "yes" after the 2FA warning' },
         ],

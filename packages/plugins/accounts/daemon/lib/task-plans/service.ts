@@ -135,7 +135,7 @@ export class TaskPlanError extends Error {
 export class TaskPlanProofMissing extends Error {
   constructor() {
     super(
-      'approving a sign-in on a task plan needs a passkey confirmation for this one selection, from a paired device',
+      'approving a sign-in on a sign-in plan needs a passkey confirmation for this one selection, from a paired device',
     );
     this.name = 'TaskPlanProofMissing';
   }
@@ -193,7 +193,7 @@ const ownerKey = (caller: Extract<PasteRuleCaller, { kind: 'owner' }>): string =
 
 function requireOwner(caller: PasteRuleCaller): Extract<PasteRuleCaller, { kind: 'owner' }> {
   if (caller.kind !== 'owner')
-    throw new SecureCopyError('forbidden', 'only the owner answers a task plan; a ferret cannot');
+    throw new SecureCopyError('forbidden', 'only the owner answers a sign-in plan; a ferret cannot');
   return caller;
 }
 
@@ -409,7 +409,7 @@ export class TaskPlanService {
       throw new TaskPlanError(
         409,
         TASK_PLAN_ERROR_CODES.passkeyRequired,
-        'approving a task plan needs a passkey, its paste lines too: add a passkey in Settings › Security first (declining needs none)',
+        'approving a sign-in plan needs a passkey, its paste lines too: add a passkey in Settings › Security first (declining needs none)',
       );
     const pins = await this.#pinsFor(plan, selection.lines);
     const canonical = boundSelection(plan, checked.data, pins);
@@ -546,7 +546,7 @@ export class TaskPlanService {
       throw new TaskPlanError(
         409,
         TASK_PLAN_ERROR_CODES.needsPasskey,
-        "allowing a plan's pastes needs your passkey: tick them on the plan's card in an updated Ferretry app, or run fy plan approve. Nothing was allowed",
+        "allowing a plan's pastes needs your passkey: tick them on the plan's item in an updated Ferretry app, or run fy plan approve. Nothing was allowed",
       );
     const answer = await this.stage(caller, sessionId, planId, { lines: [] });
     const settled = answer.outcome === 'answered' ? copyPlanOf(answer.plan) : undefined;
@@ -592,7 +592,7 @@ export class TaskPlanService {
     await this.ports.tell(
       sessionId,
       plan.agendaItemId,
-      `${plan.agendaItemId}: the owner ended ${lineList(ending)} of your task plan; those ask them again.`,
+      `${plan.agendaItemId}: the owner ended ${lineList(ending)} of your sign-in plan; those ask them again.`,
     );
     return narrowed;
   }
@@ -904,7 +904,7 @@ export class TaskPlanService {
       await this.ports.tell(
         plan.sessionId,
         plan.agendaItemId,
-        `${plan.agendaItemId}: the owner ended your task plan; each sign-in and paste asks them again.`,
+        `${plan.agendaItemId}: the owner ended your sign-in plan; each sign-in and paste asks them again.`,
       );
     await this.#auditEnded(ended, cause, undefined, owner === undefined ? { kind: 'host' } : auditActor(owner));
     return ended;
@@ -989,14 +989,14 @@ export class TaskPlanService {
   }
 
   #notFound(): SecureCopyError {
-    return new SecureCopyError('not_found', 'there is no such task plan (a daemon restart forgets plans)');
+    return new SecureCopyError('not_found', 'there is no such sign-in plan (a daemon restart forgets plans)');
   }
 
   #stageGone(): TaskPlanError {
     return new TaskPlanError(
       404,
       TASK_PLAN_ERROR_CODES.stageNotFound,
-      'that task plan selection is not waiting for a passkey: it was approved, dropped or timed out; stage it again',
+      'that sign-in plan selection is not waiting for a passkey: it was approved, dropped or timed out; stage it again',
     );
   }
 
@@ -1093,9 +1093,9 @@ export class TaskPlanService {
 }
 
 const ENDED_NOTES: Readonly<Record<'revoked' | 'expired' | 'session-ended', string>> = {
-  revoked: 'You revoked the task plan.',
-  expired: 'The task plan expired.',
-  'session-ended': 'The task plan ended with its session.',
+  revoked: 'You revoked the sign-in plan.',
+  expired: 'The sign-in plan expired.',
+  'session-ended': 'The sign-in plan ended with its session.',
 };
 
 /** A line once the plan is answered: ticked lines in force with every use left, unticked ones declined. */

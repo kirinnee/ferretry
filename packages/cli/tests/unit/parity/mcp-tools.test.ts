@@ -31,6 +31,7 @@ const NO_MANIFEST_INPUT = [
   'input_wait',
   'account_hint',
   'account_propose',
+  'signin_plan',
   'task_plan',
   'secure_copy',
   'secure_list',
@@ -87,10 +88,10 @@ describe('the MCP tool rows against the manifests’ agent tools', async () => {
     }
   });
 
-  it('should declare and list the two asking tools Accounts answers (account_propose, task_plan)', () => {
+  it('should declare and list the asking tools Accounts answers (account_propose, signin_plan and its old name task_plan)', () => {
     const names = declared.map(tool => tool.name);
     const listed = rows.map(row => row.name);
-    for (const name of ['account_propose', 'task_plan']) {
+    for (const name of ['account_propose', 'signin_plan', 'task_plan']) {
       should(names).containEql(name);
       should(listed).containEql(name);
     }
