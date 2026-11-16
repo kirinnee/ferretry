@@ -19,7 +19,7 @@
 
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { encodeQr, QR_MAX_VERSION, QrEncodeError, qrCodewordCapacity } from '../../../app/lib/qr-code.ts';
+import { localQr, MAX_QR_VERSION, QrEncodeError } from '../../src/qr.ts';
 
 type Mask = (row: number, column: number) => boolean;
 
@@ -56,6 +56,11 @@ const BLOCKS: readonly (readonly [number, number])[] = [
   [9, 4],
   [3, 11],
   [3, 13],
+];
+
+/** Level-M data codewords per version, from ISO/IEC 18004 — the reader's own copy, so a shared table cannot hide a bug. */
+const DATA_CODEWORDS: readonly number[] = [
+  16, 28, 44, 64, 86, 108, 124, 154, 182, 216, 254, 290, 334, 365, 415, 453, 507, 563, 627, 669,
 ];
 
 const alignmentCentres = (version: number): readonly number[] => {
@@ -142,11 +147,11 @@ function readCodewords(modules: readonly (readonly boolean[])[], version: number
 }
 
 /** The text a symbol carries, or `undefined` when this mask is not the one it was built with. */
-function decodeWith(matrix: ReturnType<typeof encodeQr>, mask: Mask): string | undefined {
+function decodeWith(matrix: ReturnType<typeof localQr>, mask: Mask): string | undefined {
   const version = matrix.version;
   const stream = readCodewords(matrix.modules, version, mask);
   const [short, long] = BLOCKS[version - 1] ?? [1, 0];
-  const shortLength = Math.floor(qrCodewordCapacity(version).data / (short + long));
+  const shortLength = Math.floor((DATA_CODEWORDS[version - 1] ?? 0) / (short + long));
   const lengths = Array.from({ length: short + long }, (_unused, index) =>
     index < short ? shortLength : shortLength + 1,
   );
@@ -180,7 +185,7 @@ function decodeWith(matrix: ReturnType<typeof encodeQr>, mask: Mask): string | u
  * the mask off the bottom of the value gets a check bit and decodes with the wrong mask — which is the
  * mistake worth having a comment about, because the symptom is a symbol that "sometimes" decodes.
  */
-function declaredFormat(matrix: ReturnType<typeof encodeQr>): { readonly level: number; readonly mask: number } {
+function declaredFormat(matrix: ReturnType<typeof localQr>): { readonly level: number; readonly mask: number } {
   let value = 0;
   for (let index = 0; index < 15; index += 1) {
     const bit =
@@ -200,19 +205,19 @@ function declaredFormat(matrix: ReturnType<typeof encodeQr>): { readonly level: 
 }
 
 /** What a scanner reads: the mask the symbol DECLARES, then the bytes under it. */
-function decode(matrix: ReturnType<typeof encodeQr>): string | undefined {
+function decode(matrix: ReturnType<typeof localQr>): string | undefined {
   const mask = MASKS[declaredFormat(matrix).mask];
   return mask === undefined ? undefined : decodeWith(matrix, mask);
 }
 
 const PAIRING_URL = `https://ferretry.pages.dev/pair#v1;url=http%3A%2F%2F127.0.0.1%3A48291;code=7F3K-Q2ND;fp=fy_daemon_${'a'.repeat(43)}`;
 
-describe('the QR encoder', () => {
+describe('the shared QR encoder, read back by a decoder written from the standard', () => {
   it('should encode a pairing URL a scanner reads back exactly', () => {
     // THE TEST THAT MATTERS. A credential that survives the round trip is the whole feature; a symbol
     // that looks right and decodes to nothing is the failure a person blames their camera for.
     // Arrange, Act
-    const matrix = encodeQr(PAIRING_URL);
+    const matrix = localQr(PAIRING_URL);
 
     // Assert
     should(decode(matrix)).equal(PAIRING_URL);
@@ -234,7 +239,7 @@ describe('the QR encoder', () => {
     }) as typeof globalThis.fetch;
     try {
       // Act
-      const matrix = encodeQr(PAIRING_URL);
+      const matrix = localQr(PAIRING_URL);
 
       // Assert — a whole symbol, synchronously, carrying the URL, and nobody else ever saw it.
       should(decode(matrix)).equal(PAIRING_URL);
@@ -252,13 +257,13 @@ describe('the QR encoder', () => {
     // Act, Assert
     for (const length of lengths) {
       const value = 'x'.repeat(length);
-      should(decode(encodeQr(value))).equal(value, `length ${String(length)} did not survive`);
+      should(decode(localQr(value))).equal(value, `length ${String(length)} did not survive`);
     }
   });
 
   it('should choose the smallest version that fits and grow only when it must', () => {
     // Arrange, Act
-    const versions = [1, 14, 15, 100, 660].map(length => encodeQr('x'.repeat(length)).version);
+    const versions = [1, 14, 15, 100, 660].map(length => localQr('x'.repeat(length)).version);
 
     // Assert — 14 bytes fit version 1 at level M, 15 do not.
     should(versions).deepEqual([1, 1, 2, 6, 20]);
@@ -272,7 +277,7 @@ describe('the QR encoder', () => {
     const value = 'café ☕ 日本語';
 
     // Act
-    const matrix = encodeQr(value);
+    const matrix = localQr(value);
 
     // Assert
     should(decode(matrix)).equal(value);
@@ -280,7 +285,7 @@ describe('the QR encoder', () => {
 
   it('should place the three finder patterns and the timing rows where a scanner looks', () => {
     // Arrange, Act
-    const { modules, size } = encodeQr(PAIRING_URL);
+    const { modules, size } = localQr(PAIRING_URL);
     const finder = (row: number, column: number): boolean[] =>
       [0, 1, 2, 3, 4, 5, 6].map(offset => modules[row + offset]?.[column + 3] ?? false);
 
@@ -299,8 +304,8 @@ describe('the QR encoder', () => {
     // No cache, no clock, no module-scope state — so a screenshot and a test agree, and no live
     // credential can survive in a memo after the modal that showed it closed.
     // Arrange, Act
-    const first = encodeQr(PAIRING_URL);
-    const second = encodeQr(PAIRING_URL);
+    const first = localQr(PAIRING_URL);
+    const second = localQr(PAIRING_URL);
 
     // Assert
     should(first).deepEqual(second);
@@ -308,26 +313,8 @@ describe('the QR encoder', () => {
 
   it('should refuse an empty value and one too long to encode', () => {
     // Refusing beats truncating: half a pairing URL encodes perfectly and pairs nothing.
-    // Arrange
-    const tooLong = 'x'.repeat(qrCodewordCapacity(QR_MAX_VERSION).data);
-
-    // Act, Assert
-    should(() => encodeQr('')).throw(QrEncodeError);
-    should(() => encodeQr(tooLong)).throw(/larger than version 20/u);
-  });
-
-  it('should hold the level-M capacity table the standard publishes', () => {
-    // The counts are DERIVED from the module geometry and the block table, so this is the assertion that
-    // catches a mis-transcribed row: a wrong capacity shifts every codeword after it.
-    // Arrange, Act, Assert
-    should([1, 2, 6, 8, 10, 15, 20].map(version => qrCodewordCapacity(version))).deepEqual([
-      { data: 16, total: 26 },
-      { data: 28, total: 44 },
-      { data: 108, total: 172 },
-      { data: 154, total: 242 },
-      { data: 216, total: 346 },
-      { data: 415, total: 655 },
-      { data: 669, total: 1085 },
-    ]);
+    should(MAX_QR_VERSION).equal(20);
+    should(() => localQr('')).throw(QrEncodeError);
+    should(() => localQr('x'.repeat(DATA_CODEWORDS[MAX_QR_VERSION - 1] ?? 0))).throw(QrEncodeError);
   });
 });

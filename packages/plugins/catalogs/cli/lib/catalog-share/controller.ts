@@ -1,3 +1,4 @@
+import { QrEncodeError } from '@ferretry/std/qr';
 import {
   CATALOG_SHARE_EXPIRIES,
   CATALOG_SHARE_MULTI_CAP_DEFAULT,
@@ -107,7 +108,7 @@ export class ShareController {
       this.deps.out.success(JSON.stringify(mint, null, 2));
       return;
     }
-    const qr = await this.deps.qr.encode(mint.link, options.large === true ? 'large' : 'compact');
+    const qr = await this.#qrOrNothing(mint.link, options.large === true ? 'large' : 'compact');
     this.deps.screen.write(
       renderMint({
         mint,
@@ -118,6 +119,21 @@ export class ShareController {
         binaryName: this.deps.binaryName,
       }),
     );
+  }
+
+  /**
+   * The QR for a link, or nothing when the link is too long to encode.
+   *
+   * The mint has already happened and the link is live and shown only once, so a link that will not encode prints
+   * without a code rather than aborting after the fact. Anything but `QrEncodeError` is a bug and propagates.
+   */
+  async #qrOrNothing(link: string, size: 'compact' | 'large'): Promise<string | undefined> {
+    try {
+      return await this.deps.qr.encode(link, size);
+    } catch (cause) {
+      if (cause instanceof QrEncodeError) return undefined;
+      throw cause;
+    }
   }
 
   async shares(options: ShareCommandOptions): Promise<void> {

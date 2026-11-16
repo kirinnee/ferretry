@@ -33,7 +33,7 @@
 import { CAPABILITY_AXES, CAPABILITY_NAMES, type CapabilityName } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
-import { PanelSlot } from '@ferretry/app';
+import { localQr, PanelSlot, QrEncodeError, type QrMatrix } from '@ferretry/app';
 import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
 import { DEVICE_NOTE_SLOT } from './device-note-slot.ts';
 import {
@@ -66,7 +66,6 @@ import {
   revokeConsequence,
   SELF_NARROW_NOTE,
 } from '../../lib/pairing-invite.ts';
-import { encodeQr, QrEncodeError, type QrMatrix } from '../../lib/qr-code.ts';
 import { usePairingScreenMarker } from '../../lib/pairing-screen-marker.ts';
 import {
   changeDeviceGrants,
@@ -95,7 +94,7 @@ interface HeldInvite {
 function InviteSymbol({ pairUrl }: { readonly pairUrl: string }) {
   let matrix: QrMatrix;
   try {
-    matrix = encodeQr(pairUrl);
+    matrix = localQr(pairUrl);
   } catch (cause) {
     return (
       <p

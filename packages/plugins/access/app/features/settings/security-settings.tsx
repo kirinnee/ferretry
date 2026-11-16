@@ -35,7 +35,7 @@ import {
   unsupportedSentence,
   webAuthnSupported,
 } from '../../lib/passkey-panel.ts';
-import type { CredentialsPort } from '../../lib/passkeys.ts';
+import type { CredentialsPort } from '@ferretry/app';
 import { addPasskeyCeremony, browserCredentials } from '../../lib/step-up-ceremony.ts';
 import { fetchPasskeys, type StepUpClient } from '../../lib/step-up-client.ts';
 import { type DaemonConnection, useDaemonClient } from '../../shell-grants.ts';
