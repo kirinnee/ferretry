@@ -88,7 +88,7 @@ const REFUSAL_CODE_SET: ReadonlySet<string> = new Set(REFUSAL_CODES);
 export const REFUSAL_SENTENCES: Readonly<Record<RefusalCode, string>> = {
   held: 'This is held right now because the owner just typed a private value into it.',
   quarantined: 'This terminal is held after a secret was typed into it.',
-  input_pending: 'The owner is filling in an input card for this; wait for it.',
+  input_pending: 'The owner is filling in an input for this; wait for it.',
   holds_unavailable: 'The hold check is unavailable, so nothing may act here.',
   malformed_result: 'The tool answered something the act runner does not accept.',
   unminted_id: 'The tool answered an id the daemon did not issue.',

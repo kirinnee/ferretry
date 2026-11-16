@@ -52,7 +52,7 @@ test('V-0257 a missing required program fails; a missing capability or optional 
   expect(by('gh')).toMatchObject({
     state: 'warn',
     requirement: 'optional',
-    fix: "The board's GitHub watcher cannot read PR state, link PRs or find releases; cards keep their PR state unknown.",
+    fix: "The board's GitHub watcher cannot read PR state, link PRs or find releases; tasks keep their PR state unknown.",
   });
   expect(by('jq')).toMatchObject({ requirement: 'optional' });
   expect(by('nix-store')).toMatchObject({ requirement: 'optional' });
