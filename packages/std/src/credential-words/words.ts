@@ -768,10 +768,11 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   // `--password=$X` (no one-letter flag in it).
   const gluedFlagOwnsWord = glued !== null && PLAIN_FLAG.test(gluedFlag) && tests.namesSecret(gluedFlag);
   const stuckName = gluedFlagOwnsWord ? '' : (STUCK_FLAG_NAMES.get(stuckFlag) ?? '');
-  // A quote right after the letter can only open a value (`-p'a b'`), so a letter with a known meaning hides it however
-  // short it is: no longer flag name has a quote in it.
-  const stuckHidden =
-    stuck !== null && (secretValue(stuckName, stuckValue, tests) || (stuckName !== '' && /^["']/u.test(stuckValue)));
+  // A quoted value with a blank in it stuck to the letter (`-p'a b'`) is read as a longer flag glued to a value by the
+  // other reading (`-p'a` and `b'`); a letter with a known meaning hides it however short it is. A quoted value with no
+  // blank (`-p'short'`, `-p'$DB_PASSWORD'`) is judged by its value like any other.
+  const quotedStuck = stuckName !== '' && QUOTED.test(stuckValue) && /\s/u.test(unquoted(stuckValue));
+  const stuckHidden = stuck !== null && (secretValue(stuckName, stuckValue, tests) || quotedStuck);
   if (glued !== null && secretValue(gluedFlag, gluedValue, tests)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).
