@@ -1,7 +1,7 @@
 import type { Harness as HarnessFamily } from '../view/session-base.ts';
 import type { FerretView } from '../view/ferret-view.ts';
 import type { RuntimeModelCatalog, RuntimeModelChoice } from '../view/runtime-control.ts';
-import type { DeliveryOutcome, FormKey } from './runner.ts';
+import type { DeliveryOutcome, FormKey, PickerKey } from './runner.ts';
 
 /**
  * A harness's own part of changing what a RUNNING ferret runs: how its model, reasoning level and fast mode are switched,
@@ -38,8 +38,10 @@ export interface RuntimeSwitchPane {
    * nothing could be typed.
    */
   command(text: string): Promise<DeliveryOutcome>;
-  /** One closed key at the pane (a menu row's digit included). Rejects when it could not be pressed. */
+  /** One closed navigation key at the pane. Rejects when it could not be pressed. */
   key(key: FormKey): Promise<void>;
+  /** One numbered picker row's digit, from its own closed set (never a navigation key). Rejects when it could not be pressed. */
+  pickerKey(key: PickerKey): Promise<void>;
   /** Stops the ferret. */
   stop(): Promise<void>;
 }

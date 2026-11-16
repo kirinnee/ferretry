@@ -12,17 +12,17 @@
  * through the harness seam (so Vault's input holds apply and a hold types nothing).
  *
  * WHO MAY SWITCH WHOSE: asking the seam for the ferret is the authorization. A person (no `caller`) reaches any ferret; a
- * ferret reaches itself and its lead and helpers, and `FerretsService.harness` refuses anyone else with a 403 `forbidden`
+ * ferret reaches itself and its helpers (its descendants), never its lead, and `FerretsService.harness` refuses anyone else with a 403 `forbidden`
  * before anything else is read. It is checked here, not in the route, so every transport gets the same rule.
  */
 import {
-  FORM_KEYS,
+  PICKER_KEYS,
   RuntimeControlError,
   type FerretHarness,
   type FerretId,
   type FerretView,
-  type FormKey,
   type HarnessRuntimeSwitch,
+  type PickerKey,
   type RuntimeControlApi,
   type RuntimeControlRequest,
   type RuntimeModelCatalog,
@@ -102,6 +102,12 @@ export function ferretRuntimePane(seam: FerretHarness, stop: () => Promise<void>
       const pressed = await form.key(key);
       if (!pressed.ok) throw new Error(`the key could not be pressed (${refusalSentence(pressed.error)})`);
     },
+    pickerKey: async key => {
+      const press = form?.pickerKey;
+      if (form === undefined || press === undefined) return unavailable();
+      const pressed = await press(key);
+      if (!pressed.ok) throw new Error(`the key could not be pressed (${refusalSentence(pressed.error)})`);
+    },
     stop,
   };
 }
@@ -139,16 +145,16 @@ const NO_LIVE_CATALOG: CodexRuntimeCatalogCache = {
  * The picker transport over ONE ferret's pane: open the picker with the harness's own command, read a frame, press a row's
  * digit. It does the pane's part only. Whether the row a digit is aimed at is STILL on screen is the harness's own
  * knowledge of its picker, so a harness's `pickerDriver` wraps this and proves the row before it lets a digit through.
- * Only the closed `FORM_KEYS` can be pressed.
+ * Only the closed `PICKER_KEYS` can be pressed.
  */
 function pickerTransportOf(pane: RuntimeSwitchPane): RuntimePickerTransport {
   return () => ({
     openPicker: async () => await pane.command(HARNESS_PICKER_COMMAND),
     readPane: async () => await pane.observe(),
     sendKey: async key => {
-      if (!(FORM_KEYS as readonly string[]).includes(key))
+      if (!(PICKER_KEYS as readonly string[]).includes(key))
         throw new Error(`${key} is not a key a picker is driven with`);
-      await pane.key(key as FormKey);
+      await pane.pickerKey(key as PickerKey);
     },
   });
 }

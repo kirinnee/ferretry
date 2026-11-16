@@ -247,6 +247,12 @@ export interface Runner {
    * {@link RunnerDeliveryFailure} as `deliver` does. Absent: the form cannot be driven.
    */
   formKey?(handle: RunnerHandle, key: FormKey): Promise<void>;
+  /**
+   * Additive (live model switch): ONE row digit of {@link PICKER_KEYS} typed at the pane for a numbered model picker,
+   * guarded exactly as {@link Runner.formKey} is. A SEPARATE member, never a widening of {@link FORM_KEYS}. Absent: a
+   * numbered picker cannot be driven.
+   */
+  pickerKey?(handle: RunnerHandle, key: PickerKey): Promise<void>;
   /** Additive (structured questions): `text` pasted into the pane as one bracketed paste; guarded as {@link Runner.formKey}. */
   formPaste?(handle: RunnerHandle, text: string): Promise<void>;
   /**
@@ -330,31 +336,21 @@ export type RunnerComposerCleared = 'cleared' | 'absent' | 'foreign' | 'stuck';
 export type RunnerComposerSubmitted = 'submitted' | 'holding' | 'absent';
 
 /**
- * The closed set of keys a structured-question form and a model picker are driven with (today's v4 drivers send exactly
- * these: the navigation keys and a menu row's digit). A key outside it cannot be named, so the form seam can never be
- * used to type an arbitrary key: no `C-c`, no `y`, no letter.
+ * The closed set of keys a structured-question form is driven with (today's v4 driver sends exactly these). A key
+ * outside it cannot be named, so the form seam can never be used to type an arbitrary key: no `C-c`, no `y`, and NO
+ * DIGIT: a digit CONFIRMS a permission prompt's row the moment it is pressed, so no navigation-only caller can name one.
  */
-export const FORM_KEYS = [
-  'Enter',
-  'Escape',
-  'Tab',
-  'Up',
-  'Down',
-  'Left',
-  'Right',
-  'Space',
-  // A menu row's own digit: a model picker chooses a row by its number.
-  '1',
-  '2',
-  '3',
-  '4',
-  '5',
-  '6',
-  '7',
-  '8',
-  '9',
-] as const;
+export const FORM_KEYS = ['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Space'] as const;
 export type FormKey = (typeof FORM_KEYS)[number];
+
+/**
+ * The closed set of keys a numbered model picker is driven with: the digit of the row to choose. It is a set of its OWN,
+ * pressed through its own runner member ({@link Runner.pickerKey}), so a caller that drives a form or a permission prompt
+ * through {@link FORM_KEYS} can never name a digit. Its one caller reads the picker's rows off the pane and re-verifies the
+ * row immediately before each press.
+ */
+export const PICKER_KEYS = ['1', '2', '3', '4', '5', '6', '7', '8', '9'] as const;
+export type PickerKey = (typeof PICKER_KEYS)[number];
 
 /**
  * ONE capture of a ferret's pane for the structured-question driver (today's `PaneState`): the visible screen and the

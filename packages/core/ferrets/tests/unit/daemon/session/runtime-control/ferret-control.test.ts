@@ -53,6 +53,10 @@ function seamOf(screen: () => Screen, typed: string[], pressed: string[], outcom
         pressed.push(key);
         return { ok: true as const, value: undefined };
       },
+      pickerKey: async (key: string) => {
+        pressed.push(key);
+        return { ok: true as const, value: undefined };
+      },
       paste: async () => ({ ok: true as const, value: undefined }),
     },
   } as unknown as FerretHarness;
@@ -207,7 +211,7 @@ describe('the runtime control over a ferret', () => {
       should(w.typed).eql(['/model']);
     });
 
-    it('refuses a ferret that is neither the target nor its lead or helper, before anything is read or typed', async () => {
+    it('refuses a ferret that is neither the target nor an ancestor of it, before anything is read or typed', async () => {
       const w = world();
       const refused = await refusal(w.control.control(STRANGER, 's1', MODEL, 'request-1'));
       should(refused).be.instanceOf(ApiError);
@@ -413,11 +417,12 @@ describe('a ferret pane as a harness reaches it', () => {
     should(await paneOf(IDLE, 'turn-started').pane.command('/model')).equal('turn-started');
   });
 
-  it('presses a key through the form seam and stops through the stop it was given', async () => {
+  it('presses a navigation key and a picker row digit through their own seam members, and stops through the stop it was given', async () => {
     const { pane, pressed, stopped } = paneOf(IDLE);
-    await pane.key('3');
+    await pane.key('Tab');
+    await pane.pickerKey('3');
     await pane.stop();
-    should(pressed).eql(['3']);
+    should(pressed).eql(['Tab', '3']);
     should(stopped()).equal(1);
   });
 
@@ -427,11 +432,13 @@ describe('a ferret pane as a harness reaches it', () => {
       form: {
         capture: async () => ({ ok: false as const, error: {} }),
         key: async () => ({ ok: false as const, error: 'nothing' }),
+        pickerKey: async () => ({ ok: false as const, error: 'nothing' }),
       },
     } as unknown as FerretHarness;
     const pane = ferretRuntimePane(seam, async () => undefined);
     should(((await refusal(pane.observe())) as Error).message).match(/it could not be done/u);
     should(((await refusal(pane.key('Enter'))) as Error).message).match(/it could not be done/u);
+    should(((await refusal(pane.pickerKey('3'))) as Error).message).match(/it could not be done/u);
   });
 
   it('says so when it could not type: a refusal reads as one sentence with its closed code, and never pane text', async () => {
@@ -444,5 +451,15 @@ describe('a ferret pane as a harness reaches it', () => {
     should((typed as Error).message).match(/refused: held/u);
     const read = await refusal(pane.observe());
     should((read as Error).message).match(/runner/u);
+    should(((await refusal(pane.pickerKey('3'))) as Error).message).match(/runner/u);
+  });
+
+  it('has no picker key when the runner offers none: the form is there, the digit member is not', async () => {
+    const seam = {
+      deliver: async () => ({ ok: true as const, value: 'handled-local' as const }),
+      form: {},
+    } as unknown as FerretHarness;
+    const pane = ferretRuntimePane(seam, async () => undefined);
+    should(((await refusal(pane.pickerKey('3'))) as Error).message).match(/runner/u);
   });
 });
