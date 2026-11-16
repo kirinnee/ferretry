@@ -6,22 +6,48 @@
  *
  * - `--name=value` is a value. `--name value` is a value when `value` does not start with `-`.
  * - `--name` followed by another option, by `--` or by nothing is a switch (`true`). `--no-name` is `false`.
+ * - An option the verb DECLARES a switch (its manifest flag names no value: `--allow-scratch`, not `--runtime <name>`)
+ *   never takes the next word, wherever it stands: `--allow-scratch "do it"` is the switch and the word `do it`. Only an
+ *   attached `--name=value` gives it a value (`--allow-scratch=false`). The declaration is the verb's own
+ *   (`declaredSwitches`), not a list kept here.
  * - A negative number (`-1`, `-0.5`, `-300,0`) is a word, never an option: `--pages -1` has the value `-1`.
  * - A repeated option becomes a list, in the order given.
  * - `--` ends options; everything after it is positional.
- * - Write positionals before options, or end options with `--`, when a switch is followed by a positional. A verb that
- *   declares an option a switch still gets that word back where it was written (`swallowed`).
+ * - For a verb that declares no options (or an option it does not declare), write positionals before options, or end
+ *   options with `--`, when a switch is followed by a positional. A verb whose own reader knows an option is a switch
+ *   still gets that word back where it was written (`swallowed`).
  *
  * Pure: no IO, no globals.
  */
-import type { SwallowedWord, VerbInvocation } from '@ferretry/kernel/manifest';
+import type { SwallowedWord, VerbInvocation, VerbOptionDecl } from '@ferretry/kernel/manifest';
 
 type OptionValue = string | boolean | readonly string[];
 
 /** A negative number (`-1`, `-0.5`, `-300,0`) is a word: an option's name never starts with a digit. */
 const isWord = (token: string): boolean => !token.startsWith('-') || token === '-' || /^-\d/u.test(token);
 
-export function parseArgs(tokens: readonly string[]): VerbInvocation {
+/** The names one declared flag answers to: `-s, --session <id>` is `s` and `session`. */
+const flagNames = (flag: string): readonly string[] =>
+  flag
+    .split(/[|,]/u)
+    .map(part => (part.trim().split(/\s+/u)[0] ?? '').replace(/^-{1,2}/u, ''))
+    .filter(name => name !== '');
+
+/**
+ * The option names a verb declares as SWITCHES: a flag whose declaration names no value (`--allow-scratch`, not
+ * `--runtime <name>` or `--since [dur]`). Read from the verb's manifest options, so a new switch is a declaration and
+ * not an edit here.
+ */
+export function declaredSwitches(options: readonly Pick<VerbOptionDecl, 'flag'>[] | undefined): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const { flag } of options ?? []) {
+    if (/[<[]/u.test(flag)) continue;
+    for (const name of flagNames(flag)) names.add(name);
+  }
+  return names;
+}
+
+export function parseArgs(tokens: readonly string[], switches: ReadonlySet<string> = new Set()): VerbInvocation {
   const args: string[] = [];
   const options: Record<string, OptionValue> = {};
   const swallowed: SwallowedWord[] = [];
@@ -54,7 +80,7 @@ export function parseArgs(tokens: readonly string[]): VerbInvocation {
       continue;
     }
     const next = tokens[index + 1];
-    if (next !== undefined && isWord(next)) {
+    if (!switches.has(body) && next !== undefined && isWord(next)) {
       put(body, next);
       swallowed.push({ option: body, word: next, at: args.length });
       index += 1;

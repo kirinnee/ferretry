@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { optionOn, optionText, parseArgs } from '../../src/lib/argv.ts';
+import { declaredSwitches, optionOn, optionText, parseArgs } from '../../src/lib/argv.ts';
 
 describe('parseArgs', () => {
   it('should split positionals from options', () => {
@@ -80,5 +80,51 @@ describe('parseArgs: the order every option was written in', () => {
   it('should say nothing when no option name was repeated (the order is then the order of the options)', () => {
     should(parseArgs(['a', '--', '--b']).written).be.undefined();
     should(parseArgs(['-s', 'a', '--session', 'b']).written).be.undefined();
+  });
+});
+
+describe('parseArgs: a declared switch never takes a value', () => {
+  const NEW = declaredSwitches([
+    { flag: '--runtime <name>' },
+    { flag: '--auto' },
+    { flag: '--allow-scratch' },
+    { flag: '-f, --force' },
+    { flag: '--since [dur]' },
+  ]);
+
+  it('should read the declared switches from the flags that name no value', () => {
+    should([...NEW].sort()).deepEqual(['allow-scratch', 'auto', 'f', 'force']);
+    should([...declaredSwitches(undefined)]).deepEqual([]);
+  });
+
+  it('should keep the prompt as a word when the switch is written BEFORE it', () => {
+    const parsed = parseArgs(['--allow-scratch', 'say hello', '--runtime', 'rt'], NEW);
+    should(parsed.args).deepEqual(['say hello']);
+    should(parsed.options).deepEqual({ 'allow-scratch': true, runtime: 'rt' });
+    should(parsed.swallowed).be.undefined();
+  });
+
+  it('should keep the prompt as a word when the switch is written AFTER it', () => {
+    const parsed = parseArgs(['say hello', '--allow-scratch', '--runtime', 'rt'], NEW);
+    should(parsed.args).deepEqual(['say hello']);
+    should(parsed.options).deepEqual({ 'allow-scratch': true, runtime: 'rt' });
+  });
+
+  it('should give a switch a value only when it is attached: --allow-scratch=false', () => {
+    const parsed = parseArgs(['--allow-scratch=false', 'say hello'], NEW);
+    should(parsed.args).deepEqual(['say hello']);
+    should(parsed.options).deepEqual({ 'allow-scratch': 'false' });
+    should(optionOn(parsed, 'allow-scratch')).be.false();
+    should(optionOn(parseArgs(['--allow-scratch=true'], NEW), 'allow-scratch')).be.true();
+  });
+
+  it('should still let a declared VALUE option take its word, and a short switch stand alone', () => {
+    const parsed = parseArgs(['-f', 'brief', '--runtime', 'rt', '--since', '7d'], NEW);
+    should(parsed.args).deepEqual(['brief']);
+    should(parsed.options).deepEqual({ f: true, runtime: 'rt', since: '7d' });
+  });
+
+  it('should read an undeclared option the old way (a verb that declares nothing keeps the fixed rule)', () => {
+    should(parseArgs(['--allow-scratch', 'say hello']).options).deepEqual({ 'allow-scratch': 'say hello' });
   });
 });
