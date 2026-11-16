@@ -1,0 +1,15 @@
+kind	path	limit	expires	reason
+composition	cli/index.ts	-	-	the Ferrets CLI verbs wiring
+composition	contract/app-hooks.ts	-	-	the app hooks a plugin may implement (barrel of the generated list)
+composition	contract/hooks.ts	-	-	the launch and sitrep hooks (barrel of the generated list)
+composition	contract/index.ts	-	-	the contract barrel every consumer imports
+composition	contract/kinds.ts	-	-	the harness, runner and login kinds (barrel of the generated list)
+composition	contract/port.ts	-	-	the FerretsApi port and its token
+composition	contract/slots.ts	-	-	the app slots Ferrets offers (barrel of the generated list)
+composition	contract/state.ts	-	-	the declared state files (barrel of the generated list)
+composition	contract/testing/index.ts	-	-	the Ferrets fake every consumer test uses
+composition	daemon/index.ts	-	-	implementDaemon shell: the composition root of the Ferrets daemon
+composition	daemon/lib/ferrets/service.ts	-	-	the lifecycle class; H5 U4/U6 slice it, a lifecycle change still edits it
+composition	daemon/modules/session-files.ts	-	-	the session file layout shared by every slice
+composition	manifest.ts	-	-	the Ferrets manifest shell: identity, needs, provides, privacy
+composition	ports-pending.json	-	-	the pending-port ledger; closing ruled lines is exempt

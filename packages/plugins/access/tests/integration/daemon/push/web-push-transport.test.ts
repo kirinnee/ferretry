@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import type { BrowserPushSubscription } from '../../../../daemon/lib/wire.ts';
 import should from 'should';
-import { WebPushFetchTransport } from '../../../../daemon/adapters/push/index.ts';
+import { WebPushFetchTransport } from '../../../../daemon/adapters/push/web-push-transport.ts';
 import type { VapidSigner } from '../../../../daemon/adapters/push/webcrypto-vapid-keys.ts';
 
 /**

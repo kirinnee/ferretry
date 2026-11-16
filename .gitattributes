@@ -12,3 +12,8 @@
 packages/core/ferrets/contract/generated/hooks.ts merge=union
 packages/core/ferrets/contract/generated/kinds.ts merge=union
 packages/core/ferrets/contract/generated/ferrets-api.ts merge=union
+
+# Every package's composition.tsv (scripts/ci/lib/composition.ts): a header, then one entry per line, sorted. Nothing but entries,
+# so two features' adds in the same gap keep both lines; the `composition` check (scripts/validate/composition.ts) then says if the
+# two are out of order. No slash in the pattern, so it matches in every folder and at the repository root.
+composition.tsv merge=union

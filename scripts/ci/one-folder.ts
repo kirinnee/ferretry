@@ -71,14 +71,18 @@ export function homeLine(body: string): readonly string[] | undefined {
 const LEADING_PATH = /^\s*`([^`]+)`\s*(?:,|\+|\band\b)?\s*/;
 const BULLET = /^\s*(?:[-*+]|\d+[.)])\s+(.*)$/;
 
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, match => `\\${match}`);
+
 /**
- * The entries under `## Outside files`: one bullet per path or glob (or several backticked ones before the reason),
- * `path: reason`, `path - reason`, `path — reason`. A heading is only the heading when it is exactly that title.
- * Returns undefined when the body has no such heading.
+ * The entries under the `## <title>` heading of a PR body: one bullet per path or glob (or several backticked ones
+ * before the reason), `path: reason`, `path - reason`, `path — reason`. A heading is only the heading when it is exactly
+ * that title. Returns undefined when the body has no such heading. The one parser every body section shares
+ * (`## Outside files` here, `## Contract change` in composition-guard.ts).
  */
-export function outsideEntries(body: string): readonly OutsideEntry[] | undefined {
+export function sectionEntries(body: string, title: string): readonly OutsideEntry[] | undefined {
   const lines = stripComments(body).split(/\r?\n/);
-  const start = lines.findIndex(line => /^##[ \t]+Outside files[ \t]*#*[ \t]*$/i.test(line));
+  const heading = new RegExp(`^##[ \\t]+${escapeRegExp(title)}[ \\t]*#*[ \\t]*$`, 'i');
+  const start = lines.findIndex(line => heading.test(line));
   if (start < 0) return undefined;
   const entries: OutsideEntry[] = [];
   for (const line of lines.slice(start + 1)) {
@@ -103,8 +107,12 @@ export function outsideEntries(body: string): readonly OutsideEntry[] | undefine
   return entries;
 }
 
+/** The entries under `## Outside files`; undefined when the body has no such heading. */
+export const outsideEntries = (body: string): readonly OutsideEntry[] | undefined =>
+  sectionEntries(body, 'Outside files');
+
 /** A reason that says something: at least three characters of which one is a letter or digit. */
-const hasReason = (reason: string): boolean => reason.length >= 3 && /[\p{L}\p{N}]/u.test(reason);
+export const hasReason = (reason: string): boolean => reason.length >= 3 && /[\p{L}\p{N}]/u.test(reason);
 
 const hasWildcard = (pattern: string): boolean => /[*?[\]{}]/.test(pattern);
 

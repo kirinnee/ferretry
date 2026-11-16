@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { ensureDom, interact, mount } from '@ferretry/app/testing';
-import { devicePreference } from '../../../app/lib/device-preference.ts';
+import { devicePreference } from '../../../src/storage/device-preference.ts';
+import { ensureDom, interact, mount } from '../../../src/testing/index.ts';
 
 ensureDom();
 

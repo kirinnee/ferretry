@@ -109,6 +109,12 @@ class Enricher
     // but never mutate them
 ```
 
+### OCP applied to the files themselves
+
+A feature adds files and lines; it never rewrites shared code. Registries are merge-safe by construction, and CI enforces
+it (the composition guard and One Folder). The rule, the measurements and how to add a feature are in
+[Architecture, "A feature adds files and lines; it never rewrites shared code"](../architecture/index.md#a-feature-adds-files-and-lines-it-never-rewrites-shared-code).
+
 ---
 
 ## L -- Liskov Substitution Principle (LSP)

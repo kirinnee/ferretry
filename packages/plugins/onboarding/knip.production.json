@@ -1,5 +1,4 @@
 {
   "entry": [],
-  "project": ["**/*.{ts,tsx}", "!tests/**"],
-  "ignore": ["app/landing-geometry.ts"]
+  "project": ["**/*.{ts,tsx}", "!tests/**"]
 }

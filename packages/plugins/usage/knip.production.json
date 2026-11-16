@@ -1,10 +1,5 @@
 {
   "entry": [],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
-  "ignore": [
-    "app/lib/move-triggers.ts",
-    "daemon/adapters/usage/index.ts",
-    "daemon/adapters/usage/provider-quota/index.ts",
-    "daemon/lib/performance/sampler-tee.ts"
-  ]
+  "ignore": ["app/lib/move-triggers.ts", "daemon/lib/performance/sampler-tee.ts"]
 }

@@ -21,6 +21,7 @@ import { check as actRunner } from '../validate/act-runner.ts';
 import { check as afterMerge } from '../validate/after-merge.ts';
 import { check as appHooks } from '../validate/app-hooks.ts';
 import { check as bannedGlobals } from '../validate/banned-globals.ts';
+import { check as composition } from '../validate/composition.ts';
 import { check as contextImports } from '../validate/context-imports.ts';
 import { check as contractConsumes } from '../validate/contract-consumes.ts';
 import { check as contractGraph } from '../validate/contract-graph.ts';
@@ -74,6 +75,7 @@ export const CHECKS: readonly Check[] = [
   oneFormat,
   noCompat,
   noMacros,
+  composition,
   words,
   glossary,
   vocabulary,
