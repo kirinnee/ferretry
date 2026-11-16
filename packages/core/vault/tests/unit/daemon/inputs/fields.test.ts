@@ -348,8 +348,8 @@ describe('a card of several fields', () => {
     );
 
     should(missing.message).equal('fill every field before Send: password is empty');
-    should(unknown.message).equal('that field is not on this card');
-    should(bare.message).equal('this card asks for several values: send each by its field');
+    should(unknown.message).equal('that field is not on this input');
+    should(bare.message).equal('this input asks for several values: send each by its field');
     should(writes).eql([]);
   });
 
@@ -590,7 +590,7 @@ describe('a card of several fields', () => {
 
     const error = await refused(service.deliver(SESSION, request.id, both(request.observedDigest ?? ''), HOST));
 
-    should(error.message).equal('what is on the page is no longer what the card showed; nothing was typed');
+    should(error.message).equal('what is on the page is no longer what the input showed; nothing was typed');
     should(writes).eql([]);
   });
 
@@ -719,7 +719,7 @@ describe('review regressions: a card of several fields', () => {
     const foreign = await refused(service.raise('mvv6b4qw-0000other', { ...LOGIN, chain: 'A1' as AgendaId }));
 
     should(unknown.message).equal(
-      'chain names A9, which is not an input request of this session; raise this card without chain',
+      'chain names A9, which is not an input request of this session; raise this input without chain',
     );
     should(foreign.code).equal('bad_request');
     should(await service.list(HOST)).have.length(1);
@@ -892,7 +892,7 @@ describe('when the page changes under the card (#B100)', () => {
     should(error.code).equal('conflict');
     should(error.reason).equal('target_rebound');
     should(error.message).equal(
-      'the page changed since the card was drawn, but it is the same field: Ferretry looked again and redrew the card; check it and send again. Nothing was typed',
+      'the page changed since the input was drawn, but it is the same field: Ferretry looked again and redrew the input; check it and send again. Nothing was typed',
     );
     should(card?.observed).eql(RERENDERED);
     should(card?.pictured).equal(true);

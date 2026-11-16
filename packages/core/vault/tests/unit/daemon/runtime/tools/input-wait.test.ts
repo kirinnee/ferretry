@@ -121,7 +121,7 @@ describe('the input_wait tool: what it asks and refuses', () => {
     ]) {
       const answer = await tools.input_wait(callOf(), input);
       should(answer.isError).be.true();
-      should(answer.text).equal('input_wait takes a card id like ^A7 and an optional timeoutMs');
+      should(answer.text).equal('input_wait takes an input id like ^A7 and an optional timeoutMs');
     }
     should(asked).eql([]);
   });
@@ -215,7 +215,7 @@ describe('the input_wait tool: a phone approval is waited on through the service
     const { answer } = await waitOn(provider, { id: 'pa_short' });
 
     should(answer.isError).be.true();
-    should(answer.text).equal('input_wait takes a card id like ^A7 and an optional timeoutMs');
+    should(answer.text).equal('input_wait takes an input id like ^A7 and an optional timeoutMs');
     should(asked).eql([]);
   });
 });

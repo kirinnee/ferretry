@@ -127,12 +127,12 @@ describe('a failed Send, in words', () => {
 
   it('says the secret store changed when a secret target moved', () => {
     expect(text(inputFailure(refusal(409, 'target_rebound'), 'secret'))).toBe(
-      'The secret store changed. Check the card and send again.',
+      'The secret store changed. Check the input and send again.',
     );
   });
 
   it('says the page changed for a page target and for a target it was not told', () => {
-    const page = 'The page changed. Check the card and send again.';
+    const page = 'The page changed. Check the input and send again.';
     expect(text(inputFailure(refusal(409, 'target_rebound'), 'page'))).toBe(page);
     expect(text(inputFailure(refusal(409, 'target_rebound')))).toBe(page);
   });

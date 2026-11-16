@@ -59,7 +59,7 @@ export default definePlugin({
   kinds: [],
   words: [
     { word: 'secret', means: 'a value ferrets use by name and never see', insteadOf: ['credential', 'env var'] },
-    { word: 'input', means: 'a card asking you to type a value', insteadOf: ['input request'] },
+    { word: 'input', means: 'a box asking you to type a value', insteadOf: ['input request'] },
     {
       word: 'hold',
       means: 'a short time a terminal or page is closed to ferrets after you typed into it',
@@ -169,10 +169,10 @@ export default definePlugin({
         minimum: 'authenticated',
         caller: 'any',
         capability: INPUT_USE_TERMINAL,
-        audit: { skip: 'a wait on the ferret’s own card: it changes nothing' },
+        audit: { skip: 'a wait on the ferret’s own input: it changes nothing' },
         guard: 'secrets',
         summary:
-          'wait for the owner to answer your input card, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
+          'wait for the owner to answer your input, or approve a sign-in on their phone (a pa_ id): where it stands, never the value or the number',
       }),
     ],
     /**

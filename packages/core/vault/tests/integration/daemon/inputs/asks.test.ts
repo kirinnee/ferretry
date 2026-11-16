@@ -125,7 +125,7 @@ describe('InputAsksAdapter when Asks keeps no card', () => {
     });
     expect(await refusing('no card').raise('f1', card('request1'))).toEqual({
       ok: false,
-      message: 'Asks kept no card for this request',
+      message: 'Asks kept no item for this request',
     });
   });
 });

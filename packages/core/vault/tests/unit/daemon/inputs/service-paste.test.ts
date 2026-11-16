@@ -577,8 +577,8 @@ describe('allowing a paste', () => {
     const ordinary = await w.pending();
     const sealed = await refusal(w.service.deliver(SESSION_ID, ordinary.id, w.send(ordinary, { sealed: true }), OWNER));
 
-    should(typed.message).equal('this card pastes sealed:vercel: allow it, there is nothing to type');
-    should(sealed.message).equal('this card pastes no secure copy; type the value instead');
+    should(typed.message).equal('this input pastes sealed:vercel: allow it, there is nothing to type');
+    should(sealed.message).equal('this input pastes no secure copy; type the value instead');
     should(w.writes).eql([]);
   });
 
