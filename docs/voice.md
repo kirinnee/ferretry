@@ -147,8 +147,9 @@ device starts at off and only a choice made after this shipped can turn it on.
 - **Cost:** passes run only while the microphone is open; the worker idles otherwise. Off, the take is
   transcribed once on Stop, as before.
 
-The loudness math behind "pause" (RMS, noise floor, quiet threshold) lives in `lib/stt/energy.ts`, shared with
-the [turn endpointer](#pause-detection-the-end-of-a-spoken-turn).
+The loudness math behind "pause" (RMS, noise floor, quiet threshold) lives in `lib/stt/energy.ts`, used by
+near-live (the turn endpointer that shared it was dropped, see
+[Pause detection](#pause-detection-the-end-of-a-spoken-turn)).
 
 `packages/pwa/harness/parakeet-near-live-smoke.ts` measures it in a real browser (manual, like the
 smoke below): it plays LibriSpeech dev-clean clips into the shipped transcriber in real time and
@@ -788,50 +789,17 @@ document events). In 5.0 it is mounted by Voice's `auto-read` panel in Conversat
 
 ## Pause detection (the end of a spoken turn)
 
-**Built as a library and measured; no screen uses it yet.** Live voice (a mode that listens, notices
-you stopped, sends, and reads the reply) needs one answer that does not depend on which speech engine a
-device uses: _has this person finished their turn?_ `lib/voice-chat/turn-endpointer.ts` is that answer.
-It is pure and total, takes **no clock and starts no timer**, and is fed the same 20 ms loudness frames
-the input meter already measures. Everything below is what it does and what was measured, so the
-defaults are not guesses.
+**Dropped by the owner (!A525).** v4 built a turn endpointer (_has this person finished their turn?_) and
+a scoring helper for it, but never mounted either on a screen, and 5.0 has no live voice mode to run them
+in. Both files, their tests and the noise harness are deleted; nothing replaces them yet. The shared
+loudness math in `lib/stt/energy.ts` stays, used by `near-live.ts`. A future live voice mode designs its
+own end-of-turn rule from [the voice modes design](design/voice-modes.md).
 
-### What it does
+### Archived measurements (the deleted endpointer)
 
-`endpointerFeed(state, { atMs, rms })` returns the next state and the events that frame caused. Each
-frame carries its own time, so a test feeds synthetic frames and asserts exact milliseconds.
-
-| Rule                        | Value                                                                                                                              | Why                                                                                                                                                  |
-| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Loud / quiet                | quiet is under 2.8 × the 10th-percentile level of the last 10 s, clamped                                                           | the same floor rule as near-live (`lib/stt/energy.ts`, shared); a fan raises the bar instead of reading as speech                                    |
-| Highest the bar may rise to | RMS **0.03** (near-live uses 0.015)                                                                                                | measured below: 0.015 loses fans from about 0.012 up, 0.05 does no better                                                                            |
-| Speech starts after         | 200 ms of loud time                                                                                                                | a click or a cough is shorter                                                                                                                        |
-| A turn can end only after   | 400 ms of loud time in total                                                                                                       | a lone "uh" is retracted (`speech-cancel`), never sent                                                                                               |
-| Hangover                    | 250 ms                                                                                                                             | a breath between words is not a pause                                                                                                                |
-| **Pause that ends a turn**  | **1.5 s Normal** · 0.9 s Quick · 2.5 s Thinker · any 0.8–4 s                                                                       | counted from the last loud frame; see the trade-off below                                                                                            |
-| Engine hint                 | 600 ms of quiet ends a turn early, only after a pause is already detected                                                          | Web Speech "final" or Vosk "committed" can only **shorten** a pause; it never ends a turn while the level says you are talking                       |
-| Longest turn                | 120 s                                                                                                                              | same as the dictation limit; the turn ends there whatever the level says, but never under the 400 ms minimum (a shorter run is retracted at the cap) |
-| Stalled stream              | frames more than 500 ms apart restart the quiet count, and cancel a run still under 400 ms                                         | a throttled tab can delay the end of a turn, never cause one; sparse loud frames across gaps never add up to a turn                                  |
-| Loud time is measured time  | a loud frame counts for at most 20 ms, however late it arrives; a hole over 250 ms in a run still under 400 ms starts the run over | the audio in a gap or an invalid frame was never measured, so 40 ms of loud frames can never add up to 400 ms                                        |
-| The floor learns the room   | while speech is under way, loud frames are not added to the noise-floor window; quiet frames still are                             | a long stretch of soft speech can no longer raise the bar until the speaker reads as quiet (a false pause and send mid-sentence)                     |
-
-Events: `speech-start`, `speech-cancel` (a burst too short to be a turn), `pause` (quiet longer than the
-hangover), `resume` (the voice came back, so the pause is withdrawn) and `turn-end` (with the reason:
-`pause`, `engine-hint` or `max-turn`). A new turn gets a fresh state; `endpointerStart(pause, { floorLevels })`
-seeds the noise floor with levels heard before, so the first words of the next turn are not judged blind.
-
-The `lib/stt/energy.ts` module (RMS, frame levels, noise floor, quiet threshold) was lifted out of
-`near-live.ts` with no change in behaviour, so the two can never disagree about what "quiet" is.
-
-### How it was measured
-
-`packages/pwa/harness/turn-endpointer-noise.ts` (manual, never in CI; about 6 minutes for the full run) **generates** its
-audio, so there is nothing to download and no recording of any person anywhere:
-
-```sh
-cd packages/pwa && bun harness/turn-endpointer-noise.ts --turns 200 --seed 7 --explain
-# options: --max-quiet <rms>  --beds room,fan  --noise-minutes <n>  --no-fixtures
-# the judging rules live in src/lib/voice-chat/turn-endpointer-scoring.ts and are unit-tested
-```
+Kept as history only: the harness that produced these numbers (`turn-endpointer-noise.ts`) is deleted, and
+the rest of this section is not a description of anything built. Its audio was generated, so no
+recording of any person was ever involved.
 
 - **Speech** is synthetic: harmonic voices with vowel formants, syllable envelopes with shallow valleys,
   fricative bursts, breaths between words, phrase pauses, and a last word that trails off in 30 % of
@@ -924,8 +892,8 @@ pause plus the countdown plus STT and clean-up, an estimated 3.4–5.5 s at the 
 ## Not built yet
 
 - **Live voice** (listen, notice the pause, send after a visible countdown, read the reply aloud):
-  only its end-of-turn detector exists so far — see [Pause detection](#pause-detection-the-end-of-a-spoken-turn).
-  There is no Live button, bar or loop yet.
+  nothing of it exists (its end-of-turn detector was dropped by the owner, !A525 — see
+  [Pause detection](#pause-detection-the-end-of-a-spoken-turn)). There is no Live button, bar or loop.
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):
   downloaded once to the daemon, usable by every paired device, audio crossing only the end-to-end
   channel to your own machine. It needs a native sherpa-onnx addon inside the compiled `fyd` binary (per
