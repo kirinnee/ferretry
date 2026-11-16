@@ -11,7 +11,11 @@ import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { type SelfCheckOutcome, type SessionHealthPorts, SessionHealthService } from '../lib/session/health/service.ts';
 import { SelfRestartCoordinator } from '../lib/session/health/self-restart.ts';
 import { defaultSessionHealthSettings, type SessionHealthSettings } from '../lib/session/health/settings.ts';
-import { type LoopBlockedClockPort, UNNAMED_SELF_CHECK_STAGES } from '../lib/session/health/types.ts';
+import {
+  type LoopBlockedClockPort,
+  type MonotonicClockPort,
+  UNNAMED_SELF_CHECK_STAGES,
+} from '../lib/session/health/types.ts';
 
 /** The job that runs the daemon's self-check once every `selfCheckIntervalMs` (J-0032, J-0118). */
 export const HEALTH_JOB = 'ferrets.self-check';
@@ -32,13 +36,18 @@ export interface HealthDeps {
   readonly bootstrap: { finished(): boolean; errors(): readonly string[] };
   readonly log: Pick<Log, 'warn'>;
   readonly settings?: SessionHealthSettings;
+  /** The monotonic reading gaps are measured on. Default: the system's; a test hands in one it drives. */
+  readonly monotonic?: MonotonicClockPort;
 }
 
 export interface Health {
   readonly service: SessionHealthService;
   readonly settings: SessionHealthSettings;
-  /** One firing of the timer. Never rejects: a check that fails is a warning, and the next tick is a minute away. */
-  readonly tick: () => Promise<SelfCheckOutcome | undefined>;
+  /**
+   * One firing of the timer. Never rejects: a check that fails is a warning, and the next tick is a minute away. A
+   * signal that is already aborted starts nothing.
+   */
+  readonly tick: (signal?: AbortSignal) => Promise<SelfCheckOutcome | undefined>;
 }
 
 /**
@@ -74,7 +83,7 @@ export function buildHealth(deps: HealthDeps): Health {
     events: new StateSessionHealthEventSink(deps.state, deps.clock),
     clock: deps.clock,
     wallClock: deps.clock,
-    monotonic: new SystemMonotonicClock(),
+    monotonic: deps.monotonic ?? new SystemMonotonicClock(),
     loop: deps.loop,
     activities: UNNAMED_SELF_CHECK_STAGES,
     restarts: new SelfRestartCoordinator(
@@ -88,10 +97,78 @@ export function buildHealth(deps: HealthDeps): Health {
   return {
     service,
     settings,
-    tick: async () =>
-      await service.tick().catch((error: unknown) => {
-        deps.log.warn('the daemon self-check failed', { error: error instanceof Error ? error.name : 'unknown' });
-        return undefined;
-      }),
+    tick: async signal =>
+      signal?.aborted === true
+        ? undefined
+        : await service.tick().catch((error: unknown) => {
+            deps.log.warn('the daemon self-check failed', { error: error instanceof Error ? error.name : 'unknown' });
+            return undefined;
+          }),
+  };
+}
+
+/** How long stopping the daemon waits for a self-check still running before it leaves it behind. */
+const SELF_CHECK_STOP_WAIT_MS = 5_000;
+
+/** What the self-check job stands on. */
+export interface HealthJobDeps {
+  readonly health: Pick<Health, 'tick'>;
+  /** Settles once the session store's archive is loaded (it may reject: a load that failed). */
+  readonly storeLoaded: Promise<unknown>;
+  /** The kernel clock's one-shot timer, for the bound on waiting at stop. */
+  readonly after: (delayMs: number, fire: () => void) => () => void;
+  /** How long stopping waits for a check in flight. Default {@link SELF_CHECK_STOP_WAIT_MS}. */
+  readonly stopWaitMs?: number;
+}
+
+/** The self-check job: what the kernel's job runner calls each interval, and what stopping the daemon calls. */
+export interface HealthJob {
+  readonly run: (signal: AbortSignal) => Promise<void>;
+  readonly stop: () => Promise<void>;
+}
+
+/**
+ * The job STARTS a check and returns without waiting for it.
+ *
+ * The kernel's job runner coalesces: a fire while a run is still going sets a flag and never calls `run`, then re-fires
+ * the moment the slow run ends. A `run` that awaited the check would therefore hide every interval that passes during
+ * it from the service. The service could not skip (J-0118: "skips — never overlaps"), could not measure a check that
+ * never finishes (the wedge it exists to count), and the re-fire at the end of a check slower than the wedge gap would
+ * read the whole run as a gap, call it a wedge, and run the deep pass — the slowest check there is — making the next
+ * one slower still. Started and not awaited, every interval reaches the service, which skips while one is running.
+ *
+ * The check in flight is kept so stopping can wait for it, for a bounded time.
+ */
+export function buildHealthJob(deps: HealthJobDeps): HealthJob {
+  const inflight = new Set<Promise<unknown>>();
+  const waitMs = deps.stopWaitMs ?? SELF_CHECK_STOP_WAIT_MS;
+  let stopped = false;
+  return {
+    run: async signal => {
+      if (stopped || signal.aborted) return;
+      // An archive that did not load names no archived session, and a pass would read every one of them as live.
+      if (
+        !(await deps.storeLoaded.then(
+          () => true,
+          () => false,
+        ))
+      )
+        return;
+      if (stopped || signal.aborted) return;
+      const check: Promise<unknown> = deps.health.tick(signal).finally(() => inflight.delete(check));
+      inflight.add(check);
+    },
+    stop: async () => {
+      stopped = true;
+      if (inflight.size === 0) return;
+      // A check that never finishes is left behind after the bound: stopping the daemon never waits on it for good.
+      await new Promise<void>(resolve => {
+        const giveUp = deps.after(waitMs, resolve);
+        void Promise.allSettled([...inflight]).then(() => {
+          giveUp();
+          resolve();
+        });
+      });
+    },
   };
 }

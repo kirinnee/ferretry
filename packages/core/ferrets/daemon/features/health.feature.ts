@@ -1,6 +1,6 @@
 import { milliseconds } from '@ferretry/std';
 import manifest from '../../manifest.ts';
-import { buildHealth, HEALTH_JOB } from '../modules/health.ts';
+import { buildHealth, buildHealthJob, HEALTH_JOB } from '../modules/health.ts';
 import { INDEX_REBUILD_JOB } from '../modules/index-rebuild.ts';
 import type { FeatureContribution, FerretsContext, FerretsFeature } from './types.ts';
 
@@ -30,22 +30,18 @@ function register(f: FerretsContext): FeatureContribution | undefined {
     bootstrap: { finished: () => finished, errors: () => errors },
     log,
   });
+  const job = buildHealthJob({
+    health,
+    storeLoaded,
+    after: (delayMs, fire) => kernel.clock.after(milliseconds(delayMs), fire),
+  });
+  kernel.lifecycle.onStop(job.stop);
   kernel.jobs.add({
     id: HEALTH_JOB,
     schedule: { every: milliseconds(health.settings.selfCheckIntervalMs) },
     // The first look waits for the index rebuild: an index still being refilled reads as a fleet of sessions it lost.
     after: [INDEX_REBUILD_JOB],
-    run: async () => {
-      // An archive that did not load names no archived session, and a pass would read every one of them as live.
-      if (
-        !(await storeLoaded.then(
-          () => true,
-          () => false,
-        ))
-      )
-        return;
-      await health.tick();
-    },
+    run: job.run,
   });
 
   return undefined;

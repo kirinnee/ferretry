@@ -2,6 +2,9 @@
  * The daemon self-check, MOUNTED as the `ferrets.self-check` job (parity rows J-0032, J-0118, F-0203, F-0209): the
  * Ferrets feature registers it on the kernel, and a run of it writes the health journal. The check itself is proven
  * in the integration tier over the real adapters; this proves the job exists and is wired to the real session store.
+ *
+ * A run of the job STARTS a check and returns (the kernel's job runner coalesces a run that is awaited: see
+ * `buildHealthJob`), so each test stops the host before it reads what the check wrote: stopping waits for the check.
  */
 import { describe, expect, test } from 'bun:test';
 import { randomUUID } from 'node:crypto';
@@ -52,10 +55,10 @@ describe('the self-check job, mounted', () => {
     expect(started.status).toBe(201);
 
     await h.runJob(HEALTH_JOB);
+    await h.stop();
 
     expect(h.state('ferrets').raw(HealthEventsFile)).toBeUndefined();
     expect(h.state('ferrets').raw(SelfRestartFile)).toBeUndefined();
-    await h.stop();
   });
 
   test('F-0203 a session folder the index does not list is written to health.jsonl, as the index it then repaired', async () => {
@@ -68,6 +71,7 @@ describe('the self-check job, mounted', () => {
     );
 
     await h.runJob(HEALTH_JOB);
+    await h.stop();
 
     const lines = (folder.raw(HealthEventsFile) ?? '')
       .split('\n')
@@ -75,6 +79,5 @@ describe('the self-check job, mounted', () => {
       .map(line => JSON.parse(line) as { type: string; data: { missingFromIndex?: string[] } });
     expect(lines.map(line => line.type)).toEqual(['fleet.index_incoherent']);
     expect(lines[0]?.data.missingFromIndex).toEqual(['mw4qug00-00000001']);
-    await h.stop();
   });
 });

@@ -26,6 +26,11 @@ type HealthEventsState = Pick<StatePort, 'append' | 'version' | 'tail' | 'write'
  * The journal is bounded: once a write takes it past {@link HEALTH_EVENTS_MAX_BYTES}, the newest
  * {@link HEALTH_EVENTS_KEEP_BYTES} of it are swapped in whole (the port swaps a jsonl file in on the chain its appends
  * take, so a reader never sees half of it). A compaction that fails is dropped: the event itself was already written.
+ *
+ * An event is ONE step: its append, the size check, the tail and the swap run before the next event's append starts.
+ * The port can swap a journal in but cannot read-then-swap it as one step, so an append landing between the tail and
+ * the swap would be written over and lost. The check's own events and a skipped tick's are emitted at the same time, and
+ * this sink is the journal's only writer, so its own chain closes that gap.
  */
 export class StateSessionHealthEventSink implements SessionHealthEventSink {
   constructor(
@@ -33,14 +38,21 @@ export class StateSessionHealthEventSink implements SessionHealthEventSink {
     private readonly clock: ClockPort,
   ) {}
 
+  /** The step in flight (settled, never rejected): the next event waits for it. */
+  private last: Promise<void> = Promise.resolve();
+
   async emit(event: SessionHealthEvent): Promise<void> {
-    await this.state.append(HealthEventsFile, {
-      at: this.clock.now(),
-      type: event.type,
-      // The events' `data` is built from strings, numbers and lists by the lib; the line's schema proves it on read.
-      data: event.data as Record<string, JsonValue>,
+    const step = this.last.then(async () => {
+      await this.state.append(HealthEventsFile, {
+        at: this.clock.now(),
+        type: event.type,
+        // The events' `data` is built from strings, numbers and lists by the lib; the line's schema proves it on read.
+        data: event.data as Record<string, JsonValue>,
+      });
+      await this.compact().catch(() => undefined);
     });
-    await this.compact().catch(() => undefined);
+    this.last = step.catch(() => undefined);
+    await step;
   }
 
   private async compact(): Promise<void> {

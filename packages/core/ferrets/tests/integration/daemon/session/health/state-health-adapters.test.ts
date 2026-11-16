@@ -138,6 +138,20 @@ describe('health event journal cap', () => {
     should(numbers.length).be.greaterThan(0);
   });
 
+  it('should lose no event that is emitted while a compaction is between reading the tail and swapping it in', async () => {
+    // Arrange — the persistent fault again, but the events are emitted together (the check's own events and a skip's).
+    const { state } = world();
+    const sink = new StateSessionHealthEventSink(state, { now: () => NOW });
+
+    // Act
+    await Promise.all(Array.from({ length: 12 }, async (_, n) => await sink.emit(fault(n))));
+
+    // Assert — what is kept is a whole run of the newest events: none vanished from the middle, the newest is there.
+    const numbers = (await numbersOf(state)) as number[];
+    should(numbers.at(-1)).equal(11);
+    should(numbers).deepEqual(Array.from({ length: numbers.length }, (_, i) => 11 - numbers.length + 1 + i));
+  });
+
   it('should leave the journal alone below its cap', async () => {
     // Arrange
     const { state } = world();
