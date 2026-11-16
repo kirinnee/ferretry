@@ -202,7 +202,7 @@ describe('the item view snooze control', () => {
 
 describe('the v6 layout: title, ONE card — one column', () => {
   test('is a dialog over the message list whose ONE scroller holds the head and the card (the conversation inside it, folded)', async () => {
-    const history: HistoryEvent[] = [{ kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47: noted.' }];
+    const history: HistoryEvent[] = [{ kind: 'ferret', key: 'f', at: NOW, text: 'Re ^A47: noted.' }];
     await draw(richItem, { itemKey: 'view-test:v6-layout' }, history);
     expect(one('section').getAttribute('role')).toBe('dialog');
     const column = one('.fy-item-view__body > .fy-item-view__column');
@@ -213,7 +213,7 @@ describe('the v6 layout: title, ONE card — one column', () => {
     ]);
     expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toBe('Conversation1 message');
     await interact(() => one<HTMLButtonElement>('[data-agenda-fold="conversation"]').click());
-    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re !A47: noted.');
+    expect(one('.fy-card [data-agenda-part="conversation"]').textContent).toContain('Re ^A47: noted.');
     // The answer row is in the sticky dock at the foot of the column, not a strip of its own above the composer.
     expect(one('.fy-item-view__dock [data-agenda-quick-replies]')).toBeDefined();
     expect(root().querySelectorAll('[data-agenda-quick-replies]')).toHaveLength(1);
@@ -662,10 +662,10 @@ describe('an input request', () => {
       input: { requestId: '0'.repeat(32) },
       subject: 'Type it into the terminal',
       why: 'Type it into the terminal',
-      context: 'This follows !A7 in the same login.\nThe agent says: [sudo] password for kirin:',
+      context: 'This follows ^A7 in the same login.\nThe agent says: [sudo] password for kirin:',
     } as Partial<AgendaItem>);
     await draw(input, { inputForm: <form data-fake-input="" /> });
-    expect(one('[data-agenda-section="context"]').textContent).toContain('This follows !A7 in the same login.');
+    expect(one('[data-agenda-section="context"]').textContent).toContain('This follows ^A7 in the same login.');
     expect(one('[data-agenda-section="context"]').textContent).not.toContain('The agent says');
     expect(root().querySelector('[data-agenda-need]')).toBeNull();
   });
@@ -859,7 +859,7 @@ describe('What I need from you', () => {
 
   test('is the fifth part: after the references, before the tabs, the conversation and the activity log', async () => {
     await draw(agendaItem('A47', { ...richItem, body: 'A report.' } as Partial<AgendaItem>), {}, [
-      { kind: 'ferret', key: 'f', at: NOW, text: 'Re !A47' },
+      { kind: 'ferret', key: 'f', at: NOW, text: 'Re ^A47' },
     ]);
     const parts = [...one('.fy-card').querySelectorAll('[data-agenda-part]')].map(each =>
       each.getAttribute('data-agenda-part'),

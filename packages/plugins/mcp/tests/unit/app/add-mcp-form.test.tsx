@@ -289,7 +289,7 @@ describe('mcp#0 Add MCP server — scope switching', () => {
   });
 });
 
-describe('mcp#1 the owner chooses to restart now or when each ferret is idle (!A525, input 166)', () => {
+describe('mcp#1 the owner chooses to restart now or when each ferret is idle (^A525, input 166)', () => {
   const none = { restarted: [], queued: [], skipped: [], failed: [] };
   const added = async () => {
     const made = await open({

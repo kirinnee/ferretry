@@ -268,7 +268,7 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
 
     expect(pending(fake)).toEqual(['Wait']);
     expect(topId(mounted)).toBe('A2');
-    expect(toast(mounted).textContent).toContain('Answered !A3: Wait');
+    expect(toast(mounted).textContent).toContain('Answered ^A3: Wait');
     expect(fake.commits).toEqual([]);
     await advance(fake, 4_999);
     expect(fake.commits).toEqual([]);

@@ -154,7 +154,7 @@ describe('the work search command source', () => {
     const entries = source('relay');
     expect(entries.map(entry => [entry.group, entry.label, entry.description])).toEqual([
       [WORK_GROUPS.card, '&F10 Harden the relay', 'Doing · brief: the relay handshake drops'],
-      [WORK_GROUPS.ask, '!A3 Pick a relay region', 'open · text: which relay should we pick'],
+      [WORK_GROUPS.ask, '^A3 Pick a relay region', 'open · text: which relay should we pick'],
     ]);
     expect(entries.map(entry => entry.id)).toEqual(['work-card:F10', 'work-ask:f1:A3']);
   });

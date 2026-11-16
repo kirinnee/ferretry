@@ -406,12 +406,12 @@ describe('the sections of an item as text', () => {
     expect(sectionText(item({ ask: undefined }), 'ask')).toBe('');
     const rich = item({
       terms: [{ term: 'Merge queue', meaning: 'Lands PRs one by one' }],
-      links: [{ target: '!A3', label: 'The parent', meaning: 'Where this came from' }, { target: '&F12' }],
+      links: [{ target: '^A3', label: 'The parent', meaning: 'Where this came from' }, { target: '&F12' }],
       steps: ['Open the PR', 'Press merge'],
       context: '  The facts  ',
     } as Partial<AgendaItem>);
     expect(sectionText(rich, 'terms')).toBe('Merge queue: Lands PRs one by one');
-    expect(sectionText(rich, 'links')).toBe('The parent · !A3 · Where this came from\n&F12');
+    expect(sectionText(rich, 'links')).toBe('The parent · ^A3 · Where this came from\n&F12');
     expect(sectionText(rich, 'steps')).toBe('1. Open the PR\n2. Press merge');
     expect(sectionText(rich, 'context')).toBe('The facts');
     expect(sectionText(item({ context: null }), 'context')).toBe('');

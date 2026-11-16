@@ -70,7 +70,7 @@ describe('the words of an owner closing an item', () => {
       const message = boardReplyMessage(resolved({ response }));
 
       // Assert
-      should(message).equal(`[answer to !A3 «Which region do we deploy to?»] ${words}`);
+      should(message).equal(`[answer to ^A3 «Which region do we deploy to?»] ${words}`);
     });
   }
 
@@ -85,7 +85,7 @@ describe('the words of an owner closing an item', () => {
     const message = boardReplyMessage(item);
 
     // Assert
-    should(message).equal('[answer to !A3 «Which region do we deploy to?»] \n1. Region: eu-west\n2. Size: (skipped)');
+    should(message).equal('[answer to ^A3 «Which region do we deploy to?»] \n1. Region: eu-west\n2. Size: (skipped)');
   });
 
   it('should put the owner note under their answer', () => {
@@ -95,24 +95,24 @@ describe('the words of an owner closing an item', () => {
     );
 
     // Assert
-    should(message).equal('[answer to !A3 «Which region do we deploy to?»] eu-west · note: and tell the team');
+    should(message).equal('[answer to ^A3 «Which region do we deploy to?»] eu-west · note: and tell the team');
   });
 
   it('should tell a dismissal with or without the reason', () => {
     should(boardReplyMessage(resolved({ disposition: 'dismissed' }))).equal(
-      '[dismissed !A3 «Which region do we deploy to?»] Not needed — the owner dismissed this without a reason.',
+      '[dismissed ^A3 «Which region do we deploy to?»] Not needed — the owner dismissed this without a reason.',
     );
     should(boardReplyMessage(resolved({ disposition: 'dismissed', resolutionNote: 'Out of scope' }))).equal(
-      '[dismissed !A3 «Which region do we deploy to?»] Not needed: Out of scope',
+      '[dismissed ^A3 «Which region do we deploy to?»] Not needed: Out of scope',
     );
   });
 
   it('should tell a bare done, and a done with a note as an answer', () => {
     should(boardReplyMessage(resolved())).equal(
-      '[done !A3 «Which region do we deploy to?»] The owner marked this done.',
+      '[done ^A3 «Which region do we deploy to?»] The owner marked this done.',
     );
     should(boardReplyMessage(resolved({ resolutionNote: 'Shipped' }))).equal(
-      '[answer to !A3 «Which region do we deploy to?»] Done · note: Shipped',
+      '[answer to ^A3 «Which region do we deploy to?»] Done · note: Shipped',
     );
   });
 });
@@ -144,7 +144,7 @@ describe('the answer that rests an item', () => {
     const message = ownerAnswerMessage(item);
 
     // Assert
-    should(message).equal('[answer to !A3 «Which region do we deploy to?»] eu-west · note: soon');
+    should(message).equal('[answer to ^A3 «Which region do we deploy to?»] eu-west · note: soon');
   });
 
   it('should be nothing when the item carries no answer', () => {
@@ -166,12 +166,12 @@ describe('the requests for more information or a discussion', () => {
     const message = needsInfoMessage(item);
 
     // Assert
-    should(message).equal('[needs more info !A3 «Which region do we deploy to?»] which account?');
+    should(message).equal('[needs more info ^A3 «Which region do we deploy to?»] which account?');
   });
 
   it('should say the owner needs more information when there is no note', () => {
     should(needsInfoMessage(openItem())).equal(
-      '[needs more info !A3 «Which region do we deploy to?»] The owner needs more information.',
+      '[needs more info ^A3 «Which region do we deploy to?»] The owner needs more information.',
     );
   });
 
@@ -184,7 +184,7 @@ describe('the requests for more information or a discussion', () => {
 
     // Assert
     should(message).startWith(
-      '[discuss !A3 «Pick the region»] The owner wants to talk this through before answering: premise is wrong',
+      '[discuss ^A3 «Pick the region»] The owner wants to talk this through before answering: premise is wrong',
     );
     should(message).containEql('`fy agenda edit A3`');
     should(message).containEql('`fy agenda done A3`');

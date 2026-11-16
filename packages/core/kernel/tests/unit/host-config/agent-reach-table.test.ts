@@ -120,7 +120,7 @@ const ROWS: readonly Row[] = [
     neverLoosens: { text: 'keepInSync: false\n', why: "today's machineLoosening judged no conversations key" },
   },
   {
-    // Owner decision !A525: reachable; a looser permission mode is held here, a binary/searchPaths change below.
+    // Owner decision ^A525: reachable; a looser permission mode is held here, a binary/searchPaths change below.
     path: 'harness-claude-code.yaml',
     base: 'permissionMode: auto\n',
     loosening: { text: 'permissionMode: skip\n', sentence: 'agents now skip every permission prompt' },
@@ -821,7 +821,7 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
 });
 
 /**
- * Owner decision !A525: an agent may edit the two harness files through the config tools, and a looser permission mode
+ * Owner decision ^A525: an agent may edit the two harness files through the config tools, and a looser permission mode
  * or ANY change of the harness `binary` / `searchPaths` (a path is code execution) is HELD for the owner through the
  * same writer and hold every other file uses; an owner's edit is not held.
  */

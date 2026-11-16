@@ -11,7 +11,7 @@
  * in its reply. `itemHistory` then applies the one relevance rule to them, exactly as it does to the live chat.
  */
 
-import type { AgendaItem } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL_CLASS, type AgendaItem } from '@ferretry/core-asks/contract';
 import { type SendRecord, SendListResponseSchema, TranscriptPageSchema } from '@ferretry/plugin-conversation/contract';
 import { withFreshMessageCursor } from '../shell.ts';
 import { type AgendaCall, agendaCall } from './agenda-call.ts';
@@ -122,7 +122,7 @@ const entryOf = (message: SessionTranscriptMessage): TranscriptEntry | null => {
 
 /** Feeds rows oldest first and keeps the ones that belong to the item's thread. */
 const threadOf = (itemId: string) => {
-  const named = new RegExp(`(?:^|[^\\w])!${itemId}(?![\\w])`, 'u');
+  const named = new RegExp(`(?:^|[^\\w])${ASK_REFERENCE_SIGIL_CLASS}${itemId}(?![\\w])`, 'u');
   const kept: TranscriptEntry[] = [];
   // A user row about the item opens its answer: the assistant rows after it are kept until the next user row.
   let answering = false;

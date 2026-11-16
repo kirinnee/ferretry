@@ -89,7 +89,7 @@ describe('the `!` reference menu (reference.catalog)', () => {
     }));
     const asks = { snapshots: async () => [{ items }] } as unknown as Pick<AsksApi, 'snapshots'>;
     const entries = await new AgendaReferenceMenu(asks).entries(ask('f1'));
-    expect(entries).toHaveLength(referenceCatalogLimit('!'));
+    expect(entries).toHaveLength(referenceCatalogLimit('^'));
     expect(entries[0]?.label.length).toBeLessThanOrEqual(256);
     for (const entry of entries) expect(ReferenceCatalogEntrySchema.safeParse(entry).success).toBe(true);
   });
@@ -127,22 +127,22 @@ describe('the `!` reference menu (reference.catalog)', () => {
   });
 });
 
-describe('Agenda takes the `!` menu with Conversation as an optional use', () => {
-  test('the manifest takes reference.catalog keyed `!` and uses Conversation, needing no plugin for it', () => {
+describe('Agenda takes the `^` menu with Conversation as an optional use', () => {
+  test('the manifest takes reference.catalog keyed `^` and uses Conversation, needing no plugin for it', () => {
     expect(
       manifest.hooks?.takes?.some(
         (take: { hook: { name: string }; key?: string }) =>
-          take.hook.name === ReferenceCatalog.name && take.key === '!',
+          take.hook.name === ReferenceCatalog.name && take.key === '^',
       ),
     ).toBe(true);
     expect(Object.keys(manifest.uses ?? {})).toContain('conversation');
     expect(Object.keys(manifest.needs ?? {})).not.toContain('conversation');
   });
 
-  test('with Conversation on, the kernel plans Agenda as the `!` provider', () => {
+  test('with Conversation on, the kernel plans Agenda as the `^` provider', () => {
     const { refusals, engine } = HookEngine.plan([conversationOffering, manifest], silent, never);
     expect(refusals.filter(refusal => refusal.plugins.includes('agenda'))).toEqual([]);
-    expect(engine.providerPlugin(ReferenceCatalog, '!')).toBe('agenda');
+    expect(engine.providerPlugin(ReferenceCatalog, '^')).toBe('agenda');
   });
 
   test('with Conversation absent, Agenda boots, keeps its ports and nothing asks it', async () => {
@@ -153,7 +153,7 @@ describe('Agenda takes the `!` menu with Conversation as an optional use', () =>
       expect(host.provided(manifest.provides!.agenda!)).toBeDefined();
       const { refusals, engine } = HookEngine.plan([manifest], silent, never);
       expect(refusals.filter(refusal => refusal.plugins.includes('agenda'))).toEqual([]);
-      expect(engine.providerPlugin(ReferenceCatalog, '!')).toBeUndefined();
+      expect(engine.providerPlugin(ReferenceCatalog, '^')).toBeUndefined();
     } finally {
       await host.stop();
     }

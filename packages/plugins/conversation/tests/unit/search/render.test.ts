@@ -45,7 +45,7 @@ describe('renderSearch', () => {
     );
     expect(text.split('\n')).toEqual([
       '&F1 card [Todo] Relay carrier — the relay carrier choice',
-      '!A3 ask [open] (ask of zoe) Which relay? — a long question',
+      '^A3 ask [open] (ask of zoe) Which relay? — a long question',
     ]);
   });
 

@@ -378,7 +378,7 @@ describe('fy copy: the last words', () => {
   });
 });
 
-describe('fy copy rules add: a passkey bound to that one rule (!A244)', () => {
+describe('fy copy rules add: a passkey bound to that one rule (^A244)', () => {
   it("should stage the rule, show the daemon's rows, and make nothing itself", async () => {
     const { gateway, said, controller } = rig();
     gateway.states = ['waiting', 'approved'];

@@ -96,7 +96,7 @@ describe('fy agenda', () => {
   test('prints each ferret with its asks, and says when nothing waits', async () => {
     const w = world({ 'GET /v1/agenda/open': page });
     expect(await w.verb('agenda')).toBe(0);
-    expect(w.out.join('')).toContain('!A1 [task] Pick a colour');
+    expect(w.out.join('')).toContain('^A1 [task] Pick a colour');
     expect(renderOpen({ sessions: [] })).toBe('Nothing is waiting on you.');
   });
 

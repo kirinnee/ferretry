@@ -179,7 +179,7 @@ describe('agenda patch command', () => {
     const { gateway, controller } = build({ '-': `revision: ${agendaItemRevision(item)}\nurgency: before Friday` });
 
     // Act
-    await controller.patch('!A5', {});
+    await controller.patch('^A5', {});
 
     // Assert
     should(gateway.applied).deepEqual([
@@ -240,7 +240,7 @@ describe('agenda patch command', () => {
 
     // Assert
     should(out.messages[0]).match(
-      /^# !A5 — read every part, update what is out of date, then: fy agenda patch A5 --file <this file>/u,
+      /^# \^A5 — read every part, update what is out of date, then: fy agenda patch A5 --file <this file>/u,
     );
     should(out.messages[0]).match(/\nrevision: \S+\ntitle: Teaching wording\n/u);
     should(out.messages[0]).match(/\ntabs:\n {2}Status: "- Now: drafting"\n/u);

@@ -72,7 +72,7 @@ const draw = (text: string, board: AgendaSnapshot | null = snapshot, write?: (te
 
 describe('an agenda message in the owner bubble', () => {
   test('is drawn as words, unchanged, when it is not one', () => {
-    const view = draw('just a message about !A45');
+    const view = draw('just a message about ^A45');
     expect(view.root.findAll(node => node.props['data-fallback'] === '')).toHaveLength(1);
     expect(byClass(view, 'fy-agenda-msg')).toHaveLength(0);
   });
@@ -101,7 +101,7 @@ describe('an agenda message in the owner bubble', () => {
     const view = draw(agendaAnswerMessage({ id: 'A99', quote: 'Gone?' }, 'yes'), null);
     expect(textOf(byClass(view, 'fy-agenda-msg-title')[0] as ReactTestInstance)).toBe('Gone?');
     expect(view.root.findAllByType('a')).toHaveLength(0);
-    expect(textOf(byClass(view, 'fy-agenda-msg-chip')[0] as ReactTestInstance)).toBe('!A99');
+    expect(textOf(byClass(view, 'fy-agenda-msg-chip')[0] as ReactTestInstance)).toBe('^A99');
   });
 
   test('a reply names every item, and a discussion without a note shows no empty line', () => {
@@ -190,13 +190,13 @@ describe('a message on its way', () => {
     );
 
   test('is worded as the ferret will receive it: a reply naming an open item reads as one about it', () => {
-    expect(word('!A45 Button only, please')).toBe('[re !A45 «Restarting outdated ferrets»] !A45 Button only, please');
+    expect(word('^A45 Button only, please')).toBe('[re ^A45 «Restarting outdated ferrets»] ^A45 Button only, please');
   });
 
   test('is left as typed when it names nothing open, a resolved item, or no board has been read', () => {
     expect(word('plain words')).toBe('plain words');
-    expect(word('!A7 thanks')).toBe('!A7 thanks');
-    expect(word('!A45 hi', null)).toBe('!A45 hi');
+    expect(word('^A7 thanks')).toBe('^A7 thanks');
+    expect(word('^A45 hi', null)).toBe('^A45 hi');
   });
 });
 
@@ -208,19 +208,19 @@ describe("a reply card's body", () => {
   });
 
   test('drops the leading references the heading already names, and only those', () => {
-    expect(agendaPartBody(re('!A5 Leaning SQLite'))).toBe('Leaning SQLite');
-    expect(agendaPartBody(re('!A5, !A7: both yes', ['A5', 'A7']))).toBe('both yes');
-    expect(agendaPartBody(re('!A9 Leaning SQLite'))).toBe('!A9 Leaning SQLite');
-    expect(agendaPartBody(re('Leaning SQLite, see !A5'))).toBe('Leaning SQLite, see !A5');
-    expect(agendaPartBody(re('!A5'))).toBe('');
+    expect(agendaPartBody(re('^A5 Leaning SQLite'))).toBe('Leaning SQLite');
+    expect(agendaPartBody(re('^A5, ^A7: both yes', ['A5', 'A7']))).toBe('both yes');
+    expect(agendaPartBody(re('^A9 Leaning SQLite'))).toBe('^A9 Leaning SQLite');
+    expect(agendaPartBody(re('Leaning SQLite, see ^A5'))).toBe('Leaning SQLite, see ^A5');
+    expect(agendaPartBody(re('^A5'))).toBe('');
   });
 
   test('leaves every other card exactly as written', () => {
-    expect(agendaPartBody({ kind: 'answer', items: [{ id: 'A5', quote: 'q' }], text: '!A5 Yes' })).toBe('!A5 Yes');
+    expect(agendaPartBody({ kind: 'answer', items: [{ id: 'A5', quote: 'q' }], text: '^A5 Yes' })).toBe('^A5 Yes');
   });
 
   test('draws without the repeated reference', () => {
-    const view = draw(`[re !A45 «${ASK}»] !A45 Button only, please`);
+    const view = draw(`[re ^A45 «${ASK}»] ^A45 Button only, please`);
     expect(textOf(view)).toContain('Button only, please');
     expect(byClass(view, 'fy-agenda-msg-text').map(node => textOf(node))).toEqual(['Button only, please']);
   });

@@ -224,7 +224,7 @@ value comes from the copy (`InputRaise.source`), so the card, the daemon-observe
   came from: "Allow pasting sealed:vercel (40 characters from gh) into the terminal. You type nothing."
 - **The owner allows it; there is nothing to type.** The deliver body is `{ sealed: true }`: it names no copy
   and no value, and the daemon pastes the copy the REQUEST names. A typed value or a saved login on a paste
-  card is refused, and so is `sealed` on an ordinary card. `fy input answer !A7` allows it at the machine
+  card is refused, and so is `sealed` on an ordinary card. `fy input answer ^A7` allows it at the machine
   (no prompt, so it also works from a pipe); the app's card shows **Allow paste** and no field.
 - **A card is for ONE capture.** It pins the copy's `capturedAt` (a capture is always later than the copy its name held
   before), and the write opens the copy only if that capture still holds the name. A copy discarded and captured again under

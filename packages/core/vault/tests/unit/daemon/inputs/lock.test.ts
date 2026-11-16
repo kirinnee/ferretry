@@ -20,7 +20,7 @@ import {
 } from '../../../../daemon/lib/inputs/lock.ts';
 import { identityOf } from '../../../../daemon/lib/inputs/login-observer.ts';
 
-/** How long the target is kept from the ferret after the write (!A149): only what the daemon saw decides. */
+/** How long the target is kept from the ferret after the write (^A149): only what the daemon saw decides. */
 
 const ORIGIN = 'https://accounts.example.test';
 type PageField = Extract<InputTargetFacts, { kind: 'page' }>['fields'][number];

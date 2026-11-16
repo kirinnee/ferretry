@@ -14,7 +14,7 @@ import {
   SEEN,
   cap,
 } from './contract/index.ts';
-import { AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL, AskAnswered, AsksChanged, AsksPort } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretChanged, FerretsPort, LaunchParts } from '@ferretry/core-ferrets/contract';
 import { AccessPort } from './contract/others.ts';
 import {
@@ -455,7 +455,7 @@ export default definePlugin({
       { hook: FerretChanged },
       // A ferret's round ended: the turn-end check reads its last reply (Conversation's `turn.ended`).
       { hook: TurnEnded },
-      { hook: ReferenceCatalog, key: '!' },
+      { hook: ReferenceCatalog, key: ASK_REFERENCE_SIGIL },
       { hook: ArchiveKeeps },
       { hook: LaunchParts },
     ],
