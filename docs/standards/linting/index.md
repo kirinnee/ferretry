@@ -58,6 +58,7 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `a-pages-config`            | the PWA build and the Pages deployment publish the same directory                                                                                                 |
 | `a-relay-config`            | relay code, bindings, discovery and deployment configuration agree                                                                                                |
 | `a-rebuild-checks`          | the Ferretry 5.0 checks (redesign §7.9) through their one entry, `scripts/gen/check.ts`                                                                           |
+| `a-unit-budgets`            | no speed or size budget in the unit tier (the perf tier owns them); `config/perf-pending.txt` only shrinks                                                        |
 | `a-test-tiers`              | tier placement and budgets; complete groups; Quick/Full event, verdict and run-all contracts                                                                      |
 | `a-job-ceilings`            | every workflow job states `timeout-minutes`, so a wedged job fails in minutes                                                                                     |
 | `a-commit-msg`              | conventional commit subject (`commit-msg` stage)                                                                                                                  |

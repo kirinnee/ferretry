@@ -143,6 +143,11 @@ tasks:
     cmds:
       - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} ./scripts/test/swept.sh bun test --config=bunfig.sit.toml
 
+  test:perf:
+    desc: Run the perf suite (speed and size budgets) alone, in one process
+    cmds:
+      - ./scripts/ci/test.sh perf
+
   test:realworld:
     desc: Run the non-blocking realworld suite (machine-dependent timing, memory and rate claims)
     cmds:
