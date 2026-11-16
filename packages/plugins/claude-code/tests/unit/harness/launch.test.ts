@@ -24,6 +24,7 @@ import {
   CLAUDE_PROMPTS_SEEN,
   fixedLayer,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_COMPACTION_HOOKS } from '../../../daemon/lib/harness/compaction.ts';
 import pending from '../../../ports-pending.json';
 
 const settings = new Map([
@@ -142,7 +143,7 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_QUESTION_HOOKS,
+        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS },
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
@@ -629,7 +630,7 @@ describe('the question tool (!A527: withheld from every ferret unless the questi
   });
 
   it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
-    should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_QUESTION_HOOKS);
+    should(fixedLayer('auto', '/f').overlay.hooks).eql({ ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS });
     should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
   });
 });

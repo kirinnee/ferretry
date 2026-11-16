@@ -22,7 +22,7 @@ test('Agenda’s app half is bound: no half of it is pending, and what is still 
   const pending = await Bun.file(new URL('../../../ports-pending.json', import.meta.url)).json();
   expect(pending.pendingHalves?.agenda).toBeUndefined();
   expect((pending.pendingAppPorts ?? []).some((port: { plugin: string }) => port.plugin === 'agenda')).toBe(false);
-  const open = await Bun.file(new URL('../../../app/NEEDS-APP-SHELL.txt', import.meta.url)).text();
+  const open = JSON.stringify(pending.pendingReasons?.agenda ?? []);
   expect(open).not.toContain('GAP(agenda-channel-header)');
   // The composer is Conversation's panel now (lead decision Q9), so agenda-composer is closed; the nav GAP is still open.
   expect(open).not.toContain('GAP(agenda-composer)');
