@@ -141,6 +141,11 @@ export default implementCli(manifest, {
       'queue cancel': queueCancelVerb(queuePorts),
     };
     // Typed against the manifest: a declared verb with no handler, or a handler for no declared verb, does not compile.
-    return { verbs: { ...mine, ...readingVerbs({ client: ctx.client, io: ctx.io }) } };
+    return {
+      verbs: {
+        ...mine,
+        ...readingVerbs({ client: ctx.client, io: ctx.io, ...(ctx.clock === undefined ? {} : { clock: ctx.clock }) }),
+      },
+    };
   },
 });

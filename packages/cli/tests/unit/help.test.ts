@@ -255,13 +255,15 @@ describe('help names the flags the handlers read', () => {
 
   it('should list every option `new` reads, say it needs --runtime or --auto, and offer none it refuses', () => {
     const flags = flagsOf('new [words...]');
-    for (const flag of [...SHARED, '--runtime <name>', '--auto']) should(flags).containEql(flag);
-    for (const refused of ['--continue', '--since', '--allow-scratch', '--request-id', '--file', '--parent'])
+    for (const flag of [...SHARED, '--runtime <name>', '--auto', '--allow-scratch', '--continue', '--since <dur>'])
+      should(flags).containEql(flag);
+    for (const refused of ['--request-id', '--file', '--parent'])
       should(flags.some(flag => flag.includes(refused))).be.false();
     const text = helpOf('new [words...]');
     should(text).containEql('--runtime <name>');
     should(text).containEql('--auto');
-    should(text).not.containEql('--continue');
+    // `--continue` and `--since` are `fy link` (V-0334): the help says so.
+    should(text.replace(/\s+/gu, ' ')).containEql('same as `fy link [words]`');
     should(text).not.containEql('search words');
   });
 

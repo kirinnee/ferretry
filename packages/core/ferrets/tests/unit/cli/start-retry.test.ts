@@ -132,3 +132,20 @@ test('S54 a CLI start whose error is its own cause is final instead of looping',
   await expect(api.start({ folder: '/work/a' })).rejects.toBe(looping);
   expect(starts).toBe(1);
 });
+
+test('the CLI recovery digest leaves `allowScratch` out, as the daemon’s does', async () => {
+  const calls: { route: string; init?: Init }[] = [];
+  const api = new ClientSessionApi(
+    stub(async (route, init) => {
+      calls.push({ route, init });
+      if (route === FERRET_ROUTES.start) throw new TypeError('fetch failed');
+      return { id: 'recovered' };
+    }),
+  );
+  await api.start({ folder: '/work/a', prompt: 'hello', allowScratch: false });
+  expect(calls[2]?.init?.query?.payload).toBe(
+    createHash('sha256')
+      .update(JSON.stringify({ folder: '/work/a', prompt: 'hello' }))
+      .digest('hex'),
+  );
+});

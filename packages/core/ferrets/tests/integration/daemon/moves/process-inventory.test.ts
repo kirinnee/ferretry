@@ -139,6 +139,42 @@ describe('PaneProcessInventory', () => {
     ]);
   });
 
+  it('should treat the all-empty "|||" answer of a vanished session as an empty observation', async () => {
+    // tmux 3.8 answers display-message for a session it does not have with exit 0 and every field empty (measured on
+    // a private server). v4 refused five moves on this ("unusable pane pid "|||""); the second question settles it.
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '|||\n', stderr: '' }, NO_SUCH_SESSION);
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
+
+    // Assert
+    should(actual).deepEqual({ kind: 'observed', processes: [] });
+    should(tmux.calls).deepEqual([
+      ['display-message', '-p', '-t', 'isolated-session', PANE_PROOF_FORMAT],
+      ['has-session', '-t', 'isolated-session'],
+    ]);
+  });
+
+  it('should explain an all-empty answer as a blind spot while tmux still lists the session', async () => {
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '|||\n', stderr: '' });
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'unobservable',
+      reason:
+        'tmux gave an empty answer for the pane but still lists its session, so what the agent runs could not be checked',
+    });
+  });
+
   it('should report a silent tmux failure with its exit code', async () => {
     // Arrange
     const tmux = new FakeTmux({ code: 3, stdout: '', stderr: '   ' });

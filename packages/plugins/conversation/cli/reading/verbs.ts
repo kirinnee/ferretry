@@ -10,8 +10,12 @@ import type {
 import { RENDER_GUIDE_TYPES, renderGuideSection, renderGuideSectionName } from './guide.ts';
 import { RENDER_GUIDE_SECTION } from './guide-text.ts';
 
-/** What the reading verbs need of the CLI: the generated client and the terminal. */
-type Context = Pick<CliContext<never>, 'client' | 'io'>;
+/** What the reading verbs need of the CLI: the generated client, the terminal and (for `--since`) the time. */
+type Context = Pick<CliContext<never>, 'client' | 'io' | 'clock'>;
+
+/** `<n>d`, `<n>h` or `<n>w` — the only duration grammar `--since` accepts (v4's). */
+const SINCE_PATTERN = /^(\d+)(d|h|w)$/u;
+const SINCE_UNIT_MS = { h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 } as const;
 
 const BIN = 'fy';
 
@@ -95,7 +99,15 @@ function renderTranscriptPage(page: TranscriptPage): string {
  * The reading verbs: logs, search, render guide, link (list, preview, keep) and transcript. Each is one client call and one
  * rendering; a refusal is a sentence on stderr and a non-zero exit, never a stack.
  */
-export function readingVerbs({ client, io }: Context) {
+export function readingVerbs({ client, io, clock }: Context) {
+  /** `--since` is a duration on the command line and an ISO instant on the wire: this is the bridge (v4's `sinceInstant`). */
+  const sinceInstant = (value: string): string => {
+    const match = SINCE_PATTERN.exec(value.trim());
+    if (match === null) throw new Usage(`--since takes <n>d, <n>h or <n>w (e.g. 7d), not ${JSON.stringify(value)}`);
+    const ago = Number(match[1]) * SINCE_UNIT_MS[match[2] as 'd' | 'h' | 'w'];
+    if (clock === undefined) throw new Error('--since needs the shell’s clock, which this fy does not give a verb yet');
+    return new Date(clock.nowMs() - ago).toISOString();
+  };
   const guarded =
     (run: (invocation: VerbInvocation) => Promise<number | void>): VerbHandler =>
     async invocation => {
@@ -187,7 +199,9 @@ export function readingVerbs({ client, io }: Context) {
           ...(q === '' ? {} : { q }),
           ...(option(invocation, 'harness') === undefined ? {} : { harness: option(invocation, 'harness') as string }),
           ...(option(invocation, 'source') === undefined ? {} : { source: option(invocation, 'source') as string }),
-          ...(option(invocation, 'since') === undefined ? {} : { since: option(invocation, 'since') as string }),
+          ...(option(invocation, 'since') === undefined
+            ? {}
+            : { since: sinceInstant(option(invocation, 'since') as string) }),
           ...(limit === undefined ? {} : { limit: String(limit) }),
         },
       });
