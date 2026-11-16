@@ -8,6 +8,7 @@ import {
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { type ComponentType, Suspense, useState } from 'react';
 import half from '../../../app/index.ts';
+import { RuntimesChanged } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { type Call, scripted } from './support/client.ts';
@@ -40,8 +41,13 @@ const FEED = { stale: false, accounts: [{ agent: 'claude-a', fiveHourPercent: 42
 const usageOff = (): Error =>
   Object.assign(new Error('Usage is paused on this daemon (off).'), { status: 0, code: 'plugin_paused' });
 
-const panelFor = (slot: string, routes: Record<string, unknown>, calls: Call[] = []) => {
-  const client = { ...scripted(routes, calls), subscribe: () => () => undefined } as unknown as PluginClient;
+const panelFor = (
+  slot: string,
+  routes: Record<string, unknown>,
+  calls: Call[] = [],
+  subscribe: unknown = () => () => undefined,
+) => {
+  const client = { ...scripted(routes, calls), subscribe } as unknown as PluginClient;
   const built = half.build?.({ manifest, client }) as unknown as {
     panels: Record<string, (props: unknown) => unknown>;
   };
@@ -288,6 +294,47 @@ describe('the move account slot', () => {
       { harness: 'codex' },
     );
     expect(quiet.container.querySelectorAll('[data-runtime-option]')).toHaveLength(1);
+  });
+
+  it('does not tell a page the cached roster is the answer while a changed roster is still being read', async () => {
+    // The panel's store belongs to the app half and outlives a mount, so a later mount finds the last catalog in it.
+    const changed: ((event: { runtimes: string[] }) => void)[] = [];
+    const subscribe = (event: { name: string }, handler: (event: { runtimes: string[] }) => void) => {
+      if (event.name === RuntimesChanged.name) changed.push(handler);
+      return () => undefined;
+    };
+    let reads = 0;
+    let resolveRoster: (answer: unknown) => void = () => undefined;
+    const routes = {
+      ...READS,
+      'GET /v1/runtimes': () =>
+        ++reads === 1
+          ? runtimeCatalog(runtimeView({ wrapper: 'claude-a' }))
+          : new Promise(resolve => {
+              resolveRoster = resolve;
+            }),
+    };
+    const panel = panelFor(MOVE_ACCOUNT_SLOT, routes, [], subscribe);
+    await draw(panel, { value: '', chosen: undefined }, { harness: 'claude-code' });
+    expect(reads).toBe(1);
+    await interact(async () => {
+      for (const handler of changed) handler({ runtimes: ['claude-b'] });
+    });
+    await settle();
+    expect(reads).toBe(2);
+
+    const told: (readonly string[] | null)[] = [];
+    await draw(
+      panel,
+      { value: '', chosen: undefined },
+      { harness: 'claude-code', onOffered: (wrappers: readonly string[] | null) => told.push(wrappers) },
+    );
+    expect(told.filter(wrappers => wrappers !== null)).toEqual([]);
+    expect(told.at(-1)).toBeNull();
+
+    resolveRoster(runtimeCatalog(runtimeView({ wrapper: 'claude-a' }), runtimeView({ wrapper: 'claude-b' })));
+    await settle();
+    expect(told.at(-1)).toEqual(['claude-a', 'claude-b']);
   });
 
   it('draws nothing without the harness the move page owes it', async () => {

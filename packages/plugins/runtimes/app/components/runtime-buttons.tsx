@@ -227,7 +227,12 @@ export function RuntimeButtons({
   }, [selected, onChosen]);
 
   // Said as one string so a roster read again with the same runtimes does not tell the page twice.
-  const usable = offered === null ? null : offered.filter(option => option.available).map(option => option.wrapper);
+  // The store keeps its last catalog while it reads again, so a roster is only SETTLED when the slice says it is
+  // ready: loading, re-reading after a change event and an error all leave the offer undecided (`null`), never the
+  // stale list a page could act on as if it were the machine's current runtimes.
+  const settled = slice.status === 'ready';
+  const usable =
+    offered === null || !settled ? null : offered.filter(option => option.available).map(option => option.wrapper);
   const usableKey = usable === null ? null : JSON.stringify(usable);
   useEffect(() => {
     onOffered?.(usableKey === null ? null : (JSON.parse(usableKey) as string[]));
