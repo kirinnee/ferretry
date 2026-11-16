@@ -41,7 +41,9 @@ import {
 import { createWardenRemedies } from './remedies.ts';
 import { ferretsWardenSpawner } from './spawner.ts';
 import { conversationStuckInbox, conversationStuckInput } from './stuck-ports.ts';
+import { agendaDialogNotices, ferretDialogs } from './dialogs.ts';
 import {
+  DIALOG_WATCH_REF,
   INBOX_STUCK_REF,
   INPUT_STUCK_REF,
   type LivenessSample,
@@ -50,6 +52,7 @@ import {
   ownerHoldReason,
   WARDEN_SWEEP_ORIGIN,
   WardenAutoMoveService,
+  WardenDialogWatch,
   type WardenAgentInventory,
   WardenLivenessMonitor,
   WardenReviveService,
@@ -416,6 +419,15 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
     },
   );
 
+  // ── dialog watch: a ferret parked on a harness screen nothing pre-answered is told to the owner ONCE per episode ───
+  // Not a flag and not a sweep step: a rule over the dialog Ferrets already recorded (`dialog-watch.ts`).
+  const dialogWatch = new WardenDialogWatch({
+    dialogs: async () => await ferretDialogs(ferrets, fleetNow),
+    memory: new StateMachineMembers(kernel.state, DIALOG_WATCH_REF),
+    notices: agendaDialogNotices(agenda),
+    record: (type, data) => kernel.log.info(type, data),
+  });
+
   // A flag is announced when it first appears (not on every sweep that still sees it).
   let flagged = new Set<string>();
   const announce = (view: WardenRunView): void => {
@@ -504,6 +516,23 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
         }
       };
       const stopLooking = kernel.clock.every(milliseconds(WARDEN_LIVENESS_TICK_SECONDS * 1000), () => void look());
+      // The dialog look: its own tick (the liveness one needs Terminals), one at a time, off with the Warden.
+      let dialogLooking = false;
+      const lookForDialogs = async (): Promise<void> => {
+        if (dialogLooking || stopped) return;
+        dialogLooking = true;
+        try {
+          await dialogWatch.look((await service.currentConfig()).enabled);
+        } catch (error) {
+          kernel.log.warn('warden: a dialog look failed', { error: String(error) });
+        } finally {
+          dialogLooking = false;
+        }
+      };
+      const stopDialogs = kernel.clock.every(
+        milliseconds(WARDEN_LIVENESS_TICK_SECONDS * 1000),
+        () => void lookForDialogs(),
+      );
       void loop.arm().then(
         off => {
           if (stopped) off();
@@ -514,6 +543,7 @@ export function createWardenSubsystem(host: WardenHost): WardenSubsystem {
       return () => {
         stopped = true;
         stopLooking();
+        stopDialogs();
         if (livenessArmed) liveness.disarm();
         livenessArmed = false;
         disarm?.();

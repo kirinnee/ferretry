@@ -146,7 +146,7 @@ describe('homeText', () => {
         hasCompletedOnboarding: true,
         hasCompletedClaudeInChromeOnboarding: true,
         ...CLAUDE_PROMPTS_SEEN,
-        projects: { '/work/repo': { hasTrustDialogAccepted: true } },
+        projects: { '/work/repo': { hasTrustDialogAccepted: true, enableAllProjectMcpServers: true } },
       });
     }
   });
@@ -275,6 +275,7 @@ describe('launchCommand', () => {
     should(launchCommand(base)).eql([
       'env',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
+      'DISABLE_AUTOUPDATER=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -297,7 +298,7 @@ describe('launchCommand', () => {
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-9' },
     });
-    should(argv.slice(9)).eql([
+    should(argv.slice(10)).eql([
       '--permission-mode',
       'bypassPermissions',
       '--mcp-config',

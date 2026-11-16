@@ -63,6 +63,7 @@ describe('mergeClaudeJson', () => {
       projects: {
         [CWD]: {
           hasTrustDialogAccepted: true,
+          enableAllProjectMcpServers: true,
           enabledMcpjsonServers: ['docs'],
           disabledMcpjsonServers: ['tracker'],
           allowedTools: ['Bash'],
