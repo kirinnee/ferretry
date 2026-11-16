@@ -247,5 +247,7 @@ export default definePlugin({
     secrets: [],
     // The daemon's own system-call count and reaped children's CPU, for `fy daemon profile`: `/proc/self/{io,stat}` only.
     selfCounters: true,
+    // The directories the host polls instead of watching, so a report says what a platform watcher could not do.
+    fileEvents: true,
   },
 });
