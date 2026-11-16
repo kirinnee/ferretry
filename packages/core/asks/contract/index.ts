@@ -549,3 +549,7 @@ export const AskOnScreenSchema = z.object({
   projectId: z.string().optional(),
 });
 export type AskOnScreen = z.infer<typeof AskOnScreenSchema>;
+
+// ─── when a ferret's last words ask the owner for something ───────────────────────────────────────────────────────
+/** The pure detector the turn-end check reads a reply with (Agenda's nudge): Asks owns the rule, a consumer reads it here. */
+export * from './owner-asks.ts';

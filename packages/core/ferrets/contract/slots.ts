@@ -64,6 +64,12 @@ interface AccountSlotProps {
   readonly onValueChange: (next: string) => void;
   /** Told which offered runtime the draft names now (or `null`), so the model box can follow it. */
   readonly onChosen: (chosen: ChosenFerretAccount | null) => void;
+  /**
+   * Told the wrappers this field offers AND can run now, again whenever they change: `null` while the roster is still
+   * unread, `[]` when nothing can run. A page that must know whether there is only ONE choice (Conversation's Continue)
+   * asks; a panel that cannot say simply never calls it. Optional: a page that does not care leaves it out.
+   */
+  readonly onOffered?: (wrappers: readonly string[] | null) => void;
   /** The id the typed fallback input takes, so the page's own label keeps pointing at it. */
   readonly fallbackId: string;
   /** The element naming this field, for the radio group. */
@@ -94,6 +100,7 @@ function hasAccountSlotProps(props: unknown): props is AccountSlotProps {
     typeof candidate.value === 'string' &&
     typeof candidate.onValueChange === 'function' &&
     typeof candidate.onChosen === 'function' &&
+    (candidate.onOffered === undefined || typeof candidate.onOffered === 'function') &&
     typeof candidate.fallbackId === 'string' &&
     typeof candidate.labelId === 'string' &&
     typeof candidate.fallbackPlaceholder === 'string'
