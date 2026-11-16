@@ -42,6 +42,8 @@
     // Board's card screenshots (the same browser harness): playwright-core is the app package's alone.
     "packages/plugins/board/tests/integration/app",
     // Logins' card screenshots (the same browser harness): playwright-core is only in the app package.
-    "packages/plugins/logins/tests/integration/app"
+    "packages/plugins/logins/tests/integration/app",
+    // MCP's Add MCP reload screenshots (the same browser harness): playwright-core is the app package's alone.
+    "packages/plugins/mcp/tests/integration/app"
   ]
 }

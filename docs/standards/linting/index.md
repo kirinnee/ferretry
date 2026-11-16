@@ -32,8 +32,8 @@ and `a-route-agreement` serially (Knip needs more than 4GB). `treefmt` runs in Q
 | `treefmt`                   | formatting: Biome (TS/JS/JSON/CSS), prettier (Markdown/YAML/HTML), actionlint, nixfmt, shfmt                                                                      |
 | `a-biome`                   | Biome lint on TS/JS (Biome formats through `treefmt`, configured in the same `biome.json`)                                                                        |
 | `typecheck`                 | `tsc --noEmit` across the workspace, one run per machine at a time (see below)                                                                                    |
-| `a-deadcode`                | Knip, repository view (`knip.json`) — includes tests                                                                                                              |
-| `a-deadcode-production`     | Knip, production view (`knip.production.json`) — from the bin entry                                                                                               |
+| `a-deadcode`                | Knip, repository view (`knip.ts`) — includes tests                                                                                                                |
+| `a-deadcode-production`     | Knip, production view (`knip.production.ts`) — from the bin entry                                                                                                 |
 | `a-shellcheck`              | shellcheck on every `*.sh` and `scripts/host/ferretry-loopback-firewall`                                                                                          |
 | `a-enforce-exec`            | tracked shell scripts are executable                                                                                                                              |
 | `a-action-pins-trusted`     | trusted GitHub Actions pin a major tag                                                                                                                            |
@@ -67,6 +67,18 @@ under the same strictness plus `strict`. `task test:e2e` typechecks that project
 journey, so a type error in a fixture such as `ci-sets.ts` used to pass Quick and then fail every E2E
 shard in seconds (E2E is advisory, so the PR still went green). `a-e2e-harness-typecheck` runs the exact
 command `scripts/test/run-e2e.sh` runs, in Quick's parallel buckets, so it fails first.
+
+**Where a package's Knip settings live.** Each package owns its own entry points, ignores and kept exports:
+`<package>/knip.json` is its workspace block for the repository view and `<package>/knip.production.json` for the
+production view (a package owns them when it is `packages/std`, `packages/cli`, `packages/app` or
+`packages/core|plugins/<id>`). A package with no special setting has no file; the `packages/core/*` and
+`packages/plugins/*` blocks in the root cover it. The root `knip.ts` and `knip.production.ts` keep only what is global
+(the rules, the tags, the root workspace `.` and those two globs) and call `composeKnip`
+(`scripts/gen/lib/knip-config.ts`), which reads every package's file into the one config Knip runs. A setting that keeps
+code alive without a pending-port tie (an entry that is no test, view or bin file, `ignoreDependencies`,
+`ignoreIssues`) names its reason in the same file, in an `allowed` object (`"entry:app/surfaces.tsx": "why"`).
+`a-pending-tags` refuses a package key in a root config, a root `knip.json`, and a file outside a package folder, so the
+settings cannot grow back into a file every feature edits.
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
 therefore catches files that only tests reach, which the repository view considers used.

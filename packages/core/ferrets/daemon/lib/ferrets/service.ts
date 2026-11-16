@@ -486,6 +486,8 @@ export interface OpeningFile {
 export interface BoundLaunchFolder {
   /** The folder is (or is reached through a link into) the daemon's state home: an agent never starts there. */
   readonly insideStateHome: boolean;
+  /** The directory the launch will really be in, every link resolved (what `start.decide` judges WHERE by). */
+  readonly realPath?: string | undefined;
   /** Ok while it is still the folder that was checked (same directory, same side of the state home); never throws. */
   verify(): Promise<Result<void, string>>;
 }
@@ -1034,11 +1036,13 @@ export class FerretsService implements FerretsApi {
       ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
       ...(login === undefined ? {} : { login }),
       folder: folder.value,
+      ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
       by: request.by,
       ...(request.options?.model === undefined ? {} : { model: request.options.model }),
       ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
       // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
       ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+      ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
     });
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
@@ -1047,7 +1051,7 @@ export class FerretsService implements FerretsApi {
     if (!opening.ok) return opening;
     if (request.options !== undefined) {
       // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
-      const { title, initialAttachments: _attached, ...options } = request.options;
+      const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title }),
@@ -1776,12 +1780,41 @@ export class FerretsService implements FerretsApi {
         throw new ApiError(503, 'the harness that wrote this conversation is off', 'plugin_unavailable');
       return harness.transcript;
     };
+    /**
+     * Whether this ferret's harness takes messages through its own protocol (codex-protocol-send), for this text. A
+     * native slash command (`/compact`) is the TUI's to parse, so it is always typed.
+     */
+    const injects = (text: string): boolean => {
+      const record = this.registry.get(ferret);
+      const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+      return harness?.inject !== undefined && !text.trimStart().startsWith('/');
+    };
+    /**
+     * The harness's own protocol (codex-protocol-send): types nothing and reads no screen, so an unreadable frame cannot
+     * stall the send. Not wrapped in an act: it types nothing (the act deadlock the notes above describe is about keys).
+     * A throw is `unavailable`: nothing reached the harness's protocol call's acceptance.
+     */
+    const inject = async (text: string): Promise<'handed' | 'unavailable' | 'uncertain'> => {
+      const record = this.registry.get(ferret);
+      const harness = record === undefined ? undefined : this.ports.harness(record.harness);
+      if (harness?.inject === undefined) return 'unavailable';
+      try {
+        return await harness.inject(ferret, text);
+      } catch {
+        return 'unavailable';
+      }
+    };
     const attachmentsFolder = this.ports.session?.attachmentsFolder?.bind(this.ports.session);
     const attach = this.ports.session?.attach?.bind(this.ports.session);
     return {
       deliver: async (delivery: RunnerDelivery): Promise<Result<DeliveryOutcome, HarnessDeliveryFailure>> => {
         const found = pane();
         if (!found.ok) return found;
+        // A harness that takes messages through its own protocol is answered BUSY, nothing typed or handed: Conversation
+        // then takes its queue path, which marks the row as a queued, busy-typed send before `queue` hands it over. A
+        // hand-over looks like nothing on the pane or in the transcript until the agent's current turn ends, and a row
+        // that did not say "queued" was read as absent at its deadline and handed again — a second copy (review #F4344).
+        if (injects(delivery.text)) return err({ refused: 'not_ready', why: 'busy' });
         // Ruling #45: one look first. A ferret visibly at work is answered busy NOW, nothing typed, rather than after
         // the delivery's readiness wait gives up on a prompt that will not come until the turn ends.
         const look = await found.value.runner.look?.(found.value.handle).catch(() => undefined);
@@ -1802,6 +1835,26 @@ export class FerretsService implements FerretsApi {
         const found = pane();
         if (!found.ok) return found;
         const { handle, runner } = found.value;
+        if (injects(text)) {
+          // Handed to the harness's own protocol: the text as given goes, nothing is typed, and where it landed is for
+          // the transcript to say (`left`). Cut off after it may have been accepted: unconfirmed, never sent again.
+          const handed = await inject(text);
+          if (handed === 'uncertain') return err({ unconfirmed: true, stranded: false });
+          if (handed === 'handed') {
+            this.ports.delivered?.(ferret);
+            return ok('left');
+          }
+          // Not handed, and nothing sent: typed as it always was. `deliver` answered busy without looking, so the pane
+          // is looked at now: an idle one is typed at its prompt (where it lands is again the transcript's to say), a
+          // working one goes to its own queue below.
+          const look = await runner.look?.(handle).catch(() => undefined);
+          if (!midTurn(look)) {
+            const delivered = await written(async () => await runner.deliver(handle, { text }));
+            if (!delivered.ok) return delivered;
+            this.ports.delivered?.(ferret);
+            return ok('left');
+          }
+        }
         const queue = runner.queue?.bind(runner);
         if (queue === undefined) return err({ refused: 'plugin_unavailable' });
         // Ruling #45 (today's `native-file` path): a long message goes by file, written BEFORE any key, and the queue

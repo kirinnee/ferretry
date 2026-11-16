@@ -53,7 +53,7 @@ import {
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
-import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
+import { HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
 import {
   compareLaunchSettings,
   type LaunchSettingsInputs,
@@ -397,11 +397,13 @@ export class ClaudeHarness implements Harness {
     await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
+      flags: settingsFlags(inputs.settings),
       home: spec.home,
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       mode: spec.mode,
+      questionTool: inputs.questionTool,
       conversation,
       readable: spec.readable,
     });
@@ -555,12 +557,17 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private async launchInputs(runtime: string | undefined): Promise<LaunchSettingsInputs> {
+  private async launchInputs(
+    runtime: string | undefined,
+  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean }> {
     const selected = await this.deps.selected(runtime);
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
+    const file = this.deps.config.file(configFile);
     return {
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'skip',
+      permissionMode: file?.permissionMode ?? 'skip',
+      // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
+      questionTool: file?.questionTool ?? false,
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),

@@ -1,5 +1,5 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
-import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
 import { fixedLayer } from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
@@ -93,15 +93,26 @@ export function homeText(inputs: HomeInputs): HomeText {
   };
 }
 
+/**
+ * The launch flags the selected settings items carry, item by item in name order (the order their settings merge in, so
+ * the later item's flag comes later on the command line). Every word is its own argv word, whatever it holds.
+ */
+export const settingsFlags = (settings: ReadonlyMap<string, SettingsItem>): readonly string[] =>
+  byName(settings).flatMap(item => item.flags ?? []);
+
 export interface CommandInputs {
   readonly binary: string;
+  /** The settings items' launch flags ({@link settingsFlags}): passed first, so every flag the launch sets wins. */
+  readonly flags?: readonly string[] | undefined;
   /** The ferret's home, which is Claude's `CLAUDE_CONFIG_DIR`. */
   readonly home: string;
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly model?: string | undefined;
   readonly hasMcp: boolean;
-  /** The ferret's mode (`LaunchSpec.mode`): only an interactive one keeps the question tool. */
+  /** The ferret's mode (`LaunchSpec.mode`): with {@link questionTool} on, only an interactive one keeps the question tool. */
   readonly mode?: 'interactive' | 'auto' | undefined;
+  /** `HarnessConfig.questionTool`: the opt-in that gives an interactive ferret its question tool back. */
+  readonly questionTool: HarnessConfig['questionTool'];
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
   /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
@@ -134,13 +145,20 @@ export function launchCommand(inputs: CommandInputs): readonly string[] {
 
 /** Claude itself and its flags: what the seed `exec`s. */
 function claudeCommand(inputs: CommandInputs): readonly string[] {
+  const itemFlags = launchFlagsKept(inputs.flags ?? []);
   return [
     inputs.binary,
+    // The items' flags come BEFORE every flag the launch sets: Claude takes the last of a repeated flag, and the ones the
+    // launch decides (permission mode, conversation, settings and MCP files) are dropped from them (`launchFlagsKept`).
+    ...itemFlags,
+    // A flag the items leave valueless at their end (`--model`, `--add-dir`) takes the NEXT word whatever it is. This
+    // disposable copy of the overlay, one attached word, is what it takes; the real pair after it is never eaten.
+    ...(itemFlags.length === 0 ? [] : [`--settings=${inputs.home}/${HOME_FILES.overlay}`]),
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
-    ...questionArguments(inputs.mode),
+    ...questionArguments(inputs.mode, inputs.questionTool),
     ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
@@ -150,12 +168,14 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
 }
 
 /**
- * The question tool, per ferret (O3, v4 parity with the Runtimes wrapper's `CLAUDE_NO_QUESTIONS_FLAG`): an interactive
- * ferret has an owner and keeps `AskUserQuestion`; an unattended one (`auto`, or no mode) has nobody to answer, so the
- * tool is withheld. Not part of the fixed layer's fingerprint: a ferret's mode is fixed for its life.
+ * The question tool (owner !A527: "disable question tool, so we dont get blocked"): WITHHELD from every ferret, an
+ * interactive one included, so none stops on a form only the pane shows; an agent asks through the agenda instead. The
+ * `questionTool` setting (`config/harness-claude-code.yaml`) is the one way back: with it on, an INTERACTIVE ferret (it
+ * has an owner at the pane) keeps `AskUserQuestion`, and an auto one (or one with no mode) still has it withheld, as
+ * nobody is there to answer. Not part of the fixed layer's fingerprint, so a change never reads a ferret as outdated.
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
-export function questionArguments(mode: 'interactive' | 'auto' | undefined): readonly string[] {
-  return mode === 'interactive' ? [] : [CLAUDE_NO_QUESTIONS_FLAG];
+export function questionArguments(mode: 'interactive' | 'auto' | undefined, questionTool: boolean): readonly string[] {
+  return questionTool && mode === 'interactive' ? [] : [CLAUDE_NO_QUESTIONS_FLAG];
 }

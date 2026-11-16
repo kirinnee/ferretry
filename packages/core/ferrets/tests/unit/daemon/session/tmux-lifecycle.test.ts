@@ -4,6 +4,7 @@ import {
   harnessExitReason,
   isTmuxServerAbsent,
   PANE_PROOF_FORMAT,
+  isEmptyPaneAnswer,
   paneProofArguments,
   parsePaneSighting,
   provePane,
@@ -59,6 +60,7 @@ describe('proving which pane this is', () => {
 
   test('refuses anything that is not a pane tmux described', () => {
     for (const output of [
+      '|||',
       '',
       '%1|2|0',
       '%1|2|0|3|4',
@@ -138,5 +140,15 @@ describe('why a pane is gone', () => {
     expect(quoted.startsWith('…')).toBe(true);
     expect(quoted.endsWith('END')).toBe(true);
     expect(quoted).toHaveLength(301);
+  });
+});
+
+describe('isEmptyPaneAnswer', () => {
+  test('recognises tmux 3.8 answer for a target that names nothing', () => {
+    expect(isEmptyPaneAnswer('|||\n')).toBe(true);
+  });
+  test('does not mistake a described, dead or empty-output pane for it', () => {
+    for (const output of ['', '%0||1|1730000000', '%12|4242|0|1730000000'])
+      expect(isEmptyPaneAnswer(output)).toBe(false);
   });
 });

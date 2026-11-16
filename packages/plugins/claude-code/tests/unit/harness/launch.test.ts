@@ -10,6 +10,7 @@ import {
   launchCommand,
   questionArguments,
   settingsDocument,
+  settingsFlags,
 } from '../../../daemon/lib/harness/launch.ts';
 import {
   API_KEY_SEED_NAME,
@@ -21,6 +22,7 @@ import {
   CLAUDE_QUESTION_HOOK_COMMAND,
   CLAUDE_QUESTION_HOOKS,
   CLAUDE_PROMPTS_SEEN,
+  fixedLayer,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
 import pending from '../../../ports-pending.json';
 
@@ -266,8 +268,9 @@ describe('launchCommand', () => {
     home: '/state/claude-code/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
-    // Interactive keeps the question tool, so these argv assertions are about the rest of the argv only.
+    // An opted-in interactive ferret keeps the question tool, so these argv assertions are about the rest of the argv only.
     mode: 'interactive' as const,
+    questionTool: true,
     conversation: { kind: 'new' as const, id: 'c-1' },
   };
 
@@ -307,6 +310,113 @@ describe('launchCommand', () => {
       '--model',
       'claude-opus-5-5',
     ]);
+  });
+});
+
+describe('launchCommand with settings flags', () => {
+  const base = {
+    binary: '/opt/bin/claude',
+    home: '/state/claude-code/agent-homes/f1',
+    permissionMode: 'auto' as const,
+    hasMcp: true,
+    mode: 'interactive' as const,
+    conversation: { kind: 'resume' as const, id: 'c-1' },
+    model: 'claude-opus-5-5',
+    questionTool: false,
+  };
+  /** The words after the seeded shell's own: what claude is `exec`ed with. */
+  const claudeWords = (argv: readonly string[]): readonly string[] => argv.slice(argv.indexOf(base.binary));
+  const OVERLAY = '/state/claude-code/agent-homes/f1/launch-settings.json';
+  /** The disposable word the launch puts right after the items' flags. */
+  const OVERLAY_COPY = `--settings=${OVERLAY}`;
+
+  it('passes every flag, any flag, as its own word (its value attached) and in order, before the launch’s own flags', () => {
+    const flags = ['--some-future-flag', 'a value with spaces', '--verbose', '--add-dir', '/a', '--add-dir=/b'];
+    const words = claudeWords(launchCommand({ ...base, flags }));
+
+    should(words.slice(1, 5)).eql([
+      '--some-future-flag=a value with spaces',
+      '--verbose',
+      '--add-dir=/a',
+      '--add-dir=/b',
+    ]);
+    should(words.slice(5, 8)).eql([OVERLAY_COPY, '--settings', OVERLAY]);
+  });
+
+  it('a bare --, a subcommand and a positional in the items never reach the argv, so the launch’s flags stay flags', () => {
+    const words = claudeWords(launchCommand({ ...base, flags: ['mcp', '--', 'update', '--keep', '--'] }));
+
+    should(words.slice(0, 4)).eql(['/opt/bin/claude', '--keep', OVERLAY_COPY, '--settings']);
+    should(words.includes('--')).be.false();
+    should(words.includes('mcp')).be.false();
+  });
+
+  it('an item flag left valueless at the end (--model, --add-dir) takes the disposable word, never a launch flag', () => {
+    for (const last of ['--model', '--add-dir']) {
+      const words = claudeWords(launchCommand({ ...base, flags: ['--verbose', last] }));
+      const at = words.indexOf(last);
+
+      should(words.slice(at, at + 4)).eql([last, OVERLAY_COPY, '--settings', OVERLAY]);
+    }
+  });
+
+  it('keeps the launch’s own flags authoritative: the permission mode, the conversation, the home files and the model', () => {
+    const words = claudeWords(
+      launchCommand({
+        ...base,
+        flags: [
+          '--permission-mode',
+          'bypassPermissions',
+          '--dangerously-skip-permissions',
+          '--session-id',
+          'evil',
+          '--resume',
+          'other',
+          '--settings',
+          'x.json',
+          '--mcp-config',
+          'x.json',
+          '--model',
+          'cheap',
+          '--keep',
+        ],
+      }),
+    );
+
+    should(words).eql([
+      '/opt/bin/claude',
+      '--model=cheap',
+      '--keep',
+      OVERLAY_COPY,
+      '--settings',
+      OVERLAY,
+      '--permission-mode',
+      'auto',
+      CLAUDE_NO_QUESTIONS_FLAG,
+      '--mcp-config',
+      '/state/claude-code/agent-homes/f1/mcp.json',
+      '--resume',
+      'c-1',
+      // The model the launch decides is LAST, so it wins over the item's own `--model`.
+      '--model',
+      'claude-opus-5-5',
+    ]);
+  });
+
+  it('is the same argv with no flags, and with none given', () => {
+    should(launchCommand({ ...base, flags: [] })).eql(launchCommand(base));
+  });
+});
+
+describe('settingsFlags', () => {
+  it('appends every selected item’s flags item by item in name order, and skips an item with none', () => {
+    const items = new Map([
+      ['z-last', { settings: {}, flags: ['--a', '1'] }],
+      ['a-none', { settings: { theme: 'dark' } }],
+      ['m-middle', { settings: {}, flags: ['--b'] }],
+    ]);
+
+    should(settingsFlags(items)).eql(['--b', '--a', '1']);
   });
 });
 
@@ -473,37 +583,52 @@ describe('transcript', () => {
   });
 });
 
-describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
-  const inputs = (mode?: 'interactive' | 'auto') => ({
+describe('the question tool (!A527: withheld from every ferret unless the questionTool setting opts in)', () => {
+  const inputs = (mode?: 'interactive' | 'auto', questionTool = false) => ({
     binary: '/opt/bin/claude',
     home: '/fy/agent-homes/f1',
     permissionMode: 'auto' as const,
     hasMcp: false,
+    questionTool,
     conversation: { kind: 'new' as const, id: 'conv-1' },
     ...(mode === undefined ? {} : { mode }),
   });
 
   it('spells the flag exactly as the Runtimes wrapper does', () => {
     should(CLAUDE_NO_QUESTIONS_FLAG).equal('--disallowed-tools=AskUserQuestion');
-    should(questionArguments('interactive')).eql([]);
-    should(questionArguments('auto')).eql([CLAUDE_NO_QUESTIONS_FLAG]);
-    should(questionArguments(undefined)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
   });
 
-  it('keeps the tool for an interactive launch and withholds it from an auto one or one with no mode, new or resumed', () => {
+  it('withholds the tool by default from an interactive ferret, an auto one and one with no mode', () => {
+    should(questionArguments('interactive', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments('auto', false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments(undefined, false)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+  });
+
+  it('keeps the tool only for an interactive ferret, and only with the setting on: an auto one or one with no mode stays withheld', () => {
+    should(questionArguments('interactive', true)).eql([]);
+    should(questionArguments('auto', true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+    should(questionArguments(undefined, true)).eql([CLAUDE_NO_QUESTIONS_FLAG]);
+  });
+
+  it('carries the flag in every default argv, new or resumed', () => {
     for (const conversation of [
       { kind: 'new' as const, id: 'c' },
       { kind: 'resume' as const, id: 'c' },
     ]) {
-      should(launchCommand({ ...inputs('interactive'), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
-      should(launchCommand({ ...inputs('auto'), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
-      should(launchCommand({ ...inputs(), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      for (const mode of ['interactive', 'auto', undefined] as const)
+        should(launchCommand({ ...inputs(mode), conversation })).containEql(CLAUDE_NO_QUESTIONS_FLAG);
+      should(launchCommand({ ...inputs('interactive', true), conversation })).not.containEql(CLAUDE_NO_QUESTIONS_FLAG);
     }
   });
 
-  it('adds nothing else: an interactive argv is an auto argv without the one flag', () => {
-    should(launchCommand(inputs('auto')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
-      launchCommand(inputs('interactive')),
+  it('adds nothing else: an opted-in interactive argv is a default argv without the one flag', () => {
+    should(launchCommand(inputs('interactive')).filter(argument => argument !== CLAUDE_NO_QUESTIONS_FLAG)).eql(
+      launchCommand(inputs('interactive', true)),
     );
+  });
+
+  it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
+    should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_QUESTION_HOOKS);
+    should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
   });
 });

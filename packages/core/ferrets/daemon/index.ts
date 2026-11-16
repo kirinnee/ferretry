@@ -56,6 +56,7 @@ import {
   FerretPinsFile,
   lookupStartRequest,
   StartRequestsFile,
+  startFingerprintText,
   withStartRequest,
   RestartQueueEntrySchema,
   FerretLaunchEnvironmentFiles,
@@ -611,6 +612,7 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
       if (!bound.ok) return err(bound.error.message);
       return ok({
         insideStateHome: bound.value.insideStateHome,
+        realPath: bound.value.realPath,
         verify: async () => {
           const held = await bound.value.verify();
           return held.ok ? ok(undefined) : err(held.error.message);
@@ -1301,7 +1303,8 @@ function build(ctx: DaemonContext<typeof manifest>): DaemonHalf<typeof manifest>
   });
 
   /** SHA-256 hex of the exact body text, matching the digest the protocol client computes (today's `payloadDigests`). */
-  const payloadDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+  const payloadDigest = (text: string): string =>
+    createHash('sha256').update(startFingerprintText(text), 'utf8').digest('hex');
   /** Starts under one request id run one at a time, so a retry racing its original cannot start a second ferret. */
   const startsInFlight = new Map<string, Promise<unknown>>();
   const oneAtATime = async <T>(requestId: string, work: () => Promise<T>): Promise<T> => {

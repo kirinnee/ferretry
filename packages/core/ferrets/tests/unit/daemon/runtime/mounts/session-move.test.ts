@@ -19,6 +19,7 @@ import {
   SessionRelaunchSettingsSchema,
   type SessionView,
 } from '../../../../../daemon/lib/protocol/session.ts';
+import { recordMoveRefusal } from '../../../../../daemon/modules/session-move.ts';
 import {
   moverOf,
   SESSION_MOVE_ROUTES,
@@ -756,6 +757,47 @@ describe('the session move mount, replayed', () => {
     should((JSON.parse(refused.body) as { code: string }).code).equal('move_refused');
     should(retried.status).equal(200);
     should(mover.calls).equal(2);
+  });
+
+  it('should answer a refusal whose journal write fails as the same 409, and re-evaluate the id once the journal recovers', async () => {
+    // A failed append must never change the outcome: it is the typed pre-destruction refusal either way, so the
+    // ledger leaves the request id unspent rather than caching a 500 as a committed failure.
+    // Arrange
+    let journalUp = false;
+    const appended: unknown[][] = [];
+    const warnings: string[] = [];
+    const described = { items: [{ blocks: true, title: 'a tool shell' }] };
+    const mover = new CountingMove();
+    mover.move = async sessionId => {
+      mover.calls += 1;
+      await recordMoveRefusal(
+        {
+          append: async (...args: unknown[]) => {
+            if (!journalUp) throw new Error('EIO');
+            appended.push(args);
+          },
+        } as never,
+        { warn: message => void warnings.push(message) },
+        sessionId as never,
+        { to: 'claude-auto-other', verdict: 'unknown', cause: 'busy', described, by: 'owner' },
+      );
+      throw new SessionMoveError('refused', 'refused: busy');
+    };
+    const subject = mounted(mover);
+    const headers = withRequestId('req-journal-down');
+
+    // Act
+    const down = await subject.dispatch(moveCall('s1', headers));
+    journalUp = true;
+    const recovered = await subject.dispatch(moveCall('s1', headers));
+
+    // Assert
+    should(down.status).equal(409);
+    should((JSON.parse(down.body) as { code: string }).code).equal('move_refused');
+    should(warnings.length).equal(1);
+    should(recovered.status).equal(409);
+    should(mover.calls).equal(2);
+    should(appended.length).equal(1);
   });
 
   it('should let a cross-family refusal be re-evaluated under the same request id', async () => {

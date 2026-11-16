@@ -13,6 +13,7 @@ import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } fr
 import { capturePaneArguments } from '../../lib/moves/pane-commands.ts';
 import {
   hasSessionArguments,
+  isEmptyPaneAnswer,
   paneProofArguments,
   parsePaneSighting,
   type TmuxCommandPort,
@@ -285,6 +286,14 @@ export class PaneProcessInventory implements ProcessInventoryPort {
         // empty observation — a server that will not answer either question stays a blind spot.
         if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
         return unobservable(`the pane pid could not be resolved: ${pane.stderr.trim() || `tmux exited ${pane.code}`}`);
+      }
+      // tmux 3.8 answers a target that resolves to nothing with exit 0 and every field empty (`|||`), not an error.
+      // That is the same second question as a failed read: only a session tmux CONFIRMS is gone is empty.
+      if (isEmptyPaneAnswer(pane.stdout)) {
+        if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
+        return unobservable(
+          'tmux gave an empty answer for the pane but still lists its session, so what the agent runs could not be checked',
+        );
       }
       const sighting = parsePaneSighting(pane.stdout);
       if (sighting === undefined)
