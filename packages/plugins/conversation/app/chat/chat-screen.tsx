@@ -62,7 +62,6 @@ import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import type { TranscriptEntry } from './transcript-entries.ts';
 import type { TranscriptHistoryStatus } from './transcript-history.ts';
 import type { TranscriptHistoryControl } from './transcript-history-row.tsx';
-import { useStuckMessageActions } from './use-stuck-message-actions.tsx';
 
 /** The browser's clock, timers and visibility, for the refresh (today's `browserWorkspaceRefreshEnvironment`). */
 const browserChatRefreshEnvironment: ChatRefreshEnvironment = {
@@ -299,15 +298,6 @@ function ChatRoute({ ask, client, daemonId, embedded, ferretId }: ChatRouteProps
     () => queueActions(client, ferretId, refreshSends, outbox ?? undefined, queueWatcher(refreshControl)),
     [client, ferretId, refreshSends, outbox],
   );
-  // "Clear stuck messages": built for the ferret's Actions menu (GAP(ferrets, Q1): nothing lists it yet).
-  useStuckMessageActions({
-    client,
-    ferretId,
-    sends,
-    refresh: refreshSends,
-    view: sendViewState,
-    dismiss: dismissSends,
-  });
 
   // The pane a pinned composer talks to is this ferret while its chat is on screen.
   useEffect(() => {
