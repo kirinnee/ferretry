@@ -10,3 +10,5 @@ export * from './privacy.ts';
 export * from './project-files.ts';
 export * from './history-pool.ts';
 export * from './config-items.ts';
+export * from './fragment.ts';
+export * from './compose.ts';

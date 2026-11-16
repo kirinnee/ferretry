@@ -97,7 +97,7 @@ const harness = () => {
 };
 
 describe('the one publication gate, at the real bridge', () => {
-  it('should not send a complete redraw read before a hold began (full)', async () => {
+  it('I73 should not send a complete redraw read before a hold began (full)', async () => {
     const h = harness();
     h.state.screen = SECRET;
     h.state.holdAfterRead = true;
@@ -108,7 +108,7 @@ describe('the one publication gate, at the real bridge', () => {
     should(h.sent.join('')).containEql('Kept from view');
   });
 
-  it('should not send a delta read before a hold began (delta)', async () => {
+  it('I73 should not send a delta read before a hold began (delta)', async () => {
     const h = harness();
     // The viewer's size matches the pane's, so the next frame is a delta rather than a complete redraw.
     h.bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
@@ -125,7 +125,7 @@ describe('the one publication gate, at the real bridge', () => {
     should(h.sent[1]).containEql('Kept from view');
   });
 
-  it('should not send a re-attach read before a hold began (reattach)', async () => {
+  it('I73 should not send a re-attach read before a hold began (reattach)', async () => {
     const h = harness();
     await h.bridge.open();
     h.state.screen = SECRET;
@@ -145,7 +145,7 @@ describe('the one publication gate, at the real bridge', () => {
     should(sent.join('')).containEql('Kept from view');
   });
 
-  it('should not send the second capture of a complete redraw read before a hold began', async () => {
+  it('I73 should not send the second capture of a complete redraw read before a hold began', async () => {
     const h = harness();
     await h.bridge.open();
     h.state.screen = SECRET;
@@ -159,7 +159,7 @@ describe('the one publication gate, at the real bridge', () => {
   });
 
   // R9-1, §7.3: the relay seals a queued record only if its permit still says yes.
-  it('a hold beginning mid-relay-queue drops the record (a full frame)', async () => {
+  it('I73 a hold beginning mid-relay-queue drops the record (a full frame)', async () => {
     const h = harness();
 
     await h.bridge.open();
@@ -171,7 +171,7 @@ describe('the one publication gate, at the real bridge', () => {
   });
 
   // R9-1, §7.3
-  it('a hold beginning mid-relay-queue drops the record (a delta frame)', async () => {
+  it('I73 a hold beginning mid-relay-queue drops the record (a delta frame)', async () => {
     const h = harness();
     h.bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
     await turn();

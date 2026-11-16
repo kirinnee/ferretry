@@ -471,7 +471,7 @@ function hashesJson(model: Model): string {
   return `${JSON.stringify({ format: 1, hashes: record }, null, 2)}\n`;
 }
 
-/** A package's feature folder: every `*.feature.ts` in it is one feature the package's daemon half registers. */
+/** A package's feature folder: every `*.feature.ts` in it (or `<f>/<f>.feature.ts`) is one feature the package's daemon half registers. */
 export const FEATURES_DIR = 'daemon/features';
 const FEATURES_OUT = 'daemon/generated/features.ts';
 export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/${FEATURES_OUT}`;
@@ -480,6 +480,14 @@ export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/${FEAT
 const FEATURE_REGISTRY: FolderRegistrySpec = {
   dir: FEATURES_DIR,
   glob: '*.feature.ts',
+  // A feature may also live in its own folder, `alpha/alpha.feature.ts`, beside the code it wires.
+  nested: {
+    glob: '*/*.feature.ts',
+    accept: file => {
+      const [folder, name] = file.split('/');
+      return name === `${folder}.feature.ts`;
+    },
+  },
   out: FEATURES_OUT,
   prefix: 'feature',
   emit: ({ entries }) =>
@@ -630,38 +638,74 @@ export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRAC
   ]);
 }
 
-/** The kinds of action a manifest fragment holds, in the order the merged `actions` lists them. */
+/** The sections every fragment lists in `actions`: the ones a manifest has always merged, emitted even when no fragment names one. */
 const ACTION_KINDS = ['routes', 'sockets', 'agentTools', 'cli'] as const;
 
 /**
- * A package's manifest fragments: every `manifest/actions/*.actions.ts` default-exports one feature's `routes`, `sockets`,
- * `agentTools` and `cli` (the `fragment()` of its `manifest/kit.ts`), and `manifest/generated/actions.ts` spreads them, in
- * file-name order, into one `as const` `actions` the manifest uses as it was written, so a route is added by editing or adding
- * one fragment and no list is edited. The file name's order is the declaration order, which a package's contract hash covers.
+ * The other list sections a fragment may contribute (`manifestFragment` of `@ferretry/kernel/manifest`), emitted only when some
+ * fragment of the package names the section, so a package that never uses one keeps exactly the manifest it had. `actions` stays
+ * the default export; `ui`, `hooks` and `data` are named exports, for the manifest to spread into its own `ui`, `hooks` and `data`.
+ */
+const EXTRA_SECTIONS = {
+  actions: ['memberRoutes', 'app'],
+  ui: ['screens', 'panels', 'settings', 'renderers', 'layouts', 'themes'],
+  hooks: ['takes', 'offers'],
+  data: ['publishes', 'subscribes'],
+} as const;
+
+/** A file's text without its comments, so a section named in prose is not taken for one a fragment declares. */
+const withoutComments = (text: string): string => text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+/**
+ * A package's manifest fragments: every `manifest/actions/*.actions.ts` default-exports one feature's slice of the manifest (the
+ * `manifestFragment()` of `@ferretry/kernel/manifest`), and `manifest/generated/actions.ts` merges them, in file-name order:
+ * `routes`, `sockets`, `agentTools` and `cli` always; `memberRoutes`, `app` and the `ui`, `hooks` and `data` lists when a fragment
+ * names them. The manifest uses the result as it was written, so a route is added by editing or adding one fragment and no list
+ * is edited. The file name's order is the declaration order, which a package's contract hash covers.
  */
 const MANIFEST_ACTIONS_REGISTRY: FolderRegistrySpec = {
   dir: 'manifest/actions',
   glob: '*.actions.ts',
   out: 'manifest/generated/actions.ts',
   prefix: 'actions',
-  emit: ({ entries }) =>
-    [
+  emit: ({ entries, read }) => {
+    const text = withoutComments(entries.map(entry => read(entry.file)).join('\n'));
+    // A section is named as a property (`panels: [`) or by shorthand (`{ panels, … }`).
+    const named = (section: string): boolean =>
+      new RegExp(`(?:\\b${section}\\s*:|[{,]\\s*${section}\\s*[,}])`).test(text);
+    const merged = (path: string, indent: string): readonly string[] =>
+      entryList(
+        `${indent}${path.split('.').at(-1)}: [`,
+        entries.map(entry => `...${entry.name}.${path}`),
+        `${indent}] as const,`,
+        `${indent}  `,
+      );
+    const group = (name: 'ui' | 'hooks' | 'data'): readonly string[] => {
+      const used = EXTRA_SECTIONS[name].filter(named);
+      return used.length === 0
+        ? []
+        : [
+            '',
+            `/** Every \`${name}\` list the fragments contribute, merged in file-name order. */`,
+            `export const ${name} = {`,
+            ...used.flatMap(section => merged(`${name}.${section}`, '  ')),
+            '} as const;',
+          ];
+    };
+    return [
       HEADER,
       ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
       '',
       '/** Every manifest fragment of this package (manifest/actions/*.actions.ts), merged in file-name order. */',
       'export default {',
-      ...ACTION_KINDS.flatMap(kind => [
-        ...entryList(
-          `  ${kind}: [`,
-          entries.map(entry => `...${entry.name}.${kind}`),
-          '  ] as const,',
-          '    ',
-        ),
-      ]),
+      ...[...ACTION_KINDS, ...EXTRA_SECTIONS.actions.filter(named)].flatMap(kind => merged(kind, '  ')),
       '} as const;',
+      ...group('ui'),
+      ...group('hooks'),
+      ...group('data'),
       '',
-    ].join('\n'),
+    ].join('\n');
+  },
 };
 
 /**

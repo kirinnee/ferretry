@@ -63,10 +63,12 @@ and edits no shared one. Ferrets is the first plugin on this shape
   (`FerretsContext`: the kernel, the registry, the service, the session store and the shared guards
   such as `pathFerret` and `mayAct`), adds its jobs through `f.kernel.jobs`, and returns what it
   serves: `{ routes, sockets, port }`.
-- **No list to edit.** `scripts/gen/registries.ts` lists every `daemon/features/*.feature.ts` into the
+- **No list to edit.** `scripts/gen/registries.ts` lists every `daemon/features/*.feature.ts` (or
+  `daemon/features/<f>/<f>.feature.ts`) into the
   git-ignored `daemon/generated/features.ts` (the same generator that writes the plugin registries,
   re-run by install, build, test and typecheck), and `build()` registers that list through
-  `registerFeatures`. A route, a socket or a port member two features both serve, or two features with
+  `registerFeatures`, which is the plugin kit's `composeFeatures<Ctx, Port>(label, …)` from
+  `@ferretry/kernel/manifest` labelled `ferrets` (every plugin composes its features the same way). A route, a socket or a port member two features both serve, or two features with
   one id, throws at boot naming both; `tests/unit/daemon/features/registration.test.ts` pins that the
   features serve exactly the routes and sockets the manifest declares.
 - **A feature never imports another.** Something two features share, or something the service's ports

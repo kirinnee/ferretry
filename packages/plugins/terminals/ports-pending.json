@@ -1,9 +1,0 @@
-{
-  "format": 1,
-  "pending": ["terminals"],
-  "pendingReasons": {
-    "terminals": [
-      "[cross: vault] GAP(terminals): row I73 (every stream frame kind, a predicate match and the last frame are withheld when a quarantine began after the read was stamped) is proven in Vault's tests only at the kernel Dispatcher's publication gate; the same check at Terminals' own publication points (stream frames, the recorded last frame, a screen read before quarantine) has no test named `I73` in Terminals yet"
-    ]
-  }
-}

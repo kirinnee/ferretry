@@ -9,7 +9,7 @@
  * them: a new fragment takes a number that puts its routes where they belong, and a reorder changes the hash.
  */
 import { CAPABILITIES } from '@ferretry/core-gate/contract';
-import type { RouteDecl, SocketDecl, ToolDecl, VerbDecl } from '@ferretry/kernel/manifest';
+import type { RouteDecl } from '@ferretry/kernel/manifest';
 import { route } from '@ferretry/kernel/manifest';
 
 /**
@@ -41,35 +41,5 @@ export function ferretRead<const Key extends string>(key: Key, descriptor: ReadD
   return route(key, { minimum: 'operator', caller: 'any', capability: FLEET_USE, noStore: true, ...descriptor });
 }
 
-/** One fragment's slice of `actions`; a kind it does not declare is empty, so the merged lists are always whole. */
-interface Fragment<
-  Routes extends readonly RouteDecl[],
-  Sockets extends readonly SocketDecl[],
-  Tools extends readonly ToolDecl[],
-  Verbs extends readonly VerbDecl[],
-> {
-  readonly routes: Routes;
-  readonly sockets: Sockets;
-  readonly agentTools: Tools;
-  readonly cli: Verbs;
-}
-
-/** Keeps every literal (route keys, tool names, verb lines) so the merged `actions` types the halves exactly as one literal did. */
-export function fragment<
-  const Routes extends readonly RouteDecl[] = readonly [],
-  const Sockets extends readonly SocketDecl[] = readonly [],
-  const Tools extends readonly ToolDecl[] = readonly [],
-  const Verbs extends readonly VerbDecl[] = readonly [],
->(parts: {
-  readonly routes?: Routes;
-  readonly sockets?: Sockets;
-  readonly agentTools?: Tools;
-  readonly cli?: Verbs;
-}): Fragment<Routes, Sockets, Tools, Verbs> {
-  return {
-    routes: parts.routes ?? ([] as unknown as Routes),
-    sockets: parts.sockets ?? ([] as unknown as Sockets),
-    agentTools: parts.agentTools ?? ([] as unknown as Tools),
-    cli: parts.cli ?? ([] as unknown as Verbs),
-  };
-}
+/** One feature's slice of the manifest: the plugin kit's `manifestFragment`, lifted to `@ferretry/kernel/manifest` (every plugin shares it). */
+export { manifestFragment as fragment } from '@ferretry/kernel/manifest';
