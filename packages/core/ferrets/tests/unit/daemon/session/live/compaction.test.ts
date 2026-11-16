@@ -1,10 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CompactionRecordSchema, MAX_COMPACTION_MS } from '../../../../../contract/index.ts';
 import {
   type CompactionEvidence,
-  CompactionRecordSchema,
   expectedCompaction,
-  MAX_COMPACTION_MS,
   PANE_GRACE_MS,
   paneCompaction,
   resolveCompaction,

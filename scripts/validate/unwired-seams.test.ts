@@ -1,9 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { contextFor } from '../gen/lib/check.ts';
+import { readPendingMerged } from '../gen/lib/pending-files.ts';
 import { z } from '../../packages/core/kernel/node_modules/zod';
 import { defineBoundPort, defineHook, definePort } from '../../packages/core/kernel/contract/index.ts';
 import type { Manifest } from '../../packages/core/kernel/manifest/index.ts';
@@ -240,7 +241,7 @@ describe('unwired-seams: the real workspace', () => {
   }, 120_000);
 
   test('the committed allowlist parses and every entry has a card and a reason', () => {
-    const text = readFileSync(join(import.meta.dir, '..', '..', 'ports-pending.json'), 'utf8');
+    const text = readPendingMerged(join(import.meta.dir, '..', '..')) ?? '';
     const entries = parseUnwired(text, 'ports-pending.json') ?? [];
     expect(entries.length).toBeGreaterThan(0);
     for (const entry of entries) {

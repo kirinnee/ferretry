@@ -1,4 +1,4 @@
-import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
+import { AUDIT_KINDS, cap } from '@ferretry/core-gate/contract';
 import { FerretsPort, LaunchParts, StartDecide } from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { CONVERSATION_ROW_SLOT, ConversationPort } from '@ferretry/plugin-conversation/contract';
@@ -110,6 +110,8 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/result', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec1: what a finished ferret reported is its words, so a device narrowed off `fleet.use` is refused.
+        capability: cap('fleet', 'use'),
         noStore: true,
         audit: { skip: 'a read of what a finished ferret reported' },
         guard: 'secrets',

@@ -1,6 +1,6 @@
 import type { SessionCompactionBasis, SessionCompactionState } from '../../protocol/session-live.ts';
 import { COMPACTING_LINE } from '@ferretry/std/compaction-line';
-import { z } from 'zod';
+import { type CompactionRecord, MAX_COMPACTION_MS } from '../../../../contract/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../peers/transcript.ts';
 import { tokenCounterValue } from './policy.ts';
 
@@ -79,9 +79,6 @@ export const TYPICAL_COMPACTION_MS: Readonly<Record<TranscriptHarness, number>> 
   codex: 40_000,
 };
 
-/** A watched compaction longer than this was not one compaction (a parked pane, a clock jump). */
-export const MAX_COMPACTION_MS = 30 * 60_000;
-
 /**
  * How long a tracked compaction survives frames that do not show its line. A capture can land mid-repaint
  * (the spinner line gone for one sample) or the line can wrap off the status window; ending the compaction
@@ -108,16 +105,6 @@ export const expectedCompaction = (harness: TranscriptHarness, durations: readon
       : ((sorted[middle - 1] as number) + (sorted[middle] as number)) / 2;
   return { expectedMs: Math.max(1, Math.round(median)), basis: 'history' };
 };
-
-/** One compaction this daemon watched from start to end. */
-export const CompactionRecordSchema = z.strictObject({
-  harness: z.enum(['claude', 'codex']),
-  model: z.string().min(1).optional(),
-  durationMs: z.number().int().positive().max(MAX_COMPACTION_MS),
-  tokensBefore: z.number().int().nonnegative().optional(),
-  at: z.iso.datetime(),
-});
-export type CompactionRecord = z.infer<typeof CompactionRecordSchema>;
 
 /** This daemon's past compaction durations, kept so an estimate survives a restart. */
 export interface CompactionHistory {

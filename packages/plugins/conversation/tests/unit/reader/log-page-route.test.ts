@@ -339,12 +339,13 @@ describe('G163 file is an opaque digest, never the path', () => {
 describe('G163 who may read the log page is the descriptor of /logs', () => {
   const descriptor = (path: string) => manifest.actions.routes.find(route => route.key === `GET ${path}`);
 
-  test('G163 log-page is declared with the minimum, caller, noStore and secrets guard of /logs and no capability', () => {
+  test('G163 log-page is declared with the minimum, caller, noStore, secrets guard and fleet.use demand of /logs', () => {
     const logs = descriptor('/v1/ferrets/:ferretId/logs');
     const logPage = descriptor('/v1/ferrets/:ferretId/log-page');
     expect(logPage).toBeDefined();
     expect(logPage).toMatchObject({ minimum: 'operator', caller: 'any', noStore: true, guard: 'secrets' });
-    expect(logPage?.capability).toBeUndefined();
+    // c58-sec1: the transcript is the ferret's words, so a device narrowed off fleet.use is refused on both.
+    expect(logPage?.capability).toMatchObject({ capability: 'fleet', axis: 'use' });
     for (const field of ['minimum', 'caller', 'noStore', 'guard', 'audit', 'capability'] as const)
       expect(logPage?.[field]).toEqual(logs?.[field]);
   });

@@ -1,9 +1,15 @@
-import { FerretsPort, StartDecide } from '@ferretry/core-ferrets/contract';
+import {
+  COMPACTION_HISTORY_KEY,
+  CompactionHistoryHook,
+  FerretsPort,
+  StartDecide,
+} from '@ferretry/core-ferrets/contract';
 import { definePlugin, panel, route, screen, settingsTab, verb } from '@ferretry/kernel/manifest';
 import { ConversationPort, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import { LoginsBudget, LoginsPort } from '@ferretry/plugin-logins/contract';
 import {
   BudgetReached,
+  COMPACTION_HISTORY_STATE,
   INSIGHTS_STATE,
   InsightsChanged,
   LoginPaused,
@@ -203,13 +209,21 @@ export default definePlugin({
   },
 
   data: {
-    state: [PAUSES_STATE, PAUSE_TOLD_STATE, PRICING_STATE, QUOTAS_STATE, INSIGHTS_STATE],
+    state: [PAUSES_STATE, PAUSE_TOLD_STATE, PRICING_STATE, QUOTAS_STATE, INSIGHTS_STATE, COMPACTION_HISTORY_STATE],
     config: [USAGE_CONFIG],
     readModels: USAGE_READ_MODELS,
     publishes: [LoginPaused, LoginResumed, InsightsChanged, BudgetReached],
   },
 
-  hooks: { takes: [{ hook: StartDecide }, { hook: TurnEnded }, { hook: LoginsBudget, key: 'usage' }] },
+  // `ferrets.compaction-history` is the one taker: Usage keeps how long compactions take (F-0130) and fills the hook.
+  hooks: {
+    takes: [
+      { hook: StartDecide },
+      { hook: TurnEnded },
+      { hook: LoginsBudget, key: 'usage' },
+      { hook: CompactionHistoryHook, key: COMPACTION_HISTORY_KEY },
+    ],
+  },
 
   doctor: ['usage-meter'],
 
