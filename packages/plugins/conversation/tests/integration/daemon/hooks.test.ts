@@ -7,7 +7,7 @@ import daemon from '../../../daemon/index.ts';
 import { StateDraftRepository } from '../../../daemon/drafts/adapters/index.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import type { HarnessGate } from '@ferretry/core-mailbox/contract';
-import { buildConversationA } from '../../../daemon/host.ts';
+import { buildConversationA } from '../../support/conversation-half.ts';
 import { TurnBoundaries } from '../../../daemon/turns/lib/index.ts';
 import { AskIdSchema } from '@ferretry/core-asks/contract';
 import { ferretId } from '@ferretry/core-ferrets/contract/testing';
