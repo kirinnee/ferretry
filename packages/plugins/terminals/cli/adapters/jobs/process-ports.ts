@@ -35,14 +35,17 @@ const SIGNALS = ['SIGTERM', 'SIGHUP', 'SIGINT'] as const;
  * detached, and leaves the job alone. Listening replaces the default; stopping restores nothing (the process is ending).
  */
 export class RealJobSignals implements IJobSignals {
+  /** `source` is the process; a test hands in its own emitter so no test ever raises a signal on the shared test process. */
+  constructor(private readonly source: Pick<NodeJS.Process, 'on' | 'off'> = process) {}
+
   listen(onSignal: (name: string) => void): () => void {
     const handlers = SIGNALS.map(name => {
       const handler = (): void => onSignal(name);
-      process.on(name, handler);
+      this.source.on(name, handler);
       return [name, handler] as const;
     });
     return () => {
-      for (const [name, handler] of handlers) process.off(name, handler);
+      for (const [name, handler] of handlers) this.source.off(name, handler);
     };
   }
 }

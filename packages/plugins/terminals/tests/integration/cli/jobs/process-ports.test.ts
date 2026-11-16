@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { EventEmitter } from 'node:events';
 import should from 'should';
 import { RealJobProcess, RealJobSignals, RealJobTimers } from '../../../../cli/adapters/jobs/process-ports.ts';
 
@@ -21,11 +22,20 @@ describe('the real process ports of the job verbs', () => {
 
   it('should hear the three signals while listening, and none once it stopped', () => {
     const heard: string[] = [];
-    const stop = new RealJobSignals().listen(name => heard.push(name));
-    for (const name of ['SIGTERM', 'SIGHUP', 'SIGINT'] as const) process.emit(name, name);
+    // Its own emitter: raising SIGTERM on the shared test process would reach every other test's handler (some end the process).
+    const source = new EventEmitter();
+    const stop = new RealJobSignals(source as never).listen(name => heard.push(name));
+    for (const name of ['SIGTERM', 'SIGHUP', 'SIGINT']) source.emit(name);
     stop();
+    source.emit('SIGTERM');
     should(heard).deepEqual(['SIGTERM', 'SIGHUP', 'SIGINT']);
-    should(process.listenerCount('SIGHUP')).equal(0);
+    should(source.listenerCount('SIGHUP')).equal(0);
+    // The default source is the real process: listening adds a handler for each signal and stopping takes it away again.
+    const before = process.listenerCount('SIGTERM');
+    const real = new RealJobSignals().listen(() => undefined);
+    should(process.listenerCount('SIGTERM')).equal(before + 1);
+    real();
+    should(process.listenerCount('SIGTERM')).equal(before);
   });
 
   it('should keep the clock and sleep, and wake early when told to', async () => {
