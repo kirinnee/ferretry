@@ -181,7 +181,10 @@ describe('a file is read with a hard byte bound', () => {
 });
 
 describe("a plugin's patch of a hand-written broken file parses it once", () => {
-  const broken = brokenTexts(CONFIG_FILE_MAX_BYTES);
+  // Small on purpose: the three that are parsed are 2 KiB, since what is proved (one parse reads what two parses read,
+  // and the edit comes out the same) holds at any size; only "over the cap" must be the cap, and it is refused unparsed.
+  // The cost at 256 KiB is tests/perf/host-config/check-memo-bound.test.ts.
+  const broken = [...brokenTexts(2048).slice(0, 3), ...brokenTexts(CONFIG_FILE_MAX_BYTES).slice(3)];
 
   test('the one-parse read edits to exactly the text the two-parse edit made', () => {
     for (const [, text] of broken) {
