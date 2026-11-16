@@ -660,7 +660,7 @@ per-document plan (one refused document writes nothing of the set).
   or `[` (`--settings '{"env":{"API_KEY":"v"}}'`, also glued with `=` or inside one pair of quotes) has each string under a
   secret-named key cut, wherever it sits, the nearest key above it naming it; the read is lexical, so a document that does not
   parse is read as far as it goes, and it is also cut from the value of its first secret-named key (quoted with `"`, `'` or
-  `\"`, or bare) to its end. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
+  `\"`, or bare, and also with its `\uXXXX` escapes decoded) to its end. A one-letter flag whose letter means "password" (`-p`, mysql's) is read under that
   name when the value is stuck to it (`-pHunter2Hunter2` is `-p‹hidden›`; a value under 8 characters is no credential, as
   everywhere); a longer flag glued to its value (`-password=$X`) is that flag's, and a `=` or blank inside a stuck value
   (`-pabc=def12345`) is still shown: a counted gap.

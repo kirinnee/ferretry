@@ -41,9 +41,33 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
   const found = [...findFlagSecrets({ args }), ...findRawSecrets({ args })];
   const refused = new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
   args.forEach((word, index) => {
-    if (valueOfNonPointerCredentialFlag(args[index - 1], word)) refused.add(index);
+    if (valueOfNonPointerCredentialFlag(args[index - 1], word) || placeAfterCredentialHeader(args[index - 1], word))
+      refused.add(index);
   });
   return refused;
+}
+
+/** A header whose value is a credential by its name, though the name may not say so to a flag test. */
+const CREDENTIAL_HEADER = /^(?:proxy-)?authorization$|^(?:set-)?cookie$/iu;
+
+/** What the write rule accepts as a "place" under a credential name: a path, or a URL. */
+const ANY_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+
+/**
+ * Whether `word` is a path- or URL-looking value of a credential header (`--header Authorization: /V`, or the pair in one
+ * word, `Authorization:/V`): a header names no place, so after `Header:` the word is a value and is never shown, whatever
+ * it looks like. `before` is the word before `word` (`Authorization:`). The same rule as the one-string form's.
+ */
+function placeAfterCredentialHeader(before: string | undefined, word: string): boolean {
+  const glued = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(\S[\s\S]*)$/u.exec(word);
+  const header = glued === null ? /^([A-Za-z][A-Za-z0-9_-]*):$/u.exec(before ?? '')?.[1] : glued[1];
+  const value = glued === null ? word : glued[2];
+  return (
+    header !== undefined &&
+    value !== undefined &&
+    ANY_PLACE.test(value) &&
+    (CREDENTIAL_HEADER.test(header) || SHOWN_TESTS.namesSecret(header))
+  );
 }
 
 /**
@@ -205,9 +229,46 @@ export const commandWithheld = (command: string): boolean => {
     refusedIndexes(words.map(word => ({ text: word, hidden: false }))).size > 0 ||
     cutsAValue(command) ||
     // Read word by word too, as a list of arguments is: each word with the one before it.
-    words.some((word, index) => cutsAValue(word, words[index - 1]))
+    words.some((word, index) => cutsAValue(word, words[index - 1])) ||
+    // And a JSON document as ONE piece, from the word that starts it: it holds blanks, so word by word never reads it
+    // whole (`--settings {"API_KEY": "v"}`), as the args form, where it is one argument, does.
+    documentsWithheld(command)
   );
 };
+
+/** The most places a document may start in one command before it is withheld whole: each is read to the command's end. */
+const MAX_DOCUMENT_STARTS = 16;
+
+/** Whether any JSON document in `command`, read as one piece, has a cut that is a value. Many starts: withheld (bounded). */
+function documentsWithheld(command: string): boolean {
+  const documents = documentsIn(command);
+  return documents.length > MAX_DOCUMENT_STARTS || documents.some(([document, before]) => cutsAValue(document, before));
+}
+
+/** A word that starts a JSON document: `{`, `[`, a quote and `{`, or a flag glued to either (`--settings={`). */
+const DOCUMENT_START = /^(?:[^\s=]*=)?(["']?)[{[]/u;
+
+/**
+ * Each place a JSON document starts in `command`: the text from the word that starts it to the end of the command (and,
+ * when a quote opens it, to that quote's last mark too), with the word before it.
+ */
+function documentsIn(command: string): readonly (readonly [string, string | undefined])[] {
+  const found: (readonly [string, string | undefined])[] = [];
+  let before: string | undefined;
+  for (const word of command.matchAll(/\S+/gu)) {
+    if (found.length > MAX_DOCUMENT_STARTS) break;
+    const start = DOCUMENT_START.exec(word[0]);
+    if (start !== null) {
+      const rest = command.slice(word.index);
+      found.push([rest, before]);
+      const quote = start[1] ?? '';
+      const quoted = quote === '' ? -1 : rest.lastIndexOf(quote);
+      if (quoted > start[0].length) found.push([rest.slice(0, quoted + 1), before]);
+    }
+    before = word[0];
+  }
+  return found;
+}
 
 /** A command line as it may be shown: the cutter's words, and whether the net withheld the whole list. */
 export interface ShownLine {

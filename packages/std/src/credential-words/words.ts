@@ -575,11 +575,39 @@ function parses(text: string): boolean {
  * `"`, `'` or `\"`, or bare) cuts from its value to the end of the document, whatever shape that takes.
  */
 function brokenJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
-  for (const found of matchesOf(JSON_KEY_ISH, text)) {
-    const from = found.index + found[0].length;
-    if (tests.namesSecret(found[1] ?? '') && from < text.length) return [[from, text.length]];
+  // A key may be spelled in `\uXXXX` escapes (a key whose first letter is one): the text is read as written AND with each escape
+  // decoded, and a place found in the decoded text is mapped back to the text. The earliest secret-named key wins.
+  const reads: (readonly [string, (index: number) => number])[] = [[text, index => index]];
+  if (text.includes('\\u')) {
+    const { decoded, at } = decodedEscapes(text);
+    reads.push([decoded, index => at[index] ?? text.length]);
   }
-  return [];
+  let cutFrom: number | undefined;
+  for (const [read, place] of reads) {
+    for (const found of matchesOf(JSON_KEY_ISH, read)) {
+      const from = found.index + found[0].length;
+      if (tests.namesSecret(found[1] ?? '') && from < read.length) {
+        cutFrom = Math.min(cutFrom ?? text.length, place(from));
+        break;
+      }
+    }
+  }
+  return cutFrom === undefined ? [] : [[cutFrom, text.length]];
+}
+
+/** A text with each `\uXXXX` escape decoded, and where each decoded character starts in the text. */
+function decodedEscapes(text: string): { readonly decoded: string; readonly at: readonly number[] } {
+  const at: number[] = [];
+  let decoded = '';
+  let index = 0;
+  while (index < text.length) {
+    const unicode = /^\\u([0-9a-fA-F]{4})/u.exec(text.slice(index, index + 6));
+    const piece = unicode === null ? (text[index] ?? '') : String.fromCharCode(Number.parseInt(unicode[1] ?? '0', 16));
+    for (let unit = 0; unit < piece.length; unit += 1) at.push(index);
+    decoded += piece;
+    index += unicode === null ? 1 : 6;
+  }
+  return { decoded, at };
 }
 
 /**
