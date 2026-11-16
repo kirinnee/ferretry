@@ -447,6 +447,142 @@ export function harnessHomeCases(): void {
       expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe(FAKE);
     });
 
+    // ─── the link ends with the ferret or the login (c58-69): the sign-in is in a home only while it is wanted ───────────
+
+    /** A launch of `ferret` under `login`, its credential minted for it: the link is there when this returns. */
+    async function linkedFor(harness: ReturnType<typeof build>['harness'], ferret: string, login: string) {
+      const home = await harness.homeFor(ferret as FerretId);
+      const { credential, canonical } = await mintedCredential();
+      await harness.prepareHome({ ...spec(ferret, home), login, credential } as LaunchSpec);
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      return { home, canonical };
+    }
+
+    test('a ferret that stopped has the sign-in taken out of its home, and the login’s own file stays', async () => {
+      const { harness } = build();
+      const { home, canonical } = await linkedFor(harness, 'f2', 'work');
+
+      await harness.credentials.released('f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+      expect(await readFile(canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('a stop clears a link this daemon did not place (it was restarted since the launch)', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      const { harness: restarted } = build();
+
+      await restarted.credentials.released('f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('a revoked login clears every home it was linked into, and no other login’s', async () => {
+      const { harness } = build();
+      const one = await linkedFor(harness, 'f2', 'work');
+      const two = await linkedFor(harness, 'f3', 'work');
+      const other = await linkedFor(harness, 'f4', 'spare');
+
+      await harness.credentials.revoked('work');
+
+      expect(await kind(join(one.home, 'auth.json'))).toBe('absent');
+      expect(await kind(join(two.home, 'auth.json'))).toBe('absent');
+      expect(await kind(join(other.home, 'auth.json'))).toBe('link');
+      expect(await readFile(one.canonical, 'utf8')).toBe(FAKE);
+    });
+
+    test('a login that was revoked once clears nothing a second time, and a relaunch under it links again', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await harness.credentials.revoked('work');
+      const { credential } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), login: 'work', credential } as LaunchSpec);
+
+      await harness.credentials.revoked('nobody');
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+
+      await harness.credentials.revoked('work');
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('a ferret relaunched without a credential is no longer cleared by its old login', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await harness.prepareHome(spec('f2', home));
+      await writeFile(join(home, 'auth.json'), 'written by something else');
+
+      await harness.credentials.revoked('work');
+
+      expect(await readFile(join(home, 'auth.json'), 'utf8')).toBe('written by something else');
+    });
+
+    test('a login-less launch is never cleared by a revoked login', async () => {
+      const { harness } = build();
+      const home = await harness.homeFor('f2' as FerretId);
+      const { credential } = await mintedCredential();
+      await harness.prepareHome({ ...spec('f2', home), credential } as LaunchSpec);
+
+      await harness.credentials.revoked('work');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+    });
+
+    test('a file Codex wrote in the link’s place is a copy of the sign-in and goes too; a folder stays', async () => {
+      const { harness } = build();
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await rm(join(home, 'auth.json'));
+      await writeFile(join(home, 'auth.json'), FAKE);
+
+      await harness.credentials.released('f2');
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+
+      await mkdir(join(home, 'auth.json'));
+      await writeFile(join(home, 'auth.json', 'keep'), 'x');
+      await harness.credentials.released('f2');
+      expect(await readFile(join(home, 'auth.json', 'keep'), 'utf8')).toBe('x');
+    });
+
+    test('a ferret with no home, or no sign-in in it, is cleared without a word', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      await harness.homeFor('f2' as FerretId);
+
+      await harness.credentials.released('never-started');
+      await harness.credentials.released('f2');
+
+      expect(warned).toEqual([]);
+    });
+
+    test('a removal that fails says so once by ferret id and never throws, and the next launch still clears the link', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      const { home } = await linkedFor(harness, 'f2', 'work');
+      await chmod(home, 0o500);
+      try {
+        await harness.credentials.released('f2');
+      } finally {
+        await chmod(home, 0o700);
+      }
+
+      expect(warned.filter(message => message.includes('f2'))).toHaveLength(1);
+      expect(warned.join(' ')).not.toContain(home);
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      await harness.prepareHome(spec('f2', home));
+      expect(await kind(join(home, 'auth.json'))).toBe('absent');
+    });
+
+    test('an id that is not one plain name is refused without touching anything', async () => {
+      const warned: string[] = [];
+      const { harness } = build(new Map(), { warned });
+      const { home } = await linkedFor(harness, 'f2', 'work');
+
+      await harness.credentials.released('../f2');
+
+      expect(await kind(join(home, 'auth.json'))).toBe('link');
+      expect(warned.filter(message => message.includes('../f2'))).toHaveLength(1);
+    });
+
     test('a folder at auth.json is refused, never removed', async () => {
       const { harness } = build();
       const home = await harness.homeFor('f2' as FerretId);

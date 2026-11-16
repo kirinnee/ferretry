@@ -29,7 +29,7 @@ import type {
 import { historyFilesOver, LaunchRefusal, materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
+import { buildCodexLaunchArgv, tomlDocument, tomlTables, type CodexCredentialLinks } from '../lib/index.ts';
 import { settingsDocument, settingsFlags } from '../lib/settings.ts';
 import {
   CODEX_HISTORY_ENTRIES,
@@ -138,8 +138,12 @@ function configDocument(spec: LaunchSpec, items: ReadonlyMap<string, SettingsIte
   return blocks.length === 0 ? '' : `${blocks.join('\n\n')}\n`;
 }
 
-export function codexHarness(options: CodexHarnessOptions): Harness {
+export type CodexHarness = Harness & { readonly credentials: CodexCredentialLinks };
+
+export function codexHarness(options: CodexHarnessOptions): CodexHarness {
   const { kernel, locate, probe, update } = options;
+  /** The login each ferret's link was made from, as this daemon placed it (empty after a restart; a stop still clears). */
+  const linked = new Map<string, string | undefined>();
   const permissionModeNow = (): HarnessConfig['permissionMode'] => options.permissionMode?.() ?? 'skip';
   /** The settings items (`config/codex/settings/`) the runtime's profile selects, now: what a home written now would merge. */
   const settingsNow = async (runtime: string | undefined): Promise<ReadonlyMap<string, SettingsItem>> => {
@@ -315,10 +319,46 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
       );
       await root.remove(at.value);
     } else if (found !== undefined) throw new Error("a ferret's auth.json is a folder, not the login's link");
-    if (spec.credential !== undefined) await root.linkCredential(spec.credential, at.value);
+    linked.delete(spec.ferret);
+    if (spec.credential === undefined) return;
+    await root.linkCredential(spec.credential, at.value);
+    linked.set(spec.ferret, spec.login);
+  };
+
+  /**
+   * Takes the login's sign-in out of one ferret's home: the link this plugin made, and a file Codex may have written in
+   * its place (a copy of the same sign-in). A FOLDER at the name is left alone. Total: a ferret that never had a link, a
+   * home that was never made, and a removal that fails all end here (the failure said once, by ferret id, never a path
+   * or a token). The next `prepareHome` clears the name again, so a failure here never outlives the next launch.
+   */
+  const clearCredential = async (ferret: string): Promise<void> => {
+    linked.delete(ferret);
+    try {
+      const root = homeRoot(ferret as FerretId);
+      // A ferret of another harness, or one that never started, has no home here: nothing to clear, nothing to say.
+      const homes = kernel.roots.root('agent-homes');
+      const folder = homes.resolve(ferret);
+      if (!folder.ok || (await homes.lstat(folder.value))?.kind !== 'directory') return;
+      const at = root.resolve('auth.json');
+      if (!at.ok) return;
+      const found = await root.lstat(at.value);
+      if (found?.kind === 'symlink') await root.unlink(at.value);
+      else if (found?.kind === 'file') await root.remove(at.value);
+    } catch {
+      say(`Ferret ${ferret}: the login's sign-in could not be taken out of its Codex home; the next launch clears it.`);
+    }
+  };
+
+  const credentials: CodexCredentialLinks = {
+    released: clearCredential,
+    revoked: async login => {
+      const ferrets = [...linked].filter(([, held]) => held === login).map(([ferret]) => ferret);
+      await Promise.all(ferrets.map(clearCredential));
+    },
   };
 
   return {
+    credentials,
     key: 'codex',
     // Today's stop key. NOT safe when idle: at an idle Codex prompt a stop key is one of the ways the TUI quits, so an
     // interrupt presses it only while the pane shows active work (`shouldPressStopKey`).
