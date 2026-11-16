@@ -52,6 +52,12 @@ export const MoveSessionRequestSchema = z.strictObject({
    * unasked: a daemon that predates the field refuses an unknown key, and Restart must keep working there.
    */
   conversation: MoveConversationSchema.optional(),
+  /**
+   * The pid of the `fy` process making this request, so a ferret that moves ITSELF does not find its own tool call
+   * listed as a job that blocks the move. The daemon proves the pid belongs to this session's own tool call before it
+   * leaves anything out (`requesterCall`); a pid it cannot prove excludes nothing. Optional: a human's browser has none.
+   */
+  requesterPid: PositiveIntegerSchema.optional(),
 });
 export type MoveSessionRequest = z.infer<typeof MoveSessionRequestSchema>;
 export type MoveSessionRequestInput = z.input<typeof MoveSessionRequestSchema>;
@@ -134,7 +140,7 @@ export type ConversionPreview = z.infer<typeof ConversionPreviewSchema>;
  * refuse; the rest are listed so the confirmation shows the whole picture rather than one culprit.
  */
 export const InflightItemSchema = z.strictObject({
-  kind: z.enum(['process', 'tool', 'terminal', 'unreadable']),
+  kind: z.enum(['process', 'tool', 'terminal', 'unreadable', 'turn']),
   verdict: z.enum(['safe_to_kill', 're_armable', 'destructive_to_interrupt', 'unknown']),
   title: z.string().min(1),
   detail: z.string().optional(),

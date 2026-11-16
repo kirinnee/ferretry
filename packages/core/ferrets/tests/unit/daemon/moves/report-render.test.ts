@@ -138,4 +138,40 @@ describe('renderInflightReport', () => {
     should(actual).containEql('- ps exited 1: cannot \\| allocate memory');
     should(actual).not.containEql('_No open tools or descendant processes were observed at move time._');
   });
+
+  it('should record a mid-turn session as re-armable, in the table and in the report', () => {
+    // Arrange
+    const thinking = assembleInflightReport({
+      status: 'thinking',
+      turnState: 'working',
+      turn: 2,
+      openTools: [],
+      processes: { kind: 'observed', processes: [] },
+      codexBackgroundTerminals: 0,
+    });
+
+    // Act
+    const table = renderInflightCli(thinking);
+    const report = renderInflightReport(thinking, meta);
+
+    // Assert
+    should(table).containEql('turn  [RE-ARMABLE] the agent is mid-turn');
+    should(table).not.containEql('(no open tools or descendant processes observed)');
+    should(report).containEql('### Mid-turn');
+    should(report).not.containEql('_No open tools or descendant processes were observed at move time._');
+  });
+
+  it('should keep the call that asked for the move in the record, apart from what was running', () => {
+    // Arrange
+    const own = { pid: 321, argv: 'fy migrate wren --agent claude-llm3', verdict: 'unknown' } as const;
+    const actual = { ...idle(), requesterCall: [own] };
+
+    // Act
+    const report = renderInflightReport(actual, meta);
+
+    // Assert
+    should(report).containEql('### The call that asked for this move (not counted)');
+    should(report).containEql('- pid 321: `fy migrate wren --agent claude-llm3`');
+    should(report).not.containEql('### Mid-turn');
+  });
 });

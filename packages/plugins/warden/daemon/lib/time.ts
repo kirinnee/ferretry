@@ -26,6 +26,25 @@ export function firstInstantMs(...values: readonly (string | undefined)[]): numb
   return undefined;
 }
 
+/** A usable reset instant: a real, finite, positive epoch. Zero (an unset field) is not "already elapsed". */
+export function resetInstantMs(value: number | undefined): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+const PACIFIC = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  month: 'short',
+  day: 'numeric',
+  hour: 'numeric',
+  minute: '2-digit',
+  timeZoneName: 'short',
+});
+
+/** An instant the way the owner reads times: Pacific, e.g. `Nov 16, 7:40 PM PST`. */
+export function pacificOf(ms: number): string {
+  return PACIFIC.format(new Date(ms));
+}
+
 /** Render epoch milliseconds back to an ISO instant. */
 export function isoFromMs(value: number): string {
   return new Date(value).toISOString();

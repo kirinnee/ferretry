@@ -15,6 +15,8 @@ export function renderInflightCli(report: InflightReport): string {
   if (report.codexBackgroundTerminals > 0)
     lines.push(`  codex ${report.codexBackgroundTerminals} background terminal(s) [UNKNOWN — no argv, unaccountable]`);
   for (const blindSpot of report.blindSpots) lines.push(`  blind [UNKNOWN] ${blindSpot}`);
+  if (report.midTurn)
+    lines.push('  turn  [RE-ARMABLE] the agent is mid-turn; nothing open — the new session is told to pick it up');
   if (nothingObserved(report)) lines.push('  (no open tools or descendant processes observed)');
   return lines.join('\n');
 }
@@ -24,6 +26,7 @@ function nothingObserved(report: InflightReport): boolean {
     report.openTools.length === 0 &&
     report.processes.length === 0 &&
     report.codexBackgroundTerminals === 0 &&
+    !report.midTurn &&
     report.blindSpots.length === 0
   );
 }
@@ -68,6 +71,7 @@ export function renderInflightReport(report: InflightReport, meta: ReportMeta): 
     ...processSection(report),
     ...codexSection(report),
     ...blindSpotSection(report),
+    ...requesterSection(report),
   );
   if (nothingObserved(report)) lines.push('_No open tools or descendant processes were observed at move time._', '');
   lines.push(...guidance());
@@ -125,6 +129,29 @@ function blindSpotSection(report: InflightReport): readonly string[] {
     'The inspection could not rule these out, so the work they might hide is **unaccounted for**:',
     '',
     ...report.blindSpots.map(blindSpot => `- ${escapeCell(blindSpot)}`),
+    '',
+  ];
+}
+
+/** The request's own call, which the gate left out: kept in the record so the exclusion is auditable. */
+function requesterSection(report: InflightReport): readonly string[] {
+  const call = report.requesterCall ?? [];
+  const turn = report.midTurn
+    ? [
+        '### Mid-turn',
+        '',
+        'The session was mid-turn with no open tool, process or codex terminal: the turn is interrupted and the new session is told to re-read where it stopped and continue. **re-armable**.',
+        '',
+      ]
+    : [];
+  if (call.length === 0) return turn;
+  return [
+    ...turn,
+    '### The call that asked for this move (not counted)',
+    '',
+    "The move was requested from this session's own tool call, proven from the process tree. The move ends that call, so it is not work the move interrupts:",
+    '',
+    ...call.map(entry => `- pid ${entry.pid}: \`${escapeCell(entry.argv)}\``),
     '',
   ];
 }
