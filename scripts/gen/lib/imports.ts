@@ -61,7 +61,9 @@ export function areaOf(pkg: WorkspacePackage, file: string): Area {
   }
   if (rel.startsWith('contract/testing/')) return 'contract-testing';
   if (rel.startsWith('contract/')) return 'contract';
-  if (rel === 'manifest.ts') return 'manifest';
+  // A manifest may be split into fragments under `manifest/` (generated output is already `generated` above): they
+  // are the manifest, so the manifest import rule covers them too.
+  if (rel === 'manifest.ts' || rel.startsWith('manifest/')) return 'manifest';
   if (rel.startsWith('daemon/')) return 'daemon';
   if (rel.startsWith('app/')) return 'app';
   if (rel.startsWith('cli/')) return 'cli';
