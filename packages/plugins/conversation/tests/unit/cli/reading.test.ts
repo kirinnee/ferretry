@@ -72,7 +72,7 @@ describe('the reading verbs', () => {
     expect(await run(verbs.search, ['backend'])).toBe(0);
     const text = out.join('');
     expect(text).toContain('&F303  card  In progress  Search backend');
-    expect(text).toContain('!A3    ask   open         Pick one — which backend');
+    expect(text).toContain('^A3    ask   open         Pick one — which backend');
     expect(text).toContain('Showing 2 of 5');
     expect(text).toContain('2 older closed items hidden');
   });

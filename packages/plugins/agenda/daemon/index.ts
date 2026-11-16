@@ -1,3 +1,4 @@
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import type { ConfigFileDef, FerretId } from '@ferretry/kernel/contract';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import { milliseconds } from '@ferretry/std';
@@ -36,7 +37,7 @@ import { markSeen } from './lib/seen.ts';
 import { buzzBody, buzzTitle } from './lib/words.ts';
 import { agendaRoutes } from './routes.ts';
 
-const REFERENCE_MENU_HOOK = 'reference.catalog:!' as const;
+const REFERENCE_MENU_HOOK = `reference.catalog:${ASK_REFERENCE_SIGIL}` as const;
 
 /** The command the nudge's words name (the product's one binary). */
 const BINARY_NAME = 'fy';

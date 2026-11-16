@@ -86,6 +86,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         asks: ctx.needs.asks,
         hooks: ctx.hooks,
         gate,
+        mailbox: ctx.needs.mailbox,
         // The stored originals a send hands to the agent (part b owns the store).
         attachments: { download: (ferret, id) => b.download(ferret, id) },
         // A Codex ferret's question is in its transcript (part b reads it).

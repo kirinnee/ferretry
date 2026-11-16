@@ -30,6 +30,7 @@ import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
 import { visibleWhy } from './agenda-inbox.ts';
 import type { DaemonId } from '../shell.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** One ferret's open items on one machine, under one header. */
 export interface FerretGroup {
@@ -240,7 +241,7 @@ const searchable = (
     item.subject,
     item.why,
     item.id,
-    `!${item.id}`,
+    `${ASK_REFERENCE_SIGIL}${item.id}`,
     names.title,
     names.ferret ?? undefined,
     rootNames?.title,

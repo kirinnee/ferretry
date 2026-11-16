@@ -31,7 +31,11 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         const live = (await service.list()).filter(
           summary => !hiddenFromLiveList(summary.state, isArchived(summary.id)),
         );
-        return fleetList.answer(await outdatedMarks.list(live), headerValue(call.request, 'if-none-match'));
+        return fleetList.answer(
+          await outdatedMarks.list(live),
+          headerValue(call.request, 'if-none-match'),
+          call.request.build,
+        );
       },
       'GET /v1/ferrets/:ferretId/subtree': async call => {
         const id = await pathFerret(call);

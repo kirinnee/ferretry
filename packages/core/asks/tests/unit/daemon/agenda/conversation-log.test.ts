@@ -247,7 +247,7 @@ describe('Agenda merge', () => {
     should(kept.links?.map(link => link.target)).containEql('https://example.test/b');
     should(lifecycleOf(merged.ledger, 'A2')).equal('addressed');
     should(closed.mergedInto).equal('A1');
-    should(JSON.stringify(closed)).containEql('merged into !A1');
+    should(JSON.stringify(closed)).containEql('merged into ^A1');
     should(closed.conversation?.map(entry => entry.text)).containEql('two-a');
   });
 

@@ -123,7 +123,7 @@ describe('speakableSegments: links, references and ids', () => {
   });
 
   test('references become words, from the one reference grammar', () => {
-    expect(said('Ask :dev about &F12, then !A3, see @packages/pwa/src/lib/a.ts:12 and %terminal:build.')).toEqual([
+    expect(said('Ask :dev about &F12, then ^A3, see @packages/pwa/src/lib/a.ts:12 and %terminal:build.')).toEqual([
       'Ask ferret dev about task F12, then agenda item A3, see a.ts and terminal build.',
     ]);
   });

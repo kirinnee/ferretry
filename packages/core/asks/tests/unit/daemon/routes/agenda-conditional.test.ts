@@ -62,8 +62,8 @@ const fixture = (replies: AgendaRepliesSubsystem = NO_HELD_REPLIES, repository =
   return {
     repository,
     service,
-    read: (headers: RequestOverrides['headers'] = human, path = PATH): Promise<ApiResponse> =>
-      dispatch({ path, headers }),
+    read: (headers: RequestOverrides['headers'] = human, path = PATH, build?: string): Promise<ApiResponse> =>
+      dispatch({ path, headers, ...(build === undefined ? {} : { build }) }),
     /** A ferret raising an ask on its own board: the board's ledger changes. */
     raise: (): Promise<ApiResponse> =>
       dispatch({ method: 'POST', path: PATH, headers: agentIn('s1'), body: JSON.stringify(RAISE) }),
@@ -117,6 +117,16 @@ describe('GET /v1/ferrets/:ferretId/agenda is a conditional read for its owner',
     expect(JSON.parse(changed.body).items).toHaveLength(1);
     // And that new tag is the one a repeat is answered 304 for.
     expect((await read({ ...human, 'if-none-match': tagOf(changed) })).status).toBe(304);
+  });
+
+  it('names the daemon build: the same board under another build is a 200, under the same build a 304', async () => {
+    const { read } = fixture();
+    const held = tagOf(await read({ ...human }, PATH, '5.0.0+aaa'));
+    expect((await read({ ...human, 'if-none-match': held }, PATH, '5.0.0+aaa')).status).toBe(304);
+    const upgraded = await read({ ...human, 'if-none-match': held }, PATH, '5.0.0+bbb');
+    expect(upgraded.status).toBe(200);
+    expect(upgraded.body).not.toBe('');
+    expect(tagOf(upgraded)).not.toBe(held);
   });
 
   it('names the projection: channel 2 and the plain read are different bodies, so different tags', async () => {

@@ -107,7 +107,7 @@ test('a SCOPED run lists the changed plugin, what mentions it and the platform t
   expect(has(lines, 'DRY RUN unit test files: 3')).toBe(true);
   // Everything that judges the whole repository still runs, and the proofs say what they are.
   expect(has(lines, 'DRY RUN scope mode: scoped')).toBe(true);
-  expect(has(lines, 'DRY RUN always-run parts: format gates build scripts')).toBe(true);
+  expect(has(lines, 'DRY RUN always-run parts: format gates build guards scripts')).toBe(true);
   expect(has(lines, 'DRY RUN check.ts guarantees --strict --tier unit --existence-only')).toBe(true);
   expect(has(lines, 'DRY RUN check.ts parity-ticks --tier unit')).toBe(true);
   expect(has(lines, 'coverage ledger: SCOPED')).toBe(true);

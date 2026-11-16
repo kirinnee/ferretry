@@ -11,6 +11,7 @@
  *   read time from ferret liveness, Asks and other cards, and is never stored.
  * - **History is append-only and gap-free**, and a move back or a reopen always says why.
  */
+import { askReference } from '@ferretry/core-asks/contract';
 import { z } from 'zod';
 import {
   DependencyUntilSchema,
@@ -115,11 +116,8 @@ export const AskIdTextSchema = z.string().regex(/^A[1-9][0-9]*$/u, 'an ask id is
 export const AskRefSchema = z.strictObject({ ferret: FerretRefSchema, id: AskIdTextSchema });
 export type AskRef = z.infer<typeof AskRefSchema>;
 
-/** The sigil of the `!ask` reference kind. Cards are `&`, asks `!`, and the two never swap. */
-export const ASK_REF_SIGIL = '!';
-
-/** How an ask is written: `!A48`. */
-export const formatAskRef = (ref: AskRef): string => `${ASK_REF_SIGIL}${ref.id}`;
+/** How an ask is written: `^A48` (the sigil is spelled once, in core-asks). Cards are `&`, asks `^`, and the two never swap. */
+export const formatAskRef = (ref: AskRef): string => askReference(ref.id);
 
 // ---------------------------------------------------------------------------------------------------
 // Actors

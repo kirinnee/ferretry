@@ -152,13 +152,13 @@ describe('the input_wait tool', () => {
     const tools = inputTools(service);
 
     const answer = await tools.input_wait(callOf(ferretStanding(SESSION as FerretId), {}, fresh()), {
-      id: `!${view.id}`,
+      id: `^${view.id}`,
       timeoutMs: 100,
     });
     const owner = await tools.input_wait(callOf(deviceStanding('d1'), {}, fresh()), { id: view.id });
 
     should(answer.isError).be.undefined();
-    should(answer.text).startWith(`!${view.id} was cancelled`);
+    should(answer.text).startWith(`^${view.id} was cancelled`);
     should(answer.data).have.property('state', 'cancelled');
     should(answer.data).not.have.property('observed');
     should(owner.isError).be.true();

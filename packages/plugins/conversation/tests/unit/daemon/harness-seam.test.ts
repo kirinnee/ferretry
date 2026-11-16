@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
@@ -299,7 +300,7 @@ async function conversation(
   const clock = fixedClock('2026-11-08T09:00:00Z');
   const host = await testHost({
     plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
     clock,
   });
   const asking = async () =>

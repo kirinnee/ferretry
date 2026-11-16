@@ -83,6 +83,8 @@ export interface RequestOverrides {
   /** Who calls (a standing), with any real request headers beside it. */
   readonly headers?: CallStanding | Readonly<Record<string, unknown>>;
   readonly body?: string;
+  /** The daemon build the dispatcher would stamp on the request. */
+  readonly build?: string;
   readonly query?: readonly (readonly [string, string])[];
 }
 
@@ -128,6 +130,7 @@ export function routeDispatcher(handlers: Readonly<Record<string, RouteHandler>>
       headers,
       arrival: testArrival(owner()),
       text: async () => overrides.body ?? '',
+      ...(overrides.build === undefined ? {} : { build: overrides.build }),
     };
     const found = table.lookup(request.method, request.path);
     if (found.kind === 'not-found') return errorResponse(404, 'not found', 'not_found');

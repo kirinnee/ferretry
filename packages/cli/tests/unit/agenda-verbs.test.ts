@@ -90,7 +90,7 @@ describe('fy agenda item verbs', () => {
     should(posted()[0]).containEql({ action: 'resolve', id: 'A3', note: 'shipped' });
     should(io.stderr()).equal('');
     const other = world();
-    should(await runFy(['agenda', 'done', '!A4', '--choice', 'Blue'], other.world)).equal(0);
+    should(await runFy(['agenda', 'done', '^A4', '--choice', 'Blue'], other.world)).equal(0);
     should(other.posted()[0]).containEql({ action: 'resolve', id: 'A4' });
     should((other.posted()[0] as { response: unknown }).response).containEql({
       kind: 'multiple-choice',

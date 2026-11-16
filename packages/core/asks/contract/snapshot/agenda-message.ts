@@ -11,12 +11,13 @@
  * item token and its quoted ask or title (docs/reference-standard.md, "Agenda message headings"):
  *
  * ```text
- * [answer to !A3 «ask»] <answer>[ · note: <note>]
- * [done !A3 «ask»] The owner marked this done.
- * [dismissed !A3 «ask»] Not needed: <note>
- * [needs more info !A3 «ask»] <note>
- * [discuss !A3 «title»] The owner wants to talk this through before answering: <note>. Reply in chat …
- * [re !A5 «title», !A7 «title»] <the owner's words>
+ * [answer to ^A3 «ask»] <answer>[ · note: <note>]
+ * [done ^A3 «ask»] The owner marked this done.
+ * [dismissed ^A3 «ask»] Not needed: <note>
+ * [needs more info ^A3 «ask»] <note>
+ * [discuss ^A3 «title»] The owner wants to talk this through before answering: <note>. Reply in chat …
+ * [re ^A5 «title», ^A7 «title»] <the owner's words>
+ * (A heading written before the sigil change says `!A3`; it is still read, never written.)
  * ```
  *
  * A burst of board answers is delivered as one message: each form, in the order given, a blank line apart.
@@ -25,6 +26,8 @@
  * drawn as the words it is: the failure mode is raw text (what every message was before), never the
  * owner's words cut short or attributed to the wrong item.
  */
+
+import { ASK_REFERENCE_SIGIL_CLASS, askReference } from './ask-reference.ts';
 
 /** What a form says about the items it names. */
 export type AgendaMessageKind = 'answer' | 'done' | 'dismissed' | 'needs-info' | 'discuss' | 're';
@@ -88,7 +91,7 @@ const DISCUSS_NO_NOTE = 'no note';
 const discussTail = (binary: string, id: string): string =>
   `. Reply in chat to clear it up; then update the item (\`${binary} agenda edit ${id}\`) or close it if the premise was wrong (\`${binary} agenda done ${id}\`).`;
 
-const named = (item: AgendaMessageItem): string => `!${item.id} «${agendaQuote(item.quote)}»`;
+const named = (item: AgendaMessageItem): string => `${askReference(item.id)} «${agendaQuote(item.quote)}»`;
 
 const heading = (kind: AgendaMessageKind, items: readonly AgendaMessageItem[]): string =>
   `[${OPENERS[kind]} ${items.map(named).join(', ')}]`;
@@ -124,13 +127,16 @@ export function agendaReMessage(items: readonly AgendaMessageItem[], message: st
 }
 
 /**
- * `!A3`, bounded exactly as the reference grammar bounds it (`packages/pwa/src/lib/references.ts`,
- * docs/reference-standard.md): after the start or a space/opening bracket/quote, and before the end,
- * a space, closing punctuation or a colon. Case-sensitive — `!a3` is prose.
+ * `^A3` (or the legacy `!A3`, read as an alias), bounded exactly as the reference grammar bounds it
+ * (docs/reference-standard.md): after the start or a space/opening bracket/quote, and before the end,
+ * a space, closing punctuation or a colon. Case-sensitive — `^a3` is prose.
  */
-const AGENDA_REFERENCE = /(?:^|[\s([{"'`<>=—–])!(A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])/gu;
+const AGENDA_REFERENCE = new RegExp(
+  `(?:^|[\\s([{"'\`<>=—–])${ASK_REFERENCE_SIGIL_CLASS}(A[1-9][0-9]*)(?=$|[\\s)\\]}"'\`,;!?<>:.=—–])`,
+  'gu',
+);
 
-/** The item ids a message references (`!A3`), each once, in the order first named. */
+/** The item ids a message references (`^A3`), each once, in the order first named. */
 export const referencedAgendaIds = (message: string): readonly string[] => [
   ...new Set([...message.matchAll(AGENDA_REFERENCE)].map(match => match[1] as string)),
 ];
@@ -174,11 +180,11 @@ export const agendaBatchMessage = (forms: readonly string[]): string => forms.jo
 const OPENER_WORDS = Object.values(OPENERS)
   .sort((left, right) => right.length - left.length)
   .join('|');
-const ITEM = String.raw`!(A[1-9][0-9]*) «([\s\S]*?)»`;
+const ITEM = String.raw`${ASK_REFERENCE_SIGIL_CLASS}(A[1-9][0-9]*) «([\s\S]*?)»`;
 const HEADING = new RegExp(String.raw`^\[(${OPENER_WORDS}) (${ITEM}(?:, ${ITEM})*)\](?: |$)`, 'u');
-const HEADING_ITEM = new RegExp(`${ITEM}(?=, !A[1-9]|$)`, 'gu');
+const HEADING_ITEM = new RegExp(`${ITEM}(?=, ${ASK_REFERENCE_SIGIL_CLASS}A[1-9]|$)`, 'gu');
 /** Where a batch's next form starts: a blank line, then a heading's opening. */
-const NEXT_FORM = new RegExp(String.raw`\n\n(?=\[(?:${OPENER_WORDS}) !A[1-9][0-9]* «)`, 'u');
+const NEXT_FORM = new RegExp(String.raw`\n\n(?=\[(?:${OPENER_WORDS}) ${ASK_REFERENCE_SIGIL_CLASS}A[1-9][0-9]* «)`, 'u');
 
 const KIND_OF: ReadonlyMap<string, AgendaMessageKind> = new Map(
   (Object.entries(OPENERS) as [AgendaMessageKind, string][]).map(([kind, opener]) => [opener, kind]),

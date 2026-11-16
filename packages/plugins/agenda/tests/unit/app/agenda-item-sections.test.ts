@@ -89,7 +89,7 @@ describe('terms and references', () => {
       links: [
         { label: 'The PR', target: 'https://github.com/kirinnee/ferretry/pull/1428' },
         { target: '&F12' },
-        { target: '!A3' },
+        { target: '^A3' },
         { target: 'docs/agenda.md' },
       ],
     });
@@ -97,7 +97,7 @@ describe('terms and references', () => {
       'WAL',
       'https://github.com/kirinnee/ferretry/pull/1428',
       '&F12',
-      '!A3',
+      '^A3',
       'docs/agenda.md',
     ]);
     // A link means what its label says, and nothing is made up for one that has none.
@@ -108,7 +108,7 @@ describe('terms and references', () => {
   test('a link means its own meaning when it has one, then its label; a blank one reads as nothing', () => {
     const rows = referenceRows({
       links: [
-        { target: '!A3', label: 'The parent', meaning: 'Where this came from' },
+        { target: '^A3', label: 'The parent', meaning: 'Where this came from' },
         { target: '&F12', label: 'The card', meaning: '  ' },
         { target: '@docs/agenda.md', meaning: 'The contract' },
       ],

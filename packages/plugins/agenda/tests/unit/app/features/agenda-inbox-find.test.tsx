@@ -139,7 +139,7 @@ describe('Inbox Find across every tab', () => {
     await fill(find, 'relay');
     const rows = results(root);
     expect(rows.map(row => row.chip).sort()).toEqual(['replied', 'resolved', 'snoozed']);
-    const wake = rows.find(row => row.chip === 'snoozed' && row.text.includes('!A2'));
+    const wake = rows.find(row => row.chip === 'snoozed' && row.text.includes('^A2'));
     expect(wake?.label).toBe('Snoozed · tmrw 09:00');
     expect(wake?.full).toBe('Snoozed until tomorrow 09:00');
     expect(wake?.title).toBe('Snoozed until tomorrow 09:00');

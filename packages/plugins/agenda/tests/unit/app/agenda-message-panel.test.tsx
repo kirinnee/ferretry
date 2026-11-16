@@ -134,7 +134,7 @@ describe('the agenda-message panel in conversation.row-body', () => {
   test('a send on its way that names an open item is its card at once, worded against the board', async () => {
     const { hydrated } = await draw({
       subject: 's-1',
-      entry: { id: 'send:1', kind: 'user', text: '!A45 Leaning to Automatic' },
+      entry: { id: 'send:1', kind: 'user', text: '^A45 Leaning to Automatic' },
       onItsWay: true,
       fallback,
     });

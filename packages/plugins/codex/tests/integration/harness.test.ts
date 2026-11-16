@@ -214,7 +214,7 @@ describe('the Codex harness', () => {
     should(command).containEql('sandbox_mode="workspace-write"');
   });
 
-  describe('the settings items’ launch flags (any flag, owner decision !A525)', () => {
+  describe('the settings items’ launch flags (any flag, owner decision ^A525)', () => {
     const items = new Map<string, unknown>([
       ['b-search', { settings: {}, flags: ['--search', '-c', 'model_verbosity="low"'] }],
       ['a-risky', { settings: {}, flags: ['--full-auto', '-c', 'approval_policy="never"', '--some-future-flag'] }],
@@ -290,7 +290,7 @@ describe('the Codex harness', () => {
     });
   });
 
-  it('!A525 a harness file that says no permission mode launches Codex with approval never and the full-access sandbox', async () => {
+  it('^A525 a harness file that says no permission mode launches Codex with approval never and the full-access sandbox', async () => {
     const { harness } = harnessOver(LOCATED);
     const started = fakeRunner();
     const resumed = fakeRunner();
@@ -304,7 +304,7 @@ describe('the Codex harness', () => {
     }
   });
 
-  it('!A525 an explicit auto keeps Codex asking: on-request and the workspace-write sandbox', async () => {
+  it('^A525 an explicit auto keeps Codex asking: on-request and the workspace-write sandbox', async () => {
     const { harness } = harnessOver(LOCATED, 'auto');
     const { runner, seen } = fakeRunner();
     await harness.start(specOf(), runner, ENV);
@@ -324,7 +324,7 @@ describe('the Codex harness', () => {
     should(resumed.ok && resumed.value.harnessConversation).equal('conv-1');
   });
 
-  describe('the question tool (!A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in, and an explicit OFF otherwise)', () => {
+  describe('the question tool (^A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in, and an explicit OFF otherwise)', () => {
     const FEATURE = ['--enable', 'default_mode_request_user_input'];
     const OFF = ['-c', 'features.default_mode_request_user_input=false'];
     const withFeature = (command: readonly string[]): boolean =>

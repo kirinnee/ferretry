@@ -6,8 +6,7 @@
  * and (b) the lines of every path of the parsed hooks document that the write rule refuses (a refused list item
  * withholds its whole list). Fake values only.
  *
- * Per-test limits (testing standard): the timing test reads 6 shapes at 128 and 256 KiB, each a second or less
- * alone; the repo prose test reads every `docs/**` markdown file once (about 6 s alone): both carry an explicit limit.
+ * How it grows at 256 KiB is tests/perf/daemon/net-text-values.test.ts.
  */
 import { describe, it } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
@@ -15,9 +14,8 @@ import { join } from 'node:path';
 import { Glob } from 'bun';
 import should from 'should';
 import { findFlagSecrets, findRawSecrets, rawTextHoldsSecret } from '@ferretry/std/credential-words';
-import { componentCatalog, WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
-import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
-import { ratioOf } from '@ferretry/std/testing/linear-time';
+import { WITHHELD_LINE } from '../../../daemon/lib/service/catalog.ts';
+import { hook, hooksShown, instructionsShown } from '../../support/text-values-support.ts';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const V2 = 'Qw8rTy3uIo5pAs7dFg2h';
@@ -27,41 +25,6 @@ const windowsOf = (secret: string): readonly string[] =>
   Array.from({ length: Math.max(0, secret.length - 7) }, (_, at) => secret.slice(at, at + 8));
 const WINDOWS = VALUES.flatMap(windowsOf);
 const leaks = (text: string): boolean => WINDOWS.some(window => text.includes(window));
-
-const FACTS = {
-  format: 'present',
-  machineName: 'box',
-  tools: { claude: undefined, codex: undefined },
-  runningSessions: 0,
-  userHome: '/home/person',
-  acceptsAutoPermissionMode: true,
-} as const;
-
-/** What the detail shows for an instructions text: kept in a file, or held in the component YAML. */
-function instructionsShown(text: string, held: boolean): { text: string; redacted: boolean } {
-  const model = parseAccountModel({
-    version: 1,
-    components: { instructions: { notes: held ? { text } : { file: 'notes.md' } } },
-  });
-  const content = componentCatalog(model, { ...FACTS, instructionBodies: { notes: text } }).kinds.flatMap(
-    kind => kind.components,
-  )[0]?.content;
-  if (content?.form !== 'text') throw new Error('expected text content');
-  return { text: content.text, redacted: content.redacted };
-}
-
-/** What the detail shows for a hooks file holding `text`. */
-function hooksShown(text: string): { text: string; redacted: boolean } {
-  const model = parseAccountModel({
-    version: 1,
-    components: { hooks: { notes: { harness: 'claude', file: 'components/hooks/notes.json' } } },
-  });
-  const content = componentCatalog(model, { ...FACTS, hooksTexts: { notes: text } }).kinds.flatMap(
-    kind => kind.components,
-  )[0]?.content;
-  if (content?.form !== 'text') throw new Error('expected text content');
-  return { text: content.text, redacted: content.redacted };
-}
 
 /** Whether the write rule refuses `document` (its raw rule or its flag rule), the way the kernel reads a file. */
 const refused = (document: unknown): boolean =>
@@ -145,11 +108,6 @@ describe('instructions lines the write rule refuses as values are withheld', () 
       should(shown.redacted).be.false();
     });
   }
-});
-
-/** A hooks document in the shapes the harness reads, around one `command` and its `args`. */
-const hook = (command: string, args?: readonly string[]): unknown => ({
-  hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command, ...(args ? { args } : {}) }] }] },
 });
 
 const HOOKS: Readonly<Record<string, readonly unknown[]>> = {
@@ -334,65 +292,4 @@ describe('the nets withhold nothing the write rule accepts', () => {
     should(lines).be.above(1000);
     should(overWithheld).deepEqual([]);
   }, 60_000);
-
-  // One test per shape. The timeout is the shape's local time (0.6, 6.0, 2.8, 1.0, 1.9 and 2.2 s, in the order below)
-  // with at least four times the headroom; it is a margin for a loaded runner, not a speed claim.
-  const shapes: readonly (readonly [string, (size: number) => string, number])[] = [
-    ['one very long instructions line', size => `key: ${'a1B2'.repeat(size / 4)}`, 10_000],
-    ['many short instructions lines', size => 'ab\n'.repeat(size / 3), 30_000],
-    [
-      'many instructions lines each holding a flag secret',
-      size => `run --token ${V}\n`.repeat(Math.ceil(size / 23)),
-      15_000,
-    ],
-    [
-      'one very long hooks command',
-      size => JSON.stringify(hook(`tool ${'a1B2 '.repeat(size / 5)} --token ${V}`), undefined, 2),
-      10_000,
-    ],
-    [
-      'a hooks args list of 50,000 words',
-      size =>
-        JSON.stringify(
-          hook('tool', ['--token', V, ...Array.from({ length: size / 8 }, () => 'ab'), '--x']),
-          undefined,
-          2,
-        ),
-      15_000,
-    ],
-    [
-      'many hooks each holding a flag secret',
-      size =>
-        JSON.stringify(
-          Array.from({ length: Math.ceil(size / 40) }, () => ({ command: `t --token ${V}` })),
-          undefined,
-          2,
-        ),
-      15_000,
-    ],
-  ];
-  for (const [name, make, timeoutMs] of shapes) {
-    it(
-      `should stay linear to 256 KiB on every shape of text and of document: ${name}`,
-      () => {
-        // Arrange
-        const shown = (text: string): void => {
-          if (name.includes('hooks')) hooksShown(text);
-          else instructionsShown(text, true);
-        };
-        const small128 = make(128 * 1024);
-        const large256 = make(256 * 1024);
-
-        // Act: the ratio of 256 to 128 KiB stays under 3 (a quadratic net would give about 4).
-        const ratio = ratioOf(
-          () => shown(large256),
-          () => shown(small128),
-        );
-
-        // Assert
-        should(ratio).be.below(3, name);
-      },
-      timeoutMs,
-    );
-  }
 });

@@ -1,3 +1,4 @@
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import type { CliContext, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import type {
   KeepResult,
@@ -40,8 +41,8 @@ const number = (invocation: VerbInvocation, name: string): number | undefined =>
 const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const clip = (text: string, width: number): string => (text.length <= width ? text : `${text.slice(0, width - 1)}…`);
 
-/** `&F303` for a card, `!A3` for an ask: how a hit is cited. */
-const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
+/** `&F303` for a card, `^A3` for an ask: how a hit is cited. */
+const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : ASK_REFERENCE_SIGIL}${hit.id}`;
 
 /** The matching line, unless it only repeats the title or the id the reader already sees. */
 const matchLine = (hit: WorkHit): string => {

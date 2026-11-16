@@ -1,7 +1,7 @@
 /**
  * What a runtime's login does to a Claude launch: its compaction trigger, as a `compact` part from the facts `start.decide`
  * checked. The gate never touches the login's ENVIRONMENT: a project's own `.claude` env wins over it (v4 before 4.291.9;
- * owner, !A500), so it reads no folder, pins nothing and refuses no start over a key a folder sets. The parts source reads
+ * owner, ^A500), so it reads no folder, pins nothing and refuses no start over a key a folder sets. The parts source reads
  * nothing again and is required.
  */
 import { describe, it } from 'bun:test';
@@ -62,7 +62,7 @@ describe('LaunchGate.decide', () => {
   });
 
   it('should allow a Claude start of a published runtime: it needs no folder, so none is ever read or refused', async () => {
-    // The gate has no folder reader (a project’s `.claude` env wins over a login’s: owner, !A500), so nothing a folder
+    // The gate has no folder reader (a project’s `.claude` env wins over a login’s: owner, ^A500), so nothing a folder
     // sets, a `${secret:}` key or a bare $OTHER key included, can be a reason to refuse.
     should((await gate(FACTS).decide(input())).allow).be.true();
   });

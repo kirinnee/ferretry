@@ -106,7 +106,7 @@ describe('composer suggestion switches', () => {
       />,
     );
 
-    for (const draft of [':zel', '!A3', '&F1']) {
+    for (const draft of [':zel', '^A3', '&F1']) {
       type(view, draft);
       expect(opened(view)).toBe(false);
     }
@@ -150,7 +150,7 @@ describe('composer suggestion switches', () => {
   test('offers the @ ladder and skills when the host knows nothing about the switches', () => {
     const view = mounted(<Composer api={api} daemon={daemon} ferretId="ferret-a" />);
 
-    for (const draft of [':zel', '!A3', '&F1']) {
+    for (const draft of [':zel', '^A3', '&F1']) {
       type(view, draft);
       expect(opened(view)).toBe(false);
     }

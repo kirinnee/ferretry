@@ -373,7 +373,7 @@ describe('SessionChatPage', () => {
     expect(refreshed).toBe(1);
   });
 
-  test('an ask’s reply is about that ask: its own draft, the !A3 prefix, and a receipt when it is sent (triage B17)', async () => {
+  test('an ask’s reply is about that ask: its own draft, the ^A3 prefix, and a receipt when it is sent (triage B17)', async () => {
     const received: unknown[] = [];
     const restored: string[] = [];
     const sentBodies: string[] = [];
@@ -403,7 +403,7 @@ describe('SessionChatPage', () => {
     expect(received).toEqual([{ words: 'hi', sendId: 's1', disposition: 'delivered' }]);
     // The route's answer is not this test's subject: the request it was given is.
     await composer.props.api.send('shared', { message: 'hi' }).catch(() => undefined);
-    expect(sentBodies.join('')).toContain('!A3');
+    expect(sentBodies.join('')).toContain('^A3');
   });
 
   test('without an ask the composer is the ferret’s own chat box: no item draft, no prefix', () => {

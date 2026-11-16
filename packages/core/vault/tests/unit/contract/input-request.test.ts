@@ -896,8 +896,8 @@ describe('a one-time code (`code`)', () => {
 
 describe('an input card’s context without the agent’s prompt', () => {
   it('I13 keeps the daemon’s own lines and leaves out the prompt after the marker', () => {
-    should(inputContextLines(`This follows !A7 in the same login.\n${INPUT_PROMPT_MARKER}[sudo] password:`)).equal(
-      'This follows !A7 in the same login.',
+    should(inputContextLines(`This follows ^A7 in the same login.\n${INPUT_PROMPT_MARKER}[sudo] password:`)).equal(
+      'This follows ^A7 in the same login.',
     );
   });
 

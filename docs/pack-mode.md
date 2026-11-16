@@ -431,7 +431,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   (`--how-to-test`), on the card it holds;
   reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
-  `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
+  `dismiss` items on a session it started: `fy agenda done ^A1 -s <sub-session>`. The daemon proves it by lineage
   (walking `config.parent` up from the target session, fail-closed on a cycle, a missing session or an unreadable
   registry) and attributes the change to the lead, not the sub-ferret. A sibling, an unrelated lead and a
   descendant acting on its ancestor stay refused; `add`, `progress`, `answer` and the owner's snooze/reply verbs
@@ -444,7 +444,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   never raise agenda items or notify the owner, report to your lead with `fy send` and label every send (`--kind blocker|action|fyi`, [message-delivery.md](message-delivery.md#labels-and-combined-delivery)); at each step it reads its card and rewrites the stale parts of its status and How to test (`fy task edit`), routine progress goes on its card (`fy task note`), and its lead is messaged only for a result, a blocker or a decision; if it has a card, link its PR to it, and the card moves itself (the daemon enters its working lane when the session starts); with none, make none. The Notify, Board and Agenda mode paragraphs are left
   out. Sizes with the default binary name: **lead 2910 characters** (4292 with Agenda mode on), **sub-ferret 2631**.
-  `FY_SUB_FERRET=1` is derived from `parent` at each launch; a running ferret is told the changed always-on section on the
+  `FY_SUB_FERRET=1` is derived from the record's `role` (a helper) at each launch; a running ferret is told the changed always-on section on the
   owner's next message like any other ([launch-settings.md](launch-settings.md#instructions-that-changed-since-the-launch)).
 - **Nudges** about a sub-ferret's card (the turn-check, a reopen, a go-ahead) go to its lead. The board's alerts (a stale
   card, a red CI, a PR closed unmerged) go to the sub-ferret itself while it is alive, then its nearest live lead

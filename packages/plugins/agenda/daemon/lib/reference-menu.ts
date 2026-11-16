@@ -1,4 +1,4 @@
-import type { AsksApi } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL, type AsksApi } from '@ferretry/core-asks/contract';
 import {
   type ReferenceCatalogEntry,
   type ReferenceCatalogInput,
@@ -33,7 +33,7 @@ export class AgendaReferenceMenu implements ReferenceCatalogProvider {
     const wanted = input.query?.trim().toLowerCase() ?? '';
     return board.items
       .filter(item => wanted === '' || `${item.id} ${item.subject} ${item.source}`.toLowerCase().includes(wanted))
-      .slice(0, referenceCatalogLimit('!'))
+      .slice(0, referenceCatalogLimit(ASK_REFERENCE_SIGIL))
       .map(item => ({ token: item.id, label: clip(item.subject), detail: item.source }));
   }
 }

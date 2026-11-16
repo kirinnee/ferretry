@@ -55,6 +55,13 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     return undefined;
   }
 
+  /** The pane's own process, from the runner's adoption of the live handle (which restarts and types nothing). */
+  async panePid(record: SessionLifecycleRecord): Promise<number | undefined> {
+    const handle = this.ports.handleOf(this.ferret(record));
+    const attached = handle === undefined ? undefined : await this.ports.runner()?.attach(handle);
+    return attached?.ok === true ? attached.value.pid : undefined;
+  }
+
   /**
    * The harness is at a prompt that will accept input, bounded. Dead, or never ready in time, throws: the lifecycle
    * then records the failure and the first turn is never typed. Reads only; no key is written.

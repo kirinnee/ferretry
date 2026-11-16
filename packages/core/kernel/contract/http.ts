@@ -23,6 +23,11 @@ export interface ApiRequest {
   readonly principal?: SessionPrincipal;
   /** The session transcript hash a step-up assertion is bound to. */
   readonly transcriptHash?: Uint8Array;
+  /**
+   * The build of the daemon answering this call (its version, the `x-ferretry-version` it stamps), stamped by the
+   * dispatcher and never read from the wire. A conditional tag folds it in ({@link tagForBuild}).
+   */
+  readonly build?: string;
   readonly signal?: AbortSignal;
   readonly text: (limitBytes?: number) => Promise<string>;
 }
@@ -175,6 +180,28 @@ export function namesTag(ifNoneMatch: string, etag: string): boolean {
 }
 
 /**
+ * Names the daemon build in a strong tag: `"v"` becomes `"<build>.v"`. A tag is made from what a store holds, but the
+ * body is made by the build, so a client that held the tag across a daemon upgrade (an app survives a reconnect) must
+ * not be answered `304` onto the old build's body. No build named leaves the tag as it was.
+ */
+export function tagForBuild(tag: string, build: string | undefined): string {
+  if (build === undefined) return tag;
+  const inner = tag.startsWith('"') && tag.endsWith('"') && tag.length >= 2 ? tag.slice(1, -1) : tag;
+  return `"${build}.${inner}"`;
+}
+
+/**
+ * The tag a route serves and the verdict on the request's `If-None-Match`, for a route that answers conditionally
+ * without {@link answerWhenChanged} (its tag comes with the body, or its 304 keeps headers of its own): the build is
+ * folded in here, in the one place, so no route names it itself.
+ */
+export function conditionalTag(request: ApiRequest, tag: string): { readonly etag: string; readonly held: boolean } {
+  const etag = tagForBuild(tag, request.build);
+  const asked = headerValue(request, 'if-none-match');
+  return { etag, held: asked !== undefined && namesTag(asked, etag) };
+}
+
+/**
  * A CONDITIONAL GET WHOSE TAG IS KNOWN BEFORE THE BODY EXISTS. `tag` is the strong, quoted validator the caller derived
  * from a version the store already holds (a file identity, a ledger revision) — never from the body — so a request that
  * names it is answered `304` with no body and `build` is never called: an unchanged poll costs a stat, not a read, a
@@ -183,6 +210,9 @@ export function namesTag(ifNoneMatch: string, etag: string): boolean {
  * The tag must be read BEFORE the body is built: a change in between then leaves the body newer than its tag, and the
  * next poll is one needless full answer, never a stale `304`.
  *
+ * The daemon build the dispatcher stamped on the request is part of the tag (see {@link tagForBuild}), so every route
+ * that answers here names the build without remembering to.
+ *
  * Only a `200` carries the tag; a built refusal is returned as it came.
  */
 export async function answerWhenChanged(
@@ -190,11 +220,11 @@ export async function answerWhenChanged(
   tag: string,
   build: () => Promise<ApiResponse>,
 ): Promise<ApiResponse> {
-  const held = headerValue(request, 'if-none-match');
-  if (held !== undefined && namesTag(held, tag)) return { status: 304, headers: new Map([['etag', tag]]), body: '' };
+  const { etag, held } = conditionalTag(request, tag);
+  if (held) return { status: 304, headers: new Map([['etag', etag]]), body: '' };
   const built = await build();
   if (built.status !== 200) return built;
   const headers = new Map(built.headers);
-  headers.set('etag', tag);
+  headers.set('etag', etag);
   return { ...built, headers };
 }
