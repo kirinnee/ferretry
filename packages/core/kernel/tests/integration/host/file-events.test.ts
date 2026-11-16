@@ -113,6 +113,24 @@ describe('nodeFileEvents on a real directory', () => {
     expect(events.polled()).toEqual([]);
   });
 
+  test('a path that is a file has no folder identity, so a recheck of it opens nothing', async () => {
+    const root = await fresh();
+    const file = join(root, 'machine.yaml');
+    await writeFile(file, 'a: 1\n');
+    let armed = 0;
+    const events = nodeFileEvents(systemClock(), {
+      watcher: (directory, onEvent, onError) => {
+        armed += 1;
+        return watch(directory, { persistent: false }, () => onEvent()).on('error', onError);
+      },
+    });
+    const subscription = events.watchDirectory(file, () => undefined);
+    stops.push(() => subscription.close());
+    subscription.recheck();
+    expect(armed).toBe(1);
+    expect(events.polled()).toEqual([]);
+  });
+
   test('a directory armed through a symlink is heard (it is watched on its real path)', async () => {
     const root = await fresh();
     await mkdir(join(root, 'real'));

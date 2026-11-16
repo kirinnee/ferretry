@@ -39,7 +39,7 @@ async function kernelStart(pid: number): Promise<string> {
     .at(19) as string;
 }
 
-async function pane() {
+async function pane(signal?: (pid: number, signal: 'SIGTERM' | 'SIGKILL') => void) {
   if (TMUX === null) throw new Error('tmux is required for this test and was not found');
   const root = await mkdtemp(join(tmpdir(), 'fy-identify-'));
   const socket = join(root, 's');
@@ -59,7 +59,7 @@ async function pane() {
     socketPath: socket,
     instantOf: () => 'then' as never,
     now: () => 'now' as never,
-    processes: paneProcessHost(spawn),
+    processes: signal === undefined ? paneProcessHost(spawn) : { ...paneProcessHost(spawn), signal },
   });
   const started = await runner.start({
     ferret: ferretId('idn'),
@@ -88,6 +88,31 @@ async function sleepers(host: ReturnType<typeof paneProcessHost>, rootPid: numbe
 }
 
 describe('TmuxRunner.identify and signalDescendant over a real tmux server', () => {
+  it.skipIf(!linux)(
+    'should treat a process that exited (ESRCH) or is not ours (EPERM) as not delivered, and rethrow anything else',
+    async () => {
+      // Arrange — a real pane and real proof; only the final kill is made to fail, with the errno the kernel would give
+      let code = 'ESRCH';
+      const { runner, handle, host, rootPid } = await pane(() => {
+        throw Object.assign(new Error(code), { code });
+      });
+      const target = (await sleepers(host, rootPid)).find(row => row.argv.startsWith('sleep 30'));
+      if (target === undefined) throw new Error('a sleep was expected');
+
+      // Act + Assert
+      for (code of ['ESRCH', 'EPERM'])
+        should(await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM')).equal(false);
+      code = 'EINVAL';
+      await runner.signalDescendant(handle, target.pid, target.start, 'SIGTERM').then(
+        () => {
+          throw new Error('an unexpected errno must reject');
+        },
+        (error: unknown) => should((error as Error).message).equal('EINVAL'),
+      );
+      should(await running(target.pid)).equal(true);
+    },
+  );
+
   it.skipIf(!linux)(
     'should name the pane by handle, pid and the kernel start, and prove it gone after it ends',
     async () => {
