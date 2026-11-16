@@ -168,6 +168,8 @@ export async function host(
     readonly stateHomeHolding?: Parameters<typeof testHost>[0]['stateHomeHolding'];
     /** A real-disk state home the kernel's production fence judges (links, identity). */
     readonly stateHome?: string;
+    /** Text the stand-in redaction masks (same-width `*`). */
+    readonly secrets?: readonly string[];
   } = {},
 ): Promise<TestHost> {
   const plugins = [
@@ -188,6 +190,7 @@ export async function host(
     ...(extra.directories === undefined ? {} : { directories: extra.directories }),
     ...(extra.stateHomeHolding === undefined ? {} : { stateHomeHolding: extra.stateHomeHolding }),
     ...(extra.stateHome === undefined ? {} : { stateHome: extra.stateHome }),
+    ...(extra.secrets === undefined ? {} : { secrets: extra.secrets }),
   });
   if (records.length === 0) return first;
   for (const each of records) first.state('ferrets').plant(FerretFiles, JSON.stringify(each), each.id);

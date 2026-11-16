@@ -220,6 +220,7 @@ export const WAIT_REASON_COPY: Readonly<Record<NonNullable<QueuedMessage['waitRe
   draft: 'its box holds a draft',
   unreadable: 'its screen can’t be read',
   stopped: 'it is not running',
+  compacting: 'the ferret is compacting its context',
 };
 
 type QueueEdit = (record: { readonly sendId: string }, text: string) => Promise<boolean>;
