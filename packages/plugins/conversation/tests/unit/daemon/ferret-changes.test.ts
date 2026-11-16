@@ -29,6 +29,7 @@ describe('followFerretChanges', () => {
       forget: ferret => calls.push(`forget ${ferret}`),
       withdrawQuestion: ferret => calls.push(`withdraw ${ferret}`),
       lookQuestion: ferret => calls.push(`question ${ferret}`),
+      lookPrompt: ferret => calls.push(`prompt ${ferret}`),
       warn: message => calls.push(`warn ${message}`),
     });
     return { calls, follow };
@@ -51,7 +52,7 @@ describe('followFerretChanges', () => {
     const { calls, follow } = record();
     follow(change('working', 'state'));
     follow(change('idle', 'state'));
-    expect(calls).toEqual(['look f1 working', 'question f1', 'look f1 idle', 'question f1']);
+    expect(calls).toEqual(['look f1 working', 'question f1', 'prompt f1', 'look f1 idle', 'question f1', 'prompt f1']);
   });
 
   test('a release that throws still lets the turn be followed, and the failure is not swallowed', () => {

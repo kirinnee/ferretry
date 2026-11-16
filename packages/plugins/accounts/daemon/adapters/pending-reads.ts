@@ -4,6 +4,7 @@ import type { UsesHandle } from '@ferretry/kernel/manifest';
 import type { BoardApi } from '@ferretry/plugin-board/contract';
 import type { BrowsersApi } from '@ferretry/plugin-browsers/contract';
 import type { ProjectsApi } from '@ferretry/plugin-projects/contract';
+import { stampedProjectOf } from '../lib/sign-in-grants/rules.ts';
 import type { ProjectInfo } from '../lib/sign-in-context.ts';
 
 /**
@@ -47,6 +48,28 @@ export async function workFolderOf(ferrets: UsesHandle<FerretsApi>, ferret: stri
     ?.workFolder(ferret as FerretId)
     .catch(() => undefined);
   return place?.folder;
+}
+
+/**
+ * The board a ferret was STAMPED with at its start, as Ferrets' own record keeps it (`FerretSummary.projectId`, resolved
+ * once at start and kept), for a standing rule scoped to a project: never a value from the request, the page or the ferret,
+ * and never the board the Board resolves from the folder when none was stamped. `undefined` for an unfiled or unknown
+ * ferret, a record from before boards existed, Ferrets off or a read that fails, so the rule does not fill and the
+ * person is asked.
+ */
+export async function stampedProjectOfFerret(
+  ferrets: UsesHandle<FerretsApi>,
+  ferret: string,
+): Promise<string | undefined> {
+  return await stampedProjectOf(
+    {
+      read: async sessionId => {
+        const record = await ferrets.current()?.get(sessionId as FerretId);
+        return record === undefined ? null : { cwd: record.folder, projectId: record.projectId };
+      },
+    },
+    ferret,
+  );
 }
 
 /**

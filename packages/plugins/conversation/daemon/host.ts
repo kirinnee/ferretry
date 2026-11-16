@@ -87,6 +87,9 @@ import type { TranscriptEvent } from './seams/transcript-types.ts';
 import { ANSWER_FAILURES, SessionAnswerError } from './questions/lib/mounts/session-answer.ts';
 import { agendaAnswers } from './questions/lib/agenda-answer.ts';
 import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
+import { PromptAsks } from './prompts/adapters/prompt-asks.ts';
+import { StatePromptRecords } from './prompts/adapters/state-prompt-records.ts';
+import type { PromptRead } from './prompts/lib/prompt-wait.ts';
 import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
@@ -311,6 +314,8 @@ export interface ConversationAHalf {
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
   /** The question watch: one look at a ferret (a state change), and what is forgotten about a ferret that stopped. */
   readonly questions: { look(ferret: string): void; forget(ferret: string): void };
+  /** Ferrets said a ferret changed state: its pane is read for a prompt on the next 2 s sweep, and no other ferret's is. */
+  promptChanged(ferret: string): void;
   stop(): void;
 }
 
@@ -351,6 +356,15 @@ export function buildConversationA(deps: {
         : `conversation could not raise the agenda card of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
     ),
   );
+  /** The Agenda's card for a ferret parked on a permission prompt or a dialog (Asks' source `prompt`). */
+  const promptAsks = new PromptAsks(
+    asks,
+    async ferret => (await ferrets.prompt?.(parseSessionId(ferret))) as PromptRead | undefined,
+    new StatePromptRecords(kernel.state),
+    message => kernel.log.warn(message),
+  );
+  /** Said once until the ferret list reads again, not on every 2 s look. */
+  let promptRosterFailing = false;
   /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
   const askFailure =
     (what: string) =>
@@ -1360,6 +1374,18 @@ export function buildConversationA(deps: {
             questionAsksReconciled = true;
           }, askFailure('reconcile'));
         } else await questionAsks.settle();
+        // A pane is read only for a ferret Ferrets reported changed, one owed a card, or once after boot: never every tick.
+        await ferrets.list().then(
+          async roster => {
+            promptRosterFailing = false;
+            await promptAsks.sweep(roster.map(ferret => ({ id: ferret.id, state: ferret.state })));
+          },
+          error => {
+            if (!promptRosterFailing)
+              kernel.log.warn(`conversation could not list the ferrets for their prompts: ${String(error)}`);
+            promptRosterFailing = true;
+          },
+        );
         await questionWatch.sweep();
       })()
         .catch(() => undefined)
@@ -1677,6 +1703,7 @@ export function buildConversationA(deps: {
       // Only the question that was stored when the withdrawal began: a newer one is its own.
       if (stored.ok && stored.value !== undefined) await closeQuestionAsk(ferret, stored.value.toolUseId, 'withdrawn');
     },
+    promptChanged: ferret => promptAsks.changed(ferret),
     questions: {
       look: ferret => void questionWatch.look(ferret).catch(() => undefined),
       forget: ferret => questionWatch.forget(ferret),
