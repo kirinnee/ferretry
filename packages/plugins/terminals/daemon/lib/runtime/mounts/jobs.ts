@@ -75,7 +75,8 @@ const jobKey = (call: CallContext): string => {
 
 const whole = (value: string | undefined, name: string): number | undefined => {
   if (value === undefined || value === '') return undefined;
-  if (!/^\d{1,15}$/u.test(value)) throw new ApiError(400, `query parameter "${name}" must be a whole number`, 'invalid_query');
+  if (!/^\d{1,15}$/u.test(value))
+    throw new ApiError(400, `query parameter "${name}" must be a whole number`, 'invalid_query');
   return Number(value);
 };
 
@@ -98,7 +99,15 @@ export function jobRouteHandlers(jobs: JobSubsystem): Readonly<Record<JobRouteKe
       const { ferret, startedBy } = scoped(call);
       const body = await parseBody(call.request, JobStartRequestSchema);
       return jsonResponse(
-        await jobs.start(ferret, { command: body.command, ...(body.cwd === undefined ? {} : { cwd: body.cwd }), ...(body.name === undefined ? {} : { name: body.name }) }, startedBy),
+        await jobs.start(
+          ferret,
+          {
+            command: body.command,
+            ...(body.cwd === undefined ? {} : { cwd: body.cwd }),
+            ...(body.name === undefined ? {} : { name: body.name }),
+          },
+          startedBy,
+        ),
       );
     },
     'GET /v1/ferrets/:ferretId/jobs/:jobId': async call =>

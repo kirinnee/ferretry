@@ -506,7 +506,8 @@ export default definePlugin({
         args: [{ name: 'id', help: 'session id' }],
       }),
       verb('job run', {
-        summary: 'start a background job in the keeper and attach to it; exits with the job\'s exit code (75 if the attachment broke)',
+        summary:
+          "start a background job in the keeper and attach to it; exits with the job's exit code (75 if the attachment broke)",
         args: [
           {
             name: 'command',
@@ -523,7 +524,8 @@ export default definePlugin({
         ],
       }),
       verb('job attach', {
-        summary: 'stream a job\'s log until it ends, then exit with its exit code; a signal only detaches (exit 75), the job runs on',
+        summary:
+          "stream a job's log until it ends, then exit with its exit code; a signal only detaches (exit 75), the job runs on",
         args: [{ name: 'job', help: "the job's name or id" }],
         options: [
           {
@@ -535,7 +537,7 @@ export default definePlugin({
         ],
       }),
       verb('job logs', {
-        summary: 'print a job\'s log without following it',
+        summary: "print a job's log without following it",
         args: [{ name: 'job', help: "the job's name or id" }],
         options: [
           {
@@ -567,7 +569,7 @@ export default definePlugin({
         ],
       }),
       verb('job ls', {
-        summary: 'list a session\'s running and recent jobs with exit codes and ages',
+        summary: "list a session's running and recent jobs with exit codes and ages",
         args: [],
         options: [
           {

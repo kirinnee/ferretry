@@ -5,10 +5,7 @@
  * An entry names a process by pid AND the start the daemon read for it when it registered, so an entry whose pid the kernel
  * has since handed to another process is proved dead rather than trusted.
  */
-import {
-  type AttachmentEntry,
-  type AttachmentsState,
-} from '../../../contract/index.ts';
+import { type AttachmentEntry, type AttachmentsState } from '../../../contract/index.ts';
 
 export type { AttachmentEntry, AttachmentsState };
 
@@ -55,4 +52,6 @@ export function withoutStale(
 
 /** Entries of one ferret, oldest first. */
 export const entriesOf = (state: AttachmentsState, sessionId: string): readonly AttachmentEntry[] =>
-  state.entries.filter(entry => entry.sessionId === sessionId).toSorted((a, b) => a.registeredAt.localeCompare(b.registeredAt));
+  state.entries
+    .filter(entry => entry.sessionId === sessionId)
+    .toSorted((a, b) => a.registeredAt.localeCompare(b.registeredAt));

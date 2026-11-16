@@ -27,7 +27,11 @@ describe('the job keeper against the real tmux', () => {
     const jobs = service();
 
     // Act
-    const job = await jobs.start('ferret-a', { command: 'pwd; echo out; echo err 1>&2; echo $((1+2)) | tr 3 x; exit 3' }, person);
+    const job = await jobs.start(
+      'ferret-a',
+      { command: 'pwd; echo out; echo err 1>&2; echo $((1+2)) | tr 3 x; exit 3' },
+      person,
+    );
     const done = await ended(jobs, 'ferret-a', job.id);
     const output = await jobs.output('ferret-a', job.id, { from: 0 });
 
@@ -82,7 +86,10 @@ describe('the job keeper against the real tmux', () => {
     const { service } = await start();
     const jobs = service();
     const job = await jobs.start('ferret-a', { command: 'sleep 6173 & sleep 6173' }, person);
-    await waitForValue(async () => (Bun.spawnSync(['pgrep', '-f', '^sleep 6173$']).exitCode === 0 ? true : undefined), 'both sleeps to run');
+    await waitForValue(
+      async () => (Bun.spawnSync(['pgrep', '-f', '^sleep 6173$']).exitCode === 0 ? true : undefined),
+      'both sleeps to run',
+    );
 
     // Act
     const stopped = await jobs.stop('ferret-a', job.id);
@@ -99,8 +106,15 @@ describe('the job keeper against the real tmux', () => {
     // Arrange
     const { service } = await start();
     const jobs = service();
-    const job = await jobs.start('ferret-a', { command: "trap '' TERM; echo ready; while true; do sleep 1; done" }, person);
-    await waitForValue(async () => ((await jobs.output('ferret-a', job.id, { from: 0 })).text.includes('ready') ? true : undefined), 'it to ignore TERM');
+    const job = await jobs.start(
+      'ferret-a',
+      { command: "trap '' TERM; echo ready; while true; do sleep 1; done" },
+      person,
+    );
+    await waitForValue(
+      async () => ((await jobs.output('ferret-a', job.id, { from: 0 })).text.includes('ready') ? true : undefined),
+      'it to ignore TERM',
+    );
 
     // Act
     const stopped = await jobs.stop('ferret-a', job.id);
@@ -116,7 +130,10 @@ describe('the job keeper against the real tmux', () => {
     const { service } = await start();
     const jobs = service();
     const job = await jobs.start('ferret-a', { command: 'printf "l1\\nl2\\nl3\\npartial"; sleep 2; echo' }, person);
-    await waitForValue(async () => ((await jobs.output('ferret-a', job.id, { from: 0 })).text.includes('l3') ? true : undefined), 'the lines');
+    await waitForValue(
+      async () => ((await jobs.output('ferret-a', job.id, { from: 0 })).text.includes('l3') ? true : undefined),
+      'the lines',
+    );
 
     // Act
     const whole = await jobs.output('ferret-a', job.id, { from: 0 });

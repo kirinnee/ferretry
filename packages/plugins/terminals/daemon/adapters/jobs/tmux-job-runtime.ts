@@ -33,7 +33,8 @@ export class TmuxJobRuntime implements JobRuntimePort {
     /** The same limiter terminals use; applied to a job an agent started. */
     private readonly limits?: TerminalLimiter,
     private readonly environment: () => Readonly<Record<string, string>> = () => ({}),
-    private readonly pause: (ms: number) => Promise<void> = async ms => await new Promise(resolve => setTimeout(resolve, ms)),
+    private readonly pause: (ms: number) => Promise<void> = async ms =>
+      await new Promise(resolve => setTimeout(resolve, ms)),
   ) {}
 
   async start(input: Parameters<JobRuntimePort['start']>[0]): Promise<RunningJob> {
