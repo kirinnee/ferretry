@@ -104,8 +104,7 @@
     },
     "packages/plugins/projects": {
       "entry": ["app/views/*.tsx"],
-      "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": ["app/hooks/use-project-scope.ts", "app/lib/project-scope.ts"]
+      "project": ["**/*.{ts,tsx}", "!tests/**"]
     },
     "packages/plugins/runtimes": {
       "entry": ["app/views/*.tsx"],

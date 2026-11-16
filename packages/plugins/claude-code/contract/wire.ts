@@ -302,7 +302,7 @@ export const HarnessUpdateUnverifiedBodySchema = z.looseObject({
 
 // ─── config (config/harness-claude-code.yaml, claude-code/settings/*.yaml, claude-code/hooks/*.yaml) ──────────────
 
-/** How the fixed layer sets the harness's permission mode: `auto` asks before anything risky, `skip` never asks. */
+/** How the fixed layer sets the harness's permission mode: `skip` never asks (the default: owner decision !A525), `auto` asks before anything risky. */
 export const PermissionModeSchema = z.enum(['auto', 'skip']);
 
 /** A path an operator writes: absolute or `~`-relative (docs/harness-paths.md). Never a credential. */
@@ -318,7 +318,7 @@ export const HarnessConfigSchema = z.strictObject({
   binary: HarnessPathSchema.optional(),
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
-  permissionMode: PermissionModeSchema.default('auto'),
+  permissionMode: PermissionModeSchema.default('skip'),
   /**
    * Opt a harness's question tool back in (owner !A527: off by default, so no ferret stops on a prompt only the pane
    * shows). `true` gives an INTERACTIVE ferret the tool again; an auto ferret never has it. It makes ferrets block

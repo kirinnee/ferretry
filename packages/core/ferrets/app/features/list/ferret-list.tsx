@@ -13,9 +13,19 @@
  */
 
 import { useAppHook, useDeviceControls, useOptionalRouter } from '@ferretry/app';
-import { type ReactNode, useState } from 'react';
-import { FERRETS_NEEDS_YOU_HOOK, type FerretNeedsYou, isFerretsNeedsYou } from '../../../contract/index.ts';
+import { type ReactNode, useEffect, useState } from 'react';
+import {
+  FERRETS_LIST_SCOPE_HOOK,
+  FERRETS_NEEDS_YOU_HOOK,
+  type FerretListScopeSnapshot,
+  type FerretNeedsYou,
+  type FerretsListScope,
+  isFerretsListScope,
+  isFerretsNeedsYou,
+} from '../../../contract/index.ts';
 import type { LiveFerretsClient } from '../../lib/client.ts';
+import { folderBaseName } from '../new-ferret/recent-folders.ts';
+import { useListScope } from './use-list-scope.ts';
 import { useNeedsYou } from './use-needs-you.ts';
 import { daemonOfRoute, ferretOfRoute } from '../header/header-paths.ts';
 import { NewFerretButton } from '../new-ferret/new-machine-menu.tsx';
@@ -30,6 +40,7 @@ import {
   ferretListView,
   MODE_SEGMENTS,
   type NeedingYou,
+  scopeIsStale,
 } from './list-model.ts';
 import { STALE_LIST, useFerretList } from './use-ferret-list.ts';
 
@@ -38,16 +49,33 @@ export function FerretList({ client }: { readonly client: LiveFerretsClient }): 
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
   const provided = useAppHook(daemon, FERRETS_NEEDS_YOU_HOOK);
   const needing = useNeedsYou(isFerretsNeedsYou(provided) ? provided : undefined);
-  return <FerretListBody client={client} needing={needing} />;
+  const scopeHook = useAppHook(daemon, FERRETS_LIST_SCOPE_HOOK);
+  const listScope = isFerretsListScope(scopeHook) ? scopeHook : undefined;
+  const snapshot = useListScope(listScope);
+  return (
+    <FerretListBody
+      client={client}
+      needing={needing}
+      {...(listScope === undefined ? {} : { scope: { hook: listScope, snapshot } })}
+    />
+  );
 }
 
-/** The list over an answer to "who waits on the owner": what `FerretList` draws once the hook is read. */
+/** The provider of the list's focus and the answer it gave: what `FerretList` hands the body once the hook is read. */
+export interface ListScopeRead {
+  readonly hook: FerretsListScope;
+  readonly snapshot: FerretListScopeSnapshot;
+}
+
+/** The list over an answer to "who waits on the owner" and "which folder is focused": what `FerretList` draws. */
 export function FerretListBody({
   client,
   needing,
+  scope,
 }: {
   readonly client: LiveFerretsClient;
   readonly needing: NeedingYou;
+  readonly scope?: ListScopeRead;
 }): ReactNode {
   const router = useOptionalRouter();
   const daemon = router === null ? undefined : daemonOfRoute(router.route);
@@ -59,6 +87,11 @@ export function FerretListBody({
     restartFerrets(client, request),
   );
   const filter: FerretListFilter = { mode: device.sessionsMode ?? DEFAULT_LIST_FILTER.mode, showStopped };
+  // A focus on a folder that is gone is dropped once the list is read, so the list never sits empty under a stale scope.
+  const stale = read.kind === 'ready' && scope !== undefined && scopeIsStale(read.ferrets, scope.snapshot);
+  useEffect(() => {
+    if (stale) scope?.hook.recover();
+  }, [stale, scope?.hook]);
   if (daemon === undefined) return null;
   const onNavigate = router === null ? undefined : (to: string) => router.navigate(to);
   const navigation = onNavigate === undefined ? {} : { onNavigate };
@@ -79,10 +112,14 @@ export function FerretListBody({
       </div>
     );
 
-  const view = ferretListView(read.ferrets, filter, ferret => ferret.id === openFerret, {
-    needing,
-    group: device.groupNeedsYou,
-  });
+  const view = ferretListView(
+    read.ferrets,
+    filter,
+    ferret => ferret.id === openFerret,
+    { needing, group: device.groupNeedsYou },
+    scope?.snapshot,
+  );
+  const focused = scope?.snapshot.scope ?? null;
   const row = (ferret: (typeof read.ferrets)[number]): ReactNode => {
     const waiting: FerretNeedsYou | undefined = needing.get(ferret.id);
     return (
@@ -131,6 +168,14 @@ export function FerretListBody({
         </div>
       </div>
       <RestartOutdatedResult restart={restart} />
+      {scope === undefined || focused === null ? null : (
+        <div className="fy-sbar__scope" data-sbar-scope="">
+          <span className="truncate">{scope.snapshot.groupOf(focused)?.name ?? folderBaseName(focused)}</span>
+          <button className="kt-btn" data-sbar-scope-exit="" onClick={() => scope.hook.exit()} type="button">
+            Show all folders
+          </button>
+        </div>
+      )}
       <div className="fy-sbar__list scroll-thin">
         {empty ? (
           <div className="fy-sbar__empty">
@@ -163,7 +208,19 @@ export function FerretListBody({
             {view.groups.map(group => (
               <section aria-label={group.name} className="fy-sbar__group" key={group.path || group.name}>
                 <h2 className="fy-sbar__project">
-                  <span className="truncate">{group.name}</span>
+                  {scope === undefined || focused !== null ? (
+                    <span className="truncate">{group.name}</span>
+                  ) : (
+                    <button
+                      className="fy-sbar__focus truncate"
+                      data-sbar-focus={group.path}
+                      onClick={() => scope.hook.enter(group.path)}
+                      title={`Show only ${group.name}`}
+                      type="button"
+                    >
+                      {group.name}
+                    </button>
+                  )}
                   <span className="fy-sbar__count">{group.rows.length}</span>
                 </h2>
                 <ul>{group.rows.map(row)}</ul>

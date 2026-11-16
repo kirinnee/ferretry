@@ -109,7 +109,7 @@ const put = (name: string, extra: Record<string, unknown> = {}) => ({
 /** A `machine.settings` change as a client sends it: every machine setting together, with the ones named here moved. */
 const MACHINE_SETTINGS = (moved: Record<string, unknown>) => ({
   kind: 'machine.settings',
-  agentPermissions: 'auto',
+  agentPermissions: 'skip',
   defaultRuntime: null,
   agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
   browserMode: 'headless',
@@ -361,7 +361,7 @@ describe('a real apply through the composed daemon', () => {
     const { host, world } = await compose();
 
     const staged = await host.request('POST', '/v1/runtimes/proposals', {
-      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip', publicUsageFeed: true }) },
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'auto', publicUsageFeed: true }) },
     });
 
     expect(staged.status).toBeGreaterThanOrEqual(400);
@@ -375,13 +375,13 @@ describe('a real apply through the composed daemon', () => {
       agentPermissions: string;
       publicUsageFeed: boolean;
     }>();
-    expect(machine).toMatchObject({ agentPermissions: 'auto', publicUsageFeed: false });
+    expect(machine).toMatchObject({ agentPermissions: 'skip', publicUsageFeed: false });
   });
 
-  it('C1 refuses the loosened permission mode for the owner as for anyone, and no later apply publishes bypassPermissions', async () => {
+  it('C1 refuses an agent-permissions change for the owner as for anyone, and a later apply publishes the Skip default, never Auto', async () => {
     const { host, world } = await compose();
     await host.request('POST', '/v1/runtimes/proposals', {
-      body: { change: MACHINE_SETTINGS({ agentPermissions: 'skip' }) },
+      body: { change: MACHINE_SETTINGS({ agentPermissions: 'auto' }) },
     });
 
     const applied = await stageAndApply(host, put('claude-work'));
@@ -397,8 +397,11 @@ describe('a real apply through the composed daemon', () => {
       }
       return found;
     };
-    for (const folder of ['homes', 'bin'])
-      expect((await everything(join(world.fleet, folder))).join('\n')).not.toContain('bypassPermissions');
+    for (const folder of ['homes', 'bin']) {
+      const published = (await everything(join(world.fleet, folder))).join('\n');
+      expect(published).not.toContain('"defaultMode": "auto"');
+      expect(published).not.toContain("'--permission-mode' 'auto'");
+    }
   });
 
   it('C1 saves the machine settings Runtimes does hold (default runtime, auto-resume) and reads them back', async () => {

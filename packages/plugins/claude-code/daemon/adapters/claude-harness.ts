@@ -564,7 +564,7 @@ export class ClaudeHarness implements Harness {
       new Map([...items].filter(([name]) => names.has(name)));
     const file = this.deps.config.file(configFile);
     return {
-      permissionMode: file?.permissionMode ?? 'auto',
+      permissionMode: file?.permissionMode ?? 'skip',
       // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
       questionTool: file?.questionTool ?? false,
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
