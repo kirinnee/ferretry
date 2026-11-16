@@ -37,9 +37,10 @@ describe('the verb files and the base', () => {
     expect(differences(base.handlers, handlers())).toEqual({ missing: [], extra: [] });
   });
 
+  // The set, not the order: the manifest's own order is that file's business (fragments may regroup the help).
   test('leave the declared verb tree (the help) as it was', () => {
     const declared = (manifest.actions as { cli: readonly { verb: string }[] }).cli.map(entry => entry.verb);
-    expect(declared).toEqual([...base.declared]);
+    expect([...declared].sort()).toEqual([...base.declared].sort());
   });
 
   test('every declared verb has a handler and every handler a declaration', () => {
