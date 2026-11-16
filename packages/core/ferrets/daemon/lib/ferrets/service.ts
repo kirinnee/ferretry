@@ -85,6 +85,7 @@ import {
   type FerretDetails,
 } from '../../../contract/index.ts';
 import { effectiveMode, type FerretRegistry, type FerretFilter } from '../registry/registry.ts';
+import { STOP_UNCONFIRMED, withStampedLabel } from './restart-guards.ts';
 import { resumeUnderCutOff } from '../session/resume/cut-off.ts';
 import { resumeTurnAuthor } from '../session/resume/policy.ts';
 import type { ResumeActor } from '../session/resume/types.ts';
@@ -182,6 +183,12 @@ export interface FerretsPorts {
    * fixture, where the token directory alone is the fact.
    */
   cutOffMark?: SessionCutOffMark;
+  /**
+   * Whether the ferret's session document says its last stop was never confirmed (`kill_failed`): its old pane may
+   * still be alive, so a resume refuses until a stop succeeds (`restart-guards.ts`). A read that fails rejects, and the
+   * resume refuses. Unbound only in a unit fixture, where no document says so.
+   */
+  stopUnconfirmed?(ferret: FerretId): Promise<boolean>;
   harness(key: HarnessKey): Harness | undefined;
   harnessKeys(): readonly HarnessKey[];
   runner(): Runner | undefined;
@@ -339,11 +346,14 @@ const loginEnvAllowed = (name: string): boolean => !LOGIN_ENV_RESERVED.has(name)
  * `carry` is handed the ferret's id and NOTHING the registry says about it: the label and parent a resume restamps
  * from are the ones the ferret's own session document holds (today's `recordRelaunchProvenance`), because a move, a
  * handover or an owner's edit may have changed either there since the record was written.
+ *
+ * Both answer the label the stamp FORCED onto the ferret (the Warden's, for everything below it: today's
+ * `resolveSpawnLabel`), or nothing when none was; the launch carries it to the ferret's record (`withStampedLabel`).
  */
 export interface FerretSessionPort {
   prepare(ferret: FerretId): Promise<void>;
-  stamp(request: SessionSpawnRequest): Promise<void>;
-  carry(ferret: FerretId): Promise<void>;
+  stamp(request: SessionSpawnRequest): Promise<string | undefined | void>;
+  carry(ferret: FerretId): Promise<string | undefined | void>;
   /**
    * A start's prompt, written as the ferret's assigned task (`turns/turn-001.md`), after `prepare` and before the stamp,
    * so the ferret's session document counts the turn it already holds. Answers the pointer typed into the new pane once
@@ -1374,6 +1384,15 @@ export class FerretsService implements FerretsApi {
     return undefined;
   }
 
+  /** Why a resume is refused over a stop nobody confirmed (`restart-guards.ts`), or `undefined`: a read that fails refuses too. */
+  private async stopUnconfirmedRefusal(ferret: FerretId): Promise<string | undefined> {
+    try {
+      return (await this.ports.stopUnconfirmed?.(ferret)) === true ? STOP_UNCONFIRMED(ferret) : undefined;
+    } catch {
+      return `whether the last stop of ${ferret} was confirmed could not be read, so it was not resumed`;
+    }
+  }
+
   private async resumeHeld(
     ferret: FerretId,
     message: string | undefined,
@@ -1383,6 +1402,8 @@ export class FerretsService implements FerretsApi {
     const found = this.registry.get(ferret);
     if (found === undefined) return failed('refused', `no ferret ${ferret}`);
     if (options.expect !== undefined && !options.expect(found)) return failed('refused', NO_LONGER_OWED);
+    const unconfirmed = await this.stopUnconfirmedRefusal(ferret);
+    if (unconfirmed !== undefined) return failed('refused', unconfirmed);
     // A plain resume of a running ferret is the send shortcut: nothing to relaunch. Only a move gives it up, and then
     // the live pane is stopped first (never a second pane beside it).
     const replacing = found.state !== 'stopped';
@@ -1982,6 +2003,12 @@ export class FerretsService implements FerretsApi {
     return marked;
   }
 
+  /** The label the spawn stamp forced is the record's too (`withStampedLabel`); a ferret that already says it is left alone. */
+  private async carryLabel(ferret: FerretId, label: string | undefined | void): Promise<void> {
+    const details = withStampedLabel(this.registry.detailsOf(ferret), label ?? undefined);
+    if (details !== undefined) await this.saveDetails(ferret, details);
+  }
+
   private async saveDetails(ferret: FerretId, details: FerretDetails): Promise<void> {
     await this.ports.saveDetails?.(ferret, details);
     this.registry.putDetails(ferret, details);
@@ -2359,15 +2386,21 @@ export class FerretsService implements FerretsApi {
         requestedByHuman: record.parent === undefined,
         ...(notInWardenTree === true ? { notInWardenTree: true as const } : {}),
       };
+      let forced: string | undefined | void;
       try {
-        await session.stamp(request);
+        forced = await session.stamp(request);
       } catch {
         return failed('failed', 'where this ferret came from could not be recorded, so it was not started');
       }
+      // The document is the label's authority; a record that cannot take it now takes it at the next resume.
+      await this.carryLabel(record.id, forced).catch(() => undefined);
       return ok(first);
     } else {
       // A resume that cannot bring the stamp forward leaves the one on disk exactly as it was (it only ever strengthens).
-      await session.carry(record.id).catch(() => undefined);
+      await session
+        .carry(record.id)
+        .then(async label => await this.carryLabel(record.id, label))
+        .catch(() => undefined);
       // The new turn is durable and the old turn's markers are gone BEFORE the relaunch (today's revive): a `done` left
       // by the previous turn would end the new one the moment it started.
       if (revive !== undefined && session.revive !== undefined)
