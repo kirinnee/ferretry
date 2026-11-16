@@ -180,4 +180,43 @@ describe('ruling #31b: the session-document writer, across a daemon restart', ()
     expect(helperAsks()).toHaveLength(2);
     expect(helperAsks()[1]).toMatchObject({ ferret: childId, parent: lead, role: 'helper', by: 'resume' });
   });
+
+  test('c58-59 a resume over a session document that says kill_failed is refused, and is allowed again once a stop is confirmed', async () => {
+    // Arrange: a ferret started and stopped through the real routes, then its state document says its last stop was
+    // never confirmed (the lifecycle writes this when a pane refused to die).
+    const host = await boot(admitting().plugin);
+    const started = await start(host, { folder: '/work/a', prompt: 'Work.' });
+    expect(started.status).toBeLessThan(300);
+    const { id } = started.json<{ id: string }>();
+    await host.settle();
+    expect(
+      (await host.request('POST', `/v1/ferrets/${id}/stop`, { query: { how: 'now' }, body: {} })).status,
+    ).toBeLessThan(300);
+    await host.settle();
+    const files = host.state('ferrets').files;
+    const state = JSON.parse(files.get(`${id}/state.json`) as string) as Record<string, unknown>;
+    files.set(`${id}/state.json`, JSON.stringify({ ...state, status: 'kill_failed' }));
+
+    // Act
+    const refused = await host
+      .provided(FerretsPort, 'warden')
+      .resume(ferretId(id), 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' });
+
+    // Assert: refused with the shutdown sentence, nothing relaunched.
+    expect(refused).toEqual({
+      ok: false,
+      error: {
+        code: 'refused',
+        reason: `the previous terminal shutdown for ${id} was not confirmed; stop it successfully before resuming`,
+      },
+    });
+    expect((await host.request('GET', `/v1/ferrets/${id}`)).json<{ state: string }>().state).toBe('stopped');
+
+    // A confirmed stop writes the document's `stopped`: the same resume then goes through.
+    files.set(`${id}/state.json`, JSON.stringify({ ...state, status: 'stopped' }));
+    const resumed = await host
+      .provided(FerretsPort, 'warden')
+      .resume(ferretId(id), 'carry on', { origin: PERSON_ORIGIN, automatic: true, actor: 'warden' });
+    expect(resumed.ok).toBe(true);
+  });
 });

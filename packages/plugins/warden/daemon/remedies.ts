@@ -38,6 +38,18 @@ export interface WardenRemedyHost {
 /** Ferrets ANSWERED that it would not start the ferret, before it committed a relaunch: nothing was started. */
 class ResumeRefused extends Error {}
 
+/**
+ * Ferrets' 503 `helper_admission_unavailable` (Packs gave no answer for a child): thrown from `start.decide`, before the
+ * relaunch is committed, so nothing was written or launched and it is a refusal, not a revive to count. Read by its
+ * status and code (the kernel's `ApiError` shape), the one error Ferrets documents as leaving nothing started; any
+ * other throw stays unknown.
+ */
+const nothingStarted = (error: unknown): boolean =>
+  typeof error === 'object' &&
+  error !== null &&
+  (error as { status?: unknown }).status === 503 &&
+  (error as { code?: unknown }).code === 'helper_admission_unavailable';
+
 /** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
 export const RESTART_STOP_REASON = 'restarted by the Warden: the process looked alive but was stuck';
 
@@ -196,7 +208,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
         return unsent === undefined ? { ok: true } : { ok: true, caveat: `It could not be told why: ${unsent}.` };
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        if (asked && !(error instanceof ResumeRefused))
+        if (asked && !(error instanceof ResumeRefused) && !nothingStarted(error))
           return { ok: true, caveat: `Whether it started is not known (${reason}), so this counts as a revive.` };
         return { ok: false, reason };
       }
