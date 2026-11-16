@@ -278,6 +278,22 @@ export function harnessHomeCases(): void {
       }
     });
 
+    test('a settings item that unsets the update key leaves nothing to say: a config.toml an earlier launch left is removed', async () => {
+      const home = join(AGENT_HOMES(), 'f2');
+      const present = async () => (await lstat(join(home, 'config.toml')).catch(() => undefined)) !== undefined;
+      // an earlier launch's file (a reused home) that this launch's settings no longer say anything for
+      await writeFile(join(home, 'config.toml'), 'check_for_update_on_startup = false\n');
+      const { harness } = build(new Map([['quiet', { settings: { check_for_update_on_startup: null } }]]));
+
+      const plan = await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+
+      expect(await present()).toBe(false);
+      expect(plan.files.map(file => String(file).split('/').pop())).toEqual(['AGENTS.md']);
+      // and with nothing left to clear, a second launch has nothing to remove and does not fail
+      await harness.prepareHome(spec('f2', await harness.homeFor('f2' as FerretId)));
+      expect(await present()).toBe(false);
+    });
+
     test('S42 first launch on a fresh FY_HOME: the kernel made the agent-homes base 0700 at boot, the launch makes the ferret home under it', async () => {
       const fy = join(fixture, 'fy-home');
       await rm(fy, { recursive: true });

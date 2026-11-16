@@ -303,6 +303,13 @@ async function listedGroups(database: string, user: string): Promise<readonly nu
   });
 }
 
+/** The default no-replace move on Linux: `renameat2` from the C library, trusted only once it has passed its self-test here. */
+const provenNoReplaceRename = async (): Promise<NoReplaceRename> => {
+  const loaded = loadNoReplaceRename();
+  await selfTestNoReplaceRename(loaded);
+  return loaded;
+};
+
 /**
  * `descriptorFolder`: where an open descriptor is reached by number (Linux `/proc/self/fd`); a host without it reaches
  * entries by their real path, re-proved before each step; a folder remove is refused there, and so is any remove of an
@@ -362,15 +369,7 @@ export function nodeFs(
     }
     return bracket;
   };
-  const loadNoReplace =
-    options.noReplaceRename ??
-    (process.platform === 'linux'
-      ? async () => {
-          const loaded = loadNoReplaceRename();
-          await selfTestNoReplaceRename(loaded);
-          return loaded;
-        }
-      : undefined);
+  const loadNoReplace = options.noReplaceRename ?? (process.platform === 'linux' ? provenNoReplaceRename : undefined);
   // Asked once, without blocking: every folder opened after the first waits on the same answer.
   let noReplace: Promise<NoReplaceRename | undefined> | undefined;
   const noReplaceOrNone = (): Promise<NoReplaceRename | undefined> =>

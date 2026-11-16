@@ -4,6 +4,7 @@
  * The history-pool move (`RootHandle.moveToHistoryPool`) depends on exactly these answers.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
+import { copyFileSync, writeFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { nodeFs, type OpenedDirectory } from '../../../host/adapters/node-fs.ts';
@@ -12,6 +13,7 @@ import {
   type NoReplaceRename,
   selfTestNoReplaceRename,
 } from '../../../host/adapters/pinned/descriptor-calls.ts';
+import { heldFolderOf } from '../../../host/adapters/pinned/descriptor-folder.ts';
 
 const parents: string[] = [];
 afterEach(async () => {
@@ -80,6 +82,75 @@ describe.skipIf(process.platform !== 'linux')('renameNoReplace on Linux', () => 
       await from.close();
       await real.close();
     }
+  });
+
+  test('a folder closed and its descriptor number taken by another folder is refused EBADF, and nothing moves', async () => {
+    const { a, b, parent } = await folders();
+    await mkdir(`${parent}/c`);
+    await writeFile(`${a}/x`, 'source');
+    const fs = nodeFs(() => crypto.randomUUID());
+    const from = await fs.openDirectory(a);
+    const gone = await fs.openDirectory(b);
+    const number = heldFolderOf(gone)?.fd;
+    await gone.close();
+    // the lowest free descriptor number is the one just released: another folder now stands where `gone` was
+    const stranger = await fs.openDirectory(`${parent}/c`);
+    try {
+      expect(heldFolderOf(stranger)?.fd).toBe(number);
+      expect(await codeOf(moveOf(from)('x', gone, 'y'))).toBe('EBADF');
+      expect(await readFile(`${a}/x`, 'utf8')).toBe('source');
+      expect(await readdir(`${parent}/c`)).toEqual([]);
+    } finally {
+      await from.close();
+      await stranger.close();
+    }
+  });
+
+  test('a call that changes a file while refusing, or does not move onto a free name, fails its self-test', async () => {
+    const real = loadNoReplaceRename();
+    const { parent } = await folders();
+    const through = (fd: number, name: string): string => `/proc/self/fd/${String(fd)}/${name}`;
+    const taken = (): never => {
+      throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' });
+    };
+    // refuses the taken name as it should, but damages the file it refused to move
+    const damaging: NoReplaceRename = {
+      renameNoReplace: fromFd => {
+        writeFileSync(through(fromFd, 'a'), 'damaged');
+        taken();
+      },
+    };
+    await expect(selfTestNoReplaceRename(damaging, parent)).rejects.toThrow('a refused move changed a file');
+    // refuses the taken name, then answers success for a free one without moving anything
+    let calls = 0;
+    const idle: NoReplaceRename = { renameNoReplace: () => (++calls === 1 ? taken() : undefined) };
+    await expect(selfTestNoReplaceRename(idle, parent)).rejects.toThrow('a free name was not moved');
+    // copies instead of moving: the source is still there
+    calls = 0;
+    const copying: NoReplaceRename = {
+      renameNoReplace: (fromFd, fromName, toFd, toName) => {
+        if (++calls === 1) return real.renameNoReplace(fromFd, fromName, toFd, toName);
+        copyFileSync(through(fromFd, fromName), through(toFd, toName));
+      },
+    };
+    await expect(selfTestNoReplaceRename(copying, parent)).rejects.toThrow('a free name was not moved');
+    // moves, but what arrives is not what was sent
+    calls = 0;
+    const altering: NoReplaceRename = {
+      renameNoReplace: (fromFd, fromName, toFd, toName) => {
+        const call = ++calls;
+        real.renameNoReplace(fromFd, fromName, toFd, toName);
+        if (call === 2) writeFileSync(through(toFd, toName), 'altered');
+      },
+    };
+    await expect(selfTestNoReplaceRename(altering, parent)).rejects.toThrow('a free name was not moved');
+    expect((await readdir(parent)).sort()).toEqual(['a', 'b']);
+  });
+
+  test('a C library that cannot be loaded is one sentence, not a crash', () => {
+    expect(() => loadNoReplaceRename('/nonexistent/libfy-no-such-library.so.0')).toThrow(
+      "the C library's descriptor calls could not be loaded",
+    );
   });
 
   test('the loaded call passes its own self-test', async () => {
