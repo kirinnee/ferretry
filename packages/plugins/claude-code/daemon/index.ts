@@ -118,6 +118,7 @@ export default implementDaemon(manifest, {
         const directory = await host.home();
         return directory.startsWith('/') ? `${directory.replace(/\/+$/u, '')}/.claude` : '';
       },
+      warn: message => kernel.log.warn(message),
     });
 
     return {

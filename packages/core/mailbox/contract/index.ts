@@ -9,24 +9,24 @@ export * from './lines.ts';
 export * from './peer-messages.ts';
 export * from './port.ts';
 export * from './protocol-names.ts';
-export * from './queue/answer.ts';
-export * from './queue/delivery.ts';
-export * from './queue/model.ts';
-export * from './queue/page.ts';
-export * from './queue/policy.ts';
-export * from './queue/settings.ts';
-export * from './send/composer.ts';
-export * from './send/handoff.ts';
-export * from './send/page.ts';
-export * from './send/policy.ts';
-export * from './send/retraction.ts';
-export * from './send/send-evidence.ts';
-export * from './send/settings.ts';
-export * from './send/stranded.ts';
-export * from './send/tracking.ts';
-export * from './send/transcript-reader.ts';
-export * from './send/types.ts';
-export * from './send/view.ts';
+export * from './lib/queue/answer.ts';
+export * from './lib/queue/delivery.ts';
+export * from './lib/queue/model.ts';
+export * from './lib/queue/page.ts';
+export * from './lib/queue/policy.ts';
+export * from './lib/queue/settings.ts';
+export * from './lib/send/composer.ts';
+export * from './lib/send/handoff.ts';
+export * from './lib/send/page.ts';
+export * from './lib/send/policy.ts';
+export * from './lib/send/retraction.ts';
+export * from './lib/send/send-evidence.ts';
+export * from './lib/send/settings.ts';
+export * from './lib/send/stranded.ts';
+export * from './lib/send/tracking.ts';
+export * from './lib/send/transcript-reader.ts';
+export * from './lib/send/types.ts';
+export * from './lib/send/view.ts';
 export * from './session-id.ts';
 // The ledger's own send shapes share three names with the wire's (`SendFate`, `SendPath`, `SendRecord`: the wire view
 // versus what the daemon keeps), so the stored ones leave under `Ledger*` and Conversation's send path renames them back.
@@ -75,3 +75,14 @@ export type {
   TranscriptWindow,
   TranscriptSource,
 } from './transcript.ts';
+export * from './lib/queue/rotation.ts';
+export {
+  type Enqueued,
+  type QueueRefusal,
+  QueueRefused,
+  type QueueRequest,
+  type SessionQueue,
+} from './lib/queue/requests.ts';
+export type { ClockPort, SerialExecutor, YieldingSerialExecutor } from './serial-ports.ts';
+export { KeyedSerialExecutor } from './serial.ts';
+export * from './lib/queue/service.ts';

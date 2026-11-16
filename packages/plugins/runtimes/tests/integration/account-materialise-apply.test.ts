@@ -116,8 +116,8 @@ async function machine(): Promise<Machine> {
   await writeFile(path.join(assets, 'components', 'instructions', 'extra.md'), 'Extra guidance.\n');
   await mkdir(path.join(assets, 'skills', 'review'), { recursive: true });
   await writeFile(path.join(assets, 'skills', 'review', 'SKILL.md'), '---\nname: review\n---\n');
-  // GAP(conversation): the shared-history pooling and its file system are the lease store's; the unavailable pooling is
-  // wired here as in production, so a plan carrying history requests has them skipped and named, not pooled.
+  // The shared history pool is the harness plugins' own (linked when a ferret starts); the pooling wired here is the
+  // production one, so a plan carrying history requests has them skipped and named, never pooled by an apply.
   const provisioner = newProvisioner(root);
   let ids: RuntimeIds = EMPTY_RUNTIME_IDS;
   const minted = [ID_CLAUDE, ID_CODEX];
@@ -174,7 +174,7 @@ describe('materialising the account model onto disk', () => {
     should(await readlink(path.join(host.claudeHome, 'skills', 'review'))).equal(
       path.join(host.layout.assetsDirectory, 'skills', 'review'),
     );
-    // History pooling is not built on this host: the apply stood and a person is not told about a missing engine.
+    // A Runtimes apply does not pool history: the apply stood and a person is not told about a missing engine.
     for (const skip of host.skippedByLastApply()) should(skip.reason).not.match(/pooling conversation history/);
     // A Ferretry-kept Codex login is Logins' (state/logins/credentials): no link to the old fleet store is made, and the
     // apply is not refused for a link out of the folders it may write (declared GAP: the kernel links that file, into a ferret's home only).

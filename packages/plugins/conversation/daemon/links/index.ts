@@ -1,6 +1,6 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import type { ConfigFileDef, ConfigPort, RootHandle, StatePort } from '@ferretry/kernel/contract';
-import { err, type Instant, ok } from '@ferretry/std';
+import type { ConfigFileDef, ConfigPort, StatePort } from '@ferretry/kernel/contract';
+import { err, type Instant, ok, type Result } from '@ferretry/std';
 import {
   CONVERSATION_CONFIG,
   CONVERSATION_INDEX_STATE,
@@ -27,6 +27,12 @@ import { linkRoutes } from './routes.ts';
 export * from './lib/service.ts';
 export type { FerretConversationNames, IndexedConversation, IndexSource } from './lib/conversation-index.ts';
 
+/** The harness plugin's own copy-on-link: `source` is the file's path below the harness's history folder (`projects/…`). */
+export type LinkImporter = (
+  harness: string,
+  input: { readonly id: string; readonly source: string },
+) => Promise<Result<void, { readonly reason: string }>>;
+
 export interface LinkNeeds {
   readonly state: StatePort;
   /** Every tree of transcripts the harness plugins hand over, read-only; asked at the start of each index update. */
@@ -34,8 +40,11 @@ export interface LinkNeeds {
   /** The ferret that runs each harness conversation (`"<harness>:<id>"`) and its name now, from Ferrets. */
   readonly ferretNames: () => Promise<FerretConversationNames>;
   readonly keeper: LinkKeeper;
-  /** The `imports` root, where an owner-requested copy of a conversation file is written. */
-  readonly imports: RootHandle;
+  /**
+   * Asks a harness plugin to copy one conversation of the owner's own history into ITS shared history pool
+   * (`FerretsApi.importConversation`): the harness owns its pool, Conversation writes no other plugin's state.
+   */
+  readonly importer: LinkImporter;
   readonly now: () => Instant;
   readonly yieldToLoop?: () => Promise<void>;
   readonly clockMs: () => number;
@@ -84,33 +93,21 @@ const ledger = (state: StatePort): LinkLedger => ({
 /** The longest text the index parses without pacing: its head and tail reads, 1.25 MiB at most. */
 const DIRECT_PARSE_MAX_CHARS = 2 * 1024 * 1024;
 
-/** The most of a transcript an owner-requested copy holds in memory: one write, so one buffer. */
-const COPY_MAX_BYTES = 256 * 1024 * 1024;
-const COPY_WINDOW_BYTES = 4 * 1024 * 1024;
-
 /**
- * Ferretry's own copy of a conversation, below the `imports` root at the same relative path. The history is read-only
- * (G162), so the original is never changed; the copy is written whole, so it is the file as it was when asked.
+ * Ferretry's own copy of a conversation of the owner's computer, in the harness's shared history pool at the same
+ * relative path, which the ferret then resumes. The index says where the conversation is; the harness plugin makes the
+ * copy (it owns its pool): it reads the owner's history through its read-only root, so the original is never written,
+ * linked or locked, and the copy is written whole. A conversation already in the pool needs no copy; one still in a
+ * ferret's own home (not pooled yet) is refused, since no other ferret could resume it from there.
  */
-const copier = (index: ConversationIndex, imports: RootHandle): LinkCopier => ({
-  async copy({ harness, location }) {
-    const source = index.sourceOf({ harness, ...location });
-    if (source === undefined) return err({ reason: 'That conversation file is outside the folders Ferretry may use.' });
-    const to = imports.resolve(`${harness}/${location.kind}/${location.label}/${location.path}`);
-    if (!to.ok) return err({ reason: 'That conversation file is outside the folders Ferretry may use.' });
-    const stat = await source.files.stat(location.path);
-    if (stat === undefined) return err({ reason: 'Its file could not be found to copy.' });
-    if (stat.size > COPY_MAX_BYTES)
-      return err({ reason: 'Its file is too large to copy; link it instead, so it is read where it is.' });
-    const whole = new Uint8Array(stat.size);
-    for (let at = 0; at < stat.size; ) {
-      const piece = await source.files.read(location.path, at, Math.min(COPY_WINDOW_BYTES, stat.size - at));
-      if (piece === undefined || piece.length === 0) return err({ reason: 'Its file could not be read to copy.' });
-      whole.set(piece.subarray(0, Math.min(piece.length, stat.size - at)), at);
-      at += piece.length;
-    }
-    await imports.writeBytes(to.value, whole);
-    return ok(undefined);
+const copier = (importer: LinkImporter): LinkCopier => ({
+  async copy({ harness, id, location }) {
+    if (location.kind === 'pool') return ok(undefined);
+    if (location.kind !== 'computer')
+      return err({
+        reason: "That conversation is in a ferret's own home, not in the shared pool, so it cannot be kept.",
+      });
+    return await importer(harness, { id, source: location.path });
   },
 });
 
@@ -167,7 +164,7 @@ export function buildLinks(needs: LinkNeeds) {
     previewer: previewer(index, parsers),
     ledger: ledger(needs.state),
     keeper: needs.keeper,
-    copier: copier(index, needs.imports),
+    copier: copier(needs.importer),
     now: needs.now,
     keptPublished: needs.kept,
     keepInSync: needs.keepInSync,

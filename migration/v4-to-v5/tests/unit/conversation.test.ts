@@ -784,7 +784,7 @@ console.log(JSON.stringify({ text }));
       askedAt: time.toISOString(),
     });
     expect(question.transcript?.startsWith(f.to)).toBe(true);
-    expect(question.transcript?.endsWith(join('_shared', 'projects/p/c.jsonl'))).toBe(true);
+    expect(question.transcript?.endsWith(join('history-pool', 'projects/p/c.jsonl'))).toBe(true);
     expect(report.kept).toContainEqual({ what: 'open questions', count: 1 });
   });
 

@@ -9,7 +9,7 @@
  * gave), the name is one the manifest lists and the kernel's deny list allows, and the place is the top of one ferret home.
  * The rules here are pure and shared by the real roots port (`./roots.ts`) and the testing host (`../testing/host.ts`).
  */
-import { dirname, basename } from 'node:path';
+import { dirname, basename, relative } from 'node:path';
 import type { HistoryPoolEntryDecl, HistoryPoolPermission } from '../manifest/types.ts';
 import { declaredHistoryEntry, historyPoolNameRefusal, poolStateFolder } from '../manifest/history-pool.ts';
 import type { StateFileDef } from '../contract/define.ts';
@@ -29,8 +29,16 @@ export type HistoryPoolRefusal =
   | 'not_home'
   /** The pool is not the caller's own declared, opaque, non-private state tree. */
   | 'not_own'
-  /** Anything (a folder, a file, a link) is already at the name in the home: the door never overwrites. */
-  | 'exists';
+  /**
+   * Anything (a folder, a file, a link) is already at the name: in the home for `linkHistory`, in the pool for
+   * `moveToHistoryPool` (refused by the kernel's no-replace move, the source left where it was). Never an overwrite.
+   */
+  | 'exists'
+  /**
+   * `moveToHistoryPool` moves ONE regular file and nothing else: a folder (whose children were never each proved), a link
+   * or any other kind at the source is refused before anything is made. The caller walks folders and moves their files.
+   */
+  | 'not_file';
 
 export class HistoryPoolError extends Error {
   constructor(readonly refusal: HistoryPoolRefusal) {
@@ -72,6 +80,48 @@ export function poolEntryFolder(
   const def = states.find(candidate => candidate.name === permission.state);
   if (def === undefined || poolStateFolder(permission, states) === undefined) return undefined;
   return ownStateTree(states, def, entry);
+}
+
+/** The whole pool, subject to exactly the ownership rule used for a linked entry. */
+export function ownHistoryPool(permission: HistoryPoolPermission | undefined, states: readonly StateFileDef[]): string {
+  if (permission === undefined) return refuseHistory('not_permitted');
+  const entry = poolEntryFolder(permission, states, 'projects');
+  return entry === undefined ? refuseHistory('not_own') : dirname(entry);
+}
+
+/**
+ * One path component a history move may carry below the entry (a Claude `file-history` name is `<hash>@v1`; a v4 Codex
+ * pool holds names with a space): not empty, not hidden (so never `.` or `..`), and no separator (`/`, `\`) or NUL.
+ */
+export function historyMovePart(part: string): boolean {
+  return part !== '' && !part.startsWith('.') && !part.includes('/') && !part.includes('\\') && !part.includes('\0');
+}
+
+/** Pure lexical move policy, shared by both hosts. The root has already fenced both absolute names. */
+export function historyMoveNames(
+  permission: HistoryPoolPermission | undefined,
+  top: string,
+  from: string,
+  pool: string,
+  to: string,
+): void {
+  if (permission === undefined) refuseHistory('not_permitted');
+  const source = relative(top, from).split('/');
+  const ferret = source[0];
+  const entry = source[1];
+  if (ferret === undefined || entry === undefined || !isFerretHome(top, `${top}/${ferret}`)) refuseHistory('not_home');
+  const declared = historyEntryFor(permission, entry);
+  const target = relative(pool, to).split('/');
+  const normal = target[0] === entry;
+  const numberedFile =
+    declared.kind === 'file' &&
+    target.length === 3 &&
+    target[2]?.startsWith(`${entry}.`) === true &&
+    /^(?:[2-9]|[1-9][0-9]+)$/u.test(target[2].slice(declared.name.length + 1));
+  const conflict = target[0] === '.conflicts' && target[1] === ferret && (target[2] === entry || numberedFile);
+  const parts = conflict ? target.slice(1) : target;
+  if ((!normal && !conflict) || !parts.every(historyMovePart) || !source.slice(1).every(historyMovePart))
+    refuseHistory('denied');
 }
 
 /**

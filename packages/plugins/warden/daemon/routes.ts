@@ -8,6 +8,7 @@ import {
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import { ferretOf, isFerretCall, OWNER_ONLY_CODE } from '@ferretry/core-gate/contract';
 import {
+  DialogLearnRequestSchema,
   WardenSettingsPatchSchema,
   WardenInvestigateRequestSchema,
   WardenLeaveRequestSchema,
@@ -15,8 +16,8 @@ import {
 } from '../contract/index.ts';
 import { parseBody, parseOptionalBody } from './lib/body.ts';
 import { WardenConfigHeld, WardenConfigMoved, WardenConfigRefused } from './adapters/index.ts';
-import type { WardenSubsystem } from './subsystem.ts';
-import { WardenRequestError, type WardenRequestFailure } from './lib/index.ts';
+import type { WardenDialogs, WardenSubsystem } from './subsystem.ts';
+import { DialogLearnRefused, WardenRequestError, type WardenRequestFailure } from './lib/index.ts';
 import {
   ferretAgendaView,
   ferretRunView,
@@ -48,6 +49,7 @@ function refuse(error: unknown): never {
     const refusal = REQUEST_REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
+  if (error instanceof DialogLearnRefused) throw new ApiError(409, error.message, 'warden_dialog_not_learnable');
   if (error instanceof WardenConfigRefused) throw new ApiError(400, error.message, 'invalid_request');
   if (error instanceof WardenConfigHeld) throw new ApiError(409, error.message, 'config_held');
   if (error instanceof WardenConfigMoved) throw new ApiError(409, error.message, 'conflict');
@@ -76,7 +78,15 @@ const first = (call: CallContext, name: string): string | undefined => call.requ
  * agenda, run) declare `guard: 'secrets'` in the manifest, so the host redacts their bodies; the sweep also scrubs what
  * it sends to a model.
  */
-export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsApi, 'mayTouch'>) {
+export function wardenRoutes(
+  subsystem: WardenSubsystem,
+  ferrets: Pick<FerretsApi, 'mayTouch'>,
+  dialogs?: WardenDialogs,
+) {
+  const taught = (): WardenDialogs => {
+    if (dialogs === undefined) throw new ApiError(503, 'teaching a screen is not available here', 'plugin_unavailable');
+    return dialogs;
+  };
   // The owner and a person read the whole fleet. A FERRET reads its own lineage (itself and its helpers, `mayTouch`):
   // the scope narrows every list at its source, before its cut, and the answer is then built by the ONE deny-by-default
   // projection of `ferret-view.ts`, which a ferret's reply never skips: every route below that a ferret can call
@@ -132,6 +142,11 @@ export function wardenRoutes(subsystem: WardenSubsystem, ferrets: Pick<FerretsAp
       const request = await parseBody(call.request, WardenLeaveRequestSchema);
       return jsonResponse(toWireLeave(await subsystem.leave(request.ferret, request.duration)));
     }),
+    'GET /v1/warden/dialog/rules': guarded(async () => jsonResponse(await taught().rules())),
+    // Teaches Ferretry a screen: `learn` proposes (and saves nothing), `confirm` is the owner's yes. A person's call only.
+    'POST /v1/warden/dialog/learn': guarded(async call =>
+      jsonResponse(await taught().learn(await parseBody(call.request, DialogLearnRequestSchema))),
+    ),
     'GET /v1/warden/config': guarded(async () => jsonResponse(await subsystem.config())),
     'PATCH /v1/warden/config': guarded(async call => {
       // The held sentences come back with THIS change's view, so two changes in flight never answer each other's.

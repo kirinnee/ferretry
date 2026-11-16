@@ -629,7 +629,7 @@ describe('browserParakeetVoice', () => {
               performance: {
                 now: () => {
                   read += 1;
-                  return performance.now();
+                  return performance.now(); // not-a-budget: a page double forwarding the real clock, counting reads
                 },
               },
             }),

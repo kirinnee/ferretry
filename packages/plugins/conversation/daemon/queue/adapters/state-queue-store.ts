@@ -14,8 +14,15 @@ import {
   QueueEventSchema,
   SegmentFold,
 } from '@ferretry/core-mailbox/contract';
-import type { SessionQueueStore } from '../lib/ports.ts';
-import { mergeByOrder, ROTATE_EVENTS, rotationOf, SealedShards, shardName, shardThrough } from '../lib/rotation.ts';
+import type { SessionQueueStore } from '@ferretry/core-mailbox/contract';
+import {
+  mergeByOrder,
+  ROTATE_EVENTS,
+  rotationOf,
+  SealedShards,
+  shardName,
+  shardThrough,
+} from '@ferretry/core-mailbox/contract';
 
 /** What the store tells whoever runs it when a rotation could not be written: once, until one succeeds again. */
 export interface RotationFailure {

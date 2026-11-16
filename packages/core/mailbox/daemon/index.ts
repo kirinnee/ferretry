@@ -1,19 +1,66 @@
+import { err, ok } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
-import { DeliveryWays, MailboxHosts } from '../contract/index.ts';
+import {
+  DeliveryWays,
+  KeyedSerialExecutor,
+  type MailboxQueueApi,
+  MailboxHosts,
+  QueueChanged,
+  QueueRefused,
+  SessionQueueService,
+} from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { paneWayContributions } from './ways/pane-way.ts';
 import { waysDoctor } from './ways/registry.ts';
 import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from './lib/host-slot.ts';
+import { NotifyingSessionQueueStore } from './lib/queue/notifying-store.ts';
 
 /**
- * The Mailbox's daemon half. First step (c58-m0a): it serves nothing yet, but it checks its one slot where a person can
- * see it. The kernel never fails a boot over a `beforeListen`, so "loud" is: an error line in the daemon log at boot and
- * a failing `fy doctor` row (`mailbox-host`), and every later use of the host refuses with {@link MAILBOX_HOST_MISSING}.
+ * The Mailbox's daemon half. It serves the queue (the one writer of a ferret's queue log, and the one place a change
+ * of it is announced) and checks its one slot where a person can see it. The kernel never fails a boot over a
+ * `beforeListen`, so "loud" is: an error line in the daemon log at boot and a failing `fy doctor` row (`mailbox-host`),
+ * and every later use of the host refuses with {@link MAILBOX_HOST_MISSING}.
  */
 export default implementDaemon(manifest, {
-  build: ({ hooks, needs }) => {
+  build: ({ hooks, kernel, needs }) => {
     const source: MailboxHostSource = key => hooks.provider(MailboxHosts, key);
+    // The slot's value only exists once Conversation has built, so the service is made on first use.
+    let made: SessionQueueService | undefined;
+    const service = (): SessionQueueService => {
+      made ??= new SessionQueueService({
+        store: new NotifyingSessionQueueStore(requireMailboxHost(source).queue, {
+          publish: async (id, _type, data) => {
+            await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+          },
+        }),
+        clock: { now: () => kernel.clock.now() },
+        serial: new KeyedSerialExecutor(),
+      });
+      return made;
+    };
+    const refusal = (error: unknown) => {
+      if (error instanceof QueueRefused) return err({ code: error.refusal, message: error.message });
+      throw error;
+    };
+    const queue: MailboxQueueApi = {
+      queue: async ferret => ({ messages: [...(await service().list(ferret))] }),
+      editQueued: async (ferret, message, request) => {
+        try {
+          return ok(await service().edit(ferret, message, request.text));
+        } catch (error) {
+          return refusal(error);
+        }
+      },
+      cancelQueued: async (ferret, message) => {
+        try {
+          return ok(await service().cancel(ferret, message));
+        } catch (error) {
+          return refusal(error);
+        }
+      },
+    };
     return {
+      provides: { mailbox: queue },
       hooks: { 'mailbox.delivery-way': () => paneWayContributions(needs.ferrets) },
       doctor: {
         'mailbox-ways': async () => waysDoctor(() => hooks.contributions(DeliveryWays)),
@@ -26,11 +73,11 @@ export default implementDaemon(manifest, {
           }
         },
       },
-      beforeListen: async ({ kernel }) => {
+      beforeListen: async ({ kernel: booted }) => {
         try {
           requireMailboxHost(source);
         } catch {
-          kernel.log.error(MAILBOX_HOST_MISSING);
+          booted.log.error(MAILBOX_HOST_MISSING);
         }
       },
     };

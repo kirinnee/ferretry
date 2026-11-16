@@ -33,7 +33,7 @@ import {
 import { isAbsolute, join, sep } from 'node:path';
 import { z } from 'zod';
 import type { KeptItem } from '../report.ts';
-import { agentHomesRoot, inside, previewFolder } from '../v5/harness-paths.ts';
+import { historyPoolRoot, inside, previewFolder } from '../v5/harness-paths.ts';
 import { info, json, type V4Config } from '../v4/ferrets.ts';
 import { MAX_AGENT_PINS, V4AgentPinFile, V4PinSnapshot } from '../v4/pins.ts';
 import { rebaseV4Path } from '../v4/rebase.ts';
@@ -101,7 +101,7 @@ function conversion(ctx: StepContext, value: unknown): unknown {
   const pooled = inside(join(ctx.v4.fleet, 'shared', harness), rebaseV4Path(ctx.v4.home, from));
   return pooled === undefined || pooled.length === 0
     ? value
-    : { ...record, fromFile: ctx.v5.resolve(join(agentHomesRoot(harness), '_shared', pooled)) };
+    : { ...record, fromFile: ctx.v5.resolve(join(historyPoolRoot(harness), pooled)) };
 }
 
 /**

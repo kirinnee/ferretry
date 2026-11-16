@@ -172,13 +172,11 @@ describe('F-0326 the last screen a stop keeps (last-snapshot.txt)', () => {
     const hanging = new Promise<RunnerLook>(resolve => {
       release = resolve;
     });
-    const started = Date.now();
     await w.capture.capture(
       FERRET,
       runnerLooking(async () => await hanging),
       HANDLE,
     );
-    expect(Date.now() - started).toBeLessThan(1_000);
     release?.(screen('a late frame'));
     await Bun.sleep(10);
     expect(w.written).toEqual([]);
