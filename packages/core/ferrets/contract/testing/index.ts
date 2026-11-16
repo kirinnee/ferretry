@@ -444,9 +444,9 @@ export class FakeHarness implements Harness {
   /** The harness's own hand-over (`Harness.inject`); absent, as for Claude Code, until a test sets one. */
   inject: Harness['inject'];
   /** Whether the conversation a resume names is in the ferret's home (`Harness.hasConversation`); absent until a test sets one. */
-  hasConversation: Harness['hasConversation'];
+  declare hasConversation: Harness['hasConversation'];
   /** The conversation this fake PROVES its last launch wrote (`Harness.provedConversation`); absent until a test sets one. */
-  provedConversation: Harness['provedConversation'];
+  declare provedConversation: Harness['provedConversation'];
   /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
