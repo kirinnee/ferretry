@@ -126,6 +126,21 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
     under that prefix. Dependents are followed transitively **between plugins**. They are never followed through a platform package,
     since every plugin depends on the kernel and the app; instead a plugin that a platform package depends on is a **hub**
     (today `connections`, `runtimes`, `conversation`, ...) and a change that reaches one is FULL. Selecting every plugin is FULL too.
+  - **Source-tree readers always run.** The graph sees imports only, so a test that READS source files by path (a
+    `readFileSync(join(import.meta.dir, '../app/x.ts'))`, a `Bun.Glob` scan of every app, a copied folder) has an input no
+    import names, and skipping it with its plugin silently drops a guard. `scripts/ci/scope-readers.ts` classifies every plugin test
+    file, and the test helpers it imports transitively (relative imports into a tests / testing / support / fixtures / helpers
+    folder, and a package's `testing` subpath), by static AST scan, and **fails closed**: a test is a reader when it anchors to its
+    own location (`import.meta.dir|url|dirname|file|path`, `__dirname`, `process.cwd()`, `Bun.main`), or calls a read API
+    (`readFile*`, `readdir*`, `stat*`, `exists*`, `cp*`, `copyFile*`, `createReadStream`, `Bun.file`, a Glob `scan`, ...) with a path
+    that is not provably derived from `mkdtemp*` / `tmpdir()` / `fixture()`, or cannot be parsed or resolved. A reader inside a
+    skipped plugin is **kept** (`keep <file> (<why>)` in the decision log; `alwaysRun` in `scope.json`; `filterFiles` honours it).
+    A reader may instead carry a **checked declaration** `// scope-deps: <item>, ...` where an item is `all` (whole-repo scan: always
+    runs), `self` (its own package only), `@ferretry/x`, or a repo-relative file, folder or glob; every named input becomes a real
+    graph edge of the test's package (so the test runs when its input's plugin changes), and a declaration can only add edges or keep
+    the test, never merely silence the detection. `bun scripts/ci/scope.ts check` is the **declaration gate**: `quick.sh` runs it first
+    on EVERY run (scoped or not) and fails on an item that names nothing that exists, is not a plain repo path or a missing package.
+    GAPs: a spawned process, or a production function, that reads a path the test spelled as a plain string is not seen.
   - Always run, scoped or not: all platform tests, format, every gate hook, the build part (whole-repo typecheck), the `scripts`
     part (registry and contract tests), the `guarantees` / `parity-ticks` checks and ports-pending.
   - **What a scoped run does NOT prove, and says so.** The unit coverage ledger judges the platform packages and the selected

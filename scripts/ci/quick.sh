@@ -37,6 +37,12 @@ printf 'Quick cache action hit: %s\n' "${FY_CI_CACHE_HIT:-unknown (no cache acti
 # packages' tests. Every other run (a push, main, another base, the full-ci label, any file outside the plugins, any
 # doubt) is FULL and unchanged. The decision is printed here, at the top, and in the step summary. `scope.ts decide`
 # never fails: whatever goes wrong it writes FULL.
+# THE DECLARATION GATE runs first on EVERY run, scoped or not, before anything is filtered: a `// scope-deps:` line that
+# names nothing that exists is a failure, never a warning (a bogus declaration would pretend to be an input).
+bun scripts/ci/scope.ts check || {
+  echo "❌ a scope-deps declaration is wrong (see above); fix it or remove it" >&2
+  exit 1
+}
 scope_file=coverage/ci/scope.json
 rm -f "${scope_file}"
 bun scripts/ci/scope.ts decide "${scope_file}" || {

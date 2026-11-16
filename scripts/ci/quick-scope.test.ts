@@ -171,3 +171,44 @@ test('outside CI (no scope environment at all) the run is FULL', () => {
   expect(has(lines, 'CI scope: FULL - the event is not a CI event')).toBe(true);
   expect(files(lines)).toHaveLength(5);
 });
+
+const READER =
+  "import { readFileSync } from 'node:fs';\nimport { join } from 'node:path';\nreadFileSync(join(import.meta.dir, '../../../a/daemon/lib/new.ts'), 'utf8');\n";
+const commitMore = (fx: Fixture, path: string, text: string): string => {
+  mkdirSync(dirname(join(fx.root, path)), { recursive: true });
+  writeFileSync(join(fx.root, path), text);
+  git(fx.root, 'add', '--all');
+  git(fx.root, 'commit', '--quiet', '-m', 'more');
+  return git(fx.root, 'rev-parse', 'HEAD');
+};
+
+test('a test that reads another plugin source by path stays in the unit run inside a SKIPPED plugin', () => {
+  const { fx } = workspace();
+  const base = commitMore(fx, 'packages/plugins/c/tests/unit/reads-a.test.ts', READER);
+  const head = change(fx, 'packages/plugins/d/daemon/lib/new.ts');
+  const { lines } = dryRun(fx, pr(base, head));
+  expect(has(lines, 'skip packages/plugins/c')).toBe(true);
+  expect(has(lines, 'keep packages/plugins/c/tests/unit/reads-a.test.ts')).toBe(true);
+  // The reader runs, the other test of its skipped plugin does not.
+  expect(files(lines).sort()).toEqual([
+    './packages/core/kern/tests/unit/x.test.ts',
+    './packages/plugins/c/tests/unit/reads-a.test.ts',
+    './packages/plugins/d/tests/unit/x.test.ts',
+  ]);
+});
+
+test('a scope-deps declaration naming nothing fails the run BEFORE any filtering, scoped or FULL alike', () => {
+  const { fx } = workspace();
+  const base = commitMore(
+    fx,
+    'packages/plugins/c/tests/unit/bogus.test.ts',
+    `// scope-deps: packages/plugins/a/nowhere\n${READER}`,
+  );
+  const head = change(fx, 'packages/plugins/d/daemon/lib/new.ts');
+  for (const env of [pr(base, head), { FY_SCOPE_EVENT: 'push' }, {}]) {
+    const { lines, status } = dryRun(fx, env);
+    expect(status).not.toBe(0);
+    expect(has(lines, 'packages/plugins/c/tests/unit/bogus.test.ts:1: scope-deps')).toBe(true);
+    expect(has(lines, 'CI scope:')).toBe(false);
+  }
+});

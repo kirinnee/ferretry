@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { type Fixture, fixture, LEAF } from '../gen/tests/fixture.ts';
 import {
+  checkDeclarations,
   type Decision,
   changedFiles,
   decide,
@@ -581,7 +582,7 @@ test('a computed dynamic import makes its package depend on everything, says why
       id: 'unmarked',
       files: {
         'tests/unit/all.test.ts':
-          'export const load = async (f: string) => {\n  // scope-deps: something else\n  return import(f);\n};\n',
+          'export const load = async (f: string) => {\n  // scope-dependencies manifests\n  return import(f);\n};\n',
       },
     },
     { id: 'alone' },
@@ -642,4 +643,184 @@ test.each([
   const decision = choose(result, [changed]);
   expect(filterFiles(decision, [MCP_LIMITS])).toEqual([MCP_LIMITS]);
   expect(ran(decision)).toContain('mcp');
+});
+
+// ─── tests that READ the source tree (scope-readers.ts): the graph sees imports only ────────────────────────────
+
+const ONBOARDING_APP = 'packages/plugins/onboarding/app/index.ts';
+const CONNECTIONS_MANIFEST = './packages/plugins/connections/tests/unit/manifest.test.ts';
+const SHELLS_APP = 'packages/plugins/shells/app/index.ts';
+const OPT_IN = './packages/plugins/conversation/tests/unit/app/render/fy-render-opt-in.test.ts';
+
+test('the real workspace: an Onboarding app change keeps the Connections manifest test that reads every onboarding app file', async () => {
+  const decision = choose(await realGraph, [ONBOARDING_APP]);
+  expect(filterFiles(decision, [CONNECTIONS_MANIFEST])).toEqual([CONNECTIONS_MANIFEST]);
+});
+
+test('the real workspace: a Shells app change keeps the repository-wide executable-render opt-in guard', async () => {
+  const decision = choose(await realGraph, [SHELLS_APP]);
+  expect(filterFiles(decision, [OPT_IN])).toEqual([OPT_IN]);
+});
+
+test.each([
+  'packages/plugins/accounts/tests/unit/daemon/sign-in-grants/vault-parity.test.ts',
+  'packages/plugins/browsers/tests/unit/address-rule.test.ts',
+  'packages/plugins/connections/tests/unit/worker/relay-config.test.ts',
+  'packages/plugins/mcp/tests/unit/cli/serve-seams.test.ts',
+  'packages/plugins/conversation/tests/unit/app/chat/chat-log-cell.test.ts',
+  'packages/plugins/conversation/tests/unit/app/chat/chat-stylesheet.test.ts',
+  'packages/plugins/terminals/tests/unit/app/terminal-font.test.ts',
+  'packages/plugins/agenda/tests/unit/app/agenda-deck-fullscreen-css.test.ts',
+])('the real workspace: %s reads the source tree and is detected as a reader', async file => {
+  expect((await realGraphReaders).has(file)).toBe(true);
+});
+const realGraphReaders = realGraph.then(result => result.readers);
+
+/** A plugin skeleton for the reader fixtures; each one gets a changed `app/index.ts` in the diff below. */
+const readerFixture = (): { fx: Fixture; run: (changed: string) => Promise<Decision> } => {
+  const fx = fixture([
+    { id: 'ob', files: { 'app/index.ts': 'export const v = 1;\n' } },
+    // Reads another plugin's app source by path, with no import: Connections → Onboarding.
+    {
+      id: 'conn',
+      files: {
+        'tests/unit/manifest.test.ts':
+          "import { readFileSync } from 'node:fs';\nimport { join } from 'node:path';\nconst dir = join(import.meta.dir, '../../../ob/app');\nreadFileSync(join(dir, 'index.ts'), 'utf8');\n",
+      },
+    },
+    // A glob scan of every plugin's app: Conversation → everything.
+    {
+      id: 'scan',
+      files: {
+        'tests/unit/opt-in.test.ts':
+          "import { readFileSync } from 'node:fs';\nimport { join } from 'node:path';\nfor (const f of new Bun.Glob('*/app/**/*.ts').scanSync({ cwd: join(import.meta.dir, '../../..') })) readFileSync(f, 'utf8');\n",
+      },
+    },
+    // The read is in a helper; the test itself calls no read API.
+    {
+      id: 'helped',
+      files: {
+        'tests/support/read-app.ts':
+          "import { readFileSync } from 'node:fs';\nimport { join } from 'node:path';\nexport const app = (): string => readFileSync(join(import.meta.dir, '../../../ob/app/index.ts'), 'utf8');\n",
+        'tests/unit/helped.test.ts': "import { app } from '../support/read-app.ts';\napp();\n",
+      },
+    },
+    // Reads only a temp folder it made: a pure test, skipped with its plugin.
+    {
+      id: 'pure',
+      files: {
+        'tests/unit/pure.test.ts':
+          "import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';\nimport { tmpdir } from 'node:os';\nimport { join } from 'node:path';\nconst dir = mkdtempSync(join(tmpdir(), 'x-'));\nwriteFileSync(join(dir, 'a'), 'a');\nreadFileSync(join(dir, 'a'), 'utf8');\n",
+      },
+    },
+    { id: 'other', files: { 'tests/unit/other.test.ts': "import { expect } from 'bun:test';\nexpect(1).toBe(1);\n" } },
+  ]);
+  fixtures.push(fx);
+  git(fx.root, 'init', '--quiet', '--initial-branch=main');
+  const base = commit(fx.root, 'base');
+  return {
+    fx,
+    run: async changed => {
+      fx.write(changed, `// changed ${Math.random()}\n`);
+      const head = commit(fx.root, 'change');
+      return decide(
+        fx.root,
+        {
+          FY_SCOPE_EVENT: 'pull_request',
+          FY_SCOPE_BASE_REF: SCOPED_BASE_REF,
+          FY_SCOPE_LABELS: '[]',
+          FY_SCOPE_BASE_SHA: base,
+          FY_SCOPE_HEAD_SHA: head,
+          GITHUB_STEP_SUMMARY: join(fx.root, 'summary.md'),
+        },
+        join(fx.root, 'scope.json'),
+      );
+    },
+  };
+};
+
+test('changedFiles + decide: a test that reads source by path, directly, by glob or through a helper, is kept inside a skipped plugin; a temp-only test is not', async () => {
+  const { run } = readerFixture();
+  const decision = scoped(await run('packages/plugins/other/daemon/x.ts'));
+  expect(decision.skipped.map(pkg => pkg.rel.split('/').pop()).sort()).toEqual([
+    'conn',
+    'helped',
+    'ob',
+    'pure',
+    'scan',
+  ]);
+  expect(decision.alwaysRun.map(test => test.file)).toEqual([
+    'packages/plugins/conn/tests/unit/manifest.test.ts',
+    'packages/plugins/helped/tests/unit/helped.test.ts',
+    'packages/plugins/scan/tests/unit/opt-in.test.ts',
+  ]);
+  const files = [
+    './packages/plugins/conn/tests/unit/manifest.test.ts',
+    './packages/plugins/scan/tests/unit/opt-in.test.ts',
+    './packages/plugins/helped/tests/unit/helped.test.ts',
+    './packages/plugins/pure/tests/unit/pure.test.ts',
+    './packages/plugins/ob/app/x.test.ts',
+    './packages/plugins/other/tests/unit/other.test.ts',
+  ];
+  expect(filterFiles(decision, files)).toEqual([...files.slice(0, 3), files[5] as string]);
+  // The log says which ones and why.
+  expect(describeScope(decision, 6).join('\n')).toContain('keep packages/plugins/conn/tests/unit/manifest.test.ts');
+});
+
+test('a declared bounded reader runs only when its input changes; `all` always runs; `self` adds nothing', async () => {
+  const { fx } = readerFixture();
+  const declare = (id: string, line: string): void => {
+    const file = `packages/plugins/${id}/tests/unit/${id === 'conn' ? 'manifest' : 'opt-in'}.test.ts`;
+    fx.write(file, `${line}\n${readFileSync(join(fx.root, file), 'utf8')}`);
+  };
+  declare('conn', '// scope-deps: packages/plugins/ob/app');
+  declare('scan', '// scope-deps: all');
+  const graph = await readGraph(fx.root);
+  expect(edgesOf(graph, 'conn')).toEqual(['@ferretry/plugin-ob']);
+  expect([...graph.readers.keys()]).toContain('packages/plugins/scan/tests/unit/opt-in.test.ts');
+  expect([...graph.readers.keys()]).not.toContain('packages/plugins/conn/tests/unit/manifest.test.ts');
+  // The input changes: the declaring test's plugin is selected, with the reason.
+  const byInput = scoped(choose(graph, ['packages/plugins/ob/app/index.ts']));
+  expect(ran(byInput).sort()).toEqual(['conn', 'ob']);
+  // Something else changes: the bounded reader is skipped, the `all` reader is kept.
+  const other = scoped(choose(graph, ['packages/plugins/other/daemon/x.ts']));
+  expect(
+    filterFiles(other, [
+      './packages/plugins/conn/tests/unit/manifest.test.ts',
+      './packages/plugins/scan/tests/unit/opt-in.test.ts',
+    ]),
+  ).toEqual(['./packages/plugins/scan/tests/unit/opt-in.test.ts']);
+  // `self` is a claim about the own package: no edge, not kept.
+  declare('conn', '// scope-deps: self');
+  const self = await readGraph(fx.root);
+  expect([...self.readers.keys()]).not.toContain('packages/plugins/conn/tests/unit/manifest.test.ts');
+});
+
+test('a declaration that names nothing that exists is a failure of the gate, of the graph, and of `scope.ts check`', async () => {
+  const { fx } = readerFixture();
+  const file = 'packages/plugins/conn/tests/unit/manifest.test.ts';
+  const body = readFileSync(join(fx.root, file), 'utf8');
+  for (const line of [
+    '// scope-deps: packages/plugins/ob/app/missing',
+    '// scope-deps: packages/plugins/*/nothing/**',
+    '// scope-deps: @ferretry/plugin-missing',
+    '// scope-deps: ../outside',
+  ]) {
+    fx.write(file, `${line}\n${body}`);
+    expect(await checkDeclarations(fx.root)).toEqual([expect.stringContaining(file)]);
+    await expect(readGraph(fx.root)).rejects.toThrow('scope-deps declarations are wrong');
+    const run = spawnSync(process.execPath, [join(REPO, 'scripts/ci/scope.ts'), 'check'], {
+      cwd: fx.root,
+      encoding: 'utf8',
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain(file);
+  }
+  // A good one passes the gate; the manifests marker above a computed import is not a declaration.
+  fx.write(file, `// scope-deps: manifests\n// scope-deps: packages/plugins/ob/app, self\n${body}`);
+  expect(await checkDeclarations(fx.root)).toEqual([]);
+});
+
+test('the real repository passes the declaration gate', async () => {
+  expect(await checkDeclarations(REPO)).toEqual([]);
 });

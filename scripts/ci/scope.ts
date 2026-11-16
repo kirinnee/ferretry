@@ -24,6 +24,11 @@
  *      an edge like `@ferretry/plugin-x`. An import that cannot be resolved, a dynamic import with no literal specifier
  *      or a file that does not parse makes the whole run FULL, and the decision log says which.
  *   5. Selecting every plugin leaves nothing to skip, so that is FULL too and says so.
+ *   6. The graph sees imports only, so a test that READS the source tree by path would be skipped silently with the
+ *      plugin it lives in. Such a test (detected statically, with its helpers, in `scope-readers.ts`; a doubt counts) is
+ *      kept even inside a skipped plugin, unless it carries a checked `// scope-deps:` declaration, which becomes real
+ *      graph edges (or `all`: always kept). `scope.ts check` verifies every declaration on EVERY run, before any
+ *      filtering, and fails on one that names nothing that exists.
  *
  * `selectScope` is pure; the git and file-system reads are below it, and every failure there ends in FULL.
  */
@@ -32,6 +37,7 @@ import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } f
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { importsAndOpaqueOf, resolveSpecifier } from '../gen/lib/imports.ts';
 import type { Workspace } from '../gen/lib/workspace.ts';
+import { declarationOf, readersOf, repoFiles, resolveDeclaration } from './scope-readers.ts';
 
 /** The only base a scoped run exists for. */
 export const SCOPED_BASE_REF = 'rebuild/5.0-after';
@@ -65,6 +71,11 @@ export interface ScopeInput {
    * `dependsOn` already says; this only names the reason in the log).
    */
   readonly opaque?: ReadonlyMap<string, string>;
+  /**
+   * Test file (repo-relative) → why it may read the source tree and so is never skipped with its plugin. Tests with a
+   * checked declaration are not here (their declaration is in `dependsOn`), except `scope-deps: all`.
+   */
+  readonly readers?: ReadonlyMap<string, string>;
 }
 
 export interface Selected extends PackageNode {
@@ -81,6 +92,8 @@ export type Decision =
       readonly selected: readonly Selected[];
       /** The plugin packages whose tests do NOT run (nothing depends on a changed plugin through them). */
       readonly skipped: readonly PackageNode[];
+      /** Test files inside a skipped plugin that run anyway because they read the source tree, with why. */
+      readonly alwaysRun: readonly { readonly file: string; readonly why: string }[];
       /** Every package that is not a plugin: its tests always run. */
       readonly platform: readonly PackageNode[];
     };
@@ -189,11 +202,15 @@ export function selectScope(input: ScopeInput): Decision {
     changed: [...input.changed].sort(),
     selected,
     skipped,
+    alwaysRun: [...(input.readers ?? [])]
+      .filter(([file]) => isSkippedFile(file, skipped))
+      .map(([file, why]) => ({ file, why }))
+      .sort((a, b) => a.file.localeCompare(b.file)),
     platform: input.packages.filter(pkg => !isPlugin(pkg)),
   };
 }
 
-/** Whether a test file path (with or without a leading `./`) belongs to a skipped plugin. */
+/** Whether a test file path (with or without a leading `./`) is under a skipped plugin's folder. */
 export const isSkippedFile = (file: string, skipped: readonly { readonly rel: string }[]): boolean => {
   const path = file.startsWith('./') ? file.slice(2) : file;
   return skipped.some(pkg => path.startsWith(`${pkg.rel}/`));
@@ -208,6 +225,12 @@ export function describe(decision: Decision, pluginCount: number): string[] {
   ];
   for (const pkg of decision.selected) lines.push(`  run  ${pkg.rel} (${pkg.why})`);
   for (const pkg of decision.skipped) lines.push(`  skip ${pkg.rel}`);
+  if (decision.alwaysRun.length > 0) {
+    lines.push(
+      `Source-tree readers: ${decision.alwaysRun.length} test file(s) inside skipped plugins still run, because a test that reads files by path has an input the import graph cannot see:`,
+    );
+    for (const test of decision.alwaysRun) lines.push(`  keep ${test.file} (${test.why})`);
+  }
   return lines;
 }
 
@@ -266,6 +289,7 @@ export async function readGraph(root: string): Promise<{
   readonly packages: PackageNode[];
   readonly dependsOn: Map<string, Set<string>>;
   readonly opaque: Map<string, string>;
+  readonly readers: Map<string, string>;
 }> {
   // Imported lazily: scope.ts is also the module the unit tests load, and it needs no workspace to select.
   const { loadManifests, loadWorkspace } = await import('../gen/lib/workspace.ts');
@@ -347,7 +371,51 @@ export async function readGraph(root: string): Promise<{
     throw new Error(
       `${fatal.length} import(s) could not be resolved, so no scope can be proved: ${fatal.slice(0, 5).join('; ')}${fatal.length > 5 ? `; and ${fatal.length - 5} more` : ''}`,
     );
-  return { packages, dependsOn, opaque };
+
+  // 4. Tests that READ the source tree (scope-readers.ts). A checked declaration becomes edges of the test's package
+  // (or `all`: always kept); an undeclared test that may read outside its temp folders is always kept.
+  const readers = new Map<string, string>();
+  const problems: string[] = [];
+  const files = repoFiles(root);
+  const cache = new Map();
+  for (const file of files) {
+    if (!/^packages\/plugins\/[^/]+\/.*\.test\.tsx?$/.test(file)) continue;
+    const owner = ws.ownerOf(join(root, file));
+    if (owner === undefined) continue;
+    const declaration = declarationOf(readFileSync(join(root, file), 'utf8'));
+    if (declaration === undefined) {
+      // Only the unit tier is ever narrowed (group-files.sh), so only unit files can be silently skipped.
+      if (/\/tests\/(integration|sit|realworld)\//.test(file)) continue;
+      const why = readersOf(ws, join(root, file), cache);
+      if (why.length > 0) readers.set(file, `reads the source tree: ${why[0]}`);
+      continue;
+    }
+    const resolved = resolveDeclaration(ws, files, declaration);
+    for (const problem of resolved.problems) problems.push(`${file}:${declaration.line}: ${problem}`);
+    if (resolved.all) readers.set(file, 'declares scope-deps: all');
+    for (const target of resolved.packages) edge(owner.name, target);
+  }
+  if (problems.length > 0) throw new Error(`scope-deps declarations are wrong: ${problems.slice(0, 5).join('; ')}`);
+  return { packages, dependsOn, opaque, readers };
+}
+
+/**
+ * The declaration gate: every `// scope-deps:` line of every test file must name something that exists. It reads
+ * no graph and no diff, so it runs on EVERY run (`scope.ts check`, before the decision), scoped or not.
+ */
+export async function checkDeclarations(root: string): Promise<string[]> {
+  const { loadWorkspace } = await import('../gen/lib/workspace.ts');
+  const ws = loadWorkspace(root);
+  const files = repoFiles(root);
+  const problems: string[] = [];
+  for (const file of files) {
+    if (!/\.test\.tsx?$/.test(file)) continue;
+    const declaration = declarationOf(readFileSync(join(root, file), 'utf8'));
+    if (declaration === undefined) continue;
+    for (const problem of resolveDeclaration(ws, files, declaration).problems)
+      problems.push(`${file}:${declaration.line}: scope-deps ${problem}`);
+  }
+  return problems;
 }
 
 interface Found {
@@ -456,6 +524,7 @@ export async function decide(root: string, env: Record<string, string | undefine
         packages: graph.packages,
         dependsOn: graph.dependsOn,
         opaque: graph.opaque,
+        readers: graph.readers,
       });
     }
   } catch (error) {
@@ -471,20 +540,29 @@ export async function decide(root: string, env: Record<string, string | undefine
 
 /** stdin → stdout: the test files that are not under a skipped plugin. A FULL (or unreadable) decision keeps them all. */
 export function filterFiles(decision: Decision, files: readonly string[]): string[] {
-  return decision.mode === 'scoped' ? files.filter(file => !isSkippedFile(file, decision.skipped)) : [...files];
+  if (decision.mode !== 'scoped') return [...files];
+  const kept = new Set(decision.alwaysRun.map(test => test.file));
+  return files.filter(
+    file => kept.has(file.startsWith('./') ? file.slice(2) : file) || !isSkippedFile(file, decision.skipped),
+  );
 }
 
 if (import.meta.main) {
   const [command, file] = process.argv.slice(2);
   const root = process.cwd();
-  if (command === 'decide') {
+  if (command === 'check') {
+    const problems = await checkDeclarations(root);
+    for (const problem of problems) console.error(`❌ ${problem}`);
+    if (problems.length > 0) process.exit(1);
+    console.log('scope-deps declarations: all name something that exists');
+  } else if (command === 'decide') {
     await decide(root, process.env, file ?? 'coverage/ci/scope.json');
   } else if (command === 'filter' && file !== undefined) {
     const decision = JSON.parse(readFileSync(file, 'utf8')) as Decision;
     const files = (await Bun.stdin.text()).split('\n').filter(line => line !== '');
     for (const kept of filterFiles(decision, files)) console.log(kept);
   } else {
-    console.error('usage: scope.ts decide [<out.json>] | scope.ts filter <scope.json> < files');
+    console.error('usage: scope.ts check | scope.ts decide [<out.json>] | scope.ts filter <scope.json> < files');
     process.exit(2);
   }
 }
