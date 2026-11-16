@@ -41,7 +41,10 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
   const found = [...findFlagSecrets({ args }), ...findRawSecrets({ args })];
   const refused = new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
   args.forEach((word, index) => {
-    if (valueOfNonPointerCredentialFlag(args[index - 1], word) || placeAfterCredentialHeader(args[index - 1], word))
+    if (
+      valueOfNonPointerCredentialFlag(args[index - 1], word) ||
+      valueOfCredentialHeader(args[index - 2], args[index - 1], word)
+    )
       refused.add(index);
   });
   return refused;
@@ -50,23 +53,50 @@ export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number>
 /** A header whose value is a credential by its name, though the name may not say so to a flag test. */
 const CREDENTIAL_HEADER = /^(?:proxy-)?authorization$|^(?:set-)?cookie$/iu;
 
-/** What the write rule accepts as a "place" under a credential name: a path, or a URL. */
-const ANY_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+/** A header's name, and nothing else (`Authorization`, `X-Auth-Token`). */
+const HEADER_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/u;
+
+/** A header glued to its value in one word: `Authorization:/V`, `Cookie:session=v`, `Authorization:Bearer`. */
+const GLUED_HEADER = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(\S[\s\S]*)$/u;
 
 /**
- * Whether `word` is a path- or URL-looking value of a credential header (`--header Authorization: /V`, or the pair in one
- * word, `Authorization:/V`): a header names no place, so after `Header:` the word is a value and is never shown, whatever
- * it looks like. `before` is the word before `word` (`Authorization:`). The same rule as the one-string form's.
+ * What the write rule accepts as a "place" under a credential name: a path, or a URL. Used only for a header glued to its
+ * value in ONE word, where a value that is no place is left to the cutter (a pointer with a low-entropy part is shown).
  */
-function placeAfterCredentialHeader(before: string | undefined, word: string): boolean {
-  const glued = /^([A-Za-z][A-Za-z0-9_-]*):[ \t]*(\S[\s\S]*)$/u.exec(word);
-  const header = glued === null ? /^([A-Za-z][A-Za-z0-9_-]*):$/u.exec(before ?? '')?.[1] : glued[1];
-  const value = glued === null ? word : glued[2];
+const ANY_PLACE = /^(?:[a-z][a-z0-9+.-]*:\/\/|[/~.])/iu;
+
+/** The word that says how a credential header's value is meant: it is followed by the value. */
+const SCHEME_WORD = /^(?:bearer|basic|token)$/iu;
+
+/** A word without the quote marks around it: `"Authorization:` is `Authorization:`. */
+const unquoted = (word: string): string => word.replace(/^["'`]+|["'`]+$/gu, '');
+
+const isCredentialHeader = (name: string): boolean => CREDENTIAL_HEADER.test(name) || SHOWN_TESTS.namesSecret(name);
+
+/**
+ * Whether `word` is the value of a credential header, or of a scheme word (`Bearer`, `Basic`, `Token`): what follows is a
+ * value whatever it looks like (a path, a URL, quoted, in parentheses, after `=` or `@`), because a header names no place
+ * and no scheme is followed by one. The header is read in the three ways a line holds it: the word before is `Header:`, the
+ * two before are `Header` and `:`, or the word itself holds the pair (`Authorization:/V`, `Authorization` then `:/V`).
+ * `before` is the word before `word`, `beforeThat` the one before it. The same rule as the one-string form's: it fails closed.
+ */
+function valueOfCredentialHeader(beforeThat: string | undefined, before: string | undefined, word: string): boolean {
+  const previous = unquoted(before ?? '');
+  const previousName = previous.endsWith(':') ? previous.slice(0, -1) : '';
+  const gluedBefore = GLUED_HEADER.exec(previous);
+  const gluedWord = GLUED_HEADER.exec(unquoted(word));
+  const header = (name: string): boolean => HEADER_NAME.test(name) && isCredentialHeader(name);
   return (
-    header !== undefined &&
-    value !== undefined &&
-    ANY_PLACE.test(value) &&
-    (CREDENTIAL_HEADER.test(header) || SHOWN_TESTS.namesSecret(header))
+    // `Header:` then the value
+    header(previousName) ||
+    // `Header`, `:`, then the value
+    (previous === ':' && header(unquoted(beforeThat ?? ''))) ||
+    // `Header` then `:value`
+    (/^:[ \t]*\S/u.test(unquoted(word)) && header(previous)) ||
+    // the pair in the word itself, its value a path or a URL
+    (gluedWord !== null && header(gluedWord[1] ?? '') && ANY_PLACE.test(unquoted(gluedWord[2] ?? ''))) ||
+    // a scheme word (alone, or at the end of a glued pair), then the value
+    SCHEME_WORD.test(gluedBefore !== null && header(gluedBefore[1] ?? '') ? (gluedBefore[2] ?? '') : previous)
   );
 }
 

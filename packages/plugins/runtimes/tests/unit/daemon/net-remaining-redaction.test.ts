@@ -44,15 +44,15 @@ function oneString(command: string) {
 }
 
 /** Both forms: the one string `srv <rest>` and the args form (`words`), each shows no part of V in any view. */
-function showsNoValueInBothForms(rest: string, words: readonly string[]): void {
+function showsNoValueInBothForms(rest: string, words: readonly string[], value: string = V): void {
   const command = `srv ${rest}`;
   // One string
   const seen = oneString(command);
   should(commandWithheld(command)).be.true();
-  should(seen.resolved).not.containEql(V);
-  should(seen.detail).not.containEql(V);
+  should(seen.resolved).not.containEql(value);
+  should(seen.detail).not.containEql(value);
   // Args
-  for (const view of viewsOf(words)) should(view.text).not.containEql(V);
+  for (const view of viewsOf(words)) should(view.text).not.containEql(value);
 }
 
 describe('B1: a one-string command that holds a JSON document with a blank shows no value of it', () => {
@@ -103,6 +103,52 @@ describe('B2: a place is never the word after a Header: in the args form', () =>
 
   it('should withhold the pair in one word, Authorization:/V, in the args form', () => {
     showsNoValueInBothForms(`-H Authorization:/${V}`, ['-H', `Authorization:/${V}`]);
+  });
+});
+
+describe('B2 (round 1): after a credential header, the next word is a value, whatever it looks like', () => {
+  const H = ['-H', 'Authorization:'] as const;
+  const CASES: readonly (readonly [string, readonly string[]])[] = [
+    ['a URL after Authorization:', [...H, `https://h/${V}`]],
+    ['a URL after X-Auth-Token:', ['-H', 'X-Auth-Token:', `https://h/${V}`]],
+    ['a double-quoted path', [...H, `"/${V}"`]],
+    ['a single-quoted path', [...H, `'/${V}'`]],
+    ['a double-quoted URL', [...H, `"https://h/${V}"`]],
+    ['a path after the scheme word Bearer', [...H, 'Bearer', `/${V}`]],
+    ['a path glued to the scheme word', [...H, `Bearer/${V}`]],
+    ['a path after the scheme word Basic', [...H, 'Basic', `./${V}`]],
+    ['a path after the scheme word Token', [...H, 'Token', `~/${V}`]],
+    ['a scheme glued to the header, then a path', ['-H', 'Authorization:Bearer', `/${V}`]],
+    ['a header, a colon word, then a path', ['-H', 'Authorization', ':', `/${V}`]],
+    ['a header, then a colon word glued to a path', ['-H', 'Authorization', `:/${V}`]],
+    ['a parenthesised path', [...H, `(/${V})`]],
+    ['a path after =', [...H, `=/${V}`]],
+    ['a path after @', [...H, `@/${V}`]],
+    ['a bare value', [...H, V]],
+    ['a cookie pair', ['-H', 'Cookie:', `session=${V}`]],
+    ['a quoted header word', ['-H', '"Authorization:', `/${V}"`]],
+  ];
+  for (const [name, words] of CASES) {
+    it(`should withhold ${name}, in both forms`, () => {
+      showsNoValueInBothForms(words.join(' '), words);
+    });
+  }
+
+  it('should withhold hunter2hunter2 after Authorization:, in both forms', () => {
+    showsNoValueInBothForms(
+      '-H Authorization: hunter2hunter2',
+      ['-H', 'Authorization:', 'hunter2hunter2'],
+      'hunter2hunter2',
+    );
+  });
+
+  it('should still show a header that is no credential, and a path after a plain flag', () => {
+    // Arrange
+    const command = 'srv -H Content-Type: application/json --config /etc/srv/app.json';
+
+    // Act / Assert
+    should(commandWithheld(command)).be.false();
+    should(oneString(command).resolved).equal(command);
   });
 });
 
