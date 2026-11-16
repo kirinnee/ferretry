@@ -16,6 +16,10 @@ when a ferret is created).
 | Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([lessons.md](lessons.md))         |
 | Warden, speed-up keys, secrets in the secret store                | the daemon reads them when it uses them, never the CLI                                   |
 
+The model, effort and fast switches go through `POST /v1/ferrets/:id/runtime` (Runtimes mounts it, Ferrets serves it over the
+ferret's own harness). **A person may switch any ferret; a ferret may switch only itself and its lead and helpers** — anyone else
+is refused `403 forbidden`. A harness that cannot be switched while it runs answers `422 runtime_control_unsupported`.
+
 ## On restart
 
 Everything the CLI itself reads at launch. **Restart CLI** (Actions, or Info › Runtime's Settings row), a

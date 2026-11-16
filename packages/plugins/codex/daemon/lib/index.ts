@@ -3,6 +3,7 @@ export * from './catalog-cache.ts';
 export * from './cleanup.ts';
 export * from './dismiss.ts';
 export * from './fast-mode.ts';
+export * from './ferret-runtime-switch.ts';
 export * from './launch-effort.ts';
 export * from './models.ts';
 export * from './pane-commands.ts';

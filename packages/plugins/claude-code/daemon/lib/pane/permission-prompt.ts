@@ -305,8 +305,10 @@ export function cursorKeys(from: number, to: number): FormKey[] {
  * that confirms it. A refusal is Escape alone: the harness's own `(esc)`, which stops the tool and leaves the agent at
  * its prompt.
  *
- * ARROWS, NOT THE DIGIT. A ferret's pane is driven through Ferrets' form seam, whose key set is closed (`FORM_KEYS`: no
- * digit, no `y`), so a choice is made the way the dialogs' are: move the cursor, then the CALLER reads the pane again
+ * ARROWS, NOT THE DIGIT. A ferret's pane is driven through Ferrets' form seam, whose key set is closed (`FORM_KEYS`: the
+ * navigation keys and a menu row's digit, no `y`, no letter). The digit exists for a numbered model picker whose driver
+ * reads the row first; a permission prompt's digit CONFIRMS the row the moment it is pressed, with no second look, so a
+ * choice here is made the way the dialogs' are: move the cursor, then the CALLER reads the pane again
  * and presses Enter only when the very same prompt shows the cursor on the chosen row. That check is what makes the Enter
  * safe — a prompt that was answered or replaced while the cursor moved is never confirmed.
  */
