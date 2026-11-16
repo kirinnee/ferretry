@@ -1,10 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLAUDE_DIALOG_RULES, CODEX_DIALOG_RULES, DIALOG_NUDGES } from '../support/dialog-rules.ts';
 import { type FormKey, RecordedHarnessSchema } from '@ferretry/core-ferrets/contract';
 import { DialogRuleSchema, DialogRulesFileSchema, isGrantLabel } from '../../contract/dialog-rules.ts';
 import {
-  CLAUDE_DIALOG_RULES,
-  CODEX_DIALOG_RULES,
   type ClearFrame,
   cursorRow,
   type DialogClearPorts,
@@ -225,6 +224,7 @@ function stand(pane: Pick<DialogClearPorts, 'frame' | 'key' | 'words'>, rules = 
   const nudges: { sessionId: string; text: string }[] = [];
   const clear = new WardenDialogClear({
     rules: async () => rules,
+    nudgeOf: ruleId => DIALOG_NUDGES[ruleId],
     ...pane,
     nudge: (sessionId, text) => {
       nudges.push({ sessionId, text });

@@ -1,4 +1,5 @@
 import { implementDaemon } from '@ferretry/kernel/manifest';
+import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesClaude, WardenDialogRulesCodex } from '../contract/dialog-rules.ts';
 import manifest from '../manifest.ts';
 import { wardenFlags } from './lib/protocol.ts';
 import { toWireBlessing, toWireFlag, toWireLeave, toWireRun } from './lib/wire-map.ts';
@@ -63,6 +64,11 @@ export default implementDaemon(manifest, {
       board: () => ctx.uses.board.current(),
       terminals: () => ctx.uses.terminals.current(),
       browsers: () => ctx.uses.browsers.current(),
+      // The built-in dialog rules live in the harness plugins; read live, so one that starts late is heard from the next look.
+      dialogRules: () => [
+        { harness: 'claude', provided: ctx.hooks.provider(WardenDialogRulesClaude, HARNESS_DIALOG_RULES_KEY) },
+        { harness: 'codex', provided: ctx.hooks.provider(WardenDialogRulesCodex, HARNESS_DIALOG_RULES_KEY) },
+      ],
     });
 
     // Arming reads the interval from `warden.yaml` and starts the timer: after `build`, in a job (§7.6 step 4).

@@ -102,6 +102,13 @@ export interface WardenAutoMovePorts {
   /** Append one Warden event to the ferret's own journal. Total. */
   emit(sessionId: string, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   journal: { record(type: string, data: Readonly<Record<string, unknown>>): void };
+  /**
+   * The Warden could not move `sessionId`; `detail` says why. Lists the ferret on the one machine item of ferrets the
+   * Warden could not move (`auto-move-failures.ts`). Absent: nothing is listed. Total: a throw is swallowed.
+   */
+  failed?(sessionId: string, detail: string, quiet: boolean): Promise<void>;
+  /** A run is over: drop what no longer needs a move (moved, stopped or gone) from that list. Absent: nothing is dropped. */
+  settled?(): Promise<void>;
 }
 
 export interface WardenAutoMoveInput {
@@ -178,7 +185,7 @@ export class WardenAutoMoveService {
     const { fleet, config, nowMs } = input;
     const subjects = rateLimitedSubjects(fleet, config);
     const live = new Set(fleet.map(view => view.config.id));
-    return await this.exclusive(async () => {
+    const result = await this.exclusive(async () => {
       const read = await this.load();
       let memory = pruneAutoMoveMemory(this.settle(read, subjects), live, nowMs);
       if (!sameMemory(memory, read)) await this.ports.ledger.write(memory);
@@ -204,6 +211,13 @@ export class WardenAutoMoveService {
       }
       return { actions, moved, resumed };
     });
+    // After every run, so a ferret since moved, stopped or gone leaves the list of ferrets the Warden could not move.
+    try {
+      await this.ports.settled?.();
+    } catch {
+      // The list is a courtesy; a sweep never fails over it.
+    }
+    return result;
   }
 
   /**
@@ -259,6 +273,7 @@ export class WardenAutoMoveService {
         sessionId: subject.id,
         message: failureMessage(error),
       });
+      await this.listFailed(subject.id, `Not moved: ${failureMessage(error)}.`);
       return none;
     }
   }
@@ -355,6 +370,15 @@ export class WardenAutoMoveService {
       });
       return target;
     });
+  }
+
+  /** Lists a ferret that could not be moved on the machine item. Total: the list is a courtesy to the owner, never a reason to throw. */
+  private async listFailed(sessionId: string, detail: string): Promise<void> {
+    try {
+      await this.ports.failed?.(sessionId, detail, false);
+    } catch {
+      // Total: see above.
+    }
   }
 
   /** The owner-hold read, total: a read that throws is a reason not to move. */
@@ -464,6 +488,7 @@ export class WardenAutoMoveService {
         sessionId: subject.id,
         message: failureMessage(error),
       });
+      await this.listFailed(subject.id, `Not moved: ${failureMessage(error)}.`);
       return this.hold(subject, memory, nowMs, 'error', `Not moved: ${failureMessage(error)}.`, 'failed');
     }
   }
@@ -604,6 +629,7 @@ export class WardenAutoMoveService {
       next = withSession(memory, subject.id, entry => ({ ...entry, held: autoMoveHoldKey(subject, 'failed') }));
       const detail = `Tried to move it from ${subject.agent} to ${target.wrapper} because ${because}, and the move did not take: ${failureMessage(error)}.`;
       await this.tell(subject, `Moving ${subject.id} failed`, detail);
+      await this.listFailed(subject.id, detail);
       return { memory: next, action: { ...base, outcome: 'failed', detail }, moved: false };
     }
     next = recordMove(memory, subject.id, nowMs);

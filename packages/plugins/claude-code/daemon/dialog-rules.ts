@@ -5,10 +5,13 @@
  * Bash permission prompt whose reason line is printed by the binary) the 2.1.317 strings. No rule picks a row that
  * grants: each `choose` is the row that DECLINES, and the planner refuses a grant anyway.
  *
+ * The Warden reads this table through the `warden.dialog-rules.claude` hook (`daemon/index.ts`), validates every rule, and
+ * drops one it refuses; it owns the engine that presses the keys, this plugin owns the words of the screens it draws.
+ *
  * Not here, on purpose (they stay a notice): the folder-trust screen (its only ways out are to trust or to exit the
  * ferret), the usage-limit screen (the auto-move's), and any screen this build has no name for.
  */
-import type { DialogRule } from '../../contract/dialog-rules.ts';
+import type { DialogRule } from '@ferretry/plugin-warden/contract';
 
 /**
  * What a ferret is told, as its next message and by no hook, after a rule declined its prompt: why it was denied, so it

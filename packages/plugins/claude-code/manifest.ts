@@ -23,6 +23,7 @@ import {
   ProfileClaudeSettingsSource,
   RuntimesPort,
 } from '@ferretry/plugin-runtimes/contract';
+import { HARNESS_DIALOG_RULES_KEY, WardenDialogRulesClaude } from '@ferretry/plugin-warden/contract';
 
 /**
  * Claude Code (§2.3): a harness. It takes `harnesses:claude-code` from Ferrets and needs a `runners` provider only at
@@ -235,6 +236,8 @@ export default definePlugin({
       { hook: StartDecide },
       { hook: ProfileClaudeSettingsSource, key: PROFILE_COMPONENTS_KEY },
       { hook: ProfileClaudeHooksSource, key: PROFILE_COMPONENTS_KEY },
+      // The Warden clears the screens this plugin draws by rules that live here (`daemon/dialog-rules.ts`).
+      { hook: WardenDialogRulesClaude, key: HARNESS_DIALOG_RULES_KEY },
     ],
   },
 

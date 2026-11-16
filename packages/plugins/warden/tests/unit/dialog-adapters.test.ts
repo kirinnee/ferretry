@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CLAUDE_DIALOG_RULES, CODEX_DIALOG_RULES } from '../support/dialog-rules.ts';
 import type { FerretHarness, FerretsApi, FormKey } from '@ferretry/core-ferrets/contract';
 import {
   ApiError,
@@ -14,14 +15,7 @@ import { dialogRulesInEffect, ferretClearPane } from '../../daemon/dialog-clear.
 import { dialogLearnService, dialogRulesView } from '../../daemon/dialog-learn.ts';
 import { wardenRoutes } from '../../daemon/routes.ts';
 import type { WardenDialogs, WardenSubsystem } from '../../daemon/subsystem.ts';
-import {
-  CLAUDE_DIALOG_RULES,
-  CODEX_DIALOG_RULES,
-  DialogLearnRefused,
-  isTeachable,
-  type DialogNotice,
-  teachSentence,
-} from '../../daemon/lib/index.ts';
+import { DialogLearnRefused, isTeachable, type DialogNotice, teachSentence } from '../../daemon/lib/index.ts';
 import { WardenConfigMoved, WardenConfigRefused } from '../../daemon/adapters/index.ts';
 
 /** The adapters under the dialog clearer and the teaching flow: Ferrets' form seam, the config writer, the routes, the card's words. */
@@ -34,14 +28,19 @@ const TAUGHT: DialogRule = {
   action: { press: 'escape' },
 };
 
+const BUILT_IN = { rules: () => [...CLAUDE_DIALOG_RULES, ...CODEX_DIALOG_RULES] };
+
 describe('the rules in effect', () => {
   it('should be the built-in tables, then the ones the owner taught, and only the built-ins while none is taught', async () => {
     // Act
-    const taught = await dialogRulesInEffect({ file: () => ({ rules: [TAUGHT] }) } as unknown as Pick<
-      ConfigPort,
-      'file'
-    >)();
-    const bare = await dialogRulesInEffect({ file: () => undefined } as unknown as Pick<ConfigPort, 'file'>)();
+    const taught = await dialogRulesInEffect(
+      { file: () => ({ rules: [TAUGHT] }) } as unknown as Pick<ConfigPort, 'file'>,
+      BUILT_IN,
+    )();
+    const bare = await dialogRulesInEffect(
+      { file: () => undefined } as unknown as Pick<ConfigPort, 'file'>,
+      BUILT_IN,
+    )();
 
     // Assert
     should(bare).eql([...CLAUDE_DIALOG_RULES, ...CODEX_DIALOG_RULES]);
@@ -261,7 +260,7 @@ describe('teaching a screen over the daemon’s ports', () => {
     await service.learn('f/1');
 
     // Act
-    const view = await dialogRulesView(config, proposals);
+    const view = await dialogRulesView(config, proposals, BUILT_IN);
 
     // Assert
     should(view.builtIn.map(rule => rule.id)).containEql('claude-dangerous-rm');
@@ -278,7 +277,7 @@ describe('teaching a screen over the daemon’s ports', () => {
     const proposals = { read: async () => ({ f1: ['{"nonsense":true}'], f2: [] }), write: async () => undefined };
 
     // Act
-    const view = await dialogRulesView(config, proposals);
+    const view = await dialogRulesView(config, proposals, { rules: () => [] });
 
     // Assert
     should(view.taught).eql([]);

@@ -1,24 +1,19 @@
 import type { ConfigPort } from '@ferretry/kernel/contract';
 import type { FerretId, FerretsApi } from '@ferretry/core-ferrets/contract';
 import { type DialogRule, WARDEN_DIALOG_RULES } from '../contract/dialog-rules.ts';
-import {
-  CLAUDE_DIALOG_RULES,
-  CODEX_DIALOG_RULES,
-  type ClearFrame,
-  type DialogClearPorts,
-  dialogWordsOf,
-} from './lib/index.ts';
+import type { BuiltInDialogRules } from './dialog-rules-source.ts';
+import { type ClearFrame, type DialogClearPorts, dialogWordsOf } from './lib/index.ts';
 
 /**
- * The rules in effect: the built-in tables, then the ones the owner taught (`config/warden-dialogs.yaml`, the version
- * in effect — a held or broken edit is not read). A built-in rule wins a tie, so a taught rule never overrides one.
+ * The rules in effect: the built-in ones the harness plugins provide, then the ones the owner taught
+ * (`config/warden-dialogs.yaml`, the version in effect — a held or broken edit is not read). A built-in rule wins a tie,
+ * so a taught rule never overrides one. A harness with no provider has no built-in rules.
  */
-export function dialogRulesInEffect(config: Pick<ConfigPort, 'file'>): () => Promise<readonly DialogRule[]> {
-  return async () => [
-    ...CLAUDE_DIALOG_RULES,
-    ...CODEX_DIALOG_RULES,
-    ...(config.file(WARDEN_DIALOG_RULES)?.rules ?? []),
-  ];
+export function dialogRulesInEffect(
+  config: Pick<ConfigPort, 'file'>,
+  builtIn: Pick<BuiltInDialogRules, 'rules'>,
+): () => Promise<readonly DialogRule[]> {
+  return async () => [...builtIn.rules(), ...(config.file(WARDEN_DIALOG_RULES)?.rules ?? [])];
 }
 
 /**

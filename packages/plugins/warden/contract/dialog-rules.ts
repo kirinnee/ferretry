@@ -1,4 +1,4 @@
-import { defineConfig, defineState } from '@ferretry/kernel/contract';
+import { defineConfig, defineHook, defineState } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 
 /**
@@ -11,13 +11,42 @@ import { z } from 'zod';
  * and a rule that would press one is never active.
  *
  * `config/warden-dialogs.yaml` holds the rules the OWNER taught Ferretry (`fy warden dialog learn`); the built-in tables
- * (one per harness) are code. The file is `personOnly` (no agent edits it) and every rule added to it is a LOOSENING
+ * (one per harness) are code, and each lives in ITS harness plugin: the plugin that draws a screen knows its words, and
+ * hands them to the Warden through {@link WardenDialogRulesClaude} / {@link WardenDialogRulesCodex}. The file is `personOnly` (no agent edits it) and every rule added to it is a LOOSENING
  * (it presses keys on a ferret), so an edit by anyone but the owner is held for the owner (docs/config-files.md).
  */
 
 /** The harnesses a rule is for, spelled as Ferrets records a ferret's dialog (`claude`, never `claude-code`). */
 export const DIALOG_RULE_HARNESSES = ['claude', 'codex'] as const;
 export type DialogRuleHarness = (typeof DIALOG_RULE_HARNESSES)[number];
+
+/**
+ * What a harness plugin provides: its built-in rules, and what a ferret is told after a rule declined its prompt (fixed
+ * words by rule id; never pane text; a rule with no entry says nothing). The Warden validates every rule it is handed
+ * (`DialogRuleSchema`, which refuses a row that grants) and drops, and journals, any that fails: a plugin cannot give
+ * the Warden a rule it could not have taught it.
+ */
+export interface HarnessDialogRules {
+  readonly rules: readonly DialogRule[];
+  readonly nudges?: Readonly<Record<string, string>>;
+}
+
+/** The key every dialog-rule hook is taken with. */
+export const HARNESS_DIALOG_RULES_KEY = 'dialog-rules' as const;
+
+const dialogRulesHook = (name: string, owner: string) =>
+  defineHook(name, {
+    mode: 'provide',
+    key: z.literal(HARNESS_DIALOG_RULES_KEY),
+    value: z.custom<HarnessDialogRules>(),
+    // One hook per harness: the build refuses any other plugin, so Claude Code cannot hand the Warden Codex's rules.
+    takers: [owner],
+  });
+
+/** Claude Code's built-in dialog rules. Taken by `claude-code`, read by the Warden. */
+export const WardenDialogRulesClaude = dialogRulesHook('warden.dialog-rules.claude', 'claude-code');
+/** Codex's built-in dialog rules. Taken by `codex`, read by the Warden. */
+export const WardenDialogRulesCodex = dialogRulesHook('warden.dialog-rules.codex', 'codex');
 
 /** A pattern the owner or a table wrote: it must compile, and stay short. */
 const Pattern = z

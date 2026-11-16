@@ -22,6 +22,8 @@ import {
   WARDEN_CONFIG,
   WARDEN_DIALOG_FRAMES,
   WARDEN_DIALOG_RULES,
+  WardenDialogRulesClaude,
+  WardenDialogRulesCodex,
   WARDEN_JEV_CHECKS,
   WARDEN_REMEMBERED,
   WARDEN_REPORTS,
@@ -233,7 +235,12 @@ export default definePlugin({
   // A screen a person taught Ferretry is a screen of their work: its frame is owner-only and pinned by identity.
   privacy: { private: ['dialog-frames'] },
 
-  hooks: { takes: [{ hook: FerretChanged }, { hook: TurnEnded }] },
+  // The built-in dialog rules are the harness plugins' (`warden.dialog-rules.<harness>`): each takes its hook, this plugin
+  // OFFERS them and reads what is provided (the Runtimes' component sources are the same shape).
+  hooks: {
+    takes: [{ hook: FerretChanged }, { hook: TurnEnded }],
+    offers: [{ hook: WardenDialogRulesClaude }, { hook: WardenDialogRulesCodex }],
+  },
 
   onboarding: [{ id: 'warden', title: 'Warden', order: 60 }],
   doctor: ['warden-sweep'],
