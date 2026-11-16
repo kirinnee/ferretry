@@ -11,8 +11,7 @@
  * which cannot say which side of a daylight-saving change a day falls on. Anything else in storage is the
  * default.
  */
-import { localKey } from '@ferretry/app';
-import { devicePreference } from './device-preference.ts';
+import { devicePreference, localKey } from '@ferretry/app';
 
 /** The sole browser-storage key for the Insights time zone. */
 export const INSIGHTS_TIME_ZONE_KEY = localKey('usage', 'insights-time-zone');

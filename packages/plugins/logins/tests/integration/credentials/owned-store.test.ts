@@ -19,6 +19,8 @@ import { CodexUsageProbe } from '../../../daemon/adapters/credentials/codex-usag
 import { buildLoginsDaemon } from '../../../daemon/index.ts';
 import { codexSharedHostEnding } from '../../../daemon/lib/harness-login/codex-flow.ts';
 import { emptyVault } from '../../support/fake-vault.ts';
+import type { HousekeepingRequest } from '../../../daemon/lib/credentials/housekeeping-protocol.ts';
+import { inProcessHousekeeping } from '../../support/housekeeping.ts';
 
 const NOW = Date.parse('2026-10-16T09:00:00Z');
 const TOKEN = 'oauth-access-TESTONLY-owned-store';
@@ -72,12 +74,14 @@ async function fixture(options: { readonly base?: boolean } = {}) {
 }
 
 /** The actual default composition, with the kernel's real roots port in place of the test host's in-memory one. */
-function composed(roots: RootsPort) {
+function composed(roots: RootsPort, posted: HousekeepingRequest[] = []) {
   const daemon = buildLoginsDaemon();
   return implementDaemon(daemon.manifest, {
     build: context => {
       if (daemon.build === undefined) throw new Error('missing build');
-      return daemon.build({ ...context, kernel: { ...context.kernel, roots } });
+      // The test host starts no worker thread: the housekeeping job runs in this process, the real job code over the same grants.
+      const workers = inProcessHousekeeping({ root: roots.root('credentials'), fetch: context.kernel.fetch }, posted);
+      return daemon.build({ ...context, kernel: { ...context.kernel, roots, workers } });
     },
   });
 }
@@ -397,12 +401,13 @@ test('S175 owned store refuses host paths, traversal, Claude links and links esc
   expect(JSON.stringify(failure).includes(TOKEN)).toBe(false);
 });
 
-test('S178 actual daemon Check now makes only the free provider read; values and digests never reach the route', async () => {
+test('S178 actual daemon Check now makes only the free provider read, on the housekeeping worker; values and digests never reach the route', async () => {
   const f = await fixture();
+  const jobs: HousekeepingRequest[] = [];
   await f.put('claude/.credentials.json', claude());
   const requests: { url: string; method: string }[] = [];
   const host = await testHost({
-    plugins: [composed(f.roots())],
+    plugins: [composed(f.roots(), jobs)],
     fakes: { vault: emptyVault() },
     config,
     clock: fixedClock(instantFromEpochMs(NOW)),
@@ -417,6 +422,14 @@ test('S178 actual daemon Check now makes only the free provider read; values and
     const response = await host.request('POST', '/v1/logins/claude/check', { body: {} });
     expect(response.status).toBe(200);
     expect(requests).toEqual([{ url: 'https://api.anthropic.com/api/oauth/usage', method: 'GET' }]);
+    // The read was a job for the worker, naming the sign-in by its path inside the root and carrying no credential.
+    expect(jobs).toEqual([
+      {
+        type: 'job',
+        id: 0,
+        job: { kind: 'credential.active', harness: 'claude', file: 'claude/.credentials.json', nowMs: NOW },
+      },
+    ]);
     expect(response.body).toContain('provider_accepted');
     expect(response.body).not.toMatch(/fingerprint|accessToken|refreshToken/u);
     expect(response.body.includes(TOKEN) || response.body.includes(REFRESH)).toBe(false);

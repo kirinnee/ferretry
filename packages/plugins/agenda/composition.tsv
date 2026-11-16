@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	manifest.ts	-	-	the manifest literal: panels, mounts and nudges

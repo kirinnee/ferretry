@@ -201,9 +201,11 @@ describe('a registry of plugins takes two independent adds (start order, glossar
 
 /** The repository's own `.gitattributes`: the files it marks `merge=union`. */
 const ATTRIBUTES = readFileSync(join(import.meta.dir, '..', '..', '..', '.gitattributes'), 'utf8');
+// `composition.tsv` (every package's declaration list) is union-merged too; its merge test is scripts/ci/composition-guard.test.ts.
 const unionFiles = ATTRIBUTES.split('\n')
   .filter(line => !line.startsWith('#') && /\smerge=union$/u.test(line))
-  .map(line => line.split(/\s+/u)[0] ?? '');
+  .map(line => line.split(/\s+/u)[0] ?? '')
+  .filter(pattern => pattern !== 'composition.tsv');
 
 /** What a line of a pure entry list may be: the fixed header, a doc comment, a blank, or one entry. */
 const PURE_LINES: Readonly<Record<string, RegExp>> = {

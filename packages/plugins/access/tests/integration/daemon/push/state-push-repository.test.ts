@@ -3,7 +3,7 @@ import type { StatePort } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
 import { PushFile } from '../../../../contract/index.ts';
-import { StatePushRepository } from '../../../../daemon/adapters/push/index.ts';
+import { StatePushRepository } from '../../../../daemon/adapters/push/state-push-repository.ts';
 import type { PushSubscriptionRecord } from '../../../../daemon/lib/push/index.ts';
 import type { BrowserPushSubscription } from '../../../../daemon/lib/wire.ts';
 import { refused } from './support.ts';

@@ -276,22 +276,28 @@ test('S40 row 32: a publish that throws AFTER its entry landed (the folder sync)
   expect(await readOf(stranger, 'stolen.json')).toBe('refused:fenced');
 });
 
+/**
+ * A look is counted by the folders it looks at (`identity`), never by the folders it lists: a look lists again only when a
+ * folder changed or is still inside the racy window of its last look (20 ms), so a runner slow enough to pass that window
+ * between `layout` and the pin looked without listing and this test once failed on a loaded CI runner. Every look probes
+ * the folders that are not resting, and none rests here (that takes a minute), so the count moves on every look.
+ */
 test('S40 a write to a path no private place touches asks for no look', async () => {
   const real = nodeFs(() => 'r');
-  let lists = 0;
+  let looks = 0;
   const fs: HostFs = {
     ...real,
-    list: async path => {
-      lists += 1;
-      return await real.list(path);
+    identity: async path => {
+      looks += 1;
+      return await real.identity(path);
     },
   };
   const { home } = await layout(fs);
-  const before = lists;
+  const before = looks;
   await pinCreated(fs, home, LIST, 'holder/unrelated.json', LOOK_MS);
-  expect(lists).toBe(before);
+  expect(looks).toBe(before);
   await pinCreated(fs, home, LIST, 'holder/signing.key', LOOK_MS);
-  expect(lists).toBeGreaterThan(before);
+  expect(looks).toBeGreaterThan(before);
 });
 
 /**

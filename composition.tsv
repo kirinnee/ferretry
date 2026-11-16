@@ -1,0 +1,5 @@
+kind	path	limit	expires	reason
+composition	.github/workflows/one-folder.yaml	-	-	the workflow that runs the One Folder rule and the composition guard
+composition	scripts/ci/composition-guard.ts	-	-	the composition guard itself: weakening it needs a Contract change section
+composition	scripts/ci/lib/composition.ts	-	-	the one reader of every composition.tsv the guard trusts
+composition	scripts/ci/one-folder.ts	-	-	the PR-body parser, reason rule and package roots the guard shares with One Folder

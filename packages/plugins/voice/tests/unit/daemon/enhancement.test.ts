@@ -12,22 +12,24 @@ import {
 } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type AuthorizedOutcome,
   buildEnhancementBody,
   type CleanupSettings,
   classifyEnhancementOutcome,
   DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
-  type EnhancementAuthorizer,
-  type EnhancementHttpRequest,
   type EnhancementProviderTable,
   enhancementErrorStatus,
   enhancementErrorView,
   parseEnhancementRequest,
-  type SttEnhancementError,
-  SttEnhancementService,
-  type SttMonotonicClockPort,
-} from '../../../daemon/lib/stt/index.ts';
+} from '../../../daemon/lib/stt/enhancement.ts';
+import { SttEnhancementService } from '../../../daemon/lib/stt/enhancer.ts';
+import { SttEnhancementError } from '../../../daemon/lib/stt/errors.ts';
+import type {
+  AuthorizedOutcome,
+  EnhancementAuthorizer,
+  EnhancementHttpRequest,
+  SttMonotonicClockPort,
+} from '../../../daemon/lib/stt/ports.ts';
 
 /** Stands in for the outbound holder: records what it was asked to send, and never holds a value. */
 class FakeAuthorizer implements EnhancementAuthorizer {

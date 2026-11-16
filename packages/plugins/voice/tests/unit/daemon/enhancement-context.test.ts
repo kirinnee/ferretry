@@ -2,20 +2,21 @@ import { describe, it } from 'bun:test';
 import { completionBudget, type SttEnhancementResult } from '../../../contract/index.ts';
 import should from 'should';
 import {
-  type AuthorizedOutcome,
   buildEnhancementBody,
   classifyEnhancementOutcome,
   DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
-  type EnhancementAuthorizer,
-  type EnhancementHttpRequest,
-  type EnhancementReport,
   enhancementErrorForStatus,
   parseEnhancementRequest,
-  type SttEnhancementError,
-  SttEnhancementService,
-  type SttMonotonicClockPort,
-} from '../../../daemon/lib/stt/index.ts';
+} from '../../../daemon/lib/stt/enhancement.ts';
+import { type EnhancementReport, SttEnhancementService } from '../../../daemon/lib/stt/enhancer.ts';
+import { SttEnhancementError } from '../../../daemon/lib/stt/errors.ts';
+import type {
+  AuthorizedOutcome,
+  EnhancementAuthorizer,
+  EnhancementHttpRequest,
+  SttMonotonicClockPort,
+} from '../../../daemon/lib/stt/ports.ts';
 
 describe('request budget', () => {
   const parsed = (text: string, context: string[] = []) =>

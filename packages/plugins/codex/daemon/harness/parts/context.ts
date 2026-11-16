@@ -10,9 +10,11 @@ import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import type { CodexCredentialLinks } from '../../lib/index.ts';
 import {
   CODEX_HISTORY_ENTRIES,
+  CODEX_HOOKS,
   CODEX_POOL_SQLITE,
   CODEX_SETTINGS,
   type HarnessConfig,
+  type HooksItem,
   type SettingsItem,
 } from '../../../contract/index.ts';
 import { CodexRollouts } from '../../adapters/rollouts.ts';
@@ -60,6 +62,11 @@ export interface HarnessContext {
   readonly permissionModeNow: () => HarnessConfig['permissionMode'];
   /** The settings items (`config/codex/settings/`) the runtime's profile selects, now: what a home written now would merge. */
   readonly settingsNow: (runtime: string | undefined) => Promise<ReadonlyMap<string, SettingsItem>>;
+  /**
+   * The hooks items (`config/codex/hooks/`) the runtime's profile selects, now, in the profile's layer order (the order
+   * Runtimes merges their handlers into its `hooks.json`, so a reorder is a change): what it would render.
+   */
+  readonly hooksNow: (runtime: string | undefined) => Promise<readonly (readonly [string, HooksItem])[]>;
   readonly rollouts: CodexRollouts;
   readonly say: (message: string) => void;
   readonly homeRoot: (ferret: FerretId) => RootHandle;
@@ -81,6 +88,16 @@ export function harnessContext(options: CodexHarnessOptions): HarnessContext {
       new Map();
     const { settings } = await options.selected(runtime);
     return new Map([...all].filter(([name]) => settings.has(name)));
+  };
+  const hooksNow = async (runtime: string | undefined): Promise<readonly (readonly [string, HooksItem])[]> => {
+    const all =
+      (kernel.config?.collection(CODEX_HOOKS as never) as ReadonlyMap<string, HooksItem> | undefined) ?? new Map();
+    const { hooks } = await options.selected(runtime);
+    // The selected set keeps the profile's layer order; the collection's own order is not the order they merge in.
+    return [...hooks].flatMap(name => {
+      const item = all.get(name);
+      return item === undefined ? [] : [[name, item] as const];
+    });
   };
   const rollouts = new CodexRollouts(kernel, options.historyDirectory ?? (async () => undefined));
 
@@ -154,6 +171,7 @@ export function harnessContext(options: CodexHarnessOptions): HarnessContext {
     linked,
     permissionModeNow,
     settingsNow,
+    hooksNow,
     rollouts,
     say,
     homeRoot,

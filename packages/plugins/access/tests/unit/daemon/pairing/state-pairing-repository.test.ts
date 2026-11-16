@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import should from 'should';
-import { StatePairingRepository } from '../../../../daemon/adapters/pairing/index.ts';
+import { StatePairingRepository } from '../../../../daemon/adapters/pairing/state-pairing-repository.ts';
 import type { PairingDeviceRecord } from '../../../../daemon/lib/pairing/index.ts';
 import { type DaemonId, DevicesFile, LIMITED_DEVICE_GRANTS } from '../../../../daemon/lib/wire.ts';
 

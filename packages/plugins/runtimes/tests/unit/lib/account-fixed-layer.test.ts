@@ -1020,6 +1020,18 @@ describe('AGENT_TOOLS_INSTRUCTION — phone prompts', () => {
   });
 });
 
+describe('AGENT_TOOLS_INSTRUCTION — rebase before push', () => {
+  it('should tell every agent to rebase its own branch before a push, and merge on a shared one', () => {
+    // Act
+    const text = AGENT_TOOLS_INSTRUCTION;
+
+    // Assert
+    should(text).containEql(
+      'Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.',
+    );
+  });
+});
+
 describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
   it('should teach sensitivity code for a 2FA or email code, reading it from an inbox, typed only on its own sign-in', () => {
     // Act

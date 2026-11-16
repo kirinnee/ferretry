@@ -4,6 +4,9 @@ name: One Folder
 # that changes a file outside its own plugin folder must name that file, with a reason, under `## Outside files` in its
 # body. scripts/ci/one-folder.ts decides.
 #
+# The same job also runs the COMPOSITION GUARD (scripts/ci/composition-guard.ts): a PR that edits a file a package declares in
+# its composition.tsv must name it under `## Contract change`, unless it only adds one sorted line to a registry.
+#
 # A workflow of its own, not a job of ci.yaml, because it reads the PULL REQUEST BODY: every `edited` event has to
 # re-run it so that fixing the body clears it. ci.yaml deliberately runs nothing on an edit that changed no base (its
 # contract, scripts/test/ci-sets.ts), and its Full CI verdict needs every job it holds, which a job that only exists
@@ -51,3 +54,12 @@ jobs:
           # The body comes from the event payload, as data: never interpolated into a script, never a `gh` call.
           FY_ONE_FOLDER_PR_BODY: ${{ github.event.pull_request.body }}
         run: ./scripts/ci/in-devshell.sh bun scripts/ci/one-folder.ts
+      # THE COMPOSITION GUARD (docs/standards/architecture, "A feature adds files and lines; it never rewrites shared code"):
+      # a PR that edits a file a package declares in its composition.tsv must name it under `## Contract change`.
+      # Same job, same body, same merge-base fetch; scripts/ci/composition-guard.ts decides. It runs even when the step
+      # above failed, so one run shows both verdicts.
+      - name: Check every edited composition file is named under Contract change
+        if: ${{ !cancelled() }}
+        env:
+          FY_ONE_FOLDER_PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./scripts/ci/in-devshell.sh bun scripts/ci/composition-guard.ts

@@ -1,7 +1,6 @@
 {
   "entry": [],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
-  "ignore": ["app/lib/stt/speed-bench-report.ts", "daemon/lib/speedups/index.ts", "daemon/lib/stt/index.ts"],
   "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
   "allowed": {
     "ignoreDependencies:sherpa-glue": "sherpa-glue is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the sherpa worker is unlisted to knip by nature.",

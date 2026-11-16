@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	src/lib/forwards.ts	-	-	the table of verbs the CLI forwards to the daemon

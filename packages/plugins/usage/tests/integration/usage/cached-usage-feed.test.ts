@@ -1,7 +1,7 @@
 import type { AccountUsage } from '../../../contract/index.ts';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CachedUsageFeed } from '../../../daemon/adapters/usage/index.ts';
+import { CachedUsageFeed } from '../../../daemon/adapters/usage/cached-usage-feed.ts';
 import type { UsageSourcePort } from '../../../daemon/lib/usage/index.ts';
 
 class RecordingSource implements UsageSourcePort {
