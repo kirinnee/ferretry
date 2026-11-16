@@ -49,6 +49,25 @@ describe('parts', () => {
     await view.unmount();
   });
 
+  it('fills the command with this device when Access names it', async () => {
+    const thisDeviceId = `fy_device_id_${'a'.repeat(22)}`;
+    const fake = fakeClient({ 'GET /v1/pair/devices': () => ({ devices: [], hostLocal: false, thisDeviceId }) });
+    const view = await mount(<SharingOffPanel connection={connection} createClient={fake.factory} />);
+    await settle();
+    const text = view.container.querySelector('[data-sharing-off]')?.textContent ?? '';
+    expect(text).toContain(`fy device grant ${thisDeviceId} sharing --use`);
+    expect(text).not.toContain('<device>');
+    await view.unmount();
+  });
+
+  it('keeps the placeholder when the caller is not a paired device (no id)', async () => {
+    const fake = fakeClient({ 'GET /v1/pair/devices': () => ({ devices: [], hostLocal: true }) });
+    const view = await mount(<SharingOffPanel connection={connection} createClient={fake.factory} />);
+    await settle();
+    expect(view.container.querySelector('[data-sharing-off]')?.textContent).toContain('<device>');
+    await view.unmount();
+  });
+
   it('keeps the placeholder when the device cannot be read', async () => {
     const fake = fakeClient({});
     const view = await mount(<SharingOffPanel connection={connection} createClient={fake.factory} />);
