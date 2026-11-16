@@ -77,6 +77,7 @@ import {
 import { ControlModeTmuxProcess, type ControlChild } from './adapters/tmux/control-tmux-process.ts';
 import { KernelTmuxProcess, TMUX_PROGRAM } from './adapters/tmux/kernel-tmux-process.ts';
 import { TmuxRunner, ferretTmuxSession } from './adapters/tmux/tmux-runner.ts';
+import { paneProcessHost } from './adapters/tmux/pane-process-host.ts';
 import { tmuxAvailabilityDoctor } from './adapters/tmux/tmux-availability-check.ts';
 import { RealHarnessLaunchGuard } from './adapters/tmux/harness-launch-guard.ts';
 import { boundedSpawn } from './adapters/tmux/bounded.ts';
@@ -600,6 +601,8 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
     instantOf: seconds => instantFromEpochMs(seconds * 1_000),
     now: () => kernel.clock.now(),
     wrap: async (ferret, command) => await processes.limits.command(ferret, command),
+    // `identify` and `signalDescendant` (c58-37): the pane's root start, and the one proved-descendant signal.
+    processes: paneProcessHost(kernel.spawn),
     remember: async (ferret, running) => await remember(ferret, running.handle, running.pid),
     delivery: {
       act: kernel.act.bind(kernel),

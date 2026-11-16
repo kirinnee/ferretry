@@ -108,6 +108,18 @@ export async function asksHalf(
     await Bun.sleep(0);
     while (pending.size > 0) await Promise.allSettled([...pending]);
   };
+  /**
+   * Resolves once nothing the half started is still waiting on its state: a detached step (a timer's flush, a send
+   * let go of) has finished its reads and writes, whatever real time they took. A macrotask turn first, so every
+   * continuation that only needed microtasks has issued its next state call; then wait for the calls in flight.
+   */
+  const settle = async () => {
+    for (;;) {
+      await Bun.sleep(0);
+      if (pending.size === 0) return;
+      await Promise.allSettled([...pending]);
+    }
+  };
   const kernel = {
     clock,
     log: silent,
@@ -138,6 +150,7 @@ export async function asksHalf(
     /** The Vault's view (the one with `tell`); the other tests use no more than every view has. */
     asks: asksFor('vault'),
     asksFor,
+    settle,
     events,
     jobs,
     start: async () => {
