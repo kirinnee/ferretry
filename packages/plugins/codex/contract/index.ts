@@ -161,13 +161,31 @@ export const harnessConfigLoosens: Loosens<HarnessConfig> = (before, after) =>
     ? ['agents now skip every permission prompt']
     : [];
 
+/**
+ * Any change to the harness `binary` or `searchPaths` (added, removed or changed, never judged by its value): the path
+ * names the program every new ferret launches, so it is code execution and the owner's to approve (owner decision
+ * !A525). Pure and total; the sentences name what changed, never a path.
+ */
+const harnessPathsChange: Loosens<HarnessConfig> = (before, after) => [
+  ...(before?.binary === after.binary ? [] : ['agents now launch a different Codex program (binary changed)']),
+  ...(JSON.stringify(before?.searchPaths ?? []) === JSON.stringify(after.searchPaths)
+    ? []
+    : ['agents now look for the Codex program in different directories (searchPaths changed)']),
+];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode, or any change of where the program is. */
+const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
+  ...harnessConfigLoosens(before, after),
+  ...harnessPathsChange(before, after),
+];
+
 /** `config/harness-codex.yaml`: the binary, the search directories and the permission mode. */
 export const CODEX_CONFIG = configDef(
   defineConfig({
     file: 'harness-codex.yaml',
     schema: HarnessConfigSchema,
     axis: 'configure',
-    loosens: harnessConfigLoosens,
+    loosens: harnessConfigHeld,
   }),
 );
 
