@@ -26,7 +26,6 @@ import {
   TunnelOriginSchema,
 } from '@ferretry/plugin-connections/contract';
 import type { AdvertisementRefusal } from '../contract/index.ts';
-import type { IFyApiClient } from './shell-grants.ts';
 
 /** The one sentence every throwing stand-in answers with. */
 const fromShell = (name: string): never => {
@@ -402,13 +401,3 @@ export const whileVisible =
   (): void => {
     if (!environment.hidden()) read();
   };
-
-/**
- * How many standing sign-in rules a device's passkey approved, under its row. STAND-IN: today's
- * `features/secure-copy/device-rule-note.tsx`, owned by the sign-in rules surface, not Access. It draws NOTHING,
- * which is exactly what today's note draws when the rules cannot be read — and here they cannot be, because the
- * rules surface is not in this build. It does not throw, because it renders under every device row.
- */
-export function DeviceRuleNote(_props: { readonly client: IFyApiClient; readonly deviceId: string }): ReactNode {
-  return null;
-}
