@@ -762,10 +762,20 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       );
     const report = await inspect(id, { config, state, tmuxSession, command });
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
-    if (!decision.proceed)
+    if (!decision.proceed) {
+      // EVERY REFUSAL IS COUNTED. A 409 used to be recorded nowhere, so nobody could say how often the gate said no or
+      // why. This is the only write a refusal makes: the session's config and record are untouched.
+      await recordMoveRefusal(parts.storage, id, {
+        to: account.agent,
+        verdict: report.worstVerdict,
+        cause: decision.reason,
+        described: parts.preflight.describe(report),
+        by: request.movedBy ?? 'owner',
+      });
       throw new SessionMoveError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
         inflight: parts.preflight.describe(report),
       });
+    }
     // NEVER A SILENT NEW CONVERSATION. Still before the first write, so a refusal leaves the session
     // exactly as it was and the person can choose to start fresh.
     if (relaunchConversation.kind === 'unresumable')
@@ -775,10 +785,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       await parts.storage.append(id, 'session.move_forced', {
         to: account.agent,
         verdict: report.worstVerdict,
-        went_past: parts.preflight
-          .describe(report)
-          .items.filter(item => item.blocks)
-          .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) })),
+        went_past: blockersOf(parts.preflight.describe(report)),
       });
     const reportPath = await parts.reports.write(
       id,
@@ -1194,4 +1201,38 @@ async function resolveInWorkFolder(roots: RootsPort, id: SessionId, cwd: string)
   } catch {
     return cwd;
   }
+}
+
+/** The inventory items that blocked a move, as the journal records them: a title and, where there is one, its detail. */
+function blockersOf(described: {
+  readonly items: ReadonlyArray<{ readonly blocks: boolean; readonly title: string; readonly detail?: string }>;
+}): Array<{ title: string; detail?: string }> {
+  return described.items
+    .filter(item => item.blocks)
+    .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) }));
+}
+
+/**
+ * Journals one refused move as `session.move_refused`, shaped like `session.move_forced` (what it stopped on rather
+ * than what it went past). It is the ONLY write a refusal makes — the session's documents are never touched — and it
+ * is the one record of the 409, so refusals can be counted and their causes compared.
+ */
+export async function recordMoveRefusal(
+  storage: Pick<DaemonStorage, 'append'>,
+  id: SessionId,
+  refusal: {
+    readonly to: string;
+    readonly verdict: string;
+    readonly cause: string;
+    readonly described: Parameters<typeof blockersOf>[0];
+    readonly by: string;
+  },
+): Promise<void> {
+  await storage.append(id, 'session.move_refused', {
+    to: refusal.to,
+    verdict: refusal.verdict,
+    cause: refusal.cause,
+    blockers: blockersOf(refusal.described),
+    by: refusal.by,
+  });
 }
