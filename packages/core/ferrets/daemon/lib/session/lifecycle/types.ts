@@ -188,6 +188,14 @@ export interface SessionLifecycleLauncher {
    */
   launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined>;
   /**
+   * Why a start of this session must be refused BEFORE anything changes — its record, its credential or its conversation
+   * lease — or `undefined` when {@link launch} will open a pane. Asked once, ahead of the first write of a start that is
+   * about to launch, because a launch that does nothing (the ferret is already live as far as the launcher's owner
+   * knows, or the session was stopped on purpose) must not have re-issued the credential, marked the record `starting` or
+   * taken a lease first. Optional: a launcher that cannot tell never refuses ahead.
+   */
+  refuseLaunch?(record: SessionLifecycleRecord): Promise<string | undefined>;
+  /**
    * Waits until the newly launched harness is at an idle prompt, clearing only recognised startup
    * dialogs. Required so pre-turn runtime work cannot weaken the interactive control path's
    * refuse-rather-than-queue rule.
