@@ -6,7 +6,7 @@ import should from 'should';
 import { CONVERSATION_STATE, QUEUE_CARRY_STATE, QUEUE_STATE } from '../../../../contract/index.ts';
 import { type RotationFailure, StateQueueStore } from '../../../../daemon/queue/adapters/index.ts';
 import { foldQueue, type QueueEvent } from '@ferretry/core-mailbox/contract';
-import { ROTATE_EVENTS } from '../../../../daemon/queue/lib/rotation.ts';
+import { ROTATE_EVENTS } from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { LightState } from '../../../support/light-state.ts';

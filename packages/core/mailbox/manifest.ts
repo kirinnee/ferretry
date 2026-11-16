@@ -1,5 +1,5 @@
 import { definePlugin } from '@ferretry/kernel/manifest';
-import { MailboxHosts } from './contract/index.ts';
+import { MailboxHosts, MailboxPort, QueueChanged } from './contract/index.ts';
 
 /**
  * Mailbox (§2.3): the one way a message reaches a ferret. Core, because every message goes through it. It decides WHEN
@@ -17,6 +17,8 @@ export default definePlugin({
   words: [
     { word: 'mailbox', means: 'where a message to a ferret waits until it can be delivered', insteadOf: ['outbox'] },
   ],
+  provides: { mailbox: MailboxPort },
+  data: { publishes: [QueueChanged] },
   hooks: { offers: [{ hook: MailboxHosts }] },
   doctor: ['mailbox-host'],
 });

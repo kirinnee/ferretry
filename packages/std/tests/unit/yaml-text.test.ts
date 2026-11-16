@@ -9,6 +9,7 @@ import {
   sameConfigValue,
   setConfigKey,
 } from '../../src/yaml-text.ts';
+import { hostileReads, refusalOf } from './yaml-text-hostile.ts';
 
 const MODELINE = '# yaml-language-server: $schema=../.schema/machine.json';
 
@@ -277,98 +278,17 @@ describe('readConfigText — aliases it cannot read are syntax errors, never a t
   });
 });
 
-describe('readConfigText — a file at the size limit is read in ONE pass, whatever its aliases do', () => {
-  /** A hard bound, far above what one linear pass takes; the quadratic paths this guards took seconds to minutes. */
-  const BOUND_MS = 1500;
-  /** How many times a read is timed before a slow one counts. */
-  const ATTEMPTS = 3;
-  /** Each read is cheap alone; up to four of them under a loaded run must still fit one test's own timeout. */
-  const TEST_TIMEOUT_MS = 60_000;
-  const fill = (head: string, line: (index: number) => string, tail = ''): string => {
-    const lines = [head];
-    let size = head.length + tail.length;
-    for (let index = 0; size + 32 < CONFIG_FILE_MAX_BYTES; index += 1) {
-      const next = line(index);
-      lines.push(next);
-      size += next.length;
-    }
-    return lines.join('') + tail;
-  };
-  const laughs = (() => {
-    const lines = ['l0: &l0 [lol, lol, lol, lol, lol, lol, lol, lol, lol]\n'];
-    for (let level = 1; level < 10; level += 1) {
-      lines.push(`l${level}: &l${level} [${Array.from({ length: 9 }, () => `*l${level - 1}`).join(', ')}]\n`);
-    }
-    return lines.join('');
-  })();
-  const deep = `a: ${'['.repeat(5000)}*nope${']'.repeat(5000)}\n`;
+describe('readConfigText — a hostile file is read, or refused, in the right words', () => {
+  for (const { label, text, refused } of hostileReads(1 / 32)) {
+    it(`should read ${label} to the right answer`, () => {
+      // Act
+      const actual = readConfigText(text);
 
-  for (const [label, text, refused] of [
-    ['many aliases, the last unresolved', fill('a: &a 1\nb:\n', () => '  - *a\n', '  - *nope\n'), 'not set before it'],
-    ['many aliases of one anchor', fill('a: &a 1\nb:\n', () => '  - *a\n'), undefined],
-    [
-      'many anchors, each aliased many times',
-      fill(
-        `${Array.from({ length: 1500 }, (_, index) => `k${index}: &a${index} x\n`).join('')}b:\n`,
-        index => `  - *a${index % 1500}\n`,
-      ),
-      undefined,
-    ],
-    [
-      'an anchor of an empty anchor, aliased many times',
-      fill('e: &e []\na: &a [*e]\nb:\n', () => '  - *a\n'),
-      undefined,
-    ],
-    ['an alias bomb (billion laughs), padded', fill(laughs, index => `k${index}: v\n`), 'expand too far'],
-    [
-      'an alias loop at the end of a long anchor',
-      fill('a: &a\n  b:\n', () => '    - 1\n', '    - *a\n'),
-      'sits inside the anchor',
-    ],
-    // Either refusal is right: the parser reads 5 000 levels unless the stack this process has left runs out first (it
-    // depends on what ran before), and then it refuses the file itself, as too deeply nested.
-    ['one unresolved alias 5000 deep', deep, /not set before it|too deeply nested/u],
-    ['one flat mapping', fill('', index => `k${index}: v\n`), undefined],
-    ['one flow mapping', `${fill('{', index => `k${index}: 1, `)}z: 1}\n`, undefined],
-    ['an alias to a list as every key', fill('a: &a [1, 2, 3]\n', index => `? *a\n: ${index}\n`), 'not a plain string'],
-    ['an alias to a string as every key', fill('a: &a k\n', index => `? *a\n: ${index}\n`), undefined],
-    [
-      'a long string aliased on every line',
-      fill(`s: &s ${'x'.repeat(128 * 1024)}\nl:\n`, () => '  - *s\n'),
-      'expand too far',
-    ],
-    [
-      'a long string aliased under every key',
-      fill(`s: &s ${'x'.repeat(128 * 1024)}\nm:\n`, index => `  k${index}: *s\n`),
-      'expand too far',
-    ],
-    [
-      'a list as every key, beside many anchors',
-      fill(`a: [${Array.from({ length: 5_000 }, (_, index) => `&n${index} 1`).join(', ')}]\n`, () => '? [k]\n: 1\n'),
-      'not a plain string',
-    ],
-  ] as const) {
-    it(
-      `should read ${label} in under ${BOUND_MS} ms`,
-      () => {
-        // Act: the BEST of a few reads. A bound on the clock measures the box as much as the code (2.2 s under a loaded
-        // run, a few hundred ms alone): a quadratic path takes seconds in EVERY attempt, a busy moment spoils one.
-        const actual = readConfigText(text);
-        let took = Number.POSITIVE_INFINITY;
-        for (let attempt = 0; attempt < ATTEMPTS && took >= BOUND_MS / 2; attempt += 1) {
-          const started = performance.now();
-          readConfigText(text);
-          took = Math.min(took, performance.now() - started);
-        }
-
-        // Assert
-        should(took).be.below(BOUND_MS);
-        if (refused === undefined) should(actual.ok).be.true();
-        else if (refused instanceof RegExp) should(actual.ok ? '' : actual.errors[0]?.message).match(refused);
-        else should(actual.ok ? '' : actual.errors[0]?.message).containEql(refused);
-      },
-      TEST_TIMEOUT_MS,
-    );
+      // Assert
+      if (refused === undefined) should(actual.ok).be.true();
+      else if (refused instanceof RegExp) should(refusalOf(actual)).match(refused);
+      else should(refusalOf(actual)).containEql(refused);
+    });
   }
 });
 
@@ -945,17 +865,16 @@ describe('editConfigText — the file itself', () => {
 /** The directive sentence, and the most directive lines a file may hold before it is refused unparsed. */
 const DIRECTIVE_SENTENCE = 'a % directive line is not one YAML knows';
 const DIRECTIVE_CAP = 64;
-const FLOOD_FAST_MS = 250;
+/** Far past the cap, small enough that time is irrelevant. */
+const FLOOD_LINES = 1024;
 
 describe('the % directive guard — this module pins it itself', () => {
   it('should refuse a flood of bare % lines in one fixed sentence at the first line past the cap, without parsing it', () => {
     // Arrange
-    const flood = '%\n'.repeat(131_072);
+    const flood = '%\n'.repeat(FLOOD_LINES);
 
     // Act
-    const started = performance.now();
     const actual = readConfigText(flood);
-    const elapsed = performance.now() - started;
 
     // Assert
     should(actual.ok).be.false();
@@ -963,7 +882,6 @@ describe('the % directive guard — this module pins it itself', () => {
     should(actual.errors).deepEqual([
       { message: DIRECTIVE_SENTENCE, position: { line: DIRECTIVE_CAP + 1, column: 1 } },
     ]);
-    should(elapsed).be.below(FLOOD_FAST_MS);
   });
 
   it('should count the lines of a flood in every line ending YAML knows', () => {
@@ -992,23 +910,19 @@ describe('the % directive guard — this module pins it itself', () => {
 
   it('should refuse to set a key in a flood, in the same fixed sentence, without parsing it', () => {
     // Act
-    const started = performance.now();
-    const act = () => setConfigKey('%\n'.repeat(131_072), 'a', 1);
+    const act = () => setConfigKey('%\n'.repeat(FLOOD_LINES), 'a', 1);
 
     // Assert
     should(act).throw(`the file does not parse: ${DIRECTIVE_SENTENCE}`);
-    should(performance.now() - started).be.below(FLOOD_FAST_MS);
   });
 
   it('should replace a flood whole when an edit is made to it, never parsing it', () => {
     // Act
-    const started = performance.now();
-    const actual = editConfigText('%\n'.repeat(131_072), { a: 1 }, {}, MODELINE);
+    const actual = editConfigText('%\n'.repeat(FLOOD_LINES), { a: 1 }, {}, MODELINE);
 
     // Assert
     should(meaningOf(actual)).deepEqual({ a: 1 });
     should(actual).not.containEql('%\n');
-    should(performance.now() - started).be.below(FLOOD_FAST_MS);
   });
 });
 

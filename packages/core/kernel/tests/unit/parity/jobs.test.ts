@@ -3,7 +3,7 @@
  * the housekeeping lane's opening (J-0186), the configuration watcher's interval, backstop and debounce
  * (J-0109, J-0146, J-0265, J-0266), the host arming the configuration load and watcher at boot (J-0066), and the
  * spawn deadline that kills a child (J-0172, today's git runner deadline, which 5.0 hands to the kernel's spawn).
- * Time is driven by hand; the one real child is killed within tens of milliseconds.
+ * Time is driven by hand; the one real child is killed at its deadline (how fast: `tests/perf/parity/jobs.test.ts`).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
@@ -349,7 +349,6 @@ describe('the host arms the configuration', () => {
 describe('the spawn deadline', () => {
   test('J-0172 a child still running at its deadline is killed with SIGKILL and the answer says it timed out', async () => {
     const spawn = bunSpawn({ PATH: process.env.PATH ?? '' });
-    const started = Date.now();
     // The child ignores SIGTERM and says who it is, so only SIGKILL can have ended it.
     const answer = await spawn.runBytes(
       process.execPath,
@@ -357,7 +356,7 @@ describe('the spawn deadline', () => {
         '-e',
         "process.on('SIGTERM', () => {}); process.stdout.write(String(process.pid)); setInterval(() => {}, 1_000);",
       ],
-      // Long enough for a fresh `bun -e` to start and write its pid on a loaded runner; far inside the five-second bound below.
+      // Long enough for a fresh `bun -e` to start and write its pid on a loaded runner; the speed bound is the perf tier's.
       { timeout: milliseconds(2_000) },
     );
     expect(answer.timedOut).toBe(true);
@@ -376,8 +375,6 @@ describe('the spawn deadline', () => {
     const survived = alive();
     if (survived) process.kill(pid, 'SIGKILL');
     expect(survived).toBe(false);
-    // Killed at the deadline, nowhere near the child's own thirty seconds.
-    expect(Date.now() - started).toBeLessThan(5_000);
   });
 
   test('J-0172 a child that finishes inside its deadline is not marked timed out', async () => {

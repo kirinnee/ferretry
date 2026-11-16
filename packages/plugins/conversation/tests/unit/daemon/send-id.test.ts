@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretHarness, FerretId, RunnerDelivery } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
@@ -9,7 +10,6 @@ import { ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
-import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 import { memoryStatePort } from '../../support/state.ts';
 
@@ -57,12 +57,13 @@ async function conversation(state: StatePort = memoryStatePort(CONVERSATION_STAT
       return build({ ...ctx, kernel: { ...ctx.kernel, state } });
     },
   } as typeof daemon;
+  const queue = new FakeMailboxQueue();
   const host = await testHost({
     plugins: [implementation],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: queue, ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
-  return { host, state, ferrets, api: () => host.provided(ConversationPort) };
+  return { host, state, queue, ferrets, api: () => host.provided(ConversationPort) };
 }
 
 const ledgered = async (state: StatePort, sendId: string, over: Record<string, unknown> = {}) =>
@@ -93,29 +94,18 @@ describe('the same send id twice is one message, across daemon runs', () => {
   });
 
   test('a message still waiting in the queue is answered as queued, with why', async () => {
-    const { host, state, api } = await conversation();
-    await new StateQueueStore(state).append(parseSessionId('f1'), {
+    const { host, queue, api } = await conversation();
+    queue.seed(parseSessionId('f1'), {
       v: 1,
-      kind: 'enqueued',
-      at: AT,
-      message: {
-        v: 1,
-        id: 'board-check-1',
-        sender: 'human',
-        text: 'wait',
-        attachmentIds: [],
-        enqueuedAt: AT,
-        state: 'queued',
-        stateAt: AT,
-        revision: 1,
-      },
-    });
-    await new StateQueueStore(state).append(parseSessionId('f1'), {
-      v: 1,
-      kind: 'waiting',
-      at: AT,
       id: 'board-check-1',
-      reason: 'busy',
+      sender: 'human',
+      text: 'wait',
+      attachmentIds: [],
+      enqueuedAt: AT,
+      state: 'queued',
+      stateAt: AT,
+      revision: 1,
+      waitReason: 'busy',
     });
 
     const again = await api().send(F1, { kind: 'owner' }, { message: 'wait', sendId: 'board-check-1' });
@@ -141,9 +131,8 @@ describe('the same send id twice is one message, across daemon runs', () => {
   });
 
   test('a message delivered inside a combined turn is answered with the turn’s row, as its own id', async () => {
-    const { host, state, api } = await conversation();
+    const { host, state, queue, api } = await conversation();
     await ledgered(state, 'lead-id', { fate: 'delivered' });
-    const store = new StateQueueStore(state);
     const message = (id: string) => ({
       v: 1 as const,
       id,
@@ -155,15 +144,10 @@ describe('the same send id twice is one message, across daemon runs', () => {
       stateAt: AT,
       revision: 1,
     });
-    await store.append(parseSessionId('f1'), { v: 1, kind: 'enqueued', at: AT, message: message('lead-id') });
-    await store.append(parseSessionId('f1'), { v: 1, kind: 'enqueued', at: AT, message: message('member-id') });
-    await store.append(parseSessionId('f1'), {
-      v: 1,
-      kind: 'moved',
-      at: AT,
-      id: 'member-id',
+    queue.seed(parseSessionId('f1'), message('lead-id'), {
+      ...message('member-id'),
       state: 'typing',
-      batch: 'lead-id',
+      deliveredAs: 'lead-id',
     });
 
     const again = await api().send(F1, { kind: 'owner' }, { message: 'member-id', sendId: 'member-id' });
@@ -211,23 +195,18 @@ describe('the same send id twice is one message, across daemon runs', () => {
   });
 
   test('a withdrawn send whose message the queue still holds under that id is answered by the queue', async () => {
-    const { host, state, api } = await conversation();
+    const { host, state, queue, api } = await conversation();
     await ledgered(state, 'r-2', { fate: 'withdrawn' });
-    await new StateQueueStore(state).append(parseSessionId('f1'), {
+    queue.seed(parseSessionId('f1'), {
       v: 1,
-      kind: 'enqueued',
-      at: AT,
-      message: {
-        v: 1,
-        id: 'r-2',
-        sender: 'human',
-        text: 'back in the queue',
-        attachmentIds: [],
-        enqueuedAt: AT,
-        state: 'queued',
-        stateAt: AT,
-        revision: 1,
-      },
+      id: 'r-2',
+      sender: 'human',
+      text: 'back in the queue',
+      attachmentIds: [],
+      enqueuedAt: AT,
+      state: 'queued',
+      stateAt: AT,
+      revision: 1,
     });
 
     const again = await api().send(F1, { kind: 'owner' }, { message: 'back in the queue', sendId: 'r-2' });
