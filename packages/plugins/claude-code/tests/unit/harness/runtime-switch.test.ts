@@ -182,7 +182,8 @@ describe('what a Claude Code ferret offers', () => {
     ).equal('look at it');
     should(CLAUDE_RUNTIME_SWITCH.catalogs).not.have.property('pickerDriver');
     should(CLAUDE_RUNTIME_SWITCH).not.have.property('liveCatalog');
-    const harness = Object.create(ClaudeHarness.prototype) as ClaudeHarness;
+    // The member is served by a part composed per instance now, so the harness is built (its parts touch no dependency here).
+    const harness = new ClaudeHarness({} as never);
     should(harness.runtimeSwitch()).equal(CLAUDE_RUNTIME_SWITCH);
   });
 });
