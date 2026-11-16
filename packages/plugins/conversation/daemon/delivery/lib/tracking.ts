@@ -85,15 +85,13 @@ export interface SendTrackerSettings {
   readonly strandedBackoffMaxMs: number;
   /**
    * How long a send handed to a Claude ferret's MCP channel has to show the harness's own RECEIPT — the `enqueue` line the
-   * transcript gains the instant the channel message arrives, even mid-turn (measured at 13 ms idle). No receipt by then and
-   * no ack from the MCP server means nothing reached Claude, and the message is typed ONCE instead.
+   * transcript gains the instant the channel message arrives, even mid-turn (measured at 13 ms idle) — counted from the
+   * MCP server's claim (from the send, when it never claimed). A claimed message with no receipt by then marks the
+   * ferret's channel broken, and the message is typed instead; an unclaimed one is simply typed.
    */
   readonly channelReceiptMs: number;
-  /**
-   * How long a channel send the MCP server DID acknowledge may go without a receipt before it is said unconfirmed. It is
-   * never typed: the server forwarded it, so a copy typed beside it would be the duplicate.
-   */
-  readonly channelAckedGraceMs: number;
+  /** How long a channel send whose transcript cannot be read waits for it to be, before it is said unconfirmed. */
+  readonly channelUnreadableMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -112,8 +110,8 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
-  channelReceiptMs: 5_000,
-  channelAckedGraceMs: 30_000,
+  channelReceiptMs: 10_000,
+  channelUnreadableMs: 30_000,
   typedStableMs: 4_000,
   submitNudgesMs: [4_000, 12_000, 30_000],
   deferredNudgeMs: 1_000,

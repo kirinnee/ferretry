@@ -132,8 +132,16 @@ class World {
   /** Readings handed out first, one per read, before `reading` answers again (the transcript changing between two looks). */
   readings: SendEvidenceReading[] = [];
   /** The sends the MCP server said it forwarded through the Claude channel, and the ones the tracker typed instead. */
-  readonly channelAcked = new Set<string>();
+  /** Send ids the MCP server CLAIMED, with the instant of the claim (an offset in ms from the epoch the tests use). */
+  readonly channelClaims = new Map<string, number>();
+  /** Whether the channel was marked broken (a claimed message showed no receipt). */
+  channelBroken = false;
+  /** The sends the transcript showed Claude receiving (told to the channel). */
+  readonly channelReceipts: string[] = [];
+  /** When set, the fall back to typing throws this (a failed bind, a refused question, a crash). */
+  fallBackFails: Error | undefined;
   readonly fellBack: string[] = [];
+  readonly warned: Array<{ message: string; fields: Readonly<Record<string, unknown>> }> = [];
   readFails = false;
   readonly sinces: string[] = [];
   target: SendTarget | undefined = { id: ID, status: 'running', mode: 'auto', turn: 4 };
@@ -202,6 +210,7 @@ class World {
             return this.inPane === false ? undefined : this.inPane;
           },
         },
+        warn: (message, fields) => void this.warned.push({ message, fields }),
         repository: {
           read: async () => {
             if (this.targetFails) throw new Error('session file unreadable');
@@ -210,8 +219,11 @@ class World {
           journal: async (_id, event, data) => void this.journal.push({ event, data }),
         },
         channel: {
-          acked: (_id, sendId) => this.channelAcked.has(sendId),
+          claimedAt: (_id, sendId) => this.channelClaims.get(sendId),
+          received: (_id, sendId) => void this.channelReceipts.push(sendId),
+          broken: () => this.channelBroken,
           fallBackToTyping: async (_id, entry) => {
+            if (this.fallBackFails !== undefined) throw this.fallBackFails;
             this.fellBack.push(entry.sendId);
             this.records.set(entry.sendId, { ...entry, path: 'direct', attempt: 1, attemptAt: clock.now() });
           },
@@ -2132,12 +2144,14 @@ describe("typing a person's send that nothing was typed for yet", () => {
 });
 
 /**
- * A send handed to a Claude ferret's MCP channel is never typed; only the transcript says it arrived. The harness's own
- * RECEIPT (its `enqueue` line, written the instant a channel message arrives even mid-turn) is what stops the clock, and
- * only a send with no receipt and no ack from the MCP server is typed — once, after one more look at the transcript.
+ * A send handed to a Claude ferret's MCP channel is never typed first; only the transcript says it arrived. The harness's
+ * own RECEIPT (its `enqueue` line, written the instant a channel message arrives even mid-turn) is what stops the clock.
+ * The MCP server's CLAIM is not a receipt: a send with no receipt within the window of its claim (or of the send, when
+ * never claimed) falls back to typing — once, after one more look at the transcript — and a claimed one marks the channel
+ * broken (the port's business; here only that the tracker asks for the fall back).
  */
 describe('a send handed to the Claude channel', () => {
-  const { channelReceiptMs, channelAckedGraceMs, busyExtensionMs } = defaultSendTrackerSettings;
+  const { channelReceiptMs, channelUnreadableMs, busyExtensionMs, untypedLookMs } = defaultSendTrackerSettings;
   const channelSend = (overrides: Partial<SendRecord> = {}) =>
     record({ path: 'channel', senderKind: 'agent', from: SENDER, ...overrides });
   const WRAPPED = '<channel source="ferretry" send_id="send-1">\nship it now please\n</channel>';
@@ -2166,9 +2180,10 @@ describe('a send handed to the Claude channel', () => {
     should(world.only).match({ fate: 'delivered', evidence: { proof: 'normal-user-record' } });
     should(world.fellBack).be.empty();
     should(world.retyped).be.empty();
+    should(world.channelReceipts).eql(['send-1']);
   });
 
-  it('counts the enqueue line as the receipt — queued, never typed — and waits for the delivery', async () => {
+  it('counts the enqueue line as the receipt — queued, never typed — tells the channel, and waits for the delivery', async () => {
     const world = new World(channelSend());
     world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
 
@@ -2177,6 +2192,7 @@ describe('a send handed to the Claude channel', () => {
 
     should(world.only).containEql({ fate: 'queued', queueProof: 'transcript' });
     should(world.fellBack).be.empty();
+    should(world.channelReceipts).eql(['send-1', 'send-1']);
     should(world.scheduled.at(-1)?.delayMs).equal(busyExtensionMs);
     // the tool boundary comes and the queued command is drained: delivered
     world.evidence(new ClaudeObservedInputObserver(), [
@@ -2198,17 +2214,77 @@ describe('a send handed to the Claude channel', () => {
     should(world.scheduled.at(-1)?.delayMs).equal(channelReceiptMs - 2_000);
   });
 
-  it('types it ONCE when the deadline passes with no receipt and no ack, and looks again soon', async () => {
+  it('types it ONCE when the deadline passes with no receipt, and looks again within a second', async () => {
     const world = new World(channelSend());
 
     await world.checkAt(channelReceiptMs);
 
     should(world.fellBack).eql(['send-1']);
     should(world.only.path).equal('direct');
-    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.firstCheckMs);
+    should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
     // the row is a typed send now: it is never handed to the channel path again
     await world.checkAt(channelReceiptMs + 100);
     should(world.fellBack).eql(['send-1']);
+  });
+
+  it('a server CLAIM is not a receipt: a claimed send with no enqueue line waits for its own window from the claim, then falls back', async () => {
+    const world = new World(channelSend());
+    world.channelClaims.set('send-1', Date.parse(at(4_000)));
+
+    // The send's own window is over, but the claim is only 6 s old: the push may still be landing.
+    await world.checkAt(channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(4_000);
+
+    await world.checkAt(4_000 + channelReceiptMs);
+    should(world.fellBack).eql(['send-1']);
+    should(world.channelReceipts).be.empty();
+  });
+
+  it('does not wait out the window for a send the server never claimed once the channel is marked broken', async () => {
+    const world = new World(channelSend());
+    world.channelBroken = true;
+
+    await world.checkAt(2_000);
+
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('still waits out the window for a CLAIMED send on a broken channel: the claim might be landing', async () => {
+    const world = new World(channelSend());
+    world.channelBroken = true;
+    world.channelClaims.set('send-1', Date.parse(at(1_500)));
+
+    await world.checkAt(2_000);
+
+    should(world.fellBack).be.empty();
+  });
+
+  it('keeps the send and SAYS so, with ids, when the fall back fails: the row is still a channel row and the next look retries', async () => {
+    const world = new World(channelSend());
+    world.fallBackFails = new Error('bind failed');
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only.path).equal('channel');
+    should(world.warned).have.length(1);
+    should(world.warned[0]?.fields).eql({ ferret: ID, sendId: 'send-1', error: 'bind failed' });
+    should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
+    // the failure clears (the bind works again): the very next look types it, exactly once
+    world.fallBackFails = undefined;
+    await world.checkAt(channelReceiptMs + untypedLookMs);
+    should(world.fellBack).eql(['send-1']);
+    should(world.only.path).equal('direct');
+  });
+
+  it('says a failure that is not an Error as its text', async () => {
+    const world = new World(channelSend());
+    world.fallBackFails = 'plain failure' as unknown as Error;
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.warned[0]?.fields.error).equal('plain failure');
   });
 
   it('does NOT type when the enqueue line appears between the deadline and the typing: a slow receipt is a receipt', async () => {
@@ -2223,6 +2299,7 @@ describe('a send handed to the Claude channel', () => {
 
     should(world.fellBack).be.empty();
     should(world.only).containEql({ fate: 'queued', queueProof: 'transcript', path: 'channel' });
+    should(world.channelReceipts).eql(['send-1']);
   });
 
   it('does NOT type when the delivered user entry appears between the deadline and the typing', async () => {
@@ -2258,7 +2335,7 @@ describe('a send handed to the Claude channel', () => {
       { readable: true, inputs: [] },
       { readable: false, unbound: true, inputs: [] },
     ];
-    await world.checkAt(channelAckedGraceMs);
+    await world.checkAt(channelUnreadableMs);
     should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' });
     should(world.fellBack).be.empty();
 
@@ -2267,26 +2344,8 @@ describe('a send handed to the Claude channel', () => {
       { readable: true, inputs: [] },
       { readable: false, inputs: [] },
     ];
-    await other.checkAt(channelAckedGraceMs);
+    await other.checkAt(channelUnreadableMs);
     should(other.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
-  });
-
-  it('never types a send the MCP server acknowledged: it waits, then says it could not be confirmed, still watched', async () => {
-    const world = new World(channelSend());
-    world.channelAcked.add('send-1');
-
-    await world.checkAt(channelReceiptMs);
-    should(world.fellBack).be.empty();
-    should(world.scheduled.at(-1)?.delayMs).equal(channelAckedGraceMs - channelReceiptMs);
-
-    await world.checkAt(channelAckedGraceMs);
-    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
-    should(world.fellBack).be.empty();
-
-    // a record that turns up later still proves it delivered after all
-    world.evidence(new ClaudeObservedInputObserver(), [claude.remove(WRAPPED, 60_000), channelDrained(60_000)]);
-    await world.checkAt(61_000);
-    should(world.only.fate).equal('delivered');
   });
 
   it('is said unconfirmed at the hold ceiling, whatever the transcript did or did not show', async () => {
@@ -2295,17 +2354,6 @@ describe('a send handed to the Claude channel', () => {
     await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
 
     should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'timeout' });
-  });
-
-  it('is never typed by a tracker that has no channel to take it back from: it waits for the ack grace and says so', async () => {
-    const world = new World(channelSend());
-    (world.tracker as unknown as { ports: { channel?: unknown } }).ports.channel = undefined;
-
-    await world.checkAt(channelReceiptMs);
-    should(world.only.fate).equal('accepted');
-    await world.checkAt(channelAckedGraceMs);
-
-    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
   });
 });
 

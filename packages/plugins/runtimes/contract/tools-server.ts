@@ -6,3 +6,11 @@
  */
 export const TOOLS_SERVER_INSTRUCTIONS =
   "Ferretry's tools: terminals, browser pages, configuration and lessons. How to use them is in your system prompt.";
+
+/**
+ * The variable the Claude launch puts in the tools server's own `--mcp-config` environment, ONLY when the same argv
+ * carries `--dangerously-load-development-channels`. `fy mcp serve` reads it to decide whether to declare and pump the
+ * channel: a server that polled for a channel Claude was never given would make the daemon take a dead channel for a
+ * listening one. Not `FY_`-prefixed: the shell hands a CLI half only the names its manifest declares (`cliEnvReads`).
+ */
+export const CHANNEL_LAUNCH_ENV = 'FERRETRY_CHANNEL';

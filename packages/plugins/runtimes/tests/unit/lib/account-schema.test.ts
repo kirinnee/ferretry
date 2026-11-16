@@ -50,7 +50,6 @@ describe('AccountModelSchema', () => {
       browserPorts: 'random',
       browserFirewallFailure: 'warn',
       autoResume: true,
-      claudeChannels: true,
       agendaMode: true,
       publicUsageFeed: false,
       attentionNudge: true,

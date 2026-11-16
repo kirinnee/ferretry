@@ -2755,9 +2755,11 @@ describe('a send to a box that cannot be read is kept and delivered once it read
 });
 
 /**
- * THE CLAUDE CHANNEL. A ferret's message, or the daemon's own, to a Claude ferret whose MCP server is listening is handed
- * to that server (`channel_poll`) instead of being typed; the transcript's `enqueue` line is the receipt and the user
- * entry the delivery. With no receipt and no ack the message is typed ONCE; the owner's words are never channelled.
+ * THE CLAUDE CHANNEL. A ferret's message, or the daemon's own, to a Claude ferret whose MCP server is listening is OFFERED
+ * to that server (`channel_poll`), which CLAIMS it (`channel_claim`) right before writing it, instead of the message being
+ * typed; the transcript's `enqueue` line is the receipt and the user entry the delivery. A claim is never a receipt: with
+ * no receipt within the window the message is typed ONCE — by moving the same ledger row to the typing path — and a
+ * claimed message that went unreceived marks the channel broken. The owner's words are never channelled.
  */
 describe('a ferret’s message to a Claude ferret goes through its channel', () => {
   const settle = async (): Promise<void> => {
@@ -2770,6 +2772,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     }
   };
   const AS_F1 = asFerret('f1');
+  const GEN = 'gen-1';
   const SENT = `${banner('message')}ship the report`;
   const LEAD = { kind: 'ferret', ferret: CALLER } as const;
   const AT = '2026-11-08T09:00:00.500Z';
@@ -2783,14 +2786,19 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   };
   const delivery = { id: 'u-1', at: '2026-11-08T09:00:00.700Z', role: 'user', text: SENT };
   const unrelated = { id: 'u-0', at: '2026-11-08T08:00:00.000Z', role: 'user', text: 'something earlier' };
-  const listen = async (host: Awaited<ReturnType<typeof conversation>>['host']) =>
-    await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 });
+  type Host = Awaited<ReturnType<typeof conversation>>['host'];
+  const poll = async (host: Host, generation = GEN) =>
+    await host.tool('channel_poll', { generation, waitMs: 0 }, { as: AS_F1 });
+  const claim = async (host: Host, sendId: string, generation = GEN) =>
+    await host.tool('channel_claim', { generation, sendId }, { as: AS_F1 });
+  const rows = async (api: Awaited<ReturnType<typeof conversation>>['api'], sendId: string) =>
+    (await api().sends(F1)).sends.filter(entry => entry.sendId === sendId);
   const row = async (api: Awaited<ReturnType<typeof conversation>>['api'], sendId: string) =>
-    (await api().sends(F1)).sends.find(entry => entry.sendId === sendId && entry.withdrawn !== true);
+    (await rows(api, sendId)).find(entry => entry.withdrawn !== true);
 
   test('an agent send to a connected Claude ferret is handed to the channel, typed nowhere, then proven by the transcript', async () => {
     const { host, ferrets, api, clock } = await conversation();
-    await listen(host);
+    await poll(host);
 
     const sent = await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
 
@@ -2798,12 +2806,10 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     expect(ferrets.delivered).toEqual([]);
     expect(ferrets.queued).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', senderKind: 'agent', from: 'lead' });
-    // The MCP server polls and gets the exact text that would have been typed, banner included.
-    const polled = await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 });
+    // The MCP server polls, is OFFERED the exact text that would have been typed (banner included), and claims it.
+    const polled = await poll(host);
     expect(polled.data).toEqual({ messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }] });
-    expect(await host.tool('channel_ack', { sendIds: ['lead-1'] }, { as: AS_F1 })).toMatchObject({
-      data: { acked: 1 },
-    });
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
 
     // Claude writes the enqueue line at once and the user entry when the turn takes it: delivered, never typed.
     ferrets.reviewEntries = [unrelated, receipt, delivery];
@@ -2815,8 +2821,10 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
   test('a receipt alone (a busy ferret) makes it queued and it is still never typed', async () => {
     const { host, ferrets, api, clock } = await conversation();
-    await listen(host);
+    await poll(host);
     await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    await claim(host, 'lead-1');
     ferrets.reviewEntries = [unrelated, receipt];
 
     await pass(clock, 8_000);
@@ -2826,27 +2834,99 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     await host.stop();
   });
 
-  test('with no receipt and no ack it is typed ONCE after the receipt deadline, and the channel never carries it after', async () => {
+  test('a CLAIMED message with no receipt in the window marks the channel broken and is typed ONCE; nothing more is channelled', async () => {
     const { host, ferrets, api, clock } = await conversation();
-    await listen(host);
+    await poll(host);
     await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    // The server claimed (and wrote) it, but Claude refused the channel: no enqueue line ever appears.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
     ferrets.reviewEntries = [unrelated];
 
     await pass(clock, 12_000);
-
     expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct', senderKind: 'agent', from: 'lead' });
-    // It was taken back from the outbox: a poll now finds nothing, so it can never arrive a second time.
-    expect((await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).data).toEqual({ messages: [] });
+    // No duplicate row, and no withdrawn one: the SAME row moved from the channel to typing.
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+
+    // The server is still polling (it does not know Claude dropped the channel): the broken channel routes nothing.
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'second thing', sendId: 'lead-2' });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT, `${banner('message')}second thing`]);
+    expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    expect((await poll(host)).data).toEqual({ messages: [] });
+    await host.stop();
+  });
+
+  test('withdraw racing a delayed poll response: the late claim is refused, so exactly one transport carries the message', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    // The poll answer carrying it has LEFT the daemon, and is delayed on its way to the server.
+    expect((await poll(host)).data).toEqual({ messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }] });
+    ferrets.reviewEntries = [unrelated];
+
+    // No receipt and no claim in the window: the fallback types it.
+    await pass(clock, 12_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+
+    // The delayed answer finally reaches the server, which asks to push: refused, so nothing is written to Claude.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: false } });
+    expect((await poll(host)).data).toEqual({ messages: [] });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await host.stop();
+  });
+
+  test('a claim from an older subscriber generation is refused once a newer server polled', async () => {
+    const { host, api } = await conversation();
+    await poll(host, 'old');
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host, 'old');
+
+    // The server restarted: a new generation polls and is offered the unclaimed message again.
+    expect((await poll(host, 'new')).data).toEqual({
+      messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }],
+    });
+
+    expect(await claim(host, 'lead-1', 'old')).toMatchObject({ data: { claimed: false } });
+    expect(await claim(host, 'lead-1', 'new')).toMatchObject({ data: { claimed: true } });
+    await host.stop();
+  });
+
+  test('a fall back that cannot type (the bind failed) leaves the row on the typing path, retried and typed once when it works', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 5_000);
+    // From here every try to reach the pane fails, as a failed bind or a refusal in between would.
+    ferrets.script.observe = () => Promise.reject(new Error('the pane could not be bound'));
+
+    await pass(clock, 8_000);
+
+    // Nothing was typed, nothing was lost, and the row was moved — not withdrawn and re-created.
+    expect(ferrets.delivered).toEqual([]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct', fate: 'accepted', attempt: 1 });
+
+    // The pane comes back: the tracker's next look types it, exactly once.
+    ferrets.script.observe = undefined;
+    await pass(clock, 3_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await pass(clock, 10_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
     await host.stop();
   });
 
   test('a slow receipt that shows up just before the typing means nothing is typed', async () => {
     const { host, ferrets, api, clock } = await conversation();
-    await listen(host);
+    await poll(host);
     await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    await claim(host, 'lead-1');
     ferrets.reviewEntries = [unrelated];
-    await pass(clock, 4_000);
+    await pass(clock, 8_000);
     // The enqueue line is written between the last look and the deadline's own.
     ferrets.reviewEntries = [unrelated, receipt];
 
@@ -2857,25 +2937,6 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
     await host.stop();
   });
 
-  test('a message the MCP server acknowledged is never typed, even with no receipt: it is said unconfirmed', async () => {
-    const { host, ferrets, api, clock } = await conversation();
-    await listen(host);
-    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
-    await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 });
-    await host.tool('channel_ack', { sendIds: ['lead-1'] }, { as: AS_F1 });
-    ferrets.reviewEntries = [unrelated];
-
-    await pass(clock, 40_000);
-
-    expect(await row(api, 'lead-1')).toMatchObject({
-      path: 'channel',
-      fate: 'unaccounted',
-      unaccountedReason: 'landing_unconfirmed',
-    });
-    expect(ferrets.delivered.filter(entry => entry.text === SENT)).toEqual([]);
-    await host.stop();
-  });
-
   test('the daemon’s own notice goes through the channel too, from Ferretry', async () => {
     const { host, ferrets, api, apiFor } = await conversation(
       new HarnessFerrets(),
@@ -2883,13 +2944,13 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
       {},
       { consumers: ['agenda'] },
     );
-    await listen(host);
+    await poll(host);
 
     // Agenda's turn-end check is the daemon speaking; it reaches the port as its own plugin.
     await apiFor('agenda').send(F1, { kind: 'agenda' }, { message: 'finish your turn', sendId: 'agenda-1' });
 
     expect(ferrets.delivered).toEqual([]);
-    expect((await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).data).toEqual({
+    expect((await poll(host)).data).toEqual({
       messages: [{ sendId: 'agenda-1', text: 'finish your turn', from: 'Ferretry' }],
     });
     expect(await row(api, 'agenda-1')).toMatchObject({ path: 'channel', senderKind: 'daemon' });
@@ -2898,18 +2959,18 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
   test('the owner’s own message is typed, never channelled, even while the channel is connected', async () => {
     const { host, ferrets } = await conversation();
-    await listen(host);
+    await poll(host);
 
     await send(host, 'owner-1', 'f1', { message: 'from the owner' });
 
     expect(ferrets.delivered).toEqual([{ text: 'from the owner' }]);
-    expect((await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).data).toEqual({ messages: [] });
+    expect((await poll(host)).data).toEqual({ messages: [] });
     await host.stop();
   });
 
   test('the Warden speaks by typing, never through the channel', async () => {
     const { host, ferrets, api } = await conversation();
-    await listen(host);
+    await poll(host);
 
     await api().send(F1, { kind: 'warden' }, { message: 'press on', sendId: 'w-1' });
 
@@ -2930,7 +2991,7 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('a Codex ferret is typed to even when something is polling its name', async () => {
     const ferrets = new HarnessFerrets();
     const { host, api } = await conversation(ferrets, OPEN, { harness: 'codex' });
-    await listen(host);
+    await poll(host);
 
     await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
 
@@ -2941,11 +3002,19 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   test('the channel tools answer only a ferret, and refuse what they cannot read', async () => {
     const { host } = await conversation();
 
-    expect(await host.tool('channel_poll', { waitMs: 0 }, { as: owner() })).toMatchObject({ isError: true });
-    expect(await host.tool('channel_ack', { sendIds: ['x'] }, { as: owner() })).toMatchObject({ isError: true });
-    expect(await host.tool('channel_poll', { waitMs: 99_000 }, { as: AS_F1 })).toMatchObject({ isError: true });
-    expect(await host.tool('channel_ack', { sendIds: [] }, { as: AS_F1 })).toMatchObject({ isError: true });
-    expect(await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).toMatchObject({ text: 'no messages' });
+    expect(await host.tool('channel_poll', { generation: GEN, waitMs: 0 }, { as: owner() })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_claim', { generation: GEN, sendId: 'x' }, { as: owner() })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_poll', { generation: GEN, waitMs: 99_000 }, { as: AS_F1 })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).toMatchObject({ isError: true });
+    expect(await host.tool('channel_claim', { generation: GEN }, { as: AS_F1 })).toMatchObject({ isError: true });
+    expect(await poll(host)).toMatchObject({ text: 'no messages' });
+    expect(await claim(host, 'never-offered')).toMatchObject({ text: 'not claimed', data: { claimed: false } });
     await host.stop();
   });
 });

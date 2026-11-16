@@ -40,6 +40,8 @@ export interface McpServerInfo {
   readonly version: string;
   /** What every agent is told about these tools when it connects (MCP `initialize` instructions): one line. */
   readonly instructions?: string;
+  /** Whether the launch gave Claude the channel flag: declares the `claude/channel` capability and says whose the messages are. */
+  readonly channel?: boolean;
 }
 
 type JsonRpcId = string | number | null;
@@ -284,11 +286,18 @@ export class McpServer {
     const asked = InitializeParamsSchema.safeParse(params ?? {});
     const requested = asked.success ? asked.data.protocolVersion : undefined;
     const protocolVersion = MCP_PROTOCOL_VERSIONS.find(version => version === requested) ?? MCP_PROTOCOL_VERSIONS[0];
+    const instructions = [this.info.instructions, this.info.channel === true ? CHANNEL_INSTRUCTIONS : undefined]
+      .filter(part => part !== undefined)
+      .join(' ');
     return {
       protocolVersion,
-      capabilities: { tools: { listChanged: false }, experimental: { 'claude/channel': {} } },
+      // The channel is declared only when the launch gave Claude the channel flag (see `ServeContext.channel`).
+      capabilities: {
+        tools: { listChanged: false },
+        ...(this.info.channel === true ? { experimental: { 'claude/channel': {} } } : {}),
+      },
       serverInfo: { name: this.info.name, version: this.info.version },
-      instructions: [this.info.instructions, CHANNEL_INSTRUCTIONS].filter(part => part !== undefined).join(' '),
+      ...(instructions === '' ? {} : { instructions }),
     };
   }
 

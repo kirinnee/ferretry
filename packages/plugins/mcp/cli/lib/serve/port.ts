@@ -11,6 +11,8 @@ const ToolResultSchema = z.looseObject({
   data: z.unknown().optional(),
 });
 
+const ClaimSchema = z.looseObject({ claimed: z.boolean() });
+
 const matchedOf = (result: McpToolResult): boolean | undefined => {
   const data = result.data;
   if (typeof data !== 'object' || data === null || !('matched' in data)) return undefined;
@@ -82,8 +84,8 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
 
 /**
  * The channel pump's one way to the daemon: the same tool door, two tools only this server calls (`channel_poll`,
- * `channel_ack`; Conversation serves them as the session). A poll the daemon refuses, or answers in a shape this build does
- * not read, throws, and the pump backs off.
+ * `channel_claim`; Conversation serves them as the session). A call the daemon refuses, or answers in a shape this build
+ * does not read, throws: the pump backs off (a poll) or writes nothing (a claim).
  */
 export function clientChannelPort(client: PluginClient): ChannelPort {
   const once = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
@@ -94,14 +96,16 @@ export function clientChannelPort(client: PluginClient): ChannelPort {
     return answer.data.data;
   };
   return {
-    async poll(waitMs) {
-      const messages = parseChannelMessages(await once('channel_poll', { waitMs }));
+    async poll(generation, waitMs) {
+      const messages = parseChannelMessages(await once('channel_poll', { generation, waitMs }));
       if (messages === undefined)
         throw new Error('the daemon answered channel_poll in a shape this build does not read');
       return messages;
     },
-    async ack(sendIds) {
-      await once('channel_ack', { sendIds });
+    async claim(generation, sendId) {
+      const answer = ClaimSchema.safeParse(await once('channel_claim', { generation, sendId }));
+      if (!answer.success) throw new Error('the daemon answered channel_claim in a shape this build does not read');
+      return answer.data.claimed;
     },
   };
 }

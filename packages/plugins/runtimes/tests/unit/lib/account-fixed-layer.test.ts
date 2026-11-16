@@ -15,6 +15,7 @@ import {
   CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
+  claudeChannelsFor,
   claudeToolsConfig,
   codexNoticeOverride,
   codexToolsServer,
@@ -57,7 +58,7 @@ const FY = '/opt/fy/bin/fy';
 const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
-  `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
+  `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":"","FERRETRY_CHANNEL":"1"}}}}`,
   '--dangerously-load-development-channels=server:ferretry',
   `--append-system-prompt=${INSTRUCTION}`,
 ];
@@ -129,6 +130,7 @@ describe('fixedLayerFor — Claude', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: true,
+      channels: true,
     });
 
     // Assert
@@ -187,7 +189,14 @@ describe('fixedLayerFor — Claude', () => {
             path: ['--mcp-config'],
             key: '--mcp-config',
             value: {
-              mcpServers: { ferretry: { type: 'stdio', command: FY, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
+              mcpServers: {
+                ferretry: {
+                  type: 'stdio',
+                  command: FY,
+                  args: ['mcp', 'serve'],
+                  env: { FY_TOKEN: '', FERRETRY_CHANNEL: '1' },
+                },
+              },
             },
           },
           {
@@ -229,6 +238,7 @@ describe('fixedLayerFor — Claude', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: false,
+      channels: true,
     });
 
     // Assert — Skip needs no Auto support
@@ -363,6 +373,7 @@ describe('applyFixedLayer', () => {
     cwd: CWD,
     fyCommand: FY,
     acceptsAutoPermissionMode: true,
+    channels: true,
   });
   const codexSkip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
 
@@ -538,7 +549,7 @@ describe('applyFixedLayer', () => {
 
 describe('the Ferretry tools in the fixed layer', () => {
   it('should hand Claude the tools server as a JSON string, so no file has to exist', () => {
-    should(JSON.parse(CLAUDE_TOOL_ARGS[0]?.slice('--mcp-config='.length) ?? '')).deepEqual(claudeToolsConfig(FY));
+    should(JSON.parse(CLAUDE_TOOL_ARGS[0]?.slice('--mcp-config='.length) ?? '')).deepEqual(claudeToolsConfig(FY, true));
   });
 
   it('should never hand the tools server the host admin token', () => {
@@ -568,6 +579,7 @@ describe('the Ferretry tools in the fixed layer', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: true,
+      channels: true,
     });
     const spaced = profileWith('claude', { flags: ['--append-system-prompt', 'be terse', '--mcp-config=extra.json'] });
     const joined = profileWith('claude', { flags: ['--append-system-prompt=always test'] });
@@ -1269,6 +1281,21 @@ describe('SUB_FERRET_INSTRUCTION', () => {
 });
 
 describe('the Claude channel flag in the fixed layer', () => {
+  it('should decide the channel from the explicit setting first, then from claude_max alone', () => {
+    should([
+      claudeChannelsFor(undefined, 'claude_max'),
+      claudeChannelsFor(undefined, 'claude_enterprise'),
+      claudeChannelsFor(undefined, 'claude_team'),
+      claudeChannelsFor(undefined, undefined),
+      claudeChannelsFor(false, 'claude_max'),
+      claudeChannelsFor(true, 'claude_enterprise'),
+    ]).eql([true, false, false, false, false, true]);
+  });
+
+  it('should launch with no channel flag when the caller did not turn it on', () => {
+    should(claude().args.some(arg => arg.includes('development-channels'))).be.false();
+  });
+
   const claude = (channels?: boolean): FixedLayer =>
     layerOf({
       harness: 'claude',
@@ -1279,15 +1306,15 @@ describe('the Claude channel flag in the fixed layer', () => {
       ...(channels === undefined ? {} : { channels }),
     });
 
-  it('should load the tools server as a development channel by default, in the = spelling, before the instruction', () => {
-    const args = claude().args;
+  it('should load the tools server as a development channel when the caller turns it on, in the = spelling, before the instruction', () => {
+    const args = claude(true).args;
     should(args).containEql('--dangerously-load-development-channels=server:ferretry');
     // `=` so the variadic flag cannot swallow the arguments after it, the prompt included.
     should(args.indexOf('--dangerously-load-development-channels=server:ferretry')).be.below(
       args.findIndex(arg => arg.startsWith('--append-system-prompt=')),
     );
-    should(claude(true).args).eql(args);
-    should(claude().entries.find(entry => entry.purpose === 'channels')).eql({
+    should(claude().args.some(arg => arg.includes('development-channels'))).be.false();
+    should(claude(true).entries.find(entry => entry.purpose === 'channels')).eql({
       purpose: 'channels',
       target: 'launch',
       path: ['--dangerously-load-development-channels'],
@@ -1302,13 +1329,38 @@ describe('the Claude channel flag in the fixed layer', () => {
     should(off.entries.some(entry => entry.purpose === 'channels')).be.false();
   });
 
+  it('should set FERRETRY_CHANNEL in the tools server environment ONLY when the same argv carries the channel flag', () => {
+    // Arrange
+    const serverEnv = (layer: FixedLayer): Record<string, unknown> => {
+      const arg = layer.args.find(candidate => candidate.startsWith('--mcp-config='));
+      const config = JSON.parse(arg?.slice('--mcp-config='.length) ?? '{}') as {
+        mcpServers: { ferretry: { env: Record<string, unknown> } };
+      };
+      return config.mcpServers.ferretry.env;
+    };
+    const flagged = (layer: FixedLayer): boolean =>
+      layer.args.some(arg => arg.startsWith('--dangerously-load-development-channels'));
+
+    // Act
+    const [on, off] = [claude(true), claude(false)];
+
+    // Assert: the variable and the flag travel together, in the argv AND in the locked entry
+    should([flagged(on), serverEnv(on).FERRETRY_CHANNEL]).eql([true, '1']);
+    should([flagged(off), 'FERRETRY_CHANNEL' in serverEnv(off)]).eql([false, false]);
+    should(claudeToolsConfig(FY)).eql(claudeToolsConfig(FY, false));
+    const toolsEntry = (layer: FixedLayer) => layer.entries.find(entry => entry.purpose === 'tools')?.value;
+    should(toolsEntry(on)).eql(claudeToolsConfig(FY, true));
+    should(toolsEntry(off)).eql(claudeToolsConfig(FY, false));
+  });
+
   it('should never put the flag on a Codex launch', () => {
     const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
     should(codex.args.some(arg => arg.includes('development-channels'))).be.false();
   });
 
-  it('should default the machine setting on, and take it from machine.yaml', () => {
-    should(parseAccountModel({ version: 1 }).machine.claudeChannels).be.true();
+  it('should leave the machine setting unset by default (the login decides), and take it from machine.yaml', () => {
+    should(parseAccountModel({ version: 1 }).machine.claudeChannels).be.undefined();
+    should(parseAccountModel({ version: 1, machine: { claudeChannels: true } }).machine.claudeChannels).be.true();
     should(parseAccountModel({ version: 1, machine: { claudeChannels: false } }).machine.claudeChannels).be.false();
   });
 });

@@ -36,13 +36,12 @@ describe('McpServer — the protocol', () => {
       id: 1,
       result: {
         protocolVersion: '2025-03-26',
-        capabilities: { tools: { listChanged: false }, experimental: { 'claude/channel': {} } },
+        capabilities: { tools: { listChanged: false } },
         serverInfo: { name: 'ferretry', version: '9.9.9' },
-        instructions: CHANNEL_INSTRUCTIONS,
       },
     });
     should(await harness(undefined, 'One line.').request('initialize')).match({
-      result: { instructions: `One line. ${CHANNEL_INSTRUCTIONS}` },
+      result: { instructions: 'One line.' },
     });
     should(await request('initialize', { protocolVersion: '1999-01-01' })).match({
       result: { protocolVersion: '2025-06-18' },
@@ -236,5 +235,29 @@ describe('McpServer — the tools', () => {
       { name: 'terminal_wait', args: { name: 'dev', text: 'ready', timeoutMs: 90_000 } },
       { name: 'browser_wait_for', args: { name: 'app', text: 'Done', timeoutMs: 60_000 } },
     ]);
+  });
+});
+
+describe('McpServer — the channel is declared only when the launch gave the flag', () => {
+  it('should add the claude/channel capability and the channel instructions when asked, and neither otherwise', async () => {
+    // Arrange
+    const ask = async (channel: boolean) =>
+      await new McpServer(
+        { call: async () => ({ text: 'ok' }) },
+        { name: 'ferretry', version: '9.9.9', instructions: 'One line.', channel },
+      ).handle({ jsonrpc: '2.0', id: 1, method: 'initialize' });
+
+    // Act
+    const [on, off] = [await ask(true), await ask(false)];
+
+    // Assert
+    should(on).match({
+      result: {
+        capabilities: { experimental: { 'claude/channel': {} } },
+        instructions: `One line. ${CHANNEL_INSTRUCTIONS}`,
+      },
+    });
+    should(off).match({ result: { capabilities: { tools: { listChanged: false } }, instructions: 'One line.' } });
+    should(JSON.stringify(off)).not.containEql('claude/channel');
   });
 });

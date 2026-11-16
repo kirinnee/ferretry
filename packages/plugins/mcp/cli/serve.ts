@@ -21,6 +21,14 @@ export interface ServeContext {
    * tools still work, and the daemon, seeing no poll, types messages instead).
    */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /**
+   * Whether the launch gave Claude the channel flag: `FERRETRY_CHANNEL` is set ONLY in the `--mcp-config` of a launch whose
+   * argv carries `--dangerously-load-development-channels`. The channel pump runs only then; without it the server is a
+   * plain tools server and never polls, so the daemon never takes it for a listening channel.
+   */
+  readonly channel?: boolean | undefined;
+  /** This process's subscriber id, fresh per process (the daemon fences older subscribers' claims with it). */
+  readonly generation?: string | undefined;
 }
 
 /**
@@ -31,7 +39,16 @@ export interface ServeContext {
  * It is also Ferretry's CHANNEL into a Claude Code session ({@link ChannelPump}): once the client says it is initialized,
  * messages the daemon holds for this session are written to the same output as `notifications/claude/channel`.
  */
-export async function serveTools({ client, io, stdin, version, instructions, sleep }: ServeContext): Promise<number> {
+export async function serveTools({
+  client,
+  io,
+  stdin,
+  version,
+  instructions,
+  sleep,
+  channel,
+  generation,
+}: ServeContext): Promise<number> {
   if (stdin === undefined) {
     io.err('this build gives `mcp serve` no standard input to read.\n');
     return 70;
@@ -40,19 +57,24 @@ export async function serveTools({ client, io, stdin, version, instructions, sle
     io.out(line);
   };
   const pump =
-    sleep === undefined
+    sleep === undefined || channel !== true
       ? undefined
       : new ChannelPump(clientChannelPort(client), write, {
+          generation: generation ?? crypto.randomUUID(),
           sleep,
           onError: message => {
             io.err(`${message}\n`);
           },
         });
   await serveMcpOverStdio(
-    new McpServer(clientToolsPort(client), { name: SERVER_NAME, version, instructions }, () => {
-      // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
-      pump?.start().catch(() => undefined);
-    }),
+    new McpServer(
+      clientToolsPort(client),
+      { name: SERVER_NAME, version, instructions, channel: channel === true },
+      () => {
+        // Never awaited: it ends when stopped, and a poll still waiting at the daemon must not hold the process open.
+        pump?.start().catch(() => undefined);
+      },
+    ),
     stdin(),
     write,
   );

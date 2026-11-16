@@ -11,7 +11,11 @@ import { z } from 'zod';
 /** The longest one `channel_poll` is held open: under every transport's timeout, like the other waiting tools. */
 export const CHANNEL_POLL_MAX_WAIT_MS = 25_000;
 
+/** Names one subscriber: a fresh id per `fy mcp serve` process, so a restarted server fences out the old one's claims. */
+export const ChannelGenerationSchema = z.string().min(1).max(128);
+
 export const ChannelPollInputSchema = z.strictObject({
+  generation: ChannelGenerationSchema,
   waitMs: z.number().int().min(0).max(CHANNEL_POLL_MAX_WAIT_MS).optional(),
 });
 export type ChannelPollInput = z.infer<typeof ChannelPollInputSchema>;
@@ -28,8 +32,15 @@ export type ChannelMessage = z.infer<typeof ChannelMessageSchema>;
 export const ChannelPollAnswerSchema = z.strictObject({ messages: z.array(ChannelMessageSchema) });
 export type ChannelPollAnswer = z.infer<typeof ChannelPollAnswerSchema>;
 
-export const ChannelAckInputSchema = z.strictObject({ sendIds: z.array(z.string().min(1)).min(1).max(100) });
-export type ChannelAckInput = z.infer<typeof ChannelAckInputSchema>;
+/**
+ * The second phase of a hand-out: the server is about to write this message to Claude and asks the daemon to mark it
+ * pushed. Granted only while it is still ours to push — not withdrawn, and the generation still the current subscriber.
+ */
+export const ChannelClaimInputSchema = z.strictObject({
+  generation: ChannelGenerationSchema,
+  sendId: z.string().min(1),
+});
+export type ChannelClaimInput = z.infer<typeof ChannelClaimInputSchema>;
 
-export const ChannelAckAnswerSchema = z.strictObject({ acked: z.number().int().nonnegative() });
-export type ChannelAckAnswer = z.infer<typeof ChannelAckAnswerSchema>;
+export const ChannelClaimAnswerSchema = z.strictObject({ claimed: z.boolean() });
+export type ChannelClaimAnswer = z.infer<typeof ChannelClaimAnswerSchema>;

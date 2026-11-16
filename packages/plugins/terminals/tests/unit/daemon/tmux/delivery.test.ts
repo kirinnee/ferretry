@@ -949,15 +949,56 @@ describe('claude development-channels warning (2.1.317)', () => {
     ]);
   });
 
-  it('should walk back UP to option 1 when the cursor sits on Exit, and never press Down or choose 2', () => {
+  it('should answer nothing when the cursor sits on Exit: the dialog is not in its measured state, so no key is pressed', () => {
     // Arrange
     const onExit = screen().replace('❯ 1. I am using', '  1. I am using').replace('  2. Exit', '❯ 2. Exit');
 
     // Act
-    const actual = startupDialogAction(onExit);
+    const actual = [startupDialogAction(onExit), devChannelsAction(onExit)];
 
     // Assert
-    should(actual).deepEqual({ kind: 'dev-channels', keys: ['Up', 'Enter'] });
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing for a quoted copy of the warning above an unrelated live consent dialog', () => {
+    // Arrange
+    const live = [
+      ' Do you want to proceed with this unrelated action?',
+      ' ❯ 1. Yes',
+      '   2. No, and tell Claude what to do differently',
+      '',
+      ' Esc to cancel',
+    ].join('\n');
+    const pane = `${screen()}\n${live}`;
+
+    // Act
+    const actual = [startupDialogAction(pane), devChannelsAction(pane)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should answer nothing when the warning has scrolled out of the bottom window', () => {
+    // Arrange
+    const pane = `${screen()}\n${Array.from({ length: 20 }, (_, i) => `output line ${String(i)}`).join('\n')}`;
+
+    // Act
+    const actual = devChannelsAction(pane);
+
+    // Assert
+    should(actual).be.undefined();
+  });
+
+  it('should answer nothing when the option set is not exactly the two measured rows', () => {
+    // Arrange
+    const extra = screen().replace('  2. Exit', '  2. Exit\n  3. Something else');
+    const renamed = screen().replace('I am using this for local development', 'I am using this for production');
+
+    // Act
+    const actual = [devChannelsAction(extra), devChannelsAction(renamed)];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
   });
 
   it('should answer nothing when the warning is shown without the development row, or is only talked about', () => {

@@ -17,7 +17,7 @@ import {
   resolveDefaultRuntime,
   wouldIncludeItself,
 } from '../account/schema.ts';
-import { applyFixedLayer, type FixedEntry, fixedLayerFor } from '../account/fixed-layer.ts';
+import { applyFixedLayer, claudeChannelsFor, type FixedEntry, fixedLayerFor } from '../account/fixed-layer.ts';
 import {
   COMPONENT_KIND_WORDS,
   componentScope,
@@ -193,6 +193,8 @@ export interface CatalogFacts {
   readonly missingCommands?: ReadonlySet<string>;
   /** Each credential's status word, from the credentials surface's own reading. */
   readonly credentialStatus?: Readonly<Record<string, CredentialStatusWord>>;
+  /** Each Claude login's organisation type (non-secret, from its account file), by credential id: the channel's default. */
+  readonly organizationTypes?: Readonly<Record<string, string>>;
   /** Whether the installed Claude accepts Auto mode (O4). Measured on the pinned version; nothing is launched to find out. */
   readonly acceptsAutoPermissionMode: boolean;
   /** The model catalogs and presets in effect (docs/model-catalog.md); absent, runtimes show their model set only. */
@@ -1334,6 +1336,7 @@ function fixedLayerView(
   harness: HarnessKind,
   resolved: ResolvedProfile | undefined,
   facts: CatalogFacts,
+  organizationType: string | undefined,
 ): { readonly view?: FixedLayerView; readonly refusal?: string } {
   const result =
     harness === 'claude'
@@ -1342,7 +1345,7 @@ function fixedLayerView(
           agentPermissions: model.machine.agentPermissions,
           cwd: VIEW_FOLDER,
           acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode,
-          channels: model.machine.claudeChannels,
+          channels: claudeChannelsFor(model.machine.claudeChannels, organizationType),
           fyCommand: VIEW_FY_COMMAND,
         })
       : fixedLayerFor({
@@ -1397,7 +1400,9 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): Runtim
         const harness = runtimeHarness(model, runtime) as HarnessKind;
         const resolved = resolvedFor(model, runtime.profile, harness, facts, partial);
         const stack = stackView(resolved, harness);
-        const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
+        const fixed = runtime.agent
+          ? fixedLayerView(model, harness, resolved, facts, facts.organizationTypes?.[runtime.credential])
+          : {};
         const status = facts.credentialStatus?.[runtime.credential];
         const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND, facts.budgetHolds);
         const blocked =

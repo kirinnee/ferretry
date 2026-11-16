@@ -92,20 +92,38 @@ export function resumeMenuAction(pane: string, choice: 'full' | 'summary'): Star
   return keys.length === 0 ? undefined : { kind: 'resume-menu', keys };
 }
 
+/** The exact title of the warning; matched as a whole trimmed line, never as a phrase inside prose. */
+const DEV_CHANNELS_TITLE = 'WARNING: Loading development channels';
+/** How many bottom lines of the pane the ACTIVE dialog can occupy (the measured one is 12 with its blank lines). */
+const DEV_CHANNELS_WINDOW_LINES = 16;
+const DEV_CHANNELS_OPTIONS = ['I am using this for local development', 'Exit'] as const;
+
 /**
  * Claude Code's "WARNING: Loading development channels" screen, which every launch with
  * `--dangerously-load-development-channels` shows (the fixed layer's flag for Ferretry's own channel):
- * `❯ 1. I am using this for local development` over `2. Exit`. Answered with the FIRST row only; the row is read off the
- * pane, and Exit is never chosen — a daemon that left it would stop every ferret it launched.
+ * `❯ 1. I am using this for local development` over `2. Exit`. Answered with the FIRST row only, and ONLY when this is
+ * the ACTIVE dialog at the bottom of the pane: the exact title line inside the bottom window, exactly those two numbered
+ * rows and nothing else numbered below the title, and the selection marker on row 1 alone. A copy of the warning quoted
+ * in scrollback above another dialog, or a cursor resting on Exit, answers nothing — a key pressed on the wrong dialog
+ * is an answer to a question nobody read. Exit is never chosen.
  */
 export function devChannelsAction(pane: string): StartupDialogAction | undefined {
-  if (!pane.toLowerCase().includes('loading development channels')) return undefined;
-  const options = menuOptions(pane);
-  const keys = keysTo(
-    options,
-    options.findIndex(option => option.label.startsWith('i am using this for local development')),
-  );
-  return keys.length === 0 ? undefined : { kind: 'dev-channels', keys };
+  const window = pane.trimEnd().split('\n').slice(-DEV_CHANNELS_WINDOW_LINES);
+  const titles = window.flatMap((line, index) => (line.trim() === DEV_CHANNELS_TITLE ? [index] : []));
+  const title = titles[0];
+  if (titles.length !== 1 || title === undefined) return undefined;
+  const options = window.slice(title + 1).flatMap(line => {
+    const match = NUMBERED_ROW.exec(line);
+    return match === null
+      ? []
+      : [{ selected: match[1] !== undefined, number: Number(match[2]), label: (match[3] ?? '').trim() }];
+  });
+  const [first, second] = options;
+  const complete =
+    options.length === DEV_CHANNELS_OPTIONS.length &&
+    options.every((option, index) => option.number === index + 1 && option.label === DEV_CHANNELS_OPTIONS[index]);
+  if (!complete || first?.selected !== true || second?.selected === true) return undefined;
+  return { kind: 'dev-channels', keys: ['Enter'] };
 }
 
 /** `❯ No, keep bypass permissions` — the auto-default nudge draws its rows with no numbers. */

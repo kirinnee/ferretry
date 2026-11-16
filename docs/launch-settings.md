@@ -386,16 +386,22 @@ Ferretry's own tools server (`fy mcp serve`, registered under the name `ferretry
   `--channels` refuses a server that is not on its approved list, so the development spelling is the only one that works.
   Every launch with it shows a "WARNING: Loading development channels" screen, which the daemon answers with option 1
   and never with Exit ([harness-dialogs.md](harness-dialogs.md)).
-- **The switch.** `claudeChannels` in `machine.yaml`, **on by default**, applies at the next launch (it is **on
-  restart**). Turn it off with `claudeChannels: false`; the flag, and so the channel, is then not launched, and every
-  message is typed as before. It is not a loosening, so an edit that turns it on is not held. Claude Team and Enterprise
-  organisations block channels by policy: Ferretry cannot read an account's organisation type, so on such a login turn
-  the switch off. If a channel never connects the daemon types the message instead, so a blocked channel costs nothing but
-  the warning screen.
+- **The switch.** Per launch, from the login the runtime spends. `claudeChannels` in `machine.yaml` is **unset by default**,
+  and unset means: **on** for a login whose own Claude account file says `oauthAccount.organizationType: claude_max`, **off**
+  for `claude_enterprise`, `claude_team`, any other type, and a login whose type cannot be read (an organisation's policy
+  blocks channels, and an unknown login is not assumed to allow them). Ferretry reads **only that one non-secret field**
+  (Logins names it in `launchStores`, beside the email it already reads from the same file) — never a token. Written
+  `claudeChannels: true` or `false` it wins for every login. The value is read when the runtime's wrapper is published and
+  applies at the next launch (it is **on restart**). It is not a loosening, so an edit that turns it on is not held. Off
+  means no flag, no `FERRETRY_CHANNEL` marker, no polling, and every message is typed as before. If a channel is on but Claude
+  refuses it, the first message goes unreceived for the 10 s window, the channel is marked broken for that ferret, and
+  everything is typed.
 - **The path.** The tools server polls the daemon for messages held for ITS session (`channel_poll`, a long poll that
   also says the channel is connected) and writes each as one `notifications/claude/channel` carrying the exact text
   that would have been typed, with `meta` `{ send_id, from }` (never a `source` key: it collides with the tag's own
-  attribute), then acks it (`channel_ack`). Neither tool is in the list a model sees. The server's instructions tell the
+  attribute); the server asks the daemon to **claim** each one just before writing it (`channel_claim`), so a message the
+  daemon already typed instead can never be pushed late ([claude-channel.md](claude-channel.md)). The server does this only
+  when the launch set `FERRETRY_CHANNEL=1` beside the flag. Neither tool is in the list a model sees. The server's instructions tell the
   model that `<channel source="ferretry">` messages are work from Ferretry and other ferrets, and that the owner's own
   words arrive as normal prompts, never through the channel.
 - **Measured** (Claude Code 2.1.317, a personal Max login): an idle session takes a message in about 15 ms and starts a

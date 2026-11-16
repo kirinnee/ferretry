@@ -89,7 +89,11 @@ describe('conversation manifest', () => {
   });
   test('the verbs and the agent tools are declared: the work search, and the two a Claude ferret\u2019s MCP server pumps its channel with', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toContain('link keep');
-    expect(manifest.actions.agentTools.map(item => item.name)).toEqual(['search_work', 'channel_poll', 'channel_ack']);
+    expect(manifest.actions.agentTools.map(item => item.name)).toEqual([
+      'search_work',
+      'channel_poll',
+      'channel_claim',
+    ]);
   });
 });
 

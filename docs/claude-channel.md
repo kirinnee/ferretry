@@ -33,32 +33,53 @@ A meta key named `source` would collide with the tag's own attribute, so none is
 
 ## The two halves
 
-**The MCP server polls.** After `initialized` it holds `channel_poll` open (an agent tool served by Conversation, called as
-the session) and forwards each message it gets as one notification — `content` is the exact text that would have been
-typed, banner line included — then calls `channel_ack`. Neither tool is in the list a model reads.
+**The MCP server polls — only when the launch gave Claude the flag.** The same launch that passes
+`--dangerously-load-development-channels` sets `FERRETRY_CHANNEL=1` in the tools server's own `--mcp-config` environment, and
+**in no other case**. Without it `fy mcp serve` is a plain tools server: it declares no channel capability and **never
+polls**, so a launch that dropped the flag (`claudeChannels: false`, or an Enterprise login) can never look like a listening
+channel. With it, after `initialized` the server holds `channel_poll` open (an agent tool served by Conversation, called as
+the session; it names the server's **generation**, a fresh id per process) and gets **candidates**. For each one it calls
+`channel_claim` **right before writing** the notification — `content` is the exact text that would have been typed, banner
+line included — and writes it only if the daemon grants the claim. Neither tool is in the list a model reads.
+
+A claim is **never proof of arrival**. Only Claude's own transcript is.
 
 **Conversation decides who may use it.** A message goes through the channel only when **all** hold:
 
 - it is an **agent's** send (a ferret speaking) or a **daemon notice / Agenda** message — never the owner's words, never
   the Warden's composer acts, never a send-now;
 - the recipient is a **Claude** ferret;
-- its MCP server is **connected** (a poll is open, or one ended within 5 s).
+- its MCP server is **connected** (a poll is open, or one ended within 5 s) and its channel has **not been marked broken**.
 
 Otherwise it is typed, exactly as before.
+
+## Two-phase hand-out: no late push
+
+A poll answer can be delayed in transit. If the fallback typed a message meanwhile and the late answer then made the server
+push it, the ferret would read it twice. So a poll only **offers**; the server must **claim** each candidate, and the daemon
+grants a claim **only if** the message was not withdrawn **and** the caller is still the current subscriber (its
+generation — a restarted server, or a daemon restart, invalidates the older claims). A claimed message is **never
+withdrawn**; it is resolved only by the transcript's receipt, or by the receipt window running out (below).
 
 ## Proof, and the one fallback
 
 A channel send is ledgered with path `channel` and nothing is typed. The tracker proves it from the transcript only:
 
-1. **Receipt** — the `enqueue` line for its text (within `channelReceiptMs`, 5 s). The send is then `queued` and **never
-   typed again**.
+1. **Receipt** — the `enqueue` line for its text. The send is then `queued`, **never typed again**, and the ferret's channel
+   is **proven** (Claude measurably takes channel messages; it enqueues one immediately even when busy, and drops a
+   refused one for good).
 2. **Delivered** — the `user` entry (idle) or the `queued_command` (busy).
-3. **No receipt and no ack from the MCP server** by the deadline — nothing reached Claude. The tracker reads the
-   transcript **once more**, and only if the receipt or delivery is still absent does it take the message back from the
-   outbox and type it **once** (ledger path `direct`, never channelled again). A receipt that is merely slow therefore
-   never double-delivers. A transcript that cannot be read at that moment is never a reason to type.
-4. **Acked but no receipt** — the server forwarded it, so a typed copy would be the duplicate. It is said unconfirmed after
-   `channelAckedGraceMs` (30 s) and stays watched, so a late record still proves it delivered.
+3. **No receipt within `channelReceiptMs` (10 s)** — counted from the server's claim (from the send, when it never claimed):
+   nothing is known to have reached Claude. The tracker reads the transcript **once more**, and only if the receipt or
+   delivery is still absent does the fallback run. A transcript that cannot be read is never a reason to type; it waits
+   `channelUnreadableMs` (30 s), then says the send is unconfirmed.
+4. **The fallback moves the SAME ledger row.** Under the ferret's send lane the row goes from `channel` to the typing path
+   (`direct`, accepted, **untyped**) in **one** settle — never withdraw-then-new — and only then is it typed. A crash, a
+   failed bind or a question refusal after that settle leaves a row the tracker still retries every second, typed once;
+   before it, the row is still a channel row and the next look tries again. A failure is logged with ids, never swallowed.
+5. **A claimed message that went unreceived marks the channel broken.** Claude is not taking channel messages (a dropped
+   flag, an organisation policy). Nothing more is routed through that ferret's channel until its server is relaunched (a new
+   generation polls), and what was waiting is typed. An unclaimed message is simply withdrawn and typed.
 
 ## The typing path and its three checks
 
@@ -72,7 +93,14 @@ typing it on the first look after the pane is safe. The stuck alarm (2 min) and 
 ## Gate
 
 Personal `claude_max` logins pass it. A Team/Enterprise organisation's `channelsEnabled` policy (default off) would
-block it, which is why the setting defaults off for `claude_enterprise`.
+block it, which is why the setting defaults **off** for every login that is not `claude_max` (read per login from its own
+account file; `docs/launch-settings.md#the-claude-channel`).
+
+## Era
+
+Claude Code 2.1.317 drops channels on a "modern" connection era (a discover-handshake kind) and keeps them for "legacy"
+servers that open with the classic `initialize` request over stdio. `fy mcp serve` speaks the classic `initialize`
+(`tools/list`, `tools/call`, `ping`; no discover handshake), so it is the legacy era and keeps the channel.
 
 ## Reading it in the app
 

@@ -116,7 +116,7 @@ import {
 import { startupParkedPending } from './delivery/lib/service.ts';
 import { type DeliveredAttachment, deliveredFilename, messageWithAttachments } from './attachments/lib/delivery.ts';
 import { harnessSendTerminal } from './send-terminal.ts';
-import { channelOrigin, channelSenderName, channelTools } from './channel/index.ts';
+import { channelSenderName, channelTools } from './channel/index.ts';
 import { ChannelOutbox } from './channel/lib/outbox.ts';
 import { harnessFamily } from './seams/harness-family.ts';
 import { KeyedSerialExecutor } from './seams/keyed-serial-executor.ts';
@@ -314,7 +314,7 @@ export interface ConversationAHalf {
    * card counts as answered (`ask.sources:question` `apply`). A refusal keeps the card open, in the sentence it says.
    */
   applyQuestionAnswer(answer: AskAnswer): Promise<'applied' | { readonly refused: string }>;
-  /** The agent tools a Claude ferret's MCP server pumps its channel with (`channel_poll`, `channel_ack`). */
+  /** The agent tools a Claude ferret's MCP server pumps its channel with (`channel_poll`, `channel_claim`). */
   readonly tools: ReturnType<typeof channelTools>;
   /** What Ferrets says of a ferret's phase, for `turn.ended`. */
   readonly turns: { look(ferret: string, phase: TurnPhase): void; forget(ferret: string): void };
@@ -704,8 +704,15 @@ export function buildConversationA(deps: {
       terminal: trackedPane,
       repository: sendRepository,
       channel: {
-        acked: (id, sendId) => channelOutbox.wasAcked(id, sendId),
+        claimedAt: (id, sendId) => channelOutbox.claimedAt(id, sendId),
+        received: (id, sendId) => {
+          channelOutbox.received(id, sendId);
+        },
+        broken: id => channelOutbox.broken(id),
         fallBackToTyping: async (id, record) => await fallBackToTyping(id, record),
+      },
+      warn: (message, fields) => {
+        kernel.log.warn(message, fields);
       },
       attempts: {
         reattempt: async (id, sendId) => await sendActs.reattempt(id, sendId, { by: 'daemon' }),
@@ -965,10 +972,6 @@ export function buildConversationA(deps: {
      * with no sender session, so nothing retries it and a notice that cannot be delivered never notifies anybody.
      */
     readonly notice?: true;
-    /** The words already carry their banner (a send typed again after its channel delivery showed no receipt). */
-    readonly verbatim?: { readonly fromName?: string | undefined };
-    /** Never through the channel: a send the channel already failed to carry. */
-    readonly noChannel?: true;
   };
   /** One typed send on the ferret's one lane ({@link lane}): nothing else presses a key on this ferret meanwhile. */
   const typeMessage = async (ferret: SessionId, request: TypedSend): Promise<SendResult> => {
@@ -1134,30 +1137,49 @@ export function buildConversationA(deps: {
    * type, and a person's message is not a ferret's to route), and never one the channel already failed to carry.
    */
   const channelled = (ferret: SessionId, target: SendTarget, request: TypedSend): boolean =>
-    request.noChannel !== true &&
     request.warden !== true &&
     request.now !== true &&
     target.harness === 'claude' &&
     (request.senderSessionId !== undefined || request.notice === true || request.agenda === true) &&
     channelOutbox.connected(ferret);
   /**
-   * A channel send nothing confirmed: the MCP server never acknowledged it and the transcript shows no receipt, so nothing
-   * reached Claude. It is taken back from the outbox (so it can never arrive after) and TYPED, once, as the words it went
-   * out with. Nothing happens when it was no longer this send's to type: it was forwarded after all, or the row has moved on.
+   * A channel send the transcript never showed Claude receiving (the receipt window ran out; the tracker calls this once
+   * per look until it works). NO withdraw-then-new: under the ferret's send lane the SAME ledger row is moved from the
+   * channel to the typing path in ONE settle — `direct`, accepted and `untyped`, which the tracker types every second
+   * the pane reads safe — and only then is it typed. A crash, a failed bind or a question refusal anywhere after that
+   * settle leaves a row the tracker still retries; before it, a channel row it still falls back with.
+   *
+   * The outbox gives the message back first, but a CLAIMED one is never taken back: the window ran out on it, so the
+   * channel is marked broken (nothing more is routed through it until the ferret's server is relaunched) and the message
+   * is typed. A server that wakes up and pushes it late is refused: its claim is gone.
    */
   const fallBackToTyping = async (ferret: SessionId, record: { readonly sendId: string }): Promise<void> => {
-    const current = (await ledger.list(ferret)).find(entry => entry.sendId === record.sendId);
-    if (current?.path !== 'channel' || current.fate !== 'accepted') return;
-    if (!channelOutbox.withdraw(ferret, record.sendId) && channelOutbox.wasAcked(ferret, record.sendId)) return;
-    if ((await ledger.withdraw(ferret, record.sendId, 'the channel did not take it; typed instead')) === undefined)
-      return;
-    await typeMessage(ferret, {
-      sendId: record.sendId,
-      message: current.message,
-      origin: AGENT_ORIGIN,
-      verbatim: { fromName: current.fromName },
-      noChannel: true,
-      ...channelOrigin(current),
+    const moved = await lane.run(ferret, async () => {
+      const current = (await ledger.list(ferret)).find(entry => entry.sendId === record.sendId);
+      if (current?.path !== 'channel' || current.fate !== 'accepted') return false;
+      if (channelOutbox.withdraw(ferret, record.sendId) === 'claimed') channelOutbox.markBroken(ferret);
+      const now = kernel.clock.now();
+      const settled = await ledger.settle(ferret, record.sendId, {
+        path: 'direct',
+        untyped: true,
+        attempt: 1,
+        attemptAt: now,
+        deadlineAt: undefined,
+      });
+      if (settled === undefined)
+        throw new Error(`the ledger row of send ${record.sendId} could not be moved to typing`);
+      await sendRepository.journal(ferret, 'control.send_deferred', { sendId: record.sendId, outcome: 'untyped' });
+      return true;
+    });
+    if (!moved) return;
+    // The row is recoverable from here: a refusal now (the pane is busy, a question is open, the bind failed) is the
+    // tracker's next look, in a second. Said with ids, never swallowed.
+    await sendActs.reattempt(ferret, record.sendId, { by: 'daemon' }).catch((error: unknown) => {
+      kernel.log.warn('a channel send was moved to typing and will be typed on a later look', {
+        ferret,
+        sendId: record.sendId,
+        reason: error instanceof Error ? error.message : String(error),
+      });
     });
   };
   /**
@@ -1210,13 +1232,7 @@ export function buildConversationA(deps: {
     // to Ferrets: a send has no target rule (the path names where it goes, as for every caller); a ferret is a SENDER.
     const bound = await terminal.bind(ferret);
     await refuseWhileAsking(ferret);
-    const { text, fromName } =
-      request.verbatim === undefined
-        ? await typedText(ferret, request)
-        : {
-            text: request.message,
-            ...(request.verbatim.fromName === undefined ? {} : { fromName: request.verbatim.fromName }),
-          };
+    const { text, fromName } = await typedText(ferret, request);
     // SEND-NOW: the turn is stopped FIRST and BEFORE the record exists: a stop that is refused (a hold, a gone pane, a
     // runner that cannot stop) types nothing and keeps nothing, so the id starts over. The pane is READ before any key.
     if (request.now === true) await stopForNow(ferret, bound);

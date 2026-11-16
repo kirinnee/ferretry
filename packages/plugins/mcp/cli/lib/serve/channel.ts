@@ -9,12 +9,21 @@
  * module only carries them. It holds NO queue of its own and decides nothing about delivery.
  *
  * HOW IT TALKS TO THE DAEMON. Over the tool door, as the session, like every other call this server makes:
- * `channel_poll` is a long poll that answers as soon as a message is waiting for THIS session (and, by being in flight,
- * is how the daemon knows the channel is connected), and `channel_ack` says which messages were handed to Claude. Neither
- * is in the tools list a model sees; this module is their only caller.
+ * `channel_poll` is a long poll that answers with CANDIDATES as soon as a message is waiting for THIS session (and, by
+ * being in flight, is how the daemon knows the server is listening), and `channel_claim` is asked once per candidate right
+ * before it is written: the daemon grants it only while the message is not withdrawn and this server is still the
+ * current subscriber (its GENERATION, fresh per process). A refused claim writes nothing, so a poll answer that arrives
+ * after the daemon typed the message instead can never push it a second time. Neither tool is in the tools list a model
+ * sees; this module is their only caller.
+ *
+ * A CLAIM IS NOT A RECEIPT. Nothing here says Claude received anything: the daemon proves that from Claude's own
+ * transcript (the `enqueue` line), and routes around a channel Claude does not take.
+ *
+ * It runs ONLY when the launch said Claude was given the channel flag (`FERRETRY_CHANNEL`, set in the same `--mcp-config`
+ * the flag rides with): a server polling for a channel Claude never loaded would make the daemon think it was listening.
  *
  * A FAILURE NEVER STOPS IT. A poll that fails (the daemon restarting, a refused call) backs off, capped, and tries
- * again; a notification is written before it is acked, so a message is never acked that Claude was not handed.
+ * again; a message whose claim failed or was refused is not written.
  */
 import { z } from 'zod';
 
@@ -27,10 +36,10 @@ export interface ChannelMessage {
 
 /** What the pump needs from the daemon. */
 export interface ChannelPort {
-  /** Messages waiting for this session; waits up to `waitMs` for the first one. */
-  poll(waitMs: number): Promise<readonly ChannelMessage[]>;
-  /** Tells the daemon these were handed to Claude. */
-  ack(sendIds: readonly string[]): Promise<void>;
+  /** Candidates waiting for this session; waits up to `waitMs` for the first one. `generation` names this subscriber. */
+  poll(generation: string, waitMs: number): Promise<readonly ChannelMessage[]>;
+  /** Asks to write one candidate to Claude. `true` only while the daemon still wants it pushed by this generation. */
+  claim(generation: string, sendId: string): Promise<boolean>;
 }
 
 /** How long one poll waits at the daemon: under the tool door's own limit, so no request outlives the transport. */
@@ -77,9 +86,11 @@ export function channelNotification(message: ChannelMessage): string {
 }
 
 export interface ChannelSeams {
+  /** Names this subscriber: unique per `fy mcp serve` process, so a restart fences out the old one's claims. */
+  readonly generation: string;
   /** Resolves after `ms`; the pump's only clock. */
   readonly sleep: (ms: number) => Promise<void>;
-  /** Said when a poll or an ack failed (the daemon's own sentence); never throws. */
+  /** Said when a poll or a claim failed (the daemon's own sentence); never throws. */
   readonly onError?: (message: string) => void;
 }
 
@@ -106,12 +117,22 @@ export class ChannelPump {
     this.stopped = true;
   }
 
+  /** Whether the daemon granted the claim. A failed claim is said and counts as refused: nothing is written on a guess. */
+  private async claimed(message: ChannelMessage): Promise<boolean> {
+    try {
+      return await this.port.claim(this.seams.generation, message.sendId);
+    } catch (error) {
+      this.seams.onError?.(`channel claim failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    }
+  }
+
   private async loop(): Promise<void> {
     let backoff = CHANNEL_BACKOFF_START_MS;
     while (!this.stopped) {
       let messages: readonly ChannelMessage[];
       try {
-        messages = await this.port.poll(CHANNEL_POLL_WAIT_MS);
+        messages = await this.port.poll(this.seams.generation, CHANNEL_POLL_WAIT_MS);
       } catch (error) {
         this.seams.onError?.(`channel poll failed: ${error instanceof Error ? error.message : String(error)}`);
         await this.seams.sleep(backoff);
@@ -120,11 +141,9 @@ export class ChannelPump {
       }
       backoff = CHANNEL_BACKOFF_START_MS;
       if (this.stopped || messages.length === 0) continue;
-      for (const message of messages) this.write(channelNotification(message));
-      try {
-        await this.port.ack(messages.map(message => message.sendId));
-      } catch (error) {
-        this.seams.onError?.(`channel ack failed: ${error instanceof Error ? error.message : String(error)}`);
+      for (const message of messages) {
+        if (this.stopped) break;
+        if (await this.claimed(message)) this.write(channelNotification(message));
       }
     }
   }

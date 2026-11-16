@@ -868,6 +868,7 @@ export class FleetCatalogService {
       userHome: this.deps.layout.userHome,
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
+      organizationTypes: await this.#organizationTypes(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
       lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
       now: this.deps.now(),
@@ -895,6 +896,14 @@ export class FleetCatalogService {
   }
 
   /** Each credential's status word, from the credentials surface. A list that fails shows no words. */
+  /** Each login's organisation type, by id, from what Logins names for a launch; none on a machine wired without it. */
+  async #organizationTypes(): Promise<Readonly<Record<string, string>>> {
+    const stores = (await this.#loginStores()).loginStores ?? [];
+    return Object.fromEntries(
+      stores.flatMap(store => (store.organizationType === undefined ? [] : [[store.id, store.organizationType]])),
+    );
+  }
+
   async #credentialStatus(): Promise<CatalogFacts['credentialStatus']> {
     try {
       const list = await this.deps.credentials.list();

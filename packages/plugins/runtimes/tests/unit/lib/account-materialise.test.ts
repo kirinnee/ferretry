@@ -34,7 +34,11 @@ const HOME_B = `/fy/fleet/homes/${ID_B}`;
 
 /** Where Logins keeps the Ferretry-kept logins these models name (`LoginsApi.launchStores`): never under the fleet directory. */
 const LOGIN_STORES: NonNullable<MaterialiseInput['loginStores']> = [
-  { id: 'claude-you', variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/state/logins/credentials/claude-you' } },
+  {
+    id: 'claude-you',
+    variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/state/logins/credentials/claude-you' },
+    organizationType: 'claude_max',
+  },
   { id: 'codex-work', variables: {}, signInFile: '/fy/state/logins/credentials/codex-work/auth.json' },
 ];
 
@@ -763,7 +767,7 @@ describe('materialiseFleet', () => {
       should(wrapper).containEql('FY_SEED_FIRST_RUN');
       should(wrapper).containEql('hasSeenAutoDefaultNudge');
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":"","FERRETRY_CHANNEL":"1"}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
         permissions: { defaultMode: 'auto' },
@@ -794,6 +798,59 @@ describe('materialiseFleet', () => {
       should(on).containEql("'--dangerously-load-development-channels=server:ferretry'");
     });
 
+    describe('the Claude channel follows the login’s organisation type unless machine.yaml says otherwise', () => {
+      const claudeAgent = (machine: Partial<AccountModelDocument['machine']> = {}): AccountModel =>
+        modelOf({
+          machine,
+          runtimes: { 'claude-agent': { credential: 'claude-you', profile: 'default', agent: true } },
+        });
+      const storesWith = (organizationType: string | undefined): MaterialiseInput['loginStores'] => [
+        {
+          id: 'claude-you',
+          variables: { CLAUDE_SECURESTORAGE_CONFIG_DIR: '/fy/state/logins/credentials/claude-you' },
+          ...(organizationType === undefined ? {} : { organizationType }),
+        },
+      ];
+      const wrapper = (model: AccountModel, organizationType: string | undefined): string =>
+        wrapperOf(plan(model, { loginStores: storesWith(organizationType) }), 'claude-agent');
+
+      it('should launch a claude_max login with the flag AND the marker the tools server polls on', () => {
+        // Act
+        const actual = wrapper(claudeAgent(), 'claude_max');
+
+        // Assert
+        should(actual).containEql("'--dangerously-load-development-channels=server:ferretry'");
+        should(actual).containEql('"FERRETRY_CHANNEL":"1"');
+      });
+
+      it('should launch an Enterprise, Team, other or unknown login with NEITHER the flag NOR the marker', () => {
+        for (const organizationType of ['claude_enterprise', 'claude_team', 'something_new', undefined]) {
+          // Act
+          const actual = wrapper(claudeAgent(), organizationType);
+
+          // Assert
+          should(actual).not.containEql('development-channels');
+          should(actual).not.containEql('FERRETRY_CHANNEL');
+        }
+      });
+
+      it('should launch a login Logins named no store for as unknown: off', () => {
+        should(wrapperOf(plan(claudeAgent(), { loginStores: [] }), 'claude-agent')).not.containEql(
+          'development-channels',
+        );
+        should(wrapperOf(plan(claudeAgent(), { loginStores: undefined }), 'claude-agent')).not.containEql(
+          'development-channels',
+        );
+      });
+
+      it('should let an explicit machine.yaml setting win in both directions', () => {
+        should(wrapper(claudeAgent({ claudeChannels: false }), 'claude_max')).not.containEql('development-channels');
+        should(wrapper(claudeAgent({ claudeChannels: true }), 'claude_enterprise')).containEql(
+          "'--dangerously-load-development-channels=server:ferretry'",
+        );
+      });
+    });
+
     it('should give a Claude agent on Skip the settings overlay and keep the placeholder folder out of every file', () => {
       // Act
       const result = plan(agents('skip'));
@@ -802,7 +859,7 @@ describe('materialiseFleet', () => {
       // Assert
       const overlay = `${HOME_A}/.fy/fixed.json`;
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":"","FERRETRY_CHANNEL":"1"}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(only(result, overlay)).eql({
         kind: 'file',

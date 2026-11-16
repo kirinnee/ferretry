@@ -44,7 +44,7 @@ import {
   SEND_ENTERED_AUDIT,
   SEND_RETRIED_AUDIT,
   SearchSources,
-  ChannelAckInputSchema,
+  ChannelClaimInputSchema,
   ChannelPollInputSchema,
   SearchWorkToolInputSchema,
   TURN_INTERRUPTED_AUDIT,
@@ -486,14 +486,15 @@ export default definePlugin({
         summary: 'The channel pump: wait for messages to forward into this Claude session.',
         input: ChannelPollInputSchema,
       }),
-      tool('channel_ack', {
+      tool('channel_claim', {
         minimum: 'authenticated',
         caller: 'any',
         capability: cap('fleet', 'use'),
         audit: { skip: 'not recorded: bookkeeping for a message the daemon already ledgered' },
         guard: { none: 'ids only' },
-        summary: 'The channel pump: say which messages were forwarded into this Claude session.',
-        input: ChannelAckInputSchema,
+        summary:
+          'The channel pump: claim one polled message before writing it to this Claude session (granted only while it is not withdrawn).',
+        input: ChannelClaimInputSchema,
       }),
     ],
     app: [

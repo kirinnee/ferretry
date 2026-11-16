@@ -77,7 +77,14 @@ import {
   settingsKey,
 } from './layering.ts';
 import type { AgentPermissions } from './schema.ts';
-import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
+import {
+  AGENDA_ENV,
+  CHANNEL_LAUNCH_ENV,
+  HYPERMEDIA_ENV,
+  PACK_ENV,
+  PASSIVE_LEARNING_ENV,
+  SESSION_MODE_ENV,
+} from './pane-contract.ts';
 
 /** What one fixed-layer entry is for, as the read-only lock shows it. */
 type FixedEntryPurpose =
@@ -143,7 +150,7 @@ export type FixedLayerInput =
       readonly acceptsAutoPermissionMode: boolean;
       /** The `fy` executable the tools server runs as. */
       readonly fyCommand: string;
-      /** Whether Claude loads the tools server as a development channel (the machine's `claudeChannels`; default on). */
+      /** Whether Claude loads the tools server as a development channel (see {@link claudeChannelsFor}; default off). */
       readonly channels?: boolean;
     }
   | {
@@ -400,15 +407,27 @@ export const AGENT_TOOLS_INSTRUCTION =
 export const CLAUDE_CHANNELS_FLAG = '--dangerously-load-development-channels';
 const claudeChannelsArg = `${CLAUDE_CHANNELS_FLAG}=server:${FERRETRY_MCP_SERVER}`;
 
+/**
+ * Whether a Claude launch is given the channel flag: the machine's explicit `claudeChannels` wins when it is written;
+ * otherwise only a login whose account file says `claude_max` gets it. Team, Enterprise, any other type and an unknown
+ * one are OFF: a refused channel would only cost every message a receipt window before it was typed.
+ */
+export const claudeChannelsFor = (explicit: boolean | undefined, organizationType: string | undefined): boolean =>
+  explicit ?? organizationType === 'claude_max';
+
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
-export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
+export const claudeToolsConfig = (fyCommand: string, channels = false): SettingsObject => ({
   mcpServers: {
     [FERRETRY_MCP_SERVER]: {
       type: 'stdio',
       command: fyCommand,
       args: [...FERRETRY_MCP_ARGS],
       // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
-      env: { FY_TOKEN: '' },
+      env: {
+        FY_TOKEN: '',
+        // Set ONLY on a launch whose argv carries the channel flag: the server pumps the channel only when it is set.
+        ...(channels ? { [CHANNEL_LAUNCH_ENV]: '1' } : {}),
+      },
     },
   },
 });
@@ -622,7 +641,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
     }
     const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
     const skip = agentPermissions === 'skip';
-    const channels = input.channels !== false;
+    const channels = input.channels === true;
     const entries = [
       entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
@@ -634,7 +653,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ),
       ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
-      entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
+      entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand, channels)),
       ...(channels ? [entry('channels', 'launch', [CLAUDE_CHANNELS_FLAG], `server:${FERRETRY_MCP_SERVER}`)] : []),
       entry('instructions', 'launch', ['--append-system-prompt'], instruction),
     ];
@@ -650,7 +669,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           '--permission-mode',
           mode,
           CLAUDE_NO_QUESTIONS_FLAG,
-          `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
+          `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand, channels))}`,
           ...(channels ? [claudeChannelsArg] : []),
           `--append-system-prompt=${instruction}`,
         ],
