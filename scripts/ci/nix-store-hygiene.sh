@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Keeps the Namespace `/nix` cache volume (tag `ferretry-nix`) to what CI actually reads.
+# Keeps the Namespace `/nix` cache volume (tag `ferretry-nix-d`) to what CI actually reads.
 #
 # WHY THIS EXISTS. Namespace bills a cache volume on its REQUESTED size, not on what it holds: storage
 # per GB-day, and a snapshot charge of the volume's size for every minute a job has it attached. The

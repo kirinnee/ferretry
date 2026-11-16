@@ -74,9 +74,9 @@ push, with runner queues and repeated pushes dominating the bill. The consolidat
 Quick and label-triggered Full sets replace that shape; PR CI runs supply the new timings.
 
 - **One shared Nix cache.** Every Namespace job retains `-with-cache`, tag
-  `ferretry-nix`, `nscloud-cache-size-10gb` and
-  `nscloud-cache-allow-commit-from-main`. The cache action mounts `/nix`
-  **before** installing Nix. Only `main` commits the volume; Quick Checks now owns
+  `ferretry-nix-d`, `nscloud-cache-size-10gb` and
+  `nscloud-cache-allow-commit-from-main`. The setup action (`install-nix`) mounts `/nix`
+  as its first step. Only `main` commits the volume; Quick Checks now owns
   its prune step (`scripts/ci/nix-store-hygiene.sh`), preserving both the dev shell
   and documented install bundle. The label requests 10 GB but measurements and the
   provider's minimum show a roughly 20 GB volume; it does not halve snapshot charges.
@@ -804,27 +804,58 @@ installer, and the in-repo Homebrew cask. See
 ## Installing Nix
 
 Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
-`CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action (the other local
-action, `download-binaries`, is described under the SIT bullet above), and it exists
-because the network failed whole jobs, including on `main`, where a red CI skips a release:
+`CD`), never an installer action directly. It is the one bespoke setup action (the other local
+action, `download-binaries`, is described under the SIT bullet above). It wraps
+`AtomiCloud/actions.setup-nix` (pinned to a SHA, `non-trusted` in `config/action-trust.json`) with
+`checkout: 'false'` (the job's own checkout step owns `persist-credentials`) and `github-slug: 'false'`,
+and adds what the network demanded, including on `main`, where a red CI skips a release:
 
-- **The installer's download.** `cachix/install-nix-action` fetches its installer five times one
-  second apart, which a DNS blip outlasts (`Could not resolve host: releases.nixos.org`). That fails
-  before anything is installed, so the action installs once more after 60 seconds, with a
-  `::warning::`, and never a third time.
-- **A substitute's download.** `download-attempts = 10` and `connect-timeout = 15` go into
-  `/etc/nix/nix.conf` for the daemon that does the downloading. They do not cover the failure that
-  actually recurred: cache.nixos.org breaks a `.nar.zst` mid-file, Nix resumes it from that byte, the
-  CDN answers the range with HTTP 416, and Nix stops with `path … is required, but there is no
-substituter that can build it`. Only a fresh download recovers, so the action's last step runs
-  `scripts/ci/nix-realise.sh <shell>`: `nix print-dev-env` realises the dev shell without running
-  anything, at most three times, 20 then 40 seconds apart, each failure a `::warning::`. The job's
-  real step then enters a shell that is already in the store, so a retry never reruns a test.
+- **Namespace or not.** `namespacelabels` is `true` when `runner.environment == 'self-hosted'` (how every
+  workflow already tells a Namespace runner from a GitHub-hosted one). On Namespace the setup action mounts
+  `/nix` and `~/.cache/nix` from the cache volume **itself**, so a job no longer mounts `/nix` first; Quick
+  still mounts `~/.cache/ferretry-tsc` (and reads that step's `cache-hit`) with its own cache step. Every other
+  runner (GitHub-hosted Linux, macOS) gets the plain Determinate installer.
+- **The installer's download.** The installer fetches before anything is installed, so a DNS blip fails the
+  step with nothing to clean up: the action runs it once more after 60 seconds, with a `::warning::`, and
+  never a third time. The second attempt runs as `namespacelabs: 'false'` because the first has already
+  created and mounted `/nix` (a second Namespace run would stop at `mkdir /nix`). A warm Namespace job
+  downloads no installer at all.
+- **A substitute's download.** `NIX_CONFIG` (exported to the job) carries `download-attempts = 10` and
+  `connect-timeout = 15` for the Nix client. They do not cover the failure that actually recurred:
+  cache.nixos.org breaks a `.nar.zst` mid-file, Nix resumes it from that byte, the CDN answers the range
+  with HTTP 416, and Nix stops with `path … is required, but there is no substituter that can build it`.
+  Only a fresh download recovers, so the action's last step runs `scripts/ci/nix-realise.sh <shell>`:
+  `nix print-dev-env` realises the dev shell without running anything, at most three times, 20 then 40
+  seconds apart, each failure a `::warning::`. The job's real step then enters a shell that is already in
+  the store, so a retry never reruns a test. `setup-nix` has no retry of its own, so this step stays.
+  `durian-shell`'s dev-shell cache is not used: a hit costs 0.19 s against 0.21 s to source the env
+  `nix-realise.sh` printed, so the existing `FY_DEVSHELL_ENV` contract of `scripts/ci/in-devshell.sh` is kept.
 
 A real evaluation or build failure fails every attempt identically and reaches the PR about a minute
-later than it would have; that is the whole cost. The cache volume step stays in each workflow,
-BEFORE this action. `scripts/validate/action-pins.sh` reads `.github/actions/` as well as
-`.github/workflows/`, so the pin inside the action is held to the same rules as any other.
+later than it would have; that is the whole cost. `scripts/validate/action-pins.sh` reads
+`.github/actions/` as well as `.github/workflows/`, so the pin inside the action is held to the same rules
+as any other.
+
+**Measured (2026-11-16, kirinnee/ferretry PR #1685).** The Nix step of a Namespace job, in-log time from the
+action's first line to the end of `nix-realise.sh`: **4.5 s before, 2.35 s warm after** (Nix bootstrapped from
+the persisted `/nix` in 0.5 s instead of a 1.6 s install; `print-dev-env` 1.5 s instead of 2.9 s from the
+persisted `~/.cache/nix`). It is warm only once a run that **may commit the volume** has finished: the
+volume is committed by `main` only (`nscloud-cache-allow-commit-from-main`), so on `rebuild/5.0-after` pull requests
+every Namespace job takes the **cold** path (the installer over the forked volume: about 11 s plus 3.6 s to
+realise, **15 s against 6 s**) until `main` has run this action once. On GitHub-hosted Linux and macOS the
+setup action is no faster than the installer it replaced (29 to 36 s against 27 to 29 s on Linux; 89 to
+149 s against 87 to 110 s on macOS-15).
+
+**A declared GAP in the pin rule.** The SHA pins what `install-nix` names, not what `setup-nix` runs: its
+composite step calls `DeterminateSystems/nix-installer-action@main` and `namespacelabs/nscloud-cache-action@v1`
+(floating refs), and `actions/create-github-app-token@v3` (skipped, but downloaded). A job that holds a
+long-lived secret (`pwa-pages`, `CD`, `Release`) therefore runs an action it did not pin. Closing it means
+asking AtomiCloud to pin those inside `setup-nix`, or keeping the old installer for the secret-holding jobs.
+
+**The cache tag changed to `ferretry-nix-d`.** A volume written by this action is **not** readable by the old
+installer: `cachix/install-nix-action` over it stops with `directory /nix exists, but is not writable by you`
+(measured, 63 s lost to the retry, then red). The tag is shared by every branch that commits it, so the new layout gets
+a tag of its own and a branch still running the old action keeps working on `ferretry-nix` until it is retired.
 
 ## Action pins
 
@@ -833,7 +864,7 @@ or `non-trusted`):
 
 - **Trusted** actions pin a major tag (`actions/checkout@v5`). Currently trusted:
   `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact`,
-  `cachix/install-nix-action`.
+  `namespacelabs/nscloud-cache-action`. `AtomiCloud/actions.setup-nix` is `non-trusted` (exact SHA).
 - **A job that holds a long-lived secret** pins EVERY action it runs to an exact SHA, trusted ones
   included (`pwa-pages.yaml`, whose jobs hold the release signing key and the Cloudflare token). A
   tag can be moved; a SHA cannot.

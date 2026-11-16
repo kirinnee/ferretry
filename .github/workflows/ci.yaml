@@ -84,7 +84,7 @@ jobs:
     # machine preserves tsc/Nix cache commits without paying 8 units on every main push.
     # A dispatch picks its own shape (`quick_shape`), so main's 4x8 can be measured on a branch before merge.
     runs-on: >-
-      ${{ fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]',
+      ${{ fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]',
         (github.event_name == 'push' && github.ref == 'refs/heads/main' && '4x8')
         || (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
         || '8x16')) }}
@@ -185,7 +185,7 @@ jobs:
     runs-on:
       [
         nscloud-ubuntu-24.04-amd64-8x16-with-cache,
-        nscloud-cache-tag-ferretry-nix,
+        nscloud-cache-tag-ferretry-nix-d,
         nscloud-cache-size-10gb,
         nscloud-cache-allow-commit-from-main,
       ]
@@ -238,7 +238,7 @@ jobs:
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
         && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
       - uses: actions/checkout@v5
@@ -285,7 +285,7 @@ jobs:
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
         && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
       - uses: actions/checkout@v5
@@ -308,7 +308,7 @@ jobs:
       ${{
         (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
         && 'ubuntu-latest'
-        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix-d","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
       - uses: actions/checkout@v5
