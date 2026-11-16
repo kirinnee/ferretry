@@ -142,7 +142,7 @@ const accountShape = {
   /**
    * The environment variables a profile binds to Ferretry's secret store, as `${secret:NAME}`
    * templates. REFERENCES, NEVER VALUES — the store holds the values and the daemon puts them into
-   * the launch environment; see `./env-profiles.ts` and `docs/secrets.md`.
+   * the launch environment; see `docs/secrets.md`.
    *
    * It is published here, on the record every consumer already reads, so that starting a session
    * does not have to read the fleet CONFIGURATION as well. That is not tidiness: a configuration

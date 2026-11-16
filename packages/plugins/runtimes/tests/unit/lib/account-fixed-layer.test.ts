@@ -8,7 +8,6 @@ import {
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   applyFixedLayer,
-  BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CODEX_HIDDEN_NOTICES,
@@ -25,10 +24,7 @@ import {
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   instructionDigest,
-  LEAD_RULES_INSTRUCTION,
-  LESSONS_INSTRUCTION,
   launchInstructions,
-  NOTIFY_INSTRUCTION,
   PACK_ENV,
   PACK_INSTRUCTION,
   PACK_ROUTING_ENV,
@@ -43,7 +39,7 @@ import { type ResolvedProfile, resolveProfile } from '../../../daemon/lib/accoun
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import type { HarnessKind } from '../../../daemon/lib/manifest.ts';
 
-/** What every lead agent is told: the always-on sections, in order, joined as the wrapper joins them. */
+/** What every lead agent is told (a lead's notify, board and lessons rules come from the plugins, not the wrapper): the always-on sections, in order, joined as the wrapper joins them. */
 const leadInstruction = (fy: string): string =>
   ALWAYS_ON_SECTIONS(fy)
     .map(section => section.text)
@@ -626,24 +622,14 @@ describe('the Ferretry tools in the fixed layer', () => {
   });
 });
 
-describe('passive learning teaching', () => {
-  it('should be a per-ferret system prompt section, not a tools-server variable, and teach the suggest command by name', () => {
-    // Arrange
-    const binary = 'fy';
-
-    // Act
-    const teaching = LESSONS_INSTRUCTION(binary);
-
+describe('passive learning', () => {
+  it('should be a launch switch Lessons writes, not a tools-server variable and not a wrapper section: the lessons plugin says the teaching', () => {
     // Assert
     should(FERRETRY_MCP_ENV_VARS).not.containEql(PASSIVE_LEARNING_ENV);
-    should(FERRET_SECTIONS(binary).find(section => section.env === PASSIVE_LEARNING_ENV)?.text).equal(teaching);
     should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
-    should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
-    should(teaching).containEql('global = every ferret, repo = this project');
-    should(teaching).containEql('File each once.');
-    // Compressed to make room for the Board section (cap 7,400 for the whole prompt).
-    should(teaching.length).be.below(270);
-    should(teaching).containEql('lessons_suggest');
+    should(FERRET_SECTIONS('fy').map(section => section.env)).not.containEql(PASSIVE_LEARNING_ENV);
+    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('learning');
+    for (const section of FERRET_SECTIONS('fy')) should(section.text).not.containEql('lesson suggest');
   });
 });
 
@@ -698,7 +684,7 @@ describe('hypermedia teaching', () => {
 });
 
 describe('Pack mode teaching', () => {
-  it('should be the per-ferret section after hypermedia, before agenda and lessons, naming every step by the binary it is given', () => {
+  it('should be the per-ferret section after hypermedia, before agenda, naming every step by the binary it is given', () => {
     // Arrange
     const binary = 'zz';
 
@@ -707,12 +693,7 @@ describe('Pack mode teaching', () => {
     const teaching = PACK_INSTRUCTION(binary);
 
     // Assert
-    should(sections.map(section => section.env)).deepEqual([
-      HYPERMEDIA_ENV,
-      PACK_ENV,
-      AGENDA_ENV,
-      PASSIVE_LEARNING_ENV,
-    ]);
+    should(sections.map(section => section.env)).deepEqual([HYPERMEDIA_ENV, PACK_ENV, AGENDA_ENV]);
     should(sections[1]?.text).equal(teaching);
     should(PACK_ENV).equal('FY_PACK');
     for (const step of [
@@ -741,35 +722,17 @@ describe('Pack mode teaching', () => {
   });
 });
 
-describe('NOTIFY_INSTRUCTION', () => {
-  it('should teach one quiet notice command, the opt-in ping, and no progress, with the binary name given', () => {
-    // Act
-    const text = NOTIFY_INSTRUCTION('zz');
-
+describe('the always-on instruction', () => {
+  it("should carry no notify, board or lessons copy: the plugins' instruction files (role lead) are the one emitter", () => {
     // Assert
-    should(text).startWith('Notify: the owner reads their notices, not your replies.');
-    should(text).containEql('`zz notify "<summary>" [--body "<detail>"]`');
-    should(text).containEql('a quiet notice');
-    should(text).containEql('Add `--buzz` only when it must reach their phone now.');
-    should(text).containEql('Never notify progress or chatter.');
-    // The agenda is its own switchable section: the always-on rule never teaches it, and never says Attention.
-    should(text).not.containEql('agenda');
-    should(text).not.containEql('Attention');
-    should(text).not.containEql('`fy ');
-  });
-
-  it('should stay short: it is in every prompt', () => {
-    // Assert
-    should(NOTIFY_INSTRUCTION('fy').length).be.below(450);
-  });
-
-  it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {
-    // Assert
-    should(leadInstruction('fy')).containEql(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n`);
-    should(leadInstruction('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
-      leadInstruction('fy').indexOf(NOTIFY_INSTRUCTION('fy')),
-    );
+    const text = leadInstruction('fy');
+    should(text).not.containEql('Notify:');
+    should(text).not.containEql('Board:');
+    should(text).not.containEql('Lessons:');
+    should(text).not.containEql('fy notify');
+    should(text).equal(AGENT_BASE_INSTRUCTION('fy'));
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('notify');
+    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
   });
 });
 
@@ -877,94 +840,14 @@ describe('AGENDA_INSTRUCTION', () => {
     should(AGENDA_INSTRUCTION('fy').length).be.below(1_390);
   });
 
-  it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
+  it('should be the last per-ferret section, after pack, on only when FY_AGENDA is exactly 1', () => {
     // Act
     const sections = FERRET_SECTIONS('fy');
 
     // Assert
-    should(sections.map(section => section.id)).deepEqual(['hypermedia', 'pack', 'agenda', 'learning']);
+    should(sections.map(section => section.id)).deepEqual(['hypermedia', 'pack', 'agenda']);
     should(sections.find(section => section.id === 'agenda')).match({ env: AGENDA_ENV });
     should(AGENDA_ENV).equal('FY_AGENDA');
-  });
-});
-
-describe('BOARD_INSTRUCTION', () => {
-  it('should make the board opt-in: a task only when asked, handed one or switched on', () => {
-    // Act
-    const text = BOARD_INSTRUCTION('zz');
-
-    // Assert — the daemon's opt-in refusal says how to ask for the Yes (`board/opt-in.ts`).
-    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
-    should(text).containEql(
-      "Task only if the project's board is on (`zz board`), under your task (`--parent`), or on the owner's Yes (`--approval <ask>`).",
-    );
-    should(text).not.containEql('!A'); // `!` starts a shell command in the agent's composer: only `^A<n>` is taught
-    should(text).not.containEql('all work is a task');
-    should(text).not.containEql('make one)');
-  });
-
-  it('should say a task never asks, its agenda moves it, and one task is never an umbrella', () => {
-    // Act
-    const text = BOARD_INSTRUCTION('zz');
-
-    // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
-    should(text).containEql(
-      "Tasks (&F<n>) never ask: answers, tests, Done ride the task's ask on the agenda, which moves it.",
-    );
-    should(text).containEql('One outcome, no umbrellas; add to a related task.');
-  });
-
-  it('should teach planning as a phase, the title as a sitrep and the status rewritten whole', () => {
-    // Act
-    const text = BOARD_INSTRUCTION('zz');
-
-    // Assert — the owner (&C48): "planning can be a phase!", "reading the title should directly reflect what is doing".
-    should(text).containEql('Planning is a lane.');
-    should(text).containEql("Title+summary=what it's doing (sitrep).");
-    should(text).containEql(
-      'Each step: `zz task show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz task patch <id> --file f`.',
-    );
-    should(text).not.containEql('no tasks for planning');
-  });
-
-  it("should teach that the owner's asks are public top-level tasks, never --parent or --private", () => {
-    // Act
-    const text = BOARD_INSTRUCTION('zz');
-
-    // Assert — the board answers "status of all I asked?"; a sub-task or a private task is hidden from it.
-    should(text).containEql(
-      'Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper tasks.',
-    );
-    // The gate words are gone: the ask of a task lives in its agenda, and nothing says the owner closes it.
-    should(text).not.containEql('Gate?');
-    should(text).not.containEql('raise nothing');
-    should(text).not.containEql('owner closes');
-  });
-
-  it('should teach working a task, with the real verbs and the binary name given', () => {
-    // Act
-    const text = BOARD_INSTRUCTION('zz');
-
-    // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).not.containEql('#F');
-    should(text).containEql('howToTest (where/do/see) before try');
-    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
-    should(text).containEql('Blocked:');
-    should(text).containEql('Blocked: `zz task depend`/`block`.');
-    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
-    should(text).containEql("Owner's bug:");
-    should(text).endWith('PRs, merges, `zz signal done` self-move.');
-    should(text).not.containEql('`fy ');
-  });
-
-  it('should ride last in the always-on instruction, after the notify rule, not behind a switch', () => {
-    // Assert
-    should(leadInstruction('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
-    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
-    // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
-    // the three-part status (cap 760 → 820).
-    // → 852 once it said the same words as the board plugin's own file (cap 820 → 860).
-    should(BOARD_INSTRUCTION('fy').length).be.below(860);
   });
 });
 
@@ -974,19 +857,17 @@ describe('ALWAYS_ON_SECTIONS', () => {
     const sections = ALWAYS_ON_SECTIONS('zz');
 
     // Assert
-    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
-    should(sections.map(section => section.text).join('\n\n')).equal(
-      `${AGENT_BASE_INSTRUCTION('zz')}\n\n${LEAD_RULES_INSTRUCTION('zz')}`,
-    );
+    should(sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(sections.map(section => section.text).join('\n\n')).equal(AGENT_BASE_INSTRUCTION('zz'));
   });
 });
 
 describe('instructionDigest', () => {
   it('should be a short, stable fingerprint that changes with the words', () => {
     // Act
-    const once = instructionDigest(NOTIFY_INSTRUCTION('fy'));
-    const again = instructionDigest(NOTIFY_INSTRUCTION('fy'));
-    const other = instructionDigest(NOTIFY_INSTRUCTION('zz'));
+    const once = instructionDigest(SET_UP_FERRETRY_INSTRUCTION('fy'));
+    const again = instructionDigest(SET_UP_FERRETRY_INSTRUCTION('fy'));
+    const other = instructionDigest(SET_UP_FERRETRY_INSTRUCTION('zz'));
 
     // Assert
     should(once).match(/^[0-9a-f]{14}$/u);
@@ -1074,16 +955,6 @@ describe('launchInstructions', () => {
           digest: instructionDigest(SET_UP_FERRETRY_INSTRUCTION(binary)),
         },
         {
-          id: 'notify',
-          chars: NOTIFY_INSTRUCTION(binary).length,
-          digest: instructionDigest(NOTIFY_INSTRUCTION(binary)),
-        },
-        {
-          id: 'board',
-          chars: BOARD_INSTRUCTION(binary).length,
-          digest: instructionDigest(BOARD_INSTRUCTION(binary)),
-        },
-        {
           id: 'hypermedia',
           chars: HYPERMEDIA_INSTRUCTION(binary).length,
           digest: instructionDigest(HYPERMEDIA_INSTRUCTION(binary)),
@@ -1093,11 +964,6 @@ describe('launchInstructions', () => {
           id: 'agenda',
           chars: AGENDA_INSTRUCTION(binary).length,
           digest: instructionDigest(AGENDA_INSTRUCTION(binary)),
-        },
-        {
-          id: 'learning',
-          chars: LESSONS_INSTRUCTION(binary).length,
-          digest: instructionDigest(LESSONS_INSTRUCTION(binary)),
         },
       ],
       mode: 'interactive',
@@ -1118,7 +984,7 @@ describe('launchInstructions', () => {
     should(pack?.chars).equal(PACK_INSTRUCTION('fy').length + 1 + line.length);
     should(pack?.digest).equal(instructionDigest(`${PACK_INSTRUCTION('fy')}\n${line}`));
     should(pack?.digest).not.equal(instructionDigest(PACK_INSTRUCTION('fy')));
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
   });
 
   it.each([
@@ -1127,17 +993,16 @@ describe('launchInstructions', () => {
     ['unset', {}],
     ['every switch on', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [AGENDA_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' }],
     ['every switch off', { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: '0', [AGENDA_ENV]: '0', [PASSIVE_LEARNING_ENV]: '0' }],
-  ])(
-    'should report the notify section, between settings and the per-ferret sections, for a %s launch',
-    (_name, env) => {
-      // Act
-      const ids = launchInstructions('fy', env).sections.map(section => section.id);
+  ])('should report only the tools and settings sections before the per-ferret ones, for a %s launch', (_name, env) => {
+    // Act
+    const ids = launchInstructions('fy', env).sections.map(section => section.id);
 
-      // Assert
-      should(ids.slice(0, 3)).deepEqual(['tools', 'settings', 'notify']);
-      should(launchInstructions('fy', env).sections[2]?.chars).equal(NOTIFY_INSTRUCTION('fy').length);
-    },
-  );
+    // Assert — no notify, board or learning section: the plugins say those.
+    should(ids.slice(0, 2)).deepEqual(['tools', 'settings']);
+    should(ids).not.containEql('notify');
+    should(ids).not.containEql('board');
+    should(ids).not.containEql('learning');
+  });
 
   it('should carry only the always-on sections, and withhold questions, for a launch with no mode and no switch exactly 1', () => {
     // Arrange
@@ -1147,12 +1012,12 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
   });
 
-  it('should list the agenda section only when FY_AGENDA is exactly 1, and keep the order hypermedia, pack, agenda, learning', () => {
+  it('should list the agenda section only when FY_AGENDA is exactly 1, and keep the order hypermedia, pack, agenda', () => {
     // Act
     const off = launchInstructions('fy', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' });
     const zero = launchInstructions('fy', { [AGENDA_ENV]: '0' });
@@ -1168,16 +1033,7 @@ describe('launchInstructions', () => {
     should(off.sections.map(section => section.id)).not.containEql('agenda');
     should(zero.sections.map(section => section.id)).not.containEql('agenda');
     should(yes.sections.map(section => section.id)).not.containEql('agenda');
-    should(on.sections.map(section => section.id)).deepEqual([
-      'tools',
-      'settings',
-      'notify',
-      'board',
-      'hypermedia',
-      'pack',
-      'agenda',
-      'learning',
-    ]);
+    should(on.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'pack', 'agenda']);
     // A per-ferret section carries a size and a fingerprint, so a changed word is told from a changed switch.
     should(on.sections.find(section => section.id === 'agenda')).deepEqual({
       id: 'agenda',
@@ -1192,12 +1048,12 @@ describe('launchInstructions', () => {
     const on = launchInstructions('fy', { [AGENDA_ENV]: '1' });
 
     // Assert
-    should(on.sections.slice(0, 4)).deepEqual(off.sections.slice(0, 4));
+    should(on.sections.slice(0, 2)).deepEqual(off.sections.slice(0, 2));
   });
 });
 
 describe('SUB_FERRET_INSTRUCTION', () => {
-  it('should replace the notify, board and agenda rules with two short lines that name the real verbs', () => {
+  it("should take the place of a lead's notify, board and agenda rules with two short lines that name the real verbs", () => {
     // Act
     const text = SUB_FERRET_INSTRUCTION('zz');
 
@@ -1229,13 +1085,10 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     should(text).not.match(/card/i);
   });
 
-  it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
+  it('should add the sub-ferret lines to the base prompt a lead gets alone', () => {
     // Assert
-    should(leadInstruction('fy')).equal(`${AGENT_BASE_INSTRUCTION('fy')}\n\n${LEAD_RULES_INSTRUCTION('fy')}`);
-    const lead = leadInstruction('fy').length;
-    const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
-    should(sub).be.below(lead);
-    // 759 → 840 for the task-status line (&C48, cap 760 → 880); still smaller than the lead's prompt.
+    should(leadInstruction('fy')).equal(AGENT_BASE_INSTRUCTION('fy'));
+    // 759 → 840 for the task-status line (&C48, cap 760 → 880).
     should(SUB_FERRET_INSTRUCTION('fy').length).be.below(880);
   });
 
@@ -1254,33 +1107,19 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
   });
 
-  it('should name the sub-ferret always-on sections in order, and the lead ones when the switch is off', () => {
+  it('should name the sub-ferret always-on sections in order, and none of them when the switch is off', () => {
     // Assert
     should(ALWAYS_ON_SECTIONS('zz', true).map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret']);
     should(ALWAYS_ON_SECTIONS('zz', false)).deepEqual(ALWAYS_ON_SECTIONS('zz'));
     should(launchInstructions('zz', { [SUB_FERRET_ENV]: '0', [AGENDA_ENV]: '1' }).sections.map(s => s.id)).deepEqual([
       'tools',
       'settings',
-      'notify',
-      'board',
       'agenda',
     ]);
   });
 });
 
-describe('the exact words of the Notify, Board and Sub-ferret rules (snapshots)', () => {
-  it('should say exactly this for Notify', () => {
-    should(NOTIFY_INSTRUCTION('fy')).equal(
-      'Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.',
-    );
-  });
-
-  it('should say exactly this for Board', () => {
-    should(BOARD_INSTRUCTION('fy')).equal(
-      'Board: opt-in, enforced; overrides other task rules. Task only if the project\'s board is on (`fy board`), under your task (`--parent`), or on the owner\'s Yes (`--approval <ask>`). Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper tasks. Tasks (&F<n>) never ask: answers, tests, Done ride the task\'s ask on the agenda, which moves it. One outcome, no umbrellas; add to a related task. Planning is a lane. Title+summary=what it\'s doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner\'s bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.',
-    );
-  });
-
+describe('the exact words of the Sub-ferret rules (snapshots)', () => {
   it('should say exactly this for the Sub-ferret task line', () => {
     should(SUB_FERRET_INSTRUCTION('fy').split('\n')[1]).equal(
       "With a task: each step, `fy task show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy task patch <id> --file f`; `fy task note` adds history. Link your PR `fy task link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's task? `fy task claim <id>`, don't ask. No task? Make none.",
@@ -1293,8 +1132,6 @@ describe('the words every injected prompt uses for a piece of work', () => {
     // Arrange
     const prompts = [
       AGENT_BASE_INSTRUCTION('fy'),
-      NOTIFY_INSTRUCTION('fy'),
-      BOARD_INSTRUCTION('fy'),
       SUB_FERRET_INSTRUCTION('fy'),
       HYPERMEDIA_INSTRUCTION('fy'),
       leadInstruction('fy'),
@@ -1303,7 +1140,6 @@ describe('the words every injected prompt uses for a piece of work', () => {
 
     // Assert — a person reads "task" (the glossary word); an input form is "an input", never "an input task".
     for (const prompt of prompts) should(prompt).not.match(/\bcards?\b/i);
-    should(BOARD_INSTRUCTION('fy')).containEql('`fy task show <id> --yaml`');
     should(SUB_FERRET_INSTRUCTION('fy')).containEql('`fy task claim <id>`');
     should(AGENT_BASE_INSTRUCTION('fy')).containEql('types each value in an input');
     should(AGENT_BASE_INSTRUCTION('fy')).not.containEql('input task');

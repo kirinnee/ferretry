@@ -67,7 +67,7 @@ const RESERVED_ENV_REASONS: Readonly<Record<ReservedEnvName, string>> = {
  * - `$NAME` or `${NAME}` — an indirect reference, resolved from the process environment when the
  *   wrapper runs.
  * - `${secret:NAME}`, anywhere inside the value — this daemon's secret store supplies it at launch,
- *   and the value is never written into a generated script. See `./env-profiles.ts`; that is what
+ *   and the value is never written into a generated script. That is what
  *   lets a profile authenticate an account instead of a login.
  * - anything else — a literal.
  *
@@ -112,7 +112,6 @@ export const EnvSchema = z.record(z.string(), EnvValueSchema).check(ctx => {
     }
   }
 });
-export type EnvMap = z.infer<typeof EnvSchema>;
 
 const AliasFlagsSchema = z.union([NonEmptyString, z.array(NonEmptyString).min(1)]);
 

@@ -5,9 +5,6 @@
     "daemon/adapters/ports.ts",
     "daemon/adapters/runtime-ids-file.ts",
     "daemon/adapters/runtime-session-records.ts",
-    "daemon/adapters/setup-files.ts",
-    "daemon/lib/env-profiles.ts",
-    "daemon/lib/harness-env.ts",
-    "daemon/lib/harness.ts"
+    "daemon/adapters/setup-files.ts"
   ]
 }

@@ -12,13 +12,9 @@ import {
   AGENDA_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   AGENT_TOOLS_INSTRUCTION,
-  BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   fixedLayerFor,
   HYPERMEDIA_INSTRUCTION,
-  LEAD_RULES_INSTRUCTION,
-  LESSONS_INSTRUCTION,
-  NOTIFY_INSTRUCTION,
   PACK_INSTRUCTION,
   SET_UP_FERRETRY_INSTRUCTION,
   SUB_FERRET_INSTRUCTION,
@@ -219,7 +215,8 @@ describe("a resumed conversation hears this launch's sections", () => {
 
 describe("each ferret's sections of the appended system prompt", () => {
   const BASE = 'Ferretry tools: the base instruction.';
-  const LEAD = `${BASE}\n\n${LEAD_RULES_INSTRUCTION('fy')}`;
+  // A lead's notify, board and lessons rules are the plugins' instruction files: the wrapper adds nothing for a lead.
+  const LEAD = BASE;
 
   it('should append exactly the sections this ferret switched on, after a blank line, in the fixed order', () => {
     // Arrange
@@ -242,11 +239,11 @@ describe("each ferret's sections of the appended system prompt", () => {
     should(all?.indexOf('\n\nHypermedia:')).be.above(0);
     should(all?.indexOf('\n\nPack mode:')).be.above(all?.indexOf('\n\nHypermedia:') ?? 0);
     should(all?.indexOf('\n\nAgenda mode:')).be.above(all?.indexOf('\n\nPack mode:') ?? 0);
-    should(all?.indexOf('\n\nLessons:')).be.above(all?.indexOf('\n\nAgenda mode:') ?? 0);
+    should(all).not.containEql('Lessons:');
     should(agenda).startWith(`--append-system-prompt=${LEAD}\n\nAgenda mode: `);
     should(none).not.containEql('Agenda mode:');
     should(off).not.containEql('Agenda mode:');
-    should(all).containEql('`fy lesson suggest');
+    should(all).not.containEql('lesson suggest');
   });
 
   it("should put Codex's sections inside the TOML string, escaped for it", () => {
@@ -347,7 +344,6 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     { env: 'FY_HYPERMEDIA', text: HYPERMEDIA_INSTRUCTION('fy') },
     { env: 'FY_PACK', text: PACK_INSTRUCTION('fy') },
     { env: 'FY_AGENDA', text: AGENDA_INSTRUCTION('fy') },
-    { env: 'FY_LEARNING_PASSIVE', text: LESSONS_INSTRUCTION('fy') },
   ] as const;
   const combinations = Array.from({ length: 2 ** SWITCHES.length }, (_, mask) =>
     SWITCHES.filter((_switch, index) => (mask & (1 << index)) !== 0),
@@ -391,7 +387,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
   );
 
   it.each(['claude', 'codex'] as const)(
-    'should give a %s ferret the notify rule, and not the agenda, even with every switch off',
+    'should give a %s ferret no notify, board or lessons copy, and not the agenda, even with every switch off',
     harness => {
       // Arrange
       const env = Object.fromEntries(SWITCHES.map(section => [section.env, '0']));
@@ -406,9 +402,12 @@ describe('the appended system prompt of a real agent runtime, for every combinat
                 '""',
             );
 
-      // Assert — the binary is named by the wrapper's own command, never a hard-coded name
-      should(prompt).containEql(NOTIFY_INSTRUCTION('fy'));
-      should(prompt).containEql('`fy notify "<summary>" [--body "<detail>"]`');
+      // Assert — a lead's notify, board and lessons rules are the plugins' instruction files, said once, not by the wrapper
+      should(prompt).not.containEql('Notify:');
+      should(prompt).not.containEql('fy notify');
+      should(prompt).not.containEql('Board:');
+      should(prompt).not.containEql('Lessons:');
+      should(prompt).not.containEql('lesson suggest');
       should(prompt).not.containEql('Agenda mode:');
     },
   );
@@ -426,12 +425,9 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     const sizes = {
       tools: AGENT_TOOLS_INSTRUCTION.length,
       settings: SET_UP_FERRETRY_INSTRUCTION('fy').length,
-      notify: NOTIFY_INSTRUCTION('fy').length,
-      board: BOARD_INSTRUCTION('fy').length,
       hypermedia: HYPERMEDIA_INSTRUCTION('fy').length,
       pack: PACK_INSTRUCTION('fy').length,
       agenda: AGENDA_INSTRUCTION('fy').length,
-      lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
@@ -458,6 +454,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     // The owner's split-by-content-kind rule (&F946: "tabs by content kind (serial stays one)") took agenda 1,289 → 1,311 (cap 1,320), paid for in part by the open line's placeholders; the rest of the wording is pinned, so the whole-prompt cap went 7,950 → 7,970 (`8_000 - 30`, still under 8 KB): 7,964 measured.
     // The owner's rebase-before-push rule (C58 O17, one sentence in Tools: 1,261 → 1,516) is the one rule that could not be paid for in
     // words (everything else is pinned by tests), so the whole-prompt cap went 8,000 → 8,250 and Tools 1,300 → 1,530: 8,232 measured.
+    // The notify, board and lessons copies are gone (u2-13: the plugins' instruction files are the one emitter), so the prompt is smaller by those three sections.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
     // The owner's board, agenda and explainer rules (&C48: board 757 → 814, agenda 1,311 → 1,380, hypermedia 1,320 → 1,209)
     // were paid for in words. The cap now counts the blank line between sections, as the composed prompt has it: 7,993
@@ -466,11 +463,8 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + separators + longestRouting).be.below(8_250);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_530);
-    should(sizes.board).be.below(860);
     should(sizes.hypermedia).be.below(1_550);
-    should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
-    should(sizes.notify).be.below(450);
     should(sizes.agenda).be.below(1_390);
   });
 
