@@ -18,7 +18,7 @@ import {
 import { ClockSendScheduler } from '../../../daemon/delivery/adapters/clock-send-scheduler.ts';
 import { StateSendChannel } from '../../../daemon/delivery/adapters/state-send-channel.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/state-send-ledger.ts';
-import type { SendRecord } from '../../../daemon/delivery/lib/types.ts';
+import type { SendRecord } from '../../../daemon/seams/ledger-types.ts';
 import { StateDraftRepository } from '../../../daemon/drafts/adapters/state-draft-repository.ts';
 import { StateHypermediaSwitch } from '../../../daemon/hypermedia/adapters/state-hypermedia-switch.ts';
 import { StateAnswerLedger } from '../../../daemon/questions/adapters/state-answer-ledger.ts';

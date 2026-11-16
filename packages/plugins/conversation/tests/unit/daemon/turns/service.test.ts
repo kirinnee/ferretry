@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { HarnessDialog, PermissionRequest, SessionTurnState } from '../../../../daemon/seams/protocol.ts';
+import type { HarnessDialog, PermissionRequest, SessionTurnState } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import type { TurnPaneEvidence } from '../../../../daemon/turns/lib/policy.ts';
 import {

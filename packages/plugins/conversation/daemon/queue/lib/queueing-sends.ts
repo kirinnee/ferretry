@@ -1,11 +1,11 @@
-import type { QueueAuthor, SendSenderKind } from '../../seams/protocol.ts';
+import type { QueueAuthor, SendSenderKind } from '@ferretry/core-mailbox/contract';
 import type { ClockPort } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendMessageRequest, SendOutcome } from '../../delivery/lib/service.ts';
-import { type SendLedger, SendRefused, type SendTarget } from '../../delivery/lib/types.ts';
-import { answerOf } from './answer.ts';
+import { type SendLedger, SendRefused, type SendTarget } from '@ferretry/core-mailbox/contract';
+import { answerOf } from '@ferretry/core-mailbox/contract';
 import type { QueueDeliverer } from './deliverer.ts';
-import { boardOnly } from './policy.ts';
+import { boardOnly } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueService } from './service.ts';
 
 /**

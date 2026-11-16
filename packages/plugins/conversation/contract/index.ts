@@ -23,7 +23,6 @@ export * from './wire-read.ts';
 export * from './wire-search.ts';
 export * from './compact-at-rules.ts';
 export * from './draft-ops.ts';
-export * from './turn-handoff.ts';
 export * from './fy-render-caps.ts';
 export * from './fy-render.ts';
 export * from './reference-catalog.ts';

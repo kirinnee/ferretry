@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
-import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/seams/protocol.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import type { ClockPort, SerialExecutor } from '../../../../daemon/seams/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
+import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
 import {
   type ComposerClearOutcome,
   type ComposerSubmitOutcome,
   defaultSessionSendSettings,
   type InboundMessage,
-  nextTurnNumber,
   type OutboundMessage,
   type PeerWaitEnder,
   ReviveRefusedForSend,
@@ -25,7 +25,6 @@ import {
   type SendPaneObservation,
   SendPending,
   type SendQueueOutcome,
-  type SendRecord,
   SendRefused,
   type SendRepository,
   SendRetypeWithheld,
@@ -39,11 +38,10 @@ import {
   type SendTurnStore,
   SendUnavailable,
   SendUnconfirmed,
-  SessionSendService,
-  STRANDED_ENTER_LIMIT,
   sendRecordFor,
   sendRecordView,
-} from '../../../../daemon/delivery/lib/index.ts';
+} from '@ferretry/core-mailbox/contract';
+import { nextTurnNumber, SessionSendService, STRANDED_ENTER_LIMIT } from '../../../../daemon/delivery/lib/index.ts';
 import { at } from '../../../support/instant.ts';
 
 /**

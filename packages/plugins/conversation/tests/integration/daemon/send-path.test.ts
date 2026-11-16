@@ -24,7 +24,7 @@ import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts
 import { ClientConversationGateway } from '../../../cli/lib/gateway.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
-import { queuedPayloadInstruction, turnInstruction } from '../../../daemon/delivery/lib/index.ts';
+import { queuedPayloadInstruction, turnInstruction } from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 import { callOf } from '../../support/mount-call.ts';
 import { memoryStatePort } from '../../support/state.ts';

@@ -30,7 +30,7 @@ import type {
   SessionState,
   SessionStatus,
   SessionTurnState,
-} from '../../seams/protocol.ts';
+} from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent } from '../../seams/transcript-types.ts';
 
 /** What one live frame of the agent's pane shows. */

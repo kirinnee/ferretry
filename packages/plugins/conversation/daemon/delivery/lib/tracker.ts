@@ -1,9 +1,9 @@
-import type { SendUnaccountedReason } from '../../seams/protocol.ts';
+import type { SendEvidenceReading, SendEvidenceSource } from '@ferretry/core-mailbox/contract';
+import type { SendUnaccountedReason } from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { ObservedHumanInput } from '../../seams/transcript-types.ts';
-import { paneMidTurn, typedIntoBusyPane } from './policy.ts';
-import { strandablePointer, strandableText } from './stranded.ts';
+import { paneMidTurn, typedIntoBusyPane } from '@ferretry/core-mailbox/contract';
+import { strandablePointer, strandableText } from '@ferretry/core-mailbox/contract';
 import {
   attemptsAllowed,
   deadlineOf,
@@ -12,20 +12,20 @@ import {
   judgeWatchedSends,
   type SendTrackerSettings,
   type SendVerdict,
-} from './tracking.ts';
+} from '@ferretry/core-mailbox/contract';
+import { type SendRecord } from '../../seams/ledger-types.ts';
 import {
   isUpdateUnconfirmed,
   type SendHeldAt,
   type SendLedger,
   type SendNoticeOwed,
-  type SendRecord,
   type SendRepository,
   SendRetypeWithheld,
   type SendTarget,
   type SendTerminal,
   type SendTracking,
   TERMINAL_SEND_STATUSES,
-} from './types.ts';
+} from '@ferretry/core-mailbox/contract';
 
 /**
  * Where a send WENT — the matcher the send ledger always said belonged to a monitor that did not
@@ -46,29 +46,6 @@ import {
  * deadline; and a reader of the ledger asks for a look before it reads. A daemon restart re-derives
  * every in-flight send from the transcript at boot rather than re-typing anything.
  */
-
-/** One read of a session's transcript evidence. `readable: false` means absence cannot be proven. */
-export interface SendEvidenceReading {
-  readonly readable: boolean;
-  /** The session has no transcript the daemon can prove is its own, which no amount of waiting fixes. */
-  readonly unbound?: true;
-  /**
-   * Not unreadable — still reading. A look reads a bounded amount and keeps its place, so a huge
-   * transcript is read across several looks; until the window reaches the end, absence is not yet
-   * provable, and that is a reason to look again, never to call a message unconfirmed.
-   */
-  readonly catchingUp?: true;
-  readonly inputs: readonly ObservedHumanInput[];
-}
-
-/** The transcript side: what the harness has recorded the agent receiving or holding. */
-export interface SendEvidenceSource {
-  /**
-   * What the transcript holds from `since` on — the acceptance of the oldest send being looked for,
-   * before which nothing can prove one. A source may read less than the whole file because of it.
-   */
-  read(id: SessionId, since: string): Promise<SendEvidenceReading>;
-}
 
 /** One pending look per session; scheduling again replaces it. */
 export interface SendScheduler {

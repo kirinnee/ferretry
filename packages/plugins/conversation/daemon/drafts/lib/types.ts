@@ -1,5 +1,6 @@
 import type { Instant } from '@ferretry/std';
-import type { AgendaId, SharedDraftSlot, SharedDraftSnapshot } from '../../seams/protocol.ts';
+import type { AgendaId } from '@ferretry/core-mailbox/contract';
+import type { SharedDraftSlot, SharedDraftSnapshot } from '../../seams/protocol.ts';
 
 /**
  * The draft as it was last written, or nothing when this session has never had one. A session holds a CHAT

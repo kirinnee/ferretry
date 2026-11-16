@@ -25,13 +25,8 @@ import { useChatScrollSlot, useDaemonControls, useOptionalRouter } from '@ferret
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient, ScreenProps } from '@ferretry/kernel/manifest';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import {
-  MessageSent,
-  QuestionAnswered,
-  QuestionAsked,
-  QueueChanged,
-  type QueuedMessage,
-} from '../../contract/index.ts';
+import { QueueChanged, type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { MessageSent, QuestionAnswered, QuestionAsked } from '../../contract/index.ts';
 import { useConversationClient, useConversationDaemon } from '../client.ts';
 import { ConversationOutbox } from '../composer/conversation-outbox.tsx';
 import {

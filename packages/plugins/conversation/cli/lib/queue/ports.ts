@@ -1,4 +1,4 @@
-import type { QueuedMessage } from '../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 
 /** Presentation port for `fy queue`: one line at a time; failures travel as thrown errors. */
 export interface QueueOutput {

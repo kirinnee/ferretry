@@ -26,11 +26,13 @@ sections below still describe the 4.x pipeline in places; on the 5.0 tree the di
   (`harness-contract-latest.yaml` and its realworld leg), and Realworld's macOS containment, Safari and
   tmux 3.8 proofs. Realworld is nightly and dispatch only (#1573).
 - **Quick Checks** on every pull request: install (whose `postinstall` regenerates the plugin
-  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (one `all` group
-  globbing `packages/`), the coverage ledger over every `lib/` directory at any depth, treefmt, every
+  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (five groups split by
+  package, run side by side, longest first) with the repository tooling's own tests beside them, and the coverage
+  ledger over every `lib/` directory at any depth.
+- **Static Checks** on exactly the same events, BESIDE Quick (`quick.sh --static`): treefmt, every
   pre-commit hook (typecheck of every workspace package and `scripts/`, the 5.0 checks through
   `scripts/validate/rebuild-checks.sh`), and the build part (Nix `fy` + `fyd`, the Worker rehearsals once
-  ported, the app bundle once it has a build script).
+  ported, the app bundle once it has a build script). Never scoped.
 - **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
   Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
   Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the
@@ -46,18 +48,19 @@ every subsequent push with that label runs it again, proving the exact head SHA.
 Adding any other label is a no-op and uses its own concurrency group, so it cannot
 cancel a running set.
 
-| Set / job                                                | PR runner           | Other events                          | Work                                                        |
-| -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger  |
-| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
-| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
-| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
-| E2E shards                                               | Namespace 2x4       | GitHub                                | journeys and advisory policy as before                      |
-| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                   |
-| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)    | machine budgets on a quiet dedicated VM                     |
-| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
-| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
-| Proof Reuse                                              | GitHub              | GitHub                                | a few API calls, no Nix                                     |
+| Set / job                                                | PR runner           | Other events                           | Work                                                        |
+| -------------------------------------------------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------- |
+| Quick Checks                                             | Namespace 8x16      | Namespace 8x16 on main; dispatch picks | six unit groups + scripts tests side by side; unit ledger   |
+| Static Checks                                            | Namespace 8x16      | Namespace 8x16                         | format, every pre-commit gate, build checks                 |
+| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                         | six isolated groups, then the integration ledger            |
+| Full Gates                                               | Namespace 4x8       | GitHub                                 | both Knip checks and route agreement (Knip needs >4GB)      |
+| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                 | cross-compile, upload the binaries, then SIT on those bytes |
+| E2E shards                                               | Namespace 2x4       | GitHub                                 | journeys and advisory policy as before                      |
+| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                 | existing geometry assertions and evidence                   |
+| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)     | machine budgets on a quiet dedicated VM                     |
+| Linux smoke and macOS jobs                               | GitHub              | GitHub                                 | stock platform proofs; existing macOS policy                |
+| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                 | seconds of API/shell work, no Nix                           |
+| Proof Reuse                                              | GitHub              | GitHub                                 | a few API calls, no Nix                                     |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -99,11 +102,30 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   status, waits for all parts even after a failure, and writes per-part durations to
   the job summary and `coverage/ci/<set>/results.tsv`. Each tier's 100% ledger runs
   in the same job after its groups; a missing or failed group keeps the job red.
-  Quick finishes all unit groups first, then runs format/gates/build under
-  `nice -n 10`. The first 8x16 run doubled the archive unit test from 3.819 seconds
-  on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
-  this ordering rather than a timeout increase. Its summary names each group's
-  slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+  `parallel.sh` is a POOL: the next part starts the moment any running part ends, so parts are listed longest
+  first. The contention rule still holds - no test budget is raised to make room for other work - and is now met by
+  RUNNER, not by ordering: the static parts (format/gates/build, `nice -n 10`) run in their own `Static Checks` job,
+  so Quick's 8x16 runs only the unit groups and the scripts tests, six at a time. Static
+  Checks is an 8x16 with three parts and four gates at a time, as on Quick's runner before (on a 4x8 the TypeScript 7
+  tsc was OOM-killed with four gates and with two). The first 8x16
+  run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
+  instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
+  `unit-timings.tsv` in the part artifact.
+- **Why six unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
+  files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
+  260 s (its `tests/unit/host-config/` alone 147 s), runtimes 149, voice 75, conversation 58, catalogs 31, std 24,
+  browsers 23, terminals 23, board 20, ferrets 20, everything else ~118. The groups balance by those seconds:
+  `runtimes` (~150), `kernel-host-config` (~145), `conversation-voice` (~133), `kernel` (the rest, ~110), `plugins-a`
+  (catalogs, browsers, terminals, std: ~100) and `everything-else` (~160). A plugin package stays whole (the ledger
+  passes a file only when ONE group covers it 100%); the kernel is split by test folder because it has a single
+  `lib/` file (`app/lib/`), which its `kernel` group covers alone, so the split cannot move a judged file between
+  groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-card
+  tick writes) passed every time behind app, cli, core and the plugins before it in one process, and missed the budget
+  (128-164 ms) twice as the FIRST files of a fresh process - with six and with four processes at once, so not CPU. The
+  budget is unchanged; the test keeps the position it always passed in. Rebalance from
+  `unit-timings.tsv` and the JUnit per-file times, never by guessing. A SCOPED run may leave a group with no file;
+  only then is an empty group not a failure (`group-files.sh` says so, `test.sh` leaves an empty ledger and a
+  `scoped-out` marker).
 - **One-folder rule.** `one-folder.yaml` runs `scripts/ci/one-folder.ts` on a pull request into `rebuild/5.0-after`: every changed
   file outside the PR's home package must be named under `## Outside files` in the PR body, with a reason (the rule is
   [Architecture, "One feature, one folder"](../architecture/index.md)). It is a workflow of its own because it reads the PR body, so
@@ -205,10 +227,13 @@ run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <
   their own. Local typechecks keep their ordinary non-incremental default.
   The Quick summary records the cache action's exact hit/miss output (or unknown),
   so partial/missing cache paths remain visible rather than inferred from speed.
-  Main's Quick uses Namespace 4x8, with up to three parts and two gate hooks at once;
-  Knip is outside Quick, and units finish before builds/typechecks start, limiting
-  memory overlap. A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) lets a branch
-  measure main's 4x8 shape before merge; pull requests and main ignore it.
+  Main's Quick uses the pull-request 8x16 too. The six unit groups and the scripts tests do
+  not fit a 4x8: dispatch run 43825305638 took 8.4 min with three parts at once and the
+  real-tree TypeScript guard (`scripts/gen/tests/fleet-link-callers.test.ts`) hit its 180 s
+  timeout, where the 8x16 ran the same parts in 3.8 min. Main's Quick runs only when no pull
+  request proved the merged tree, so it is the fallback and must be the shape that is green.
+  A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) measures another shape;
+  pull requests and main ignore it.
 - **Measure instances, not just step time.** One unit-minute is one vCPU with 2 GB RAM
   for a billed minute, with a one-minute minimum per instance. Namespace instance
   lifetime includes boot/teardown; cache snapshots bill attached GB × instance-hours.
@@ -378,7 +403,8 @@ main](#proof-reuse-on-main)).
 | Job              | Check name                           | Work                                                                                                                                                                   |
 | ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
-| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                                     |
+| `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                     |
+| `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build                                                                                |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
 | `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                                             |

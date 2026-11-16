@@ -1,6 +1,6 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import {
   type DeliveryView,
@@ -8,15 +8,16 @@ import {
   movesFrom,
   type OwnDraft,
   reasonForWaiting,
-} from '../../../../daemon/queue/lib/delivery.ts';
+} from '@ferretry/core-mailbox/contract';
 import {
   defaultQueueDeliverySettings,
   QueueDeliverer,
   type QueueDelivery,
   type QueueDeliverySettings,
 } from '../../../../daemon/queue/lib/deliverer.ts';
-import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
-import { type SendFate, type SendPaneObservation, type SendTarget } from '../../../../daemon/delivery/lib/types.ts';
+import { foldQueue, type QueueEvent } from '@ferretry/core-mailbox/contract';
+import { type SendFate } from '../../../../daemon/seams/ledger-types.ts';
+import { type SendPaneObservation, type SendTarget } from '@ferretry/core-mailbox/contract';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 
 const ID = parseSessionId('session-1');

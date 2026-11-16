@@ -16,7 +16,7 @@ import {
   type SendRequest,
   type SendResult,
   SendResultSchema,
-} from '../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 import type { ConversationCaller } from './seam.ts';
 
 /** How long a failed send's request id is reused for the same words. */

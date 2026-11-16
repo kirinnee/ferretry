@@ -5,7 +5,7 @@ import {
   type QueueWaitReason,
   type SendRecord,
   type SendResult,
-} from '../../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 
 /** How a send reached the ferret, as the daemon answered. */
 type SendDisposition = SendResult['disposition'];

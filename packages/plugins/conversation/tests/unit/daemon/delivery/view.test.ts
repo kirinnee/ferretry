@@ -1,16 +1,16 @@
 import { describe, it } from 'bun:test';
-import { SendRecordSchema } from '../../../../daemon/seams/protocol.ts';
+import { SendRecordSchema } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
+import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
 import {
-  AgentSendFailureNotifier,
-  type SendRecord,
   type SendTarget,
   sendFailureNotice,
   sendRecordView,
   TranscriptSendEvidence,
-} from '../../../../daemon/delivery/lib/index.ts';
-import type { SessionTranscriptReader, TranscriptTarget } from '../../../../daemon/seams/transcript-reader.ts';
+} from '@ferretry/core-mailbox/contract';
+import { AgentSendFailureNotifier } from '../../../../daemon/delivery/lib/index.ts';
+import type { SessionTranscriptReader, TranscriptTarget } from '@ferretry/core-mailbox/contract';
 import type {
   ObservedHumanInput,
   TranscriptBatch,

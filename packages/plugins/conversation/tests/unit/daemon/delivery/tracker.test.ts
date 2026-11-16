@@ -1,22 +1,24 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
-import { turnFileInstruction } from '../../../../daemon/seams/protocol.ts';
+import { turnFileInstruction } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { type ClockPort, type SerialExecutor } from '../../../../daemon/seams/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
+import { type SendRecord } from '../../../../daemon/seams/ledger-types.ts';
 import {
   defaultSendTrackerSettings,
-  lookBeforeReading,
-  OWED_NOTICE_RETRY_LIMIT,
-  SEND_READ_LOOK_BUDGET_MS,
   type SendEvidenceReading,
   type SendHeldAt,
   type SendPaneObservation,
-  type SendRecord,
   SendRetypeWithheld,
   type SendRetypeWithholding,
   type SendSettlement,
   type SendTarget,
+} from '@ferretry/core-mailbox/contract';
+import {
+  lookBeforeReading,
+  OWED_NOTICE_RETRY_LIMIT,
+  SEND_READ_LOOK_BUDGET_MS,
   SendTracker,
 } from '../../../../daemon/delivery/lib/index.ts';
 import {
