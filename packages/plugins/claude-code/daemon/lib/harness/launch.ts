@@ -1,4 +1,11 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
+import {
+  CHANNEL_AGENT_INSTRUCTION,
+  CLAUDE_CHANNELS_FLAG,
+  channelToolsServer,
+  claudeChannelsFor,
+  FERRETRY_MCP_SERVER,
+} from '@ferretry/plugin-runtimes/contract';
 import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
 import {
@@ -41,7 +48,22 @@ export interface HomeInputs {
   readonly effort?: string | undefined;
   /** The start asked for (`true`) or against (`false`) the harness's fast mode; absent leaves Claude's own setting. */
   readonly fast?: boolean | undefined;
+  /**
+   * The ferret is launched with Ferretry's message channel (see {@link channelsOn}): the tools server is added to its MCP
+   * servers (run as {@link HomeInputs.fyCommand}, with the launch marker) and its memory says how to treat channel messages.
+   */
+  readonly channels?: boolean | undefined;
+  /** The `fy` executable the tools server runs as; read only with {@link HomeInputs.channels}. */
+  readonly fyCommand?: string | undefined;
 }
+
+/**
+ * Whether a launch gets the channel: the `channels` setting when it is written, otherwise only a login whose own account file
+ * says `claude_max` (the `account` part Runtimes adds). Team, Enterprise, any other type and an unknown one are OFF: a refused
+ * channel would only cost every message a receipt window before it was typed.
+ */
+export const channelsOn = (explicit: boolean | undefined, parts: readonly LaunchPart[]): boolean =>
+  claudeChannelsFor(explicit, parts.flatMap(part => (part.kind === 'account' ? [part.organizationType] : [])).at(-1));
 
 export interface HomeText {
   readonly memory: string;
@@ -77,12 +99,17 @@ export function homeText(inputs: HomeInputs): HomeText {
   const memory = [
     ...inputs.instructions.map(entry => entry.text.trim()),
     ...inputs.parts.flatMap(part => (part.kind === 'instruction' ? [part.text.trim()] : [])),
+    ...(inputs.channels === true ? [CHANNEL_AGENT_INSTRUCTION] : []),
   ]
     .filter(text => text !== '')
     .join('\n\n');
-  const servers = Object.fromEntries(
-    inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
-  );
+  const servers = {
+    ...Object.fromEntries(inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : []))),
+    // Ours is added LAST: a profile's own server of that name never replaces the one the channel is loaded from.
+    ...(inputs.channels === true
+      ? { [FERRETRY_MCP_SERVER]: channelToolsServer(inputs.fyCommand ?? 'fy') as never }
+      : {}),
+  };
   const settings = deepMergeSettings(settingsDocument(inputs), fixed.settings);
   // The compaction trigger a login publishes (a `compact` part), where Claude reads it: `autoCompactWindow`.
   const compactAt = inputs.parts.flatMap(part => (part.kind === 'compact' ? [part.at] : [])).at(-1);
@@ -116,6 +143,8 @@ export interface CommandInputs {
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly model?: string | undefined;
   readonly hasMcp: boolean;
+  /** Ferretry's message channel is loaded (see {@link HomeInputs.channels}): its flag is on the argv and the MCP file is named. */
+  readonly channels?: boolean | undefined;
   /** The ferret's mode (`LaunchSpec.mode`): with {@link questionTool} on, only an interactive one keeps the question tool. */
   readonly mode?: 'interactive' | 'auto' | undefined;
   /** `HarnessConfig.questionTool`: the opt-in that gives an interactive ferret its question tool back. */
@@ -169,12 +198,14 @@ function claudeCommand(inputs: CommandInputs): readonly string[] {
     // A flag the items leave valueless at their end (`--model`, `--add-dir`) takes the NEXT word whatever it is. This
     // disposable copy of the overlay, one attached word, is what it takes; the real pair after it is never eaten.
     ...(itemFlags.length === 0 ? [] : [`--settings=${inputs.home}/${HOME_FILES.overlay}`]),
+    // The channel's flag, with `=` (the option takes several servers; a bare one would swallow the arguments after it).
+    ...(inputs.channels === true ? [CLAUDE_CHANNELS_FLAG] : []),
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
     ...questionArguments(inputs.mode, inputs.questionTool),
-    ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
+    ...(inputs.hasMcp || inputs.channels === true ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
     ...readAllowArguments(inputs.readable ?? []),

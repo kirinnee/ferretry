@@ -75,6 +75,7 @@ import {
   sameSettingsValue,
   settingsKey,
 } from './layering.ts';
+import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -225,12 +226,6 @@ export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
 
-/** The name the Ferretry tools server is registered under, in both harnesses. */
-const FERRETRY_MCP_SERVER = 'ferretry';
-
-/** How the harness starts the tools server: the `fy` the wrapper already uses, as `fy mcp serve`. */
-const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
-
 /**
  * The variables the tools server needs from the agent's environment: where the daemon is, and the
  * agent session's own credential — the one thing that tells the daemon which session is calling, and
@@ -369,7 +364,9 @@ export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
       command: fyCommand,
       args: [...FERRETRY_MCP_ARGS],
       // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
-      env: { FY_TOKEN: '' },
+      env: {
+        FY_TOKEN: '',
+      },
     },
   },
 });

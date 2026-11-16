@@ -34,7 +34,7 @@ export interface DaemonHealthSnapshot {
   readonly supervisesWarden: boolean;
 }
 
-interface SessionHealthInventory {
+export interface SessionHealthInventory {
   observe(): Promise<DaemonHealthSnapshot>;
 }
 
@@ -59,7 +59,7 @@ export interface ConsistencyPassPort {
 }
 
 /** The two repairs a self-check is allowed to perform. Both must be safe to run on a healthy fleet. */
-interface SessionHealthRepairPort {
+export interface SessionHealthRepairPort {
   startMonitor(id: string): Promise<void>;
   rearmWarden(): Promise<void>;
 }
@@ -83,7 +83,7 @@ export interface SessionExitPort {
   settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean>;
 }
 
-interface SessionHealthEventSink {
+export interface SessionHealthEventSink {
   emit(event: SessionHealthEvent): Promise<void>;
 }
 

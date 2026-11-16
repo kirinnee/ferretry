@@ -138,6 +138,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         sockets,
         tools: {
           search_work: b.tools.search_work,
+          ...a.tools,
         },
         provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
         hooks: {

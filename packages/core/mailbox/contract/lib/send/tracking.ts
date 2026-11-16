@@ -85,6 +85,15 @@ export interface SendTrackerSettings {
   readonly strandedWatchMs: number;
   /** The longest wait between two looks at an unconfirmed send never yet seen in the composer (B187). */
   readonly strandedBackoffMaxMs: number;
+  /**
+   * How long a send handed to a Claude ferret's MCP channel has to show the harness's own RECEIPT — the `enqueue` line the
+   * transcript gains the instant the channel message arrives, even mid-turn (measured at 13 ms idle) — counted from the
+   * MCP server's claim (from the send, when it never claimed). A claimed message with no receipt by then marks the
+   * ferret's channel broken, and the message is typed instead; an unclaimed one is simply typed.
+   */
+  readonly channelReceiptMs: number;
+  /** How long a channel send whose transcript cannot be read waits for it to be, before it is said unconfirmed. */
+  readonly channelUnreadableMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -98,14 +107,16 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   },
   reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
-  untypedLookMs: 5_000,
+  untypedLookMs: 1_000,
   stuckAlarmMs: 2 * 60_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
+  channelReceiptMs: 10_000,
+  channelUnreadableMs: 30_000,
   typedStableMs: 4_000,
   submitNudgesMs: [4_000, 12_000, 30_000],
-  deferredNudgeMs: 5_000,
+  deferredNudgeMs: 1_000,
   strandedWatchMs: 10 * 60_000,
   strandedBackoffMaxMs: 10 * 60_000,
 };
@@ -330,6 +341,17 @@ function evidenceSince(record: SendRecord, slackMs: number): number {
 }
 
 /**
+ * Whether this input may prove this send at all. A message that came through Ferretry's channel carries the `send_id` of
+ * the send it is, and ONLY that send is proven by it; a send handed to the channel is proven ONLY by an input carrying its
+ * own id. Two identical channel messages share a text and never a receipt, and a typed send never takes a channel message's
+ * proof for its own. Anything else is told by its text, as before.
+ */
+function ownedBy(input: ObservedHumanInput, record: SendRecord): boolean {
+  if (input.channelSendId !== undefined) return input.channelSendId === record.sendId;
+  return record.path !== 'channel';
+}
+
+/**
  * Judges every watched send against one reading of the transcript, ONE-TO-ONE.
  *
  * Sends are taken oldest first and each takes the EARLIEST unclaimed user record that carries its
@@ -349,7 +371,8 @@ function judgeSends(
   for (const record of ordered) {
     const needle = normalized(record.matchText ?? record.message);
     const since = evidenceSince(record, slackMs);
-    const after = (input: ObservedHumanInput): boolean => Date.parse(input.observedAt) >= since;
+    const after = (input: ObservedHumanInput): boolean =>
+      Date.parse(input.observedAt) >= since && ownedBy(input, record);
     const entered = inputs.find(
       input =>
         ENTERED.has(input.proof) &&
@@ -410,9 +433,12 @@ function judgeMerged(
   inputs: readonly ObservedHumanInput[],
   slackMs: number,
 ): void {
-  const pending = ordered.filter(record => verdicts.get(record.sendId)?.delivered === undefined);
+  // A channel message is one whole message with its own id: it is never half of a joined record, nor a joined one.
+  const pending = ordered.filter(
+    record => record.path !== 'channel' && verdicts.get(record.sendId)?.delivered === undefined,
+  );
   for (const input of inputs) {
-    if (!ENTERED.has(input.proof) || taken.has(input.proofKey)) continue;
+    if (!ENTERED.has(input.proof) || taken.has(input.proofKey) || input.channelSendId !== undefined) continue;
     const target = squeezed(input.text);
     const run = mergedRun(pending, target, Date.parse(input.observedAt), slackMs);
     if (run === undefined) continue;
@@ -459,8 +485,8 @@ function mergedRun(
 export function sendStuckNotice(recipient: string, record: SendRecord, waitedMs: number): string {
   return (
     `Your message to ${recipient} (send ${record.sendId}) has not been delivered yet: for ${Math.round(waitedMs / 60_000)} min ` +
-    `Ferretry could not read ${recipient}’s input box to prove it empty, so nothing was typed. It is kept and tried ` +
-    `again every few seconds, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
+    `${recipient}’s input box was not safe to type into (its screen could not be read to prove it empty, it held text, a dialog was up, or it was compacting), so nothing was typed. It is kept and tried ` +
+    `again every second, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
     'tell the owner: whatever is on that ferret’s screen instead of an empty input box is what holds it.'
   );
 }

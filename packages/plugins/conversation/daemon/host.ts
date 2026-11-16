@@ -4,6 +4,9 @@ import { type FerretsApi, type SitrepLineSource } from '@ferretry/core-ferrets/c
 import type { HookInvoker } from '@ferretry/kernel/manifest';
 import type { Instant, Result } from '@ferretry/std';
 import { err, milliseconds, ok } from '@ferretry/std';
+import { channelSenderName, channelTools } from './channel/index.ts';
+import { ChannelOutbox } from './channel/lib/outbox.ts';
+import { CHANNEL_WRITE_BUDGET_MS } from '../contract/wire-channel.ts';
 import {
   type AttachmentSource,
   harnessFamily,
@@ -103,6 +106,8 @@ export interface ConversationAHalf {
   readonly ownerChat: AskOwnerChat;
   /** The queue log and send ledger over the files this plugin keeps, handed to the Mailbox through `mailbox.host`. */
   readonly mailboxHost: MailboxHost;
+  /** The agent tools a Claude ferret's MCP server pumps its channel with (`channel_poll`, `channel_claim`). */
+  readonly tools: ReturnType<typeof channelTools>;
   /** The hypermedia switch the owner set for a ferret, or `undefined` when none (the launch reads it). */
   hypermediaRecorded(ferret: string): Promise<boolean | undefined>;
   /** The ferret stopped or went away: the question it was asking is withdrawn, so `question.json` goes. */
@@ -527,8 +532,35 @@ export function buildConversationA(deps: {
     },
   };
 
+  /**
+   * THE CLAUDE CHANNEL'S OUTBOX: what waits to be forwarded into a Claude ferret's session by the MCP server it already
+   * runs, and whether that server is listening. A ferret's or the daemon's message goes through it instead of the composer
+   * (the Mailbox's send path); the tracker proves it from the transcript and types it ONCE if nothing arrived.
+   */
+  const channelOutbox = new ChannelOutbox({
+    nowMs: () => kernel.clock.nowMs(),
+    after: (ms, run) => kernel.clock.after(milliseconds(ms), run),
+  });
   /** What the Mailbox needs of the files and terminals this plugin keeps (it never opens them itself). */
   const mailboxHost: MailboxHost = {
+    claudeChannel: {
+      connected: ferret => channelOutbox.connected(ferret),
+      push: (ferret, message) => {
+        channelOutbox.push(ferret, message);
+      },
+      claimedAt: (ferret, sendId) => channelOutbox.claimedAt(ferret, sendId),
+      withdraw: (ferret, sendId) => channelOutbox.withdraw(ferret, sendId),
+      markBroken: ferret => {
+        channelOutbox.markBroken(ferret);
+      },
+      received: (ferret, sendId) => {
+        channelOutbox.received(ferret, sendId);
+      },
+      broken: ferret => channelOutbox.broken(ferret),
+      bootedAt: channelOutbox.bootedAt,
+      writeBudgetMs: CHANNEL_WRITE_BUDGET_MS,
+      senderName: channelSenderName,
+    },
     queue: queueStore,
     ledger,
     channel,
@@ -570,6 +602,7 @@ export function buildConversationA(deps: {
     sitrep,
     ownerChat: new SessionOwnerChat(queue, ledger),
     mailboxHost,
+    tools: channelTools(channelOutbox),
     hypermediaRecorded: async ferret => await hypermediaSwitch.recorded(ferret),
     withdrawQuestion: async ferret => {
       questionWatch.forget(ferret);
@@ -625,10 +658,12 @@ export function buildConversationA(deps: {
         boundaries.look(ferret, phase, kernel.clock.now());
       },
       forget: ferret => {
+        channelOutbox.forget(ferret);
         boundaries.forget(ferret);
       },
     },
     stop: () => {
+      channelOutbox.stop();
       cancelQuestionWatch?.();
       stopped = true;
     },

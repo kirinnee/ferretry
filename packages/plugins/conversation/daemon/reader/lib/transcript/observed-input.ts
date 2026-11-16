@@ -1,3 +1,4 @@
+import { isFerretryChannelOrigin, parseFerretryChannel } from './channel.ts';
 import type { ObservedHumanInput, TranscriptInputObserver, TranscriptObservationContext } from './types.ts';
 import { transcriptObject, transcriptString } from './value.ts';
 
@@ -46,12 +47,16 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
     if (record === undefined) return [];
 
     if (record.type === 'queue-operation') {
-      const content = transcriptString(record.content);
+      // Ferretry's own channel message is held, absorbed and released under its wrapper; the send it proves was typed (or
+      // channelled) as the words inside it, so those are what the tracker is shown.
+      const raw = transcriptString(record.content);
+      const wrapped = raw === undefined ? undefined : parseFerretryChannel(raw);
+      const content = wrapped?.text ?? raw;
       if (record.operation === 'remove' && content !== undefined) {
         this.removeRing.push({ content, timestamp: transcriptString(record.timestamp) });
         if (this.removeRing.length > CLAUDE_REMOVE_RING_LIMIT) this.removeRing.shift();
       }
-      return this.queueBookkeeping(record, content, context);
+      return this.queueBookkeeping(record, content, wrapped?.sendId, context);
     }
 
     if (record.type === 'attachment') {
@@ -61,11 +66,14 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
       // several queued prompts at once (measured on 2.1.281). Read as a string only, such a drain proved
       // nothing: the tracker called a message the agent had read lost, typed it three more times, and
       // the owner's phone showed it "not delivered".
-      const text = claudeUserText(attachment?.prompt);
+      const channelled = isFerretryChannelOrigin(origin);
+      const drained = claudeUserText(attachment?.prompt);
+      const wrapped = channelled && drained !== undefined ? parseFerretryChannel(drained) : undefined;
+      const text = wrapped?.text ?? drained;
       if (
         attachment?.type !== 'queued_command' ||
         attachment.commandMode !== 'prompt' ||
-        origin?.kind !== 'human' ||
+        (origin?.kind !== 'human' && !channelled) ||
         text === undefined ||
         text.trim().length === 0
       ) {
@@ -83,13 +91,18 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
           ...(originatedAt === undefined ? {} : { originatedAt }),
           proofKey: proofKey(transcriptString(record.uuid), context),
           shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
+          ...(wrapped?.sendId === undefined ? {} : { channelSendId: wrapped.sendId }),
         },
       ];
     }
 
     const message = transcriptObject(record.message);
     if (record.type !== 'user' || message?.role !== 'user') return [];
-    const text = claudeUserText(message.content ?? record.content);
+    const written = claudeUserText(message.content ?? record.content);
+    // Ferretry's own channel writes its message as a meta user record: the words inside its wrapper are the proof.
+    const wrapped =
+      written !== undefined && isFerretryChannelOrigin(record.origin) ? parseFerretryChannel(written) : undefined;
+    const text = wrapped?.text ?? written;
     if (text === undefined || text.trim().length === 0) return [];
     const observedAt = transcriptString(record.timestamp) ?? context.observedAt;
     if (observedAt === undefined) return [];
@@ -101,6 +114,7 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
         observedAt,
         proofKey: proofKey(transcriptString(record.uuid), context),
         shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
+        ...(wrapped?.sendId === undefined ? {} : { channelSendId: wrapped.sendId }),
       },
     ];
   }
@@ -113,6 +127,7 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
   private queueBookkeeping(
     record: Readonly<Record<string, unknown>>,
     content: string | undefined,
+    channelSendId: string | undefined,
     context: TranscriptObservationContext,
   ): readonly ObservedHumanInput[] {
     const proof =
@@ -132,6 +147,7 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
         observedAt,
         proofKey: proofKey(undefined, context),
         shapeVersion: CLAUDE_INPUT_SHAPE_VERSION,
+        ...(channelSendId === undefined ? {} : { channelSendId }),
       },
     ];
   }

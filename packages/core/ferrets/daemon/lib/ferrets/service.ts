@@ -1756,7 +1756,11 @@ export class FerretsService implements FerretsApi {
       await this.keepLastScreen(record.id, runner, record.handle as RunnerHandle);
       await harness.stop(record.id, record.handle as RunnerHandle, runner, 'now');
     }
-    await this.settle(record, 'stopped', 'stopped', { kind: 'stopped' });
+    // The conversation's lease is HANDED to the ferret, never freed: between this pane's death and the relaunch's claim a
+    // terminal's `claude --resume` could otherwise take the conversation and leave two writers (a failed relaunch
+    // releases it, as a stop does).
+    await this.settle(record, 'stopped', 'stopped', { kind: 'stopped' }, true);
+    if (record.harnessConversation !== undefined) await this.claimConversation(record.id, record.harnessConversation);
     return this.registry.get(record.id) as FerretRecord;
   }
 
@@ -2639,6 +2643,7 @@ export class FerretsService implements FerretsApi {
     state: FerretState,
     change: FerretChangedPayload['change'],
     cause?: FerretEndCause,
+    keepLease = false,
   ): Promise<void> {
     if (this.tokens.revoke(record.id)) await this.ports.saveTokens(this.tokens.snapshot());
     const { handle: _handle, cause: _before, ...rest } = record;
@@ -2650,7 +2655,7 @@ export class FerretsService implements FerretsApi {
     if (state === 'stopped') {
       await this.ports.endWait?.(record.id).catch(() => undefined);
       // A lease that cannot be freed only delays a terminal claim: the daemon already reads a stopped session's as stale.
-      await this.ports.leases?.release(record.id).catch(() => undefined);
+      if (!keepLease) await this.ports.leases?.release(record.id).catch(() => undefined);
     }
   }
 
