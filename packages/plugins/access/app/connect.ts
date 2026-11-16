@@ -8,7 +8,7 @@
  * `KeyRotation` over that same store (`lib/key-rotation.ts`), which the shell's session applies inside the next unlock or
  * step-up once the daemon says the key is due (R248) and falls back to once on a refused session (R252).
  */
-import { type ConnectPorts, type DeviceClaims, type PairingKey, toBase64Url } from '@ferretry/app';
+import { browserDeviceName, type ConnectPorts, type DeviceClaims, type PairingKey, toBase64Url } from '@ferretry/app';
 import { PairingResponseSchema } from '../contract/index.ts';
 import {
   DeviceKeyUnreadableError,
@@ -16,7 +16,6 @@ import {
   IndexedDbDeviceKeyStore,
   mintDeviceKey,
 } from './lib/device-keys.ts';
-import { browserDeviceName } from './lib/device-name.ts';
 import { KeyRotation } from './lib/key-rotation.ts';
 import { browserPushHost } from './lib/push-host.ts';
 import type { DaemonPushDevices } from './lib/push-enrolment.ts';

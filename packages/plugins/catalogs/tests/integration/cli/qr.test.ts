@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { localQr, QrEncodeError } from '@ferretry/std/qr';
 import { BlockQrEncoder } from '../../../cli/adapters/qr.ts';
 import { workingDirectory } from '../../../cli/adapters/working-directory.ts';
 
@@ -64,6 +65,30 @@ describe('the catalogs CLI block QR', () => {
         should(glyph).equal(top && bottom ? '█' : top ? '▀' : bottom ? '▄' : ' ');
       });
     });
+  });
+});
+
+describe('the catalogs CLI block QR draws the shared encoder symbol', () => {
+  it('should leave a dark module as the terminal background and draw a light one, exactly where the shared encoder puts them', async () => {
+    // Arrange
+    const { modules, size } = localQr(LINK);
+
+    // Act
+    const lines = (await new BlockQrEncoder().encode(LINK, 'large')).split('\n');
+
+    // Assert: inside the one-module quiet zone, a module is '  ' where the encoder says dark and '██' where light.
+    for (let row = 0; row < size; row += 1)
+      for (let column = 0; column < size; column += 1)
+        should(lines[row + 1]?.slice((column + 1) * 2, (column + 2) * 2)).equal(
+          modules[row]?.[column] === true ? '  ' : '██',
+        );
+  });
+
+  it('should refuse a link too long for a symbol a phone reads, rather than draw a truncated code', async () => {
+    // Arrange / Act / Assert
+    await should(
+      new BlockQrEncoder().encode('https://share.example.test/c/'.concat('x'.repeat(1200)), 'compact'),
+    ).rejectedWith(QrEncodeError);
   });
 });
 

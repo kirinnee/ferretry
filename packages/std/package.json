@@ -12,10 +12,12 @@
     "./credential-words": "./src/credential-words/index.ts",
     "./testing/linear-time": "./testing/linear-time.ts",
     "./pairing-screen": "./src/pairing-screen.ts",
-    "./live-window": "./src/live-window.ts"
+    "./live-window": "./src/live-window.ts",
+    "./qr": "./src/qr.ts"
   },
   "types": "./src/index.ts",
   "dependencies": {
+    "qrcode-generator": "^2.0.4",
     "yaml": "2.9.0",
     "zod": "4.4.3"
   },

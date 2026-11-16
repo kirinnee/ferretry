@@ -179,6 +179,29 @@ describe('AddDeviceCard', () => {
     expect(text(renderer)).toContain('Show it to the phone you are adding');
   });
 
+  it('P100 draws a pairing URL in this tab, asking no network, image service or other party for it', () => {
+    // The std encoder test proves the symbol decodes; THIS proves Access's own path (the card's symbol, drawn
+    // through the shell's `localQr`) reaches no network to get it. Any request at all would land here.
+    // Arrange
+    const requests: string[] = [];
+    const network = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      requests.push(String(input));
+      throw new Error('the pairing QR must be drawn locally; no request may be made');
+    }) as unknown as typeof globalThis.fetch;
+    try {
+      // Act
+      const renderer = card({ invite: minted() });
+
+      // Assert — a whole symbol, and nobody else ever saw the link.
+      should(marked(renderer, 'data-pair-qr')).have.length(1);
+      should(marked(renderer, 'data-qr-version')).have.length(1);
+      should(requests).eql([]);
+    } finally {
+      globalThis.fetch = network;
+    }
+  });
+
   it('P70 draws no QR for an address only this machine can dial, and says who can redeem it', () => {
     // THE BLOCKER, IN THE BROWSER. The default daemon advertises loopback, and a QR of that address is
     // an offer to a phone that would dial ITSELF. The link stays — the browser reading this panel is

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { localQr, MAX_QR_VERSION, QrEncodeError } from '../../../src/ui/local-qr.ts';
+import { localQr, MAX_QR_VERSION, QrEncodeError } from '../../src/qr.ts';
 
 describe('S14 localQr: the one local encoder', () => {
   it('draws a square symbol with the finder patterns a scanner looks for', () => {
@@ -24,6 +24,24 @@ describe('S14 localQr: the one local encoder', () => {
 
   it('refuses an empty value', () => {
     expect(() => localQr('')).toThrow(QrEncodeError);
+  });
+
+  it('refuses a non-string with a TypeError, never an empty symbol and never a QrEncodeError', () => {
+    // `undefined` used to encode as zero bytes and come back as a blank symbol.
+    const refuse = (value: unknown): unknown => {
+      try {
+        localQr(value as string);
+      } catch (error) {
+        return error;
+      }
+      return undefined;
+    };
+    for (const value of [undefined, null, 42, {}, ['x']]) {
+      const error = refuse(value);
+      expect(error).toBeInstanceOf(TypeError);
+      expect(error).not.toBeInstanceOf(QrEncodeError);
+      expect((error as TypeError).message).toBe('a QR symbol encodes text');
+    }
   });
 
   it('refuses rather than truncates a value no symbol can hold', () => {
