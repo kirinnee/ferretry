@@ -58,23 +58,23 @@ describe('an answer to an item that only its own card can answer', () => {
     [
       'a task plan',
       { taskPlan: {} } as never,
-      'A1 is a task plan: answer it on its card in the app, where a sign-in is confirmed with your passkey',
+      'A1 is a task plan: answer it on its item in the app, where a sign-in is confirmed with your passkey',
     ],
     [
       'a standing-rule suggestion',
       { signInRuleSuggestion: {} } as never,
       'A1 suggests a standing rule: open it in the app, where you choose what to allow and confirm with your passkey',
     ],
-    ['a paste plan', { copyPlan: {} } as never, 'A1 is a paste plan: answer it on its card, or with fy plan approve'],
+    ['a paste plan', { copyPlan: {} } as never, 'A1 is a paste plan: answer it on its item, or with fy plan approve'],
     [
       'a staged 2FA key',
       { twoFactorSeed: {} } as never,
-      'A1 saves a 2FA key: allow it on its card in the app, with your passkey',
+      'A1 saves a 2FA key: allow it on its item in the app, with your passkey',
     ],
     [
       'a sign-in to approve on the phone',
       { phoneApproval: {} } as never,
-      'A1 is a sign-in to approve on your phone: approve it there, or tap Not me on its card',
+      'A1 is a sign-in to approve on your phone: approve it there, or tap Not me on its item',
     ],
   ];
 
@@ -118,7 +118,7 @@ describe('a ferret’s standing-rule suggestion', () => {
     for (const result of [edited, dismissed]) {
       should(result.ok).be.false();
       should(!result.ok && result.error.code).equal('use_input_form');
-      should(!result.ok && result.error.message).startWith("A1 is a ferret's rule suggestion: Dismiss it on its card");
+      should(!result.ok && result.error.message).startWith("A1 is a ferret's rule suggestion: Dismiss it on its item");
     }
   });
 });

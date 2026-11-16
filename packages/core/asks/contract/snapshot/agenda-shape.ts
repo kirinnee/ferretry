@@ -61,7 +61,7 @@ export const AGENDA_SHAPE_ERRORS = {
   formAsksInFields:
     'a form asks in its fields: no --question, --option or --step. Anything free-form is one "text" field, answered in the reply box',
   infoAsksNothing:
-    'an info card only tells: no --question, --option or --step; the owner taps Got it. To ask → --kind reply',
+    'an info item only tells: no --question, --option or --step; the owner taps Got it. To ask → --kind reply',
 } as const;
 
 /** One kind as `fy agenda add --help` teaches it: what the owner sees, and an example raise. */
@@ -106,7 +106,7 @@ const SHAPE_HELP: readonly ShapeHelp[] = [
   {
     kind: 'form',
     shows:
-      'SEVERAL STRUCTURED answers: radios, checkboxes and yes/no on the card, free text in the reply box; one Send answers all',
+      'SEVERAL STRUCTURED answers: radios, checkboxes and yes/no on the item, free text in the reply box; one Send answers all',
     example: `-k form "Deploy settings" --field "1|one|Which region?|*EU: data stays in Europe|US: cheapest" --field "2|many|Which alerts?|Failures|Slow builds" --field "3|yesno|OK to restart?" --field "4|text|Anything else?"`,
   },
   {
@@ -127,7 +127,7 @@ const SHAPE_HELP: readonly ShapeHelp[] = [
  */
 export const agendaShapeHelp = (fy: string): string =>
   [
-    'ONE ANSWER SHAPE PER KIND — the card shows exactly what you need, and nothing else:',
+    'ONE ANSWER SHAPE PER KIND — the item shows exactly what you need, and nothing else:',
     ...SHAPE_HELP.flatMap(each => [
       `  ${each.kind.padEnd(11)}${each.shows}`,
       `             e.g. ${fy} agenda add -t "<topic>" --premise … --context … ${each.example}`,

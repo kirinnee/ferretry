@@ -115,7 +115,7 @@ export function agendaContext(source: AgendaContextSource, warn: (message: strin
     gates: {
       asking: async task => {
         const found = board();
-        if (found === undefined) throw new Error('the board cannot say whether the card is asking');
+        if (found === undefined) throw new Error('the board cannot say whether the task is asking');
         return await found.asking(task);
       },
     },

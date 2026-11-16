@@ -82,7 +82,7 @@ const AGENDA_AUDIT = {
   skip: 'an agenda change is recorded on the item itself; a config confirm records its own act',
 } as const;
 const AGENDA_GUARD = {
-  none: 'ask words a ferret, the daemon or the owner wrote; an input card holds its prompt, never the value typed',
+  none: 'ask words a ferret, the daemon or the owner wrote; an input holds its prompt, never the value typed',
 } as const;
 const read = { minimum: 'operator', caller: 'any', noStore: true, audit: AGENDA_AUDIT, guard: AGENDA_GUARD } as const;
 

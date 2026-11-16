@@ -143,7 +143,7 @@ describe('an agenda item’s card asks', () => {
     should(AgendaItemSchema.safeParse(item([open('F412'), open('F412', 2)])).success).be.true();
     const twice = AgendaItemSchema.safeParse(item([open('F412'), answered('F412')]));
     should(twice.success).be.false();
-    should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each ask about a card once');
+    should(twice.error?.issues.map(issue => issue.message)).containEql('an agenda carries each ask about a task once');
   });
 
   it('should carry the turn an ask woke the agenda out of, and read without it', () => {

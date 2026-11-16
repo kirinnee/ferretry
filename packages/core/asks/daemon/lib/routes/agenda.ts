@@ -380,7 +380,7 @@ async function apply(
     request.cardAsk === undefined &&
     request.gate !== true
   )
-    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a task ask', 'invalid');
   const sourced =
     request.action === 'resolve' && sources !== undefined
       ? await sources({
@@ -403,7 +403,7 @@ async function apply(
     (request.cardAsk !== undefined || request.gate === true) &&
     request.response === undefined
   )
-    throw new ApiError(400, 'an attached card answer needs a response', 'invalid');
+    throw new ApiError(400, 'an attached task answer needs a response', 'invalid');
   // An answer to a card's gate moves the card first; only a move that went through answers the item.
   const gated =
     sourced === undefined && request.action === 'resolve' && request.response !== undefined && gates !== undefined
@@ -421,7 +421,7 @@ async function apply(
       : undefined;
   // Files belong to a card's gate answer: an answer that is not one has nothing to carry them to.
   if (request.action === 'resolve' && request.attachments !== undefined && gated === undefined) {
-    throw new ApiError(400, 'files can only come with the answer to a card ask', 'invalid');
+    throw new ApiError(400, 'files can only come with the answer to a task ask', 'invalid');
   }
   // Not needed on a gate item asks the same grant an answer does.
   if (request.action === 'dismiss' && gates !== undefined) {

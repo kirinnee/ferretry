@@ -30,7 +30,7 @@ export function sourceAnswers(
     if (denied !== undefined) throw new ApiError(403, denied, 'forbidden');
     // The stored source owns this question. Caller-supplied card targets must never redirect it to a plain resolve.
     if (answer.cardAsk !== undefined || answer.gate === true)
-      throw new ApiError(400, 'answer the source question itself, without an attached card target', 'invalid');
+      throw new ApiError(400, 'answer the source question itself, without an attached task target', 'invalid');
     const receipt = createHash('sha256')
       .update(
         JSON.stringify([
@@ -72,7 +72,7 @@ export function sourceAnswers(
           if (obligation.source === 'card')
             throw new ApiError(
               409,
-              'the board cannot move the card right now, so this question stays open',
+              'the board cannot move the task right now, so this question stays open',
               'source_unavailable',
             );
           return;

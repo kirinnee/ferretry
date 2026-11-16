@@ -623,7 +623,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
       ok: false,
       error: {
         code: 'invalid',
-        message: `&F12 already asks the owner on ^A3 (lead's agenda), which carries the card; add what the card needs to it: fy card note F12 "<text>"`,
+        message: `&F12 already asks the owner on ^A3 (lead's agenda), which carries the task; add what the task needs to it: fy task note F12 "<text>"`,
       },
     });
     should(raisedOn(repository)).equal(0);
@@ -650,7 +650,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     if (!crowded.ok) return;
     should(crowded.item?.task).be.undefined();
     should(crowded.notes).deepEqual([
-      `this was raised without the card: &F18 already asks the owner on ^A3 (lead's agenda), which carries the card; add what the card needs to it: fy card note F18 "<text>"`,
+      `this was raised without the task: &F18 already asks the owner on ^A3 (lead's agenda), which carries the task; add what the task needs to it: fy task note F18 "<text>"`,
     ]);
   });
 
@@ -669,7 +669,7 @@ describe('one owner ask per thing (docs/agenda.md § One ask per thing)', () => 
     if (!byFocus.ok) return;
     should(byFocus.item?.task).be.undefined();
     should(byFocus.notes).deepEqual([
-      `&F18's gate could not be read, so this was raised without the card rather than risk a second ask about it; add what the card needs to it instead: fy card note F18 "<text>"`,
+      `&F18's gate could not be read, so this was raised without the task rather than risk a second ask about it; add what the task needs to it instead: fy task note F18 "<text>"`,
     ]);
 
     const named = withGates(down);
