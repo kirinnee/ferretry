@@ -21,6 +21,22 @@ describe('the Codex settings source', () => {
     held.clear();
     expect(await source.read('guard')).toBeUndefined();
   });
+
+  it('projects an item’s launch flags beside its document, a copy, and none when it has none', async () => {
+    const held = new Map<string, SettingsItem>([
+      ['fast', { settings: {}, flags: ['--search', '-c', 'a=1'] }],
+      ['plain', { settings: { model: 'm' }, flags: [] }],
+      ['bare', { settings: { model: 'm' } }],
+    ]);
+    const source = codexSettingsSource(() => held);
+
+    const fast = await source.read('fast');
+    expect(fast).toEqual({ harness: 'codex', document: {}, flags: ['--search', '-c', 'a=1'] });
+    (fast as { flags: string[] }).flags.push('--mutated');
+    expect(held.get('fast')?.flags).toEqual(['--search', '-c', 'a=1']);
+    expect(await source.read('plain')).toEqual({ harness: 'codex', document: { model: 'm' } });
+    expect(await source.read('bare')).toEqual({ harness: 'codex', document: { model: 'm' } });
+  });
 });
 
 describe('the Codex hooks source', () => {
