@@ -47,7 +47,7 @@ describe('baseline: every producer is checked, nothing hides an error', () => {
     await sb.state('board-closed.json', '{"cards":[],"nextCursor":"abc"}');
     const truncated = await sb.run('baseline', ['--asks-open', '0']);
     expect(truncated.code).toBe(1);
-    expect(truncated.err).toContain('more than 500 closed cards');
+    expect(truncated.err).toContain('more than 500 closed tasks');
   });
 
   test('a damaged secret store stops the baseline; it is never read as an empty one', async () => {
@@ -142,7 +142,7 @@ describe('verify: compares each field with its own v5 destination', () => {
     await sb.state('board-open.json', '{"cards":[],"nextCursor":null}');
     const gone = await sb.run('verify');
     expect(gone.code).toBe(1);
-    expect(gone.out).toMatch(/board open: card ids .* FAIL/);
+    expect(gone.out).toMatch(/board open: task ids .* FAIL/);
   });
 
   test('a missing pane, login or secret name is a FAIL', async () => {
