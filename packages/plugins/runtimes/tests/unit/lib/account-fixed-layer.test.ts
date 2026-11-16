@@ -11,8 +11,6 @@ import {
   BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
   claudeToolsConfig,
@@ -202,7 +200,6 @@ describe('fixedLayerFor — Claude', () => {
           permissions: { defaultMode: 'auto' },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
-          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,
@@ -235,7 +232,6 @@ describe('fixedLayerFor — Claude', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
-      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
@@ -244,7 +240,7 @@ describe('fixedLayerFor — Claude', () => {
     ]);
   });
 
-  it('should hand the daemon every question Claude asks through an overlay hook, and never through settings', () => {
+  it('should write no question hook: an open question is read off the pane, so neither the overlay nor the settings carry one (M7)', () => {
     // Act
     const actual = layerOf({
       harness: 'claude',
@@ -254,15 +250,10 @@ describe('fixedLayerFor — Claude', () => {
       acceptsAutoPermissionMode: false,
     });
 
-    // Assert — Claude 2.1.281 writes an AskUserQuestion call to its transcript only once the form is
-    // answered, so the hook is how the daemon learns of an open one: before the form, for that tool alone.
-    should(actual.claudeSettingsOverlay?.hooks).deepEqual({
-      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-    });
-    // The file it writes is the one the daemon names per pane, and it never fails the tool it watches.
-    should(CLAUDE_QUESTION_HOOK_COMMAND).containEql('"$FY_QUESTION_FILE"');
-    should(CLAUDE_QUESTION_HOOK_COMMAND).endWith('exit 0');
-    // A settings entry is written OVER the profile's own settings, which would drop a person's own hooks.
+    // Assert
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('AskUserQuestion');
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('PreToolUse');
+    should(actual.claudeSettingsOverlay?.hooks).be.undefined();
     should(actual.entries.some(entry => entry.path[0] === 'hooks')).be.false();
   });
 
@@ -838,7 +829,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // No item type (the owner: "now agenda doesn't have a "main" type any more"): the stage chain is not taught.
     should(text).not.containEql('Type:');
     should(text).not.containEql('`--stage`');
-    // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
+    // All discussion about an agenda lands in it, the owner's words verbatim (^A304), copied by `log` (DoD 16).
     should(text).containEql(
       'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
     );
@@ -874,7 +865,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
     // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
-    // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
+    // owner on ^A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
     // and a ferret's own tabs, paid for by dropping ", `--where`=short status". Then 1,311: the owner's split rule (&F946),
@@ -907,6 +898,7 @@ describe('BOARD_INSTRUCTION', () => {
     should(text).containEql(
       "Card only if the project's board is on (`zz board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`).",
     );
+    should(text).not.containEql('!A'); // `!` starts a shell command in the agent's composer: only `^A<n>` is taught
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
   });
@@ -1042,7 +1034,7 @@ describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
 });
 
 describe('launchInstructions', () => {
-  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (!A527)', () => {
+  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (^A527)', () => {
     // Arrange
     const binary = 'zz';
     const env = {

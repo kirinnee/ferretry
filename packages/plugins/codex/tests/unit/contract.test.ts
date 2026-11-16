@@ -49,13 +49,13 @@ describe('codex contract', () => {
     expect(CODEX_CONFIG.axis).toBe('configure');
   });
 
-  test('!A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
+  test('^A525 a harness file with no permissionMode means skip; an explicit auto stays auto', () => {
     expect(HarnessConfigSchema.parse({}).permissionMode).toBe('skip');
     expect(HarnessConfigSchema.parse({ permissionMode: 'auto' }).permissionMode).toBe('auto');
     expect(HarnessConfigSchema.parse({ permissionMode: 'skip' }).permissionMode).toBe('skip');
   });
 
-  test('!A525 the hold judges explicit values: auto to skip or to nothing is a loosening, nothing to auto a tightening', () => {
+  test('^A525 the hold judges explicit values: auto to skip or to nothing is a loosening, nothing to auto a tightening', () => {
     const explicitAuto = HarnessConfigSchema.parse({ permissionMode: 'auto' });
     const nothing = HarnessConfigSchema.parse({});
     const explicitSkip = HarnessConfigSchema.parse({ permissionMode: 'skip' });

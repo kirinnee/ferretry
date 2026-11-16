@@ -172,7 +172,7 @@ describe('the words of an approve-on-phone card', () => {
       warning: PHONE_APPROVAL_WARNING,
       subject: 'Approve on your phone: your account on company.okta.com',
       agendaWhy: 'Your account on company.okta.com.',
-      // Owner decision !A171: the push carries the daemon-read number. It reaches every subscribed device, one without
+      // Owner decision ^A171: the push carries the daemon-read number. It reaches every subscribed device, one without
       // secrets.use included, so it names the place alone (secrev-1329a L7).
       push: 'Tap 42 on your phone: your account on company.okta.com',
     });

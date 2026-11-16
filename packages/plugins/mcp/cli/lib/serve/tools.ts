@@ -16,6 +16,10 @@ export interface McpToolDefinition {
   readonly inputSchema: Readonly<Record<string, unknown>>;
 }
 
+/** The input card's reference as the owner and ferret write it: core-asks' `askReference('A<n>')`, pinned by `tools-limits.test.ts`. */
+const INPUT_CARD = '^A<n>';
+const INPUT_CARD_EXAMPLE = '^A7';
+
 /** Terminals' `AGENT_TOOL_MAX_READ_LINES`. */
 const AGENT_TOOL_MAX_READ_LINES = 2_000;
 /** Terminals' `AGENT_TOOL_MAX_WAIT_MS`: the longest one call to the daemon waits. */
@@ -226,8 +230,7 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'terminal_request_input',
-    description:
-      'Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), code (a 2FA, email, SMS or device code; you see it), private (shows, not one-time) or plain (you see it). Returns !A<n>; then input_wait.',
+    description: `Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), code (a 2FA, email, SMS or device code; you see it), private (shows, not one-time) or plain (you see it). Returns ${INPUT_CARD}; then input_wait.`,
     inputSchema: object(
       {
         name: NAME,
@@ -242,11 +245,10 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'input_wait',
-    description:
-      'Wait for the owner to answer your input card (!A<n>): where it stands, then the screen with the value masked. Never the value.',
+    description: `Wait for the owner to answer your input card (${INPUT_CARD}): where it stands, then the screen with the value masked. Never the value.`,
     inputSchema: object(
       {
-        id: { type: 'string', description: 'The card, like !A7, or a pa_ id.' },
+        id: { type: 'string', description: `The card, like ${INPUT_CARD_EXAMPLE}, or a pa_ id.` },
         timeoutMs: {
           type: 'integer',
           minimum: 100,

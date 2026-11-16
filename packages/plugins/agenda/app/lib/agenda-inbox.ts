@@ -39,6 +39,7 @@ import { sessionAgendaSummary } from './agenda-wire.ts';
 import { type DaemonId, daemonHomeHref, daemonId as toDaemonId } from '../shell.ts';
 import { BOARD_READ_FAILURE_WORDS, type BoardReadFailure } from './inbox-board-reads.ts';
 import { rootViews } from '../shell.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** One machine's session list, as the inbox reads it. `sessions` is `null` before the first read. */
 export interface AgendaInboxSource {
@@ -560,15 +561,16 @@ export const swipeIntent = (
 
 /** The words an undo toast uses for an action it is holding. */
 export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now()): string => {
-  if (action.kind === 'snooze') return `Snoozed !${id} until ${clockWords(action.until, now) ?? 'later'}`;
-  if (action.kind === 'unsnooze') return `!${id} is back on your list`;
-  if (action.kind === 'dismiss') return `Dismissed !${id}`;
-  if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
-  if (action.kind === 'discuss') return `Asked to discuss !${id}`;
-  if (action.label === 'Reply') return `Replied to !${id}`;
-  if (action.kind === 'resolve' && action.label === 'Clear') return `Cleared !${id}`;
-  if (action.kind === 'resolve') return `Marked !${id} done`;
-  return `Answered !${id}: ${action.label}`;
+  if (action.kind === 'snooze')
+    return `Snoozed ${ASK_REFERENCE_SIGIL}${id} until ${clockWords(action.until, now) ?? 'later'}`;
+  if (action.kind === 'unsnooze') return `${ASK_REFERENCE_SIGIL}${id} is back on your list`;
+  if (action.kind === 'dismiss') return `Dismissed ${ASK_REFERENCE_SIGIL}${id}`;
+  if (action.kind === 'needs-info') return `Asked for more info on ${ASK_REFERENCE_SIGIL}${id}`;
+  if (action.kind === 'discuss') return `Asked to discuss ${ASK_REFERENCE_SIGIL}${id}`;
+  if (action.label === 'Reply') return `Replied to ${ASK_REFERENCE_SIGIL}${id}`;
+  if (action.kind === 'resolve' && action.label === 'Clear') return `Cleared ${ASK_REFERENCE_SIGIL}${id}`;
+  if (action.kind === 'resolve') return `Marked ${ASK_REFERENCE_SIGIL}${id} done`;
+  return `Answered ${ASK_REFERENCE_SIGIL}${id}: ${action.label}`;
 };
 
 /** How long an answer waits, undoable, before it is sent. */

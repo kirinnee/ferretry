@@ -194,7 +194,7 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     should(slept).eql([1_000]);
     should(said[0]).equal('  Sign in as GITHUB_WORK on github.com');
     should(said[1]).equal(TASK_PLAN_HONEST_LIMIT);
-    should(said[2]).containEql("card !A9 in the app's Inbox (session s1)");
+    should(said[2]).containEql("card ^A9 in the app's Inbox (session s1)");
     should(said[2]).not.containEql('Agenda');
     should(said[2]).containEql('Nothing is approved until you do');
     should(said[3]).startWith('Approved.');
@@ -492,7 +492,7 @@ describe('fy plan ls and revoke', () => {
 
     await controller.list({});
 
-    should(said[0]).startWith('feedbeef  !A9  pending  session s1  until 2026-11-01T14:00:00.000Z');
+    should(said[0]).startWith('feedbeef  ^A9  pending  session s1  until 2026-11-01T14:00:00.000Z');
     should(said[0]).containEql('1. [waiting] paste command:gh → terminal:vercel  the ferret says: a\\u{202e}b');
     should(said[0]).not.containEql('the agent says');
     should(said[0]).endWith(`\n\n${TASK_PLAN_HONEST_LIMIT}`);
@@ -571,7 +571,7 @@ describe('fy plan: the less common lines and answers', () => {
     should(JSON.parse(said[0] as string)).eql({ state: 'approved' });
     should(warned[0]).equal('  Sign in as GITHUB_WORK on github.com');
     should(warned[1]).equal(TASK_PLAN_HONEST_LIMIT);
-    should(warned[2]).containEql('card !A9');
+    should(warned[2]).containEql('card ^A9');
   });
 
   it('should report the plan in force when the owner re-ticked the lines in the app and the stage was replaced', async () => {

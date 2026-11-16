@@ -71,15 +71,15 @@ describe('agenda card Markdown and hypermedia', () => {
   });
 
   test('links a reference the surface proved and leaves an unproven one as prose', async () => {
-    const item = todo({ body: 'See !A3 and !A9.' });
+    const item = todo({ body: 'See ^A3 and ^A9.' });
     view = await mount(
       <ReferenceSurfaceProvider surface={{ agendaReferenceResolver: id => id === 'A3', onAgendaOpen: () => undefined }}>
         <AgendaDetail layout="panel" item={item} renderProse={chatProse()} />
       </ReferenceSurfaceProvider>,
     );
     const links = [...view.container.querySelectorAll('[data-fy-reference]')];
-    expect(links.map(link => link.textContent)).toEqual(['!A3']);
-    expect(view.container.querySelector('[data-agenda-body]')?.textContent).toContain('!A9');
+    expect(links.map(link => link.textContent)).toEqual(['^A3']);
+    expect(view.container.querySelector('[data-agenda-body]')?.textContent).toContain('^A9');
   });
 
   test('puts a Copy button on every code span and fence in a step, and copies exactly that text', async () => {

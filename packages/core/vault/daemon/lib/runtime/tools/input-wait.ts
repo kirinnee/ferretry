@@ -10,6 +10,7 @@ import {
   type PhoneApprovalAgentView,
   type PhoneApprovalProvider,
 } from '../../../../contract/index.ts';
+import { ASK_REFERENCE_SIGIL, askReference, stripAskReferenceSigil } from '@ferretry/core-asks/contract';
 
 /** Today's agent-tool wait bounds (`AGENT_TOOL_DEFAULT_WAIT_MS`, `AGENT_TOOL_MAX_WAIT_MS`). */
 const INPUT_WAIT_DEFAULT_MS = 10_000;
@@ -17,13 +18,13 @@ const INPUT_WAIT_MAX_MS = 25_000;
 
 /**
  * Today's `input.wait` call, less the phone approval's `pa_` id (Accounts' now): the card raised by
- * `*.request_input`, written `!A7` or `A7`, and how long to wait in this call.
+ * `*.request_input`, written `^A7` (the older `!A7` still reads) or `A7`, and how long to wait in this call.
  */
 const InputWaitInputSchema = z.strictObject({
   id: z
     .string()
     .trim()
-    .transform(value => value.replace(/^!/u, ''))
+    .transform(stripAskReferenceSigil)
     .pipe(z.union([AgendaIdSchema, z.string().regex(PHONE_APPROVAL_ID_PATTERN)])),
   timeoutMs: z.number().int().min(100).max(INPUT_WAIT_MAX_MS).optional(),
 });
@@ -48,7 +49,7 @@ function approvalSummary(view: PhoneApprovalAgentView): string {
 
 /** Today's `inputSummary`, word for word: where the card stands, never the value. */
 function inputSummary(view: InputAgentView): string {
-  const card = `!${view.id}`;
+  const card = `${ASK_REFERENCE_SIGIL}${view.id}`;
   switch (view.state) {
     case 'pending':
       return `${card} is still waiting for the owner. Wait again with input.wait; do not type there yourself.`;
@@ -84,7 +85,8 @@ export function inputTools(
       if (ferret === undefined)
         return refusal('input_wait is a ferret’s own call: it waits on a card that ferret raised');
       const parsed = InputWaitInputSchema.safeParse(input);
-      if (!parsed.success) return refusal('input_wait takes a card id like !A7 and an optional timeoutMs');
+      if (!parsed.success)
+        return refusal(`input_wait takes a card id like ${askReference('A7')} and an optional timeoutMs`);
       const waitMs = parsed.data.timeoutMs ?? INPUT_WAIT_DEFAULT_MS;
       if (PHONE_APPROVAL_ID_PATTERN.test(parsed.data.id)) {
         // A phone approval is Accounts': its own service answers, and only for the ferret that raised it.

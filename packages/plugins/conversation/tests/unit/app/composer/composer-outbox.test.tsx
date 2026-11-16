@@ -194,7 +194,7 @@ describe('the composer with a device outbox', () => {
     online = true;
     // The drain goes through the machine's plain client, not the composer's: the prefix comes from the entry.
     await runAsync(async () => await store.outbox.drainAll());
-    expect(arrived).toEqual(['!A3 yes, ship it']);
+    expect(arrived).toEqual(['^A3 yes, ship it']);
     expect(store.outbox.snapshot()).toEqual([]);
   });
 

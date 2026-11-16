@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ownerAsks, parseAgendaMessage } from '@ferretry/core-asks/contract';
+import { ASK_REFERENCE_SIGIL, ownerAsks, parseAgendaMessage } from '@ferretry/core-asks/contract';
 import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 
 /**
@@ -154,7 +154,7 @@ export function attentionNudge(
   if (left.length === 0) return raise === undefined ? undefined : { asks, message: raise };
   const discussion = discussionNudgeMessage(left, binary);
   return {
-    asks: [...left.map(id => `discussed !${id}`), ...(toRaise ? asks : [])],
+    asks: [...left.map(id => `discussed ${ASK_REFERENCE_SIGIL}${id}`), ...(toRaise ? asks : [])],
     message: raise === undefined ? discussion : `${discussion}\n${raise.slice(AGENDA_NUDGE_MARK.length).trim()}`,
   };
 }
@@ -165,7 +165,7 @@ export function attentionNudge(
  * in its old place), or to close it when nothing more is expected.
  */
 export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
-  const named = ids.map(id => `!${id}`).join(', ');
+  const named = ids.map(id => `${ASK_REFERENCE_SIGIL}${id}`).join(', ');
   const first = ids[0] as string;
   const off = ids.length === 1 ? 'it rests, waiting on you' : 'they rest, waiting on you';
   return `${AGENDA_NUDGE_MARK} Owner replied about ${named}; ${off}. Answer on it: \`${binary} agenda answer ${first} "<text>"\` (back on their list), or \`${binary} agenda done ${first}\` when nothing more is expected.`;

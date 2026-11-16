@@ -8,13 +8,13 @@ test('an old delivered row must not inherit a newer cancelled send with identica
     {
       messagesTail: async () => ({
         messages: [
-          { point: 'old-transcript-row', role: 'user', text: '!A4 ship it', timestamp: '2026-08-01T10:00:00.000Z' },
+          { point: 'old-transcript-row', role: 'user', text: '^A4 ship it', timestamp: '2026-08-01T10:00:00.000Z' },
         ],
         previousCursor: null,
       }),
       sends: async () => [
-        { sendId: 'old-delivered', message: '!A4 ship it', acceptedAt: '2026-08-01T10:00:00.000Z', fate: 'delivered' },
-        { sendId: 'new-cancelled', message: '!A4 ship it', acceptedAt: '2026-08-01T11:00:00.000Z', fate: 'cancelled' },
+        { sendId: 'old-delivered', message: '^A4 ship it', acceptedAt: '2026-08-01T10:00:00.000Z', fate: 'delivered' },
+        { sendId: 'new-cancelled', message: '^A4 ship it', acceptedAt: '2026-08-01T11:00:00.000Z', fate: 'cancelled' },
       ],
     },
     'sess',

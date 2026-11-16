@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import { z } from 'zod';
-import { namesTag, parseBody } from '../../../daemon/reader/lib/http.ts';
+import { parseBody } from '../../../daemon/reader/lib/http.ts';
 
 const Schema = z.strictObject({ name: z.string(), nested: z.strictObject({ count: z.number() }).optional() });
 
@@ -51,15 +51,5 @@ describe('parseBody', () => {
     expect(error.message).toContain('nested.count:');
     expect(error.message).not.toContain('secret');
     expect((await refusal(parseBody(request('[]'), Schema))).message).toContain('body:');
-  });
-});
-
-describe('namesTag', () => {
-  it('matches the tag, weakly, among several and for *', () => {
-    expect(namesTag('"a"', '"a"')).toBe(true);
-    expect(namesTag('W/"a"', '"a"')).toBe(true);
-    expect(namesTag('"b", W/"a"', '"a"')).toBe(true);
-    expect(namesTag('*', '"a"')).toBe(true);
-    expect(namesTag('"b"', '"a"')).toBe(false);
   });
 });

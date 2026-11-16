@@ -34,6 +34,7 @@ import { createContext, type ReactNode, useContext, useId, useMemo, useState } f
 import { browserClipboardWriter, type ClipboardWriter, CopyButton } from '../shell.ts';
 import { Markdown } from '../shell.ts';
 import { useReferenceSurface } from '../shell.ts';
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 /** An item as the agenda holds it, open or resolved. */
 type AgendaItemOrResolved = AgendaItem | AgendaListRecord;
@@ -108,7 +109,7 @@ function AgendaReferenceChip({ id }: { readonly id: string }) {
   const surface = useReferenceSurface();
   return (
     <div className="fy-agenda-msg-chip" data-agenda-item={id}>
-      <Markdown text={`!${id}`} {...surface} />
+      <Markdown text={`${ASK_REFERENCE_SIGIL}${id}`} {...surface} />
     </div>
   );
 }
@@ -121,7 +122,7 @@ function AgendaReferenceChip({ id }: { readonly id: string }) {
 export const agendaPartBody = (part: Pick<AgendaMessagePart, 'kind' | 'items' | 'text'>): string => {
   if (part.kind !== 're') return part.text;
   const own = new Set(part.items.map(item => item.id));
-  const lead = /^\s*!(A[1-9][0-9]*)(?=[\s,;:]|$)[\s,;:]*/u;
+  const lead = new RegExp(`^\\s*${ASK_REFERENCE_SIGIL_CLASS}(A[1-9][0-9]*)(?=[\\s,;:]|$)[\\s,;:]*`, 'u');
   let body = part.text;
   for (let match = lead.exec(body); match !== null && own.has(match[1] as string); match = lead.exec(body)) {
     body = body.slice(match[0].length);
