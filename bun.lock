@@ -141,6 +141,7 @@
       "version": "5.0.0",
       "dependencies": {
         "@ferretry/core-ferrets": "workspace:*",
+        "@ferretry/core-gate": "workspace:*",
         "@ferretry/kernel": "workspace:*",
         "@ferretry/std": "workspace:*",
         "zod": "4.4.3",
@@ -227,6 +228,7 @@
         "zod": "4.4.3",
       },
       "devDependencies": {
+        "@ferretry/plugin-board": "workspace:*",
         "@happy-dom/global-registrator": "^20.11.1",
         "@types/react": "^19.0.0",
         "@types/react-dom": "^19.0.0",

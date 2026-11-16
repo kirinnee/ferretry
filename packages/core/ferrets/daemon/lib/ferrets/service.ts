@@ -8,6 +8,8 @@ import { err, type Instant, ok, type Result } from '@ferretry/std';
 import { openHarness } from './harness-facade.ts';
 import { KeyedSerialExecutor } from './serial.ts';
 import type { SerialExecutor } from '../ports.ts';
+import { ConversationLeaseHeldError } from '../../../contract/conversation-lease.ts';
+import type { FerretLaunchLeases } from './launch-leases.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import {
@@ -239,6 +241,11 @@ export interface FerretsPorts {
   saveDetails?(ferret: FerretId, details: FerretDetails): Promise<void>;
   /** A stopped ferret holds no declared wait: ended when the ferret is settled as stopped. */
   endWait?(ferret: FerretId): Promise<void>;
+  /**
+   * One live writer per harness conversation: every pane this service opens holds its conversation's lease from before the
+   * pane exists until the ferret is settled stopped. Unbound (a unit fixture): no pane is leased.
+   */
+  leases?: FerretLaunchLeases;
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
   history?(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   /**
@@ -678,6 +685,11 @@ export const CONVERSATION_NOT_FOUND =
  */
 export const CONVERSATION_UNKNOWN =
   'Your earlier conversation was not resumed: this machine never recorded which conversation was yours (a Codex ferret, or one moved from Ferretry 4, can be without one), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
+
+const LEASE_UNCHECKED =
+  'the ferret was not started: whether another session is writing its conversation could not be checked';
+const LEASE_UNHELD =
+  'the ferret was stopped: its conversation could not be kept for it, and a second writer on it would corrupt it';
 
 /** What one launch attempt found that its caller must say (filled in by `launchAttempt`). */
 interface LaunchSaid {
@@ -2169,7 +2181,16 @@ export class FerretsService implements FerretsApi {
           : `the ${record.harness} harness could not prepare this ferret's home, so it was not started`,
       );
     }
-    const env = await this.environment(record.id, mode, record.role, issued.token, parts, login.value, signedIn.value);
+    const env = await this.environment(
+      record.id,
+      mode,
+      record.role,
+      record.parent,
+      issued.token,
+      parts,
+      login.value,
+      signedIn.value,
+    );
     if (!env.ok) return failed('login_unavailable', env.error);
     // The LAST step before the harness: the folder is still the one that was checked. Anything else (a swap, a doubt)
     // starts nothing. (Remaining window: the instant between this check and the child's own chdir; docs/secrets.md.)
@@ -2187,6 +2208,9 @@ export class FerretsService implements FerretsApi {
       const held = await bound.verify().catch(() => err('the launch folder could not be checked again'));
       if (!held.ok) return failed('refused', held.error);
     }
+    // Before any pane exists: a conversation another live writer holds is refused here, never taken over.
+    const claimed = resumable === undefined ? ok(undefined) : await this.claimConversation(record.id, resumable);
+    if (!claimed.ok) return claimed;
     let started: Awaited<ReturnType<Harness['start']>>;
     try {
       started =
@@ -2203,6 +2227,14 @@ export class FerretsService implements FerretsApi {
       const code = started.error === 'unavailable' ? 'runner_unavailable' : 'failed';
       return failed(code, `the harness could not start: ${started.error}`);
     }
+    // The pane is open: its conversation moves onto the pane's own pid. FAIL CLOSED: the caller's cleanup stops the
+    // pane (keeping its handle, and so this lease, when it cannot) before anything else can write the conversation.
+    const held = await this.holdConversation(
+      record.id,
+      started.value.harnessConversation ?? resumable,
+      started.value.running.pid,
+    );
+    if (!held.ok) return held;
     // What this launch told the ferret, kept for the out-of-date check; only once the harness really started.
     // A write that fails leaves no record at all (never the previous launch's), so nothing is compared against it.
     const told = this.ports.launchSections;
@@ -2224,6 +2256,35 @@ export class FerretsService implements FerretsApi {
     };
     await this.write(working, record.state, 'state');
     return ok(record.id);
+  }
+
+  /** Claims the conversation a launch resumes, or refuses with who holds it. Nothing is said of a lease store's own failure. */
+  private async claimConversation(ferret: FerretId, conversation: string): Promise<Result<undefined, StartFailure>> {
+    try {
+      await this.ports.leases?.claimConversation(ferret, conversation);
+      return ok(undefined);
+    } catch (error) {
+      return error instanceof ConversationLeaseHeldError
+        ? failed('refused', error.message)
+        : failed('failed', LEASE_UNCHECKED);
+    }
+  }
+
+  /** Moves the conversation the open pane writes onto the pane's pid; a conversation the harness has not named leases nothing. */
+  private async holdConversation(
+    ferret: FerretId,
+    conversation: string | undefined,
+    pid: number | undefined,
+  ): Promise<Result<undefined, StartFailure>> {
+    if (conversation === undefined) return ok(undefined);
+    try {
+      await this.ports.leases?.moveConversationToPane(ferret, conversation, pid);
+      return ok(undefined);
+    } catch (error) {
+      return error instanceof ConversationLeaseHeldError
+        ? failed('refused', error.message)
+        : failed('failed', LEASE_UNHELD);
+    }
   }
 
   /**
@@ -2629,6 +2690,7 @@ export class FerretsService implements FerretsApi {
     ferret: FerretId,
     mode: FerretRecord['mode'],
     role: FerretRecord['role'],
+    parent: FerretRecord['parent'],
     token: string,
     parts: readonly LaunchPart[],
     login: Readonly<Record<string, string>>,
@@ -2644,7 +2706,7 @@ export class FerretsService implements FerretsApi {
     Object.assign(env, sessionModeSwitch(mode));
     // Whether it is a helper (`FY_SUB_FERRET`) is the record's own fact too: with it the wrapper gives the pane the
     // Sub-ferret section, without it every helper would be handed the lead's Notify, Board and Agenda text.
-    Object.assign(env, subFerretSwitch(role));
+    Object.assign(env, subFerretSwitch(role, parent));
     // Ferretry's own sign-in variable goes in AFTER the parts: nothing a part or a login file says can move the store
     // a ferret reads its credential from. (The kernel's spawn base is PATH and HOME only, so no inherited value is here.)
     Object.assign(env, signedIn);
@@ -2690,7 +2752,11 @@ export class FerretsService implements FerretsApi {
       record.state,
       change,
     );
-    if (state === 'stopped') await this.ports.endWait?.(record.id).catch(() => undefined);
+    if (state === 'stopped') {
+      await this.ports.endWait?.(record.id).catch(() => undefined);
+      // A lease that cannot be freed only delays a terminal claim: the daemon already reads a stopped session's as stale.
+      await this.ports.leases?.release(record.id).catch(() => undefined);
+    }
   }
 
   private async write(

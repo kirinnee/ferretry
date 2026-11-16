@@ -157,7 +157,7 @@ Claude has the one rm sentence in its fixed instructions (`packages/plugins/clau
 targets as explicit absolute paths, never `"$VAR"`, a `$(cmd)`-derived variable, or `rm` inside `bash -c`, so the guard does
 not stop it. Codex has no such guard. **A ferret home never gets a Bash deny/ask permission rule or a `PermissionRequest`
 hook from the fixed layer** — either silently voids the waivers — and a unit test fails if one appears. (A `PreToolUse` hook
-is allowed: the question hook is one, and the rm guard's own may add another.)
+is allowed: the rm guard's own may add one.)
 
 **The project-MCP approval has no safe key.** `enableAllProjectMcpServers` approves EVERY server a folder's
 `.mcp.json` ever declares, and 5.0 has no owner-approved per-server list to write instead; v4 never wrote it. So a

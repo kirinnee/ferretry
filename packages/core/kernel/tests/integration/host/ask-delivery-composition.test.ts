@@ -61,6 +61,7 @@ const world = async () => {
     plugins: [
       real('asks'),
       real('ferrets'),
+      real('mailbox'),
       real('conversation'),
       real('board'),
       stub('packs', { 'start.decide': () => ({ allow: true }) }, { takes: [{ hook: StartDecide }] }),

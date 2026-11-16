@@ -21,7 +21,7 @@ import {
   OWED_NOTICE_RETRY_LIMIT,
   SEND_READ_LOOK_BUDGET_MS,
   SendTracker,
-} from '../../../../daemon/delivery/lib/index.ts';
+} from '../../../../../../core/mailbox/daemon/lib/delivery/index.ts';
 import {
   ClaudeObservedInputObserver,
   CodexObservedInputObserver,

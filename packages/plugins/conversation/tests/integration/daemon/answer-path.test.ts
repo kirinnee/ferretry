@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
@@ -174,7 +174,7 @@ async function world(setup: (ferrets: FormFerrets) => void = () => undefined) {
   } as typeof daemon;
   const host = await testHost({
     plugins: [implementation, wardenStandIn],
-    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailbox(), ferrets, asks: new FakeAsks() },
     clock,
   });
   await state.write(QUESTION_STATE, question, 'f1');
@@ -348,7 +348,7 @@ describe('the form seam refuses what it cannot do', () => {
     } as typeof daemon;
     const host = await testHost({
       plugins: [implementation, wardenStandIn],
-      fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+      fakes: { mailbox: new FakeMailbox(), ferrets, asks: new FakeAsks() },
       clock: fixedClock(START),
     });
     await state.write(QUESTION_STATE, question, 'f1');

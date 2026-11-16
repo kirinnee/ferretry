@@ -53,13 +53,21 @@ function mailbox(provided: 'filled' | 'unavailable' = 'filled') {
   const store = new MemoryStore();
   const published: { event: unknown; payload: unknown }[] = [];
   if (daemon.build === undefined) throw new Error('the Mailbox daemon has no build');
-  const host: MailboxHost = { queue: store, ledger: {} as MailboxHost['ledger'] };
+  const host = {
+    queue: store,
+    ledger: {},
+    channel: {},
+    gate: { send: true, interrupt: true },
+  } as unknown as MailboxHost;
   const built = daemon.build({
     hooks: { provider: () => (provided === 'filled' ? host : 'unavailable') },
+    needs: { ferrets: {} },
     kernel: {
       clock: { now: () => AT },
       events: { publish: async (event: unknown, payload: unknown) => void published.push({ event, payload }) },
-      log: { error: () => undefined },
+      log: { error: () => undefined, warn: () => undefined },
+      lifecycle: { onStop: () => undefined },
+      redaction: {},
     },
   } as never) as unknown as { provides: { mailbox: MailboxQueueApi } };
   return { store, published, port: built.provides.mailbox };

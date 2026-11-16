@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { CHANNEL_WRITE_BUDGET_MS } from '../../../contract/wire-channel.ts';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
@@ -39,7 +39,7 @@ import {
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
-} from '../../../daemon/harness-seam.ts';
+} from '@ferretry/core-mailbox/contract';
 import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-asked-question.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { fixtureTexts } from '../../support/fixtures.ts';
@@ -258,17 +258,18 @@ async function conversation(
       return await base.append(...args);
     },
   };
+  const guardedAct = () =>
+    (async (target: unknown) => {
+      acted.push(String(JSON.stringify(target)));
+      throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
+    }) as never;
   const served = conversationDaemon(gate);
   const implementation = {
     ...served,
     build: (ctx: Parameters<NonNullable<typeof served.build>>[0]) => {
       const build = served.build;
       if (build === undefined) throw new Error('the conversation daemon half has no build');
-      const act = (async (target: unknown) => {
-        acted.push(String(JSON.stringify(target)));
-        throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
-      }) as typeof ctx.kernel.act;
-      const unstamped = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
+      const unstamped = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct(), state } });
       // The host's stand-in admission names the caller but stamps no credential; Gate's real one attaches the ferret's own,
       // which is what `ferretOf` reads in the daemon, so the channel tools get exactly that and nothing else.
       const credentialed =
@@ -280,12 +281,21 @@ async function conversation(
               : call) as never,
             input,
           );
-      const built = {
+      return {
         ...unstamped,
         tools: Object.fromEntries(
           Object.entries(unstamped.tools ?? {}).map(([name, handler]) => [name, credentialed(handler as never)]),
         ),
       } as unknown as typeof unstamped;
+    },
+  } as typeof served;
+  /** The send routes are the Mailbox's now: a test that stamps a standing on one wraps the Mailbox's half. */
+  const mailbox = {
+    ...mailboxDaemon,
+    build: (ctx: Parameters<NonNullable<typeof mailboxDaemon.build>>[0]) => {
+      const build = mailboxDaemon.build;
+      if (build === undefined) throw new Error('the mailbox daemon half has no build');
+      const built = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct() } });
       const stamped = [
         [SEND_ROUTE, options.sendStanding],
         [ENTER_ROUTE, options.enterStanding],
@@ -296,17 +306,17 @@ async function conversation(
       for (const [key, standing] of stamped) {
         if (standing === undefined) continue;
         const handler = routes[key];
-        if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+        if (handler === undefined) throw new Error(`the mailbox daemon half serves no ${key} route`);
         const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
         wrapped = { ...wrapped, [key]: peer };
       }
       return { ...built, routes: wrapped } as typeof built;
     },
-  } as typeof served;
+  } as typeof mailboxDaemon;
   const clock = fixedClock('2026-11-08T09:00:00Z');
   const host = await testHost({
-    plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
-    fakes: { mailbox: new FakeMailboxQueue(), ferrets, asks: new FakeAsks() },
+    plugins: [mailbox, implementation, ...(options.consumers ?? []).map(consumerPlugin)],
+    fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
   const asking = async () =>
@@ -463,6 +473,19 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
     // The same id again types nothing: the kept record answers it (as today's duplicate is answered from its record).
     expect((await send(host)).status).toBe(200);
     expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('a runner that rejects with a failure it already worded keeps it: the record STAYS and the answer is the runner’s own', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => {
+      throw new ApiError(502, 'the runner could not reach the terminal', 'runner_unreachable');
+    };
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([502, 'runner_unreachable']);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate])).toEqual([['req-1', 'accepted']]);
     await host.stop();
   });
 

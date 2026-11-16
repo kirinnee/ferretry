@@ -22,7 +22,6 @@ import {
   DraftEditSchema,
   type DraftEditResult,
   type DraftItem,
-  type DraftSent,
   type DraftServerFrame,
   type DraftSlot,
   type DraftSnapshot,
@@ -61,7 +60,6 @@ export const SharedDraftSnapshotSchema = DraftSnapshotSchema;
 export type SharedDraftEdit = DraftEdit;
 export const SharedDraftEditSchema = DraftEditSchema;
 export type SharedDraftEditResult = DraftEditResult;
-export type SharedDraftSent = DraftSent;
 export type SharedDraftClientFrame = DraftClientFrame;
 export const SharedDraftClientFrameSchema = DraftClientFrameSchema;
 export type SharedDraftServerFrame = DraftServerFrame;

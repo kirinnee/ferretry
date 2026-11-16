@@ -5,8 +5,8 @@ describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
     // Today's 38, the composer's reference menus (lead decision Q6), and the ferret's hypermedia switch
-    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th.
-    expect(routes).toHaveLength(40);
+    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th, less the twelve send, queue and composer routes the Mailbox serves.
+    expect(routes).toHaveLength(28);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);
@@ -20,10 +20,8 @@ describe('conversation manifest', () => {
       expect(route.path).not.toMatch(/\/v1\/sessions\/|\/v1\/imports\//);
   });
   test('answering a question and every shared-draft route are the owner’s, never a ferret’s', () => {
-    const mine = [...routes, ...manifest.actions.sockets].filter(
-      route => /\/answer$|shared-draft/.test(route.path) || route.path.endsWith('/composer'),
-    );
-    expect(mine.length).toBe(5);
+    const mine = [...routes, ...manifest.actions.sockets].filter(route => /\/answer$|shared-draft/.test(route.path));
+    expect(mine.length).toBe(4);
     for (const route of mine) expect(route.caller).toBe('person');
   });
   test('a body that can show a transcript, pane or draft is built under the secrets guard', () => {
@@ -60,8 +58,10 @@ describe('conversation manifest', () => {
       'reference.catalog',
       'reference.catalog',
       'mailbox.host',
+      'turn.question-open',
     ]);
     expect(manifest.hooks.takes[11]?.key).toBe('ferret');
+    expect(manifest.hooks.takes[12]?.key).toBe('question');
     expect(manifest.hooks.takes[9]?.key).toBe(':');
     expect(manifest.hooks.takes[10]?.key).toBe('@');
     expect(manifest.hooks.takes[0]?.key).toBe('question');

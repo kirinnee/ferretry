@@ -11,8 +11,6 @@ import {
   BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
   claudeToolsConfig,
@@ -202,7 +200,6 @@ describe('fixedLayerFor — Claude', () => {
           permissions: { defaultMode: 'auto' },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
-          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,
@@ -235,7 +232,6 @@ describe('fixedLayerFor — Claude', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
-      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
@@ -244,7 +240,7 @@ describe('fixedLayerFor — Claude', () => {
     ]);
   });
 
-  it('should hand the daemon every question Claude asks through an overlay hook, and never through settings', () => {
+  it('should write no question hook: an open question is read off the pane, so neither the overlay nor the settings carry one (M7)', () => {
     // Act
     const actual = layerOf({
       harness: 'claude',
@@ -254,15 +250,10 @@ describe('fixedLayerFor — Claude', () => {
       acceptsAutoPermissionMode: false,
     });
 
-    // Assert — Claude 2.1.281 writes an AskUserQuestion call to its transcript only once the form is
-    // answered, so the hook is how the daemon learns of an open one: before the form, for that tool alone.
-    should(actual.claudeSettingsOverlay?.hooks).deepEqual({
-      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-    });
-    // The file it writes is the one the daemon names per pane, and it never fails the tool it watches.
-    should(CLAUDE_QUESTION_HOOK_COMMAND).containEql('"$FY_QUESTION_FILE"');
-    should(CLAUDE_QUESTION_HOOK_COMMAND).endWith('exit 0');
-    // A settings entry is written OVER the profile's own settings, which would drop a person's own hooks.
+    // Assert
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('AskUserQuestion');
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('PreToolUse');
+    should(actual.claudeSettingsOverlay?.hooks).be.undefined();
     should(actual.entries.some(entry => entry.path[0] === 'hooks')).be.false();
   });
 

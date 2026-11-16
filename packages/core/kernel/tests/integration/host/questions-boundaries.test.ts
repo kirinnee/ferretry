@@ -96,7 +96,7 @@ async function boot(
       }),
   };
   const host = await testHost({
-    plugins: [real('ferrets'), testedConversation, harnessPlugin(harness), runnerPlugin(runner)],
+    plugins: [real('ferrets'), real('mailbox'), testedConversation, harnessPlugin(harness), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     everyDirectory: true,

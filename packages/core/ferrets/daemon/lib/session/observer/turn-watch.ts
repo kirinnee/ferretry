@@ -36,6 +36,12 @@ export interface PacedTurnPorts extends SessionTurnPorts {
   /** Hands the event loop back (one pane per turn of the loop): no tick is one long synchronous slice. */
   yieldToLoop(): Promise<void>;
   /**
+   * Whether the ferret's owner stores a question that is open now (the host's `turn.question-open` probe, which
+   * Conversation answers from its `question.json`): one read per look. Absent when nothing answers, and a probe that
+   * throws reads as absent for that look, so the turn is decided as it was before the probe existed.
+   */
+  questionOpen?(id: SessionId): Promise<boolean>;
+  /**
    * Told of a session a tick could not decide, so the host can say so; the tick goes on with the next one. A failure
    * {@link failureKey} names is told ONCE, until its key changes or the session records a turn again.
    */
@@ -191,6 +197,15 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     return this.paces.get(id)?.delayMs;
   }
 
+  /** The probe's answer for one look; a probe that is absent or throws says nothing (`undefined`), never "no". */
+  private async questionOpen(id: SessionId): Promise<boolean | undefined> {
+    try {
+      return await this.ports.questionOpen?.(id);
+    } catch {
+      return undefined;
+    }
+  }
+
   private async watch(session: TurnWatchSession): Promise<TurnStateChange | undefined> {
     const live = isTurnStatus(session.state.status);
     const nowMs = Date.parse(this.ports.clock.now());
@@ -201,8 +216,12 @@ export class PacedTurnWatcher implements SessionTurnWatcher {
     const woken = this.wakes.get(session.id);
     let look: TurnLook | undefined;
     if (live) {
-      const [transcript, pane] = await Promise.all([this.ports.transcript(session.id), this.ports.pane(session.id)]);
-      look = { transcript, pane };
+      const [transcript, pane, questionOpen] = await Promise.all([
+        this.ports.transcript(session.id),
+        this.ports.pane(session.id),
+        this.questionOpen(session.id),
+      ]);
+      look = { transcript, pane, questionOpen };
     }
     const before = this.previous.get(session.id);
     const step = stepTurn(session.state, before, look);
