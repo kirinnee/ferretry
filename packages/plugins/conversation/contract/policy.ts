@@ -16,14 +16,6 @@ export const narrowing = (name: ConversationCapability, axis: CapabilityAxis): C
 });
 
 /** Audit kinds this plugin adds (one per writing route). */
-export const MESSAGE_SENT_AUDIT = policyRef('audit', 'conversation.message-sent');
-export const TURN_INTERRUPTED_AUDIT = policyRef('audit', 'conversation.turn-interrupted');
-export const QUEUE_EDITED_AUDIT = policyRef('audit', 'conversation.queue-edited');
-export const QUEUE_CANCELLED_AUDIT = policyRef('audit', 'conversation.queue-cancelled');
-export const SEND_RETRIED_AUDIT = policyRef('audit', 'conversation.send-retried');
-export const SEND_CANCELLED_AUDIT = policyRef('audit', 'conversation.send-cancelled');
-export const SEND_ENTERED_AUDIT = policyRef('audit', 'conversation.send-entered');
-export const COMPOSER_ACTED_AUDIT = policyRef('audit', 'conversation.composer-acted');
 export const QUESTION_ANSWERED_AUDIT = policyRef('audit', 'conversation.question-answered');
 export const ATTACHMENT_ADDED_AUDIT = policyRef('audit', 'conversation.attachment-added');
 export const ATTACHMENT_UNLOCKED_AUDIT = policyRef('audit', 'conversation.attachment-unlocked');

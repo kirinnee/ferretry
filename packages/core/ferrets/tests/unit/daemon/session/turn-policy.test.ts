@@ -51,6 +51,16 @@ describe('what the pane and the transcript say about whose turn it is', () => {
     });
   });
 
+  test('a question the ferret is stored as asking parks the session on a person, as a recorded one does', () => {
+    const open = { ...evidence({ transcript: 'working', pane: { working: true } }), questionOpen: true };
+    expect(observeTurn(open)).toEqual({ state: 'needs-input', confirmed: true });
+    // Only an open question says so: none, and a probe nobody answered, leave the evidence to decide.
+    for (const questionOpen of [false, undefined])
+      expect(observeTurn({ ...open, questionOpen })).toEqual({ state: 'working', confirmed: true });
+    // A session that is not live has no turn, question or not.
+    expect(observeTurn({ ...open, state: { status: 'stopped', turn: 1 } as TurnEvidence['state'] })).toBeUndefined();
+  });
+
   test('a spinner-shaped line alone is overruled by a transcript that says the turn ended, but only weakly', () => {
     expect(observeTurn(evidence({ transcript: 'ended', pane: { working: true, spinnerOnly: true } }))).toEqual({
       state: 'your-turn',

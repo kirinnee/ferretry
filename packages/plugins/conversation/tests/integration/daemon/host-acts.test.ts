@@ -8,9 +8,10 @@ import type { CallStanding, RouteHandler, StatePort } from '@ferretry/kernel/con
 import { ferret as ferretCaller, fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
 import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-asked-question.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
@@ -65,7 +66,6 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
   setup(ferrets);
   const inner = memoryStatePort(CONVERSATION_STATE);
   const { port: state, broken } = breakable(inner);
-  const queue = new FakeMailboxQueue();
   const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
   /**
    * The standing Gate stamps on a compact-at call. The test host's stand-in admission stamps no credential or actor, so the
@@ -93,26 +93,31 @@ async function world(setup: (ferrets: TurnsFerrets) => void = () => undefined) {
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation, wardenStandIn],
-    fakes: { ferrets, asks: new FakeAsks(), mailbox: queue },
+    plugins: [mailboxDaemon, implementation, wardenStandIn],
+    fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });
   const api = () => host.provided(ConversationPort);
   /** The port as Ferretry's Warden holds it: the only consumer that may speak as the Warden or press a pane. */
   const warden = () => host.provided(ConversationPort, 'warden');
   const waiting = async (id: string, state: 'queued' | 'typing' = 'queued') =>
-    queue.seed(parseSessionId('f1'), {
+    await new StateQueueStore(inner).append(parseSessionId('f1'), {
       v: 1,
-      id,
-      sender: 'human',
-      text: 'wait',
-      attachmentIds: [],
-      enqueuedAt: AT,
-      state,
-      stateAt: AT,
-      revision: 1,
+      kind: 'enqueued',
+      at: AT,
+      message: {
+        v: 1,
+        id,
+        sender: 'human',
+        text: 'wait',
+        attachmentIds: [],
+        enqueuedAt: AT,
+        state,
+        stateAt: AT,
+        revision: 1,
+      },
     });
-  return { host, queue, ferrets, api, warden, state: inner, broken, built, waiting, caller };
+  return { host, ferrets, api, warden, state: inner, broken, built, waiting, caller };
 }
 
 const route = (
@@ -158,13 +163,13 @@ describe('the queue, through the port and its routes', () => {
   });
 
   test('a store that fails with something nobody worded is not made into a refusal', async () => {
-    const { host, api, queue, waiting } = await world();
+    const { host, api, broken, waiting } = await world();
     await waiting('q-1');
-    queue.failure = new Error('FIXTURE_SECRET the disk is gone');
+    broken.on = true;
 
     await expect(api().editQueued(F1, 'q-1', { text: 'x' })).rejects.toThrow('FIXTURE_SECRET');
     await expect(api().cancelQueued(F1, 'q-1')).rejects.toThrow('FIXTURE_SECRET');
-    queue.failure = undefined;
+    broken.on = false;
     await host.stop();
   });
 
@@ -184,13 +189,13 @@ describe('the queue, through the port and its routes', () => {
   });
 
   test('a store that fails on an edit through the route is the route’s own error, not a refusal', async () => {
-    const { host, queue, waiting } = await world();
+    const { host, broken, waiting } = await world();
     await waiting('q-1');
-    queue.failure = new Error('FIXTURE_SECRET the disk is gone');
+    broken.on = true;
 
     const answer = await route(host, 'PATCH', 'q-1', 'x');
 
-    queue.failure = undefined;
+    broken.on = false;
     expect(answer.status).toBe(500);
     expect(JSON.stringify(answer.json())).not.toContain('FIXTURE_SECRET');
     await host.stop();

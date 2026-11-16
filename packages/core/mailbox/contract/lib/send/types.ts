@@ -1,4 +1,5 @@
 import type { SendDisposition } from '../../protocol-names.ts';
+import type { FerretSummary } from '@ferretry/core-ferrets/contract';
 import type { SessionHealth, SessionStatus } from '../../ferret-types.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SendLedger, SendNoticeOwed, SendPath, SendRecord, SendSenderKind, SendSettlement } from '../../stores.ts';
@@ -496,3 +497,61 @@ export class ReviveRefusedForSend extends Error {
     this.name = 'ReviveRefusedForSend';
   }
 }
+
+/** The longest stretch of a draft quoted back in a refusal: enough to recognise, not a transcript. */
+const DRAFT_QUOTE_CHARS = 40;
+
+/**
+ * Why nothing was typed when the composer already held text that is not provably Ferretry's own.
+ *
+ * Quoted so a person can recognise it, and the remedy named, because the obvious one (send again) is
+ * what made it worse. The whole draft rides along, so the app can offer to send or clear exactly it.
+ */
+export function composerOccupiedRefusal(draft: string): SendDraftRefused {
+  const quoted = draft.length > DRAFT_QUOTE_CHARS ? `${draft.slice(0, DRAFT_QUOTE_CHARS)}…` : draft;
+  return new SendDraftRefused(
+    `the agent's composer already holds unsent text ("${quoted}"); a message typed now would be sent ` +
+      'joined to it. Press Enter on it or clear it first',
+    draft,
+  );
+}
+
+/**
+ * Why nothing was typed when the agent's composer could not be read: it may hold a person's draft, and
+ * a message typed onto one is submitted joined to it. Usually a passing repaint, so trying again works.
+ */
+export function composerUnreadableRefusal(): SendScreenUnreadable {
+  return new SendScreenUnreadable(
+    "the agent's screen could not be read to prove its composer empty, so nothing was typed; send it again " +
+      'in a moment, or check the terminal for a half-written message',
+  );
+}
+
+/**
+ * Takes what a send carried out of the owner's shared draft (`SharedDraftSentSchema`). Optional: a table
+ * built without drafts simply ignores the field.
+ */
+export type SentDraftClearer = (
+  sessionId: string,
+  actor: string | undefined,
+  requestId: string,
+  sent: unknown,
+) => Promise<'invalid' | undefined>;
+
+/** A ferret's lifecycle state, as the session status the interrupt's refusals are written against. */
+export const statusOf = (ferret: FerretSummary): SessionStatus => {
+  switch (ferret.state) {
+    case 'starting':
+      return 'starting';
+    case 'working':
+      return 'running';
+    case 'idle':
+      return 'awaiting_user';
+    case 'stopped':
+      return ferret.cause?.kind === 'completed'
+        ? 'completed'
+        : ferret.cause === undefined || ferret.cause.kind === 'stopped' || ferret.cause.kind === 'clean_exit'
+          ? 'stopped'
+          : 'failed';
+  }
+};

@@ -7,9 +7,9 @@ import {
   type QueueChangedEventData,
   type QueueEvent,
   type QueuedMessage,
-  SessionQueueService,
   type SessionQueueStore,
 } from '../../../../contract/index.ts';
+import { SessionQueueService } from '../../../../daemon/lib/queue/service.ts';
 import { NotifyingSessionQueueStore, type QueueChangePublisher } from '../../../../daemon/lib/queue/notifying-store.ts';
 import { type FerretId as SessionId } from '@ferretry/core-ferrets/contract';
 import { ferretId as parseSessionId } from '@ferretry/core-ferrets/contract/testing';
