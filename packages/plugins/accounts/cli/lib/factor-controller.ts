@@ -14,6 +14,7 @@ import {
 import { accountRefusal } from './account-gateway.ts';
 import type { IAccountGateway, IAccountPrompt } from './account-ports.ts';
 import type { ITwoFactorSeedGateway } from './factor-gateway.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** `fy account factor add <id> --totp`. The key is typed at a hidden prompt; there is no flag that carries one. */
 export interface TwoFactorAddOptions {
@@ -64,7 +65,7 @@ export class TwoFactorSeedController {
       ...(session === undefined ? {} : { session }),
     });
     this.ports.out.success(
-      `Confirm it with your passkey on the card !${card.agendaItemId} in the app's Inbox (session ${card.session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the card ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${card.session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     const final = await this.#wait(account.data, staged.stage);
     this.ports.out.success(OUTCOME[final.state](account.data));

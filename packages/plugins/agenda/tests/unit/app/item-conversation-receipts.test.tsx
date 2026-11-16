@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { readItemConversation } from '../../../app/lib/item-conversation.ts';
 import { OwnWordsRow } from '../../../app/features/agenda/history-rows.tsx';
 
-const words = '!A4 ship it';
+const words = '^A4 ship it';
 const row = (point: string, timestamp: string) => ({ point, role: 'user', text: words, timestamp });
 const send = (sendId: string, fate: string, acceptedAt: string) => ({ sendId, fate, acceptedAt, message: words });
 const read = (messages: ReturnType<typeof row>[], sends: ReturnType<typeof send>[]) =>

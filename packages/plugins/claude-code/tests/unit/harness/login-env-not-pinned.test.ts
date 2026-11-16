@@ -3,7 +3,7 @@ import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import { homeText } from '../../../daemon/lib/harness/launch.ts';
 
 /**
- * A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, !A500). Claude applies a
+ * A project's own `.claude` settings win over a login's environment (v4 before 4.291.9; owner, ^A500). Claude applies a
  * settings file's `env` over the process environment, and the `--settings` overlay over a project's files, so the ONLY way
  * a login's value could beat a repository's is by being written into the overlay. It never is: the login's values reach
  * the child's process environment alone. Fake values only.

@@ -1,5 +1,6 @@
 import { type CallStanding, type CapabilityDemand, defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
 
 /**
@@ -11,7 +12,16 @@ import { FerretIdSchema } from '@ferretry/core-ferrets/contract';
  *
  * A prefix nobody provides answers no entries, never an error: the menu for it is simply empty.
  */
-export const REFERENCE_CATALOG_PREFIXES = [':', '@', '&', '!', '/', '$', '%terminal', '%browser'] as const;
+export const REFERENCE_CATALOG_PREFIXES = [
+  ':',
+  '@',
+  '&',
+  ASK_REFERENCE_SIGIL,
+  '/',
+  '$',
+  '%terminal',
+  '%browser',
+] as const;
 export const ReferenceCatalogPrefixSchema = z.enum(REFERENCE_CATALOG_PREFIXES);
 export type ReferenceCatalogPrefix = z.infer<typeof ReferenceCatalogPrefixSchema>;
 

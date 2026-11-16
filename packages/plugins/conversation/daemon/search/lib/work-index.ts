@@ -17,6 +17,7 @@
  *    names one thing and finds it at any age, and a query that asks for `all`. What the window left out is
  *    counted, so a client can say so instead of looking like the work does not exist.
  */
+import { ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 import { type WorkHit, type WorkSearchQuery, WORK_SEARCH_CLOSED_WINDOW_DAYS } from '../../../contract/index.ts';
 import type { WorkDocument, WorkField } from './documents.ts';
 import { matchLine, meaningfulTokens, normalizePhrase, tokensOf } from './text.ts';
@@ -77,7 +78,7 @@ const RELATED_WEAK_BODY = 0.25;
 
 const TASK_ID = /^[bfic][1-9][0-9]{0,8}$/iu;
 const AGENDA_ID = /^a[1-9][0-9]{0,8}$/iu;
-const SIGILS = /^[&!#@]+/u;
+const SIGILS = new RegExp(`^(?:[&#@]|${ASK_REFERENCE_SIGIL_CLASS})+`, 'u');
 
 /** What one document contributes, kept so it can be taken back out exactly. */
 interface Indexed {

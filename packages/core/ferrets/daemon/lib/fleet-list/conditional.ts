@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ApiResponse } from '@ferretry/kernel/contract';
+import { type ApiResponse, tagForBuild } from '@ferretry/kernel/contract';
 import type { FerretSummary } from '../../../contract/index.ts';
 
 /**
@@ -65,12 +65,13 @@ export class ConditionalFleetList {
     | { readonly list: readonly FerretSummary[]; readonly response: ApiResponse; readonly etag: string }
     | undefined;
 
-  answer(list: readonly FerretSummary[], ifNoneMatch: string | undefined): ApiResponse {
+  /** `build` is the serving daemon build (`ApiRequest.build`): the same fleet under another build is another tag. */
+  answer(list: readonly FerretSummary[], ifNoneMatch: string | undefined, build?: string): ApiResponse {
     if (this.previous === undefined || !sameList(this.previous.list, list)) {
       const body = renderFerretList(list);
       const response: ApiResponse = { status: 200, headers: new Map([['content-type', JSON_CONTENT_TYPE]]), body };
       this.previous = { list, response, etag: entityTag(body) };
     }
-    return conditionalWithTag(this.previous.response, this.previous.etag, ifNoneMatch);
+    return conditionalWithTag(this.previous.response, tagForBuild(this.previous.etag, build), ifNoneMatch);
   }
 }

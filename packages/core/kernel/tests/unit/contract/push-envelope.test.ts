@@ -202,7 +202,7 @@ describe('readPushMessage is total', () => {
   });
 });
 
-describe('the push-service table (owner decision !A324)', () => {
+describe('the push-service table (owner decision ^A324)', () => {
   test('every allowlisted service is classified, and the values are today’s', () => {
     expect(Object.keys(PUSH_SERVICE_ALLOWS_SILENT).sort()).toEqual(
       [...PUSH_SERVICE_HOSTS, ...PUSH_SERVICE_HOST_SUFFIXES].sort(),

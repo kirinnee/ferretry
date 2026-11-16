@@ -138,7 +138,7 @@ describe('the words and the send id', () => {
   test('one short message names every item and says how to answer, rest or close', () => {
     const message = restNudgeMessage([resting('A1'), resting('A2')], 'fy');
     expect(message.startsWith(AGENDA_NUDGE_MARK)).toBe(true);
-    expect(message).toContain('!A1 «Ask A1», !A2 «Ask A2»');
+    expect(message).toContain('^A1 «Ask A1», ^A2 «Ask A2»');
     expect(message).toContain('Answer each:');
     expect(message).toContain('fy agenda answer A1 "<text>"');
     expect(message).toContain('fy agenda rest A1 --why');
@@ -241,7 +241,7 @@ describe('the silence nudge sweep', () => {
     expect(sent).toHaveLength(2);
     expect(sent[0]?.sendId).toBe(`${AGENDA_REST_NUDGE_ID_PREFIX}${FERRET}-A1.${Date.parse(REPLIED)}.1`);
     expect(sent[1]?.sendId).toBe(`${AGENDA_REST_NUDGE_ID_PREFIX}${FERRET}-A1.${Date.parse(REPLIED)}.2`);
-    expect(sent[0]?.message).toContain('!A1 «Ask A1», !A2 «Ask A2»');
+    expect(sent[0]?.message).toContain('^A1 «Ask A1», ^A2 «Ask A2»');
     expect(Object.values(files.get(FERRET) ?? {}).map(each => each.nudges)).toEqual([2, 2]);
   });
 

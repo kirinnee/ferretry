@@ -60,7 +60,7 @@ describe('the search routes and tool', () => {
 
   test('the search_work tool answers the lines a model reads, with the hits as data', async () => {
     const result = await built.tools.search_work(undefined, { query: 'backend' });
-    expect(result.text).toContain('!a1 ask [open] (ask of lead) Pick a search backend');
+    expect(result.text).toContain('^a1 ask [open] (ask of lead) Pick a search backend');
     expect(result.isError).toBeUndefined();
     expect((await built.tools.search_work(undefined, { query: '' })).isError).toBe(true);
   });
@@ -81,7 +81,7 @@ describe('v4 spellings of the search kind and the text of an agenda item', () =>
   test('the search_work tool takes kind task or agenda', async () => {
     const result = await built.tools.search_work(undefined, { query: 'backend', kind: 'agenda' });
     expect(result.isError).toBeUndefined();
-    expect(result.text).toContain('!a1');
+    expect(result.text).toContain('^a1');
   });
 
   test('an ask is found by the premise, context and body of its item, not by its subject alone', async () => {

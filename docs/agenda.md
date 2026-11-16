@@ -15,8 +15,8 @@ moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agen
 [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
-given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re !A163 …] what is X?"), the
-ferret answers ON that item: `fy agenda answer !A163 "<text>"` brings it back to the owner's list, in its old place, with an "Answer to your
+given only in chat can be missed. When the owner asks a question ABOUT an open item ("[re ^A163 …] what is X?"), the
+ferret answers ON that item: `fy agenda answer A163 "<text>"` brings it back to the owner's list, in its old place, with an "Answer to your
 question" block above its own options, which stay visible and answerable. **A question item keeps its own answer shape
 until the ferret closes it with `done`**: the owner's answer rests it, waiting on the ferret ([States](#states)), and
 never closes it. The owner's reply never turns
@@ -72,10 +72,10 @@ they would want to hear about in the same place, against the same background, an
 
 ```text
 Search, check, then open: these agendas are open, closest first.
-  !A7  needs you  Ship the cache  &F9  ← carries &F9, which &F12 depends on
-  !A2  resting    Relay choice
+  ^A7  needs you  Ship the cache  &F9  ← carries &F9, which &F12 depends on
+  ^A2  resting    Relay choice
 
-Should this join !A7? It does when all three hold: same place, same context, same pace;
+Should this join ^A7? It does when all three hold: same place, same context, same pace;
 dependent things always share one. If unsure, join the closest. Add it there instead (nothing is opened):
   fy agenda edit A7 --still-open 'Pick the relay region' --premise '…' --context '…'
 
@@ -91,11 +91,11 @@ Open a new agenda only when none passes the test:
   replied to is brought back by the same edit with `--question-answer '<the new ask>' --summary '<the new ask>'`, the old subject kept as a
   still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
   `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card, `--offer-close` onto an agenda that does not already offer the Done button) is never squeezed in:
-  the listing says what would be lost and the safe way out, `--new "<why none fits; closest is !A7>"`.
+  the listing says what would be lost and the safe way out, `--new "<why none fits; closest is ^A7>"`.
 - **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
   printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";
   then the agenda opens. `--new` always takes its reason; a bare or blank one is refused.
-- **At a terminal** the question is asked ("Should this join !A7? [y/N]"). Only `y` joins (the edit is printed and
+- **At a terminal** the question is asked ("Should this join ^A7? [y/N]"). Only `y` joins (the edit is printed and
   nothing is opened). Enter, `n` or anything else opens nothing either: the two ways out are printed, and a new
   agenda needs `--new "<why>"`.
 
@@ -105,7 +105,7 @@ Open a new agenda only when none passes the test:
 - **The candidates** are the items a ferret raised and can add to. The owner's own items, notices, held configuration
   changes, gate items and the daemon's input cards are never listed.
 - **A ferret** (nobody at a terminal) is refused with the list and the two ways out; `--json` prints
-  `{candidates, related}` and refuses the same way. **A person at a terminal** is asked "Should this join !A7?": yes
+  `{candidates, related}` and refuses the same way. **A person at a terminal** is asked "Should this join ^A7?": yes
   prints the edit and opens nothing, anything else opens nothing and prints the two ways out.
 - **With no candidate**, the add opens, unless the daemon's related check finds a STRONG match in someone else's work,
   which refuses as before (`--related A3`, `--related F12`, `fy send`).
@@ -117,7 +117,7 @@ Open a new agenda only when none passes the test:
 
 **What the daemon raises on a ferret's behalf.** An input request (`terminal_request_input`,
 `browser_request_input`) raises its own form card, because the form is what the owner answers. When the agent's
-prompt strongly matches an open agenda of the same ferret, the card links to it ("Part of: <title>" → `!A3`), so it
+prompt strongly matches an open agenda of the same ferret, the card links to it ("Part of: <title>" → `^A3`), so it
 does not read as a fresh topic (`closestAgenda` in `packages/daemon/src/lib/agenda/closest.ts`). The
 `*_ask_owner` tools raise no agenda item at all: they bring the surface's tab forward.
 
@@ -277,17 +277,17 @@ The owner is asked about one thing **once**:
 - **One agenda carries a card's ask.** The daemon puts it on the agenda that already carries the card rather than
   opening another (above), and a second open copy of the same ask is withdrawn.
 - **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card whose ask is open, answers
-  `invalid`, pointing to the agenda that carries the card: on the agent's own agenda `&F12 already asks the owner on !A3,
+  `invalid`, pointing to the agenda that carries the card: on the agent's own agenda `&F12 already asks the owner on ^A3,
 which carries the card; put yours on it: fy agenda edit A3 --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`, else naming that agenda and
   `fy task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is
   raised **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). If the card's
   ask cannot be read, the add is raised without the card, with a note saying so. Notices are never refused.
-- **`--thread` only links.** `fy task create --thread !A12` sets the `task` of the caller's own open thread to the
+- **`--thread` only links.** `fy task create --thread ^A12` sets the `task` of the caller's own open thread to the
   new card (refused when that thread is already linked to another card): that thread then carries the card's asks.
 - **The duplicate sweep.** At boot and on every Warden sweep the daemon reads every agenda (pure `findDuplicates`) and
   closes only what is provably the same ask. Every rule is scoped to **one lineage** (one home): one card with more than
   one open owner item; one `source` + `sourceRef`; identical normalized titles. It keeps the **oldest** (the first
-  ask) unless a newer one is on the owner's turn, and closes the rest with the note `duplicate of !A<n>` — only when
+  ask) unless a newer one is on the owner's turn, and closes the rest with the note `duplicate of ^A<n>` — only when
   both were raised by the **same session**, and for identical titles only when the ask and body match too (else it
   reports). It never closes an item the owner has begun to talk about, a hands-on card, a gate the owner answered, or
   an agenda that carries a card ask, and closes nothing while any agenda is unreadable. What it leaves is listed by
@@ -310,9 +310,9 @@ fields every item already carries, so an item from any daemon reads as exactly o
 **The rules (the owner's decisions on !A304):**
 
 - **Any reply or answer from the owner RESTS the item, waiting on the ferret.** A chat message naming it
-  (`[re !A5 …]`), an answer to its ask (a choice, Approve, a typed answer, a form) and a request for more
+  (`[re ^A5 …]`), an answer to its ask (a choice, Approve, a typed answer, a form) and a request for more
   information all do. **An answer never closes an item**: it is kept on the open item (`ownerAnswer`) and
-  delivered to the ferret as `[answer to !A5 …]`, and the item leaves the owner's queue.
+  delivered to the ferret as `[answer to ^A5 …]`, and the item leaves the owner's queue.
 - **The ferret's answer brings it back to Needs you, in its OLD place.** `fy agenda answer A5 "<text>"` (the same
   request as `fy agenda edit A5 --question-answer "<text>"`) shows the answer above the item's ask and puts it back
   where it stood in the queue: the item's `waitingSince`, which is when it last STARTED needing the owner
@@ -329,7 +329,7 @@ fields every item already carries, so an item from any daemon reads as exactly o
   urgent a moment ago still wakes for a new blocker.
 - **The silence nudge.** An item waiting on its ferret that the ferret leaves silent for **30 minutes**
   (`AGENDA_REST_NUDGE_MS`) gets the Warden's nudge (`rest-nudge.ts`): ONE message per ferret naming every item due,
-  `[attention check] The owner replied on !A5 «…» and is waiting on you…`, then again on a doubling backoff (1 h,
+  `[attention check] The owner replied on ^A5 «…» and is waiting on you…`, then again on a doubling backoff (1 h,
   2 h, … at most a day). It is off with the turn-end check (`attentionNudge` in `machine.yaml`), journalled as a
   nudge with the items named. Its send id names the resting episode (`resting.at`), not just the nudge count, so a
   later reply cycle never reuses a delivered nudge's id; the batch is recorded on each item (`resting.nudgeSend`)
@@ -683,19 +683,19 @@ A human's edit never changes whose turn it is.
 
 ## Chatting about items
 
-The owner can mention open items in a chat message: type `!A5`, or attach "re:" chips (several are fine).
+The owner can mention open items in a chat message: type `^A5`, or attach "re:" chips (several are fine).
 The ferret receives the message as
 
 ```
-[re !A5 «title», !A7 «title»] <text>
+[re ^A5 «title», ^A7 «title»] <text>
 ```
 
 **A reply is not an answer, and it is not "still open" either.** Each referenced item RESTS at once, waiting on
-the ferret (next section). The message itself is the delivery: the ferret reads `[re !A5 …]` in its chat,
+the ferret (next section). The message itself is the delivery: the ferret reads `[re ^A5 …]` in its chat,
 and the daemon sends nothing else (a `replied` change that no observer reacts to). A notice is never
 referenced. If the ferret finishes a turn without touching a referenced item (an `answer`, `rest`, `edit`, `done`,
-`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re !A…` opener); after that
-only the 30-minute silence nudge ([States](#states)) speaks. The turn-end nudge says: "Owner replied about !A5; it
+`dismiss` or `surface` naming it), the daemon nudges it once (nudge-once keys on the `[re ^A…` opener); after that
+only the 30-minute silence nudge ([States](#states)) speaks. The turn-end nudge says: "Owner replied about ^A5; it
 rests, waiting on you. Answer on it: `fy agenda answer A5 "<text>"` (back on their list), or `fy agenda done A5`
 when nothing more is expected." It never says it is the ferret's turn to hand the item back.
 
@@ -731,7 +731,7 @@ a frozen historical thread instead; its order and text remain fixed even after a
 `operator`, serves `any` caller allowed to read the session, and never treats relayed loopback as host arrival.
 
 Every path that carries words writes the conversation in the same transaction as its state change: a chat
-`[re !A5 …]` reply, the Inbox composer, textual owner answers (including free text without a note), optional notes,
+`[re ^A5 …]` reply, the Inbox composer, textual owner answers (including free text without a note), optional notes,
 `fy agenda answer`, `needs-info`, `discuss`, `rest --why`, `surface`, gate notes and closing notes.
 
 **Migration.** Earlier ledgers read as version 4. A stored embedded conversation is moved intact into the full-thread
@@ -859,7 +859,7 @@ made meanwhile are missing; a snapshot is the item, so an item at the 1 MB trans
 
 `fy agenda merge A2 A5` merges A5 **into** A2 (`POST …/agenda` with `{ action: 'merge', id, from }`). The two
 conversations are interleaved by time, and all cards, card asks and links of both are kept (a merge that would pass a
-bound is refused, never trimmed). A2 keeps its state and its ask. A5 closes as `merged into !A2`, and the two point at
+bound is refused, never trimmed). A2 keeps its state and its ask. A5 closes as `merged into ^A2`, and the two point at
 each other (`mergedFrom` on A2, `mergedInto` on A5), A5's versions kept.
 
 [Card asks](#card-asks) move to A2, and A5 closes carrying none:
@@ -882,14 +882,14 @@ address.
 In the app, an open plain conversation offers **Merge with…** in the item's ⋯ menu; it opens the picker under the head, by the lineage lines. The picker asks "Merge this item with
 which open agenda?" and lists the other open plain conversations on the same board by id and title, each title once.
 A confirm step says what will happen before anything is sent, and repeats no title (the picker just showed it): the
-heading "Merge !A2 into this item?" (the `!A2` is a reference, opened as in a message), one line, "!A2 closes; this item
-keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep !A2 instead". The viewed item
-survives by default, and the checkbox flips it ("Merge this item into !A2?", "This item closes; !A2 keeps its ask. …").
+heading "Merge ^A2 into this item?" (the `^A2` is a reference, opened as in a message), one line, "^A2 closes; this item
+keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep ^A2 instead". The viewed item
+survives by default, and the checkbox flips it ("Merge this item into ^A2?", "This item closes; ^A2 keeps its ask. …").
 The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
 picker is reopened from ⋯ with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the host can send a merge and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
-**Merged into !A2 (its title)** as a link, and the survivor shows **Merged in from !A5 (its title)**. A merged-away agenda is closed, so
+**Merged into ^A2 (its title)** as a link, and the survivor shows **Merged in from ^A5 (its title)**. A merged-away agenda is closed, so
 its title is read from the board's resolved records as well as its open items. An Inbox card that says it merged
 another in, whose conversation board this device does not yet hold (only the machine's roll-up, which lists open items
 alone), reads that one board once, so the title appears; until it lands, or if that read fails (it is tried again), the
@@ -915,8 +915,8 @@ A card A5 carries only through its [card ask](#card-asks) can be moved too. A mo
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
   on the new item.
 
-The app shows both links as references through the one reference renderer: **Split from !A3 (its title)** on the new
-item and **Split into !A7 (its title), !A8 (its title)** on the original, each `!A…` opening as it does in a message.
+The app shows both links as references through the one reference renderer: **Split from ^A3 (its title)** on the new
+item and **Split into ^A7 (its title), ^A8 (its title)** on the original, each `^A…` opening as it does in a message.
 Each target carries its title when the board holds it, so a link never points outside the agenda without saying what it
 points at; a target the board does not hold is the bare id. The app has no split button: a
 split is a ferret's act, and a plain "Split off…" can follow once the owner may split by route.
@@ -930,7 +930,7 @@ mechanism: why it is parked, and its way back.
 
 ### Replied
 
-An item the owner replied to in the chat (`[re !A5 «title»] …`), or ANSWERED on its card, RESTS the moment the
+An item the owner replied to in the chat (`[re ^A5 «title»] …`), or ANSWERED on its card, RESTS the moment the
 message or answer is accepted: it is **parked as `replied`** (the field every app reads) and its `resting` says it
 waits on the ferret ([States](#states)). Otherwise an item a ferret never touches would hang on the owner's list for
 ever, and closing it would lose it when the ferret still needs something.
@@ -1264,7 +1264,7 @@ approval the daemon asks for is the only thing that reaches the owner from a sub
 **One-time migration.** At boot, once (`agenda-homes-migration.json` in the daemon's home; written only when every
 session was read and every item moved, so an unfinished start tries again), each open item that the **daemon** raised, and that is not hands-on, on a
 session with a parent is raised on its home carrying its waiting time, snooze, conversation and history (`carried`, a
-daemon-only field: an agent can never set it) and resolved where it was with "moved to !A<n> on <home callsign>'s
+daemon-only field: an agent can never set it) and resolved where it was with "moved to ^A<n> on <home callsign>'s
 agenda". Gate items keep their `gate` and `sourceRef`, so duplicates collapse by the one-item-per-gate rule; other
 items get the sub-ferret's callsign in front of the title, and a Warden notification is renamed to the scoped form
 above. An item a ferret or the owner raised stays where it is (the daemon may not close it, and a copy would be
@@ -1273,7 +1273,7 @@ after a move is logged with the session and the item and holds the marker back; 
 (`forbidden`, `invalid`, `too-long`) is logged, stays, and does not. The boot log says how many moved.
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
-items on the board of a session it started (never an open [card ask](#card-asks)): `fy agenda done !A1 -s <sub-session>`. `AgendaService.apply` proves the
+items on the board of a session it started (never an open [card ask](#card-asks)): `fy agenda done ^A1 -s <sub-session>`. `AgendaService.apply` proves the
 lineage from `config.parent` and marks the actor for the state machine (`overSubFerret`; a request cannot set it);
 anyone else keeps `forbidden: an agent may change the agenda only in its own session`. The change is recorded as the
 lead's. Warden escalations are not the lead's to close.
@@ -1480,7 +1480,7 @@ and a part the item does not carry is not drawn:
   (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
   nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
   lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
-  item's own reference the composer puts in front ("!A304 ok to build!") is set aside, and only that one. Nothing
+  item's own reference the composer puts in front ("^A304 ok to build!") is set aside, and only that one. Nothing
   longer is read, and a ferret reply after the words withdraws the offer.
 - **Opened at its ask.** A Needs-you push, and any link that names the item (`?agenda=A5`), open the view scrolled to
   part 6, "What I need from you", with it focused. Each tap is a new request, so an item already at its ask is brought to it again. An item
@@ -1643,8 +1643,8 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
 
 - **Opening an item shows the chat's own item view** — the same component (`AgendaItemView`), so Markdown, the
   options, the quick replies, the terms and the history read exactly as in the chat — with that ferret's **real
-  composer** under it. A message typed there goes to the ferret's chat about the item (`!A5 …`, delivered as
-  `[re !A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
+  composer** under it. A message typed there goes to the ferret's chat about the item (`^A5 …`, delivered as
+  `[re ^A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
 - **Each card has its own draft.** The composer under an item is **not** the chat's composer: its unsent text is a
   synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly

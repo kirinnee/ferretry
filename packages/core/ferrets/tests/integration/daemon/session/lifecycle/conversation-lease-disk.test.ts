@@ -393,6 +393,7 @@ describe('the daemon and `fy history claim` over ONE set of lease files', () => 
   const S = parseSessionId('mw7bp88g-50e00159');
   const sessions = (status: string) => ({
     launchOf: () => ({ harness: 'claude' as const, runtime: 'claude-review' }),
+    registryState: () => undefined,
     readState: async () => ({ status }),
   });
 

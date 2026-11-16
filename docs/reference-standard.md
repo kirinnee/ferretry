@@ -47,7 +47,7 @@ rule exists so a model cannot fabricate a destination by writing one.
 | `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
 | `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
 | `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide       |
-| `!AN`              | An agenda item      | `!A3`                         | Always `A` + a positive number; session-scoped              |
+| `^AN`              | An agenda item      | `^A3`                         | Always `A` + a positive number; session-scoped              |
 | `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
 | `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
 | `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
@@ -72,9 +72,25 @@ dashes, unique within its session, and it may never be twelve hex characters: th
 written before names existed, and a name that could also be an id would make one key mean two shells.
 The key grammar below is unchanged — a name is already a valid key.
 
+### The attention sigil is `^`, and `!A3` is only an alias
+
+An agenda item is `^AN`. The first spelling was `!AN`, but a line that starts with `!` is a **shell
+command** in Claude Code and Codex, and an agent that typed one there ran it. The composers were checked
+(Claude Code 2.1.317, Codex 0.166, strings and shipped completions only): `!` (shell), `/` (commands),
+`@` (files), `$` (Codex skills/apps) and an empty line's `?` (shortcuts) are special; `^`, `~`, `%`,
+`&`, `+`, `=` and `*` are not.
+
+- **Emitters write only `^AN`.** Every one of them formats through `askReference` /
+  `ASK_REFERENCE_SIGIL` (`packages/core/asks/contract/snapshot/ask-reference.ts`, the one place the
+  sigil is spelled); the grammar in `packages/app/src/references/grammar.ts` imports the same constants.
+  A scan test fails any source file that writes a literal `!A<n>`.
+- **Readers accept `!AN` as an alias**: it is parsed, proved and rendered as the same link, because the
+  transcripts, agenda messages and notes already written carry it. It is never offered by a picker and
+  never emitted, and it is read-only forever rather than "for one release".
+
 ### What is NOT a reference
 
-- `#F12` and `?A3` — the pre-Ferretry sigils. Gone as output; use `&F12` and `!A3`. The CLI still
+- `#F12` and `?A3` — the pre-Ferretry sigils. Gone as output; use `&F12` and `^A3`. The CLI still
   accepts `#F12` as input for one release, and nothing prints it.
 - A bare path (`src/api.ts`) — a path is only a reference with `@` in front of it.
 - `@@`, `@@@`, `@@@@` — those are composer **triggers** (section 5), not authored syntax.
@@ -107,17 +123,17 @@ never rewritten.
 | `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
 | `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
 | `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
-| `!attention` | That item's view over this conversation (a full page on a phone), whatever its state  |
+| `^attention` | That item's view over this conversation (a full page on a phone), whatever its state  |
 | `/skill`     | The Skills tab of this session's "This folder" context                                |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
 | `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view            |
 
-The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
+The `^attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
 agenda (renamed in a later release).
 
 Every id the proof accepts opens the SAME view — the one the agenda line, Info's agenda list, the Inbox and a
 card's "Agenda asks" open. An open item is answered there; a parked one (snoozed, or replied to) says so and offers
-"Back to my list"; a resolved one is read-only. Agenda mode does not gate it. A proved `!A3` is therefore never a dead
+"Back to my list"; a resolved one is read-only. Agenda mode does not gate it. A proved `^A3` is therefore never a dead
 click, and no click switches a tab or a menu instead of opening the item (#B76).
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
@@ -132,10 +148,10 @@ one of the tokens in section 2.
 | ------- | ------------------- | ----------------------------------- |
 | `@`     | Files               | `@path`                             |
 | `@@`    | Fleet agents        | `:name`                             |
-| `@@@`   | The agenda          | `!AN`                               |
+| `@@@`   | The agenda          | `^AN`                               |
 | `@@@@`  | Tasks               | `&FN`                               |
 | `:`     | Fleet agents        | `:name`                             |
-| `!`     | The agenda          | `!AN`                               |
+| `^`     | The agenda          | `^AN`                               |
 | `&`     | Tasks               | `&FN`                               |
 | `$`     | Skills              | `/name` on Claude, `$name` on Codex |
 | `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
@@ -285,7 +301,7 @@ Everything is keyed by `(daemonId, …)`. A resolved agent reference carries the
 against and navigates to `/d/:daemon/session/:id`, so a reference in one daemon's transcript can
 never open a same-named session on another. A resolved task reference carries the machine whose
 board proved it, because a card id is unique there and nowhere else. Agenda ids still collide per
-session, so an `!attention` reference stays session-scoped and resolves against the transcript's
+session, so an `^attention` reference stays session-scoped and resolves against the transcript's
 own session — on the Board and on a card an ask is always shown with its card chip and its ferret,
 so it is never ambiguous there.
 
@@ -342,28 +358,28 @@ page in its own workspace tab.
 ## 9. Agenda message headings
 
 Some chat messages are ABOUT agenda items: the owner's answer from a card, a request for more
-information, a wish to talk an item through, and the owner's own message that references `!AN`. The
-daemon words each with a bracketed heading — a kind, then every item it names as this grammar's `!AN`
+information, a wish to talk an item through, and the owner's own message that references `^AN`. The
+daemon words each with a bracketed heading — a kind, then every item it names as this grammar's `^AN`
 token and its quoted ask or title — so the ferret always knows which item a message is about:
 
 | Heading                           | Means                                    | What the card shows as the owner's words                               |
 | --------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `[answer to !A3 «ask»] …`         | The owner answered from the card         | The answer (a choice as a selected pill), and any `· note: …` under it |
-| `[done !A3 «ask»] …`              | The owner marked it done, with no note   | The body as written                                                    |
-| `[dismissed !A3 «ask»] …`         | The owner dismissed it                   | The body as written                                                    |
-| `[needs more info !A3 «ask»] …`   | The owner needs more before answering    | Their note                                                             |
-| `[discuss !A3 «title»] …`         | The owner wants to talk it through       | Their note, without the instructions to the ferret                     |
-| `[re !A5 «title», !A7 «title»] …` | The owner's own chat message about items | What they typed                                                        |
+| `[answer to ^A3 «ask»] …`         | The owner answered from the card         | The answer (a choice as a selected pill), and any `· note: …` under it |
+| `[done ^A3 «ask»] …`              | The owner marked it done, with no note   | The body as written                                                    |
+| `[dismissed ^A3 «ask»] …`         | The owner dismissed it                   | The body as written                                                    |
+| `[needs more info ^A3 «ask»] …`   | The owner needs more before answering    | Their note                                                             |
+| `[discuss ^A3 «title»] …`         | The owner wants to talk it through       | Their note, without the instructions to the ferret                     |
+| `[re ^A5 «title», ^A7 «title»] …` | The owner's own chat message about items | What they typed                                                        |
 
 A burst of board answers is ONE message: each form in turn, a blank line apart.
 
 **One owner, both directions.** The writer and the reader are the same module,
 `packages/protocol/src/lib/agenda-message.ts`: the daemon builds every heading through it, and the app
-reads them back through `parseAgendaMessage` to draw each as a compact card (kind, the `!AN` chip, the
+reads them back through `parseAgendaMessage` to draw each as a compact card (kind, the `^AN` chip, the
 item's title, the owner's words) instead of raw text. Never parse or word a heading anywhere else — a
 second reader is how the two drift apart.
 
-The `!AN` in a card is an ordinary reference: proved against the session's ledger and opened exactly as
+The `^AN` in a card is an ordinary reference: proved against the session's ledger and opened exactly as
 in section 4, or left as plain text when it cannot be proved. The text the ferret actually received is
 always one tap away on the card ("Show sent text", and copy), so the card is a reading of the message,
 never a replacement for it. A message that does not read as headings in full — prose before the first
@@ -372,11 +388,11 @@ heading, an unknown kind, an id that is not `A` and a positive number — is dra
 ## 10. Input cards are agenda items
 
 An [input request](input-requests.md) is an agenda item of `kind: 'input'`, so it is cited exactly as
-every other item: `!AN`, proved against the session's ledger, opened as in section 4. **There is no
+every other item: `^AN`, proved against the session's ledger, opened as in section 4. **There is no
 new sigil.** Two consequences for this grammar:
 
-- A message about an input card uses the existing headings (`[delivered !A7 …]` is worded by the
+- A message about an input card uses the existing headings (`[delivered ^A7 …]` is worded by the
   daemon's agenda path). The heading never carries the value, and no heading is ever built from an
   input answer, because the generic agenda answer refuses `kind: 'input'`.
-- The `!AN` of an input card is a pointer to the card, nothing more. The card's own kind, `Input`, is
+- The `^AN` of an input card is a pointer to the card, nothing more. The card's own kind, `Input`, is
   drawn from the item's `kind` like the others.

@@ -9,6 +9,7 @@ import {
   ConversationLeaseStore,
   type HistoryHarness,
 } from '../../../../../contract/conversation-lease.ts';
+import type { FerretState } from '../../../../../contract/index.ts';
 import { ferretId } from '../../../../../contract/testing/index.ts';
 import {
   ConversationLeases,
@@ -65,8 +66,13 @@ class FakeSessions implements ConversationLeaseSessions {
   readonly launches = new Map<string, { harness: HistoryHarness; runtime?: string }>();
   /** A state document, `'unreadable'` for a read that rejects, or absent for a record that is gone. */
   readonly states = new Map<string, unknown>();
+  /** What the ferret registry says of a session NOW (it is not read from the document, which follows it later). */
+  readonly registry = new Map<string, FerretState>();
   launchOf(id: SessionId) {
     return this.launches.get(id);
+  }
+  registryState(id: SessionId): FerretState | undefined {
+    return this.registry.get(id);
   }
   async readState(id: SessionId): Promise<unknown> {
     const state = this.states.get(id);
@@ -243,6 +249,56 @@ describe('ConversationLeases.claim', () => {
   });
 });
 
+describe('ConversationLeases and the registry (c58-36c b)', () => {
+  it('should hold a conversation for a session the registry runs, whatever its not-yet-followed document says', async () => {
+    // Arrange — S was started by a reconcile (a daemon restart over a live pane): the registry says it is working, but the
+    // document still reads 'stopped' because a reconcile never moves it to 'starting' and the follow is fire-and-forget
+    for (const registry of ['starting', 'working', 'idle'] as const) {
+      const { disk, sessions, leases, launching } = built();
+      launching(S, 'stopped');
+      launching(T);
+      await leases.claim(S, resume(C));
+      sessions.registry.set(S, registry);
+
+      // Act
+      const claiming = leases.claim(T, resume(C));
+
+      // Assert
+      await should(claiming).rejectedWith(ConversationLeaseHeldError);
+      should(disk.holder('claude', C)?.session).equal(S);
+    }
+  });
+
+  it('should take the conversation over once the registry says the session stopped, though its document still reads running', async () => {
+    // Arrange
+    const { disk, sessions, leases, launching } = built();
+    launching(S, 'running');
+    launching(T);
+    await leases.claim(S, resume(C));
+    sessions.registry.set(S, 'stopped');
+
+    // Act
+    await leases.claim(T, resume(C));
+
+    // Assert
+    should(disk.holder('claude', C)?.session).equal(T);
+  });
+
+  it('should fall back to the document for a session the registry does not hold', async () => {
+    // Arrange
+    const { disk, leases, launching } = built();
+    launching(S, 'stopped');
+    launching(T);
+    await leases.claim(S, resume(C));
+
+    // Act
+    await leases.claim(T, resume(C));
+
+    // Assert
+    should(disk.holder('claude', C)?.session).equal(T);
+  });
+});
+
 describe('ConversationLeases and a session that renews its own lease', () => {
   it("should not let S's own wrapper renewal satisfy a claim made for ANOTHER session over S's conversation", async () => {
     // Arrange — S's daemon claim, then S's wrapper (an agent inside S running `claude --resume C`) renews it as S
@@ -307,9 +363,9 @@ describe('registryLeaseSessions', () => {
   const registry = {
     get: (id: string) =>
       id === 'fern'
-        ? { harness: 'claude-code' as const, runtime: 'claude-review' }
+        ? { harness: 'claude-code' as const, runtime: 'claude-review', state: 'working' as const }
         : id === 'plain'
-          ? { harness: 'codex' as const }
+          ? { harness: 'codex' as const, state: 'stopped' as const }
           : undefined,
   };
   const sessions = registryLeaseSessions(registry, async () => ({ status: 'running' }));
@@ -324,6 +380,13 @@ describe('registryLeaseSessions', () => {
     should(plain).deepEqual({ harness: 'codex' });
   });
 
+  it("should answer a session's live state from the registry, and nothing for one it does not hold", () => {
+    // Act / Assert
+    should(sessions.registryState(ferretId('fern') as unknown as SessionId)).equal('working');
+    should(sessions.registryState(ferretId('plain') as unknown as SessionId)).equal('stopped');
+    should(sessions.registryState(ferretId('ghost') as unknown as SessionId)).be.undefined();
+  });
+
   it('should know nothing of a session the registry does not hold, and read its state from the store', async () => {
     // Act
     const ghost = sessions.launchOf(ferretId('ghost') as unknown as SessionId);
@@ -332,5 +395,67 @@ describe('registryLeaseSessions', () => {
     // Assert
     should(ghost).be.undefined();
     should(state).deepEqual({ status: 'running' });
+  });
+});
+
+describe('ConversationLeases.moveToPane (c58-36c-r1)', () => {
+  it('should move the lease onto the pane’s pid and start, so a terminal claim holds once the daemon pid is dead', async () => {
+    // Arrange — a Claude session and a Codex one, both claimed as this daemon before their panes exist
+    const { disk, sessions, store, leases, launching } = built();
+    launching(S);
+    sessions.launches.set(T, { harness: 'codex' });
+    sessions.registry.set(T, 'working');
+    sessions.registry.set(S, 'working');
+    await leases.claim(S, resume(C));
+    await leases.claim(T, ['/opt/fleet/bin/codex', 'resume', D]);
+    disk.running.set(WRAPPER_PID, 7);
+
+    // Act
+    await leases.moveToPane(S, resume(C), WRAPPER_PID);
+    await leases.moveToPane(T, ['/opt/fleet/bin/codex', 'resume', D], WRAPPER_PID);
+    disk.running.delete(DAEMON_PID);
+    const claude = await store.claim(
+      { harness: 'claude', conversation: C, holder: { pid: 9000 } },
+      async () => 'unknown',
+    );
+    const codex = await store.claim(
+      { harness: 'codex', conversation: D, holder: { pid: 9000 } },
+      async () => 'unknown',
+    );
+
+    // Assert
+    should(disk.holder('claude', C)).deepEqual({ pid: WRAPPER_PID, start: 7, session: S, runtime: 'claude-review' });
+    should(claude.kind).equal('held');
+    should(codex.kind).equal('held');
+  });
+
+  it('should refuse, and leave the lease as it was, when the pane’s pid is not known', async () => {
+    // Arrange
+    const { disk, leases, launching } = built();
+    launching(S);
+    await leases.claim(S, resume(C));
+
+    // Act
+    const moving = leases.moveToPane(S, resume(C), undefined);
+
+    // Assert
+    await should(moving).rejectedWith(/could not tell which process runs its terminal/u);
+    should(disk.holder('claude', C)?.pid).equal(DAEMON_PID);
+  });
+
+  it('should refuse when another live session holds the conversation, and move nothing for a command that names none', async () => {
+    // Arrange
+    const { disk, leases, launching } = built();
+    launching(S);
+    launching(T);
+    await leases.claim(T, resume(C));
+
+    // Act
+    const moving = leases.moveToPane(S, resume(C), WRAPPER_PID);
+    await leases.moveToPane(S, ['/opt/fleet/bin/claude'], undefined);
+
+    // Assert
+    await should(moving).rejectedWith(ConversationLeaseHeldError);
+    should(disk.holder('claude', C)?.session).equal(T);
   });
 });

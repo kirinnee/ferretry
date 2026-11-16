@@ -1,5 +1,5 @@
 /**
- * Launch flags on a Codex settings item (owner decision !A525): ANY flag is accepted, the launch keeps for itself the few it
+ * Launch flags on a Codex settings item (owner decision ^A525): ANY flag is accepted, the launch keeps for itself the few it
  * decides, an AGENT adding a flag that sets the approval policy or sandbox is held for the owner and the owner's own edit
  * is not, and a flag value that looks like a secret is still refused at the write. The last three run through the REAL
  * kernel writer. Fake values only.

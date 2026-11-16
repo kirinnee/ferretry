@@ -11,6 +11,7 @@
  * receive the same arrays, read once per prefix per ferret; a navigation to another ferret aborts the reads in
  * flight and fences their late answers.
  */
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   type ReferenceCatalogAnswer,
@@ -20,8 +21,8 @@ import {
 } from '../../contract/index.ts';
 import { type ConversationCaller, DaemonCallError } from './seam.ts';
 
-/** The prefixes a ferret's page reads up front: the families Markdown proves a reference against (`&`, `!`, `/`, `$`). */
-export const HOSTED_REFERENCE_PREFIXES: readonly ReferenceCatalogPrefix[] = ['&', '!', '/', '$'];
+/** The prefixes a ferret's page reads up front: the families Markdown proves a reference against (`&`, `^`, `/`, `$`). */
+export const HOSTED_REFERENCE_PREFIXES: readonly ReferenceCatalogPrefix[] = ['&', ASK_REFERENCE_SIGIL, '/', '$'];
 
 export type ComposerReferenceCatalogReader = ConversationCaller;
 

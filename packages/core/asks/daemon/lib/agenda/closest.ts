@@ -1,4 +1,5 @@
 import { type AgendaId, type AgendaItem, type AgendaLink, MAX_AGENDA_LINK_LABEL_LENGTH } from '../protocol/agenda.ts';
+import { ASK_REFERENCE_SIGIL } from '../../../contract/snapshot/ask-reference.ts';
 
 /**
  * THE CLOSEST AGENDA of something the daemon raises for a ferret (docs/agenda.md § One channel per topic): an agenda is
@@ -52,7 +53,7 @@ export function closestAgendaLink(closest: ClosestAgenda): AgendaLink {
   return {
     label:
       label.length <= MAX_AGENDA_LINK_LABEL_LENGTH ? label : `${label.slice(0, MAX_AGENDA_LINK_LABEL_LENGTH - 1)}…`,
-    target: `!${closest.id}`,
+    target: `${ASK_REFERENCE_SIGIL}${closest.id}`,
     meaning: 'The open agenda this belongs with: the same topic, so the answer lands in one place.',
   };
 }

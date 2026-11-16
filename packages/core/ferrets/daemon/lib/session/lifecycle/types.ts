@@ -188,6 +188,12 @@ export interface SessionLifecycleLauncher {
    */
   launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined>;
   /**
+   * The pid of the process the session's pane runs (tmux `#{pane_pid}`), read after {@link launch}; `undefined` when it
+   * cannot be told. The conversation lease moves onto it. Optional: a launcher that has none leaves the lease on the
+   * daemon's pid, and the lease then refuses a start that names a conversation (fail closed).
+   */
+  panePid?(record: SessionLifecycleRecord): Promise<number | undefined>;
+  /**
    * Why a start of this session must be refused BEFORE anything changes — its record, its credential or its conversation
    * lease — or `undefined` when {@link launch} will open a pane. Asked once, ahead of the first write of a start that is
    * about to launch, because a launch that does nothing (the ferret is already live as far as the launcher's owner

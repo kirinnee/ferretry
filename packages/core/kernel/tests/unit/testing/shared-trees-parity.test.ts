@@ -1,7 +1,7 @@
 /**
  * The testing host's shared trees stay in step with the real roots port: the same rules (`host/shared-trees.ts`) decide
  * who may mint, from what, into what, and when a link is made, so a plugin's unit test meets the refusals and the
- * link-or-copy answers production gives (one link rule: owner decision !A466).
+ * link-or-copy answers production gives (one link rule: owner decision ^A466).
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdir, mkdtemp, readdir, realpath, rm, writeFile } from 'node:fs/promises';

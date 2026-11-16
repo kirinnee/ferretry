@@ -1,5 +1,5 @@
 /**
- * Shared trees (kernel batch #10, rulings #52 Q2 + Q5, owner decision !A466): `RootsPort.share` mints ONE folder of the minter's own state, and
+ * Shared trees (kernel batch #10, rulings #52 Q2 + Q5, owner decision ^A466): `RootsPort.share` mints ONE folder of the minter's own state, and
  * `RootHandle.copyShared` materializes it in the receiver's internal root, on the real roots port and a real disk.
  * Who may mint, from what, into what, that a link is made only from internal state, and that a forged, rebuilt or revoked tree opens nothing.
  */

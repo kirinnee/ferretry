@@ -431,7 +431,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   (`--how-to-test`), on the card it holds;
   reading the board and the agenda. `fy new` still makes the sub-ferret's card where it makes one at all.
 - **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
-  `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
+  `dismiss` items on a session it started: `fy agenda done ^A1 -s <sub-session>`. The daemon proves it by lineage
   (walking `config.parent` up from the target session, fail-closed on a cycle, a missing session or an unreadable
   registry) and attributes the change to the lead, not the sub-ferret. A sibling, an unrelated lead and a
   descendant acting on its ancestor stay refused; `add`, `progress`, `answer` and the owner's snooze/reply verbs

@@ -51,8 +51,8 @@ const reply = agendaItem('A48', {
 } as never);
 
 const history = [
-  { kind: 'ferret', key: 'f1', at: NOW - 600_000, text: 'Re !A47: I looked at both and lean to SQLite.' },
-  { kind: 'ferret', key: 'f2', at: NOW - 300_000, text: 'Re !A47: nothing has changed since.' },
+  { kind: 'ferret', key: 'f1', at: NOW - 600_000, text: 'Re ^A47: I looked at both and lean to SQLite.' },
+  { kind: 'ferret', key: 'f2', at: NOW - 300_000, text: 'Re ^A47: nothing has changed since.' },
 ] as never;
 
 function Item() {

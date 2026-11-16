@@ -160,7 +160,7 @@ describe('a gate attached to a thread', () => {
     expect(attachedGateLead(review as never)).toBe('It is at Review.');
   });
 
-  // &B156: !A304 was a reply with three questions carrying "OK to build" for &F923, and drew no button for it.
+  // &B156: ^A304 was a reply with three questions carrying "OK to build" for &F923, and drew no button for it.
   test('keeps none of the thread’s own answer shape, so a thread of questions, steps or a form still offers the card’s options', () => {
     const plan = gate([['OK to build', 'next']], 'F923');
     const hosts: Partial<AgendaItem>[] = [

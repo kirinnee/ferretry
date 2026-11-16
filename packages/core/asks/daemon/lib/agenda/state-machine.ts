@@ -89,6 +89,7 @@ import {
   withCardAsks,
   withoutCardAsks,
 } from './card-asks.ts';
+import { ASK_REFERENCE_SIGIL } from '../../../contract/snapshot/ask-reference.ts';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
@@ -2466,7 +2467,7 @@ function merge(ledger: AgendaLedger, command: MergeCommand): AgendaMutation {
     kept,
     bare,
     command.actor,
-    `merged into !${command.id}`,
+    `merged into ${ASK_REFERENCE_SIGIL}${command.id}`,
     command.at,
     'dismissed',
     'dismissed',

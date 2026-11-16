@@ -30,6 +30,7 @@ export {
   setForegroundPinScope,
 } from '@ferretry/app';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 // ─── the daemon this half talks to ────────────────────────────────────────────────────────────────────────────────
 
@@ -77,8 +78,10 @@ export type AgendaId = string;
  * (one already typed is not repeated). Nothing is guessed — only the chips the owner added.
  */
 export const withReferences = (text: string, ids: readonly AgendaId[]): string => {
-  const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
-  return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
+  const missing = [...new Set(ids)].filter(
+    id => !new RegExp(`(?:^|\\s)${ASK_REFERENCE_SIGIL_CLASS}${id}(?=$|[\\s.,;:!?)])`, 'u').test(text),
+  );
+  return missing.length === 0 ? text : `${missing.map(id => `${ASK_REFERENCE_SIGIL}${id}`).join(' ')} ${text}`;
 };
 
 /** Where a reference-carrying client keeps its chips, for a sender that must remember them past this send. */

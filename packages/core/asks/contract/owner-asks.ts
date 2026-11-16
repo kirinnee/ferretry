@@ -15,6 +15,8 @@
  * cannot make it spin.
  */
 
+import { ASK_REFERENCE_SIGIL_CLASS } from './snapshot/ask-reference.ts';
+
 /** At most this many asks are returned. */
 export const MAX_OWNER_ASKS = 8;
 /** Each ask is cut to this many characters (ending with '…' when cut). */
@@ -101,7 +103,10 @@ const WHO_HEADER = /^(?:who|owner|by|actor|whose)$/u;
 const OWNER_CELL = /^(?:you|owner|human|for you)$/u;
 const NOTHING = /^(?:none|nothing|n\/a|nil|no action|no further action|no input)(?![\p{L}\p{N}])/iu;
 const ONLY_DASHES = /^[-–—\s]*$/u;
-const AGENDA_ITEM_REFERENCE = /[!?]A\d+\b|attention item|agenda item/iu;
+const AGENDA_ITEM_REFERENCE = new RegExp(
+  `(?:\\?|${ASK_REFERENCE_SIGIL_CLASS})A\\d+\\b|attention item|agenda item`,
+  'iu',
+);
 
 const NEXT_LINE_BREAK = /\r\n|\r|\n/u;
 
