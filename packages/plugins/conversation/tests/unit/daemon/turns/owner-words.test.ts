@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FakeMailboxQueue } from '@ferretry/core-mailbox/contract/testing';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StatePort } from '@ferretry/kernel/contract';
@@ -178,7 +178,7 @@ describe('Conversation’s port answers what the owner said', () => {
         return build({ ...ctx, kernel: { ...ctx.kernel, state } });
       },
     } as typeof daemon;
-    const queue = new FakeMailboxQueue();
+    const queue = new FakeMailbox();
     const host = await testHost({
       plugins: [implementation],
       fakes: { mailbox: queue, ferrets, asks: new FakeAsks() },

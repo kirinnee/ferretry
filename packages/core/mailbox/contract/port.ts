@@ -93,5 +93,5 @@ export interface MailboxApi extends MailboxQueueApi {
   retractedDraft?(ferret: FerretId): Promise<string | undefined>;
 }
 
-/** What the Mailbox serves today: its queue. The send path joins it when it moves in (then this is {@link MailboxApi}). */
-export const MailboxPort = definePort<MailboxQueueApi>('mailbox');
+/** What the Mailbox serves: its queue and the send path. */
+export const MailboxPort = definePort<MailboxApi>('mailbox');

@@ -1,10 +1,13 @@
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { err, ok } from '@ferretry/std';
-import type { MailboxQueueApi } from '../port.ts';
+import type { MailboxApi } from '../port.ts';
 import type { QueuedMessage } from '../wire-send.ts';
 
-/** `@ferretry/core-mailbox/contract/testing` (§7.8): the in-memory queue port a plugin that reads the Mailbox is tested against. */
-export class FakeMailboxQueue implements MailboxQueueApi {
+/**
+ * `@ferretry/core-mailbox/contract/testing` (§7.8): the Mailbox's port in memory, for a plugin that only reads and changes
+ * its queue. A test that sends runs the real Mailbox half instead; here every send-path act is refused `unavailable`.
+ */
+export class FakeMailbox implements MailboxApi {
   private readonly held = new Map<string, QueuedMessage[]>();
   /** Set, every call fails with it (a store that breaks with something nobody worded). */
   failure: Error | undefined;
@@ -53,5 +56,39 @@ export class FakeMailboxQueue implements MailboxQueueApi {
       (this.held.get(ferret) ?? []).map(entry => (entry.id === message ? next : entry)),
     );
     return ok(next);
+  }
+
+  private readonly unavailable = () => err({ code: 'unavailable', message: 'this fake Mailbox does not send' });
+
+  async send() {
+    return this.unavailable();
+  }
+
+  async interrupt() {
+    return this.unavailable();
+  }
+
+  async sends() {
+    return { sends: [] };
+  }
+
+  async sendRecord() {
+    return undefined;
+  }
+
+  async retrySend() {
+    return this.unavailable();
+  }
+
+  async cancelSend() {
+    return this.unavailable();
+  }
+
+  async enterSend() {
+    return this.unavailable();
+  }
+
+  async composer() {
+    return this.unavailable();
   }
 }

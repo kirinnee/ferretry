@@ -15,7 +15,7 @@ import {
   SENDS_STATE,
   type StoredRenderMeta,
 } from '../../../contract/index.ts';
-import { ClockSendScheduler } from '../../../daemon/delivery/adapters/clock-send-scheduler.ts';
+import { ClockSendScheduler } from '../../../../../core/mailbox/daemon/adapters/clock-send-scheduler.ts';
 import { StateSendChannel } from '../../../daemon/delivery/adapters/state-send-channel.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/state-send-ledger.ts';
 import type { SendRecord } from '../../../daemon/seams/ledger-types.ts';
