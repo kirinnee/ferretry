@@ -545,6 +545,43 @@ export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRAC
   );
 }
 
+/** The kinds of action a manifest fragment holds, in the order the merged `actions` lists them. */
+const ACTION_KINDS = ['routes', 'sockets', 'agentTools', 'cli'] as const;
+
+/**
+ * A package's manifest fragments: every `manifest/actions/*.actions.ts` default-exports one feature's `routes`, `sockets`,
+ * `agentTools` and `cli` (the `fragment()` of its `manifest/kit.ts`), and `manifest/generated/actions.ts` spreads them, in
+ * file-name order, into one `as const` `actions` the manifest uses as it was written, so a route is added by editing or adding
+ * one fragment and no list is edited. The file name's order is the declaration order, which a package's contract hash covers.
+ */
+const MANIFEST_ACTIONS_REGISTRY: FolderRegistrySpec = {
+  dir: 'manifest/actions',
+  glob: '*.actions.ts',
+  out: 'manifest/generated/actions.ts',
+  prefix: 'actions',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      '/** Every manifest fragment of this package (manifest/actions/*.actions.ts), merged in file-name order. */',
+      'export default {',
+      ...ACTION_KINDS.map(
+        kind => `  ${kind}: [${entries.map(entry => `...${entry.name}.${kind}`).join(', ')}] as const,`,
+      ),
+      '} as const;',
+      '',
+    ].join('\n'),
+};
+
+/**
+ * `<package>/manifest/generated/actions.ts` for each package that has manifest fragments. Built from the folder alone and
+ * written BEFORE any manifest loads, because the manifest imports it.
+ */
+export function manifestRegistries(ws: Workspace): ReadonlyMap<string, string> {
+  return folderRegistries(ws.packages, MANIFEST_ACTIONS_REGISTRY);
+}
+
 /** `ids.port.ts` → `IdsApi`, `runtime-records.port.ts` → `RuntimeRecordsApi`: the interface a slice file exports. */
 const sliceApiName = (file: string): string =>
   `${file.replace(/\.port\.ts$/, '').replace(/(^|-)(\w)/g, (_m, _dash, c: string) => c.toUpperCase())}Api`;
@@ -583,6 +620,7 @@ export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
     ...featureRegistries(model),
     ...contractRegistries(model.ws),
+    ...manifestRegistries(model.ws),
     ...ferretsApiRegistries(model),
     [
       GENERATED.plugins,
@@ -672,8 +710,12 @@ function argValue(args: readonly string[], flag: string): string | undefined {
 async function main(args: readonly string[]): Promise<number> {
   const root = argValue(args, '--root') ?? join(import.meta.dir, '..', '..');
   const only = argValue(args, '--package');
-  // The contract barrels first: a manifest imports the contract, so none loads without them. `--check` writes nothing.
-  if (!args.includes('--check')) writeFiles(root, contractRegistries(loadWorkspace(root)));
+  // The contract barrels and the manifest fragments first: a manifest imports both, so none loads without them. `--check` writes nothing.
+  if (!args.includes('--check')) {
+    const ws = loadWorkspace(root);
+    writeFiles(root, contractRegistries(ws));
+    writeFiles(root, manifestRegistries(ws));
+  }
   const model = await buildModel(root, false);
   for (const failure of model.failures) console.error(`⚠️  ${failure}`);
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);
