@@ -264,7 +264,12 @@ export interface QueuePageViewProps {
   readonly onLoadOlder?: (group: QueueGroup) => void;
   /** The clock the "… ago" times read; the page passes the present, a test passes a fixed instant. */
   readonly now?: number;
+  /** The daemon's sentence when the list of ferrets could not be read: said instead of the empty state. */
+  readonly error?: string;
 }
+
+/** What a ferret's card says when its queue could not be read; the daemon's own sentence follows. */
+const UNREAD_QUEUE_COPY = 'Couldn’t read this queue:';
 
 export function QueuePageView({
   title,
@@ -280,27 +285,40 @@ export function QueuePageView({
   loadingOlder = null,
   olderFailed = null,
   onLoadOlder,
+  error,
 }: QueuePageViewProps) {
   // A ferret with nothing in its queue has no card: the page says so once, whether it shows one ferret or all. One
   // whose newest window shows nothing (every message in it cancelled) but whose machine holds older messages keeps its
   // card, because "Show older messages" lives there and would otherwise be unreachable.
   const hasOlder = (group: QueueGroup): boolean => onLoadOlder !== undefined && olderKeys?.has(group.key) === true;
-  const shown = groups.filter(group => group.rows.length > 0 || hasOlder(group));
+  // A ferret whose queue could not be read keeps its card too: it is not empty, it is unknown.
+  const shown = groups.filter(group => group.rows.length > 0 || group.unread !== undefined || hasOlder(group));
   const loadOlder = onLoadOlder;
   const waiting = groups.reduce((sum, group) => sum + group.rows.filter(isWaitingRow).length, 0);
+  const incomplete = error !== undefined || groups.some(group => group.unread !== undefined);
+  const countLine = !incomplete
+    ? waitingCountLine(waiting)
+    : waiting === 0
+      ? 'could not read every queue'
+      : `${waitingCountLine(waiting)}; some queues could not be read`;
   return (
     <section aria-label={title} className="fy-queue-page scroll-thin" data-queue-page="">
       <div className="fy-queue-column">
         <header className="fy-queue-head">
           <h1 className="fy-queue-title">{title}</h1>
-          <span className="fy-queue-count">{loading ? 'Reading the queues…' : waitingCountLine(waiting)}</span>
+          <span className="fy-queue-count">{loading ? 'Reading the queues…' : countLine}</span>
           {onShowAll === undefined ? null : (
             <button className="kt-btn kt-btn--sm" onClick={onShowAll} type="button">
               All queues
             </button>
           )}
         </header>
-        {shown.length === 0 && !loading ? (
+        {error !== undefined && !loading ? (
+          <p className="fy-queue-note" data-queue-error="" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {shown.length === 0 && !loading && !incomplete ? (
           <div className="fy-queue-empty kt-panel" data-queue-empty="">
             <p className="fy-queue-empty-title">Nothing is waiting</p>
             <p className="fy-queue-empty-hint">
@@ -347,10 +365,15 @@ export function QueuePageView({
                     </button>
                     {showMachine ? <span className="fy-queue-machine">{group.machine}</span> : null}
                     <GroupNextSend group={group} now={now} />
-                    {shown.length > 1 ? (
+                    {shown.length > 1 && group.unread === undefined ? (
                       <span className="fy-queue-group-count">{`${group.rows.filter(isWaitingRow).length} waiting`}</span>
                     ) : null}
                   </h2>
+                  {group.unread === undefined ? null : (
+                    <p className="fy-queue-note" data-queue-unread={group.key} role="status">
+                      {`${UNREAD_QUEUE_COPY} ${group.unread}`}
+                    </p>
+                  )}
                   <ul className="fy-queue-list">
                     {group.rows.map(row => (
                       <Fragment key={row.id}>

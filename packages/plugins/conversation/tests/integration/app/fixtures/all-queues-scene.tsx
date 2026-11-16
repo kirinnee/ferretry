@@ -3,13 +3,17 @@
  * network): three ferrets, two with messages waiting and one with an empty queue.
  *
  *   ?theme=<family>-<mode>
+ *   ?refused=<ferretId>   the daemon refuses that ferret's queue (the others still read)
  */
+import { DaemonCallError } from '@ferretry/app';
 import { createRoot } from 'react-dom/client';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { AllQueues } from '../../../../app/queue/all-queues-screen.tsx';
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+
+const refused = params.get('refused') ?? undefined;
 
 const minutesAgo = (minutes: number): string => new Date(Date.now() - minutes * 60_000).toISOString();
 const minutesAhead = (minutes: number): string => new Date(Date.now() + minutes * 60_000).toISOString();
@@ -57,7 +61,12 @@ const client = {
   call: async (route: string, init?: { params?: Record<string, string> }) => {
     if (route === 'GET /v1/ferrets')
       return [summary('casen', 'Casen'), summary('mira', 'Mira'), summary('idle', 'Idle')];
-    if (route === 'GET /v1/ferrets/:ferretId/queue') return { messages: queues[init?.params?.ferretId ?? ''] ?? [] };
+    if (route === 'GET /v1/ferrets/:ferretId/queue') {
+      // `?refused=<ferretId>`: the daemon refuses that ferret's queue (the partly-failed case).
+      if (init?.params?.ferretId === refused)
+        throw new DaemonCallError(403, 'forbidden', 'This device is not allowed to use the fleet.');
+      return { messages: queues[init?.params?.ferretId ?? ''] ?? [] };
+    }
     throw new Error(`Unexpected fixture route ${route}`);
   },
   subscribe: () => () => undefined,

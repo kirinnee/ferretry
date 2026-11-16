@@ -192,6 +192,56 @@ describe('AllQueuesScreen', () => {
     expect(page()).toContain('still here');
   });
 
+  const REFUSAL = 'This device is not allowed to use the fleet.';
+
+  test('a refused list read says the daemon’s sentence, never "Nothing is waiting"', async () => {
+    const client = daemon({});
+    client.on(LIST, () => {
+      throw new DaemonCallError(403, 'forbidden', REFUSAL);
+    });
+    open(client);
+    await read();
+    expect(page()).toContain(REFUSAL);
+    expect(page()).not.toContain('Nothing is waiting');
+    expect(mounted!.root.findAllByProps({ 'data-queue-empty': '' })).toHaveLength(0);
+  });
+
+  test('a queue the daemon refused is said, not counted as empty, while a readable one still shows', async () => {
+    const client = fakeClient(
+      {
+        [LIST]: () => [ferretSummary({ id: 'f1', name: 'Casen' }), ferretSummary({ id: 'f2', name: 'Mira' })],
+        [QUEUE]: call => {
+          if (call.params.ferretId === 'f1') throw new DaemonCallError(403, 'forbidden', REFUSAL);
+          return { messages: [queued('q2', 'for mira', 1)] };
+        },
+      },
+      'd1',
+    );
+    open(client);
+    await read();
+    expect(page()).toContain('for mira');
+    const unread = mounted!.root.findByProps({ 'data-queue-unread': 'd1/f1' });
+    expect(text(unread)).toBe(`Couldn’t read this queue: ${REFUSAL}`);
+    expect(mounted!.root.findAllByProps({ 'data-queue-unread': 'd1/f2' })).toHaveLength(0);
+    expect(page()).not.toContain('Nothing is waiting');
+  });
+
+  test('every read refused: each ferret says it could not be read, and the empty state stays away', async () => {
+    const client = fakeClient(
+      {
+        [LIST]: () => [ferretSummary({ id: 'f1', name: 'Casen' })],
+        [QUEUE]: () => {
+          throw new DaemonCallError(403, 'forbidden', REFUSAL);
+        },
+      },
+      'd1',
+    );
+    open(client);
+    await read();
+    expect(page()).toContain(REFUSAL);
+    expect(page()).not.toContain('Nothing is waiting');
+  });
+
   test('a queue event reads the queues again; a change of ferrets reads the list again', async () => {
     const client = daemon({});
     open(client);

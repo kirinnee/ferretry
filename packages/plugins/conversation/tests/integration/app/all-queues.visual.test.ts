@@ -90,4 +90,42 @@ describe('the All queues screen', () => {
           await context.close();
         }
       }, 60_000);
+
+  // One ferret's queue is refused while the others read: it says so, whole, and the rest still show.
+  for (const scheme of ['light', 'dark'] as const)
+    it(`says a refused queue could not be read, beside the readable ones, on 390 wide in ${scheme}`, async () => {
+      const context = await browser.newContext({
+        viewport: { width: 390, height: 844 },
+        colorScheme: scheme,
+        deviceScaleFactor: 2,
+      });
+      try {
+        const origin = server?.url.origin ?? '';
+        await context.route('**/*', async route =>
+          new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
+        );
+        const tab = await context.newPage();
+        const errors: string[] = [];
+        tab.on('pageerror', error => errors.push(error.message));
+        await tab.goto(`${origin}/?theme=studio-${scheme}&refused=casen`);
+        await tab
+          .locator('[data-queue-unread]')
+          .first()
+          .waitFor({ timeout: 10_000 })
+          .catch(() => undefined);
+        expect(errors).toEqual([]);
+        expect(await tab.locator('[data-queue-unread]').allInnerTexts()).toEqual([
+          'Couldn’t read this queue: This device is not allowed to use the fleet.',
+        ]);
+        expect(await tab.locator('[data-queue-row]').count()).toBe(1);
+        expect(await tab.locator('[data-queue-empty]').count()).toBe(0);
+        expect(await tab.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+        if (shotsDir !== '') {
+          await tab.waitForTimeout(150);
+          await tab.screenshot({ path: join(shotsDir, `390-${scheme}-partly-failed.png`), fullPage: true });
+        }
+      } finally {
+        await context.close();
+      }
+    }, 60_000);
 });

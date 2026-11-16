@@ -7,11 +7,12 @@
  * Reads: ONE list read of the ferrets (`GET /v1/ferrets`, again on `FerretsChanged`) and ONE queue read per listed
  * ferret (`GET /v1/ferrets/:ferretId/queue`, the newest window: everything that waits is in it, so no older pages).
  * The queues are read again on the queue page's own cadence (`POLL_MS`) and at once when a queue event is heard. A ferret
- * whose queue cannot be read keeps what was last read; a message saved on this device for a ferret the list does not
- * name still shows.
+ * whose queue cannot be read keeps what was last read and says it could not be read (it is never counted as empty); a
+ * list that cannot be read says why instead of "Nothing is waiting"; a message saved on this device for a ferret the
+ * list does not name still shows. The empty state is only for when every read answered and every queue is empty.
  */
 
-import { useOptionalRouter, useScreenHref } from '@ferretry/app';
+import { DaemonCallError, useOptionalRouter, useScreenHref } from '@ferretry/app';
 import { type FerretSummary, FerretSummarySchema, FerretsChanged } from '@ferretry/core-ferrets/contract';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -26,6 +27,10 @@ import { queueActions, readFerretQueuePage } from './send-queue.ts';
 /** Ferrets' `GET /v1/ferrets`: every ferret's summary. */
 const readFerrets = async (client: Pick<PluginClient, 'call'>): Promise<readonly FerretSummary[]> =>
   z.array(FerretSummarySchema).parse(await client.call('GET /v1/ferrets'));
+
+/** The sentence a failed read says: the daemon's own for a refusal, plain words for anything else. */
+const readFailure = (cause: unknown): string =>
+  cause instanceof DaemonCallError && cause.message !== '' ? cause.message : 'The daemon’s answer could not be read.';
 
 export function AllQueuesScreen() {
   const client = useConversationClient();
@@ -46,6 +51,9 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
   const held = useRef<ReadonlyMap<string, readonly QueuedMessage[]>>(new Map());
   // The number of the newest queue poll started: only it may commit (a slower, older answer must not undo a newer one).
   const generation = useRef(0);
+  // Why a read failed, in the daemon's words: the list (undefined while it reads), and each ferret's queue by id.
+  const [listError, setListError] = useState<string | undefined>(undefined);
+  const [unread, setUnread] = useState<ReadonlyMap<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [listTick, setListTick] = useState(0);
   const [tick, setTick] = useState(0);
@@ -69,9 +77,18 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
   useEffect(() => {
     let live = true;
     readFerrets(client).then(
-      list => live && setFerrets(list),
-      // A list that cannot be read shows what this device still holds, and the next change reads it again.
-      () => live && setFerrets(previous => previous ?? []),
+      list => {
+        if (!live) return;
+        setListError(undefined);
+        setFerrets(list);
+      },
+      // A list that cannot be read shows what this device still holds AND says why it is short; the next change
+      // reads it again.
+      cause => {
+        if (!live) return;
+        setListError(readFailure(cause));
+        setFerrets(previous => previous ?? []);
+      },
     );
     return () => {
       live = false;
@@ -86,12 +103,14 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
       generation.current += 1;
       const mine = generation.current;
       const answers = new Map<string, readonly QueuedMessage[]>();
+      const refused = new Map<string, string>();
       await Promise.all(
         ferrets.map(async ferret => {
           try {
             answers.set(ferret.id, (await readFerretQueuePage(client, ferret.id)).messages);
-          } catch {
-            // An unreadable queue keeps what was last read for that ferret.
+          } catch (cause) {
+            // An unreadable queue keeps what was last read for that ferret, and is said, never counted as empty.
+            refused.set(ferret.id, readFailure(cause));
           }
         }),
       );
@@ -103,6 +122,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
       }
       held.current = next;
       setQueues(next);
+      setUnread(refused);
       setLoading(false);
     };
     void read();
@@ -122,6 +142,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
       ferretId: ferret.id,
       ferret: ferret.name,
       rows: ferretRows(daemon, ferret.id, ferret.name, queues.get(ferret.id) ?? [], outbox),
+      ...(unread.has(ferret.id) ? { unread: unread.get(ferret.id) } : {}),
     }));
     // A message saved on this device for a ferret the list does not name still shows, under its id.
     const seen = new Set<string>(listed.map(ferret => ferret.id));
@@ -138,7 +159,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
       });
     }
     return waitingGroups(out);
-  }, [daemon, ferrets, outbox, queues]);
+  }, [daemon, ferrets, outbox, queues, unread]);
 
   const handlers = useMemo<QueueRowHandlers>(
     () => ({
@@ -154,6 +175,7 @@ export function AllQueues({ client, daemon }: { readonly client: PluginClient; r
 
   return (
     <QueuePageView
+      error={listError}
       groups={groups}
       handlers={handlers}
       loading={loading}
