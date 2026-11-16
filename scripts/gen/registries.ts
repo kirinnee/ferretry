@@ -578,10 +578,36 @@ export function ferretsApiRegistries(model: Model): ReadonlyMap<string, string> 
   return folderRegistries(model.ws.packages, FERRETS_API_REGISTRY);
 }
 
+/**
+ * A package's CLI verbs: every `*.verb.ts` under `cli/verbs/` default-exports the handlers of the verbs it owns
+ * (`defineVerbs`), and `cli/generated/verbs.ts` lists them, so a verb is added by adding a file and no hand list is edited.
+ */
+const CLI_VERBS_REGISTRY: FolderRegistrySpec = {
+  dir: 'cli/verbs',
+  glob: '*.verb.ts',
+  out: 'cli/generated/verbs.ts',
+  prefix: 'verb',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      "/** Every verb file of this package's CLI half, by file name (cli/verbs/*.verb.ts). */",
+      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      '',
+    ].join('\n'),
+};
+
+/** `<package>/cli/generated/verbs.ts`, one per package that has `cli/verbs/*.verb.ts` (see {@link CLI_VERBS_REGISTRY}). */
+export function cliVerbRegistries(model: Model): ReadonlyMap<string, string> {
+  return folderRegistries(model.ws.packages, CLI_VERBS_REGISTRY);
+}
+
 /** The global registries, keyed by root-relative path. */
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
     ...featureRegistries(model),
+    ...cliVerbRegistries(model),
     ...contractRegistries(model.ws),
     ...ferretsApiRegistries(model),
     [
