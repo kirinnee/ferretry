@@ -8,13 +8,13 @@ import { hostRuntimes } from '../routes/support.ts';
 /** The picker's api over the real mounted `POST /v1/ferrets/:id/runtime`, which refuses a control with no request id. */
 const picker = async () => {
   const controls: unknown[] = [];
-  const runtime: FerretRuntimeSubsystem = {
+  const runtime = {
     models: async () => ({}),
-    control: async (...args) => {
+    control: async (_caller: unknown, ...args: unknown[]) => {
       controls.push(args);
       return { changed: true };
     },
-  };
+  } as unknown as FerretRuntimeSubsystem;
   const { host } = await hostRuntimes({
     catalog: {} as RuntimesAssembly['catalog'],
     setup: {} as RuntimesAssembly['setup'],

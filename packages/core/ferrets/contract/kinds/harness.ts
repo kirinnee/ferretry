@@ -4,6 +4,7 @@ import type { Instant, JsonValue, Result } from '@ferretry/std';
 import type { HarnessKey, LoginKindKey } from '../ids.ts';
 import type { HarnessHistorySource } from '../history.ts';
 import type { LaunchSpec } from './launch.ts';
+import type { HarnessRuntimeSwitch, RuntimeSwitchPane } from './runtime-switch.ts';
 import type { HarnessStop, Runner, RunnerHandle, RunningFerret, StartRefusal } from './runner.ts';
 
 // ─── harness (§4.3) ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -402,6 +403,13 @@ export interface Harness {
    * Total: a tree that cannot be reached is left out, never an error. Absent: this harness lists no history.
    */
   historySources?(): Promise<readonly HarnessHistorySource[]>;
+  /**
+   * Additive (runtime control): this harness's part of changing the model, reasoning level or fast mode of a RUNNING ferret
+   * (`POST /v1/ferrets/:id/runtime`), built for ONE ferret's pane. Ferrets' runtime-control service asks it for the plan, the
+   * catalog and the picker recovery and never names the harness; absent: the harness cannot be switched live, and the answer
+   * is `422 runtime_control_unsupported`.
+   */
+  runtimeSwitch?(pane: RuntimeSwitchPane): HarnessRuntimeSwitch;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;

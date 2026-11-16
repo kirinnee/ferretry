@@ -35,11 +35,7 @@
     "daemon/adapters/session/signal/file-signal-artifacts.ts",
     "daemon/adapters/session/signal/launcher-signal-terminal.ts",
     "daemon/adapters/session/signal/storage-signal-repository.ts",
-    "daemon/lib/session/signal/index.ts",
-    "daemon/lib/session/runtime-control/index.ts",
-    "daemon/lib/session/runtime-control/ledger.ts",
-    "daemon/lib/session/runtime-control/policy.ts",
-    "daemon/lib/session/runtime-control/service.ts"
+    "daemon/lib/session/signal/index.ts"
   ],
   "allowed": {
     "entry:daemon/features/*.feature.ts": "a Ferrets feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.",

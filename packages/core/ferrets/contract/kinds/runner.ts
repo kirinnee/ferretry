@@ -330,10 +330,30 @@ export type RunnerComposerCleared = 'cleared' | 'absent' | 'foreign' | 'stuck';
 export type RunnerComposerSubmitted = 'submitted' | 'holding' | 'absent';
 
 /**
- * The closed set of keys a structured-question form is driven with (today's v4 driver sends exactly these). A key
- * outside it cannot be named, so the form seam can never be used to type an arbitrary key: no `C-c`, no `y`.
+ * The closed set of keys a structured-question form and a model picker are driven with (today's v4 drivers send exactly
+ * these: the navigation keys and a menu row's digit). A key outside it cannot be named, so the form seam can never be
+ * used to type an arbitrary key: no `C-c`, no `y`, no letter.
  */
-export const FORM_KEYS = ['Enter', 'Escape', 'Tab', 'Up', 'Down', 'Left', 'Right', 'Space'] as const;
+export const FORM_KEYS = [
+  'Enter',
+  'Escape',
+  'Tab',
+  'Up',
+  'Down',
+  'Left',
+  'Right',
+  'Space',
+  // A menu row's own digit: a model picker chooses a row by its number.
+  '1',
+  '2',
+  '3',
+  '4',
+  '5',
+  '6',
+  '7',
+  '8',
+  '9',
+] as const;
 export type FormKey = (typeof FORM_KEYS)[number];
 
 /**
