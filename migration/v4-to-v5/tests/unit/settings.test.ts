@@ -250,6 +250,67 @@ test('converts every v4 config kind into the v5 file that owns it, read back wit
   expect(report.kept).toContainEqual({ what: 'instruction documents', count: 1 });
 });
 
+test('!A527 an owner-shaped warden.yaml carries every autoMigrate key and the targets list, verbatim, as autoMove', async () => {
+  await yaml(
+    'warden.yaml',
+    [
+      'enabled: true',
+      'autoMigrate:',
+      '  enabled: true',
+      '  when: [rate_limited]',
+      '  targets:',
+      '    - claude-personal-a',
+      '    - codex-personal-b',
+      '  forceStopBackground: true',
+      '  waitMinutes: 20',
+      '  maxMovesPerHour: 2',
+      '  minHeadroomPercent: 35',
+      '',
+    ].join('\n'),
+  );
+  const report = await settingsStep.run(f.ctx());
+  expect(report.status).toBe('converted');
+
+  const warden = await read('warden.yaml', WardenFileSchema);
+  expect(warden.autoMove).toEqual({
+    enabled: true,
+    when: ['rate_limited'],
+    targets: ['claude-personal-a', 'codex-personal-b'],
+    forceStopBackground: true,
+    waitMinutes: 20,
+    maxMovesPerHour: 2,
+    minHeadroomPercent: 35,
+  });
+  expect(await text('warden.yaml')).not.toContain('autoMigrate');
+  // The work logins were never named by the owner, so nothing the conversion wrote names them.
+  expect(await text('warden.yaml')).not.toContain('liftoff');
+  expect(await text('warden.yaml')).not.toContain('loai');
+});
+
+test('!A527 an explicit autoMigrate enabled: false stays false, and a warden.yaml without autoMigrate gains no autoMove', async () => {
+  await yaml('warden.yaml', 'enabled: true\nautoMigrate:\n  enabled: false\n  targets: [claude-personal-a]\n');
+  await settingsStep.run(f.ctx());
+  expect((await read('warden.yaml', WardenFileSchema)).autoMove).toEqual({
+    enabled: false,
+    targets: ['claude-personal-a'],
+  });
+
+  // Absent in v4 → absent in v5, so the home takes the new default (on).
+  const silent = await fixture();
+  try {
+    const target = join(silent.from, 'config', 'warden.yaml');
+    await mkdir(join(target, '..'), { recursive: true, mode: 0o700 });
+    await writeFile(target, 'enabled: true\nintervalMinutes: 5\n', { mode: 0o600 });
+    await settingsStep.run(silent.ctx());
+    const written = parse(await readFile(join(silent.to, 'config', 'warden.yaml'), 'utf8')) as Record<string, unknown>;
+    expect(written).not.toHaveProperty('autoMove');
+    expect(written).not.toHaveProperty('autoMigrate');
+    expect(WardenFileSchema.parse(written).intervalMinutes).toBe(5);
+  } finally {
+    await silent.clean();
+  }
+});
+
 test('agenda check: attentionNudge carries when agendaNudge is absent, and is not reported as dropped', async () => {
   await yaml('machine.yaml', 'attentionNudge: false\n');
   const report = await settingsStep.run(f.ctx());

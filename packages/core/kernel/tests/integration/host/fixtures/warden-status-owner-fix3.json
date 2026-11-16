@@ -11,7 +11,7 @@
         "breakerMinutes": 30
       },
       "autoMove": {
-        "enabled": false,
+        "enabled": true,
         "when": ["rate_limited", "budget_exceeded"],
         "targets": [],
         "forceStopBackground": false,
@@ -178,7 +178,7 @@
         "breakerMinutes": 30
       },
       "autoMove": {
-        "enabled": false,
+        "enabled": true,
         "when": ["rate_limited", "budget_exceeded"],
         "targets": [],
         "forceStopBackground": false,

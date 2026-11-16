@@ -6,6 +6,7 @@
 import type { CallContext, RouteHandler } from '@ferretry/kernel/contract';
 
 export {
+  answerWhenChanged,
   ApiError,
   type ApiResponse,
   decodeParameter,
