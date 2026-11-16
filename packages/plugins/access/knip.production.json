@@ -1,0 +1,17 @@
+{
+  "entry": [],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "ignore": [
+    "app/features/onboarding/device-kind.ts",
+    "app/harness/pair-from-menu.tsx",
+    "app/lib/device-preference.ts",
+    "cli/lib/grants/commands.ts",
+    "cli/lib/grants/controller.ts",
+    "cli/lib/grants/gateway.ts",
+    "cli/lib/grants/ports.ts",
+    "cli/lib/grants/render.ts",
+    "daemon/adapters/grants/index.ts",
+    "daemon/adapters/pairing/index.ts",
+    "daemon/adapters/push/index.ts"
+  ]
+}

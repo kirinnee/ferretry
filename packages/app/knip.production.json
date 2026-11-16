@@ -1,0 +1,19 @@
+{
+  "entry": ["src/main.tsx"],
+  "project": ["src/**/*.{ts,tsx,css}"],
+  "ignore": [
+    "src/worker/service-worker.ts",
+    "src/worker/filter-document.ts",
+    "src/worker/notifications.ts",
+    "src/release/keeper.ts",
+    "src/release/storage.ts"
+  ],
+  "allowed": {
+    "entry:src/main.tsx": "the browser entry point the app shell build bundles from index.html; nothing imports it.",
+    "ignore:src/worker/service-worker.ts": "the service worker is its own bundle: packages/app/scripts/build-release.ts compiles it from this path (sw.verified.js) and the shell registers it by URL.",
+    "ignore:src/worker/notifications.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
+    "ignore:src/release/keeper.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
+    "ignore:src/worker/filter-document.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.",
+    "ignore:src/release/storage.ts": "reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports."
+  }
+}
