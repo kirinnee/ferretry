@@ -1,7 +1,7 @@
 /** Starting a ferret: `POST /v1/ferrets`, its recovery read, `fy start` and `fy new`. */
 import { AUDIT_KINDS } from '@ferretry/core-gate/contract';
 import { route, verb } from '@ferretry/kernel/manifest';
-import { ferretRead, fragment } from '../kit.ts';
+import { ferretRead, FLEET_CONFIGURE, fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
@@ -9,6 +9,7 @@ export default fragment({
     route('POST /v1/ferrets', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       // B2: a governed device's start outside every project is `terminal.use` (route-security/launch.ts). Gate gives a call
       // its grant standing only when the route asks for it, so without this the decision has no standing to read.

@@ -105,7 +105,7 @@ The carrier's `privilegedLoopback` proof (a loopback-only bind that advertises n
 
 | capability   | what it covers                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `fleet`      | the machine, its credentials, components, profiles and runtimes, and the proposals that change them; and every ferret write: **use** sends, stops, resumes, renames, signals and pins, **configure** starts, forks, moves, hands over, revokes and restarts ([the ferret writes](#the-ferret-writes-are-fleet-c58-sec3))                                                                                                                                                                                |
 | `terminal`   | opening, writing to and streaming session terminals, and typing into a session's own pane (Console)                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `browser`    | the human login window and per-session browser control                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `filesystem` | reading session working trees, registering projects, and the browser file tools (upload / download / pdf) on the host                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -286,8 +286,8 @@ proved pane, so it is declared `terminal` / `use` and governed exactly as the Co
 **So is acting on the person's own draft.** `POST /v1/ferrets/:ferretId/composer` presses Enter on, or
 erases, text a person left typed in the agent's composer — the "Send it" / "Clear it" a refused send
 offers. It is not a send (no ledger row, and the text is not Ferretry's), so it is declared `terminal` /
-`use` and governed exactly as the Console is, unlike the send-ledger routes, which stay `operator` with no
-capability. It acts only while the composer holds exactly the quoted draft, and is audited as
+`use` and governed exactly as the Console is, unlike the send-ledger routes, which ask `fleet.use` (the send path,
+above). It acts only while the composer holds exactly the quoted draft, and is audited as
 `terminal.input` with `detail.mode: 'composer'`, never with the text. See
 [docs/message-delivery.md](message-delivery.md).
 
@@ -305,17 +305,58 @@ Each has two axes, and they are different questions:
 - **use** — may the caller exercise the capability at all?
 - **configure** — may the caller change how it behaves on this host?
 
-The list is closed. Everything the daemon does _inside its own state home_ — sessions, tasks,
-the agenda — is deliberately absent (a pin is not: the pin routes ask `fleet.use`, below): a grant list that grew to cover every route would be a
-second copy of the route table, and a second copy is how the two stop agreeing.
+The list is closed. What a ferret write does to the **fleet** is not absent from it: every ferret write asks `fleet`
+([below](#the-ferret-writes-are-fleet-c58-sec3)), and a test over the shipped route table fails a ferret write that
+declares nothing and is not on a commented list. What stays absent is what the daemon does _inside its own state
+home_ that is not a ferret write — the agenda and the tasks, which are gated by **who acts** — because a grant list that
+grew to cover every route would be a second copy of the route table, and a second copy is how the two stop agreeing.
 
-**Shared drafts follow sends.** `GET`/`POST /v1/ferrets/:ferretId/shared-draft` and its live
-`…/shared-draft/stream` are `operator` with **no capability**, exactly like the send-ledger routes: a draft
-is the owner's own unsent message, strictly less than a send, and a device that may send a message may
-draft one. What guards them is **who acts** — `caller: 'person'` refuses every ferret, and the route admits
-only the owner's shell and paired devices — not a grant. An Inbox card's own draft rides the same routes with
-`?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. A test pins this choice
-(`tests/unit/runtime/mounts/shared-drafts.test.ts`), so making drafts governed is a reviewed decision.
+<a id="the-ferret-writes-are-fleet-c58-sec3"></a>
+
+**The ferret writes are `fleet` (c58-sec3; owner ruling on !A538, choice (a)).** Reading a ferret was `fleet.use`
+(c58-sec1) and changing its pins was `fleet.use` (c58-sec2); until c58-sec3 every other write on a ferret asked
+nothing, so a device the owner narrowed to `--limited` (fleet use only) could still start, fork, move, hand over and
+restart ferrets, and a device narrowed off fleet use could still send to one. The limit is now real on every one:
+
+| axis        | the writes                                                                                                                                                                              |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `use`       | send, stop, resume, rename, signal, and pin (the pin board `POST …/pins`, the sidebar `…/pin` and `…/unpin`)                                                                            |
+| `configure` | fork, move (+ `…/move/ask-to-stop-jobs`), handover (+ `…/handover/cancel`), `…/conversion-preview`, `POST /v1/ferrets` (start), `…/revoke-credential`, `POST` and `DELETE /v1/restarts` |
+
+- **`use` is the everyday act, `configure` changes what the host runs.** Every default device holds both; a `--limited`
+  device holds `use` only, so it still sends, stops, resumes, renames, signals and pins, and can no longer start, fork,
+  move, hand over, revoke or restart a ferret. A governed caller needs the live step-up for every `configure` write, which
+  an unlock holds (the ordinary rule); a `use` write needs nothing beyond the grant.
+- **One act, every path.** Where an act is reached by more than one route the same demand is on all of them: the send path
+  is the send, an interrupt, a retry, an Enter and a cancel on the send ledger, and an edit or a cancel in the queue (its
+  reads were `fleet.use` already); a move's preview and its ask-to-stop-jobs ask what the move asks. The CLI verbs call these
+  same routes, so there is no second door.
+- **Who is not governed.** The host's admin token over loopback is ungoverned and is never refused; a ferret's own
+  credential is never grant-governed, so an agent keeps what it had (a `caller: 'person'` route still refuses it). A
+  relayed request is **remote** whatever address it appears to carry: the carrier decides, never the address.
+- **What it does not change.** `POST /v1/ferrets` still asks `terminal.use` itself for a start with flags or outside every
+  project (`consultsGrants`); the new `fleet.configure` is asked first, and both must hold.
+- **Pinned by tests, from the shipped manifests.** `packages/core/ferrets/tests/unit/fleet-write-capability.test.ts` holds
+  the route table: every non-GET under `/v1/ferrets`, `/v1/restarts` and `/v1/worktrees`, and every write the Ferrets
+  manifest owns, declares a capability or is on a commented allowlist with a reason; adding a write without either fails it,
+  and so does removing one declaration the ruling names. `packages/core/gate/tests/unit/daemon/ferret-writes-fleet-limit.test.ts`
+  asks the real admission of each route: an axis-off device is refused (`grant_device_not_granted`) before the body is read,
+  the default and a `--limited` device still do every `use` write, loopback is never refused and a relayed one is remote.
+- **Declared GAP — ferret writes the ruling does not name.** These stay ungoverned and are on the allowlist, each with the
+  capability proposed for it: `PATCH …/compact-at`, `PATCH …/hypermedia`, `POST …/attachments` and `…/attachments/:id/unlock`
+  (POST and DELETE), `PATCH …/lessons` and `PATCH …/pack` (proposed `fleet.use`), and `POST /v1/ferrets/:id/runtime`
+  (proposed `fleet.configure`: it changes the runtime a ferret runs on, as a move does). The agenda writes (`agenda`,
+  `agenda-mode`, `agenda/replies`, `agenda/:id/seen`) are gated by who acts and stay that way on purpose.
+
+**Shared drafts follow sends, and sends are `fleet.use`.** `GET`/`POST /v1/ferrets/:ferretId/shared-draft` and its live
+`…/shared-draft/stream` ask `fleet.use`, like the send path they feed: a draft is the owner's own unsent message,
+strictly less than a send, and a device that may send a message may draft one — and a device narrowed off fleet use may
+do neither (c58-sec3; before it the draft routes were ungoverned on the reasoning that a draft is less than a send, which
+left a device that could not send able to read and write what its owner was about to). The rule only narrows: every
+default device and every `--limited` one holds `fleet.use`. Who acts still guards them as well — `caller: 'person'`
+refuses every ferret, and the route admits only the owner's shell and paired devices. An Inbox card's own draft rides the same
+routes with `?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. The conversation
+plugin's own tests pin the person-only half; `ferret-writes-fleet-limit.test.ts` pins the capability.
 
 **Pinned agents are the owner's preference, and a pin is a read of the ferret (c58-sec2).** `POST
 /v1/ferrets/:ferretId/pin` and `…/unpin` are `operator` and `caller: 'person'` (every ferret is refused at the
@@ -831,7 +872,7 @@ from. This is the version-skew rule in `packages/protocol/src/lib/version-skew.t
 - **A newly paired device holds every capability** (`FULL_DEVICE_GRANTS`, owner decision 2026-10-14), behind
   the unlock: it can do nothing until it unlocks, and then anything the daemon-wide document allows.
 - **A `fy pair --limited` code** gives the device that redeems it `fleet.use` only (`LIMITED_DEVICE_GRANTS`):
-  it can read the fleet and chat with sessions, and every other axis starts off until somebody widens it.
+  it can read the fleet and work with sessions (send, stop, resume, rename, signal, pin), and every other axis starts off until somebody widens it — so it cannot start, fork, move, hand over, revoke or restart a ferret (`fleet.configure`, [above](#the-ferret-writes-are-fleet-c58-sec3)).
   A full code minted from another device is refused unless that device holds every capability itself, so no
   device can pass on more than it holds; at the machine anything goes. The code carries the choice inside
   the daemon, never in the QR or the link.

@@ -1,6 +1,6 @@
 /** The restart queue: the restart routes and `fy restart`. */
 import { route, verb } from '@ferretry/kernel/manifest';
-import { ferretRead, fragment } from '../kit.ts';
+import { ferretRead, FLEET_CONFIGURE, fragment } from '../kit.ts';
 
 export default fragment({
   routes: [
@@ -9,6 +9,7 @@ export default fragment({
     route('POST /v1/restarts', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { skip: 'a restart is recorded in each ferret history, as today' },
       guard: { none: 'ferret ids and what was restarted or queued' },
@@ -22,6 +23,7 @@ export default fragment({
     route('DELETE /v1/restarts', {
       minimum: 'operator',
       caller: 'any',
+      capability: FLEET_CONFIGURE,
       noStore: true,
       audit: { skip: 'clearing the restart queue records nothing, as today' },
       guard: { none: 'how many waiting restarts were cleared' },
