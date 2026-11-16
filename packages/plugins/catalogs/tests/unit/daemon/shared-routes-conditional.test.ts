@@ -34,11 +34,14 @@ function routes(overrides: Partial<SharedRouteDeps['catalogs']> = {}) {
     ...overrides,
   };
   const table = sharedRoutes({ catalogs } as unknown as SharedRouteDeps);
-  const call = async (path: string, params: Record<string, string>, ifNoneMatch?: string) => {
+  const call = async (path: string, params: Record<string, string>, ifNoneMatch?: string, build?: string) => {
     const route = table.find(candidate => candidate.path === path);
     if (route === undefined) throw new Error(`no route ${path}`);
     return await route.handle({
-      request: { headers: new Map(ifNoneMatch === undefined ? [] : [['if-none-match', ifNoneMatch]]) },
+      request: {
+        headers: new Map(ifNoneMatch === undefined ? [] : [['if-none-match', ifNoneMatch]]),
+        ...(build === undefined ? {} : { build }),
+      },
       params: new Map(Object.entries(params)),
       access: { catalogIds: [CATALOG] },
       appSession: 'tab',
@@ -81,6 +84,21 @@ describe('conditional member reads', () => {
     expect(stale.status).toBe(200);
     expect(stale.headers.get('etag')).toBe('"7"');
     expect(signed).toEqual(['versions']);
+  });
+
+  it('names the daemon build: the same revision under another build with the same semver is signed again', async () => {
+    const { call, signed } = routes();
+    for (const [path, params] of [
+      [MANIFEST, { catalogId: CATALOG }],
+      [VERSIONS, { catalogId: CATALOG, itemId: ITEM }],
+    ] as const) {
+      const held = (await call(path, params, undefined, '5.0.0+aaa')).headers.get('etag') as string;
+      expect((await call(path, params, held, '5.0.0+aaa')).status).toBe(304);
+      const upgraded = await call(path, params, held, '5.0.0+bbb');
+      expect(upgraded.status).toBe(200);
+      expect(upgraded.headers.get('etag')).not.toBe(held);
+    }
+    expect(signed).toEqual(['manifest', 'manifest', 'versions', 'versions']);
   });
 
   it('says an item is not offered when the catalog refuses it, and lets any other failure through', async () => {
