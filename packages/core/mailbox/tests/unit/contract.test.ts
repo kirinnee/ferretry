@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  DeliveryWays,
   MAILBOX_HOST_KEY,
   MailboxHosts,
   MailboxPort,
@@ -10,10 +11,10 @@ import {
 import manifest from '../../manifest.ts';
 
 describe('the Mailbox package', () => {
-  test('is a core piece that offers one slot and serves nothing yet', () => {
+  test('is a core piece that offers its slots and serves nothing yet', () => {
     expect(manifest.id).toBe('mailbox');
     expect(manifest.core).toBe(true);
-    expect(manifest.hooks?.offers?.map(offer => offer.hook)).toEqual([MailboxHosts]);
+    expect(manifest.hooks?.offers?.map(offer => offer.hook)).toEqual([MailboxHosts, DeliveryWays]);
     expect(Object.keys(manifest)).not.toContain('actions');
     expect(MailboxPort.name).toBe('mailbox');
   });

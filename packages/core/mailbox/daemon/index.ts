@@ -1,6 +1,7 @@
 import { err, ok } from '@ferretry/std';
 import { implementDaemon } from '@ferretry/kernel/manifest';
 import {
+  DeliveryWays,
   KeyedSerialExecutor,
   type MailboxQueueApi,
   MailboxHosts,
@@ -9,6 +10,8 @@ import {
   SessionQueueService,
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
+import { paneWayContributions } from './ways/pane-way.ts';
+import { waysDoctor } from './ways/registry.ts';
 import { MAILBOX_HOST_MISSING, type MailboxHostSource, requireMailboxHost } from './lib/host-slot.ts';
 import { NotifyingSessionQueueStore } from './lib/queue/notifying-store.ts';
 
@@ -19,7 +22,7 @@ import { NotifyingSessionQueueStore } from './lib/queue/notifying-store.ts';
  * and every later use of the host refuses with {@link MAILBOX_HOST_MISSING}.
  */
 export default implementDaemon(manifest, {
-  build: ({ hooks, kernel }) => {
+  build: ({ hooks, kernel, needs }) => {
     const source: MailboxHostSource = key => hooks.provider(MailboxHosts, key);
     // The slot's value only exists once Conversation has built, so the service is made on first use.
     let made: SessionQueueService | undefined;
@@ -58,7 +61,9 @@ export default implementDaemon(manifest, {
     };
     return {
       provides: { mailbox: queue },
+      hooks: { 'mailbox.delivery-way': () => paneWayContributions(needs.ferrets) },
       doctor: {
+        'mailbox-ways': async () => waysDoctor(() => hooks.contributions(DeliveryWays)),
         'mailbox-host': async () => {
           try {
             requireMailboxHost(source);
