@@ -78,7 +78,7 @@ const FLAGS: readonly Flag[] = [
   text('whereFile', 'where-file'),
   text('jsonFile', 'json-file'),
   text('questionAnswer', 'question-answer'),
-  text('moveCards', 'move-cards'),
+  text('moveCards', 'move-tasks'),
   text('reply', 'reply'),
   text('rest', 'rest'),
   text('message', 'message'),
@@ -137,7 +137,14 @@ const EXTRA: readonly Flag[] = [
   on('dryRun', 'dry-run'),
 ];
 
+/** The one flag whose spelling changed (O18: card → task): the old long name still reads, for one release. */
+const FORMER_LONG: ReadonlyMap<string, string> = new Map([['move-cards', 'move-tasks']]);
+
 const BY_LONG = new Map<string, Flag>([...FLAGS, ...EXTRA].map(flag => [flag.long, flag]));
+for (const [formerName, current] of FORMER_LONG) {
+  const flag = BY_LONG.get(current);
+  if (flag !== undefined) BY_LONG.set(formerName, flag);
+}
 const BY_SHORT = new Map<string, Flag>(
   [...FLAGS, ...EXTRA].flatMap(flag => (flag.short === undefined ? [] : [[flag.short, flag] as const])),
 );
@@ -236,7 +243,7 @@ const GRAMMARS = {
       'still-open',
       'kind',
       'stage',
-      'move-cards',
+      'move-tasks',
       'body-file',
       'json-file',
     ],

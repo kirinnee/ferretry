@@ -42,40 +42,40 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)                                                             | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
 | 3   | A notice with **`--ping`**                                                                                                                        | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
-| 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
+| 5   | A task the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <task> is at <lane>: Done or Not good"  | Once per task ask, when it is put on    |
 
-A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
-of a stop only while its sole open items are card asks, so a ferret that stops with only such an agenda waiting makes
-no stop push, and a question it asked on the same agenda is counted. An internal card (a ferret's own errand) never asks, so it never buzzes.
+A task ask is the task's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
+of a stop only while its sole open items are task asks, so a ferret that stops with only such an agenda waiting makes
+no stop push, and a question it asked on the same agenda is counted. An internal task (a ferret's own errand) never asks, so it never buzzes.
 
-An input card always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
+An input always counts as inside the window (row 2), so it pushes once the moment it is raised, unless it is
 **quiet** (below). An
-**approve-on-phone card** ([input requests](input-requests.md#approve-on-your-phone)) is the one card that pushes
+**approve-on-phone input** ([input requests](input-requests.md#approve-on-your-phone)) is the one input that pushes
 outside these rows: once when it is raised, and once more for each new number the daemon reads off the page (at most
 four in all). It has no `neededBy`, so row 2 never pushes it a second time. A woken item already inside its deadline's window gets the deadline's push (row 2) instead, never both. A snoozed
 item is parked, and a replied item rests (stored as `parked: replied`; [agenda.md](agenda.md#parked-items)): neither
 counts toward a stop or a deadline while it sleeps.
 
-### Quiet cards: filled in advance, never buzzed
+### Quiet inputs: filled in advance, never buzzed
 
-An input card that is filled the moment it is raised, under a paste rule the owner approved in advance
+An input that is filled the moment it is raised, under a paste rule the owner approved in advance
 ([secure copy](secure-copy.md)), a task plan line ([input requests](input-requests.md#task-plan-fills-a-sign-in-the-owner-approved-in-advance))
 or a standing sign-in rule ([input requests](input-requests.md#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)),
 is raised and closed at once: it was never the owner's to answer, so it must not buzz. While the daemon fills it, the
-card is QUIET (`InputRequestService.quietCard`): `AgendaBuzz` leaves it out of the owner's items, so it makes neither
-its deadline push nor a stop. The card on the wire is unchanged; the agenda history shows it closed ("Filled under
+input is QUIET (`InputRequestService.quietCard`): `AgendaBuzz` leaves it out of the owner's items, so it makes neither
+its deadline push nor a stop. The input on the wire is unchanged; the agenda history shows it closed ("Filled under
 your task plan (line 2) on github.com." for a plan; a rule fill closes in a tap fill's words, and the owner's input
-card says "Filled under your standing sign-in rule on github.com.").
+input says "Filled under your standing sign-in rule on github.com.").
 
-When the fill does not happen after all (a check missed, the write typed nothing), the card stops being quiet and the
+When the fill does not happen after all (a check missed, the write typed nothing), the input stops being quiet and the
 daemon adds one line to its context ("A task plan line didn't apply here, so you're asked as usual."). That edit is a
-daemon move, so the board settles at once and the card makes its one push, as any input card does. The line is the
-same whatever went wrong: the reason is on the owner's input card only.
+daemon move, so the board settles at once and the input makes its one push, as any input does. The line is the
+same whatever went wrong: the reason is on the owner's input only.
 
-A standing rule's miss adds NO line: the ferret reads its own agenda, and its card must stay byte-identical to a
+A standing rule's miss adds NO line: the ferret reads its own agenda, and its input must stay byte-identical to a
 sign-in no rule was ever about. The daemon instead asks `AgendaBuzz` to look at the board again
-(`AgendaBuzz.unquieted`), exactly as its edit would have, so the card still makes its one push. A suspension a fill
-caused raises no card in the ferret's session either: the owner sees it in Settings and on the input card's reason line.
+(`AgendaBuzz.unquieted`), exactly as its edit would have, so the input still makes its one push. A suspension a fill
+caused raises no input in the ferret's session either: the owner sees it in Settings and on the input's reason line.
 
 Each push opens the ferret's chat at the item that triggered it (`?attention=<id>`): the first blocking item
 for a stop, else the oldest. **The item opens AT ITS ASK**: its view scrolls to "What I need from you" and focuses it
@@ -119,12 +119,12 @@ Read at start; a change needs a restart.
 - **A stop:** the title is "<ferret> is stopped · 3 need you" (a lone item: "1 needs you"). The count
   always survives a lock screen: a long ferret name is trimmed to 24 characters first. The body is the
   title of the item the owner most likely wants first.
-- **A deadline or a ping:** the card's title as the heading and its ask as the text, nothing else. The
+- **A deadline or a ping:** the item's title as the heading and its ask as the text, nothing else. The
   title is trimmed to 40 characters at a word boundary; an item from before titles uses the start of its
   ask (`agendaTitle`). The body is at most 120 characters, trimmed with `…` (an ask is meant to be about 80, so it fits whole). A push never carries the
   context, the options or the recommendation.
 
-- **An approve-on-phone card:** the daemon's own title, "Approve on your phone", and a body built by
+- **An approve-on-phone input:** the daemon's own title, "Approve on your phone", and a body built by
   `phoneApprovalWords` from what the daemon observed. By owner decision !A171 the body leads with the number
   the daemon read off the page: "Tap 42 on your phone: your account on company.okta.com", or "Enter 123 in Duo Mobile:
   …". It names the place, never the account, because every subscribed device shows it.
@@ -139,15 +139,15 @@ written.
 
 ### High priority
 
-The owner asked for it: a push about a **one-time code** waiting on an input card (sensitivity `code`,
-[input requests](input-requests.md#one-time-codes-code)) is high priority: only a push that SHOWS the code card, its own
-push at raise or a stop whose shown item is the card (a code card waiting behind another item does not make that item loud). One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
+The owner asked for it: a push about a **one-time code** waiting on an input (sensitivity `code`,
+[input requests](input-requests.md#one-time-codes-code)) is high priority: only a push that SHOWS the code input, its own
+push at raise or a stop whose shown item is the input (a code input waiting behind another item does not make that item loud). One rule decides it, `pushUrgencyFor` (`packages/protocol/src/lib/push.ts`):
 `one-time-code` and `approve-on-phone` are high, everything else normal.
 
-An **approve-on-phone push** differs from a code card's in three ways: its tag is the approval's own (`pa-<id>`) at
-every priority, so a new number replaces the last one on the lock screen; its TTL is the seconds the card has left,
-never more than 600; and it pushes once per new number, not once per card. It spends the same per-ferret and
-daemon-wide high slots as a code card.
+An **approve-on-phone push** differs from a code input's in three ways: its tag is the approval's own (`pa-<id>`) at
+every priority, so a new number replaces the last one on the lock screen; its TTL is the seconds the input has left,
+never more than 600; and it pushes once per new number, not once per input. It spends the same per-ferret and
+daemon-wide high slots as a code input.
 
 The app's service worker reads the `pa-` tag (`fy-push:<daemonId>:pa-pa_…`): it shows the push on its own, never
 grouped into the ferret's summary, with `renotify` and `requireInteraction` so a new number sounds again and stays on
@@ -155,17 +155,17 @@ a desktop screen. The daemon sends no `urgency` for it; the app decides from the
 
 What a high push does, and who honours it:
 
-| Part                                               | Set by         | Honoured by                                                                                                                                                                                      |
-| -------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `Urgency: high` header (RFC 8030)                  | the daemon     | the push service, if it chooses: Google's FCM (Chrome on Android) documents that it delivers a high push at once, waking a dozing phone; other services, Apple's included, decide for themselves |
-| `TTL: 600` (a code card's life) instead of 4 weeks | the daemon     | every push service: a push not delivered in ten minutes is dropped, because its code has expired                                                                                                 |
-| `requireInteraction`                               | service worker | Chrome and Edge on desktop keep it on screen until it is acted on; Android and iOS ignore it                                                                                                     |
-| `renotify` with a tag per card, `silent: false`    | service worker | Chrome and Edge sound it again even when an earlier push for the ferret is showing                                                                                                               |
-| `vibrate`                                          | service worker | Chrome on Android; ignored elsewhere                                                                                                                                                             |
+| Part                                                | Set by         | Honoured by                                                                                                                                                                                      |
+| --------------------------------------------------- | -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `Urgency: high` header (RFC 8030)                   | the daemon     | the push service, if it chooses: Google's FCM (Chrome on Android) documents that it delivers a high push at once, waking a dozing phone; other services, Apple's included, decide for themselves |
+| `TTL: 600` (a code input's life) instead of 4 weeks | the daemon     | every push service: a push not delivered in ten minutes is dropped, because its code has expired                                                                                                 |
+| `requireInteraction`                                | service worker | Chrome and Edge on desktop keep it on screen until it is acted on; Android and iOS ignore it                                                                                                     |
+| `renotify` with a tag per input, `silent: false`    | service worker | Chrome and Edge sound it again even when an earlier push for the ferret is showing                                                                                                               |
+| `vibrate`                                           | service worker | Chrome on Android; ignored elsewhere                                                                                                                                                             |
 
 **At most three high pushes an hour per ferret, and twelve across the daemon** (`HIGH_PUSHES_PER_SESSION_PER_HOUR`,
-`HIGH_PUSHES_PER_HOUR`, rolling hours). Past either a code card still pushes once, at normal priority: a ferret raising
-card after card spends only its own three, never the slots another ferret's real code needs. A slot is spent only
+`HIGH_PUSHES_PER_HOUR`, rolling hours). Past either a code input still pushes once, at normal priority: a ferret raising
+input after input spends only its own three, never the slots another ferret's real code needs. A slot is spent only
 on a push a device accepted: one that reached no device (none enrolled, a failed send, nothing accepted) gives it
 back.
 
@@ -174,9 +174,9 @@ a Focus mode) is an option for native apps only; Web Push on iOS and iPadOS expo
 cannot set it. A Focus mode can still hold a code push on an iPhone.
 
 The payload says `urgency: "high"` and never the code, the value or anything typed: only what an ordinary push says
-(the push service is a third party). Every input card pushes ONCE the moment it is raised, while its ferret still waits in
-`input_wait`: its expiry is its deadline, and an input card always counts as inside the warning window whatever
-`attention.deadlineWarnHours` says (`buzz.ts`, `deadlineDue`). A code card's push is high priority; every other card's
+(the push service is a third party). Every input pushes ONCE the moment it is raised, while its ferret still waits in
+`input_wait`: its expiry is its deadline, and an input always counts as inside the warning window whatever
+`attention.deadlineWarnHours` says (`buzz.ts`, `deadlineDue`). A code input's push is high priority; every other input's
 is normal. A service worker older than this field cannot read the payload and shows its
 plain "something is waiting in your Inbox" notification instead: never nothing.
 
@@ -185,11 +185,11 @@ plain "something is waiting in your Inbox" notification instead: never nothing.
 Every item push goes out under **its own tag**, `attention-<session>:<item>` (`agendaItemPushTag`): a ping, a
 gate, a deadline and a woken item each replace only that item's earlier line. **So a ferret with two pushed items
 shows two lines**, not one line with "+1 more". A stop's push keeps the ferret's tag, `attention-<session>`
-(`agendaSessionPushTag`), even when it goes out loud for a code card, because it is about the ferret and everything
-waiting then: clearing that one card never takes the stop's line down. The own tag is what lets a handled item's line
+(`agendaSessionPushTag`), even when it goes out loud for a code input, because it is about the ferret and everything
+waiting then: clearing that one input never takes the stop's line down. The own tag is what lets a handled item's line
 come down on its own (below). A push recorded before tags were went out under the ferret's tag, the item's (a high
-push), its approval's (`pa-<id>`) or — a high stop — a code card's: a clear names each one it may have used, every
-code card that no longer waits included, since the ledger never said which card a high stop showed.
+push), its approval's (`pa-<id>`) or — a high stop — a code input's: a clear names each one it may have used, every
+code input that no longer waits included, since the ledger never said which input a high stop showed.
 
 ## When an alert is cleared
 
@@ -208,17 +208,17 @@ It decides from the board, not from what changed, so a new way for an item to st
 without a new rule. The **stop's line** ("N need you") comes down only once no item it could count is left on the
 owner's turn, because until then its words are still true.
 
-**When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox
-deck's top card, or the item's card in its conversation (an agenda row, a `^A3` reference, a notification tap, paging
+**When the owner opens the item.** Opening an item anywhere in the app takes its alerts down too: the Inbox
+deck's top item, or the item in its conversation (an agenda row, a `^A3` reference, a notification tap, paging
 to it). The app closes that item's lines on the device in the owner's hand at once, and tells the machine
 (`POST /v1/push/seen`, `fleet.use`, only where the machine lists `push.clear.1`). The machine clears every OTHER device
 and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.
 The device the item was opened on is skipped, so it never gets the iPhone note below about its own tap.
 
-An Inbox card counts as opened only while someone is at that page (`ATTENDED_MS`): it came on top within a minute of
+An Inbox item counts as opened only while someone is at that page (`ATTENDED_MS`): it came on top within a minute of
 a press, key or tap on a visible page — coming to the page counts — or else it is told at the next one. A deck left
-open on a screen nobody is at moves on by itself when its card is answered elsewhere, and that is not the owner
-opening the next card, so it never takes that card's alert off the phone in their hand.
+open on a screen nobody is at moves on by itself when its item is answered elsewhere, and that is not the owner
+opening the next item, so it never takes that item's alert off the phone in their hand.
 
 The answer can be slow, and by then a NEWER line can be up under one of its tags (the next item was raised, and a new
 stop went out). So the app closes, for the answer's tags, only a line whose `timestamp` is at or before the moment of
@@ -460,7 +460,7 @@ went idle), which are what the list shows beside the badge.
 
 ## Machine notices
 
-Notices that belong to no ferret — a ferret the Warden could not move, a card with nobody working on it, a login at its
+Notices that belong to no ferret — a ferret the Warden could not move, a task with nobody working on it, a login at its
 budget limit — are raised **once per cause** on the machine agenda ([agenda.md](agenda.md#the-machine-agenda)), not
 once per ferret. They notify and count like any item, an update in place does not buzz again, and nothing is raised
 on a stopped session.
@@ -549,21 +549,21 @@ recorded push errored or reached no device, plus a `notification log` note for s
 
 ## Every automatic push, and why it stays or goes
 
-| Path                                                 | Where                                       | Decision                                                                                                                           |
-| ---------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| A ferret stops on the owner                          | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                                    |
-| An item's `neededBy` comes near                      | daemon `AgendaBuzz`                         | **One push** per item. Never for a quiet input card (filled under a paste rule, a task plan line or a standing rule at its raise). |
-| A notice with `--ping`                               | `fy notify --ping`                          | **One push** per notice.                                                                                                           |
-| A sign-in to approve on the phone                    | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                                        |
-| An item is created, edited, surfaced or answered     | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.)             |
-| A pushed item is handled, rests, sleeps or is opened | daemon `AgendaAlertClearer`                 | **One clear** per push: its line comes down on every device, content-free (see When an alert is cleared).                          |
-| A notice without `--ping`                            | `fy notify`                                 | **Never pushed.** Inbox badge only.                                                                                                |
-| Enrolment confirmation                               | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                            |
-| A new device was paired                              | daemon audit log                            | Kept. This is a security alert.                                                                                                    |
-| A harness parks on its own prompt                    | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                               |
-| A session starts, finishes or idles                  | daemon                                      | Never pushed on its own (a stop is idle **with** an item waiting).                                                                 |
-| `failed` / `stalled` / `kill_failed`                 | PWA page watcher                            | Kept. A dead ferret cannot raise an item.                                                                                          |
-| Notifications a device's own filter hides            | push worker                                 | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.              |
+| Path                                                 | Where                                       | Decision                                                                                                                      |
+| ---------------------------------------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| A ferret stops on the owner                          | daemon `AgendaBuzz` → `NotificationService` | **The** push. One per stop, grouped. See above.                                                                               |
+| An item's `neededBy` comes near                      | daemon `AgendaBuzz`                         | **One push** per item. Never for a quiet input (filled under a paste rule, a task plan line or a standing rule at its raise). |
+| A notice with `--ping`                               | `fy notify --ping`                          | **One push** per notice.                                                                                                      |
+| A sign-in to approve on the phone                    | daemon `PhoneApprovalService`               | **One push** at the raise and one per new number read (at most four), high inside the caps.                                   |
+| An item is created, edited, surfaced or answered     | daemon                                      | **Never pushed.** Inbox badge only. (The per-turn grouped push, the surfaced push and the more-info push are retired.)        |
+| A pushed item is handled, rests, sleeps or is opened | daemon `AgendaAlertClearer`                 | **One clear** per push: its line comes down on every device, content-free (see When an alert is cleared).                     |
+| A notice without `--ping`                            | `fy notify`                                 | **Never pushed.** Inbox badge only.                                                                                           |
+| Enrolment confirmation                               | daemon `PushService.register`               | Kept. One push, only to the browser that just enrolled.                                                                       |
+| A new device was paired                              | daemon audit log                            | Kept. This is a security alert.                                                                                               |
+| A harness parks on its own prompt                    | daemon `HarnessPromptAgenda`                | **An item** like any other: it buzzes through a stop, not by itself.                                                          |
+| A session starts, finishes or idles                  | daemon                                      | Never pushed on its own (a stop is idle **with** an item waiting).                                                            |
+| `failed` / `stalled` / `kill_failed`                 | PWA page watcher                            | Kept. A dead ferret cannot raise an item.                                                                                     |
+| Notifications a device's own filter hides            | push worker                                 | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Carries the mark.         |
 
 ## GAPs
 

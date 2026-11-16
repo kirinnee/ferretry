@@ -39,8 +39,8 @@ export function DoneCloseConfirm({ view }: { readonly view: DoneCloseView }) {
   const confirm = view.confirm;
   if (confirm === null) return null;
   return (
-    <fieldset aria-label="Cards to close" className="fy-qr__confirm" data-agenda-done-close-confirm="">
-      <legend className="fy-qr__confirm-title">Close these cards too?</legend>
+    <fieldset aria-label="Tasks to close" className="fy-qr__confirm" data-agenda-done-close-confirm="">
+      <legend className="fy-qr__confirm-title">Close these tasks too?</legend>
       {confirm.cards.map(card => (
         <label className="fy-qr__confirm-card" key={card.ref.id}>
           <input

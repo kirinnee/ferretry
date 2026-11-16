@@ -1252,7 +1252,7 @@ The set crosses to the device at the one moment every device has: **redemption**
 "the one moment guaranteed to be direct", and §14 retired the guarantee without weakening the
 argument — see the rest of this paragraph. The pairing
 response carries `carriers`, at most **eight** entries, each one `{ kind: 'direct' | 'relay', url }`,
-in the daemon's own order. A relay the operator wrote in the daemon's own `carriers` list also carries `source: "configured"`; a discovered relay carries no `source`. It is the daemon's self-report — a device cannot check it — and it proves only that an address was ENTERED, never who runs it. It picks only the wording of the Connection card's disclosure (below), never what the path does. It is on the redemption response rather than the mint response because the
+in the daemon's own order. A relay the operator wrote in the daemon's own `carriers` list also carries `source: "configured"`; a discovered relay carries no `source`. It is the daemon's self-report — a device cannot check it — and it proves only that an address was ENTERED, never who runs it. It picks only the wording of the Connection panel's disclosure (below), never what the path does. It is on the redemption response rather than the mint response because the
 two are read by different parties — the mint response is read by the **host's** own UI, which has the
 daemon in front of it, and this one is read by the **device**, which is who has to know where to look
 next time. No rendezvous has an opportunity to edit this answer on any carrier: a direct redemption
@@ -1299,7 +1299,7 @@ pair with it. The daemon **fingerprint** is a different matter. It is not on thi
 named in any carrier diagnostic — it addresses the rendezvous, it travels in the pairing fragment, and
 it stays out of anything a reader might paste into an issue.
 
-**Whose relay a relay is, as the Connection card says it** — the app never states ownership as fact unless it is
+**Whose relay a relay is, as the Connection panel says it** — the app never states ownership as fact unless it is
 positively known, and it cannot know it. The browser decides in this order: an address equal to the hosted one this
 browser discovered itself is **Hosted relay**; an entry carrying `source: "configured"` that is NOT that address is
 **Configured relay** ("the relay this machine is set up to use"); everything else — a directory that timed out, failed or
@@ -2026,7 +2026,7 @@ The rules, each of which is a reason it can be trusted:
   the day someone adds a route and forgets it, so the default is off and the set that is on is the
   short, audited one: `GET /v1/ferrets` (the fleet list: names, states, context counters and the
   hashes of launch-instruction sections, which authorise nothing), `GET /v1/board` (the board list:
-  work-item titles, states and the people's own work text) and `GET /v1/board/ids` (the card ids alone). Every other route — passkeys, secrets, the
+  work-item titles, states and the people's own work text) and `GET /v1/board/ids` (the task ids alone). Every other route — passkeys, secrets, the
   security settings, pairing codes and devices, fleet credentials and MCP authorisation, the tunnel,
   push subscriptions, the browser sign-in window and state, file, diff and attachment bytes, session
   transcripts, messages, logs and any input request — answers plain, and so does any route added
@@ -3029,10 +3029,10 @@ device key, governed exactly as a relayed arrival. Every surface that names the 
 is direct **because the relay failed** ("Couldn’t reach it through the relay, using the direct
 connection."), and says it for as long as **any** live session of that machine — a request lane, the bulk
 lane, a stream — is on the direct address: a relay session that answers on another lane does not clear it, and
-the Connection card never says "via relay" while a lane still sends direct. The line goes when the last such
+the Connection panel never says "via relay" while a lane still sends direct. The line goes when the last such
 session ends with a relay session live (or when a relay session answers and none is direct); a walk that finds
-nothing at all clears it too. On one screen it is told once: the Connection card says it, and the frame's own
-status line for that machine stays quiet while the card is up. A chosen "Relay only" never falls back. When the read
+nothing at all clears it too. On one screen it is told once: the Connection panel says it, and the frame's own
+status line for that machine stays quiet while the panel is up. A chosen "Relay only" never falls back. When the read
 that opens a machine fails, the block page names the carrier's own cause and links Settings › This device
 › Connection, which needs no machine.
 

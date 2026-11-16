@@ -529,7 +529,7 @@ behaviour — exit codes, stdout/stderr content, and journeys completing — not
 ## Performance Tests (the perf tier)
 
 **Owner, 2026-11-16: "split those out as performance test. dont mix performance and correctness test together."**
-A test whose claim is a SPEED or SIZE budget - no synchronous slice of 100 ms while a tick writes 3,600 cards,
+A test whose claim is a SPEED or SIZE budget - no synchronous slice of 100 ms while a tick writes 3,600 tasks,
 linear time on adversarial input, a reload within a CPU bound, a memory ceiling - lives in `<package>/tests/perf/`,
 never in `tests/unit/`.
 

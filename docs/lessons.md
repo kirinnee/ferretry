@@ -96,7 +96,7 @@ owner reads and rewrites it through Lessons:
 - Settings › Lessons › Global lessons edits it in place; `fy lesson global` lists the rules numbered, and
   `fy lesson global edit <n> <rule…>` / `fy lesson global remove <n>` reword or remove one.
 
-An applied lesson's card refuses a further verdict (`409 already-applied`) and says where to change it.
+An applied lesson refuses a further verdict (`409 already-applied`) and says where to change it.
 
 ## Scan
 

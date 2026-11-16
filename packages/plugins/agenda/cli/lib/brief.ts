@@ -301,7 +301,7 @@ function confirmsFrom(
   ];
   if (clashing.length > 0) {
     throw new Error(
-      `--confirms writes the card's answers itself (Allow, Deny, Discard change): drop ${clashing.join(', ')}`,
+      `--confirms writes the item's answers itself (Allow, Deny, Discard change): drop ${clashing.join(', ')}`,
     );
   }
   return path;
@@ -334,7 +334,7 @@ function askLineFrom(summary: string | undefined): string {
 function titleFrom(raw: string | undefined): string {
   if (raw === undefined) {
     throw new Error(
-      'give the card a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
+      'give the item a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
     );
   }
   const line = raw.replaceAll(/\s+/gu, ' ').trim();

@@ -33,7 +33,7 @@ describe('the button’s words', () => {
     expect(doneCloseLabel([F12, { id: 'F13' }])).toBe('Done · closes &F12, &F13');
     // A narrow row's words: the one card, or how many.
     expect(doneCloseShortLabel([F12])).toBe('Close &F12');
-    expect(doneCloseShortLabel([F12, { id: 'F13' }, { id: 'F14' }])).toBe('Close 3 cards');
+    expect(doneCloseShortLabel([F12, { id: 'F13' }, { id: 'F14' }])).toBe('Close 3 tasks');
   });
 });
 

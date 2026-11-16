@@ -45,7 +45,7 @@ export const doneCloseLabel = (refs: readonly TaskRef[]): string =>
  * "Not needed" in it (the owner's compact action area); the full words stay the button's name and its title.
  */
 export const doneCloseShortLabel = (refs: readonly TaskRef[]): string =>
-  refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} cards`;
+  refs.length === 1 && refs[0] !== undefined ? `Close ${formatTaskRef(refs[0])}` : `Close ${refs.length} tasks`;
 
 /**
  * Closes each card in turn and stops at the first that will not close. A failure names the card and, when

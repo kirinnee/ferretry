@@ -129,7 +129,7 @@ function SkipButton({ busy, onSkip }: { readonly busy: boolean; readonly onSkip:
       data-agenda-skip=""
       disabled={busy}
       onClick={onSkip}
-      title="Leave it for now and move on to the next card"
+      title="Leave it for now and move on to the next item"
       type="button"
     >
       Skip

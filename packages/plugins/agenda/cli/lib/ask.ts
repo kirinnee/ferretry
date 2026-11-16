@@ -33,7 +33,7 @@ const KINDS = new Map<string, AgendaKind>([
 export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'form'] as const;
 
 /** Why a card cannot offer more than three answers, and what to do instead. */
-export const TOO_MANY_ANSWERS = `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
+export const TOO_MANY_ANSWERS = `an item offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
 
 /** The flags that shape an ask. */
 export interface AskFlags {
@@ -88,7 +88,7 @@ export function parseAsk(flags: AskFlags): CardAsk {
   );
   if (!parsed.success) {
     throw new Error(
-      `a choice card needs 2 to ${MAX_AGENDA_CARD_ANSWERS} distinct --option labels, ` +
+      `a choice needs 2 to ${MAX_AGENDA_CARD_ANSWERS} distinct --option labels, ` +
         `each one line of at most ${MAX_ASK_OPTION_LENGTH} characters`,
     );
   }

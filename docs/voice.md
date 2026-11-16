@@ -185,7 +185,7 @@ cd packages/pwa && bunx vite build && bun harness/parakeet-smoke.ts
 
 ## Which engine a device dictates with by default
 
-Every engine is offered side by side in **Settings › Voice**, each card carrying the numbers the on-device
+Every engine is offered side by side in **Settings › Voice**, each row carrying the numbers the on-device
 speech research measured for it (`lib/stt/research-numbers.ts`: headless Chrome with a 4× slower CPU,
 20 LibriSpeech clips and 10 synthetic technical dictations). Until a device picks one, it dictates with
 (`lib/stt/engine-defaults.ts`):

@@ -251,8 +251,8 @@ describe('the activity log', () => {
       'You asked to talk it through',
       'Brought to you',
       'Brought to you: ready for you',
-      'You answered a card ask',
-      'You answered the card ask gate:F12:tested:3',
+      'You answered a task ask',
+      'You answered the task ask gate:F12:tested:3',
       'Waiting on Zoe',
     ]);
   });

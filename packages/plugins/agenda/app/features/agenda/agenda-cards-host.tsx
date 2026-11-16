@@ -20,7 +20,7 @@ export interface AgendaCardsHostProps {
   readonly onNavigate?: (to: string) => void;
 }
 
-const NOT_HERE = 'Cards are Board’s, and Board is not reachable from here: open the card to do this on its page.';
+const NOT_HERE = 'Tasks are Board’s, and Board is not reachable from here: open the task to do this on its page.';
 
 /** The board when no host provides one: every write is refused, saying where it can be made. */
 const IDLE_BOARD: AgendaCardsBoard = {

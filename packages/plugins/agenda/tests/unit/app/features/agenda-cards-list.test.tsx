@@ -84,11 +84,11 @@ describe('the cards of a notice', () => {
       const start = list.q(id, '[data-agenda-card-start]');
       const close = list.q(id, '[data-agenda-card-close]');
       expect(open?.textContent).toBe('Open');
-      expect(open?.getAttribute('aria-label')).toBe(`Open card &${id}`);
+      expect(open?.getAttribute('aria-label')).toBe(`Open task &${id}`);
       expect(start?.textContent).toBe('Start a ferret');
       expect(start?.getAttribute('aria-label')).toBe(`Start a ferret on &${id}`);
       expect(close?.textContent).toBe('Close');
-      expect(close?.getAttribute('aria-label')).toBe(`Close card &${id}`);
+      expect(close?.getAttribute('aria-label')).toBe(`Close task &${id}`);
     }
     expect(list.q('B2', '[data-agenda-card-line]')?.textContent).toContain(
       '&B2 Fix the login page is waiting in Implement',
@@ -132,7 +132,7 @@ describe('the cards of a notice', () => {
 
   it('offers Open its chat in place of Start when a live ferret already holds the card, and opens that ferret', async () => {
     const list = await draw(ONE, {
-      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
+      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this task.' }),
     });
 
     await click(list.q('B1', '[data-agenda-card-start]'));
@@ -153,7 +153,7 @@ describe('the cards of a notice', () => {
 
   it('says the card’s ref when a line has no "is waiting in" tail to cut', async () => {
     const list = await draw([{ task: { id: 'B9' as BoardTaskId }, line: 'Something else entirely.' }], {
-      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' }),
+      start: async () => ({ ok: true, ferret: 'worker', note: 'A ferret is already working on this task.' }),
     });
 
     await click(list.q('B9', '[data-agenda-card-start]'));
@@ -265,8 +265,8 @@ describe('the buttons as the board’s own writes', () => {
     const closed = await actions.close('B1' as BoardTaskId, 'no longer needed');
 
     expect(sent).toEqual(['start:laptop:B1', 'drop:laptop:B1:no longer needed']);
-    expect(started).toEqual({ ok: true, note: 'Started: a new ferret is working on this card.' });
-    expect(closed).toEqual({ ok: true, note: 'Closed. The card is off the board.' });
+    expect(started).toEqual({ ok: true, note: 'Started: a new ferret is working on this task.' });
+    expect(closed).toEqual({ ok: true, note: 'Closed. The task is off the board.' });
   });
 
   it('answers a card a live ferret holds with that ferret, and opens its chat page', async () => {
@@ -277,7 +277,7 @@ describe('the buttons as the board’s own writes', () => {
     const started = await actions.start('B1' as BoardTaskId);
     actions.openChat('worker');
 
-    expect(started).toEqual({ ok: true, ferret: 'worker', note: 'A ferret is already working on this card.' });
+    expect(started).toEqual({ ok: true, ferret: 'worker', note: 'A ferret is already working on this task.' });
     expect(opened).toHaveLength(1);
     expect(opened[0]).toContain('laptop');
     expect(opened[0]).toContain('worker');

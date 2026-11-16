@@ -51,6 +51,17 @@ describe('an item verb reads the words as they were typed', () => {
     expect(read('edit', 'A1', '-t', 'Short')).toMatchObject({ ok: true, flags: { title: 'Short' } });
   });
 
+  test('--move-tasks names the tasks that move, and the former --move-cards still reads', () => {
+    expect(read('split', 'A1', 'Ask', '--move-tasks', 'F12,F13')).toMatchObject({
+      ok: true,
+      flags: { moveCards: 'F12,F13' },
+    });
+    expect(read('split', 'A1', 'Ask', '--move-cards', 'F12,F13')).toMatchObject({
+      ok: true,
+      flags: { moveCards: 'F12,F13' },
+    });
+  });
+
   test('repeats of a list flag keep every value in order', () => {
     expect(read('add', 'Ask', '--premise', 'one', '--premise', 'two')).toMatchObject({
       ok: true,

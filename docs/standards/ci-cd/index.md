@@ -125,7 +125,7 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   (catalogs, browsers, terminals, std: ~100) and `everything-else` (~160). A plugin package stays whole (the ledger
   passes a file only when ONE group covers it 100%); the kernel is split by test folder because it has a single
   `lib/` file (`app/lib/`), which its `kernel` group covers alone, so the split cannot move a judged file between
-  groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-card
+  groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-task
   tick writes) passed every time behind app, cli, core and the plugins before it in one process, and missed the budget
   (128-164 ms) twice as the FIRST files of a fresh process - with six and with four processes at once, so not CPU. The
   budget is unchanged; the test keeps the position it always passed in. Rebalance from

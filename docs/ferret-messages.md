@@ -85,7 +85,7 @@ Structured facts, never the banner:
 
 ### The receiver's Chat
 
-A card on the LEFT, distinct from the owner's right-hand bubbles: the sender's monogram, the sender as a
+A row on the LEFT, distinct from the owner's right-hand bubbles: the sender's monogram, the sender as a
 `:name` reference ([reference standard](reference-standard.md) — proved by session id, so a link only
 appears when this daemon's fleet holds that ferret), "ferret", the kind ("waiting for a reply",
 "replied"), the body as Markdown, the time and the receipt mark, and a quiet **Open conversation with
@@ -99,14 +99,14 @@ delivery's plumbing. A read that FAILED stays.
 
 A message that has not gone into the receiver yet — queued on the machine, held to be combined with others
 (`holdUntil`), or saved on the owner's device — is **not in the Chat at all**, whether the owner or a ferret
-sent it: no card, no strip. It shows on that ferret's Queue page ([queue views](message-delivery.md#the-durable-queue-being-built)),
+sent it: no row, no strip. It shows on that ferret's Queue page ([queue views](message-delivery.md#the-durable-queue-being-built)),
 with "sends by 11:20" per held message and the earliest as the ferret's "next send", and appears in the Chat
 once delivered. A message that failed or could not be confirmed is not waiting and stays in the Chat, where the
-owner can retry it. The sender's own **Sent to** card is unchanged: it lives in the sender's Chat.
+owner can retry it. The sender's own **Sent to** row is unchanged: it lives in the sender's Chat.
 
 ### The sender's Chat
 
-The tool call that ran `fy send` becomes a **Sent to** card: the recipient as a `:name` reference, the
+The tool call that ran `fy send` becomes a **Sent to** row: the recipient as a `:name` reference, the
 message (a quoted argument or the `"$(cat <<'EOF' … EOF)"` heredoc; a `--message-file` or any other
 shell expansion is named, never guessed), and its state:
 
@@ -122,7 +122,7 @@ shell expansion is named, never guessed), and its state:
 The raw command stays one tap away under **Show command**. Anything the reader does not recognise as a
 send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/peer-delivery.ts`.
 
-The card is compact (&F949): "Sent to :name" is a meta line the size of a chat row's name, and the foot is
+The row is compact (&F949): "Sent to :name" is a meta line the size of a chat row's name, and the foot is
 ONE line — the state's mark and its short word, `·` and "Show command" (the separator belongs to the control after it, so a wrap never strands it), then the time at the right. A longer meaning
 ("Queued — it reads this when its current turn ends") is the state's tooltip and is read to a screen reader;
 a failure's reason takes the one line of its own under the foot, and is part of the failure's alert, so a screen
@@ -130,7 +130,7 @@ reader hears "Not delivered: <reason>" at once.
 
 Each send is drawn ONCE (&B157). Claude Code (seen on 2.1.317) writes every message it sends the model again
 as an untimed `api-request-blob` record — an earlier tool call, its result, the owner's words, its own system
-reminders. Read as conversation, that drew every `fy send` twice: a copy with no time, and both cards stuck
+reminders. Read as conversation, that drew every `fy send` twice: a copy with no time, and both rows stuck
 on "Sending…" because the copy took the call's result. The daemon's Claude parser
 (`packages/daemon/src/lib/transcript/claude.ts`) drops those records. The one thing only a snapshot ever drew
 was a prompt queued while Claude was busy whose drain is content blocks (its text and a pasted image, as
@@ -145,7 +145,7 @@ message and each picture once after them.
   the sender's Chat and matching the send to its row.
 
 - **One machine.** A send is always between two sessions on the same daemon, so no machine is shown.
-- **Live sender state.** The Sent card reads the CLI's answer at send time, then `replied` from the
+- **Live sender state.** The Sent row reads the CLI's answer at send time, then `replied` from the
   Chat; it does not follow the receiver's ledger afterwards.
 - **The hand-off wire is unchanged.** `GET /v1/ferrets/:ferretId/handoffs/:name` still returns the document's
   text, banner included, because its schema is strict and a new field would break an older app reading
@@ -188,14 +188,14 @@ owner runs the safety check again, which stays the only way a migration starts. 
 an open tool call, a program the agent did not start from its shell, a blind spot — keeps the offer away.
 Claude's own `statusLine` command (`sh -c 'fy' statusline …`, from `claudeStatuslineCommand`) is the
 harness's helper, not a job. A daemon older than 4.153.0 marks no job, so when one refuses on processes
-alone the card says to update this machine's daemon instead of offering the ask.
+alone the offer says to update this machine's daemon instead of offering the ask.
 
 ## What the board types into a chat
 
 No board news reaches a chat (the owner, 2026-10-30: "there should not be any append or prepend on any
-feature"). A card's move, block, unblock, drop, reopen or done is never typed into the lead's chat, alone
+feature"). A task's move, block, unblock, drop, reopen or done is never typed into the lead's chat, alone
 or as a batched digest: the ferret that finished tells its lead in its own words (`fy signal done` reaches
-it through `fy wait`), the board shows the state, and the card's history keeps every event.
+it through `fy wait`), the board shows the state, and the task's history keeps every event.
 
 The one digest the owner has allowed (2026-11-03) is not the board's: it is made of messages a FERRET
 labelled `fyi` (`fy send --kind fyi`), which the queue holds and delivers with the receiver's other pending
@@ -209,25 +209,25 @@ the app shows as a "Ferretry · Board" sender chip — never as text in the mess
 | Producer                                     | To                                                         | Message                                                                                                            |
 | -------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
 | Stale nudge (`lib/board/sweep.ts`)           | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.`                          |
-| Go-ahead (`lib/board/sweep.ts`)              | the dependent card's assignee, once its last blocker ships | `&F20 can go ahead: &F18 merged.`                                                                                  |
-| PR closed unmerged (`lib/board/pr-cache.ts`) | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 was closed without merging. Reopen it, link its replacement, or drop the card.`                     |
-| CI red (`lib/board/pr-cache.ts`)             | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 CI is red. Fix it, or note on the card why it can stay red.`                                        |
-| Turn-end check (`lib/board/turn-check.ts`)   | the ferret that changed code with no card                  | `You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"` |
-| Reopen (`lib/board/reopen-delivery.ts`)      | the card's assignee, else its owner ferret                 | `&F412 was reopened by the owner: <reason>`                                                                        |
+| Go-ahead (`lib/board/sweep.ts`)              | the dependent task's assignee, once its last blocker ships | `&F20 can go ahead: &F18 merged.`                                                                                  |
+| PR closed unmerged (`lib/board/pr-cache.ts`) | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 was closed without merging. Reopen it, link its replacement, or drop the task.`                     |
+| CI red (`lib/board/pr-cache.ts`)             | [alert route](board.md#who-a-board-alert-is-for)           | `&F412 PR #930 CI is red. Fix it, or note on the task why it can stay red.`                                        |
+| Turn-end check (`lib/board/turn-check.ts`)   | the ferret that changed code with no task                  | `You changed code this turn without a task. Create one (fy task create …) or record why not: fy task skip "<why>"` |
+| Reopen (`lib/board/reopen-delivery.ts`)      | the task's assignee, else its owner ferret                 | `&F412 was reopened by the owner: <reason>`                                                                        |
 
-**The alert route.** A stale nudge, a red CI and a closed-unmerged PR go to the card's assignee while it is alive, else
-the nearest live lead above it, else the card's owner (its creator) and the owner's leads. They are never sent to the
-session that merely made a card another lead is working. The route is `noticeRecipient` (`lib/board/notice-route.ts`);
+**The alert route.** A stale nudge, a red CI and a closed-unmerged PR go to the task's assignee while it is alive, else
+the nearest live lead above it, else the task's owner (its creator) and the owner's leads. They are never sent to the
+session that merely made a task another lead is working. The route is `noticeRecipient` (`lib/board/notice-route.ts`);
 when it can only name an interactive session, the alert is **not typed** there at all: `BoardAlerts`
-(`lib/board/alert-sends.ts`) journals it on that session (`board.alert-withheld`) and the card shows the fact.
+(`lib/board/alert-sends.ts`) journals it on that session (`board.alert-withheld`) and the task shows the fact.
 [board.md](board.md#who-a-board-alert-is-for) has the rules.
 
-The stale nudge goes at most once per card per its lane's stale threshold, whoever receives it, and never to a ferret that
+The stale nudge goes at most once per task per its lane's stale threshold, whoever receives it, and never to a ferret that
 declared `fy signal waiting`. A go-ahead that could not be sent is said again on the next sweep. The
 contract is tested in `packages/daemon/tests/unit/board/no-prepend.test.ts`.
 
 **The agent's side.** The agent reads the sentence as it is: there is no agent-facing framing on these,
-because each names its card and says what to do, so nothing needs a "not from the owner" line.
+because each names its task and says what to do, so nothing needs a "not from the owner" line.
 
 Declared gaps:
 
@@ -238,28 +238,28 @@ Declared gaps:
 
 **How the app shows it.** A board message (`by: {kind: 'ferretry', feature: 'Board'}`, read from the queue
 item or from the ledger record) is never the owner's bubble: it is one compact system row — a board mark,
-"Board" as the sender, the sentence as it is, and the card (`&F412`) and the PR (`PR #930`, when the card links
+"Board" as the sender, the sentence as it is, and the task (`&F412`) and the PR (`PR #930`, when the task links
 it) as links (`BoardNudgeRow`, `packages/pwa/src/components/agent-message-rows.tsx`).
 
 ## The Warden and the board
 
-The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message is a plain sentence, from
+The Warden reads the board (`board-design.md` §3.4). Its orphaned-task message is a plain sentence, from
 "Ferretry · Warden" as the queue item's `by`; the resume turns below are still `[ferretry] ` notices (a GAP).
 
-- **An orphaned card.** A card in an active or review lane whose ferret is finished, with nothing alive
+- **An orphaned task.** A task in an active or review lane whose ferret is finished, with nothing alive
   under it and no lead above the finished ferret alive to take it back ([board.md](board.md#a-finished-helpers-task-goes-back-to-its-lead)), is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
-  board decides "orphaned"; the Warden reads its word. The card's **owner ferret**, when it is alive and
-  is not the finished ferret, gets one queued message naming the card and the three ways out:
+  board decides "orphaned"; the Warden reads its word. The task's **owner ferret**, when it is alive and
+  is not the finished ferret, gets one queued message naming the task and the three ways out:
   `fy resume <ferret>`, `fy task assign F412 <ferret>` or `fy task drop F412 --reason "<why>"`.
   The message is the daemon's (`senderKind: daemon`), never typed into an **interactive** owner ferret —
   that is the owner's own chat, so it gets the notice below instead — and a message that could not be
   typed becomes that notice too, rather than being typed again every sweep.
-  Otherwise the owner gets a plain notice tied to the card (`task` on the agenda item, source reference
+  Otherwise the owner gets a plain notice tied to the task (`task` on the agenda item, source reference
   `warden-orphan:F412`) on the owner ferret's board, else the finished ferret's. Each is sent once per
-  card and ferret that left it; a message to an owner ferret that has finished since moves on to the
-  notice; the notice clears itself once a ferret is on the card again. Nothing is investigated: the flag
+  task and ferret that left it; a message to an owner ferret that has finished since moves on to the
+  notice; the notice clears itself once a ferret is on the task again. Nothing is investigated: the flag
   never reaches Jev, an investigation or the Warden's spawn fingerprint. It is shown on the Warden page
-  as **card orphaned**.
+  as **task orphaned**.
 - **A ferret stuck on an unsent message.** A ferret idle at its prompt with a message of Ferretry's own typed in
   its box and never submitted is the Warden anomaly `input_stuck` (`packages/daemon/src/lib/warden/input-stuck.ts`),
   shown on the Warden page as **stuck unsent**. It is facts only — the session's state and its send ledger — and
@@ -273,14 +273,14 @@ The Warden reads the board (`board-design.md` §3.4). Its orphaned-card message 
   the spawn fingerprint. The Warden re-checks it once per episode, safely; if that does not move it, the ferret is
   named on the `warden:inbox-stuck` machine item and handed to an investigation whose verdict can only re-check
   again. The whole rule is in [message-delivery.md](message-delivery.md#b148-a-ferret-whose-inbox-is-stuck).
-- **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
-  or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
+- **The task a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
+  or a verdict's resume or restart — and the ferret has a focus task, its turn names the task: id, title,
   lane, the ask and every clarification verbatim, its links and its last five history lines
-  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no card gets the turn it got before. The closing line
-  tells a lead to move the card as it works; a sub-ferret, who may not, is told its card moves itself.
-  An interactive ferret never gets a card typed into its terminal.
+  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no task gets the turn it got before. The closing line
+  tells a lead to move the task as it works; a sub-ferret, who may not, is told its task moves itself.
+  An interactive ferret never gets a task typed into its terminal.
 
 Declared gaps:
 
-- **A failover is not handed the card.** Moving a ferret to another login keeps its conversation, and the
-  migration writes its own notice; the card is not added to it.
+- **A failover is not handed the task.** Moving a ferret to another login keeps its conversation, and the
+  migration writes its own notice; the task is not added to it.

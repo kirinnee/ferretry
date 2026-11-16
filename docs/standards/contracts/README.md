@@ -64,7 +64,7 @@ manifest OFFERS and nothing wires: a hook with no taker (or one key of a closed 
 offerer's own daemon code never reads, a port nothing reaches (no other plugin, no kernel bind, and no route path
 named by its own app or cli half), and an unbound seam in daemon code (`unbound(`, `notBuilt*`, a hard-coded
 `const x: T | undefined = undefined;`). Each is wired or listed under `"unwired"` in a `ports-pending.json` (its owning package's, or the root's when no package owns it) with a
-`&F<digits>` card and one sentence on what the owner loses. The list only shrinks against the base ref, and an entry
+`&F<digits>` task and one sentence on what the owner loses. The list only shrinks against the base ref, and an entry
 that is stale or names something that does not exist is a finding.
 
 Hook wiring lives in `nix/pre-commit.nix` — see [Linting](../linting/index.md).
