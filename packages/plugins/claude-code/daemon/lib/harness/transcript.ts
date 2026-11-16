@@ -17,6 +17,27 @@ const asInstant = (value: unknown): Instant | undefined =>
   typeof value === 'string' && !Number.isNaN(Date.parse(value)) ? (value as Instant) : undefined;
 
 /** The visible text of a message's content: a string, or the text blocks of a list. */
+/** The MCP server name Ferretry's own channel is registered under (Runtimes' fixed layer: `FERRETRY_MCP_SERVER`). */
+const FERRETRY_CHANNEL_SERVER = 'ferretry';
+
+/**
+ * A message pushed through Ferretry's own MCP channel is recorded inside `<channel source="ferretry" …>\nTEXT\n</channel>`,
+ * where TEXT is exactly what would have been typed. The words inside are what the conversation and the send tracker are
+ * shown; another server's wrapper, or text that is no wrapper, is returned as it is. The FIRST `source` names the server
+ * (Claude writes its own before the meta's).
+ */
+function unwrapChannel(text: string): string {
+  const found = /^\s*<channel((?:\s+[^\s=>]+="[^"]*")*)\s*>\n?([\s\S]*?)\n?<\/channel>\s*$/u.exec(text);
+  const server = /(?:^|\s)source="([^"]*)"/u.exec(found?.[1] ?? '')?.[1];
+  return found !== null && server === FERRETRY_CHANNEL_SERVER ? (found[2] ?? '') : text;
+}
+
+/** Whether a record's `origin` says it came through Ferretry's channel. */
+const fromFerretryChannel = (origin: unknown): boolean => {
+  const { kind, server } = asObject(origin) ?? {};
+  return kind === 'channel' && server === FERRETRY_CHANNEL_SERVER;
+};
+
 function textOf(content: unknown): string | undefined {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return undefined;
@@ -70,15 +91,17 @@ function proofEntry(record: Json, offset: number): TranscriptEntry | undefined {
       id: `${QUEUE_OPERATION_PROOF}:${offset}`,
       at,
       role: 'system',
-      text: content,
+      text: unwrapChannel(content),
       data: { proof: QUEUE_OPERATION_PROOF, operation },
     };
   }
   if (record.type !== 'attachment') return undefined;
   const attachment = asObject(record.attachment);
   if (attachment?.type !== 'queued_command' || attachment.commandMode !== 'prompt') return undefined;
-  if (asObject(attachment.origin)?.kind !== 'human') return undefined;
-  const text = textOf(attachment.prompt);
+  const channelled = fromFerretryChannel(attachment.origin);
+  if (asObject(attachment.origin)?.kind !== 'human' && !channelled) return undefined;
+  const prompt = textOf(attachment.prompt);
+  const text = channelled && prompt !== undefined ? unwrapChannel(prompt) : prompt;
   const originatedAt = asInstant(attachment.timestamp) ?? asInstant(record.timestamp);
   const drained = at ?? originatedAt;
   if (text === undefined || text.trim() === '' || drained === undefined) return undefined;
@@ -114,7 +137,8 @@ export function parseEntry(line: string, offset = 0): TranscriptEntry | undefine
   const content = message?.content;
   const blocks = Array.isArray(content) ? content.map(asObject) : [];
   const tool = blocks.some(block => block?.type === 'tool_use' || block?.type === 'tool_result');
-  const text = textOf(content);
+  const written = textOf(content);
+  const text = written !== undefined && fromFerretryChannel(record.origin) ? unwrapChannel(written) : written;
   const identity = toolIdentity(blocks);
   return {
     id,
@@ -275,11 +299,13 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
     );
     const hasText = typeof content === 'string' || blocks.some(block => block?.type === 'text');
     const origin = asObject(record.origin)?.kind;
+    // Ferretry's own channel is written as a meta record but carries a ferret's or the daemon's words: a message, like a typed one.
     const harnessWrote =
-      record.isMeta === true ||
-      record.isSidechain === true ||
-      record.isVisibleInTranscriptOnly === true ||
-      (typeof origin === 'string' && origin !== '' && origin !== 'human');
+      !fromFerretryChannel(record.origin) &&
+      (record.isMeta === true ||
+        record.isSidechain === true ||
+        record.isVisibleInTranscriptOnly === true ||
+        (typeof origin === 'string' && origin !== '' && origin !== 'human'));
     if (record.type === 'user') {
       if (hasText && !working)
         records.push({

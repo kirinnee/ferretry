@@ -58,6 +58,7 @@ const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
   `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
+  '--dangerously-load-development-channels=server:ferretry',
   `--append-system-prompt=${INSTRUCTION}`,
 ];
 /** Every one-shot dialog a Claude agent's `.claude.json` records as seen, as locked entries. */
@@ -188,6 +189,13 @@ describe('fixedLayerFor — Claude', () => {
             value: {
               mcpServers: { ferretry: { type: 'stdio', command: FY, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
             },
+          },
+          {
+            purpose: 'channels',
+            target: 'launch',
+            path: ['--dangerously-load-development-channels'],
+            key: '--dangerously-load-development-channels',
+            value: 'server:ferretry',
           },
           {
             purpose: 'instructions',
@@ -1257,5 +1265,50 @@ describe('SUB_FERRET_INSTRUCTION', () => {
       'board',
       'agenda',
     ]);
+  });
+});
+
+describe('the Claude channel flag in the fixed layer', () => {
+  const claude = (channels?: boolean): FixedLayer =>
+    layerOf({
+      harness: 'claude',
+      agentPermissions: 'auto',
+      cwd: CWD,
+      fyCommand: FY,
+      acceptsAutoPermissionMode: true,
+      ...(channels === undefined ? {} : { channels }),
+    });
+
+  it('should load the tools server as a development channel by default, in the = spelling, before the instruction', () => {
+    const args = claude().args;
+    should(args).containEql('--dangerously-load-development-channels=server:ferretry');
+    // `=` so the variadic flag cannot swallow the arguments after it, the prompt included.
+    should(args.indexOf('--dangerously-load-development-channels=server:ferretry')).be.below(
+      args.findIndex(arg => arg.startsWith('--append-system-prompt=')),
+    );
+    should(claude(true).args).eql(args);
+    should(claude().entries.find(entry => entry.purpose === 'channels')).eql({
+      purpose: 'channels',
+      target: 'launch',
+      path: ['--dangerously-load-development-channels'],
+      key: '--dangerously-load-development-channels',
+      value: 'server:ferretry',
+    });
+  });
+
+  it('should leave the flag, and its entry, out when the machine switched the channel off', () => {
+    const off = claude(false);
+    should(off.args.some(arg => arg.includes('development-channels'))).be.false();
+    should(off.entries.some(entry => entry.purpose === 'channels')).be.false();
+  });
+
+  it('should never put the flag on a Codex launch', () => {
+    const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
+    should(codex.args.some(arg => arg.includes('development-channels'))).be.false();
+  });
+
+  it('should default the machine setting on, and take it from machine.yaml', () => {
+    should(parseAccountModel({ version: 1 }).machine.claudeChannels).be.true();
+    should(parseAccountModel({ version: 1, machine: { claudeChannels: false } }).machine.claudeChannels).be.false();
   });
 });

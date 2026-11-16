@@ -83,6 +83,17 @@ export interface SendTrackerSettings {
   readonly strandedWatchMs: number;
   /** The longest wait between two looks at an unconfirmed send never yet seen in the composer (B187). */
   readonly strandedBackoffMaxMs: number;
+  /**
+   * How long a send handed to a Claude ferret's MCP channel has to show the harness's own RECEIPT — the `enqueue` line the
+   * transcript gains the instant the channel message arrives, even mid-turn (measured at 13 ms idle). No receipt by then and
+   * no ack from the MCP server means nothing reached Claude, and the message is typed ONCE instead.
+   */
+  readonly channelReceiptMs: number;
+  /**
+   * How long a channel send the MCP server DID acknowledge may go without a receipt before it is said unconfirmed. It is
+   * never typed: the server forwarded it, so a copy typed beside it would be the duplicate.
+   */
+  readonly channelAckedGraceMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -96,14 +107,16 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   },
   reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
-  untypedLookMs: 5_000,
+  untypedLookMs: 1_000,
   stuckAlarmMs: 2 * 60_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
+  channelReceiptMs: 5_000,
+  channelAckedGraceMs: 30_000,
   typedStableMs: 4_000,
   submitNudgesMs: [4_000, 12_000, 30_000],
-  deferredNudgeMs: 5_000,
+  deferredNudgeMs: 1_000,
   strandedWatchMs: 10 * 60_000,
   strandedBackoffMaxMs: 10 * 60_000,
 };
@@ -457,8 +470,8 @@ function mergedRun(
 export function sendStuckNotice(recipient: string, record: SendRecord, waitedMs: number): string {
   return (
     `Your message to ${recipient} (send ${record.sendId}) has not been delivered yet: for ${Math.round(waitedMs / 60_000)} min ` +
-    `Ferretry could not read ${recipient}’s input box to prove it empty, so nothing was typed. It is kept and tried ` +
-    `again every few seconds, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
+    `${recipient}’s input box was not safe to type into (its screen could not be read to prove it empty, it held text, a dialog was up, or it was compacting), so nothing was typed. It is kept and tried ` +
+    `again every second, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
     'tell the owner: whatever is on that ferret’s screen instead of an empty input box is what holds it.'
   );
 }

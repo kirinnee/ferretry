@@ -88,6 +88,7 @@ type FixedEntryPurpose =
   | 'remote-control'
   | 'one-time-prompts'
   | 'no-questions'
+  | 'channels'
   | 'no-alt-screen'
   | 'tools'
   | 'instructions';
@@ -142,6 +143,8 @@ export type FixedLayerInput =
       readonly acceptsAutoPermissionMode: boolean;
       /** The `fy` executable the tools server runs as. */
       readonly fyCommand: string;
+      /** Whether Claude loads the tools server as a development channel (the machine's `claudeChannels`; default on). */
+      readonly channels?: boolean;
     }
   | {
       readonly harness: 'codex';
@@ -388,6 +391,15 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 export const AGENT_TOOLS_INSTRUCTION =
   "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask.";
 
+/**
+ * The flag that loads the tools server as a development channel. Claude's plain `--channels` refuses a server that is not
+ * on its approved list, so the development spelling is the only one that works; it shows a one-time warning on every
+ * launch, which the daemon answers (claude-code's startup dialogs). Written with `=`: the option takes several servers, and
+ * a bare one would swallow the arguments after it, the prompt included.
+ */
+export const CLAUDE_CHANNELS_FLAG = '--dangerously-load-development-channels';
+const claudeChannelsArg = `${CLAUDE_CHANNELS_FLAG}=server:${FERRETRY_MCP_SERVER}`;
+
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
   mcpServers: {
@@ -610,6 +622,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
     }
     const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
     const skip = agentPermissions === 'skip';
+    const channels = input.channels !== false;
     const entries = [
       entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
@@ -622,6 +635,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
       entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
+      ...(channels ? [entry('channels', 'launch', [CLAUDE_CHANNELS_FLAG], `server:${FERRETRY_MCP_SERVER}`)] : []),
       entry('instructions', 'launch', ['--append-system-prompt'], instruction),
     ];
     return {
@@ -637,6 +651,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           mode,
           CLAUDE_NO_QUESTIONS_FLAG,
           `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
+          ...(channels ? [claudeChannelsArg] : []),
           `--append-system-prompt=${instruction}`,
         ],
         // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one

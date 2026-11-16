@@ -19,6 +19,7 @@ import {
 } from '../../../../daemon/lib/tmux/delivery.ts';
 import {
   codexUpdateAction,
+  devChannelsAction,
   resumeMenuAction,
   type StartupDialogAction,
   startupDialogAction,
@@ -930,5 +931,38 @@ describe('a submission Codex 0.166 parks until its startup ends', () => {
     should(paneShowsStartupWait(capture('startup-queued-slash').visible)).be.true();
     should(paneShowsStartupWait(quoted)).be.false();
     should(promptIsReady(quoted, 3, 2)).be.true();
+  });
+});
+
+describe('claude development-channels warning (2.1.317)', () => {
+  const screen = (): string =>
+    readFileSync(join(import.meta.dir, '../../../fixtures/startup-dialogs/claude-2.1.317-dev-channels.txt'), 'utf8');
+
+  it('should be recognised and answered with option 1 (Enter on the highlighted row), never Exit', () => {
+    // Act
+    const actual = [startupDialogAction(screen()), devChannelsAction(screen())];
+
+    // Assert
+    should(actual).deepEqual([
+      { kind: 'dev-channels', keys: ['Enter'] },
+      { kind: 'dev-channels', keys: ['Enter'] },
+    ]);
+  });
+
+  it('should walk back UP to option 1 when the cursor sits on Exit, and never press Down or choose 2', () => {
+    // Arrange
+    const onExit = screen().replace('❯ 1. I am using', '  1. I am using').replace('  2. Exit', '❯ 2. Exit');
+
+    // Act
+    const actual = startupDialogAction(onExit);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'dev-channels', keys: ['Up', 'Enter'] });
+  });
+
+  it('should answer nothing when the warning is shown without the development row, or is only talked about', () => {
+    should(devChannelsAction('WARNING: Loading development channels\n❯ 1. Exit')).be.undefined();
+    should(devChannelsAction('the user asked about the dev flag')).be.undefined();
+    should(startupDialogAction('I read: loading development channels is only for development')).be.undefined();
   });
 });

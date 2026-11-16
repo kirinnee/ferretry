@@ -220,6 +220,7 @@ const PATHS: ReadonlySet<string> = new Set<SendPath>([
   'native-file',
   'revive',
   'revive-queue',
+  'channel',
 ]);
 const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'timeout',

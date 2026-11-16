@@ -24,6 +24,7 @@ export interface StartupDialogAction {
     | 'onboarding'
     | 'resume-menu'
     | 'auto-default-nudge'
+    | 'dev-channels'
     | 'codex-update';
   readonly keys: readonly string[];
 }
@@ -89,6 +90,22 @@ export function resumeMenuAction(pane: string, choice: 'full' | 'summary'): Star
     ),
   );
   return keys.length === 0 ? undefined : { kind: 'resume-menu', keys };
+}
+
+/**
+ * Claude Code's "WARNING: Loading development channels" screen, which every launch with
+ * `--dangerously-load-development-channels` shows (the fixed layer's flag for Ferretry's own channel):
+ * `❯ 1. I am using this for local development` over `2. Exit`. Answered with the FIRST row only; the row is read off the
+ * pane, and Exit is never chosen — a daemon that left it would stop every ferret it launched.
+ */
+export function devChannelsAction(pane: string): StartupDialogAction | undefined {
+  if (!pane.toLowerCase().includes('loading development channels')) return undefined;
+  const options = menuOptions(pane);
+  const keys = keysTo(
+    options,
+    options.findIndex(option => option.label.startsWith('i am using this for local development')),
+  );
+  return keys.length === 0 ? undefined : { kind: 'dev-channels', keys };
 }
 
 /** `❯ No, keep bypass permissions` — the auto-default nudge draws its rows with no numbers. */
@@ -198,6 +215,8 @@ export function startupDialogAction(pane: string, options: StartupDialogOptions 
   if (nudge !== undefined) return nudge;
   const update = codexUpdateAction(pane);
   if (update !== undefined) return update;
+  const channels = devChannelsAction(pane);
+  if (channels !== undefined) return channels;
   const lower = pane.toLowerCase();
   // The theme picker has no wrong answer: every row is a text style, and the harness proceeds on any
   // of them. It is the one dialog that needs no row search.

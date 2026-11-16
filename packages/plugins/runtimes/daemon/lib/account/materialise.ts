@@ -368,6 +368,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
               agentPermissions: model.machine.agentPermissions,
               cwd: LAUNCH_FOLDER_PLACEHOLDER,
               acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
+              channels: model.machine.claudeChannels,
               fyCommand: input.fyCommand,
             })
           : fixedLayerFor({

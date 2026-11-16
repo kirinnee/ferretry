@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { CHANNEL_INSTRUCTIONS } from '../../../cli/lib/serve/channel.ts';
 import { McpServer, type McpToolResult } from '../../../cli/lib/serve/server.ts';
 import { MCP_TOOLS } from '../../../cli/lib/serve/tools.ts';
 
@@ -35,12 +36,13 @@ describe('McpServer — the protocol', () => {
       id: 1,
       result: {
         protocolVersion: '2025-03-26',
-        capabilities: { tools: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, experimental: { 'claude/channel': {} } },
         serverInfo: { name: 'ferretry', version: '9.9.9' },
+        instructions: CHANNEL_INSTRUCTIONS,
       },
     });
     should(await harness(undefined, 'One line.').request('initialize')).match({
-      result: { instructions: 'One line.' },
+      result: { instructions: `One line. ${CHANNEL_INSTRUCTIONS}` },
     });
     should(await request('initialize', { protocolVersion: '1999-01-01' })).match({
       result: { protocolVersion: '2025-06-18' },

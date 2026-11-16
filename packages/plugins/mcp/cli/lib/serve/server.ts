@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CHANNEL_INSTRUCTIONS } from './channel.ts';
 import { AGENT_TOOL_MAX_TOTAL_WAIT_MS, MCP_TOOLS } from './tools.ts';
 
 /**
@@ -234,6 +235,8 @@ export class McpServer {
   constructor(
     private readonly tools: McpToolsPort,
     private readonly info: McpServerInfo,
+    /** Called once when the client says it is initialized: the channel pump starts there, never before. */
+    private readonly onInitialized: () => void = () => {},
   ) {}
 
   /**
@@ -253,7 +256,10 @@ export class McpServer {
     const { id, method, params } = parsed.data;
     // A message with no id is a notification, and a notification is never answered — `initialized`
     // and `cancelled` included. A long call is bounded by its own timeout rather than cancelled.
-    if (id === undefined) return undefined;
+    if (id === undefined) {
+      if (method === 'notifications/initialized') this.onInitialized();
+      return undefined;
+    }
     switch (method) {
       case 'initialize':
         return { jsonrpc: '2.0', id, result: this.initialize(params) };
@@ -280,9 +286,9 @@ export class McpServer {
     const protocolVersion = MCP_PROTOCOL_VERSIONS.find(version => version === requested) ?? MCP_PROTOCOL_VERSIONS[0];
     return {
       protocolVersion,
-      capabilities: { tools: { listChanged: false } },
+      capabilities: { tools: { listChanged: false }, experimental: { 'claude/channel': {} } },
       serverInfo: { name: this.info.name, version: this.info.version },
-      ...(this.info.instructions === undefined ? {} : { instructions: this.info.instructions }),
+      instructions: [this.info.instructions, CHANNEL_INSTRUCTIONS].filter(part => part !== undefined).join(' '),
     };
   }
 

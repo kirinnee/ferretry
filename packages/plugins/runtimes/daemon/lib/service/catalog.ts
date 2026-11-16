@@ -1304,6 +1304,7 @@ const FIXED_ENTRY_WORDS: Readonly<Partial<Record<FixedEntry['purpose'], { key: s
   'remote-control': { key: 'Remote Control at startup', value: 'off' },
   'one-time-prompts': { key: 'one-time prompts (nudges, upsells, notices)', value: 'off' },
   tools: { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
+  channels: { key: 'Ferretry messages through Claude’s channel', value: 'on' },
   instructions: { key: 'Ferretry tools instruction', value: 'on' },
 };
 
@@ -1341,6 +1342,7 @@ function fixedLayerView(
           agentPermissions: model.machine.agentPermissions,
           cwd: VIEW_FOLDER,
           acceptsAutoPermissionMode: facts.acceptsAutoPermissionMode,
+          channels: model.machine.claudeChannels,
           fyCommand: VIEW_FY_COMMAND,
         })
       : fixedLayerFor({

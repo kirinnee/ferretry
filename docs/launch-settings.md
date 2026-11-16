@@ -374,3 +374,29 @@ a handover freezes the provenance with the resolved model in its plan, so a fork
 - A change of the runtime, the profile or the credential's environment since the launch is not detected either:
   today's wrapper digest covered them, but in 5.0 nothing Runtimes or the Vault supply is compared. Restart the
   ferret to apply it.
+
+## The Claude channel
+
+A Claude Code ferret can be handed a message **without anything being typed into its composer**: Claude Code accepts
+a push from an MCP server that declares the `claude/channel` capability and sends `notifications/claude/channel`.
+Ferretry's own tools server (`fy mcp serve`, registered under the name `ferretry`) is that server.
+
+- **The launch.** The fixed layer adds `--dangerously-load-development-channels=server:ferretry` to a Claude agent's
+  argv (the same single builder as every other launch flag: start, Restart CLI, migrate, revive). Claude's plain
+  `--channels` refuses a server that is not on its approved list, so the development spelling is the only one that works.
+  Every launch with it shows a "WARNING: Loading development channels" screen, which the daemon answers with option 1
+  and never with Exit ([harness-dialogs.md](harness-dialogs.md)).
+- **The switch.** `claudeChannels` in `machine.yaml`, **on by default**, applies at the next launch (it is **on
+  restart**). Turn it off with `claudeChannels: false`; the flag, and so the channel, is then not launched, and every
+  message is typed as before. It is not a loosening, so an edit that turns it on is not held. Claude Team and Enterprise
+  organisations block channels by policy: Ferretry cannot read an account's organisation type, so on such a login turn
+  the switch off. If a channel never connects the daemon types the message instead, so a blocked channel costs nothing but
+  the warning screen.
+- **The path.** The tools server polls the daemon for messages held for ITS session (`channel_poll`, a long poll that
+  also says the channel is connected) and writes each as one `notifications/claude/channel` carrying the exact text
+  that would have been typed, with `meta` `{ send_id, from }` (never a `source` key: it collides with the tag's own
+  attribute), then acks it (`channel_ack`). Neither tool is in the list a model sees. The server's instructions tell the
+  model that `<channel source="ferretry">` messages are work from Ferretry and other ferrets, and that the owner's own
+  words arrive as normal prompts, never through the channel.
+- **Measured** (Claude Code 2.1.317, a personal Max login): an idle session takes a message in about 15 ms and starts a
+  turn; a busy one takes it at the next tool boundary, in order, none lost.

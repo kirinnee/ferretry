@@ -129,6 +129,11 @@ class World {
   crashOnCrossOff: number | undefined;
   private crossOffs = 0;
   reading: SendEvidenceReading = { readable: true, inputs: [] };
+  /** Readings handed out first, one per read, before `reading` answers again (the transcript changing between two looks). */
+  readings: SendEvidenceReading[] = [];
+  /** The sends the MCP server said it forwarded through the Claude channel, and the ones the tracker typed instead. */
+  readonly channelAcked = new Set<string>();
+  readonly fellBack: string[] = [];
   readFails = false;
   readonly sinces: string[] = [];
   target: SendTarget | undefined = { id: ID, status: 'running', mode: 'auto', turn: 4 };
@@ -184,7 +189,7 @@ class World {
           read: async (_id, since) => {
             this.sinces.push(since);
             if (this.readFails) throw new Error('transcript gone');
-            return this.reading;
+            return this.readings.shift() ?? this.reading;
           },
         },
         terminal: {
@@ -203,6 +208,13 @@ class World {
             return this.target;
           },
           journal: async (_id, event, data) => void this.journal.push({ event, data }),
+        },
+        channel: {
+          acked: (_id, sendId) => this.channelAcked.has(sendId),
+          fallBackToTyping: async (_id, entry) => {
+            this.fellBack.push(entry.sendId);
+            this.records.set(entry.sendId, { ...entry, path: 'direct', attempt: 1, attemptAt: clock.now() });
+          },
         },
         attempts: {
           reattempt: async (_id, sendId) => {
@@ -2116,5 +2128,233 @@ describe("typing a person's send that nothing was typed for yet", () => {
 
     should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'ferret_ended' });
     should(world.retyped).be.empty();
+  });
+});
+
+/**
+ * A send handed to a Claude ferret's MCP channel is never typed; only the transcript says it arrived. The harness's own
+ * RECEIPT (its `enqueue` line, written the instant a channel message arrives even mid-turn) is what stops the clock, and
+ * only a send with no receipt and no ack from the MCP server is typed — once, after one more look at the transcript.
+ */
+describe('a send handed to the Claude channel', () => {
+  const { channelReceiptMs, channelAckedGraceMs, busyExtensionMs } = defaultSendTrackerSettings;
+  const channelSend = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'channel', senderKind: 'agent', from: SENDER, ...overrides });
+  const WRAPPED = '<channel source="ferretry" send_id="send-1">\nship it now please\n</channel>';
+  /** The busy form: the harness drains the queued channel message as an attachment at the next tool boundary. */
+  const channelDrained = (ms: number) => ({
+    type: 'attachment',
+    uuid: `q-${ms}`,
+    timestamp: at(ms),
+    attachment: {
+      type: 'queued_command',
+      prompt: WRAPPED,
+      commandMode: 'prompt',
+      origin: { kind: 'channel', server: 'ferretry' },
+    },
+  });
+
+  it('is proven delivered by the user entry the channel message becomes, with nothing typed', async () => {
+    const world = new World(channelSend());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(WRAPPED, 20),
+      { ...claude.user(WRAPPED, 40, 'u-1'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+    ]);
+
+    await world.checkAt(2_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { proof: 'normal-user-record' } });
+    should(world.fellBack).be.empty();
+    should(world.retyped).be.empty();
+  });
+
+  it('counts the enqueue line as the receipt — queued, never typed — and waits for the delivery', async () => {
+    const world = new World(channelSend());
+    world.evidence(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 20)]);
+
+    await world.checkAt(2_000);
+    await world.checkAt(channelReceiptMs + 1_000);
+
+    should(world.only).containEql({ fate: 'queued', queueProof: 'transcript' });
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(busyExtensionMs);
+    // the tool boundary comes and the queued command is drained: delivered
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(WRAPPED, 20),
+      claude.remove(WRAPPED, 7_000),
+      channelDrained(7_000),
+    ]);
+    await world.checkAt(8_000);
+    should(world.only).containEql({ fate: 'delivered' });
+  });
+
+  it('looks again at the receipt deadline instead of judging a send that is only seconds old', async () => {
+    const world = new World(channelSend());
+
+    await world.checkAt(2_000);
+
+    should(world.only.fate).equal('accepted');
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(channelReceiptMs - 2_000);
+  });
+
+  it('types it ONCE when the deadline passes with no receipt and no ack, and looks again soon', async () => {
+    const world = new World(channelSend());
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).eql(['send-1']);
+    should(world.only.path).equal('direct');
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.firstCheckMs);
+    // the row is a typed send now: it is never handed to the channel path again
+    await world.checkAt(channelReceiptMs + 100);
+    should(world.fellBack).eql(['send-1']);
+  });
+
+  it('does NOT type when the enqueue line appears between the deadline and the typing: a slow receipt is a receipt', async () => {
+    const world = new World(channelSend());
+    // The first read (the look's own) shows nothing; the one-more look right before typing finds the enqueue line.
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: true, inputs: observe(new ClaudeObservedInputObserver(), [claude.enqueue(WRAPPED, 4_900)]) },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only).containEql({ fate: 'queued', queueProof: 'transcript', path: 'channel' });
+  });
+
+  it('does NOT type when the delivered user entry appears between the deadline and the typing', async () => {
+    const world = new World(channelSend());
+    world.readings = [
+      { readable: true, inputs: [] },
+      {
+        readable: true,
+        inputs: observe(new ClaudeObservedInputObserver(), [
+          { ...claude.user(WRAPPED, 4_950, 'late'), isMeta: true, origin: { kind: 'channel', server: 'ferretry' } },
+        ]),
+      },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+
+    should(world.fellBack).be.empty();
+    should(world.only).containEql({ fate: 'delivered' });
+  });
+
+  it('never types on a guess: a transcript the last look cannot read waits, then says it is unconfirmed', async () => {
+    const world = new World(channelSend());
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, inputs: [] },
+    ];
+
+    await world.checkAt(channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.only.fate).equal('accepted');
+
+    world.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, unbound: true, inputs: [] },
+    ];
+    await world.checkAt(channelAckedGraceMs);
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' });
+    should(world.fellBack).be.empty();
+
+    const other = new World(channelSend());
+    other.readings = [
+      { readable: true, inputs: [] },
+      { readable: false, inputs: [] },
+    ];
+    await other.checkAt(channelAckedGraceMs);
+    should(other.only).containEql({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+  });
+
+  it('never types a send the MCP server acknowledged: it waits, then says it could not be confirmed, still watched', async () => {
+    const world = new World(channelSend());
+    world.channelAcked.add('send-1');
+
+    await world.checkAt(channelReceiptMs);
+    should(world.fellBack).be.empty();
+    should(world.scheduled.at(-1)?.delayMs).equal(channelAckedGraceMs - channelReceiptMs);
+
+    await world.checkAt(channelAckedGraceMs);
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
+    should(world.fellBack).be.empty();
+
+    // a record that turns up later still proves it delivered after all
+    world.evidence(new ClaudeObservedInputObserver(), [claude.remove(WRAPPED, 60_000), channelDrained(60_000)]);
+    await world.checkAt(61_000);
+    should(world.only.fate).equal('delivered');
+  });
+
+  it('is said unconfirmed at the hold ceiling, whatever the transcript did or did not show', async () => {
+    const world = new World(channelSend({ fate: 'queued', queuedAt: at(20) }));
+
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
+
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'timeout' });
+  });
+
+  it('is never typed by a tracker that has no channel to take it back from: it waits for the ack grace and says so', async () => {
+    const world = new World(channelSend());
+    (world.tracker as unknown as { ports: { channel?: unknown } }).ports.channel = undefined;
+
+    await world.checkAt(channelReceiptMs);
+    should(world.only.fate).equal('accepted');
+    await world.checkAt(channelAckedGraceMs);
+
+    should(world.only).containEql({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed' });
+  });
+});
+
+/**
+ * The owner's ruling (2026-11-15): the sender checks EVERY SECOND, and types only into a pane that is not compacting, is
+ * not parked on a dialog or consent prompt, and whose composer is empty. Each condition is the send service's own refusal
+ * (see service.test.ts); here the tracker's cadence is pinned — a withheld try is looked at again within a second and
+ * the send is typed on the first try after the condition clears.
+ */
+describe('the sender checks every second before it types', () => {
+  const { untypedLookMs } = defaultSendTrackerSettings;
+
+  it('looks again every second, not every five', () => {
+    should(untypedLookMs).equal(1_000);
+    should(defaultSendTrackerSettings.deferredNudgeMs).equal(1_000);
+  });
+
+  const holds: ReadonlyArray<readonly [string, SendRetypeWithholding]> = [
+    ['the pane is compacting its context (busy)', 'busy'],
+    ['the pane is parked on a dialog or consent prompt (not at a prompt)', 'busy'],
+  ];
+  for (const [name, reason] of holds) {
+    it(`does NOT type while ${name}, and types within a second of it clearing`, async () => {
+      const world = new World(record({ untyped: true, senderKind: 'agent', from: SENDER }));
+      world.withhold = reason;
+
+      await world.checkAt(untypedLookMs);
+      await world.checkAt(2 * untypedLookMs);
+      should(world.retyped).be.empty();
+      should(world.scheduled.at(-1)?.delayMs).equal(untypedLookMs);
+
+      world.withhold = undefined;
+      await world.checkAt(3 * untypedLookMs);
+      should(world.retyped).eql(['send-1']);
+    });
+  }
+
+  it('does NOT type while the composer holds text, and types within a second of it being empty', async () => {
+    const world = new World(record({ untyped: true }));
+    world.retypeFails = true; // the service refuses with the composer's draft; the tracker treats it as "not yet"
+
+    await world.checkAt(untypedLookMs);
+    await world.checkAt(2 * untypedLookMs);
+    should(world.retyped).be.empty();
+    should(world.only).containEql({ fate: 'accepted', untyped: true });
+    should(world.only.deadlineAt).equal(at(3 * untypedLookMs));
+
+    world.retypeFails = false;
+    await world.checkAt(3 * untypedLookMs);
+    should(world.retyped).eql(['send-1']);
   });
 });

@@ -1,3 +1,4 @@
+import { isFerretryChannelOrigin, unwrapFerretryChannel } from './channel.ts';
 import type { ObservedHumanInput, TranscriptInputObserver, TranscriptObservationContext } from './types.ts';
 import { transcriptObject, transcriptString } from './value.ts';
 
@@ -46,7 +47,10 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
     if (record === undefined) return [];
 
     if (record.type === 'queue-operation') {
-      const content = transcriptString(record.content);
+      // Ferretry's own channel message is held, absorbed and released under its wrapper; the send it proves was typed (or
+      // channelled) as the words inside it, so those are what the tracker is shown.
+      const raw = transcriptString(record.content);
+      const content = raw === undefined ? undefined : (unwrapFerretryChannel(raw) ?? raw);
       if (record.operation === 'remove' && content !== undefined) {
         this.removeRing.push({ content, timestamp: transcriptString(record.timestamp) });
         if (this.removeRing.length > CLAUDE_REMOVE_RING_LIMIT) this.removeRing.shift();
@@ -61,11 +65,13 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
       // several queued prompts at once (measured on 2.1.281). Read as a string only, such a drain proved
       // nothing: the tracker called a message the agent had read lost, typed it three more times, and
       // the owner's phone showed it "not delivered".
-      const text = claudeUserText(attachment?.prompt);
+      const channelled = isFerretryChannelOrigin(origin);
+      const drained = claudeUserText(attachment?.prompt);
+      const text = channelled && drained !== undefined ? (unwrapFerretryChannel(drained) ?? drained) : drained;
       if (
         attachment?.type !== 'queued_command' ||
         attachment.commandMode !== 'prompt' ||
-        origin?.kind !== 'human' ||
+        (origin?.kind !== 'human' && !channelled) ||
         text === undefined ||
         text.trim().length === 0
       ) {
@@ -89,7 +95,12 @@ export class ClaudeObservedInputObserver implements TranscriptInputObserver {
 
     const message = transcriptObject(record.message);
     if (record.type !== 'user' || message?.role !== 'user') return [];
-    const text = claudeUserText(message.content ?? record.content);
+    const written = claudeUserText(message.content ?? record.content);
+    // Ferretry's own channel writes its message as a meta user record: the words inside its wrapper are the proof.
+    const text =
+      written !== undefined && isFerretryChannelOrigin(record.origin)
+        ? (unwrapFerretryChannel(written) ?? written)
+        : written;
     if (text === undefined || text.trim().length === 0) return [];
     const observedAt = transcriptString(record.timestamp) ?? context.observedAt;
     if (observedAt === undefined) return [];

@@ -90,6 +90,16 @@ interface SendReattempter {
   resubmit(id: SessionId, sendId: string): Promise<SendRecord | undefined>;
 }
 
+/**
+ * The Claude channel as the tracker needs it: whether the MCP server said it forwarded a send, and the one fall back to
+ * typing a send whose channel delivery showed no receipt. The implementer takes the message back from the outbox first and
+ * does nothing when it was not the tracker's to type (already forwarded, or the row is no longer this send).
+ */
+interface SendChannelPort {
+  acked(id: SessionId, sendId: string): boolean;
+  fallBackToTyping(id: SessionId, record: SendRecord): Promise<void>;
+}
+
 /** Tells an agent that its message did not arrive. */
 export interface SendFailureNotifier {
   notify(sender: string, recipient: SessionId, record: SendRecord): Promise<void>;
@@ -118,6 +128,8 @@ export interface SendTrackerPorts {
   readonly notifier: SendFailureNotifier;
   /** Told once when a send has been stuck past `stuckAlarmMs` (see {@link SendStuckAlarm}). */
   readonly alarm: SendStuckAlarm;
+  /** Absent where no Claude channel exists: a `channel` row is then never watched as one. */
+  readonly channel?: SendChannelPort;
   readonly scheduler: SendScheduler;
   readonly roster: SendRoster;
   /** Its own queue: a look reads a whole transcript and must not hold the send lock while it does. */
@@ -333,6 +345,11 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         if (look !== undefined) next = next === undefined ? look : Math.min(next, look);
         continue;
       }
+      if (record.path === 'channel') {
+        const look = await this.channelStep(id, record, verdict, claimed, now);
+        if (look !== undefined) next = next === undefined ? look : Math.min(next, look);
+        continue;
+      }
       const proven =
         verdict?.queuedAt !== undefined && record.fate === 'accepted'
           ? await this.queued(id, record, verdict.queuedAt, 'transcript')
@@ -362,6 +379,73 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       next = next === undefined ? at : Math.min(next, at);
     }
     return next === undefined ? undefined : Math.max(0, next - now);
+  }
+
+  /**
+   * One look at a send handed to the Claude channel: nothing was typed for it, so the only proof is the transcript's.
+   *
+   *   * The harness's RECEIPT (its `enqueue` line, written the instant the channel message arrives, even mid-turn) makes it
+   *     `queued`; from then on it is never typed — it is in Claude's hands, and the user record (idle) or the queued
+   *     command (busy) is the delivery, proven like any other send.
+   *   * No receipt within `channelReceiptMs` and no ack from the MCP server: nothing reached Claude, so it is typed ONCE
+   *     (the channel port takes it back from the outbox first, so it can never arrive twice).
+   *   * An ack with no receipt: the server forwarded it, so a typed copy would be the duplicate. It waits
+   *     `channelAckedGraceMs`, then is said unconfirmed, and stays watched so a late record still proves it.
+   *
+   * Answers the instant of its next look, or `undefined` when it settled.
+   */
+  private async channelStep(
+    id: SessionId,
+    record: SendRecord,
+    verdict: SendVerdict | undefined,
+    claimed: ReadonlySet<string>,
+    now: number,
+  ): Promise<number | undefined> {
+    const age = now - Date.parse(record.acceptedAt);
+    if (age >= this.settings.holdLimitMs) {
+      await this.settle(id, record, 'unaccounted', 'timeout');
+      return undefined;
+    }
+    if (verdict?.queuedAt !== undefined) {
+      if (record.fate === 'accepted') await this.queued(id, record, verdict.queuedAt, 'transcript');
+      return now + this.settings.busyExtensionMs;
+    }
+    const receiptBy = Date.parse(record.acceptedAt) + this.settings.channelReceiptMs;
+    if (now < receiptBy) return receiptBy;
+    const port = this.ports.channel;
+    if (port !== undefined && !port.acked(id, record.sendId)) {
+      // ONE MORE LOOK before the only typing: a receipt that was merely slow must never become a second copy.
+      const fresh = await this.ports.evidence
+        .read(id, new Date(Date.parse(record.acceptedAt) - this.settings.matchSlackMs).toISOString())
+        .catch(() => UNREADABLE);
+      const again = judgeWatchedSends([record], claimed, fresh.inputs, this.settings.matchSlackMs).get(record.sendId);
+      if (again?.delivered !== undefined) {
+        await this.deliver(id, record, again);
+        return undefined;
+      }
+      if (again?.queuedAt !== undefined) {
+        if (record.fate === 'accepted') await this.queued(id, record, again.queuedAt, 'transcript');
+        return now + this.settings.busyExtensionMs;
+      }
+      // A transcript that cannot be read cannot rule a receipt out: nothing is typed on a guess.
+      if (!fresh.readable) {
+        if (now < Date.parse(record.acceptedAt) + this.settings.channelAckedGraceMs)
+          return now + this.settings.firstCheckMs;
+        await this.settle(
+          id,
+          record,
+          'unaccounted',
+          fresh.unbound === true ? 'transcript_unbound' : 'transcript_unreadable',
+        );
+        return undefined;
+      }
+      await port.fallBackToTyping(id, record).catch(() => undefined);
+      return now + this.settings.firstCheckMs;
+    }
+    const confirmBy = Date.parse(record.acceptedAt) + this.settings.channelAckedGraceMs;
+    if (now < confirmBy) return confirmBy;
+    await this.settle(id, record, 'unaccounted', 'landing_unconfirmed');
+    return undefined;
   }
 
   private async deliver(id: SessionId, record: SendRecord, verdict: SendVerdict): Promise<void> {

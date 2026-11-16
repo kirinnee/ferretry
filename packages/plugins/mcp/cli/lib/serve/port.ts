@@ -1,5 +1,6 @@
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { z } from 'zod';
+import { type ChannelPort, parseChannelMessages } from './channel.ts';
 import type { McpToolResult, McpToolsPort } from './server.ts';
 import { AGENT_TOOL_DEFAULT_WAIT_MS, AGENT_TOOL_MAX_TOTAL_WAIT_MS, AGENT_TOOL_MAX_WAIT_MS } from './tools.ts';
 
@@ -75,6 +76,32 @@ export function clientToolsPort(client: PluginClient): McpToolsPort {
       }
       if (name === 'search_work') return await once(name, withWorkKind(args));
       return await once(name, args);
+    },
+  };
+}
+
+/**
+ * The channel pump's one way to the daemon: the same tool door, two tools only this server calls (`channel_poll`,
+ * `channel_ack`; Conversation serves them as the session). A poll the daemon refuses, or answers in a shape this build does
+ * not read, throws, and the pump backs off.
+ */
+export function clientChannelPort(client: PluginClient): ChannelPort {
+  const once = async (name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> => {
+    if (client.tool === undefined) throw new Error('this build cannot reach the daemon’s tool door');
+    const answer = ToolResultSchema.safeParse(await client.tool(name, args));
+    if (!answer.success) throw new Error(`the daemon answered ${name} in a shape this build does not read`);
+    if (answer.data.isError === true) throw new Error(answer.data.text);
+    return answer.data.data;
+  };
+  return {
+    async poll(waitMs) {
+      const messages = parseChannelMessages(await once('channel_poll', { waitMs }));
+      if (messages === undefined)
+        throw new Error('the daemon answered channel_poll in a shape this build does not read');
+      return messages;
+    },
+    async ack(sendIds) {
+      await once('channel_ack', { sendIds });
     },
   };
 }

@@ -7,6 +7,7 @@ export * from './ids.ts';
 export * from './policy.ts';
 export * from './port.ts';
 export * from './state.ts';
+export * from './wire-channel.ts';
 export * from './wire-compact.ts';
 export * from './wire-draft.ts';
 export * from './wire-link.ts';

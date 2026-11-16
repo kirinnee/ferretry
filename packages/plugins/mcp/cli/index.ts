@@ -1,5 +1,6 @@
 import { configItemVerbs, implementCli, MCP_ITEM_KEYS, type VerbInvocation } from '@ferretry/kernel/manifest';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/plugin-runtimes/contract';
+import { milliseconds } from '@ferretry/std';
 import manifest from '../manifest.ts';
 import { serveTools } from './serve.ts';
 import { clientServersGateway, McpServersController } from './lib/servers.ts';
@@ -16,7 +17,7 @@ const text = (invocation: VerbInvocation, name: string): string | undefined => {
 };
 
 export default implementCli(manifest, {
-  build: ({ client, io, stdin, env, readText, confirm }) => {
+  build: ({ client, io, stdin, env, readText, confirm, sleep }) => {
     const items = configItemVerbs({
       collection: 'mcp',
       noun: 'MCP server',
@@ -37,6 +38,7 @@ export default implementCli(manifest, {
             stdin,
             version: manifest.version,
             instructions: TOOLS_SERVER_INSTRUCTIONS,
+            sleep: sleep === undefined ? undefined : async ms => await sleep(milliseconds(ms)),
           }),
         'mcp ls': async invocation =>
           await servers.list({

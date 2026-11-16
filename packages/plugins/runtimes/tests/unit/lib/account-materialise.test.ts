@@ -763,7 +763,7 @@ describe('materialiseFleet', () => {
       should(wrapper).containEql('FY_SEED_FIRST_RUN');
       should(wrapper).containEql('hasSeenAutoDefaultNudge');
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'auto' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
         permissions: { defaultMode: 'auto' },
@@ -776,6 +776,24 @@ describe('materialiseFleet', () => {
       });
     });
 
+    it('should leave the development-channel flag out of a Claude agent’s wrapper when the machine switched the channel off', () => {
+      // Act
+      const off = wrapperOf(
+        plan(
+          modelOf({
+            machine: { claudeChannels: false },
+            runtimes: { 'claude-agent': { credential: 'claude-you', profile: 'default', agent: true } },
+          }),
+        ),
+        'claude-agent',
+      );
+      const on = wrapperOf(plan(agents('auto')), 'claude-agent');
+
+      // Assert
+      should(off).not.containEql('development-channels');
+      should(on).containEql("'--dangerously-load-development-channels=server:ferretry'");
+    });
+
     it('should give a Claude agent on Skip the settings overlay and keep the placeholder folder out of every file', () => {
       // Act
       const result = plan(agents('skip'));
@@ -784,7 +802,7 @@ describe('materialiseFleet', () => {
       // Assert
       const overlay = `${HOME_A}/.fy/fixed.json`;
       should(wrapper).endWith(
-        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
+        `exec claude '--model' 'claude-opus-5-5' '--permission-mode' 'bypassPermissions' '--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"/opt/ferretry/bin/fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}' '--dangerously-load-development-channels=server:ferretry' ${shellQuote(`--append-system-prompt=${AGENT_BASE_INSTRUCTION('fy')}`)}"$_fy_sections" '--settings' '${overlay}' "$@"\n`,
       );
       should(only(result, overlay)).eql({
         kind: 'file',
