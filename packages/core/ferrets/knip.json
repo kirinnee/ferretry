@@ -4,6 +4,7 @@
     "tests/**/fixtures/**/*.{ts,tsx}",
     "app/views/*.tsx",
     "daemon/features/*.feature.ts",
+    "contract/{slots,hooks,kinds,app-hooks}/*.ts",
     "contract/ports/*.port.ts"
   ],
   "project": ["**/*.{ts,tsx}"],
@@ -31,6 +32,7 @@
   ],
   "allowed": {
     "entry:daemon/features/*.feature.ts": "a Ferrets feature is listed by the generator into the git-ignored daemon/generated/features.ts (scripts/gen/registries.ts), which knip does not read, so each feature file is an entry by its name: a new feature adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.",
+    "entry:contract/{slots,hooks,kinds,app-hooks}/*.ts": "a Ferrets slot, hook, kind or app hook is one file in its folder, re-exported by the generator into the git-ignored contract/generated/<folder>.ts (scripts/gen/registries.ts), which knip does not read, so each such file is an entry by its folder: a new one adds one file and edits no list (docs/standards/architecture). Not a pending-port gap.",
     "entry:contract/ports/*.port.ts": "a Ferrets port slice is composed into FerretsApi by the generator in the git-ignored contract/generated/ferrets-api.ts (scripts/gen/registries.ts), which knip does not read, so each slice file is an entry by its name: a new port member adds or edits one slice file and edits no list (docs/standards/architecture). Not a pending-port gap."
   }
 }

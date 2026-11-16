@@ -244,17 +244,17 @@ leaves, so a standing Ferrets would refuse is a rejection there too (keep live).
 
 ## Where it is in the code
 
-| Part                              | File                                                                 |
-| --------------------------------- | -------------------------------------------------------------------- |
-| The rule (pure)                   | `packages/core/ferrets/daemon/lib/session/archive/policy.ts`         |
-| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                  |
-| The pass                          | `.../archive/service.ts`                                             |
-| The registry document             | `.../archive/registry.ts`                                            |
-| Archive, revive, fallback reads   | `packages/core/ferrets/daemon/adapters/storage/session-storage.ts`   |
-| The session ports and the factory | `packages/core/ferrets/daemon/adapters/session/archive/`             |
-| `GET /v1/archived-sessions`       | `packages/core/ferrets/daemon/lib/runtime/mounts/session-archive.ts` |
-| The job, the answer parsing       | `packages/core/ferrets/daemon/modules/archive.ts`                    |
-| The keep hook                     | `packages/core/ferrets/contract/hooks.ts` (`ArchiveKeeps`)           |
-| The live list and the pin revival | `packages/core/ferrets/daemon/index.ts`                              |
-| Board's half of the keep hook     | `packages/plugins/board/daemon/adapters/archive-keeps.ts`            |
-| Agenda's half of the keep hook    | `packages/plugins/agenda/daemon/lib/archive-keeps.ts`                |
+| Part                              | File                                                                                  |
+| --------------------------------- | ------------------------------------------------------------------------------------- |
+| The rule (pure)                   | `packages/core/ferrets/daemon/lib/session/archive/policy.ts`                          |
+| Keep signals                      | `.../archive/keeps.ts`, `.../archive/open-cards.ts`                                   |
+| The pass                          | `.../archive/service.ts`                                                              |
+| The registry document             | `.../archive/registry.ts`                                                             |
+| Archive, revive, fallback reads   | `packages/core/ferrets/daemon/adapters/storage/session-storage.ts`                    |
+| The session ports and the factory | `packages/core/ferrets/daemon/adapters/session/archive/`                              |
+| `GET /v1/archived-sessions`       | `packages/core/ferrets/daemon/lib/runtime/mounts/session-archive.ts`                  |
+| The job, the answer parsing       | `packages/core/ferrets/daemon/modules/archive.ts`                                     |
+| The keep hook                     | `packages/core/ferrets/contract/hooks/session-archive-keeps.hook.ts` (`ArchiveKeeps`) |
+| The live list and the pin revival | `packages/core/ferrets/daemon/index.ts`                                               |
+| Board's half of the keep hook     | `packages/plugins/board/daemon/adapters/archive-keeps.ts`                             |
+| Agenda's half of the keep hook    | `packages/plugins/agenda/daemon/lib/archive-keeps.ts`                                 |

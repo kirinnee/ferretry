@@ -31,9 +31,8 @@ export function refusal(edge: ImportEdge): string | undefined {
 
   // Rule 2: a contract's imports.
   if (from === 'contract' || from === 'kernel-contract') {
-    // Ferrets' composed port (`contract/generated/ferrets-api.ts`, written by the generator from `contract/ports/`): the
-    // contract's own port file takes its types from it, as a half takes its feature list.
-    if (same && from === 'contract' && to === 'generated' && /^\.\/generated\/ferrets-api\.ts$/.test(edge.specifier))
+    // Its own folders' barrels (`contract/generated/<folder>.ts`, written by the generator from `contract/<folder>/`).
+    if (from === 'contract' && to === 'generated' && same && /^\.\/generated\/[a-z-]+\.ts$/.test(edge.specifier))
       return undefined;
     if (toStd || to === 'kernel-contract' || to === 'contract') return undefined;
     return `a contract imports only zod, @ferretry/std, @ferretry/kernel/contract and contracts, not ${name}`;

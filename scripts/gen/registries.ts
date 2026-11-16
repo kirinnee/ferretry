@@ -22,7 +22,13 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, sep } from 'node:path';
-import { type FolderRegistrySpec, folderRegistries, ident, importPath } from './lib/folder-registry.ts';
+import {
+  type FolderEntry,
+  type FolderRegistrySpec,
+  folderRegistries,
+  ident,
+  importPath,
+} from './lib/folder-registry.ts';
 import { buildGraph, hookOrder } from './lib/graph.ts';
 import type { StartGraph } from './lib/graph.ts';
 import {
@@ -463,6 +469,82 @@ export function featureRegistries(model: Model): ReadonlyMap<string, string> {
   return folderRegistries(model.ws.packages, FEATURE_REGISTRY);
 }
 
+/**
+ * Ferrets' contract folders: `contract/{slots,hooks,kinds,app-hooks}/` hold one file per slot, hook, kind or app hook, and
+ * `contract/generated/<folder>.ts` re-exports them (the committed `contract/<folder>.ts` re-exports that), so a new one
+ * is a new file and no list is edited. Slots and app hooks also get the lists that name them: `FERRET_SLOTS` (the account
+ * slots, then every `*.slot.ts` by file name) and the two app-hook records, each file default-exporting `{ name, narrow }`.
+ */
+const FERRETS_CONTRACT = 'packages/core/ferrets';
+/** What a contract folder's generated file adds to its barrel: the imports it needs, then the list(s). */
+interface ContractList {
+  readonly imports: readonly string[];
+  readonly body: readonly string[];
+}
+const CONTRACT_LISTS: Readonly<Record<string, (entries: readonly FolderEntry[]) => ContractList>> = {
+  slots: entries => {
+    const slots = entries.filter(entry => entry.file.endsWith('.slot.ts'));
+    const account = entries.find(entry => entry.file === 'account-slots.ts');
+    return {
+      imports: [
+        ...(account === undefined ? [] : [`import { FERRET_ACCOUNT_SLOTS } from '${account.importPath}';`]),
+        ...slots.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      ],
+      body: [
+        "/** Every slot Ferrets' pages offer, in one list a test can pair: the account slots, then one per `slots/*.slot.ts`. */",
+        `export const FERRET_SLOTS = [${[...(account === undefined ? [] : ['...FERRET_ACCOUNT_SLOTS']), ...slots.map(entry => `${entry.name}.slot`)].join(', ')}] as const;`,
+        'export type FerretSlot = (typeof FERRET_SLOTS)[number];',
+      ],
+    };
+  },
+  'app-hooks': entries => {
+    const hooks = (suffix: string): readonly FolderEntry[] => entries.filter(entry => entry.file.endsWith(suffix));
+    const record = (name: string, what: string, suffix: string): readonly string[] => [
+      `/** ${what}, by name, each with the narrowing that says a value has its shape (\`app-hooks/*${suffix}\`). */`,
+      `export const ${name} = {`,
+      ...hooks(suffix).map(entry => `  [${entry.name}.name]: ${entry.name}.narrow,`),
+      '} as const;',
+    ];
+    return {
+      imports: [...hooks('.app-hook.ts'), ...hooks('.provided-hook.ts')].map(
+        entry => `import ${entry.name} from '${entry.importPath}';`,
+      ),
+      body: [
+        ...record('FERRETS_APP_HOOKS', 'Every app hook Ferrets offers', '.app-hook.ts'),
+        ...record('FERRETS_PROVIDED_APP_HOOKS', 'The hooks Ferrets provides', '.provided-hook.ts'),
+      ],
+    };
+  },
+};
+
+const contractFolder = (folder: string): FolderRegistrySpec => ({
+  dir: `contract/${folder}`,
+  glob: '*.ts',
+  out: `contract/generated/${folder}.ts`,
+  prefix: 'contract',
+  emit: ({ entries }) => {
+    const list = CONTRACT_LISTS[folder]?.(entries);
+    return [
+      HEADER,
+      ...(list?.imports ?? []),
+      ...entries.map(entry => `export * from '${entry.importPath}';`),
+      ...(list === undefined ? [] : ['', ...list.body]),
+      '',
+    ].join('\n');
+  },
+});
+
+/**
+ * `packages/core/ferrets/contract/generated/<folder>.ts` for each contract folder that holds a file. Built from the folders
+ * alone and written BEFORE any manifest loads, because a manifest imports the contract and the contract imports these.
+ */
+export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRACT): ReadonlyMap<string, string> {
+  const ferrets = ws.packages.filter(pkg => pkg.rel === home);
+  return new Map(
+    ['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [...folderRegistries(ferrets, contractFolder(folder))]),
+  );
+}
+
 /** `ids.port.ts` → `IdsApi`, `runtime-records.port.ts` → `RuntimeRecordsApi`: the interface a slice file exports. */
 const sliceApiName = (file: string): string =>
   `${file.replace(/\.port\.ts$/, '').replace(/(^|-)(\w)/g, (_m, _dash, c: string) => c.toUpperCase())}Api`;
@@ -500,6 +582,7 @@ export function ferretsApiRegistries(model: Model): ReadonlyMap<string, string> 
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
     ...featureRegistries(model),
+    ...contractRegistries(model.ws),
     ...ferretsApiRegistries(model),
     [
       GENERATED.plugins,
@@ -589,6 +672,8 @@ function argValue(args: readonly string[], flag: string): string | undefined {
 async function main(args: readonly string[]): Promise<number> {
   const root = argValue(args, '--root') ?? join(import.meta.dir, '..', '..');
   const only = argValue(args, '--package');
+  // The contract barrels first: a manifest imports the contract, so none loads without them. `--check` writes nothing.
+  if (!args.includes('--check')) writeFiles(root, contractRegistries(loadWorkspace(root)));
   const model = await buildModel(root, false);
   for (const failure of model.failures) console.error(`⚠️  ${failure}`);
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);

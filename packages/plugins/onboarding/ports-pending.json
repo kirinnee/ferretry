@@ -5,8 +5,7 @@
     "onboarding": [
       "[tests] 10 parity rows have no test files: tests/unit/parity/app.test.tsx, commands.test.ts and storage.test.ts do not exist, and R-0092 is not proved yet",
       "[cross: access] GAP(onboarding-pairing): the first run's pairing step opens Access's /pair page (a button, asking `/pair?return=/onboarding`) instead of embedding Access's pairing screen, because Onboarding imports nothing of Access; v4 paired inside the step with its scanner. The return trip itself is kept: the place and the count of machines at the moment of leaving are both in this browser's storage, so a reload on the pairing page still finishes the step on the way back: app/views/onboarding-views.tsx",
-      "[tests] GAP(onboarding-harness): app/landing-geometry.ts is the browser harness's measure of the static pages (it needs playwright's types and the DOM lib) and nothing in the app imports it; the harness is not ported",
-      "[cli] GAP(onboarding): `fy daemon setup` and `fy daemon import <tool>` (parity rows V-0241, V-0232) are not shell verbs yet: Onboarding and Runtimes serve the setup and import steps in the app, but no terminal verb drives them: packages/cli/src/lib/verbs.ts"
+      "[tests] GAP(onboarding-harness): app/landing-geometry.ts is the browser harness's measure of the static pages (it needs playwright's types and the DOM lib) and nothing in the app imports it; the harness is not ported"
     ]
   }
 }

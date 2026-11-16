@@ -845,7 +845,7 @@ describe('WardenAutoMoveService: nowhere to go, so wait and resume at the reset'
     should(after.actions.map(action => [action.action, action.outcome])).deepEqual([['resume', 'done']]);
     should(recorded.resumed).deepEqual(['s1']);
     should(recorded.resumeNotes[0]).match(
-      /^Ferretry's Warden: the usage limit on claude-a-wrapper has reset \(Nov 3, 9:00\sAM PST\)\. Carry on/,
+      /^Ferretry's Warden: the usage limit on claude-a-wrapper has reset \(Nov 3, 9:00\sAM PST\)\. Re-read your last turn, then continue from where you stopped\.$/,
     );
     // … and forgotten once it is off the limit.
     should(ledger().sessions.s1).be.undefined();
