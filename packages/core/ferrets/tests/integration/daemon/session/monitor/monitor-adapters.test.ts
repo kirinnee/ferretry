@@ -10,7 +10,10 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../../../../../daemon/adapters/session/monitor/index.ts';
-import { StorageSignalRepository } from '../../../../../daemon/adapters/session/signal/index.ts';
+import {
+  FerretSignalRepository,
+  type FerretSignalHost,
+} from '../../../../../daemon/adapters/session/signal/ferret-signal.ts';
 import { KeyedSerialExecutor } from '../../../../../daemon/adapters/storage/keyed-serial-executor.ts';
 import {
   defaultSessionMonitorSettings,
@@ -19,12 +22,13 @@ import {
   type WaitHeartbeat,
 } from '../../../../../daemon/lib/session/monitor/index.ts';
 import type { SessionSendService } from '../../../../../daemon/lib/session/peers/send.ts';
-import {
-  SessionSignalService,
-  type SignalArtifacts,
-  type SignalRepository,
-  type SignalTerminal,
-} from '../../../../../daemon/lib/session/signal/index.ts';
+import { SessionSignalService } from '../../../../../daemon/lib/session/signal/service.ts';
+import type {
+  SignalArtifacts,
+  SignalRepository,
+  SignalTerminal,
+} from '../../../../../daemon/lib/session/signal/types.ts';
+import type { FerretId, FerretRecord, FerretWaiting } from '../../../../../contract/index.ts';
 import { parseSessionId, type SessionId } from '../../../../../daemon/lib/session-id.ts';
 import { memoryStorage, sessionConfig } from '../../../../support/daemon/storage.ts';
 
@@ -45,9 +49,59 @@ const THREE = parseSessionId('session-3');
 const clock = { now: () => NOW };
 const SETTINGS = defaultSessionMonitorSettings;
 
+/** What the Ferrets host holds of one ferret: its state, the park it declared and the credit already given back. */
+interface Held {
+  state: FerretRecord['state'];
+  waiting?: FerretWaiting | undefined;
+  credit?: number | undefined;
+}
+
+/** A scripted Ferrets host: the ferrets it holds are the map, and the two writes a tick makes land in it. */
+function ferretsOver(held: Map<string, Held>): FerretSignalHost {
+  return {
+    ready: async () => undefined,
+    record: ferret => {
+      const one = held.get(ferret);
+      return one === undefined ? undefined : ({ name: 'wren', mode: 'auto', state: one.state } as FerretRecord);
+    },
+    resolve: reference => (held.has(reference) ? (reference as FerretId) : undefined),
+    waitingOf: ferret => held.get(ferret)?.waiting,
+    creditOf: async ferret => held.get(ferret)?.credit,
+    saveWaiting: async (ferret, waiting, credit) => {
+      const one = held.get(ferret);
+      if (one !== undefined) held.set(ferret, { ...one, waiting, credit });
+    },
+    saveFinished: async () => refuse('a wait tick must never record a completion'),
+    writeSummary: async () => refuse('a wait tick must never write a completion summary'),
+    history: async () => undefined,
+    stop: async () => refuse('a wait tick must never stop a pane'),
+  };
+}
+
+/** The session index (the roster a tick walks) and the Ferrets host (what each park says), opened together. */
 async function openStorage() {
   const { storage } = await memoryStorage({ clock });
-  return { opened: { storage } };
+  const held = new Map<string, Held>();
+  const repository = new FerretSignalRepository(ferretsOver(held));
+  return { opened: { storage }, held, repository };
+}
+
+/** One ferret in both places: the index row the roster lists and the Ferrets record the park is read from. */
+async function keep(
+  storage: Awaited<ReturnType<typeof memoryStorage>>['storage'],
+  held: Map<string, Held>,
+  id: SessionId,
+  indexStatus: string,
+  ferret: Held,
+): Promise<void> {
+  await storage.writeConfig(id, config(id));
+  await storage.writeState(id, {
+    id,
+    turn: 1,
+    status: indexStatus,
+    ...(ferret.waiting === undefined ? {} : { waiting: { since: NOW } }),
+  });
+  held.set(id, ferret);
 }
 
 function config(id: string, overrides: Record<string, unknown> = {}) {
@@ -99,18 +153,14 @@ afterEach(async () => {
 describe('the parks this daemon holds', () => {
   it('should see every live park, and no session it cannot vouch for', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const { opened, held, repository } = await openStorage();
     const storage = opened.storage;
-    // Parked, and its status has drifted off the park — the case the roster must not filter away.
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'running', waiting: { since: NOW } });
+    // Parked, and its index row still says running — the case the roster must not filter away.
+    await keep(storage, held, ONE, 'running', { state: 'working', waiting: { since: NOW } as FerretWaiting });
     // Not parked at all.
-    await storage.writeConfig(TWO, config('session-2'));
-    await storage.writeState(TWO, { id: 'session-2', turn: 1, status: 'running' });
-    // Parked, but settled: nothing to wake, and restoring its status would resurrect a verdict.
-    await storage.writeConfig(THREE, config('session-3'));
-    await storage.writeState(THREE, { id: 'session-3', turn: 1, status: 'stopped', waiting: { since: NOW } });
-    const repository = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, TWO, 'running', { state: 'working' });
+    // Parked, but settled: nothing to wake.
+    await keep(storage, held, THREE, 'stopped', { state: 'stopped', waiting: { since: NOW } as FerretWaiting });
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
     // Act
@@ -118,19 +168,17 @@ describe('the parks this daemon holds', () => {
 
     // Assert
     should(parked.map(session => session.id)).deepEqual([ONE]);
-    should(parked[0]?.status).equal('running');
+    // A ferret that declared a park reads as waiting: its status is derived from the park, so it cannot drift.
+    should(parked[0]?.status).equal('waiting');
     await storage.close();
   });
 
   it('should not read a session the index says has ended at all', async () => {
     // Arrange — an ended session can hold no park this loop may service, so its documents are not read.
-    const { opened } = await openStorage();
+    const { opened, held, repository: durable } = await openStorage();
     const storage = opened.storage;
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'completed', waiting: { since: NOW } });
-    await storage.writeConfig(TWO, config('session-2'));
-    await storage.writeState(TWO, { id: 'session-2', turn: 1, status: 'waiting', waiting: { since: NOW } });
-    const durable = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, ONE, 'completed', { state: 'stopped', waiting: { since: NOW } as FerretWaiting });
+    await keep(storage, held, TWO, 'waiting', { state: 'working', waiting: { since: NOW } as FerretWaiting });
     const read: SessionId[] = [];
     const counting: SignalRepository = {
       read: async (id: SessionId) => {
@@ -152,11 +200,9 @@ describe('the parks this daemon holds', () => {
 
   it('should skip a record it could not read rather than guess at its park', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const { opened, held, repository: durable } = await openStorage();
     const storage = opened.storage;
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since: NOW } });
-    const durable = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, ONE, 'waiting', { state: 'working', waiting: { since: NOW } as FerretWaiting });
     const failing: SignalRepository = {
       read: async (id: SessionId) => {
         if (id === ONE) throw new Error('the state document is unreadable');
@@ -178,12 +224,10 @@ describe('the parks this daemon holds', () => {
 describe('the two writes a tick makes to a park', () => {
   it('should end a park at its backstop, credit the time back, and journal why', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const { opened, held, repository } = await openStorage();
     const storage = opened.storage;
     const since = new Date(NOW_MS - SETTINGS.backstopMs - 1_000).toISOString();
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since } });
-    const repository = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, ONE, 'waiting', { state: 'working', waiting: { since } as FerretWaiting });
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
     // Act
@@ -207,11 +251,9 @@ describe('the two writes a tick makes to a park', () => {
 
   it('should leave a park whose deadline has not arrived', async () => {
     // Arrange
-    const { opened } = await openStorage();
+    const { opened, held, repository } = await openStorage();
     const storage = opened.storage;
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'waiting', waiting: { since: NOW } });
-    const repository = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, ONE, 'waiting', { state: 'working', waiting: { since: NOW } as FerretWaiting });
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
     // Act
@@ -228,21 +270,19 @@ describe('the two writes a tick makes to a park', () => {
     await storage.close();
   });
 
-  it('should put a drifted status back to waiting, and write nothing when it already agrees', async () => {
-    // Arrange
-    const { opened } = await openStorage();
+  it('should write nothing to hold a park, because a ferret parked already reads as waiting', async () => {
+    // Arrange — a Ferrets record's status is derived from its park, so there is no drift to put back.
+    const { opened, held, repository } = await openStorage();
     const storage = opened.storage;
-    await storage.writeConfig(ONE, config('session-1'));
-    await storage.writeState(ONE, { id: 'session-1', turn: 1, status: 'running', waiting: { since: NOW } });
-    const repository = new StorageSignalRepository(storage, clock);
+    await keep(storage, held, ONE, 'running', { state: 'working', waiting: { since: NOW } as FerretWaiting });
     const subject = new StorageMonitorWaits(storage, repository, signalsOver(repository), SETTINGS);
 
     // Act
-    const held = await subject.hold(ONE);
+    const first = await subject.hold(ONE);
     const again = await subject.hold(ONE);
 
     // Assert
-    should(held).be.true();
+    should(first).be.false();
     should(again).be.false();
     should((await repository.read(ONE))?.status).equal('waiting');
     await storage.close();
