@@ -163,6 +163,34 @@ describe('the browsers daemon half', () => {
     should(whenOff).deepEqual({ shared: true });
   });
 
+  it('should say the host is shared, and show no doctor row, while a healthy Runtimes holds no browserPorts setting (it refuses to say)', async () => {
+    // Arrange — the real Runtimes rejects like this while no file of it carries the setting (the schema default is nobody's choice).
+    const runtimes = fakeRuntimes();
+    runtimes.machineBrowserPorts = async () => {
+      throw new Error(
+        'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
+      );
+    };
+    let markerReads = 0;
+    host = await firewallHost(runtimes, {
+      marker: {
+        read: async () => {
+          markerReads += 1;
+          return undefined;
+        },
+      },
+    });
+
+    // Act
+    const shared = await host.provided(BrowsersPort, needer('logins')).browserPorts?.();
+    const finding = await host.doctor('browsers', 'loopback-firewall');
+
+    // Assert — Logins keeps its shared-host refusal (no automatic move to the fixed link), and no row is made up.
+    should(shared).deepEqual({ shared: true });
+    should(finding).be.undefined();
+    should(markerReads).equal(0);
+  });
+
   it('should say nothing in the loopback-firewall doctor row while the machine’s ports are random, and read no marker', async () => {
     // Arrange
     const runtimes = fakeRuntimes();
