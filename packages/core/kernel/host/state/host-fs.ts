@@ -45,6 +45,12 @@ export interface HostFs {
    * A link is refused, never followed.
    */
   readTail(path: string, maxBytes: number): Promise<{ readonly bytes: Uint8Array; readonly from: number } | undefined>;
+  /**
+   * Hands a regular file to `onChunk` in pieces of at most `chunkBytes`, in order, holding only one piece: `false`
+   * when the file does not exist. A piece is reused after `onChunk` returns, so it must be copied to be kept. A
+   * link is refused, never followed; a fault, or a throw from `onChunk`, ends the read and rejects.
+   */
+  streamBytes(path: string, chunkBytes: number, onChunk: (chunk: Uint8Array) => void | Promise<void>): Promise<boolean>;
   /** `lstat`: `undefined` when the path does not exist. */
   info(path: string): Promise<HostFileInfo | undefined>;
   /** The entries of a directory; `[]` when it does not exist. */
@@ -124,6 +130,26 @@ export function createNodeHostFs(options: NodeHostFsOptions = {}): HostFs {
           read += bytesRead;
         }
         return { bytes: bytes.subarray(0, read), from };
+      } finally {
+        await handle.close();
+      }
+    },
+    async streamBytes(path, chunkBytes, onChunk) {
+      let handle: FileHandle;
+      try {
+        handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      } catch (error) {
+        if (isMissing(error)) return false;
+        throw error;
+      }
+      try {
+        if (!(await handle.stat()).isFile()) throw new Error('not a regular file');
+        const buffer = new Uint8Array(chunkBytes);
+        for (;;) {
+          const { bytesRead } = await handle.read(buffer, 0, chunkBytes, null);
+          if (bytesRead === 0) return true;
+          await onChunk(buffer.subarray(0, bytesRead));
+        }
       } finally {
         await handle.close();
       }

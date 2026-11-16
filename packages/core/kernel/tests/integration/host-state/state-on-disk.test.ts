@@ -214,3 +214,32 @@ describe('readTail on disk: only the end of the file, never through a link', () 
     await expect(fs.readTail(join(home, 'link.jsonl'), 100)).rejects.toThrow();
   });
 });
+
+describe('streamBytes on disk: the whole file in bounded pieces, never through a link', () => {
+  test('U a large file arrives in order, in pieces no larger than asked, and a missing file is `false`', async () => {
+    const home = await freshHome();
+    const fs = createNodeHostFs();
+    const lines = Array.from({ length: 5_000 }, (_, i) => `{"format":1,"count":${i}}`).join('\n');
+    await writeFile(join(home, 'big.jsonl'), `${lines}\n`);
+    const pieces: Uint8Array[] = [];
+    expect(await fs.streamBytes(join(home, 'big.jsonl'), 4096, chunk => void pieces.push(chunk.slice()))).toBe(true);
+    expect(pieces.length).toBeGreaterThan(10);
+    expect(Math.max(...pieces.map(piece => piece.byteLength))).toBeLessThanOrEqual(4096);
+    expect(Buffer.concat(pieces).toString('utf8')).toBe(`${lines}\n`);
+    expect(await fs.streamBytes(join(home, 'missing.jsonl'), 4096, () => undefined)).toBe(false);
+  });
+
+  test('U a link and a folder are refused, and a throw from the reader rejects the read', async () => {
+    const home = await freshHome();
+    const fs = createNodeHostFs();
+    await writeFile(join(home, 'a.jsonl'), '{"format":1,"count":1}\n');
+    await symlink(join(home, 'a.jsonl'), join(home, 'link.jsonl'));
+    await expect(fs.streamBytes(join(home, 'link.jsonl'), 4096, () => undefined)).rejects.toThrow();
+    await expect(fs.streamBytes(home, 4096, () => undefined)).rejects.toThrow();
+    await expect(
+      fs.streamBytes(join(home, 'a.jsonl'), 4096, () => {
+        throw new Error('stop');
+      }),
+    ).rejects.toThrow('stop');
+  });
+});
