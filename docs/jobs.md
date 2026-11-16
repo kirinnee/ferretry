@@ -167,7 +167,7 @@ the ferret (each prints its detach message and exits 75), then waits up to 4 s f
 fails or hangs (each question is bounded to 5 s), or an attachment that will not leave, is logged and the move goes on: the kill breaks the attachment anyway.
 
 **Un-kept background jobs are named, never silently lost, and a foreground command is never called one.** Whether they BLOCK is still the
-classifier's verdict; only the card's words change. CLAUDE WRITES EVERY BASH CALL'S STDOUT TO `tasks/<id>.output`, foreground calls included, so
+classifier's verdict; only the words the move shows change. CLAUDE WRITES EVERY BASH CALL'S STDOUT TO `tasks/<id>.output`, foreground calls included, so
 that path never proves a call was backgrounded.
 
 | Harness | What is recognised                                                                                                                                                                                     |
