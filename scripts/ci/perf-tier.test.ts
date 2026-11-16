@@ -28,12 +28,15 @@ for f in "$@"; do
     bad*) failed=true ;;
     crash*) crash=true ;;
   esac
+  # A passing test AFTER the file's verdict test: a report whose last case passed must not end the script (errexit).
+  echo "  <testcase name=\\"$base first\\" classname=\\"s\\" time=\\"0.1\\" file=\\"$f\\" line=\\"0\\" />" >>"$out/junit.xml"
   if [[ $failed == true ]]; then
     status=1
     echo "  <testcase name=\\"$base is under budget\\" classname=\\"s\\" time=\\"2.5\\" file=\\"$f\\" line=\\"1\\"><failure type=\\"AssertionError\\" /></testcase>" >>"$out/junit.xml"
   else
     echo "  <testcase name=\\"$base is under budget\\" classname=\\"s\\" time=\\"0.5\\" file=\\"$f\\" line=\\"1\\" />" >>"$out/junit.xml"
   fi
+  echo "  <testcase name=\\"$base last\\" classname=\\"s\\" time=\\"0.2\\" file=\\"$f\\" line=\\"9\\" />" >>"$out/junit.xml"
 done
 echo '</testsuites>' >>"$out/junit.xml"
 if [[ $crash == true ]]; then rm -f "$out/junit.xml"; echo "boom" >"$out/console.log"; exit 1; fi

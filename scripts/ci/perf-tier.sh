@@ -87,7 +87,9 @@ for index in "${!failed_files[@]}"; do
   file="${failed_files[index]}"
   say "- ${file}"
   junit times "${file}" "${out}"/attempt-1/process-*/junit.xml | while IFS=$'\t' read -r ms verdict name; do
-    [[ ${verdict} == FAIL ]] && say "    attempt 1: ${ms} ms FAIL  ${name}"
+    # An `if`, not `[[ ]] && say`: that form returns 1 when the LAST test of the file passed, and pipefail + errexit
+    # would kill the script mid-summary.
+    if [[ ${verdict} == FAIL ]]; then say "    attempt 1: ${ms} ms FAIL  ${name}"; fi
   done
 done
 
