@@ -69,6 +69,8 @@ import {
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
+  QUESTION_OPEN_KEY,
+  QuestionOpen,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
@@ -561,6 +563,9 @@ export default definePlugin({
       // The queue log and send ledger the Mailbox runs over: the files stay in this plugin's folder (the one provider of this
       // security-path hook, `takers: ['conversation']`).
       { hook: MailboxHosts, key: MAILBOX_HOST_KEY },
+      // Whether a ferret has a question open: the stored `question.json` is this plugin's, and Ferrets' turn watch reads a
+      // yes as "waiting on a person" (the one provider: `takers: ['conversation']`).
+      { hook: QuestionOpen, key: QUESTION_OPEN_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },

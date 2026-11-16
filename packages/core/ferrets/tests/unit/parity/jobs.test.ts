@@ -42,6 +42,8 @@ import {
   FerretStateFile,
   FerretsPort,
   Harnesses,
+  QUESTION_OPEN_KEY,
+  QuestionOpen,
   type RunnerHandle,
   type HarnessTailRecord,
   type HarnessTranscriptStamp,
@@ -121,6 +123,25 @@ const listenerPlugin = (heard: FerretChangedPayload[], id = 'conversation') =>
     { build: () => ({ hooks: { 'ferret.changed': (payload: FerretChangedPayload) => void heard.push(payload) } }) },
   );
 
+/** Conversation's half of `turn.question-open`, as a stand-in with its real id: a ferret is asking while its id is in `open`. */
+const questionPlugin = (open: ReadonlySet<string>) =>
+  implementDaemon(
+    definePlugin({
+      id: 'conversation',
+      title: 'Conversation (fake)',
+      version: '5.0.0',
+      api: 5,
+      core: false,
+      kinds: [],
+      hooks: { takes: [{ hook: QuestionOpen, key: QUESTION_OPEN_KEY }] },
+    }),
+    {
+      build: () => ({
+        hooks: { 'turn.question-open:question': { isOpen: async (ferret: string) => open.has(ferret) } },
+      }),
+    },
+  );
+
 /** The Vault fake, keeping each launch's environment as Ferrets handed it (names and fixture paths only). */
 class RecordingVault extends FakeVault {
   readonly asked: Readonly<Record<string, string>>[] = [];
@@ -149,14 +170,25 @@ const admitting = () =>
     { build: () => ({ hooks: { 'start.decide': async (): Promise<HookDecision> => ({ allow: true }) } }) },
   );
 
-async function host(standing: () => CallStanding = () => ownerStanding(), more: ReturnType<typeof admitting>[] = []) {
+async function host(
+  standing: () => CallStanding = () => ownerStanding(),
+  more: ReturnType<typeof admitting>[] = [],
+  /** The ferrets Conversation stores an open question for; given, a stand-in Conversation provides the probe. */
+  asking?: ReadonlySet<string>,
+) {
   const runner = new FakeRunner();
   const heard: FerretChangedPayload[] = [];
   const vault = new RecordingVault();
   const harness = new FakeHarness();
   const h = await testHost({
     everyDirectory: true,
-    plugins: [ferrets, harnessPlugin(harness), runnerPlugin(runner), listenerPlugin(heard), ...more],
+    plugins: [
+      ferrets,
+      harnessPlugin(harness),
+      runnerPlugin(runner),
+      ...(asking === undefined ? [listenerPlugin(heard)] : [listenerPlugin(heard, 'listener'), questionPlugin(asking)]),
+      ...more,
+    ],
     gate: new StandInAdmission(standing),
     fakes: { gate: new FakeGate(), vault, asks: new FakeAsks() },
     secrets: [SECRET],
@@ -236,6 +268,47 @@ describe('the turn watch (U4, ruling #27 Q3: mounted in Ferrets)', () => {
     await tick(h);
     expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
     expect(heard.at(-1)).toEqual({ ferret: id, state: 'working', previous: 'idle', change: 'state' });
+    await h.stop();
+  });
+
+  test('a stored question reads as waiting on a person: the ferret goes idle while it is open, and working again once answered', async () => {
+    const asking = new Set<string>();
+    const { h, runner, heard, harness } = await host(() => ownerStanding(), [], asking);
+    const id = await start(h, 'ivo');
+    harness.transcripts.set(id, { stamp: STAMP('/t/ivo.jsonl', 10), records: [{ kind: 'work' }] });
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.runJob(TURN_WATCH_JOB);
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
+
+    // The question form is open: the transcript still says mid-turn (the harness writes its call only once answered).
+    asking.add(id);
+    runner.screens.set(handle, working('w2'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('idle');
+    expect((await h.provided(FerretsPort).prompt?.(id))?.turnState).toBe('needs-input');
+    expect(heard.at(-1)).toEqual({ ferret: id, state: 'idle', previous: 'working', change: 'state' });
+
+    // Answered: the stored question is gone and the turn carries on.
+    asking.delete(id);
+    runner.screens.set(handle, working('w3'));
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
+    expect(heard.at(-1)).toEqual({ ferret: id, state: 'working', previous: 'idle', change: 'state' });
+    await h.stop();
+  });
+
+  test('with no Conversation to answer, an open question changes nothing: the turn is decided as before', async () => {
+    const { h, runner, harness } = await host();
+    const id = await start(h, 'jory');
+    harness.transcripts.set(id, { stamp: STAMP('/t/jory.jsonl', 10), records: [{ kind: 'work' }] });
+    const handle = (await h.provided(FerretsPort).handle(id)) as RunnerHandle;
+    await h.runJob(TURN_WATCH_JOB);
+    runner.screens.set(handle, working('w1'));
+    await tick(h);
+    await tick(h);
+    expect((await h.provided(FerretsPort).get(id))?.state).toBe('working');
     await h.stop();
   });
 
