@@ -1,4 +1,5 @@
-import type { PendingQuestion, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 
 export type StructuredQuestionAcceptance = 'none' | 'ambiguous';

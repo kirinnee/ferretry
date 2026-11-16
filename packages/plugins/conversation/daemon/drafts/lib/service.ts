@@ -36,8 +36,8 @@ import type { FerretId } from '@ferretry/core-ferrets/contract';
  * never interleave half-way; loading is the only await, and it is shared by every caller that arrives
  * while it is in flight.
  */
+import { type AgendaId } from '@ferretry/core-mailbox/contract';
 import {
-  type AgendaId,
   applyTextOp,
   isSharedDraftItemSlot,
   normalizeTextOp,

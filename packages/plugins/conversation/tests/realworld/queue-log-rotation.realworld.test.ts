@@ -7,7 +7,7 @@ import { state as kernelState } from '@ferretry/kernel/host';
 import should from 'should';
 import { CONVERSATION_STATE } from '../../contract/index.ts';
 import { StateQueueStore } from '../../daemon/queue/adapters/index.ts';
-import { foldQueue } from '../../daemon/queue/lib/model.ts';
+import { foldQueue } from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../daemon/seams/ferret-id.ts';
 import { LightState } from '../support/light-state.ts';
 import { queueHistory } from '../support/queue-history.ts';

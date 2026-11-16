@@ -21,7 +21,7 @@ import { defineState } from '../../../contract/index.ts';
 import type { RootHandle, RootName, RootsPort } from '../../../contract/ports.ts';
 import { type HostFs, nodeFs } from '../../../host/adapters/node-fs.ts';
 import { bootHost, type HostOptions, type RunningHost } from '../../../host/host.ts';
-import { INTERNAL_ROOT_FOLDERS } from '../../../host/internal-roots.ts';
+import { INTERNAL_ROOT_FOLDERS } from '../../../contract/internal-roots.ts';
 import { ensureInternalRootBases, RootError, rootsPortFor } from '../../../host/roots.ts';
 import { UndeclaredStateFileError } from '../../../host/state/errors.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';

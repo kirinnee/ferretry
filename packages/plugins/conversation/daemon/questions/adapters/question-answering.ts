@@ -4,9 +4,10 @@ import type { Instant } from '@ferretry/std';
 import { type Question, QUESTION_ANSWERED_STATE, QUESTION_STATE } from '../../../contract/index.ts';
 import { ApiError } from '../../seams/api.ts';
 import { type SessionId, tryParseSessionId } from '../../seams/ferret-id.ts';
-import type { SessionStatus } from '../../seams/ferret-types.ts';
+import type { SessionStatus } from '@ferretry/core-mailbox/contract';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
-import type { PendingQuestion, SessionView, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { PendingQuestion, SessionView } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 import {
   AnswerAcknowledged,
   AnswerAlreadyAnswered,

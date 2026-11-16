@@ -4,7 +4,7 @@ import type { EventDef } from '@ferretry/kernel/contract';
 import { ChatScreen } from '../../../../app/chat/chat-screen.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
-import { QueueChanged } from '../../../../contract/index.ts';
+import { QueueChanged } from '@ferretry/core-mailbox/contract';
 import { TurnPanel } from '../../../../app/toolbar/turn-panel.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
 import { ferretSummary } from '../../../support/app/ferret-view.ts';

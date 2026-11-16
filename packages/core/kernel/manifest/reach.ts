@@ -1,3 +1,4 @@
+import { historyPoolFault } from './history-pool.ts';
 import type { ItemKind, Manifest, Needer } from './types.ts';
 
 /** `'*'` in `permissions.spawn` / `network`: any program or host. A core piece's alone: `effectivePermissions` drops it from any other manifest. */
@@ -62,7 +63,7 @@ export function itemOwnersOf(manifests: readonly Manifest[], kind: ItemKind): re
 /** One way a manifest's reach declarations are wrong; the plugin is not started (boot) and the graph fails (build). */
 export interface ReachFault {
   readonly plugin: string;
-  readonly code: 'item-owner' | 'resolver-axes';
+  readonly code: 'item-owner' | 'resolver-axes' | 'history-pool';
   /** A sentence that starts with a verb, to follow the plugin's name. */
   readonly sentence: string;
 }
@@ -73,6 +74,8 @@ export interface ReachFault {
  *   owner; `itemKind` on a collection belongs to an `item` plugin;
  * - one resolver name is in `spawn` OR `network`, never both: its answers are programs on one axis and hosts on the
  *   other, so a name in both lets a host answer authorize a same-named program and the reverse.
+ * - `permissions.historyPool` must name an opaque `<folder>/*` state tree of the plugin's own, list only entries the
+ *   kernel's deny list allows, and sit beside the `agent-homes` root it links into.
  * The build-time graph check and the boot refusal read this one rule.
  */
 export function reachFaults(manifests: readonly Manifest[]): readonly ReachFault[] {
@@ -108,6 +111,20 @@ export function reachFaults(manifests: readonly Manifest[]): readonly ReachFault
             sentence: `declares permissions.${field} { items: '${entry.items}' }, whose items are ${owner}'s config collection; only ${owner} may`,
           });
       }
+    const pool = manifest.permissions?.historyPool;
+    if (pool !== undefined) {
+      const fault =
+        historyPoolFault(pool, manifest.data?.state ?? []) ??
+        ((manifest.permissions?.roots ?? []).includes('agent-homes')
+          ? undefined
+          : 'declares permissions.historyPool without the agent-homes root it links into');
+      if (fault !== undefined)
+        faults.push({
+          plugin: manifest.id,
+          code: 'history-pool',
+          sentence: fault.startsWith('declares') ? fault : `declares an illegal permissions.historyPool: ${fault}`,
+        });
+    }
     const spawnResolvers = new Set(resolverNames(manifest.permissions?.spawn));
     for (const name of new Set(resolverNames(manifest.permissions?.network)))
       if (spawnResolvers.has(name))
