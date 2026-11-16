@@ -11,7 +11,13 @@ import type { FencedPath, FerretId, KernelPorts, RootHandle, StatePort } from '@
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { state as kernelState } from '@ferretry/kernel/host';
 import { ok } from '@ferretry/std';
-import { CODEX_LAUNCH_SETTINGS, CODEX_ROLLOUTS, CODEX_SETTINGS, type HarnessConfig } from '../../contract/index.ts';
+import {
+  CODEX_HOOKS,
+  CODEX_LAUNCH_SETTINGS,
+  CODEX_ROLLOUTS,
+  CODEX_SETTINGS,
+  type HarnessConfig,
+} from '../../contract/index.ts';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from './ports.ts';
 import { selectEverything } from './selected.ts';
@@ -58,16 +64,21 @@ export function launchSettingsCases(): void {
     mode: { value: HarnessConfig['permissionMode'] },
     state: StatePort,
     items: ReadonlyMap<string, unknown> = new Map(),
+    hooks: ReadonlyMap<string, unknown> = new Map(),
+    selected: typeof selectEverything = selectEverything,
   ) {
     return codexHarness({
-      selected: selectEverything,
+      selected,
       kernel: {
         roots: roots(),
         state,
         log: undefined as never,
         clock: realClock(),
         redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
-        config: { collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()) } as never,
+        config: {
+          collection: (definition: unknown) =>
+            definition === CODEX_SETTINGS ? items : definition === CODEX_HOOKS ? hooks : new Map(),
+        } as never,
       },
       permissionMode: () => mode.value,
       locate: async () => ({
@@ -145,7 +156,12 @@ export function launchSettingsCases(): void {
 
   const HEALTHY_RECORD = `${JSON.stringify({
     format: 1,
-    sections: { 'permission-mode': 'a'.repeat(64), 'fixed-layer': 'b'.repeat(64), settings: 'c'.repeat(64) },
+    sections: {
+      'permission-mode': 'a'.repeat(64),
+      'fixed-layer': 'b'.repeat(64),
+      settings: 'c'.repeat(64),
+      hooks: 'd'.repeat(64),
+    },
   })}\n`;
 
   describe('F-0422 one bad launch-settings record is that ferret’s nothing-to-say, never the whole plugin’s damage', () => {
@@ -230,7 +246,7 @@ export function launchSettingsCases(): void {
   });
 
   describe('F-0422 Codex records what a launch ran under', () => {
-    test('F-0422 a start records three values-free fingerprints in state/codex/launch-settings/<ferret>.json and is current', async () => {
+    test('F-0422 a start records four values-free fingerprints in state/codex/launch-settings/<ferret>.json and is current', async () => {
       const { folder, state } = fresh();
       const harness = over({ value: 'auto' }, state);
 
@@ -239,7 +255,7 @@ export function launchSettingsCases(): void {
       const record = JSON.parse(raw) as { format: number; sections: Record<string, string> };
 
       expect(record.format).toBe(1);
-      expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'permission-mode', 'settings']);
+      expect(Object.keys(record.sections).toSorted()).toEqual(['fixed-layer', 'hooks', 'permission-mode', 'settings']);
       for (const digest of Object.values(record.sections)) expect(digest).toMatch(/^[0-9a-f]{64}$/u);
       for (const value of [FOLDER, HOME, 'auto', 'on-request', 'workspace-write']) expect(raw).not.toContain(value);
       expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
@@ -340,6 +356,69 @@ export function launchSettingsCases(): void {
       expect(started.ok).toBe(true);
       expect(folder.raw(CODEX_LAUNCH_SETTINGS, FERRET)).toBeUndefined();
       expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'unknown' });
+    });
+  });
+
+  describe('F-0422 a changed Codex hooks item says relaunch needed (the hooks section)', () => {
+    const notify = (command: string) => ({ hooks: { Stop: [{ hooks: [{ type: 'command', command }] }] } });
+    const drifted = { kind: 'drifted', sections: ['hooks'] } as const;
+
+    test('F-0422 hooks unchanged since the launch is current, and none selected is current too', async () => {
+      const { state } = fresh();
+      const hooks = new Map<string, unknown>([['notify', notify('one')]]);
+      const harness = over({ value: 'auto' }, state, new Map(), hooks);
+      await harness.start(spec, runner, {} as never);
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+      const bare = fresh();
+      const none = over({ value: 'auto' }, bare.state);
+      await none.start(spec, runner, {} as never);
+      expect(await none.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+    });
+
+    test('F-0422 a hooks item changed, added or removed since the launch drifts in the hooks section only', async () => {
+      const { state } = fresh();
+      const hooks = new Map<string, unknown>([['notify', notify('one')]]);
+      const harness = over({ value: 'auto' }, state, new Map(), hooks);
+      await harness.start(spec, runner, {} as never);
+
+      hooks.set('notify', notify('two'));
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+      hooks.set('notify', notify('one'));
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+      hooks.set('extra', notify('x'));
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+      hooks.delete('extra');
+      hooks.delete('notify');
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+    });
+
+    test('F-0422 a hooks item the runtime’s profile does not select is not a launch setting', async () => {
+      const { state } = fresh();
+      const hooks = new Map<string, unknown>([['notify', notify('one')]]);
+      const selectNone = async () => ({ settings: new Set<string>(), hooks: new Set<string>() });
+      const harness = over({ value: 'auto' }, state, new Map(), hooks, selectNone);
+      await harness.start(spec, runner, {} as never);
+
+      hooks.set('notify', notify('two'));
+
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+    });
+
+    test('F-0422 the record keeps no hook command, and a resume records the hooks afresh', async () => {
+      const { folder, state } = fresh();
+      const hooks = new Map<string, unknown>([['notify', notify('secret-looking-command')]]);
+      const harness = over({ value: 'auto' }, state, new Map(), hooks);
+      await harness.start(spec, runner, {} as never);
+      expect(folder.raw(CODEX_LAUNCH_SETTINGS, FERRET) ?? '').not.toContain('secret-looking-command');
+
+      hooks.set('notify', notify('two'));
+      await harness.resume(spec, runner, {} as never, 'thread-1');
+
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
     });
   });
 

@@ -169,8 +169,9 @@ export const CodexLaunchSettingsRecordSchema = z.strictObject({
     'permission-mode': SectionDigestSchema,
     'fixed-layer': SectionDigestSchema,
     settings: SectionDigestSchema,
+    hooks: SectionDigestSchema,
   }),
-  /** The runtime this launch ran as (a name, not a secret): the selection of settings is read for it again. */
+  /** The runtime this launch ran as (a name, not a secret): the selection of settings and hooks is read for it again. */
   runtime: z.string().min(1).max(128).optional(),
 });
 export type CodexLaunchSettingsRecord = z.infer<typeof CodexLaunchSettingsRecordSchema>;

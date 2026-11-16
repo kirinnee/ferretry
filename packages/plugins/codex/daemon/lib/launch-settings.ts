@@ -5,7 +5,7 @@ import {
   type HarnessLaunchSettings,
 } from '@ferretry/core-ferrets/contract';
 import { canonicalJson } from '@ferretry/std';
-import type { CodexLaunchSettingsRecord, HarnessConfig, SettingsItem } from '../../contract/index.ts';
+import type { CodexLaunchSettingsRecord, HarnessConfig, HooksItem, SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments } from './fixed-layer.ts';
 import { settingsDocument, settingsFlags } from './settings.ts';
 
@@ -33,12 +33,14 @@ function fingerprint(value: unknown): string {
 /**
  * One fingerprint per section of what a launch would run under with this permission mode and these settings items
  * (`config/codex/settings/`, merged into every Codex home's `config.toml`, so a changed item is a relaunch for a running
- * ferret exactly as Claude Code's is). There is no `hooks` section: this plugin has no hooks collection yet, so no hook
- * reaches a Codex home and there is nothing to fingerprint.
+ * ferret exactly as Claude Code's is). The `hooks` section is the hooks items (`config/codex/hooks/`) the runtime's
+ * profile selects, which Runtimes renders into the runtime's `hooks.json`: a changed, added or removed one is a relaunch
+ * too. With none selected it is the digest of the empty set.
  */
 export function codexLaunchSettingsRecord(
   permissionMode: HarnessConfig['permissionMode'],
   items: ReadonlyMap<string, SettingsItem>,
+  hooks: ReadonlyMap<string, HooksItem>,
   runtime?: string,
 ): CodexLaunchSettingsRecord {
   const document = settingsDocument(items);
@@ -51,6 +53,7 @@ export function codexLaunchSettingsRecord(
       'fixed-layer': fingerprint(codexFixedArguments(permissionMode, FOLDER_STAND_IN)),
       // The flags are part of what the item runs the launch under; a document with none keeps the digest it always had.
       settings: fingerprint(flags.length === 0 ? document : { document, flags }),
+      hooks: fingerprint(Object.fromEntries([...hooks].map(([name, item]) => [name, item.hooks]))),
     },
   };
 }
