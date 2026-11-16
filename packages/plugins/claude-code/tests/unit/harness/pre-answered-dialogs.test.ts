@@ -8,8 +8,10 @@ import { homeText, launchCommand } from '../../../daemon/lib/harness/launch.ts';
 import { mergeClaudeJson } from '../../../daemon/lib/harness/claude-json.ts';
 
 /**
- * O11: every screen Claude can stop a ferret on that has a key is answered in the ferret's OWN home, and the two that
- * loosen something (folder trust, project MCP approval) are answered for the ferret's working folder ONLY.
+ * O11: every screen Claude can stop a ferret on that has a SAFE key is answered in the ferret's OWN home. Folder trust,
+ * which loosens something, is answered for the ferret's working folder ONLY. The project-MCP approval has no safe key
+ * (`enableAllProjectMcpServers` approves every server of a folder, and 5.0 has no owner-approved per-server list), so it
+ * is NOT written: that screen goes to the Warden's one notice.
  */
 
 const home = (permissionMode: 'auto' | 'skip', folder = '/work/repo') =>
@@ -74,13 +76,16 @@ describe('the screens a Claude home pre-answers', () => {
     should(json.hasSeenEffortMediumNudge).equal(true);
   });
 
-  it('should trust ONLY the ferret’s working folder, and approve project MCP servers only in that folder’s entry', () => {
+  it('should trust ONLY the ferret’s working folder, and NEVER approve project MCP servers', () => {
     // Act
     const json = JSON.parse(home('skip', '/work/repo/sub').claudeJson);
 
-    // Assert: one project entry, the cwd — not a parent, not a wildcard — and the global keys carry neither
+    // Assert: one project entry, the cwd — not a parent, not a wildcard — holding trust and nothing that approves a server
     should(Object.keys(json.projects)).eql(['/work/repo/sub']);
-    should(json.projects['/work/repo/sub']).eql({ hasTrustDialogAccepted: true, enableAllProjectMcpServers: true });
+    should(json.projects['/work/repo/sub']).eql({ hasTrustDialogAccepted: true });
+    should(fixedLayer('auto', '/work/repo').claudeJson.projects['/work/repo']).not.have.property(
+      'enableAllProjectMcpServers',
+    );
     should('enableAllProjectMcpServers' in json).equal(false);
     should('hasTrustDialogAccepted' in json).equal(false);
     should(JSON.parse(home('skip').settings).enableAllProjectMcpServers).equal(undefined);
@@ -95,6 +100,19 @@ describe('the screens a Claude home pre-answers', () => {
 
     // Assert
     should(merged.projects['/other']).eql({ disabledMcpjsonServers: ['x'] });
-    should(merged.projects['/work/repo'].enableAllProjectMcpServers).equal(true);
+    should(merged.projects['/work/repo']).eql({ hasTrustDialogAccepted: true });
+  });
+
+  it('should leave an owner’s own enableAllProjectMcpServers value in the entry exactly as it is, false or true', () => {
+    for (const owner of [false, true]) {
+      // Arrange: the owner (or Claude, on their answer) already decided for this folder
+      const existing = JSON.stringify({ projects: { '/work/repo': { enableAllProjectMcpServers: owner } } });
+
+      // Act
+      const merged = JSON.parse(mergeClaudeJson(existing, home('auto', '/work/repo').claudeJson) as string);
+
+      // Assert
+      should(merged.projects['/work/repo']).eql({ enableAllProjectMcpServers: owner, hasTrustDialogAccepted: true });
+    }
   });
 });

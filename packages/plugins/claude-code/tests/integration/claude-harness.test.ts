@@ -657,7 +657,6 @@ describe('ClaudeHarness', () => {
       expect(now.projects['/work']).toEqual({
         allowedTools: ['Bash'],
         hasTrustDialogAccepted: true,
-        enableAllProjectMcpServers: true,
       });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
       expect(plan.files as readonly string[]).toContain(claudeJson());

@@ -28,9 +28,10 @@ export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as c
  *   notice or self-update in a ferret's pane. Updates are Ferretry's to apply.
  * - `projects[<cwd>].hasTrustDialogAccepted`: the "Do you trust this folder?" screen, for the ferret's OWN working
  *   folder and no other (not a parent, not `*`). It lets that folder's `.claude/settings` and hooks run.
- * - `projects[<cwd>].enableAllProjectMcpServers`: the "New MCP server found in this project" approval, for the
- *   servers of THAT folder's `.mcp.json` only (the key lives in the project's own entry, so no other folder is
- *   touched). It lets those servers start unasked; a name in `disabledMcpjsonServers` still wins over it.
+ * - NOT `projects[<cwd>].enableAllProjectMcpServers`: it would approve EVERY server a folder's `.mcp.json` ever
+ *   declares, and 5.0 has no owner-approved per-server list to write instead (v4 never wrote it either). The "New MCP
+ *   server found in this project" screen is therefore left to the owner: the Warden raises ONE notice for it
+ *   (docs/harness-dialogs.md), and an `enableAllProjectMcpServers` already in the home is never touched.
  */
 export const CLAUDE_HOME_ENV = { DISABLE_AUTOUPDATER: '1' } as const;
 
@@ -49,7 +50,7 @@ export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd:
       hasCompletedOnboarding: true,
       hasCompletedClaudeInChromeOnboarding: true,
       ...CLAUDE_PROMPTS_SEEN,
-      projects: { [cwd]: { hasTrustDialogAccepted: true, enableAllProjectMcpServers: true } },
+      projects: { [cwd]: { hasTrustDialogAccepted: true } },
     },
   };
 }

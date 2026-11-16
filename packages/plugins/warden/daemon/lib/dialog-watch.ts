@@ -21,8 +21,9 @@
  * - A DIFFERENT dialog on the same ferret closes the old notice and opens a new one.
  * - The usage-limit dialog is NOT this module's: a spent login is the auto-move's (`auto-move.ts`).
  *
- * The Warden never answers a dialog. A notice tells the owner what the screen says, which rows trust something to
- * run, and that the ferret waits until they choose.
+ * The Warden never answers a dialog. A notice tells the owner THAT a ferret waits on a dialog of some kind and to read
+ * and choose in its terminal — never what the screen says: that is pane text, served only under `terminal.use`, and the
+ * agenda it lands on carries no capability.
  *
  * Pure but for its ports.
  */
@@ -40,48 +41,36 @@ export const GONE_LOOKS = 2;
 /** The dialog kind this module leaves to the auto-move: a login out of spend or usage. */
 const USAGE_LIMIT = 'usage-limit';
 
-/** The words of the dialog the Warden reads off a ferret's state: only what the notice says. */
-export const WatchedDialogSchema = z.looseObject({
+/**
+ * What the Warden reads of a dialog: WHICH one (id), WHERE (harness) and WHAT KIND (the dialog table's own constant).
+ * Never the pane's words — a screen's title, body and row labels, or a tool prompt's command, path or URL, are served
+ * only to a caller holding `terminal.use`, and a notice lands on the agenda, which carries no capability. The schema
+ * STRIPS every other key, so pane text cannot reach a notice by construction.
+ */
+export const WatchedDialogSchema = z.object({
   id: z.string().min(1),
   harness: z.string().optional(),
   kind: z.string().min(1),
-  title: z.string().min(1),
-  body: z.string().optional(),
-  options: z
-    .array(z.looseObject({ number: z.number(), label: z.string(), grantsTrust: z.boolean().optional() }))
-    .default([]),
-  escape: z.string().optional(),
 });
 export type WatchedDialogWords = z.infer<typeof WatchedDialogSchema>;
 
-/** A tool-permission prompt (Ferrets' `permissionRequest`): only what a notice says of it. */
-const WatchedPermissionSchema = z.looseObject({
+/** A tool-permission prompt (Ferrets' `permissionRequest`): only that it is one, and which. */
+const WatchedPermissionSchema = z.object({
   id: z.string().min(1),
   harness: z.string().optional(),
   tool: z.string().min(1),
-  action: z.string().optional(),
-  what: z.string().optional(),
-  question: z.string().min(1),
-  options: z.array(z.looseObject({ number: z.number(), label: z.string() })).default([]),
 });
 
 /**
- * A tool-permission prompt, said as a dialog (kind `permission`): it stops a ferret exactly as a screen does, and the
- * notice says the same things — what is asked, the rows, and that the Warden never picks one. `undefined` when
- * `permissionRequest` does not read as a prompt.
+ * A tool-permission prompt, said as a dialog (kind `permission`): it stops a ferret exactly as a screen does. Its tool,
+ * command, question and rows are pane text and are dropped here. `undefined` when `permissionRequest` does not read
+ * as a prompt.
  */
 export function permissionAsDialog(permissionRequest: unknown): WatchedDialogWords | undefined {
   const read = WatchedPermissionSchema.safeParse(permissionRequest);
   if (!read.success) return undefined;
-  const { id, harness, tool, action, what, question, options } = read.data;
-  return {
-    id,
-    ...(harness === undefined ? {} : { harness }),
-    kind: 'permission',
-    title: question,
-    body: `${tool}${action === undefined ? '' : ` wants to ${action}`}${what === undefined ? '' : `: ${what}`}`,
-    options: options.map(option => ({ number: option.number, label: option.label })),
-  };
+  const { id, harness } = read.data;
+  return { id, ...(harness === undefined ? {} : { harness }), kind: 'permission' };
 }
 
 /** One ferret and the dialog it is parked on, as the Warden reads it. */
@@ -105,25 +94,28 @@ export interface DialogNotice {
   readonly context: string;
 }
 
-/** The notice for one dialog, in the dialog's own words and with what to do. */
+/** A dialog kind is a constant of the dialog table: a plain lowercase slug, or the notice says `other`. */
+const KIND_SLUG = /^[a-z][a-z0-9-]{0,39}$/;
+
+/**
+ * The notice for one dialog: FIXED words only — the ferret, the dialog kind, the harness, and that its terminal holds
+ * the screen. It carries no pane text (see {@link WatchedDialogSchema}); the notice stands on the ferret's own board
+ * (`ref.ferret`), which is the link to the ferret and its terminal.
+ */
 export function dialogNotice(watched: WatchedDialog): DialogNotice {
   const { dialog, name, sessionId } = watched;
-  const harness = dialog.harness === 'codex' ? 'Codex' : dialog.harness === undefined ? 'its' : 'Claude Code';
-  const rows = dialog.options.map(
-    option => `${option.number}. ${option.label}${option.grantsTrust === true ? ' (trusts something to run)' : ''}`,
-  );
-  const said = [dialog.body, ...(rows.length === 0 ? [] : ['Choices:', ...rows])].filter(
-    (part): part is string => part !== undefined && part !== '',
-  );
+  const harness = dialog.harness === 'codex' ? 'Codex' : dialog.harness === undefined ? 'its harness' : 'Claude Code';
+  const kind = KIND_SLUG.test(dialog.kind) ? dialog.kind : 'other';
+  const said = `${name} is waiting on a ${kind} prompt in ${harness}`;
   return {
     sessionId,
     dialogId: dialog.id,
     ref: dialogNoticeRef(dialog.id),
-    subject: clipAtWord(`${name} is stopped at ${harness} screen: ${dialog.title}`, MAX_AGENDA_SUBJECT_LENGTH),
-    why: clipAtWord(`It waits until somebody chooses. ${said.join(' ')}`, MAX_AGENDA_DETAIL_LENGTH),
+    subject: clipAtWord(said, MAX_AGENDA_SUBJECT_LENGTH),
+    why: clipAtWord(`${said}; open its terminal to read and choose.`, MAX_AGENDA_DETAIL_LENGTH),
     howToResolve:
-      'Open the ferret’s terminal and choose a row. The Warden never chooses one, and a row that trusts something to run is yours to pick. This notice closes itself when the screen is gone.',
-    context: `Harness dialog (${dialog.kind}) seen on ${name}.`,
+      'Open the ferret’s terminal, read the screen and choose. The Warden never chooses one for you. This notice closes itself when the screen is gone.',
+    context: `Harness dialog (${kind}) seen on ${name}.`,
   };
 }
 
