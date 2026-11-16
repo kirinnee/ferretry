@@ -100,9 +100,11 @@ then deletes every token, client secret and record the sign-in left.
   15 seconds for them; there is no separate overall deadline.
 - **A public name that resolves to a private address during discovery. — residual risk.** Discovery
   refuses endpoints on loopback, private, link-local, CGNAT (`100.64/10`), unspecified and
-  IPv4-mapped-IPv6 forms of those when they are written as IP literals and the server itself is not
-  on one; a DNS name is not resolved and checked. Discovery only runs for a server a configure-holder
-  named.
+  IPv4-mapped (`::ffff:a:b`), IPv4-translated (`::ffff:0:a:b`), NAT64 (`64:ff9b::a:b`) and
+  IPv4-compatible (`::a:b`) IPv6 forms of those when they are written as IP literals (a host with any
+  number of trailing dots is judged as the host without them, read by the URL parser again, so
+  `127.1...` is `127.0.0.1`; a host that is only dots is refused) and the server itself is not on one; a DNS name is not resolved and checked.
+  Discovery only runs for a server a configure-holder named.
 - **Anyone who can read the state home.** As [secrets.md](secrets.md) says: the key sits beside the
   ciphertext.
 

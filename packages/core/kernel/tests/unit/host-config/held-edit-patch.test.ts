@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { defineConfig } from '../../../contract/index.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
-import { captureLog, HOME, manualClock } from './support.ts';
+import { captureLog, HOME, manualClock, TEST_ETAG_KEY } from './support.ts';
 
 /**
  * [kernel: config held-edit patch] A PATCH of a file with an edit held for the owner is made to BOTH versions: the one
@@ -42,6 +42,7 @@ function harness() {
     clock: manualClock(),
     log,
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     defs: [{ plugin: 'caps', def: capsDef }],
     judge: input => (asked.push(input), input.secretAdd === true ? verdicts.owner : verdicts.other),
   });

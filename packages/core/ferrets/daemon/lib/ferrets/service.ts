@@ -15,6 +15,7 @@ import { KeyedSerialExecutor } from './serial.ts';
 import type { SerialExecutor } from '../ports.ts';
 import { ConversationLeaseHeldError } from '../../../contract/conversation-lease.ts';
 import type { FerretLaunchLeases } from './launch-leases.ts';
+import { type LaunchSteps, paneVariables } from './launch-steps.ts';
 import type { SessionCutOffMark } from '../tokens/cut-off-mark.ts';
 import { ambiguousAgentAddressMessage, resolveAgentAddress } from '../../../contract/agent-address.ts';
 import {
@@ -121,10 +122,7 @@ import { STATE_HOME_UNRESOLVED, stateHomeSentence } from '../route-security/stat
 /** Today's launch variables: the ferret's own bearer and id, read by `fy` inside the pane. */
 const FERRET_TOKEN_VARIABLE = 'FY_SESSION_TOKEN';
 const FERRET_ID_VARIABLE = 'FY_SESSION_ID';
-/** Where Claude Code's question hook records the question it asks (today's `QUESTION_ASKED_FILE_ENV`). */
-export const QUESTION_FILE_VARIABLE = 'FY_QUESTION_FILE';
-/** Where the agent puts media it made to show the person (today's `SESSION_MEDIA_VARIABLE`, docs/hypermedia.md). */
-export const MEDIA_FOLDER_VARIABLE = 'FY_MEDIA_DIR';
+export { MEDIA_FOLDER_VARIABLE, QUESTION_FILE_VARIABLE } from './session-stores/pane-files.ts';
 
 /** The reason a stop records when its caller gave none (today's lifecycle `defaultStopReason`). */
 const DEFAULT_STOP_REASON = 'stopped by client';
@@ -252,6 +250,11 @@ export interface FerretsPorts {
    * pane exists until the ferret is settled stopped. Unbound (a unit fixture): no pane is leased.
    */
   leases?: FerretLaunchLeases;
+  /**
+   * What features add to every launch: one declared pane variable each (the question file, the media folder). Unbound (a
+   * unit fixture): the list is sealed and empty, so a launch sets none.
+   */
+  launchSteps?: LaunchSteps;
   /** Appends one event to the ferret's `history.jsonl` (today's journal event shape). */
   history?(ferret: FerretId, type: string, data: Readonly<Record<string, unknown>>): Promise<void>;
   /**
@@ -438,18 +441,6 @@ export interface FerretSessionPort {
    * locked read-modify-write, keeping every other field. Answers whether the config named the old runtime (and so moved).
    */
   repointRuntime?(ferret: FerretId, rename: FerretRuntimeRename): Promise<boolean>;
-  /**
-   * Additive (U4): where Claude Code's question hook records the question it is asking, inside THIS ferret's own session
-   * folder (`question-asked.json`, today's `SessionPaths.questionAsked`), handed to the pane as `FY_QUESTION_FILE`.
-   * Unbound, or a path that cannot be named: the variable is not set, and the hook records nothing.
-   */
-  questionFile?(ferret: FerretId): Promise<FencedPath>;
-  /**
-   * Additive (F-0327): THIS ferret's MEDIA folder (`media/` in its own session folder), made private if it is missing, and
-   * handed to the pane as `FY_MEDIA_DIR`: where the agent puts what it made to show the person, read back through
-   * `GET /v1/ferrets/:ferretId/fs/file?scope=media`. Unbound, or a folder that cannot be made: the variable is not set.
-   */
-  mediaFolder?(ferret: FerretId): Promise<FencedPath>;
   /**
    * Additive (structured questions): THIS ferret's `question-asked.json` as the hook left it (raw text, bounded) and its
    * modification time; `undefined` when absent, unreadable or over the bound. Reads only. Unbound: no question is seen.
@@ -701,6 +692,9 @@ export const CONVERSATION_NOT_FOUND =
 export const CONVERSATION_UNKNOWN =
   'Your earlier conversation was not resumed: this machine never recorded which conversation was yours (a Codex ferret, or one moved from Ferretry 4, can be without one), so this is a NEW conversation and you remember nothing from before it. Your assigned task is turn-001.md in the same folder as the turn file below: read it and the turns after it before you go on.';
 
+/** A launch asked before the features finished registering what it hands the pane (insurance: boot seals right after). */
+export const LAUNCH_STEPS_UNSEALED =
+  'the ferret was not started: the daemon had not finished setting up what a launch hands a pane';
 const LEASE_UNCHECKED =
   'the ferret was not started: whether another session is writing its conversation could not be checked';
 const LEASE_UNHELD =
@@ -2618,12 +2612,11 @@ export class FerretsService implements FerretsApi {
     Object.assign(env, signedIn);
     env[FERRET_ID_VARIABLE] = ferret;
     env[FERRET_TOKEN_VARIABLE] = token;
-    // The ferret's own question file (U4): its folder exists (`prepare` ran first); a path that cannot be named sets nothing.
-    const questionFile = await this.ports.session?.questionFile?.(ferret).catch(() => undefined);
-    if (questionFile !== undefined) env[QUESTION_FILE_VARIABLE] = questionFile;
-    // The ferret's media folder (F-0327), made if missing; a folder that cannot be made sets nothing.
-    const mediaFolder = await this.ports.session?.mediaFolder?.(ferret).catch(() => undefined);
-    if (mediaFolder !== undefined) env[MEDIA_FOLDER_VARIABLE] = mediaFolder;
+    // The pane variables features declared (the question file, the media folder), after the two above so none can
+    // overwrite them. A launch before the features have registered is refused, never run on a half-filled list.
+    const steps = this.ports.launchSteps;
+    if (steps !== undefined && !steps.sealed()) return err(LAUNCH_STEPS_UNSEALED);
+    Object.assign(env, await paneVariables(steps?.stores() ?? [], ferret));
     const resolved = await this.ports.vault.childEnvironment(ferret, env);
     if (!resolved.ok) return err(`unknown secrets: ${resolved.error.unknown.join(', ')}`);
     // What this launch told the ferret, kept for `instructions` (persisted, so a restart changes no answer): only the

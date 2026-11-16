@@ -10,7 +10,13 @@ import {
   ferretId,
   T0,
 } from '../../../../contract/testing/index.ts';
-import { FerretsService, type FerretSessionPort, type FerretsPorts } from '../../../../daemon/lib/ferrets/service.ts';
+import type { SessionStore } from '../../../../daemon/lib/ferrets/launch-steps.ts';
+import {
+  FerretsService,
+  type FerretSessionPort,
+  type FerretsPorts,
+  LAUNCH_STEPS_UNSEALED,
+} from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
 import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
 
@@ -138,11 +144,13 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
 
   describe('the ferret’s media folder (F-0327)', () => {
     /** The environment the launch asked the vault to resolve, and whether the harness was still launched. */
-    const launchedWith = async (mediaFolder: FerretSessionPort['mediaFolder']) => {
+    const launchedWith = async (mediaFolder: SessionStore['locate'] | undefined, sealed = true) => {
       const log: string[] = [];
       const seen: Readonly<Record<string, string>>[] = [];
-      const session: FerretSessionPort = { ...recorder(log), ...(mediaFolder === undefined ? {} : { mediaFolder }) };
-      const f = fixture(session, [], log, {
+      const stores: SessionStore[] =
+        mediaFolder === undefined ? [] : [{ id: 'media-folder', variable: 'FY_MEDIA_DIR', locate: mediaFolder }];
+      const f = fixture(recorder(log), [], log, {
+        launchSteps: { sealed: () => sealed, stores: () => stores },
         vault: {
           childEnvironment: async (_ferret, env) => {
             seen.push({ ...env });
@@ -173,6 +181,14 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
       const { started, env } = await launchedWith(undefined);
       expect(started.ok).toBe(true);
       expect(env['FY_MEDIA_DIR']).toBeUndefined();
+    });
+
+    test('a launch before the features have registered is refused and starts nothing', async () => {
+      const { started, env, log } = await launchedWith(async ferret => fenced(`/sessions/${ferret}/media`), false);
+      expect(started.ok).toBe(false);
+      if (!started.ok) expect(started.error.reason).toBe(LAUNCH_STEPS_UNSEALED);
+      expect(env).toEqual({});
+      expect(log).not.toContain('runner.start');
     });
   });
 
