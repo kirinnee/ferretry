@@ -155,8 +155,8 @@ export const ferretsStep: Step = {
     { what: 'v4 session-version markers', why: 'v5 files carry their own format' },
     { what: 'per-ferret environment.json', why: 'plaintext credential; never opened; the hash alone is carried' },
     {
-      what: 'summary.md and compaction-history.json as additional history entries',
-      why: 'FerretHistoryEventSchema describes journal events only; no approved event type/sequence for these separate artifacts',
+      what: 'summary.md as an additional history entry',
+      why: 'FerretHistoryEventSchema describes journal events only; no approved event type/sequence for this separate artifact (compaction-history.json is Usage’s: its step carries it)',
     },
     {
       what: 'system-callsigns.json counters',
