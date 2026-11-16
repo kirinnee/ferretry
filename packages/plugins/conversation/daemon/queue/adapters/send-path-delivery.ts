@@ -1,11 +1,11 @@
-import type { SendDisposition } from '../../seams/protocol.ts';
+import type { SendDisposition } from '@ferretry/core-mailbox/contract';
 import type { QueueDelivery, QueueTransport } from '../lib/deliverer.ts';
-import type { DeliveryView, HandOver, OwnDraft } from '../lib/delivery.ts';
+import type { DeliveryView, HandOver, OwnDraft } from '@ferretry/core-mailbox/contract';
 import type { SendMessageRequest, SessionSendService } from '../../delivery/lib/service.ts';
 import type { SendTracker } from '../../delivery/lib/tracker.ts';
+import { type SendFate } from '../../seams/ledger-types.ts';
 import {
   SendDraftRefused,
-  type SendFate,
   type SendLaunchGate,
   type SendLedger,
   SendNotReady,
@@ -16,7 +16,7 @@ import {
   type SendTerminal,
   SendUnavailable,
   SendUnconfirmed,
-} from '../../delivery/lib/types.ts';
+} from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../seams/ferret-id.ts';
 
 /** The send path's answers that mean the pane proved the message: a turn started, a queue holding it, a revive. */

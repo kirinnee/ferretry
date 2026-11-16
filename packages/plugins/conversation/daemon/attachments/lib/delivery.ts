@@ -16,7 +16,7 @@ import { basename, extname } from 'node:path';
 import {
   type DeliveredAttachment,
   messageWithAttachments as handoffMessageWithAttachments,
-} from '../../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 
 export type { DeliveredAttachment };
 

@@ -4,9 +4,9 @@ import {
   type AskOwnerChatMessage,
   parseAgendaMessage,
 } from '@ferretry/core-asks/contract';
-import type { SendRecord } from '../../delivery/lib/types.ts';
+import type { SendRecord } from '../../seams/ledger-types.ts';
 import { tryParseSessionId, type SessionId } from '../../seams/ferret-id.ts';
-import type { QueuedMessage } from '../../seams/protocol.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { queuedByOwner, sentByOwner } from './owner-words.ts';
 
 /** Restore boundary whitespace the author detector strips, without changing its author decision. */

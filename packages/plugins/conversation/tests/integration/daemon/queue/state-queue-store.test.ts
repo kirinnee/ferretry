@@ -5,10 +5,10 @@ import type { Instant } from '@ferretry/std';
 import should from 'should';
 import { CONVERSATION_STATE, QUEUE_CARRY_STATE, QUEUE_STATE } from '../../../../contract/index.ts';
 import { type RotationFailure, StateQueueStore } from '../../../../daemon/queue/adapters/index.ts';
-import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { foldQueue, type QueueEvent } from '@ferretry/core-mailbox/contract';
 import { ROTATE_EVENTS } from '../../../../daemon/queue/lib/rotation.ts';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { LightState } from '../../../support/light-state.ts';
 import { queueHistory } from '../../../support/queue-history.ts';
 

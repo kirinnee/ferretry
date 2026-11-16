@@ -1,4 +1,4 @@
-import { splitFerretryNotice } from '../../contract/index.ts';
+import { splitFerretryNotice } from '@ferretry/core-mailbox/contract';
 import {
   Activity,
   ArrowRightLeft,

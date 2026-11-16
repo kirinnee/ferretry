@@ -1,4 +1,4 @@
-import type { PendingQuestion, SessionState } from '../../seams/protocol.ts';
+import type { PendingQuestion, SessionState } from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent, TranscriptQuestion } from '../../seams/transcript-types.ts';
 import {
   type AnswerOperationRecord,
