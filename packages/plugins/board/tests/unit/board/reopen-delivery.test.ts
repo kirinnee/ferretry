@@ -101,7 +101,7 @@ describe('delivering a reopen', () => {
     // Assert
     should(delivered).deepEqual({ to: null, how: 'orphaned' });
     should(warnings).deepEqual([
-      `${LINE} reached no ferret: the card's assignee and owner are gone, so it is orphaned`,
+      `${LINE} reached no ferret: the task's assignee and owner are gone, so it is orphaned`,
     ]);
   });
 
@@ -115,7 +115,7 @@ describe('delivering a reopen', () => {
 
     // Assert
     should(delivered).deepEqual({ to: 'child', how: 'held' });
-    should(warnings).deepEqual([`${LINE} is held for child's next revive: no ferret on the card could be resumed now`]);
+    should(warnings).deepEqual([`${LINE} is held for child's next revive: no ferret on the task could be resumed now`]);
   });
 
   it('should ask an owner who is also the assignee once, and serve the notifier port', async () => {

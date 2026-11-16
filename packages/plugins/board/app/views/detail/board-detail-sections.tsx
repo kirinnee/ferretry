@@ -208,7 +208,7 @@ export function ChildrenList({
   readonly now: number;
   readonly onOpen: (id: string) => void;
 }) {
-  if (lines.length === 0) return <p className="fy-board-detail__quiet">No sub-cards.</p>;
+  if (lines.length === 0) return <p className="fy-board-detail__quiet">No sub-tasks.</p>;
   return (
     <ul className="fy-board-detail__list" data-kind="children">
       {lines.map(({ task, laneName }) => (

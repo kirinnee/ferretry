@@ -207,7 +207,7 @@ describe('a gate option that names a lane', () => {
       'a gate option names a lane of this set',
     ]);
     should(problemsOf([...SOUND.slice(0, 2), gated('ready'), SOUND[2] as Lane])).deepEqual([
-      'a gate option sends the card to another lane',
+      'a gate option sends the task to another lane',
     ]);
   });
 });

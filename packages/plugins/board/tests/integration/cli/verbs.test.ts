@@ -43,7 +43,7 @@ describe('fy board', () => {
       options: { json: true },
       answers: { ...STANDARD, 'GET /v1/board': response() },
     });
-    should(JSON.parse(result.out)).have.property('cards');
+    should(JSON.parse(result.out)).have.property('tasks').and.not.have.property('cards');
   });
 
   it('should refuse --mine outside a ferret, and say so on stderr with exit 1', async () => {
@@ -64,24 +64,24 @@ describe('fy board', () => {
   });
 });
 
-describe('fy card new', () => {
+describe('fy task new', () => {
   const options = { kind: 'feature', ask: 'rename it', 'ask-source': 'chat://1' };
 
   it('should check for related work, then create the card and say where it stands', async () => {
-    const result = await run('card new', {
+    const result = await run('task new', {
       args: ['Rename', 'widget'],
       options,
-      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/cards': CARD },
+      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': CARD },
     });
     should(result.code).equal(0);
     should(result.calls.map(call => call.route)).containEql('POST /v1/search/related');
-    should(result.calls.map(call => call.route)).containEql('POST /v1/board/cards');
+    should(result.calls.map(call => call.route)).containEql('POST /v1/board/tasks');
     should(written(result)).have.property('title', 'Rename widget');
     should(result.out).match(/&F7/u);
   });
 
   it('should refuse a strong duplicate with exit 1 and create nothing', async () => {
-    const result = await run('card new', {
+    const result = await run('task new', {
       args: ['Rename', 'widget'],
       options,
       answers: {
@@ -101,19 +101,19 @@ describe('fy card new', () => {
             },
           ],
         },
-        'POST /v1/board/cards': CARD,
+        'POST /v1/board/tasks': CARD,
       },
     });
     should(result.code).equal(1);
     should(result.err).match(/Related work already exists/u);
-    should(result.calls.map(call => call.route)).not.containEql('POST /v1/board/cards');
+    should(result.calls.map(call => call.route)).not.containEql('POST /v1/board/tasks');
   });
 
   it('should let the shell print why --brief-file cannot be read', async () => {
-    const failure = await run('card new', {
+    const failure = await run('task new', {
       args: ['Rename', 'widget'],
       options: { ...options, 'brief-file': '/nope.md' },
-      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/cards': CARD },
+      answers: { ...STANDARD, 'POST /v1/search/related': { matches: [] }, 'POST /v1/board/tasks': CARD },
       files: {},
     }).then(
       () => undefined,
@@ -123,63 +123,78 @@ describe('fy card new', () => {
   });
 });
 
-describe('fy card show, move and progress', () => {
+describe('fy task show, move and progress', () => {
   it('should show one card in full', async () => {
-    const result = await run('card show', {
+    const result = await run('task show', {
       args: ['&F7'],
-      answers: { ...STANDARD, 'GET /v1/board/cards/:cardId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
     });
     should(result.code).equal(0);
     should(result.out).match(/F7/u);
-    should(result.calls[0]).eql({ route: 'GET /v1/board/cards/:cardId', init: { params: { cardId: 'F7' } } });
+    should(result.calls[0]).eql({ route: 'GET /v1/board/tasks/:taskId', init: { params: { taskId: 'F7' } } });
   });
 
   it('should print the card as the patch document with --yaml', async () => {
-    const result = await run('card show', {
+    const result = await run('task show', {
       args: ['F7'],
       options: { yaml: true },
-      answers: { ...STANDARD, 'GET /v1/board/cards/:cardId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
     });
     should(result.out)
       .match(/revision:/u)
-      .and.match(/card patch F7 --file/u);
+      .and.match(/task patch F7 --file/u);
+  });
+
+  it('should print the task under the task key with --json, and read an answer that still says card', async () => {
+    const current = await run('task show', {
+      args: ['F7'],
+      options: { json: true },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD },
+    });
+    should(JSON.parse(current.out)).have.property('task').and.not.have.property('card');
+    const former = await run('task show', {
+      args: ['F7'],
+      options: { json: true },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': { task: CARD.card, laneSet: CARD.laneSet } },
+    });
+    should(JSON.parse(former.out)).have.property('task');
   });
 
   it('should move a card to a lane by name', async () => {
-    const result = await run('card move', {
+    const result = await run('task move', {
       args: ['F7', 'Implement'],
       options: { reason: 'started' },
-      answers: { ...STANDARD, 'GET /v1/board/cards/:cardId': CARD, 'POST /v1/board/cards/:cardId': CARD },
+      answers: { ...STANDARD, 'GET /v1/board/tasks/:taskId': CARD, 'POST /v1/board/tasks/:taskId': CARD },
     });
     should(result.code).equal(0);
     should(written(result)).containEql({ action: 'move', to: 'implement' });
   });
 
   it('should write the progress as ONE edit with only the parts named (card progress replaces the status writer)', async () => {
-    const result = await run('card progress', {
+    const result = await run('task progress', {
       args: ['F7'],
       options: { now: 'testing', next: '1. ship' },
-      answers: { 'POST /v1/board/cards/:cardId': CARD, ...STANDARD },
+      answers: { 'POST /v1/board/tasks/:taskId': CARD, ...STANDARD },
     });
     should(result.code).equal(0);
     should(result.calls[0]).eql({
-      route: 'POST /v1/board/cards/:cardId',
-      init: { params: { cardId: 'F7' }, body: { action: 'edit', progress: { now: 'testing', next: '1. ship' } } },
+      route: 'POST /v1/board/tasks/:taskId',
+      init: { params: { taskId: 'F7' }, body: { action: 'edit', progress: { now: 'testing', next: '1. ship' } } },
     });
   });
 
   it('should read the whole progress from --file', async () => {
-    const result = await run('card progress', {
+    const result = await run('task progress', {
       args: ['F7'],
       options: { file: '/p.yaml' },
       files: { '/p.yaml': 'now: from file\nnext: later\n' },
-      answers: { 'POST /v1/board/cards/:cardId': CARD, ...STANDARD },
+      answers: { 'POST /v1/board/tasks/:taskId': CARD, ...STANDARD },
     });
     should(body(result)).eql({ action: 'edit', progress: { now: 'from file', doneSoFar: '', next: 'later' } });
   });
 
   it('should refuse a progress write that names nothing', async () => {
-    const result = await run('card progress', { args: ['F7'], answers: STANDARD });
+    const result = await run('task progress', { args: ['F7'], answers: STANDARD });
     should(result.code).equal(1);
     should(result.err).match(/nothing to write/u);
     should(result.calls).eql([]);
@@ -187,16 +202,16 @@ describe('fy card show, move and progress', () => {
 });
 
 describe('the other card verbs', () => {
-  const answers = { ...STANDARD, 'POST /v1/board/cards/:cardId': CARD, 'GET /v1/board/cards/:cardId': CARD };
+  const answers = { ...STANDARD, 'POST /v1/board/tasks/:taskId': CARD, 'GET /v1/board/tasks/:taskId': CARD };
 
   it('should send each verb as the one action it is', async () => {
     const cases: [string, string[], Record<string, string | boolean>, object][] = [
-      ['card focus', ['F7'], {}, { action: 'focus' }],
-      ['card block', ['F7', 'waiting', 'on', 'infra'], {}, { action: 'block', reason: 'waiting on infra' }],
-      ['card unblock', ['F7'], { reason: 'done' }, { action: 'unblock', reason: 'done' }],
-      ['card claim', ['F7'], {}, { action: 'claim' }],
-      ['card note', ['F7', 'hello', 'there'], {}, { action: 'note', text: 'hello there' }],
-      ['card drop', ['F7'], { reason: 'moot' }, { action: 'drop', reason: 'moot' }],
+      ['task focus', ['F7'], {}, { action: 'focus' }],
+      ['task block', ['F7', 'waiting', 'on', 'infra'], {}, { action: 'block', reason: 'waiting on infra' }],
+      ['task unblock', ['F7'], { reason: 'done' }, { action: 'unblock', reason: 'done' }],
+      ['task claim', ['F7'], {}, { action: 'claim' }],
+      ['task note', ['F7', 'hello', 'there'], {}, { action: 'note', text: 'hello there' }],
+      ['task drop', ['F7'], { reason: 'moot' }, { action: 'drop', reason: 'moot' }],
     ];
     for (const [verb, args, options, expected] of cases) {
       const result = await run(verb, { args, options, answers });
@@ -206,7 +221,7 @@ describe('the other card verbs', () => {
   });
 
   it('should record a skip', async () => {
-    const result = await run('card skip', {
+    const result = await run('task skip', {
       args: ['no', 'card', 'needed'],
       answers: { 'POST /v1/board/skip': { ferret: DENISHA, skip: { reason: 'no card needed', at: AT } } },
     });
@@ -215,7 +230,7 @@ describe('the other card verbs', () => {
   });
 
   it('should patch a card from a document, sending one edit with the revision', async () => {
-    const result = await run('card patch', {
+    const result = await run('task patch', {
       args: ['F7'],
       options: { file: '/f7.yaml' },
       files: { '/f7.yaml': 'revision: 1\ntitle: Renamed widget\n' },
@@ -241,21 +256,21 @@ describe('the other card verbs', () => {
   });
 });
 
-describe('fy card merge-gate', () => {
+describe('fy task merge-gate', () => {
   const PR = 'https://github.com/kirinnee/ferretry/pull/42';
   const gate = (overrides: object) => ({
     'GET /v1/board/merge-gate': { pr: PR, unit: [], waits: [], unreadable: [], ...overrides },
   });
 
   it('should exit 0 and print nothing when the PR waits on nothing', async () => {
-    const result = await run('card merge-gate', { args: [PR], answers: gate({}) });
+    const result = await run('task merge-gate', { args: [PR], answers: gate({}) });
     should(result.code).equal(0);
     should(result.out).equal('');
     should(result.calls[0]).eql({ route: 'GET /v1/board/merge-gate', init: { query: { pr: PR } } });
   });
 
   it('should exit 1 with the waits', async () => {
-    const result = await run('card merge-gate', {
+    const result = await run('task merge-gate', {
       args: [PR],
       answers: gate({ waits: [{ card: { id: 'F20' }, on: { id: 'F18' }, until: 'shipped' }] }),
     });
@@ -264,7 +279,7 @@ describe('fy card merge-gate', () => {
   });
 
   it('should exit 2 when the daemon cannot answer, so the merger fails closed', async () => {
-    const result = await run('card merge-gate', { args: [PR], answers: {} });
+    const result = await run('task merge-gate', { args: [PR], answers: {} });
     should(result.code).equal(2);
     should(result.err).match(/no answer/u);
   });

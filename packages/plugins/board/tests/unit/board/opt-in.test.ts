@@ -53,7 +53,7 @@ describe('the question the Yes must answer', () => {
 
   it('should not be any yes/no that names a card, a board or tracking', () => {
     for (const words of [
-      'Remove the credit card field?',
+      'Remove the credit task field?',
       'Track down the leak?',
       'Is the board page slow?',
       'Should I keep tracking it on the board? Or ship?',
@@ -106,7 +106,7 @@ describe("the owner's Yes", () => {
   });
 
   it('should refuse a Yes to another question, even one that names a card or tracking', () => {
-    for (const subject of ['Ship the fix?', 'Remove the credit card field?', 'Track down the leak?']) {
+    for (const subject of ['Ship the fix?', 'Remove the credit task field?', 'Track down the leak?']) {
       // Arrange
       const item = answered({ subject });
 
@@ -120,7 +120,7 @@ describe("the owner's Yes", () => {
 
   it('should count the question in the title when the ask says it differently', () => {
     // Arrange
-    const item = answered({ title: 'Track this on the board?', subject: 'Should the login fix get a card?' });
+    const item = answered({ title: 'Track this on the board?', subject: 'Should the login fix get a task?' });
 
     // Act
     const problem = approvalProblem('A12', item, FERRET, undefined);
@@ -149,7 +149,7 @@ describe("the owner's Yes", () => {
 
   it('should refuse a Yes that already made a card', () => {
     should(approvalProblem('A12', answered(), FERRET, { id: 'F7' })).equal(
-      '^A12 already made &F7; one Yes makes one card',
+      '^A12 already made &F7; one Yes makes one task',
     );
   });
 });
@@ -157,7 +157,7 @@ describe("the owner's Yes", () => {
 describe('the refusal', () => {
   it('should say the board is off, what to do instead and how to ask', () => {
     should(offBoardRefusal('ferretry')).equal(
-      'The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" --premise "<what you are doing>" --context "<why it needs a card>" — then, once the owner says Yes, fy card new … --approval <ask>.',
+      'The ferretry board is off, so this work needs no task: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" --premise "<what you are doing>" --context "<why it needs a task>" — then, once the owner says Yes, fy task new … --approval <ask>.',
     );
   });
 

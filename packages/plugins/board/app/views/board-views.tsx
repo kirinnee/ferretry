@@ -141,7 +141,7 @@ export interface TreeViewProps {
 /** A lead's card with its sub-ferrets' cards indented under it. */
 export function TreeView({ model, env }: TreeViewProps) {
   const rows = useMemo(() => flattenTree(buildTree(model.cards)), [model.cards]);
-  if (rows.length === 0) return <Empty>No cards match.</Empty>;
+  if (rows.length === 0) return <Empty>No tasks match.</Empty>;
   return (
     <ul className="fy-board-tree">
       {rows.map(row => (
@@ -172,7 +172,7 @@ export interface DependenciesViewProps {
  */
 export function DependenciesView({ model, env }: DependenciesViewProps) {
   const linked = model.cards.filter(card => card.task.blockedBy.length > 0 || card.task.blocks.length > 0);
-  if (linked.length === 0) return <Empty>No card depends on another.</Empty>;
+  if (linked.length === 0) return <Empty>No task depends on another.</Empty>;
   return (
     <ul className="fy-board-deps">
       {linked.map(card => (
@@ -220,13 +220,13 @@ export function ArchiveView({ shown, remaining, total, query, onQuery, onMore, l
         aria-label="Search the archive"
         className="fy-board-archive__search"
         onChange={event => onQuery(event.target.value)}
-        placeholder="Search closed and dropped cards"
+        placeholder="Search closed and dropped tasks"
         type="search"
         value={query}
       />
       {shown.length === 0 ? (
         <Empty>
-          {loading ? 'Reading the archive…' : query.trim() === '' ? 'Nothing closed yet.' : 'No archived card matches.'}
+          {loading ? 'Reading the archive…' : query.trim() === '' ? 'Nothing closed yet.' : 'No archived task matches.'}
         </Empty>
       ) : (
         <TableRows env={env} rows={archiveRowsOf(shown, env)} />

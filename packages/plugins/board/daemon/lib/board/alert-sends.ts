@@ -103,6 +103,6 @@ export class AlertSurface {
     if (card === undefined || cardVisibility(card) === 'public') return;
     const ancestor = visibleAncestor(card, new BoardIndex(cards, this.ports.machineId() ?? ''), laneSets);
     if (ancestor !== undefined)
-      await this.ports.note(ancestor.id, `sub-card alert, not typed to the interactive lead: ${message}`);
+      await this.ports.note(ancestor.id, `sub-task alert, not typed to the interactive lead: ${message}`);
   }
 }

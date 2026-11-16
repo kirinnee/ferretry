@@ -39,7 +39,7 @@ export interface ObservedTerminalPane {
   readonly processStartTicks: number;
 }
 
-export type TerminalReapTarget = RegisteredTerminalPane;
+type TerminalReapTarget = RegisteredTerminalPane;
 
 export interface TerminalReapPlan {
   readonly targets: readonly TerminalReapTarget[];
@@ -66,7 +66,7 @@ function paneKey(pane: Pick<RegisteredTerminalPane, 'tmuxSession' | 'paneId' | '
   return `${pane.tmuxSession}\n${pane.paneId}\n${pane.pid}\n${pane.processStartTicks}`;
 }
 
-export function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): boolean {
+function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | RegisteredTerminalPane): boolean {
   return (
     pane.tmuxSession.length > 0 &&
     /^%(?:0|[1-9][0-9]*)$/u.test(pane.paneId) &&
@@ -87,7 +87,7 @@ export function hasSafeTerminalPaneIdentity(pane: ObservedTerminalPane | Registe
  * conservative direction for each: the reap declines to kill, and the limits surface declines to
  * pass over a pane it cannot prove is gone.
  */
-export function hasDurableTerminalEvidence(session: DurableTerminalSession): boolean {
+function hasDurableTerminalEvidence(session: DurableTerminalSession): boolean {
   if (!TERMINAL_STATUSES.has(session.status as ReapTerminalStatus) || session.finishedAt === undefined) return false;
   return Number.isFinite(Date.parse(session.finishedAt));
 }

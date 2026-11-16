@@ -7,13 +7,13 @@ import { boardEntry, entry, registryOf, skeletonEntry } from './fakes.ts';
 
 describe('verb table', () => {
   it('should keep only the typed words of a declared line', () => {
-    should(verbWords('card move <id> [--to lane]')).deepEqual(['card', 'move']);
+    should(verbWords('task move <id> [--to lane]')).deepEqual(['task', 'move']);
   });
 
   it('should resolve the longest run of leading words, leaving the rest as arguments', () => {
     const table = buildVerbTable(registryOf(boardEntry()));
-    const moved = resolveVerb(table, ['card', 'move', 'c1', '--to', 'done']);
-    should(moved.kind === 'verb' && moved.entry.line).equal('card move');
+    const moved = resolveVerb(table, ['task', 'move', 'c1', '--to', 'done']);
+    should(moved.kind === 'verb' && moved.entry.line).equal('task move');
     should(moved.kind === 'verb' && moved.rest).deepEqual(['c1', '--to', 'done']);
     const board = resolveVerb(table, ['board', '--all']);
     should(board.kind === 'verb' && board.entry.owner).equal('board');
@@ -21,9 +21,9 @@ describe('verb table', () => {
 
   it('should name the verbs under the same first word when the second is mistyped', () => {
     const table = buildVerbTable(registryOf(boardEntry()));
-    const unknown = resolveVerb(table, ['card', 'nope']);
+    const unknown = resolveVerb(table, ['task', 'nope']);
     should(unknown.kind).equal('unknown');
-    should(unknown.kind === 'unknown' && unknown.nearby.map(near => near.line)).deepEqual(['card show', 'card move']);
+    should(unknown.kind === 'unknown' && unknown.nearby.map(near => near.line)).deepEqual(['task show', 'task move']);
   });
 
   it('should keep the shell’s own verb lines and leave out a plugin line that repeats one', () => {
@@ -97,12 +97,12 @@ describe('verb table', () => {
       api: 5,
       core: false,
       kinds: ['command'],
-      actions: { cli: [verb('done', { alias: 'card move --to done' })] },
+      actions: { cli: [verb('done', { alias: 'task move --to done' })] },
     });
     const table = buildVerbTable(registryOf(skeletonEntry(aliasPlugin)));
     const done = resolveVerb(table, ['done', 'c9']);
     should(done.kind === 'verb' && expandAlias(done.entry, done.rest)).deepEqual([
-      'card',
+      'task',
       'move',
       '--to',
       'done',
@@ -114,7 +114,7 @@ describe('verb table', () => {
     const table = buildVerbTable(registryOf(boardEntry()));
     const help = renderRootHelp('fy', table, { board: 'Board' });
     should(help).containEql('Usage: fy <verb>');
-    should(help).containEql('Board\n  card show');
+    should(help).containEql('Board\n  task show');
     should(help).containEql('The shell\n  plugin list');
   });
 

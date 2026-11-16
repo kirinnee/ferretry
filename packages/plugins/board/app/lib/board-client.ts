@@ -23,7 +23,6 @@ import {
   type BoardProjectId,
   BoardProjectsResponseSchema,
   type BoardResponse,
-  BoardResponseSchema,
   type BoardResult,
   boardErr,
   boardOk,
@@ -33,13 +32,15 @@ import {
   CardCreateRequestSchema,
   type CardId,
   type CardResponse,
-  CardResponseSchema,
   type CardStartResponse,
-  CardStartResponseSchema,
   type LaneSetActionRequestInput,
   LaneSetActionRequestSchema,
   type LaneSetChangeResponse,
   LaneSetChangeResponseSchema,
+  readBoard,
+  readCard,
+  safeReadCard,
+  safeReadCardStart,
 } from '../../contract/index.ts';
 
 /** The most cards one page asks for; a board larger than a few pages is shown as partial, not paged on. */
@@ -182,11 +183,11 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
       { query: queryRecord(boardQueryParams(query, cursor, limit)) },
       false,
     );
-    return BoardResponseSchema.parse(answer);
+    return readBoard(answer);
   },
   card: async (_daemon, id) => {
-    const answer = await read<unknown>(client, 'GET /v1/board/cards/:cardId', { params: { cardId: id } }, true);
-    return answer === null ? null : CardResponseSchema.parse(answer);
+    const answer = await read<unknown>(client, 'GET /v1/board/tasks/:taskId', { params: { taskId: id } }, true);
+    return answer === null ? null : readCard(answer);
   },
   ids: async () => BoardIdsResponseSchema.parse(await read<unknown>(client, 'GET /v1/board/ids', {}, false)).ids,
   projects: async () =>
@@ -213,23 +214,23 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
     if (!checked.success) return boardErr(writeError(0, checked.error.message, 'invalid'));
     return await write(
       client,
-      'POST /v1/board/cards/:cardId',
-      { params: { cardId: id }, body: checked.data, headers: { [REQUEST_ID_HEADER]: crypto.randomUUID() } },
+      'POST /v1/board/tasks/:taskId',
+      { params: { taskId: id }, body: checked.data, headers: { [REQUEST_ID_HEADER]: crypto.randomUUID() } },
       answer => {
-        const parsed = CardResponseSchema.safeParse(answer);
+        const parsed = safeReadCard(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
-      'the daemon answered with a card this app cannot read',
+      'the daemon answered with a task this app cannot read',
     );
   },
   start: async (_daemon, id, key = crypto.randomUUID()) =>
     await write(
       client,
-      'POST /v1/board/cards/:cardId/start',
-      { params: { cardId: id }, headers: { [REQUEST_ID_HEADER]: key } },
+      'POST /v1/board/tasks/:taskId/start',
+      { params: { taskId: id }, headers: { [REQUEST_ID_HEADER]: key } },
       answer => {
-        const parsed = CardStartResponseSchema.safeParse(answer);
+        const parsed = safeReadCardStart(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
@@ -240,14 +241,14 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
     if (!checked.success) return boardErr(writeError(0, checked.error.message, 'invalid'));
     return await write(
       client,
-      'POST /v1/board/cards',
+      'POST /v1/board/tasks',
       { body: checked.data, headers: { [REQUEST_ID_HEADER]: crypto.randomUUID() } },
       answer => {
-        const parsed = CardResponseSchema.safeParse(answer);
+        const parsed = safeReadCard(answer);
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
-      'the daemon answered with a card this app cannot read',
+      'the daemon answered with a task this app cannot read',
     );
   },
   lanes: async (_daemon, projectId, request) => {

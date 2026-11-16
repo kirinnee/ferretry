@@ -73,7 +73,7 @@ describe('Board for <ferret> (S-0449)', () => {
       id: 'board-for-ferret-dm1',
       group: 'Go to',
       label: 'Board for Ms-98',
-      description: "Open the board filtered to this ferret's cards.",
+      description: "Open the board filtered to this ferret's tasks.",
       resting: true,
     });
     expect(entry?.keywords).toEqual(['board', 'for this ferret', 'cards', 'tasks', 'kanban', 'project', 'mine']);

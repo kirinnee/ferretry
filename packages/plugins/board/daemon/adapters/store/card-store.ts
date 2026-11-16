@@ -90,7 +90,7 @@ export class KernelCardStore implements BoardStore {
         const next = Math.max(...onDisk, 0) + 1;
         allocated = next;
         await this.state.write(this.files.counters, { format: 1, next: { ...fresh(), [kind]: next + 1 } });
-        this.diagnostics.warn('the board id counter was damaged; it was started again above the highest card on disk');
+        this.diagnostics.warn('the board id counter was damaged; it was started again above the highest task on disk');
       }
       if (allocated > MAX_COUNTER) throw new BoardUnavailableError(`the ${prefix} id counter is exhausted`);
       return `${prefix}${allocated}` as CardId;
@@ -101,7 +101,7 @@ export class KernelCardStore implements BoardStore {
     return await this.serial.run(`board:card:${id}`, async () => {
       const loaded = await this.load();
       if (loaded.quarantined.has(id))
-        throw new BoardUnavailableError(`card ${id} is quarantined; refusing to overwrite the damaged file`);
+        throw new BoardUnavailableError(`task ${id} is quarantined; refusing to overwrite the damaged file`);
       const decision = await decide(loaded.cards.get(id));
       if (decision.task === null) return decision.result;
       if (decision.task.id !== id)
@@ -130,9 +130,9 @@ export class KernelCardStore implements BoardStore {
       if (read.ok && read.value !== undefined && read.value.id === id) loaded.cards.set(id, read.value);
       else if (read.ok && read.value === undefined) continue;
       else {
-        const why = read.ok ? 'the card file names another card' : read.error.sentence;
+        const why = read.ok ? 'the task file names another task' : read.error.sentence;
         loaded.quarantined.set(id, clip(why));
-        this.diagnostics.warn(`board card ${id} is quarantined: ${why}`);
+        this.diagnostics.warn(`board task ${id} is quarantined: ${why}`);
       }
     }
     return loaded;

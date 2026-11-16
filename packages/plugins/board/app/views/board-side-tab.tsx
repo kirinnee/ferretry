@@ -65,7 +65,7 @@ function ViewToggle({
   readonly onView: (view: BoardSideView) => void;
 }): ReactElement {
   return (
-    <fieldset aria-label="How the cards are arranged" className="fy-board-side__views" data-board-side-views={view}>
+    <fieldset aria-label="How the tasks are arranged" className="fy-board-side__views" data-board-side-views={view}>
       {VIEWS.map(({ id, label, Icon }) => (
         <button
           aria-pressed={view === id}
@@ -106,7 +106,7 @@ function Toolbar({
       ) : null}
       {onExpand === undefined ? null : (
         <button
-          aria-label={expanded ? 'Collapse the cards back to the panel' : 'Expand the cards to the whole chat'}
+          aria-label={expanded ? 'Collapse the tasks back to the panel' : 'Expand the tasks to the whole chat'}
           className="fy-board-side__expand"
           data-board-side-expand={expanded ? 'collapse' : 'expand'}
           onClick={onExpand}
@@ -161,7 +161,7 @@ export function BoardSideTab({
 
   return (
     <section
-      aria-label="This ferret's cards"
+      aria-label="This ferret's tasks"
       className="fy-board-side"
       data-board-side=""
       data-density={density}
@@ -172,7 +172,7 @@ export function BoardSideTab({
       </p>
       {density === 'page' ? (
         <h2 className="fy-board-side__title">
-          This ferret's cards <span className="fy-board-side__total">{cards.total}</span>
+          This ferret's tasks <span className="fy-board-side__total">{cards.total}</span>
         </h2>
       ) : null}
       {cards.total > 0 || chat.splitsAgents || density === 'page' ? (
@@ -189,8 +189,8 @@ export function BoardSideTab({
         ) : status === 'ready' ? (
           <p className="fy-board-empty" data-board-side-empty="">
             {cards.hiddenAgents === 0
-              ? 'This ferret has no cards.'
-              : `No cards of your own yet. ${cards.hiddenAgents} agent ${cards.hiddenAgents === 1 ? 'card is' : 'cards are'} hidden.`}
+              ? 'This ferret has no tasks.'
+              : `No tasks of your own yet. ${cards.hiddenAgents} agent ${cards.hiddenAgents === 1 ? 'task is' : 'tasks are'} hidden.`}
           </p>
         ) : (
           <p className="fy-board__reading" role="status">

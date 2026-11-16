@@ -484,7 +484,7 @@ describe('applyPrUpdate', () => {
     should(nudges).deepEqual([
       {
         reason: 'closed-unmerged',
-        message: '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.',
+        message: '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.',
       },
     ]);
     should(apply(task as Card, { observed: [observed({ state: 'closed' })] }).nudges).be.empty();
@@ -498,7 +498,7 @@ describe('applyPrUpdate', () => {
     should(nudges).deepEqual([
       {
         reason: 'ci-failing',
-        message: '&F1 PR #940 CI is red. Fix it, or note on the card why it can stay red.',
+        message: '&F1 PR #940 CI is red. Fix it, or note on the task why it can stay red.',
       },
     ]);
     should(apply(task as Card, { observed: [observed({ checks: 'failing' })] }).nudges).be.empty();
@@ -517,7 +517,7 @@ describe('applyPrUpdate', () => {
     const bare = card({ laneId: 'implement', workflow: 'quick' });
     const { task } = apply(bare, {
       link: [
-        { url: URL, because: "its head branch feat/x is the card's branch" },
+        { url: URL, because: "its head branch feat/x is the task's branch" },
         { url: 'https://github.com/KirinNee/Ferretry/pull/940', because: 'again' },
         { url: 'https://example.com/not-a-pr', because: 'never' },
       ],
@@ -525,7 +525,7 @@ describe('applyPrUpdate', () => {
     });
     should(task?.links.prs.map(pr => pr.url)).deepEqual([URL]);
     should(task?.history.map(event => event.type)).deepEqual(['created', 'linked', 'note', 'moved']);
-    should(notes(task)).deepEqual(["PR #940 linked automatically: its head branch feat/x is the card's branch"]);
+    should(notes(task)).deepEqual(["PR #940 linked automatically: its head branch feat/x is the task's branch"]);
     should(task?.laneId).equal('review');
   });
 
@@ -547,7 +547,7 @@ describe('BoardService.recordPullRequests', () => {
     const outcome = await service.recordPullRequests('F1', update({ observed: [observed({ state: 'closed' })] }));
     should(outcome.nudges).have.length(1);
     should(ports.store.writes).have.length(1);
-    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, cardIds: ['F1'] } }]);
+    should(ports.changes.events).deepEqual([{ ferret: 'lead', event: { projectId: PROJECT, taskIds: ['F1'] } }]);
   });
 
   it('should write nothing and publish nothing when nothing changed', async () => {

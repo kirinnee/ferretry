@@ -446,6 +446,19 @@ test('decide reads the CI environment: a push, a dispatch, a label list that is 
   expect(JSON.parse(readFileSync(join(dir, 'scope.json'), 'utf8')).mode).toBe('full');
 });
 
+test('a dot-directory inside a package (a test’s temporary folder) is never walked', async () => {
+  const fx = fixture([{ id: 'target' }, { id: 'holder' }]);
+  fixtures.push(fx);
+  // A test's temporary probe inside a package: it may vanish mid-walk, and it is never package source.
+  fx.write(
+    'packages/plugins/holder/.fy-worker-contract-x/src/probe.ts',
+    "import '@ferretry/plugin-target/contract';\n",
+  );
+  fx.write('packages/plugins/holder/.tmp/probe.ts', "import '@ferretry/plugin-target/contract';\n");
+  const result = await readGraph(fx.root);
+  expect([...(result.dependsOn.get('@ferretry/plugin-holder') ?? [])]).toEqual([]);
+});
+
 // ─── the REAL imports: a relative path into a sibling plugin is an edge ─────────────────────────────────────────
 
 const edgesOf = (graph: Awaited<ReturnType<typeof readGraph>>, id: string): string[] =>
@@ -627,6 +640,48 @@ test('a ports-pending record or a plugin manifest is never scopable, wherever it
   expect(full(selectScope(input(['packages/plugins/a/manifest.ts'])))).toContain('plugin manifest');
   // Lookalikes are plain files of the plugin.
   expect(ran(selectScope(input(['packages/plugins/a/daemon/ports-pending-note.ts'])))).toContain('a');
+});
+
+test('a manifest fragment is never scopable, at any depth, exactly like manifest.ts', () => {
+  for (const path of [
+    'packages/plugins/a/manifest/actions/10-roll-up.actions.ts',
+    'packages/plugins/a/manifest/generated/actions.ts',
+    'packages/plugins/a/manifest/deeper/still/x.ts',
+    'packages/plugins/a/manifest/note.md',
+  ])
+    expect(full(selectScope(input([path])))).toContain('plugin manifest');
+  // Lookalikes are plain files of the plugin: only the `manifest/` folder of the package itself is the manifest.
+  for (const path of [
+    'packages/plugins/a/daemon/manifest/x.ts',
+    'packages/plugins/a/manifest-notes.ts',
+    'packages/plugins/a/tests/unit/manifest/x.test.ts',
+  ])
+    expect(ran(selectScope(input([path])))).toContain('a');
+});
+
+test('a hook take declared in a manifest fragment is a graph edge, read through the manifest that spreads it', async () => {
+  const fx = fixture([
+    {
+      id: 'taker',
+      manifestImports: "import fragment from './manifest/actions/10-x.actions.ts';",
+      manifest: '  hooks: { takes: fragment.hooks.takes },',
+      files: {
+        'manifest/actions/10-x.actions.ts':
+          // No import: the edge can only come from the manifest that spreads this, not from a source mention.
+          "export default { hooks: { takes: [{ hook: { name: 'offered', mode: 'contribute' } }] } };\n",
+      },
+    },
+    {
+      id: 'offerer',
+      contract: `import { defineHook } from '${LEAF}';\nexport const offered = defineHook('offered', { mode: 'contribute' });\n`,
+      manifestImports: "import { offered } from './contract/index.ts';",
+      manifest: '  hooks: { offers: [{ hook: offered }] },',
+    },
+    { id: 'alone' },
+  ]);
+  fixtures.push(fx);
+  const result = await readGraph(fx.root);
+  expect([...(result.dependsOn.get('@ferretry/plugin-taker') ?? [])]).toEqual(['@ferretry/plugin-offerer']);
 });
 
 // ─── the real workspace ─────────────────────────────────────────────────────────────────────────────────────────

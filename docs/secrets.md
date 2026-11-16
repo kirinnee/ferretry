@@ -736,10 +736,8 @@ per-document plan (one refused document writes nothing of the set).
   them when the rest of the file was known. The stored accepted record's etag is recomputed on read, never trusted.
   What stays: two etags still show that a file changed, and a reader who holds the identity's private key (the host
   owner) can compute any etag, which gives them nothing the file does not.
-- **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
-  holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
-  flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
-  contract next opens.
+- **The route descriptor sentence is exact.** The descriptor of `GET /v1/config/file` says a raw secret is refused on
+  write and that a file written before the flag rule can still hold one under a flag name, shown masked on every read.
 
 ## Accounts and sign-ins: the store
 

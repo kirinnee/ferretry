@@ -235,10 +235,24 @@ test('a self-tracking branch behind its integration base is refused, naming that
 
 test('when two long-lived branches fork from the same commit, containing either is enough', () => {
   const box = sandbox();
-  box.git('push', '-q', 'origin', 'main:rebuild/other');
+  box.git('push', '-q', 'origin', 'main:rebuild/9.9');
   box.git('push', '-q', '-u', 'origin', 'feature');
   box.advanceBase();
-  // main and rebuild/other are equally near, and feature contains rebuild/other's tip: the base is not certain.
+  // main and rebuild/9.9 are equally near, and feature contains rebuild/9.9's tip: the base is not certain.
+  expect(box.push().code).toBe(0);
+});
+
+test('a PR branch under rebuild/ is never taken for a base, however many there are', () => {
+  const box = sandbox();
+  mergeIntegration(box, 'rebuild/5.0-after');
+  // A PR stacked on this one forks from it last, so as a candidate it would be the "nearest" base and refuse the push.
+  // origin holds one such branch per PR (1,000+), which also made the candidate comparison hang for minutes.
+  box.git('checkout', '-q', '-b', 'stacked', 'feature');
+  writeFileSync(join(box.work, 'stacked.txt'), 'a PR stacked on feature\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'stacked PR');
+  for (let n = 0; n < 5; n += 1) box.git('push', '-q', 'origin', `stacked:rebuild/c58-pr-${n}`);
+  box.git('checkout', '-q', 'feature');
   expect(box.push().code).toBe(0);
 });
 

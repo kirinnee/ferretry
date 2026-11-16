@@ -24,7 +24,7 @@ export function BoardLane({ name, category, count, density, defaultCollapsed = f
   const bodyId = useId();
   return (
     <section
-      aria-label={`${name}, ${count} ${count === 1 ? 'card' : 'cards'}`}
+      aria-label={`${name}, ${count} ${count === 1 ? 'task' : 'tasks'}`}
       className="fy-board-lane"
       data-category={category ?? 'unplaced'}
       data-density={density}

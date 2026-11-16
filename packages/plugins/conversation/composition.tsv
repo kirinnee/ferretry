@@ -1,4 +1,6 @@
 kind	path	limit	expires	reason
-composition	daemon/host.ts	-	-	buildConversationA: wires queue, turns, questions, drafts, channel and prompts
-composition	daemon/index.ts	-	-	implementDaemon shell and the per-route lists
-composition	manifest.ts	-	-	the manifest literal: routes, cli, tools, ui and hooks
+oversize	app/composer/composer.tsx	1766	2026-12-16	the composer component; split by feature when next touched
+composition	daemon/features/compose.ts	-	-	composes the features' sections: tools, hooks, subscribers, scrubbed routes and stops beside the kernel kit's routes, sockets and port
+composition	daemon/features/types.ts	-	-	the feature context, late bindings and contribution: a new field is a plugin contract change
+composition	daemon/index.ts	-	-	implementDaemon shell over composeConversation: callsign addressing, the secret mask and the 503 fallback
+composition	manifest.ts	-	-	the Conversation manifest shell: identity, needs, provides, privacy, data config; spreads the generated fragments

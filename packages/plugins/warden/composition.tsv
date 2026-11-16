@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	daemon/lib/sweep.ts	3989	2026-12-16	54 declarations and 3 classes; cold, split by sweep when next touched

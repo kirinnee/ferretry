@@ -78,8 +78,8 @@ export const rearmableToolNames = words('Write Edit MultiEdit NotebookEdit');
  * `fy` verbs that only read fleet state, so killing the process loses nothing — each entry a verb line EXACTLY as a
  * manifest declares it (`verb('guide inventory', …)`), so a test can prove none of them is invented. Decided verb by verb
  * from the manifests, never by prefix: `guide` is safe only bare, as `guide show` or as `guide inventory` (`accept`,
- * `undo`, `clean-up` and `write` rewrite the routing prompt or start a model run), and `card show` / `card note` are the
- * read and the append-only note (every other `card` verb moves or rewrites a card). `wait` stops the session it awaited
+ * `undo`, `clean-up` and `write` rewrite the routing prompt or start a model run), and `task show` / `task note` are the
+ * read and the append-only note (every other `task` verb moves or rewrites a task). `wait` stops the session it awaited
  * only when that session settles, which the waiter being killed cannot cause. A verb absent here — `migrate`,
  * `restart`, `start`, `new`, `stop`, `signal`, `config`, `daemon` … — stays unclassified and refuses the move.
  */
@@ -93,11 +93,13 @@ export const safeFyVerbLines: readonly string[] = [
   'guide',
   'guide show',
   'guide inventory',
-  'card show',
-  'card note',
+  'task show',
+  'task note',
 ];
 /** Verbs that have sub-verbs in {@link safeFyVerbLines}: the word after them must be one listed, or none. */
-export const fyVerbsWithSubverbs = words('guide card');
+export const fyVerbsWithSubverbs = words('guide task');
+/** The shell's hidden old spellings, read as the verb they run: `fy card note` is `fy task note`, so it is classified as that. */
+export const fyVerbOldSpellings: ReadonlyMap<string, string> = new Map([['card', 'task']]);
 /**
  * `fy send` queues a message, so a killed send is a message to say again (`re_armable`) — except with a flag that
  * interrupts the peer (`--now`), parks this session until it answers (`--ask`) or waits on delivery (`--wait`), which

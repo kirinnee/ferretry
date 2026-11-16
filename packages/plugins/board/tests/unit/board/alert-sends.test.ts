@@ -119,7 +119,7 @@ describe('board alerts to an interactive session', () => {
   it('should journal a red CI on the interactive lead instead of typing it, and type it into an automatic one', async () => {
     // Arrange
     const nudges = prAlerts({ state: 'open', checks: 'failing' });
-    const message = '&F1 PR #940 CI is red. Fix it, or note on the card why it can stay red.';
+    const message = '&F1 PR #940 CI is red. Fix it, or note on the task why it can stay red.';
     should(nudges.map(nudge => nudge.message)).eql([message]);
 
     // Act
@@ -138,7 +138,7 @@ describe('board alerts to an interactive session', () => {
   it('should journal a PR closed unmerged on the interactive lead instead of typing it', async () => {
     // Arrange
     const nudges = prAlerts({ state: 'closed', checks: 'pending' });
-    const message = '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.';
+    const message = '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.';
     should(nudges.map(nudge => nudge.message)).eql([message]);
 
     // Act
@@ -228,8 +228,8 @@ describe('a withheld alert about a private card', () => {
   const parent = card({ id: 'F10', askedBy: 'person', owner: 'lizzette', parent: null });
   const child = card({ id: 'F11', owner: 'lizzette', assignee: 'child', parent: { id: 'F10' } });
   const grandchild = card({ id: 'F12', owner: 'lizzette', assignee: 'child', parent: { id: 'F11' } });
-  const redCi = '&F12 PR #940 CI is red. Fix it, or note on the card why it can stay red.';
-  const closed = '&F12 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.';
+  const redCi = '&F12 PR #940 CI is red. Fix it, or note on the task why it can stay red.';
+  const closed = '&F12 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.';
 
   it.each([
     ['a red CI', redCi],
@@ -247,7 +247,7 @@ describe('a withheld alert about a private card', () => {
       should(outcome).equal('withheld');
       should(world.sent).be.empty();
       should(world.withheld).eql([`lizzette: ${message}`]);
-      should(world.notes).eql([`F10: sub-card alert, not typed to the interactive lead: ${message}`]);
+      should(world.notes).eql([`F10: sub-task alert, not typed to the interactive lead: ${message}`]);
     },
   );
 
@@ -276,7 +276,7 @@ describe('a withheld alert about a private card', () => {
     const root = card({ id: 'F30', askedBy: 'person', owner: 'lizzette', parent: null });
     const parentCard = card({ id: 'F31', owner: 'lizzette', visibility: 'public', parent: { id: 'F30' }, ...archived });
     const leaf = card({ id: 'F32', owner: 'lizzette', assignee: 'child', parent: { id: 'F31' } });
-    const message = '&F32 PR #940 CI is red. Fix it, or note on the card why it can stay red.';
+    const message = '&F32 PR #940 CI is red. Fix it, or note on the task why it can stay red.';
     const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, parentCard, leaf] });
 
     // Act
@@ -285,7 +285,7 @@ describe('a withheld alert about a private card', () => {
     // Assert
     should(outcome).equal('withheld');
     should(world.sent).be.empty();
-    should(world.notes).eql([`F30: sub-card alert, not typed to the interactive lead: ${message}`]);
+    should(world.notes).eql([`F30: sub-task alert, not typed to the interactive lead: ${message}`]);
   });
 
   it('should note nothing when the only public ancestor is archived, and still type nothing', async () => {
@@ -298,7 +298,7 @@ describe('a withheld alert about a private card', () => {
       dropped: { reason: 'x', at: NOW },
     });
     const leaf = card({ id: 'F41', owner: 'lizzette', assignee: 'child', parent: { id: 'F40' } });
-    const message = '&F41 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.';
+    const message = '&F41 PR #940 was closed without merging. Reopen it, link its replacement, or drop the task.';
     const world = alertWorld({ lizzette: 'interactive' }, { cards: [root, leaf] });
 
     // Act

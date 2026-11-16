@@ -86,8 +86,8 @@ describe('the card store over the board’s state folder', () => {
 
     expect(snapshot.cards.map(each => each.id)).toEqual(['F1']);
     expect(snapshot.quarantined.map(each => each.id).sort()).toEqual(['F4', 'F5']);
-    expect(said.join('\n')).toContain('board card F4 is quarantined');
-    expect(said.join('\n')).toContain('board card F5 is quarantined: the card file names another card');
+    expect(said.join('\n')).toContain('board task F4 is quarantined');
+    expect(said.join('\n')).toContain('board task F5 is quarantined: the task file names another task');
     await expect(cards.write('F4' as CardId, keep('F4'))).rejects.toMatchObject({
       detail: expect.stringContaining('quarantined'),
     });

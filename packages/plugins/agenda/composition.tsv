@@ -1,2 +1,3 @@
 kind	path	limit	expires	reason
-composition	manifest.ts	-	-	the manifest literal: panels, mounts and nudges
+oversize	app/features/agenda/agenda-inbox-page.tsx	2201	2026-12-16	70 components in one file; a mechanical move of components splits it
+composition	manifest.ts	-	-	the Agenda manifest shell: identity, needs, provides, uses, state; the rest is manifest/actions/*.actions.ts

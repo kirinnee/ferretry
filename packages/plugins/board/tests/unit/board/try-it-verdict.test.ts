@@ -53,10 +53,10 @@ describe('tryItVerdict', () => {
   describe('wait', () => {
     it('waits while an open dependency holds the card, before anything else is looked at', () => {
       const held = { ...tryable({ visibility: 'private', visibilitySource: 'chosen' }), blockedBy: [{ id: 'F2' }] };
-      should(tryItVerdict(held, TRY_IT)).match({ kind: 'wait', why: 'it waits on 1 other card' });
+      should(tryItVerdict(held, TRY_IT)).match({ kind: 'wait', why: 'it waits on 1 other task' });
       should(tryItVerdict({ ...held, blockedBy: [{ id: 'F2' }, { id: 'F3' }] }, TRY_IT)).match({
         kind: 'wait',
-        why: 'it waits on 2 other cards',
+        why: 'it waits on 2 other tasks',
       });
     });
 
@@ -71,10 +71,10 @@ describe('tryItVerdict', () => {
       const umbrella = { ...tryable(withPrs(pr(1536, 'code'))), building: 1 };
       should(tryItVerdict(umbrella, TRY_IT)).eql({
         kind: 'wait',
-        why: 'it is an umbrella card: 1 of its sub-cards is still being built',
+        why: 'it is an umbrella task: 1 of its sub-tasks is still being built',
       });
       should(tryItVerdict({ ...umbrella, building: 3 }, TRY_IT)).match({
-        why: 'it is an umbrella card: 3 of its sub-cards are still being built',
+        why: 'it is an umbrella task: 3 of its sub-tasks are still being built',
       });
     });
 
@@ -99,12 +99,12 @@ describe('tryItVerdict', () => {
     it('finds nothing to try on a private card, however it came to be private', () => {
       should(tryItVerdict(tryable({ visibility: 'private', visibilitySource: 'chosen' }), TRY_IT)).eql({
         kind: 'nothing',
-        why: 'it is a private card',
+        why: 'it is a private task',
       });
       // No stored visibility: a ferret's own card reads as private by the daemon's default.
       should(tryItVerdict(tryable({ ask: { text: 'tidy', source: 'session:lead' }, askedBy: 'agent' }), TRY_IT)).match({
         kind: 'nothing',
-        why: 'it is a private card',
+        why: 'it is a private task',
       });
     });
 

@@ -11,7 +11,8 @@
  *   2. The changed set is `git diff --name-only --no-renames <base>...<head>` (merge-base). No merge-base, no diff, a
  *      path this file cannot classify: FULL. `--no-renames` lists BOTH sides of a rename (the old and the new path).
  *   3. A file may be scoped ONLY when it lives under `packages/plugins/<one>/` of a workspace package, and is not that
- *      package's `package.json` or `manifest.ts` (a changed declaration changes the graph this selection reads, and a
+ *      package's `package.json`, `manifest.ts` or any file under its `manifest/` folder - the manifest fragments the
+ *      generator merges into `manifest.ts` (a changed declaration changes the graph this selection reads, and a
  *      computed `import()` marked `// scope-deps: manifests` loads every manifest) nor a
  *      `ports-pending` record anywhere (the ports-pending validation reads every one). Any other path - core, app, cli,
  *      std, daemon, scripts, nix, .github, docs, the root manifests, generated registries, a path nobody has seen yet -
@@ -152,9 +153,12 @@ export function selectScope(input: ScopeInput): Decision {
     const dir = `${PLUGIN_ROOT}/${match[1]}`;
     const pkg = byRel.get(dir);
     if (pkg === undefined) return full(`${file} is under ${dir}, which is no workspace package`);
-    if (match[2] === 'package.json')
+    const inside = match[2] ?? '';
+    if (inside === 'package.json')
       return full(`${file} changes a plugin's dependency declaration, which changes the graph`);
-    if (match[2] === 'manifest.ts')
+    // A manifest is `manifest.ts` and every file under `manifest/` at any depth (the fragments `manifestFragment()` writes and
+    // their generated merge): one rule, no per-plugin list, so a fragment is never scoped more leniently than the manifest.
+    if (inside === 'manifest.ts' || inside.startsWith('manifest/'))
       return full(
         `${file} changes a plugin manifest, which is a graph source and is loaded whole by cross-plugin tests`,
       );
@@ -250,7 +254,9 @@ interface PackageJson {
 /** Every file under `dir` (relative to `root`, `/`-separated), without entering `node_modules` or following a symlink. */
 function* walk(root: string, dir: string): Generator<string> {
   for (const entry of readdirSync(join(root, dir), { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.tmp') continue;
+    // No package keeps source in a dot-directory; tests make temporary ones inside packages (`.fy-worker-contract-*`)
+    // and delete them while another test walks the real workspace, which then read a vanished directory (ENOENT).
+    if (entry.name === 'node_modules' || (entry.isDirectory() && entry.name.startsWith('.'))) continue;
     const path = `${dir}/${entry.name}`;
     if (entry.isDirectory()) yield* walk(root, path);
     else if (entry.isFile()) yield path;

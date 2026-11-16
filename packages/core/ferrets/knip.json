@@ -12,8 +12,6 @@
   ],
   "project": ["**/*.{ts,tsx}"],
   "ignore": [
-    "daemon/lib/session/events/service.ts",
-    "daemon/lib/session/peers/reads.ts",
     "daemon/lib/session/observer/facts.ts",
     "daemon/lib/session/observer/observer.ts",
     "daemon/lib/session/observer/plan.ts",

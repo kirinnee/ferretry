@@ -238,13 +238,13 @@ export const applyPrUpdate = (card: Card, update: PrUpdate, context: CardContext
       next = withEvent(next, { type: 'note', text: `${name} was closed without merging` }, context);
       nudges.push({
         reason: 'closed-unmerged',
-        message: `${ref} ${name} was closed without merging. Reopen it, link its replacement, or drop the card.`,
+        message: `${ref} ${name} was closed without merging. Reopen it, link its replacement, or drop the task.`,
       });
     }
     if (change.turnedRed) {
       nudges.push({
         reason: 'ci-failing',
-        message: `${ref} ${name} CI is red. Fix it, or note on the card why it can stay red.`,
+        message: `${ref} ${name} CI is red. Fix it, or note on the task why it can stay red.`,
       });
     }
   }

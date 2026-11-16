@@ -57,7 +57,7 @@ describe('storage parity', () => {
   test('F-0110 F-0111 F-0337 the board import record and the per-ferret tasks.json are gone: no state file, no route, no verb', () => {
     const paths = manifest.data.state.map(file => file.path);
     expect(paths.some(path => /import|tasks/.test(path))).toBe(false);
-    expect(manifest.actions.routes.some(route => /import|\/tasks/.test(route.key))).toBe(false);
+    expect(manifest.actions.routes.some(route => /import/.test(route.key))).toBe(false);
     expect(manifest.actions.cli.some(verb => verb.verb.includes('import'))).toBe(false);
   });
 

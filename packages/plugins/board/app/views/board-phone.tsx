@@ -123,7 +123,7 @@ function PhoneBoard({
           return (
             <button
               aria-controls={panelId}
-              aria-label={`${lane.name}, ${lane.count} ${lane.count === 1 ? 'card' : 'cards'}`}
+              aria-label={`${lane.name}, ${lane.count} ${lane.count === 1 ? 'task' : 'tasks'}`}
               aria-selected={selected}
               className="fy-board-phone__chip"
               data-lane={lane.id}
@@ -141,7 +141,7 @@ function PhoneBoard({
         })}
       </div>
       <div
-        aria-label={`${shown.name}, ${shown.count} ${shown.count === 1 ? 'card' : 'cards'}`}
+        aria-label={`${shown.name}, ${shown.count} ${shown.count === 1 ? 'task' : 'tasks'}`}
         className="fy-board-phone__panel"
         data-lane={shown.id}
         id={panelId}

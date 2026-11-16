@@ -76,13 +76,13 @@ function ScopeToggle({
   readonly onChange: (all: boolean) => void;
 }) {
   return (
-    <fieldset aria-label="Which cards" className="fy-board__scope" data-board-scope={scoped ? 'ferret' : 'all'}>
+    <fieldset aria-label="Which tasks" className="fy-board__scope" data-board-scope={scoped ? 'ferret' : 'all'}>
       <button
         aria-pressed={scoped}
         className="fy-board__scope-option"
         data-scope="ferret"
         onClick={() => onChange(false)}
-        title={`Only ${ferret}'s cards`}
+        title={`Only ${ferret}'s tasks`}
         type="button"
       >
         {ferret}
@@ -94,7 +94,7 @@ function ScopeToggle({
         onClick={() => onChange(true)}
         type="button"
       >
-        All cards
+        All tasks
       </button>
     </fieldset>
   );

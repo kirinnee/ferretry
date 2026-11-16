@@ -61,6 +61,7 @@ const owners = [
   'gate',
   'vault',
   'ferrets',
+  'mailbox',
   'asks',
   'access',
   'connections',
@@ -91,7 +92,7 @@ const owners = [
   'cli',
   'app',
 ];
-const core = new Set(['kernel', 'gate', 'vault', 'ferrets', 'asks']);
+const core = new Set(['kernel', 'gate', 'vault', 'ferrets', 'mailbox', 'asks']);
 const packagePath = (owner: string) =>
   owner === 'app' || owner === 'cli'
     ? `packages/${owner}`
@@ -415,6 +416,45 @@ const REOWNED: Readonly<Record<string, string>> = {
   'S-0382': 'catalogs',
   'S-0373': 'onboarding',
   'V-0241': 'onboarding',
+  // Parity rows filed under Ferrets whose 5.0 code is another owner's (Ferrets may not import it): re-owned, none removed
+  // (c58-89). Each stays `[ ]` until its new owner ticks it with a test. Conversation declares the verbs reply, interrupt
+  // and compact-at, the chat screen and its page, hypermedia, session search, the compact-at, hypermedia, answer and log
+  // routes, and the send scheduler's timer.
+  'V-0374': 'conversation',
+  'V-0291': 'conversation',
+  'V-0432': 'conversation',
+  'S-0229': 'conversation',
+  'S-0230': 'conversation',
+  'S-0353': 'conversation',
+  'S-0404': 'conversation',
+  'S-0379': 'conversation',
+  'S-0308': 'conversation',
+  'S-0325': 'conversation',
+  'J-0179': 'conversation',
+  'R-0145': 'conversation',
+  'R-0226': 'conversation',
+  'R-0227': 'conversation',
+  'R-0335': 'conversation',
+  'R-0158': 'conversation',
+  'R-0159': 'conversation',
+  'R-0160': 'conversation',
+  // The send, interrupt, composer, ledger and handoff-read routes are Mailbox's (packages/core/mailbox/manifest.ts).
+  'R-0153': 'mailbox',
+  'R-0172': 'mailbox',
+  'R-0173': 'mailbox',
+  'R-0339': 'mailbox',
+  'R-0350': 'mailbox',
+  'R-0366': 'mailbox',
+  'R-0367': 'mailbox',
+  'R-0368': 'mailbox',
+  'R-0369': 'mailbox',
+  // The attach route is Terminals'; the dialog and permission answers are Claude Code's (declared once, for either harness).
+  'R-0142': 'terminals',
+  'R-0343': 'claude-code',
+  'R-0357': 'claude-code',
+  // Instruction files are kernel-loaded config items; the kernel host writes logs/fyd.log.
+  'F-0157': 'kernel',
+  'F-0043': 'kernel',
 };
 
 const SHELL_DAEMON_VERBS: ReadonlySet<string> = new Set([

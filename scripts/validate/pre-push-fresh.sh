@@ -11,7 +11,7 @@ usage: pre-push-fresh.sh [--help]
 Refuses a push of a branch that does not contain its base's tip (git merge-base --is-ancestor origin/<base> <pushed sha>).
 The branch is the one pushed TO (the remote ref), and the commit is the one pushed (a branch, `HEAD` or a raw sha alike).
 Base: `git config branch.<name>.ferretry-base`, else the branch it was cut from (its upstream, when that is another branch),
-else the nearest of origin's long-lived branches (origin/HEAD, main, rebuild/*, release/*): the one it forked from last.
+else the nearest of origin's long-lived branches (origin/HEAD, main, rebuild/<digit>*, release/<digit>*): the one it forked from last.
 When no base can be told with confidence the push is allowed with a warning.
 Tag pushes, branch deletes and the base branch itself are skipped; a failed fetch (offline) allows the push with a warning.
 Set FY_ALLOW_BEHIND_PUSH=1 to push anyway.
@@ -64,7 +64,9 @@ if [ -n "${base}" ]; then
   bases=("${base}")
 else
   # No setting: the base is the long-lived branch of origin that this branch forked from last, found from the refs
-  # already fetched (no network, no per-user setup). Candidates: origin/HEAD's branch, main, rebuild/*, release/*.
+  # already fetched (no network, no per-user setup). Candidates: origin/HEAD's branch, main, and the version-named
+  # rebuild/<digit>* and release/<digit>* branches. Never every rebuild/* ref: origin holds one per PR (1,000+), and
+  # comparing each fork point with every other made a push hang for minutes.
   default="$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null || true)"
   default="${default#origin/}"
   candidates=()
@@ -76,7 +78,7 @@ else
     {
       [ -n "${default}" ] && echo "${default}"
       echo main
-      git for-each-ref --format='%(refname:strip=3)' refs/remotes/origin/rebuild/ refs/remotes/origin/release/ 2>/dev/null
+      git for-each-ref --format='%(refname:strip=3)' 'refs/remotes/origin/rebuild/[0-9]*' 'refs/remotes/origin/release/[0-9]*' 2>/dev/null
     }
   )
   found=()

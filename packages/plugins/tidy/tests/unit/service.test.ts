@@ -164,7 +164,7 @@ describe('TidyService.plan', () => {
     const none = new TidyService({ ferrets: new FakeFerrets(), asks: new FakeAsks(), board: () => undefined });
     expect(await none.plan(ME)).toEqual({
       ok: false,
-      message: 'the board is not running, so there is no card to read',
+      message: 'the board is not running, so there is no task to read',
     });
     expect(service).toBeDefined();
   });

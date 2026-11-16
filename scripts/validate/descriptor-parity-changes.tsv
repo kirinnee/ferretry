@@ -226,16 +226,12 @@ route	GET /v1/sessions/:sessionId/agenda-mode	removed	session routes renamed /v1
 route	GET /v1/ferrets/:ferretId/agenda-mode	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	PATCH /v1/sessions/:sessionId/agenda-mode	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	PATCH /v1/ferrets/:ferretId/agenda-mode	added	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
-route	GET /v1/board/tasks	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	GET /v1/board/cards	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/tasks	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/cards	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	GET /v1/board/tasks/:taskId	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	GET /v1/board/cards/:cardId	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/tasks/:taskId	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/cards/:cardId	added	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/tasks/:taskId/start	removed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; descriptor fields unchanged
-route	POST /v1/board/cards/:cardId/start	moved-changed	tasks are cards (design §1.4): /v1/board/tasks… is /v1/board/cards…; 5.0 adds the fleet configure capability (c58-sec3 r1): starting a card starts a ferret with the card text as its prompt, so it asks what POST /v1/ferrets asks (4.x asked fleet use); a tightening only: a device holding fleet use only (--limited) can no longer do it and a governed caller needs the live step-up; a ferret's own credential is never grant-governed and the owner's loopback admin token is ungoverned
+route	GET /v1/board/cards	added	the path Board had before the noun became task (O18): a second key on the same handler as /v1/board/tasks…, with the same guard, grant and audit; the key is the old one to the letter, :cardId included
+route	POST /v1/board/cards	added	the path Board had before the noun became task (O18): a second key on the same handler as /v1/board/tasks…, with the same guard, grant and audit; the path parameter is :taskId
+route	GET /v1/board/cards/:cardId	added	the path Board had before the noun became task (O18): a second key on the same handler as /v1/board/tasks…, with the same guard, grant and audit; the path parameter is :taskId
+route	POST /v1/board/cards/:cardId	added	the path Board had before the noun became task (O18): a second key on the same handler as /v1/board/tasks…, with the same guard, grant and audit; the path parameter is :taskId
+route	POST /v1/board/tasks/:taskId/start	changed	5.0 adds the fleet configure capability (c58-sec3 r1): starting a task starts a ferret with the task text as its prompt, so it asks what POST /v1/ferrets asks (4.x asked fleet use); a tightening only: a device holding fleet use only (--limited) can no longer do it and a governed caller needs the live step-up; a ferret's own credential is never grant-governed and the owner's loopback admin token is ungoverned
+route	POST /v1/board/cards/:cardId/start	added	the path Board had before the noun became task (O18): a second key on the same handler as /v1/board/tasks…, with the same guard, grant and audit; the path parameter is :taskId; it asks fleet configure like POST /v1/board/tasks/:taskId/start
 route	POST /v1/sessions/:sessionId/send	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
 route	POST /v1/ferrets/:ferretId/send	moved-changed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); 5.0 adds the fleet use capability (c58-sec3): sending a message to a ferret; a device the owner narrowed to no fleet use can no longer do it, and the default and --limited devices keep it; a tightening only, a ferret's own credential is never grant-governed and the owner's loopback admin token is ungoverned
 route	POST /v1/sessions/:sessionId/interrupt	removed	session routes renamed /v1/sessions/:sessionId/… to /v1/ferrets/:ferretId/… (design §1.4); descriptor fields unchanged
@@ -309,7 +305,8 @@ route	DELETE /v1/projects/:id	added	new in 5.0: no counterpart in today's table 
 route	POST /v1/board/import	removed	compatibility importer deleted (clean slate, owner decision A452)
 route	GET /v1/sessions/:sessionId/tasks	removed	legacy task listing deleted with the compatibility routes (clean slate, owner decision A452)
 route	POST /v1/imports/conversations/adopt	removed	imports are links (design §1.4): adopting a conversation is keeping it, POST /v1/links/conversations/keep; descriptor fields unchanged
-tool	card_progress	added	new in 5.0: writes one card's progress (design §3.3)
+tool	task_progress	added	new in 5.0: writes one task's progress (design §3.3)
+tool	card_progress	added	new in 5.0 as the first name of task_progress; kept as its old name on the same handler (O18)
 route	GET /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	GET /v1/lessons/config	added	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged
 route	PATCH /v1/learning/config	removed	learning is lessons (design §1.4): /v1/learning/… is /v1/lessons/…; descriptor fields unchanged

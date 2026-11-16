@@ -13,8 +13,7 @@
       "[tests] tests/integration/app/*.visual.test.ts and fixtures/ need a real browser (playwright-core, the Vite browser harness and a signed release build) and are never run here: agenda-clip, agenda-head-oneline, agenda-sticky-gap, agenda-tab, agenda-table-head, inbox-card-once, inbox-find, inbox-layout, inbox-machine, inbox-text-voice, snooze-head, snoozed-tidy",
       "[cross: conversation] GAP(quote-target): \"Quote in composer\" on an open ask quotes into the composer registered for its scope (@ferretry/app/ui registerComposerQuoteTarget); Conversation's composer has to register itself there",
       "[cross: vault] GAP(input-hold), GAP(ask-input): no plugin contributes the ask:input renderer yet (app/features/agenda/agenda.tsx AgendaInputCard, ask-renderers.tsx), and no contract carries its hold on the view; ask:sign-in-approval is Accounts' and ask:card is Board's, and an owner that is not installed draws nothing, the card keeps its own words",
-      "[shell] app/lib/agenda-runtime.ts names the machine \"This machine\": the shell hands a half no daemon name",
-      "[cross: asks] GAP(asks): `fy agenda log` copies nothing, because no owner-chat source is bound (V-0040) (&F1787)"
+      "[shell] app/lib/agenda-runtime.ts names the machine \"This machine\": the shell hands a half no daemon name"
     ]
   }
 }

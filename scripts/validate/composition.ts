@@ -3,7 +3,8 @@
  * code", the composition guard `scripts/ci/composition-guard.ts` reads these files). Per file: the fixed header, five columns,
  * a known kind, a clean path that EXISTS under the package, sorted by path then kind, no duplicate (and no path declared by
  * two packages), a reason on every line. The reader is `scripts/ci/lib/composition.ts`; this is only the check around it.
- * An `oversize` entry's 45-day expiry is the H6 size check's, not read here.
+ * A path is a composition or a registry, never both (`oversize` may sit beside either), and an `oversize` expiry is at most
+ * 45 days out; whether an expiry has PASSED is the H6 size check's.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';

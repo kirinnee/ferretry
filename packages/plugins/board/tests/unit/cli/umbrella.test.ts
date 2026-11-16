@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { broadWord, outcomeCount, umbrellaRefusal, umbrellaSignals } from '../../../cli/lib/umbrella.ts';
 
-describe('umbrella cards', () => {
+describe('umbrella tasks', () => {
   it('should refuse titles that name a pile of work', () => {
     for (const title of [
       'Agenda overhaul',
@@ -41,10 +41,10 @@ describe('umbrella cards', () => {
     ).eql([]);
   });
 
-  it('should pass a card that names one outcome', () => {
+  it('should pass a task that names one outcome', () => {
     for (const shape of [
       { title: 'Fix relay reconnect', summary: 'The phone reconnects after a relay drop' },
-      { title: 'Add the --broad flag', summary: 'Create refuses an umbrella card without it' },
+      { title: 'Add the --broad flag', summary: 'Create refuses an umbrella task without it' },
       { title: 'Make search fast', summary: 'Make search easy and fast' },
       { title: 'Rotate the pairing code' },
     ]) {
@@ -52,7 +52,7 @@ describe('umbrella cards', () => {
     }
   });
 
-  it('should never refuse a card under a parent: it is one part of a bigger card', () => {
+  it('should never refuse a task under a parent: it is one part of a bigger task', () => {
     should(umbrellaSignals({ title: 'Agenda overhaul', parent: { id: 'F12' } })).eql([]);
     should(umbrellaSignals({ title: 'Agenda overhaul', parent: null })).not.be.empty();
   });
@@ -75,9 +75,9 @@ describe('umbrella cards', () => {
     const text = umbrellaRefusal(['the title says "overhaul"'], 'zz');
 
     // Assert
-    should(text).startWith('This looks like an umbrella card (the title says "overhaul"), and nothing was created.');
-    should(text).containEql('zz card new … --parent F12');
-    should(text).containEql('zz card new … --related F12');
-    should(text).containEql('zz card new … --broad "<why this must be one card>"');
+    should(text).startWith('This looks like an umbrella task (the title says "overhaul"), and nothing was created.');
+    should(text).containEql('zz task new … --parent F12');
+    should(text).containEql('zz task new … --related F12');
+    should(text).containEql('zz task new … --broad "<why this must be one task>"');
   });
 });

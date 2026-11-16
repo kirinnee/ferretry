@@ -14,6 +14,8 @@ import { CommandCache } from '../../../daemon/adapters/command-cache.ts';
 import { cloneConfigFilesOver, fileFleetSetupDeps } from '../../../daemon/adapters/setup-files.ts';
 import type { ConfigFileService } from '../../../daemon/adapters/ports.ts';
 import { fleetHost } from '../../../daemon/host-assembly.ts';
+import { CLONE_BASE_FILE } from '../../../daemon/lib/account/clone-base.ts';
+import { EXPORT_KEYS_FILE } from '../../../daemon/lib/account/export-keys.ts';
 import { FleetPublication } from '../../../daemon/lib/service/publication.ts';
 import { cleanupWorlds, fleetWorld, type FleetWorld } from '../../unit/support/fleet-world.ts';
 import { kernelOver } from '../support/kernel-over.ts';
@@ -242,11 +244,14 @@ describe('the setup’s collaborators over the fleet folder', () => {
     expect(codex?.harness).toBe('codex');
   });
 
-  it('keeps the export keys and the clone record as files of the fleet folder', async () => {
+  it('F-0427 F-0428 keeps the export keys and the clone record as files of the fleet folder', async () => {
     const world = await fleetWorld();
     const { setup, directory } = await setupOver(world);
     const keys = join(directory, 'setup', 'export-keys.json');
     const base = join(directory, 'setup', 'clone-base.json');
+    // The names the service writes under are the v4 file names, in the fleet folder's setup folder.
+    expect(join(directory, EXPORT_KEYS_FILE)).toBe(keys);
+    expect(join(directory, CLONE_BASE_FILE)).toBe(base);
 
     expect(await setup.exportKeys.read(keys)).toBeUndefined();
     await setup.exportKeys.write(keys, '{"keys":1}');

@@ -61,7 +61,7 @@ export class CardAskLinks implements CardAskLinkSource {
       return await this.asks.open();
     } catch (error) {
       this.diagnostics.warn(
-        `could not read the asks of the cards: ${error instanceof Error ? error.message : String(error)}`,
+        `could not read the asks of the tasks: ${error instanceof Error ? error.message : String(error)}`,
       );
       return [];
     }

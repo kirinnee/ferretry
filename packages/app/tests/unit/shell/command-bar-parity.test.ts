@@ -211,7 +211,7 @@ describe('Board for <ferret> (S-0449)', () => {
     const entry = commandBarResults(sources, 'board for').results.find(one => one.id === 'board-for-ferret-dm1');
     expect(entry).toMatchObject({
       label: 'Board for Ms-98',
-      description: "Open the board filtered to this ferret's cards.",
+      description: "Open the board filtered to this ferret's tasks.",
     });
     went.length = 0;
     entry?.run();

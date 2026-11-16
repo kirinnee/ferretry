@@ -2,6 +2,7 @@ import { PERSON_ORIGIN } from '../../../../contract/index.ts';
 import { expect, test } from 'bun:test';
 import { definePlugin, implementDaemon } from '@ferretry/kernel/manifest';
 import { FerretsPort, FerretTokensFile, StartDecide } from '../../../../contract/index.ts';
+import { DECIDE_ASK_TIMEOUT_MS } from '../../../../contract/hooks/decide-timeout.ts';
 import { FakeHarness, FakeRunner, ferretId } from '../../../../contract/testing/index.ts';
 import { HELPER_ADMISSION_ANSWERER } from '../../../../daemon/lib/ferrets/helper-admission.ts';
 import { fakePacks, host as plainHost, portConsumer, record } from './route-fixture.ts';
@@ -301,62 +302,73 @@ test("G12 R-0332 Packs' own no keeps only a string reason and a string code", as
   expect(runner.starts).toBe(0);
 });
 
-test('G12 R-0332 a Packs that never answers is no answer once the start.decide bound passes', async () => {
-  // Arrange
-  const runner = new FakeRunner();
-  const packs = fakePacks(async () => await new Promise<never>(() => {}));
-  const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
+// The test host waits the hook's own bound in real time, so a hung taker takes that long; the test's timeout covers it.
+const HANG_TEST_TIMEOUT_MS = DECIDE_ASK_TIMEOUT_MS + 5_000;
 
-  // Act
-  const answer = await childStart(h);
+test(
+  'G12 R-0332 a Packs that never answers is no answer once the start.decide bound passes',
+  async () => {
+    // Arrange
+    const runner = new FakeRunner();
+    const packs = fakePacks(async () => await new Promise<never>(() => {}));
+    const h = await host([record('lead')], { harness: new FakeHarness(), runner, plugins: [packs.plugin] });
 
-  // Assert
-  expectUnanswered(answer);
-  expect(packs.asked).toHaveLength(1);
-  expect(runner.starts).toBe(0);
-  expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
-});
+    // Act
+    const answer = await childStart(h);
 
-test('G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop queued behind it still answers', async () => {
-  // Arrange: a stopped child; its resume holds the child's queue while Packs hangs.
-  const child = { ...record('child', 'lead'), state: 'stopped' as const };
-  const runner = new FakeRunner();
-  let asked!: () => void;
-  const wasAsked = new Promise<void>(resolve => {
-    asked = resolve;
-  });
-  const packs = fakePacks(async () => {
-    asked();
-    return await new Promise<never>(() => {});
-  });
-  const h = await host([record('lead'), child], {
-    harness: new FakeHarness(),
-    runner,
-    plugins: [packs.plugin, portConsumer('warden')],
-  });
-  const port = h.provided(FerretsPort, 'warden');
+    // Assert
+    expectUnanswered(answer);
+    expect(packs.asked).toHaveLength(1);
+    expect(runner.starts).toBe(0);
+    expect((await h.request('GET', '/v1/ferrets')).json<unknown[]>()).toHaveLength(1);
+  },
+  HANG_TEST_TIMEOUT_MS,
+);
 
-  // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
-  const settled: string[] = [];
-  const resumed = port.resume(ferretId('child'), 'carry on', {
-    origin: PERSON_ORIGIN,
-    automatic: true,
-    actor: 'warden',
-  });
-  const resumeEnded = resumed.then(
-    () => settled.push('resume'),
-    () => settled.push('resume'),
-  );
-  await wasAsked;
-  const stop = port.stop(ferretId('child'), 'now').then(() => settled.push('stop'));
+test(
+  'G12 R-0332 a resume whose Packs hangs is refused at the bound, so a stop queued behind it still answers',
+  async () => {
+    // Arrange: a stopped child; its resume holds the child's queue while Packs hangs.
+    const child = { ...record('child', 'lead'), state: 'stopped' as const };
+    const runner = new FakeRunner();
+    let asked!: () => void;
+    const wasAsked = new Promise<void>(resolve => {
+      asked = resolve;
+    });
+    const packs = fakePacks(async () => {
+      asked();
+      return await new Promise<never>(() => {});
+    });
+    const h = await host([record('lead'), child], {
+      harness: new FakeHarness(),
+      runner,
+      plugins: [packs.plugin, portConsumer('warden')],
+    });
+    const port = h.provided(FerretsPort, 'warden');
 
-  // Assert: the resume fails closed (nothing relaunched), and the stop behind it ran only AFTER the resume ended: its
-  // order proves the queue, where a single awaited microtask would prove next to nothing.
-  await expect(resumed).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
-  await Promise.all([resumeEnded, stop]);
-  expect(settled).toEqual(['resume', 'stop']);
-  expect(runner.starts).toBe(0);
-});
+    // Act: a Warden revive waits on Packs; a stop of the same ferret queues behind it.
+    const settled: string[] = [];
+    const resumed = port.resume(ferretId('child'), 'carry on', {
+      origin: PERSON_ORIGIN,
+      automatic: true,
+      actor: 'warden',
+    });
+    const resumeEnded = resumed.then(
+      () => settled.push('resume'),
+      () => settled.push('resume'),
+    );
+    await wasAsked;
+    const stop = port.stop(ferretId('child'), 'now').then(() => settled.push('stop'));
+
+    // Assert: the resume fails closed (nothing relaunched), and the stop behind it ran only AFTER the resume ended: its
+    // order proves the queue, where a single awaited microtask would prove next to nothing.
+    await expect(resumed).rejects.toMatchObject({ status: 503, code: 'helper_admission_unavailable' });
+    await Promise.all([resumeEnded, stop]);
+    expect(settled).toEqual(['resume', 'stop']);
+    expect(runner.starts).toBe(0);
+  },
+  HANG_TEST_TIMEOUT_MS,
+);
 
 test('G12 R-0332 only allow === true admits: an allow with extra fields still starts the child', async () => {
   // Arrange

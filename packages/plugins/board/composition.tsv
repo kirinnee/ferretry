@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	daemon/lib/board/service.ts	1600	2026-12-16	one board service class; split by concern when next touched

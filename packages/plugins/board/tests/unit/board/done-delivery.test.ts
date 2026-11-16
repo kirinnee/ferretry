@@ -66,7 +66,7 @@ describe('the line a done card’s ferret is told', () => {
     ]);
 
     // Assert
-    should(line).equal('The owner marked these cards done: &F1 “First”, &F2 “Second”.');
+    should(line).equal('The owner marked these tasks done: &F1 “First”, &F2 “Second”.');
   });
 
   it('should never say the owner closed it when the admin token did: that may be a ferret', () => {
@@ -143,7 +143,7 @@ describe('delivering a done', () => {
 
     // Assert
     should(messenger.sent).deepEqual([
-      ['child', 'The owner marked these cards done: &F1 “First”, &F3 “Third”.', 'board-done-F1-1+F3-1'],
+      ['child', 'The owner marked these tasks done: &F1 “First”, &F3 “Third”.', 'board-done-F1-1+F3-1'],
       ['other', 'The owner marked &F2 “Second” done.', 'board-done-F2-1'],
     ]);
   });
@@ -158,7 +158,7 @@ describe('delivering a done', () => {
 
     // Assert
     should(warnings).deepEqual([
-      "The owner marked &F7 “Ship it” done. reached no ferret: the card's assignee and owner are gone, so it is orphaned",
+      "The owner marked &F7 “Ship it” done. reached no ferret: the task's assignee and owner are gone, so it is orphaned",
     ]);
   });
 

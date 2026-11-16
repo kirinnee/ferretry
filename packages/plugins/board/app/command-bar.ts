@@ -57,7 +57,7 @@ export const boardForFerretCommands = (context: PluginCommandContext) => {
         id: `board-for-ferret-${context.daemon}`,
         group: 'Go to',
         label: `Board for ${name}`,
-        description: "Open the board filtered to this ferret's cards.",
+        description: "Open the board filtered to this ferret's tasks.",
         keywords: [...BOARD_FOR_FERRET_KEYWORDS],
         resting: true,
         // Right after the board itself.

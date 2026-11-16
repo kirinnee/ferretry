@@ -445,18 +445,18 @@ export const laneLayoutProblems = (layout: LaneLayout): readonly (readonly [stri
     if (lane.stage?.kind !== 'gate') continue;
     for (const option of lane.stage.options) {
       if (option.outcome.kind !== 'lane') continue;
-      if (option.outcome.laneId === lane.id) problems.push(['lanes', 'a gate option sends the card to another lane']);
+      if (option.outcome.laneId === lane.id) problems.push(['lanes', 'a gate option sends the task to another lane']);
       else if (!ids.includes(option.outcome.laneId)) problems.push(['lanes', 'a gate option names a lane of this set']);
     }
   }
   if (layout.doneLane !== undefined) {
     const done = layout.lanes.find(lane => lane.id === layout.doneLane);
-    if (done?.category !== 'closed') problems.push(['doneLane', 'Done moves a card to the closed lane']);
+    if (done?.category !== 'closed') problems.push(['doneLane', 'Done moves a task to the closed lane']);
   }
   if (layout.notGoodLane !== undefined) {
     const notGood = layout.lanes.find(lane => lane.id === layout.notGoodLane);
     if (notGood === undefined || !mayResumeIn(layout.lanes, notGood)) {
-      problems.push(['notGoodLane', 'Not good moves a card back to an active lane, where work resumes']);
+      problems.push(['notGoodLane', 'Not good moves a task back to an active lane, where work resumes']);
     }
   }
   return problems;
@@ -644,14 +644,14 @@ const answerChanges = (
       const now = resolve(after, option.id);
       if (was === now) continue;
       said.add(
-        `changes where "${option.label}" on ${gate.name} sends cards: ${where(before, was, false)} → ${where(after, now, true)}`,
+        `changes where "${option.label}" on ${gate.name} sends tasks: ${where(before, was, false)} → ${where(after, now, true)}`,
       );
     }
     for (const option of gateOptions(kept).filter(
       candidate => !gateOptions(gate).some(old => old.id === candidate.id),
     )) {
       said.add(
-        `adds the answer "${option.label}" to ${gate.name}, which sends cards to ${where(after, resolve(after, option.id), true)}`,
+        `adds the answer "${option.label}" to ${gate.name}, which sends tasks to ${where(after, resolve(after, option.id), true)}`,
       );
     }
   }
@@ -688,10 +688,10 @@ export const laneGateProblems = (
       continue;
     }
     if (kept.category === 'closed' && lane.category !== 'closed') {
-      problems.push({ laneId: lane.id, why: `makes ${lane.name} the closed lane, which closes the cards in it` });
+      problems.push({ laneId: lane.id, why: `makes ${lane.name} the closed lane, which closes the tasks in it` });
     }
     if (lane.category === 'closed' && kept.category !== 'closed') {
-      problems.push({ laneId: lane.id, why: `makes ${lane.name} an open lane, which reopens the cards in it` });
+      problems.push({ laneId: lane.id, why: `makes ${lane.name} an open lane, which reopens the tasks in it` });
     }
     if (!gate) continue;
     if (!isGateLane(kept)) {
@@ -735,7 +735,7 @@ const removal = (
     cards?: { readonly verb: 'moves' | 'sends'; readonly where: string },
   ): LaneGateProblem => ({
     laneId,
-    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${cards === undefined ? '' : `, and ${cards.verb} its cards ${cards.where}`}`,
+    why: `removes ${lane.name}${gate ? ', which waits for the owner' : ''}${cards === undefined ? '' : `, and ${cards.verb} its tasks ${cards.where}`}`,
     removed: { name: lane.name, gate, ...(cards === undefined ? {} : { cards }) },
   });
   const target = to === undefined ? undefined : next.lanes.find(candidate => candidate.id === to);
@@ -788,7 +788,7 @@ export const laneChangeLines = (
     const { gate, cards } = problem.removed ?? { gate: false };
     const names = nameRun(group.map(each => each.removed?.name ?? each.laneId));
     const lanes = `removes ${String(group.length)} lanes${gate ? ' that wait for the owner' : ''} (${names})`;
-    lines.push(cards === undefined ? lanes : `${lanes}, and ${cards.verb} their cards ${cards.where}`);
+    lines.push(cards === undefined ? lanes : `${lanes}, and ${cards.verb} their tasks ${cards.where}`);
   }
   return lines;
 };

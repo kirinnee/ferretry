@@ -423,6 +423,7 @@ main](#proof-reuse-on-main)).
 | `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
 | `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                     |
 | `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, whole-tree guards                                                             |
+| `perf`           | Performance Tests                    | `test.sh perf`: the speed/size budgets on their own runner; report-only on a PR, blocking on `main` ([below](#performance-tests-report-only-on-prs-blocking-on-main))  |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
 | `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                                             |
@@ -435,6 +436,14 @@ main](#proof-reuse-on-main)).
 | `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                                             |
 | `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                                    |
 | `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                                     |
+
+### Performance Tests: report-only on PRs, blocking on `main`
+
+Lead ruling 2026-11-16. Runner load swings the same perf tests 618-2273 ms on identical code (52 `perf` jobs, one afternoon, suite wall 121-327 s), so a budget cannot gate a pull request, and no budget was raised.
+
+- **On a pull request** the `perf` job still runs and shows its result (`scripts/ci/perf-tier.sh`: a "⚠ perf: N over budget (report-only on PRs)" line, each failed test with its time, a `perf-failed: <files>` line), exits 0, and `full-status.sh` does not count it: Full CI passes whatever the job did. It is not a required check.
+- **On a push to `main`** it blocks, with ONE automatic re-run of just the failing files (one process per file). A file that passes the re-run passes (`perf-flaked:` names it); a file that fails twice fails the job, both attempts' times are printed and `perf-failed: <files>` names it. A file that shows up there twice in a row on `main` gets a fixer: the line is the whole signal, there is no bot and no issue.
+- **A reused proof never covers perf.** A pull request's perf result is advisory, so it is no evidence about `main`'s: the `perf` job does not `need` `proof` and runs on EVERY push to `main`, even when [proof reuse](#proof-reuse-on-main) skips every other job, and the reused verdict in `full-status.sh` requires `perf` to have `success`ed (a skipped, failed or cancelled perf job fails `main`). A file that also fails to load in a process where another file named its failure is retried with it, not passed by omission. `scripts/test/ci-sets.ts` pins the case: advisory PR perf failure, identical-tree push with proof reuse, perf runs and its failure fails `main`.
 
 **The merge gate is the commit status `Full CI` on the exact PR head SHA.** Quick
 posts pending with `full set not run on this commit: add the full-ci label`. Full's
@@ -649,7 +658,7 @@ A status is only a claim; rule f reads the run behind it. The decision is
 `Proof reuse: YES - tree <T> passed the full set in <run url> (PR #N head <H>)` or
 `Proof reuse: NO - <reason>. Every job runs.`
 
-**What a yes skips.** Every expensive job — `quick`, `int`, `strict-guarantees`, `full-gates`, `compile`, `smoke`, `smoke-darwin` — has
+**What a yes skips.** Every expensive job — `quick`, `int`, `strict-guarantees`, `full-gates`, `compile`, `smoke`, `smoke-darwin` (**not** `perf`: it always runs on `main`, see [Performance Tests](#performance-tests-report-only-on-prs-blocking-on-main)) — has
 `proof` in its `needs` and `!(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')` in its `if` — **reuse only a SEALED yes**. `full-pending` is untouched (already
 pull-request only). `proof` itself carries `quick`'s event guard, so an unrelated label or a retitle still runs no job.
 **A failed proof job must not skip tests**, so a job that had no status function now starts with
@@ -660,7 +669,7 @@ job had an implicit `success()` over another need (`smoke`, `smoke-darwin`) it a
 against the pre-proof graph written out in the test, across events and need results.
 
 **The verdict.** `full` needs `proof` and gets `PROOF_DECIDED`/`PROOF_REUSED`/`PROOF_URL`. With a sealed, reused proof `full-status.sh`
-succeeds on a **push** that has a URL (no job failed or was cancelled), writing the proof line to the
+succeeds on a **push** that has a URL (no job failed or was cancelled, and `perf` ran and passed), writing the proof line to the
 summary; a pull request or dispatch never reuses a proof, and with no sealed `proved=true` the verdict judges the jobs
 exactly as before. `proof` itself is never a gate: its failure changes no verdict.
 

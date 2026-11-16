@@ -145,7 +145,7 @@ describe('checkMergeGate', () => {
   });
 });
 
-describe('fy card file prints the queue', () => {
+describe('fy task file prints the queue', () => {
   it('should say which card a clashing claim queued this one behind', async () => {
     // Arrange
     const queued = card({

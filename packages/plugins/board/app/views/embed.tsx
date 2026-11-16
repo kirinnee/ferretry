@@ -131,8 +131,8 @@ function OneCard({
 }) {
   const state = useBoardCard(store, THIS_MACHINE, id, { beat: false });
   if (state.task === null) {
-    if (state.missing) return note(id, 'No card with this id.');
-    if (state.status === 'error') return note(id, 'This card could not be read.');
+    if (state.missing) return note(id, 'No task with this id.');
+    if (state.status === 'error') return note(id, 'This task could not be read.');
     return loading(id);
   }
   const { task } = state;
@@ -161,8 +161,8 @@ function ListedCards({
     states.forEach((state, index) => {
       const id = ids[index] ?? '';
       if (state.task !== null) entries.push({ task: state.task, laneSet: state.laneSet });
-      else if (state.missing) missing.push(note(id, 'No card with this id.'));
-      else if (state.status === 'error') missing.push(note(id, 'This card could not be read.'));
+      else if (state.missing) missing.push(note(id, 'No task with this id.'));
+      else if (state.status === 'error') missing.push(note(id, 'This task could not be read.'));
       else pending += 1;
     });
     return { lanes: groupEmbedLanes(entries), notes: missing, waiting: pending };
@@ -193,15 +193,15 @@ function ChildCards({
   const { model, status, machines } = useBoard(store, MACHINES, CHILD_FILTERS, { beat: false });
   const lanes = useMemo(() => childLanes(model, parent), [model, parent]);
   if (proof.task === null) {
-    if (proof.missing) return note(parent, 'No card with this id.');
-    if (proof.status === 'error') return note(parent, 'This card could not be read.');
+    if (proof.missing) return note(parent, 'No task with this id.');
+    if (proof.status === 'error') return note(parent, 'This task could not be read.');
     return loading(parent);
   }
   if (lanes.length === 0 && status !== 'ready' && status !== 'error') return loading(parent);
   const notes =
     lanes.length > 0
       ? []
-      : [note(parent, status === 'error' ? 'Its cards could not be read.' : 'No cards under this one.')];
+      : [note(parent, status === 'error' ? 'Its tasks could not be read.' : 'No tasks under this one.')];
   const incomplete = machines.some(read => read.truncated) ? (
     <p className="fy-card-embed-more" data-embed-truncated={parent}>
       The board is too big to read in full, so this list may be incomplete.{' '}
