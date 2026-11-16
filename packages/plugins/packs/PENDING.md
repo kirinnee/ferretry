@@ -7,7 +7,8 @@ Each line names the seam it waits on and who owns it. Nothing here is stood in f
 - **Helper start (`fy new`) and `fy wait`** are not Packs' (lead decision D2 #14): `fy new` is Ferrets', `fy wait`
   Conversation's. Packs shapes a start only through its `start.decide` taker and the start options. With `new` went
   the candidate order for `--auto`, Jev's ranking and its spend ledger (`jev-spend.json`), the probe-then-start loop,
-  the named-scratch-folder refusal and the helper's brief footer. They return when Ferrets' helper start asks Packs
+  and the helper's brief footer (the named-scratch-folder refusal is back: `daemon/lib/scratch.ts`, answered on
+  `start.decide` for a start that asked it, `fy new` without `--allow-scratch`). They return when Ferrets' helper start asks Packs
   for an order; copy them from today's `packages/daemon/src/lib/pack/service.ts` (and this package's history). Packs
   therefore needs no Vault, calls no host and names no secret.
 - **Card reservation** (a helper started without `--card` gets a child card under the lead's focus card, as today):

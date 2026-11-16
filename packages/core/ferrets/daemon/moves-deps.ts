@@ -140,6 +140,7 @@ export function movesDeps(ctx: DaemonContext<typeof manifest>, own: MovesOwn): M
       spawn: kernel.spawn,
       host,
       clock: kernel.clock,
+      log: kernel.log.child('ferrets'),
       storage,
       sessions: unbound('The session directory'),
       resume: own.resume ?? unbound('Resuming a ferret'),

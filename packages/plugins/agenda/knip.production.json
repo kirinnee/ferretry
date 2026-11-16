@@ -1,0 +1,11 @@
+{
+  "entry": ["app/views/*.tsx"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "ignore": [
+    "app/hooks/use-agenda-replies.ts",
+    "app/lib/answer-chip.ts",
+    "app/features/agenda/agenda-inbox-composer.tsx",
+    "app/features/agenda/agenda-replies-notice.tsx",
+    "app/lib/agenda-source-refs.ts"
+  ]
+}
