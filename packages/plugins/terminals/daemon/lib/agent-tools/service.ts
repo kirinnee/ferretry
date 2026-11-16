@@ -389,7 +389,7 @@ export class TerminalToolService {
           'conflict',
           caller.kind === 'agent'
             ? `${reference} is quarantined: the owner's secret was just typed there, so you cannot read it for a short while. You can still send keys. Try again shortly, or ask the owner.`
-            : `${reference} is quarantined: a secret was just typed there. End the quarantine from its input card, or try again shortly.`,
+            : `${reference} is quarantined: a secret was just typed there. End the quarantine from its input, or try again shortly.`,
         );
       case 'input_pending':
         throw new AgentToolError(

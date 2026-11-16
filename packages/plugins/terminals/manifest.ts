@@ -347,7 +347,7 @@ export default definePlugin({
       }),
       tool('terminal_request_input', {
         ...TOOL,
-        guard: { none: 'raises an input card through the Vault; answers its state, never a value' },
+        guard: { none: 'raises an input through the Vault; answers its state, never a value' },
         summary: 'ask the owner to type a password or code into a terminal',
       }),
     ],

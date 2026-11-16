@@ -328,7 +328,7 @@ describe('when a hold refuses the act', () => {
     const w = world({ rows: [mine], refuse: 'quarantined' });
     const error = await refusalOf(w.service.call(person, { tool: 'terminal.read', name: 'dev' }));
     expect(error.message).toBe(
-      '%terminal:dev is quarantined: a secret was just typed there. End the quarantine from its input card, or try again shortly.',
+      '%terminal:dev is quarantined: a secret was just typed there. End the quarantine from its input, or try again shortly.',
     );
   });
 });
