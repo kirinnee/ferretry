@@ -28,11 +28,12 @@ import { diskFolders, type TestHost, testHost } from '../../../testing/index.ts'
  *  (iii) `fast: true` writes `fastMode` and a published account `compactAt` writes `autoCompactWindow`, on a start, a
  *        stop/resume and an adoption alike, into the same private settings file.
  *
- * A MOVE is the fifth path. Its route (`POST /v1/ferrets/:id/move`) is still a 503 skeleton on this base (its account
- * inventory, planner and session directory are unbound): with a request id and a COMPLETE legacy lifecycle record it
- * reaches the unbound account-resolution dependency (`503 plugin_unavailable`) and launches nothing; a freshly started
- * record has no lifecycle command, so it answers `409 session_unusable` first. Both are pinned here so the day the
- * route is bound it must go through `launchAttempt` too.
+ * A MOVE is the fifth path. Its route (`POST /v1/ferrets/:id/move`) is bound: a move naming the ferret's OWN runtime is a
+ * Restart (`restartInPlace`), which asks the in-flight gate before the pane is released. The harness here runs a pane
+ * Ferretry cannot read, so the gate refuses `409 move_refused` ("can't see what it is running") and launches nothing,
+ * whatever the folder holds. A fresh record carries no v4 lifecycle half (`command`, `tmuxSession`) and needs none: it
+ * is a usable ferret, so it reaches the gate too. (A record whose documents are missing is refused `409 session_unusable`
+ * by `subject()`, which runs before the registry record and the gate are read.)
  *
  * Fixture values only; folders are real temporary directories.
  */
@@ -274,25 +275,12 @@ interface Row {
   readonly drive: (h: TestHost, runner: RecordingRunner, name: string, plant: Plant) => Promise<Outcome>;
 }
 
-/** A record as a v4 session left it: it HAS its lifecycle command and tmux session, so a move can start from it. */
-function plantLegacyLifecycle(h: TestHost, id: string): void {
-  const state = h.state('ferrets');
-  const raw = JSON.parse(state.raw(FerretConfigFile, id) as string) as Record<string, unknown>;
-  state.plant(
-    FerretConfigFile,
-    JSON.stringify({ ...raw, command: ['/fleet/bin/claude-work'], tmuxSession: 'fixture-pane' }),
-    id,
-  );
-}
-
-/** A move request WITH its request id, on a record that has a complete legacy lifecycle. */
-const legacyMove = async (h: TestHost, id: string) => {
-  plantLegacyLifecycle(h, id);
-  return await h.request('POST', `/v1/ferrets/${id}/move`, {
+/** A move onto the ferret's own runtime (a Restart), WITH its request id. */
+const ownRuntimeMove = async (h: TestHost, id: string) =>
+  await h.request('POST', `/v1/ferrets/${id}/move`, {
     headers: { 'x-fy-request-id': randomUUID() },
     body: { agent: RUNTIME },
   });
-};
 
 const outcome = (r: { status: number; body: string }, launches: number): Outcome => ({
   status: r.status,
@@ -345,10 +333,8 @@ const ROWS: readonly Row[] = [
     },
   },
   {
-    // A move's route is a 503 skeleton on this base (its accounts, planner and session directory are unbound): it must
-    // refuse before launching anything, and the day it is bound its relaunch is `launchAttempt` like the rest. The
-    // request carries its id and the record a complete legacy lifecycle, so the route gets past the request check and
-    // the lifecycle subject to the unbound dependency itself (see `legacyMove`).
+    // A move onto the ferret's own runtime is a Restart: the in-flight gate refuses it (the pane here is unreadable)
+    // before anything launches, and the folder is never the reason.
     name: 'move',
     drive: async (h, runner, name, plant) => {
       const where = await folder(name);
@@ -357,7 +343,7 @@ const ROWS: readonly Row[] = [
       await h.settle();
       await plant(where);
       const before = runner.starts;
-      const moved = await legacyMove(h, idOf(first));
+      const moved = await ownRuntimeMove(h, idOf(first));
       return { status: moved.status, body: moved.body, launches: runner.starts - before };
     },
   },
@@ -397,10 +383,11 @@ describe.each(ROWS.map(row => [row.name, row] as const))('launch wiring: %s', (n
       const result = await row.drive(h, runner, `planted-${randomUUID()}`, planted.plant);
 
       if (isMove) {
-        // The skeleton refuses first, whatever the folder; the folder is never the reason.
-        expect(result.status).toBe(503);
-        expect(JSON.parse(result.body)).toMatchObject({ code: 'plugin_unavailable' });
-        expect((JSON.parse(result.body) as { error: string }).error).toContain('account resolution');
+        // The in-flight gate refuses first, whatever the folder; the folder is never the reason.
+        expect(result.status).toBe(409);
+        expect(JSON.parse(result.body)).toMatchObject({ code: 'move_refused' });
+        expect((JSON.parse(result.body) as { error: string }).error).toContain('in-flight inventory');
+        expect(result.launches).toBe(0);
         await h.stop();
         return;
       }
@@ -419,9 +406,9 @@ describe.each(ROWS.map(row => [row.name, row] as const))('launch wiring: %s', (n
     const result = await row.drive(h, runner, `clean-${randomUUID()}`, async () => undefined);
 
     if (isMove) {
-      expect(result.status).toBe(503);
-      expect(JSON.parse(result.body)).toMatchObject({ code: 'plugin_unavailable' });
-      expect((JSON.parse(result.body) as { error: string }).error).toContain('account resolution');
+      expect(result.status).toBe(409);
+      expect(JSON.parse(result.body)).toMatchObject({ code: 'move_refused' });
+      expect((JSON.parse(result.body) as { error: string }).error).toContain('in-flight inventory');
       expect(result.launches).toBe(0);
       await h.stop();
       return;
@@ -461,7 +448,7 @@ describe('a start on no runtime', () => {
   });
 });
 
-/** The rows that really launch (a move is a skeleton on this base). */
+/** The rows that really launch (a move is refused by the in-flight gate here). */
 const LAUNCHING = ROWS.filter(row => row.name !== 'move');
 
 describe.each(LAUNCHING.map(row => [row.name, row] as const))('fast mode and compaction: %s', (_name, row) => {
@@ -724,7 +711,7 @@ describe('#1587 fast mode through the production start', () => {
 });
 
 describe('#1587 a move on a record a v4 session left', () => {
-  test('a freshly started record has no lifecycle command, so the move answers 409 session_unusable before any launch', async () => {
+  test('a freshly started 5.0 record is usable, so a move onto its own runtime reaches the gate: 409 move_refused, nothing launches', async () => {
     const runner = new RecordingRunner();
     const h = await boot(runner);
     const first = await start(h, { folder: await folder('fresh-move') });
@@ -732,13 +719,10 @@ describe('#1587 a move on a record a v4 session left', () => {
     await h.settle();
     const before = runner.starts;
 
-    const moved = await h.request('POST', `/v1/ferrets/${idOf(first)}/move`, {
-      headers: { 'x-fy-request-id': randomUUID() },
-      body: { agent: RUNTIME },
-    });
+    const moved = await ownRuntimeMove(h, idOf(first));
 
     expect(moved.status).toBe(409);
-    expect(JSON.parse(moved.body)).toMatchObject({ code: 'session_unusable' });
+    expect(JSON.parse(moved.body)).toMatchObject({ code: 'move_refused' });
     expect(runner.starts - before).toBe(0);
     await h.stop();
   });
