@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	src/index.ts	-	-	the app shell public API

@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	daemon/adapters/claude-harness.ts	-	-	the one class that implements Harness for Claude Code

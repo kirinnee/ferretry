@@ -136,6 +136,18 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   file outside the PR's home package must be named under `## Outside files` in the PR body, with a reason (the rule is
   [Architecture, "One feature, one folder"](../architecture/index.md)). It is a workflow of its own because it reads the PR body, so
   an `edited` event re-runs it, which `ci.yaml` (no run on an edit that changed no base; Full CI needs every job it holds) cannot do.
+- **Composition guard.** The same `one-folder.yaml` job runs `scripts/ci/composition-guard.ts` as a second step (the rule is
+  [Architecture, "A feature adds files and lines; it never rewrites shared code"](../architecture/index.md)). Each package
+  declares its hand-written seams and registries in `<package>/composition.tsv` (the repository root's holds `scripts/`):
+  a tab-separated file, fixed header `kind, path, limit, expires, reason`, sorted by path then kind, marked `merge=union` in
+  `.gitattributes` so two packages' adds never conflict; `kind` is `composition`, `registry` or `oversize` (read by the H6 size
+  check). `scripts/ci/lib/composition.ts` is the one reader; the `composition` check (`scripts/validate/composition.ts`, part of
+  `fy check`) holds the format and that every path exists. A PR that edits a declared file fails unless its body has a
+  `## Contract change` section naming the file by full path with a reason (the same body parser as `## Outside files`). The
+  declarations are read at the PR's merge-base, so a PR cannot un-declare a file and edit it in one go. Exempt: one added line in its
+  sorted place in a `registry`, an edit of a `composition.tsv` that only adds lines (a package declaring more files), and deleted lines of a `ports-pending.json` ledger. Generated files are never
+  declared (a hand edit already fails `registries.ts --check`). `bun scripts/ci/composition-guard.ts --replay <ref> [count]` reads
+  history and prints which merges the rule would have failed.
 - **Changed-plugin scope.** A pull request into exactly `rebuild/5.0-after` without the `full-ci` label runs only the
   plugins it changes, the plugins that depend on them, and every platform package's tests (core, app, cli, std), because
   the unit tier was 86% of Quick's median 14 minutes. Everything else - a push, `main`, `rebuild/5.0`, manual dispatch, any

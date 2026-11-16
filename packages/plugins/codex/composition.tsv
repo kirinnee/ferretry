@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+composition	daemon/adapters/codex-harness.ts	-	-	the one factory that returns the whole Harness for Codex

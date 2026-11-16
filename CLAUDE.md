@@ -13,6 +13,9 @@ This file is a pure index — the linked documents own their subjects.
 - **IMPORTANT: one feature, one folder**: a feature lives in its own plugin folder; touching a shared or
   cross-plugin file is the exception and the PR body must name each such file under `## Outside files` with a
   reason (enforced by `scripts/ci/one-folder.ts`). See [Architecture](docs/standards/architecture/index.md).
+- **A feature adds files and lines; it never rewrites shared code**: each package declares its composition files in
+  `<package>/composition.tsv`; a PR that edits one needs a `## Contract change` section (enforced by
+  `scripts/ci/composition-guard.ts`). See [Architecture](docs/standards/architecture/index.md).
 - **No `@semantic-release/github`**: GoReleaser owns the GitHub release (`cd.yaml` on the `v*.*.*` tag).
   See [Semantic Release](docs/standards/semantic-release/index.md).
 - **The Homebrew cask is committed into this repo** under `Casks/` — there is no separate tap repo.

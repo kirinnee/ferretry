@@ -100,6 +100,70 @@ Enforced on every pull request into `rebuild/5.0-after` by `scripts/ci/one-folde
   registries.
 - Editing the body re-runs the job, so fixing the body clears it. The PR template carries the empty section.
 
+## A feature adds files and lines; it never rewrites shared code
+
+**The rule.** A new feature lands as new files in its own folder. It does not change code that other features share:
+a manifest literal, a wiring `index.ts`, a big service class, a state machine. The one shared thing a feature MAY touch
+is a **registry**, and only by adding its own line to it.
+
+This holds at both levels:
+
+- **Between plugins:** a plugin's code lives in its own package folder (the One Folder rule).
+- **Inside a plugin:** each feature of the plugin lives in its own folder (`<plugin>/<side>/features/<feature>/`), and the
+  plugin's manifest, wiring and contract barrel are assembled from registries of those features. A plugin is not a
+  second place for a big shared file to grow.
+
+**A registry is merge-safe by construction.** So two features added at the same time never collide:
+
+1. One entry per line, and nothing else on that line.
+2. Entries are sorted, so two new entries land in different places.
+3. No shared closing line to edit: no trailing separator that the next entry must change, no `]` or `}` that moves.
+   (Every entry ends with its own comma, or the list is a plain list of imports.)
+4. Where the file is nothing but entries, `.gitattributes` marks it `merge=union`.
+5. Each registry has a test that makes two independent one-line adds on two branches and proves they 3-way merge and
+   rebase cleanly.
+
+A registry may be written by hand or generated (`scripts/gen/registries.ts`, `folderRegistry`). Generation is a
+convenience, not a requirement. Either way, adding a feature is a new folder plus at most one new line per registry.
+
+**Why.** This is the Open/Closed Principle applied to the files themselves: the code is open to new features and closed
+to edits of what is already there. When features share a file, unrelated work collides in it: merge conflicts,
+re-reviews of code nobody changed, and one feature's mistake breaking another. We measured it on the 5.0 rebuild:
+
+| Window                                                      | PRs | Edited a shared file | Edited one of the four biggest shared files |
+| ----------------------------------------------------------- | --- | -------------------- | ------------------------------------------- |
+| Before (40 merges to 2026-11-15 11:28pm PST)                | 40  | 22                   | 10 (25%)                                    |
+| After the core split (14 merges from 2026-11-16 7:06am PST) | 14  | 2                    | 2 (14%)                                     |
+| After the guard (to be measured)                            |     |                      |                                             |
+
+The old standard already described OCP. It did not prevent this, because nothing checked it, and the shared lists were
+ordinary code, so the easy path was to edit them anywhere.
+
+**What enforces it.**
+
+1. **Registry tests** prove each registry takes two independent adds without a conflict.
+2. **One Folder** (CI): a PR names its home package folder; files outside it must be explained under `## Outside files`.
+3. **Composition guard** (CI, U9): every package declares its composition files (registries and the few hand-written
+   seams that remain). A PR that edits one fails unless its body has a `## Contract change` section that names each
+   file and says why. Exempt: a pure one-line ADD to a registry, and line DELETIONS from a `ports-pending.json` ledger.
+4. **Size and churn check** (CI, H6): a source file over the size limit, or edited by too many separate PRs in a
+   window, is flagged so it is split before it becomes the next bottleneck.
+5. **Rebase before pushing.** Before every push, rebase your own branch onto the latest base and push it with
+   `--force-with-lease`. Never rewrite a shared branch (`main`, a release or integration branch, or a branch another PR
+   stacks on): bring the base into it with a merge instead. A pre-push hook refuses a branch that does not contain its
+   base's tip. Conflicts are met by the author, at their desk, not by the reviewer.
+
+**The honest exception.** A real change to a contract (a new port member, a new state file shape) still edits the
+contract. That is allowed. Say so under `## Contract change`, keep it to the contract file, and put the behaviour in the
+feature folder.
+
+**How to add a feature.**
+
+1. Make a folder under the plugin's `features/`, with the feature's manifest fragment, wiring and code.
+2. Add one line for it to each registry it belongs in (or run `bun scripts/gen/registries.ts`).
+3. Do not edit the plugin's `manifest.ts`, `daemon/index.ts` or any other feature's files.
+4. Rebase onto the base branch, then push.
+
 ## The PWA renders on the client only
 
 `packages/pwa` is client-rendered. Its app root, when it is assembled, **must mount with
