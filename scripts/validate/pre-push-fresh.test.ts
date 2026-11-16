@@ -196,6 +196,97 @@ test('a branch that tracks its own name falls back to the default branch', () =>
   expect(box.push().code).toBe(1);
 });
 
+/** Origin gains an `integration` branch (one commit past main); the feature branch merges it and is pushed with -u. */
+function mergeIntegration(box: Sandbox, name = 'integration'): void {
+  box.git('push', '-q', 'origin', `main:${name}`);
+  box.git('checkout', '-q', '-b', name, `origin/${name}`);
+  writeFileSync(join(box.work, 'integration.txt'), 'integration advances\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'integration advances');
+  box.git('push', '-q', 'origin', name);
+  box.git('checkout', '-q', 'feature');
+  box.git('merge', '-q', '--no-edit', `origin/${name}`);
+  box.git('push', '-q', '-u', 'origin', 'feature');
+}
+
+test('a self-tracking branch that merged its integration base is allowed while main advances separately', () => {
+  const box = sandbox();
+  mergeIntegration(box, 'rebuild/5.0-after');
+  box.advanceBase();
+  expect(box.git('config', '--get', 'branch.feature.merge')).toBe('refs/heads/feature');
+  expect(box.push().code).toBe(0);
+});
+
+test('a self-tracking branch behind its integration base is refused, naming that base', () => {
+  const box = sandbox();
+  mergeIntegration(box, 'rebuild/5.0-after');
+  // The integration branch moves past the feature branch.
+  box.git('checkout', '-q', 'rebuild/5.0-after');
+  writeFileSync(join(box.work, 'more.txt'), 'more\n');
+  box.git('add', '.');
+  box.git('commit', '-q', '-m', 'integration moves again');
+  box.git('push', '-q', 'origin', 'rebuild/5.0-after');
+  box.git('checkout', '-q', 'feature');
+  box.advanceBase();
+  const { code, out } = box.push();
+  expect(code).toBe(1);
+  expect(out).toContain('feature is behind rebuild/5.0-after: rebase onto origin/rebuild/5.0-after first');
+});
+
+test('when two long-lived branches fork from the same commit, containing either is enough', () => {
+  const box = sandbox();
+  box.git('push', '-q', 'origin', 'main:rebuild/other');
+  box.git('push', '-q', '-u', 'origin', 'feature');
+  box.advanceBase();
+  // main and rebuild/other are equally near, and feature contains rebuild/other's tip: the base is not certain.
+  expect(box.push().code).toBe(0);
+});
+
+test('a base that cannot be told with confidence allows the push with a warning', () => {
+  const box = sandbox();
+  box.git('remote', 'set-head', 'origin', '--delete');
+  box.git('branch', '-q', '-m', 'main', 'main-local');
+  box.git('update-ref', '-d', 'refs/remotes/origin/main');
+  const { code, out } = box.push();
+  expect(code).toBe(0);
+  expect(out).toContain('could not tell which branch feature is based on');
+});
+
+test('a SHA refspec to a branch is gated on the destination: a stale sha is refused', () => {
+  const box = sandbox();
+  box.advanceBase();
+  const sha = box.git('rev-parse', 'HEAD');
+  const { code, out } = box.push({ local: sha, remote: 'refs/heads/feature', sha });
+  expect(code).toBe(1);
+  expect(out).toContain('feature is behind main');
+});
+
+test('a SHA refspec to a branch with an up-to-date sha is allowed', () => {
+  const box = sandbox();
+  box.advanceBase();
+  box.git('fetch', '-q', 'origin');
+  box.git('rebase', '-q', 'origin/main');
+  const sha = box.git('rev-parse', 'HEAD');
+  expect(box.push({ local: sha, remote: 'refs/heads/feature', sha }).code).toBe(0);
+});
+
+test('a merge commit pushed by sha onto an integration branch that contains its base is allowed', () => {
+  const box = sandbox();
+  mergeIntegration(box, 'rebuild/5.0-after');
+  box.git('config', 'branch.feature.ferretry-base', 'rebuild/5.0-after');
+  box.advanceBase();
+  expect(box.push().code).toBe(0);
+  const sha = box.git('rev-parse', 'HEAD');
+  expect(box.push({ local: sha, remote: 'refs/heads/rebuild/5.0', sha }).code).toBe(0);
+});
+
+test('a delete by sha refspec (all-zero sha) is allowed', () => {
+  const box = sandbox();
+  box.advanceBase();
+  const zero = '0'.repeat(40);
+  expect(box.push({ local: '(delete)', remote: 'refs/heads/feature', sha: zero }).code).toBe(0);
+});
+
 test('--help states the escape variable', () => {
   const result = spawnSync('bash', [GATE, '--help'], { encoding: 'utf8' });
   expect(result.status).toBe(0);

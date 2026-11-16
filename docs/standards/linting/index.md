@@ -154,10 +154,13 @@ the push unless `git merge-base --is-ancestor origin/<base> <pushed sha>` holds,
 <branch> is behind <base>: rebase onto origin/<base> first (or merge it on a shared branch). Set FY_ALLOW_BEHIND_PUSH=1 to push anyway.
 ```
 
+- **Branch and commit** are the push's DESTINATION (`refs/heads/<branch>`) and the pushed sha, so `git push origin <sha>:refs/heads/<branch>` is gated like a branch push.
 - **Base** is `git config branch.<name>.ferretry-base` when set, else the branch this one was cut from (its upstream
-  while that is another branch, as after `git worktree add -b <name> origin/<base>`), else the branch `origin/HEAD` points at. Set
-  `ferretry-base` on a branch that has pushed with `-u` and is not cut from the default branch. No network call
-  asks a PR's base (`gh pr view` is not used).
+  while that is another branch, as after `git worktree add -b <name> origin/<base>`), else the nearest of origin's
+  long-lived branches (`origin/HEAD`'s branch, `main`, `rebuild/*`, `release/*`) read from refs already fetched: the one
+  whose fork point with the pushed commit is newest. When several are equally near the push passes if it contains
+  any of them, and when no base can be told with confidence it passes with a warning. Set `ferretry-base` to
+  be certain. No network call asks a PR's base (`gh pr view` is not used).
 - **Rebase** your own branch (`git fetch && git rebase origin/<base>`, then `git push --force-with-lease`). On a
   release, integration or stacked branch, merge the base in instead; never rewrite those.
 - **Skipped:** tag pushes, branch deletes and a push of the base branch itself.
