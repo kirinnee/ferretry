@@ -14,11 +14,15 @@ set -euo pipefail
 # pull request's own earlier head is never the base, because a second push would then hide a first push that
 # grew the list. The chosen commit is fetched at depth 1 and written to $GITHUB_ENV as FY_CHECK_BASE, which
 # `scripts/gen/check.ts` reads as its `--base`. A base it cannot fetch fails the job.
+# It also writes FY_BUDGET_BASE (see the end of this file) for scripts/validate/unit-budgets.sh.
 
 list="docs/rebuild/after-merge.json"
 zero="0000000000000000000000000000000000000000"
 # The commit that wrote the approved baseline (docs/rebuild/merge-bar.md, !A480). Never moved forward by hand.
 ANCHOR="7573243d27c42a4cdb23cdfdee7bd954c911c7e6"
+# Tests only (scripts/ci/check-base.test.ts): a throwaway repository cannot hold the real anchor in a one-commit CI
+# checkout, so the test names its own stand-in. No workflow may set it (scripts/test/ci-sets.ts refuses one that does).
+ANCHOR="${FY_CHECK_BASE_TEST_ANCHOR:-${ANCHOR}}"
 
 # Whether a given commit holds the list, fetching it first. An empty or all-zero commit holds nothing.
 holds_list() {
@@ -42,3 +46,28 @@ fi
 
 echo "FY_CHECK_BASE=${chosen}" >>"${GITHUB_ENV:?GITHUB_ENV is set by GitHub Actions}"
 echo "✅ only-down checks compare against ${chosen}"
+
+# FY_BUDGET_BASE: the base `config/perf-pending.txt` may not grow from. Chosen independently of after-merge.json (an
+# unrelated ledger): the pull request's base; else a push's `before`; else (workflow_dispatch, the first push of a
+# branch) the tip of the default branch. A fetch that fails fails the job.
+budget=""
+if [[ -n ${FY_PR_BASE_SHA:-} ]]; then
+  budget="${FY_PR_BASE_SHA}"
+elif [[ -n ${FY_PUSH_BEFORE:-} && ${FY_PUSH_BEFORE} != "${zero}" ]]; then
+  budget="${FY_PUSH_BEFORE}"
+fi
+if [[ -n ${budget} ]]; then
+  git fetch --no-tags --quiet --depth=1 origin "${budget}" || {
+    echo "❌ could not fetch ${budget} for the perf-pending ratchet" >&2
+    exit 1
+  }
+else
+  default_branch="${FY_DEFAULT_BRANCH:?FY_DEFAULT_BRANCH names the default branch (github.event.repository.default_branch)}"
+  git fetch --no-tags --quiet --depth=1 origin "${default_branch}" || {
+    echo "❌ could not fetch origin ${default_branch} for the perf-pending ratchet" >&2
+    exit 1
+  }
+  budget="$(git rev-parse FETCH_HEAD)"
+fi
+echo "FY_BUDGET_BASE=${budget}" >>"${GITHUB_ENV}"
+echo "✅ perf-pending ratchet compares against ${budget}"

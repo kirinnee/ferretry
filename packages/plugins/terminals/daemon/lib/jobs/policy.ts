@@ -1,0 +1,349 @@
+/**
+ * Jobs' pure rules (docs/jobs.md): naming, caps, retention, how a job's state and exit code are read, the command line
+ * a person typed, and the wrapper script the pane runs. No clock, no files, no tmux: every fact is handed in.
+ */
+import {
+  JOB_MAX_RUNNING_GLOBAL,
+  JOB_MAX_RUNNING_PER_FERRET,
+  JOB_NAME_PATTERN,
+  JOB_RETENTION_DAYS,
+  JOB_RETENTION_FINISHED_PER_FERRET,
+  type JobExit,
+  type JobState,
+} from '../../../contract/index.ts';
+
+export const JOB_TMUX_PREFIX = 'fy-job-';
+/** The tmux option that marks a session as a job and names its ferret; terminal sweeps never read it. */
+export const JOB_OWNER_OPTION = '@fy_job_owner';
+export const JOB_ID_OPTION = '@fy_job_id';
+
+// ─── names ────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/** The tmux session of a job: the prefix, the owner (shortened, path-safe) and the id. */
+export function jobTmuxSessionName(owner: string, id: string): string {
+  const stem = owner.replaceAll(/[^A-Za-z0-9_-]/gu, '-').slice(0, 28) || 'session';
+  return `${JOB_TMUX_PREFIX}${stem}-${id}`.slice(0, 80);
+}
+
+/**
+ * A name for a job nobody named: its command's first word (a path loses its folders, `.sh` its extension), cleaned to the
+ * name grammar, then made unique among the ferret's jobs with `-2`, `-3`, … .
+ */
+export function defaultJobName(command: string, taken: ReadonlySet<string>): string {
+  const first = command.trim().split(/\s+/u)[0] ?? '';
+  const base =
+    first
+      .split('/')
+      .at(-1)
+      ?.replace(/\.[A-Za-z0-9]{1,4}$/u, '')
+      .toLowerCase()
+      .replaceAll(/[^a-z0-9-]+/gu, '-')
+      .replaceAll(/^-+|-+$/gu, '')
+      .slice(0, 24) ?? '';
+  const stem = /^[a-z]/u.test(base) ? base : `job${base === '' ? '' : `-${base}`}`.slice(0, 24);
+  const candidate = (n: number): string => (n === 1 ? stem : `${stem}-${n}`);
+  for (let n = 1; ; n += 1) {
+    const name = candidate(n);
+    if (!taken.has(name) && JOB_NAME_PATTERN.test(name) && !/^[a-f0-9]{12}$/u.test(name)) return name;
+  }
+}
+
+/** Finds a job by id or name among `jobs`. An exact id wins over a name. */
+export function findJob<T extends { readonly id: string; readonly name: string }>(
+  jobs: readonly T[],
+  key: string,
+): T | undefined {
+  return jobs.find(job => job.id === key) ?? jobs.find(job => job.name === key);
+}
+
+// ─── caps ─────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why one more job may NOT start, or nothing when it may. Jobs are their own tmux sessions, so they do not take terminal slots;
+ * they have a cap of their own per ferret and across the machine. A refusal says which one and what to do.
+ */
+export function jobCapacityRefusal(running: { readonly ferret: number; readonly global: number }): string | undefined {
+  if (running.ferret >= JOB_MAX_RUNNING_PER_FERRET)
+    return `this ferret already has ${running.ferret} running jobs (the limit is ${JOB_MAX_RUNNING_PER_FERRET}); wait for one or stop one with fy job stop`;
+  if (running.global >= JOB_MAX_RUNNING_GLOBAL)
+    return `the machine already has ${running.global} running jobs (the limit is ${JOB_MAX_RUNNING_GLOBAL}); try again when some end`;
+  return undefined;
+}
+
+// ─── retention ────────────────────────────────────────────────────────────────────────────────────────────────────
+
+export interface FinishedJob {
+  readonly id: string;
+  /** When it ended, in epoch ms; a lost job counts from when it started. */
+  readonly endedAtMs: number;
+}
+
+/**
+ * Which finished jobs of ONE ferret to delete: any older than the retention window, and anything beyond the newest N.
+ * A running job is never passed in, so never chosen.
+ */
+export function jobsToDelete(
+  finished: readonly FinishedJob[],
+  nowMs: number,
+  retention: { readonly days: number; readonly perFerret: number } = {
+    days: JOB_RETENTION_DAYS,
+    perFerret: JOB_RETENTION_FINISHED_PER_FERRET,
+  },
+): readonly string[] {
+  const cutoff = nowMs - retention.days * 86_400_000;
+  const newestFirst = finished.toSorted((a, b) => b.endedAtMs - a.endedAtMs);
+  return newestFirst.filter((job, index) => job.endedAtMs < cutoff || index >= retention.perFerret).map(job => job.id);
+}
+
+// ─── state and exit ───────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * An exit record beats everything (the wrapper wrote it, whatever became of tmux); otherwise a living tmux session is
+ * `running`; neither is `lost` — the host rebooted or the tmux server was killed under it.
+ */
+export function jobState(exit: JobExit | undefined, sessionAlive: boolean): JobState {
+  if (exit !== undefined) return 'exited';
+  return sessionAlive ? 'running' : 'lost';
+}
+
+/** `fy job attach`'s own exit status for a job that ended: its code (a signal death is already 128 + n). */
+export function attachExitCode(state: JobState, exit: JobExit | undefined, lostCode: number): number {
+  if (state === 'exited' && exit !== undefined) return Math.min(255, exit.code);
+  return lostCode;
+}
+
+// ─── the wrapper the pane runs ────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The most a job's `output.log` may hold: 64 MiB. Past it the wrapper drops the output, writes ONE marker line and keeps the
+ * job running (a chatty watcher or `yes` must not fill the disk, and retention only removes FINISHED jobs).
+ */
+export const JOB_LOG_CAP_BYTES = 64 * 1024 * 1024;
+
+/** How long the job's tree gets after SIGTERM before SIGKILL, in seconds (the wrapper's own timer). */
+export const JOB_STOP_GRACE_SECONDS = 5;
+
+/**
+ * The POSIX `sh` program the pane runs: `sh -c <this> fy-job <dir> <shell> <command> <cwd> <cap>`.
+ *
+ * - runs `<shell> -l -c <command>` (the same login shell terminals use) in `<cwd>` with stdin closed and stdout+stderr
+ *   written through a BOUNDED writer to `<dir>/output.log`: past `<cap>` bytes the writer drops the rest, adds one marker line
+ *   and keeps draining, so a job is never blocked on a full pipe and the log never outgrows the cap. The cwd is a plain argv
+ *   value the wrapper `cd`s to — it never goes through a tmux argument, because tmux expands `#(…)` formats in `-c`;
+ * - on SIGINT/SIGTERM/SIGHUP (the pane closing, a stop) it signals the job's whole process TREE, found by walking children with
+ *   `pgrep -P` (TERM to every one, then KILL to those same pids after the grace), and still waits for the job, so the exit
+ *   is recorded either way. A tree walk rather than a process group: job control needs a terminal and its pgid arithmetic
+ *   differed between shells; a process that detaches itself (setsid, a double fork) before the stop is out of reach. Every
+ *   process found is kept as an INCARNATION (pid + start time, `/proc/<pid>/stat` or `ps -o lstart=`): the KILL after the grace
+ *   goes only to those still the same process (plus what they started since), wherever they were reparented, and the wrapper
+ *   does not write `exit.json` until they are gone — the main shell dying first does not cancel the escalation;
+ * - a watcher in the wrapper turns the daemon's `<dir>/stop` file into SIGTERM on the wrapper itself (within a second). A stop is
+ *   a FILE, never a signal typed into the pane: a tty interrupt reaches the job directly as SIGINT and races the wrapper, and
+ *   the file works however early or late it is written;
+ * - writes `<dir>/exit.json` ATOMICALLY (a temp file, then `mv`) when the job ends — the wrapper does this, not the daemon,
+ *   so an exit is recorded even while the daemon is down. A code of 129–192 is also named as a signal (`TERM`).
+ *
+ * It must not end in `;` (tmux would read that as a command separator).
+ */
+export const JOB_WRAPPER_SCRIPT = `dir=$1
+shell=$2
+cmd=$3
+cwd=$4
+cap=$5
+log="$dir/output.log"
+fifo="$dir/output.fifo"
+pid=
+gpid=
+writer=
+stopping=
+fresh=
+tracked="$dir/tracked"
+known="
+"
+kids() {
+  if [ -d /proc/self ]; then
+    for file in /proc/$1/task/*/children; do
+      [ -r "$file" ] || continue
+      list=
+      read -r list <"$file" 2>/dev/null || :
+      [ -z "$list" ] || echo $list
+    done
+  else
+    pgrep -P "$1" 2>/dev/null
+  fi
+}
+ident() {
+  started=
+  if [ -d /proc/self ]; then
+    stat=
+    read -r stat <"/proc/$1/stat" 2>/dev/null || :
+    [ -n "$stat" ] || return 0
+    set -- \${stat##*) }
+    case "$1" in Z|X) return 0 ;; esac
+    started=\${20}
+  else
+    started=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' _)
+  fi
+}
+live() {
+  ident "\${1%%=*}"
+  [ -n "$started" ] && [ "$started" = "\${1#*=}" ]
+}
+take() {
+  ident "$1"
+  [ -n "$started" ] || return 1
+  entry="$1=$started"
+  case "$known" in *"
+$entry
+"*) return 1 ;; esac
+  known="$known$entry
+"
+  fresh="$fresh $entry"
+  printf '%s\\n' "$entry" >>"$tracked"
+}
+adopt() {
+  for child in $(kids "$1"); do
+    if take "$child"; then adopt "$child"; fi
+  done
+}
+discover() {
+  known="
+$(cat "$tracked" 2>/dev/null)
+"
+  [ -z "$1" ] || take "$1" || :
+  for entry in $known; do
+    if live "$entry"; then adopt "\${entry%%=*}"; fi
+  done
+}
+send() {
+  for entry in $fresh; do
+    if live "$entry"; then kill -s "$1" "\${entry%%=*}" 2>/dev/null; fi
+  done
+  fresh=
+}
+any_live() {
+  for entry in $(cat "$tracked" 2>/dev/null); do
+    if live "$entry"; then return 0; fi
+  done
+  return 1
+}
+reap() {
+  fresh=
+  discover ""
+  send KILL
+  for entry in $(cat "$tracked" 2>/dev/null); do
+    if live "$entry"; then kill -s KILL "\${entry%%=*}" 2>/dev/null; fi
+  done
+  rounds=0
+  while [ "$rounds" -lt 3 ]; do
+    fresh=
+    discover ""
+    [ -n "$fresh" ] || break
+    send KILL
+    rounds=$((rounds + 1))
+  done
+}
+capped() {
+  while :; do
+    size=$(wc -c <"$log" 2>/dev/null || echo 0)
+    [ "$size" -lt "$cap" ] || break
+    dd bs=65536 count=1 >>"$log" 2>/dev/null
+    [ "$(wc -c <"$log" 2>/dev/null || echo 0)" -gt "$size" ] || return 0
+  done
+  if [ "$(dd bs=1 count=1 2>/dev/null | wc -c)" -gt 0 ]; then
+    printf '[fy: output log reached %s bytes; further output is dropped]\n' "$cap" >>"$log"
+  fi
+  cat >/dev/null
+}
+term() {
+  stopping=1
+  [ -n "$pid" ] || return 0
+  discover "$pid"
+  send TERM
+  if [ -z "$gpid" ]; then
+    (
+      sleep ${JOB_STOP_GRACE_SECONDS}
+      reap
+    ) >/dev/null 2>&1 &
+    gpid=$!
+  fi
+}
+trap term INT TERM HUP
+rm -f "$fifo"
+mkfifo "$fifo"
+capped <"$fifo" &
+writer=$!
+( cd -- "$cwd" && exec "$shell" -l -c "$cmd" ) >"$fifo" 2>&1 </dev/null &
+pid=$!
+( while [ ! -e "$dir/stop" ]; do sleep 0.2; done; kill -TERM $$ ) >/dev/null 2>&1 &
+watcher=$!
+[ -z "$stopping" ] || term
+wait "$pid"
+code=$?
+while kill -0 "$pid" 2>/dev/null; do
+  wait "$pid"
+  code=$?
+done
+kill "$watcher" 2>/dev/null
+if [ -n "$gpid" ]; then
+  warned=
+  waited=0
+  while any_live; do
+    discover ""
+    if kill -0 "$gpid" 2>/dev/null; then send TERM; else send KILL; fi
+    sleep 0.2
+    waited=$((waited + 1))
+    if [ -z "$warned" ] && ! kill -0 "$gpid" 2>/dev/null && [ "$waited" -gt 50 ]; then
+      warned=1
+      printf '[fy: a process of this job is still running after SIGKILL; the job is not recorded as ended until it is gone]\\n' >>"$log"
+    fi
+  done
+  kill "$gpid" 2>/dev/null
+fi
+tries=0
+while kill -0 "$writer" 2>/dev/null && [ "$tries" -lt 20 ]; do
+  sleep 0.1
+  tries=$((tries + 1))
+done
+rm -f "$fifo"
+[ -z "$gpid" ] || kill "$gpid" 2>/dev/null
+signal=
+if [ "$code" -gt 128 ] && [ "$code" -le 192 ]; then
+  name=$(kill -l $((code - 128)) 2>/dev/null)
+  case "$name" in
+    ''|*[!A-Z0-9]*) ;;
+    *) signal=$name ;;
+  esac
+fi
+ended=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+if [ -n "$signal" ]; then
+  printf '{"code":%d,"signal":"%s","endedAt":"%s"}\\n' "$code" "$signal" "$ended" >"$dir/exit.json.tmp"
+else
+  printf '{"code":%d,"endedAt":"%s"}\\n' "$code" "$ended" >"$dir/exit.json.tmp"
+fi
+mv "$dir/exit.json.tmp" "$dir/exit.json"
+exit 0
+`;
+
+/** The argv a pane runs for a job: the wrapper, then the job's folder, the login shell, the command, its cwd and the log cap. */
+export function jobPaneArgv(input: {
+  readonly dir: string;
+  readonly shell: string;
+  readonly command: string;
+  /** The folder the job runs in. */
+  readonly cwd: string;
+  /** The log cap in bytes; the policy's own unless a test needs a small one. */
+  readonly logCapBytes?: number;
+}): readonly string[] {
+  return [
+    '/bin/sh',
+    '-c',
+    JOB_WRAPPER_SCRIPT,
+    'fy-job',
+    input.dir,
+    input.shell,
+    input.command,
+    input.cwd,
+    String(input.logCapBytes ?? JOB_LOG_CAP_BYTES),
+  ];
+}

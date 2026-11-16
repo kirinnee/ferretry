@@ -17,6 +17,7 @@ import {
 } from '../../contract/index.ts';
 import { type Instant, ok } from '@ferretry/std';
 import { defineState } from '@ferretry/kernel/contract';
+import { CHANNEL_LAUNCH_ENV } from '@ferretry/plugin-runtimes/contract';
 import { ClaudeHarness } from '../../daemon/adapters/claude-harness.ts';
 import { API_KEY_SEED_NAME, API_KEY_SEED_SCRIPT, API_KEY_SEED_SHELL } from '../../daemon/lib/harness/api-key-seed.ts';
 import { PaneDirectory } from '../../daemon/adapters/tmux-pane.ts';
@@ -473,6 +474,37 @@ describe('ClaudeHarness', () => {
     expect(roots.root('harness-history').resolve('projects').ok).toBe(false);
   });
 
+  test('historySources offers the owner’s home and each ferret home as read-only trees, a linked home as nothing', async () => {
+    const { harness } = build();
+    await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+    await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), '0123456789');
+    await mkdir(join(AGENT_HOMES(), 'scout', 'projects/q'), { recursive: true });
+    await Bun.write(join(AGENT_HOMES(), 'scout', 'projects/q/c-2.jsonl'), 'abcdef');
+    await mkdir(join(fixture, 'pool'), { recursive: true });
+    await mkdir(join(AGENT_HOMES(), 'pooled'), { recursive: true });
+    await symlink(join(fixture, 'pool'), join(AGENT_HOMES(), 'pooled', 'projects'));
+
+    const sources = await harness.historySources();
+
+    expect(sources.map(source => [source.kind, source.label])).toEqual(
+      expect.arrayContaining([
+        ['computer', 'owner'],
+        ['ferret-home', 'scout'],
+      ]),
+    );
+    const owner = sources.find(source => source.kind === 'computer');
+    const scout = sources.find(source => source.label === 'scout');
+    const pooled = sources.find(source => source.label === 'pooled');
+    expect((await owner?.files.entries('projects/p'))?.map(entry => [entry.name, entry.kind, entry.size])).toEqual([
+      ['c-1.jsonl', 'file', 10],
+    ]);
+    expect(new TextDecoder().decode(await owner?.files.read('projects/p/c-1.jsonl', 2, 4))).toBe('2345');
+    expect(await scout?.files.stat('projects/q/c-2.jsonl')).toMatchObject({ size: 6 });
+    // A home whose history is a link lists nothing here (a pool lists it once), and the seam has no way to write.
+    expect(await pooled?.files.entries('projects')).toEqual([]);
+    expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
+  });
+
   test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
     const { harness } = build();
     await mkdir(join(fixture, 'outside'), { recursive: true });
@@ -654,7 +686,10 @@ describe('ClaudeHarness', () => {
       const now = await document();
       expect(now.userID).toBe('fake-user-id');
       expect(now.hasCompletedOnboarding).toBe(true);
-      expect(now.projects['/work']).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true });
+      expect(now.projects['/work']).toEqual({
+        allowedTools: ['Bash'],
+        hasTrustDialogAccepted: true,
+      });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
       expect(plan.files as readonly string[]).toContain(claudeJson());
     });
@@ -702,9 +737,13 @@ describe('ClaudeHarness', () => {
 
     expect(result.ok && result.value.harnessConversation).toBe('conv-1');
     expect(started.cwd).toBe('/work');
-    expect(started.command?.slice(0, 7)).toEqual([
+    expect(started.command?.slice(0, 11)).toEqual([
       'env',
+      '-u',
+      'CLAUDE_CODE_CHILD_SESSION',
       `CLAUDE_CONFIG_DIR=${HOME}`,
+      'DISABLE_AUTOUPDATER=1',
+      'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -714,6 +753,60 @@ describe('ClaudeHarness', () => {
     expect(started.command).toContain('--session-id');
     expect(started.command?.slice(-2)).toEqual(['--model', 'claude-opus-5-5']);
     expect(panes.require(FERRET)).toBe('%7');
+  });
+
+  describe('the settings items’ launch flags (any flag, owner decision ^A525)', () => {
+    const withItems = (items: ReadonlyMap<string, unknown>) =>
+      build({
+        config: {
+          file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+          collection: definition => (definition === CLAUDE_CODE_SETTINGS ? items : new Map()),
+        },
+      });
+    const items = new Map<string, unknown>([
+      ['b-tools', { settings: {}, flags: ['--add-dir', '/data', '--some-future-flag'] }],
+      ['a-risky', { settings: {}, flags: ['--dangerously-skip-permissions', '--session-id', 'evil', '--verbose'] }],
+    ]);
+
+    test('a start and a resume pass them as one word per flag in item name order, ahead of the launch’s own flags', async () => {
+      const { harness } = withItems(items);
+      const started: { command?: readonly string[] } = {};
+      const resumed: { command?: readonly string[] } = {};
+
+      await harness.start(spec({ model: 'claude-opus-5-5' }), runner(started), {} as never);
+      await harness.resume(spec(), runner(resumed), {} as never, 'conv-9');
+
+      for (const command of [started.command ?? [], resumed.command ?? []]) {
+        const at = command.indexOf('/opt/bin/claude');
+        expect(command.slice(at + 1, at + 4)).toEqual(['--verbose', '--add-dir=/data', '--some-future-flag']);
+        expect(command.indexOf('--some-future-flag')).toBeLessThan(command.indexOf('--settings'));
+      }
+    });
+
+    test('lose to the launch on the permission mode and the conversation: those flags never reach the argv', async () => {
+      const { harness } = withItems(items);
+      const started: { command?: readonly string[] } = {};
+
+      await harness.start(spec(), runner(started), {} as never);
+      const command = started.command ?? [];
+
+      expect(command).not.toContain('--dangerously-skip-permissions');
+      expect(command).not.toContain('evil');
+      expect(command.filter(argument => argument === '--session-id')).toEqual(['--session-id']);
+      expect(command[command.indexOf('--session-id') + 1]).toBe('conv-1');
+      expect(command[command.indexOf('--permission-mode') + 1]).toBe('auto');
+    });
+
+    test('change the launch record, so a ferret launched before the flag was added reads as drifted', async () => {
+      const live = new Map<string, unknown>([['b-tools', { settings: {}, flags: ['--verbose'] }]]);
+      const { harness } = withItems(live);
+      await harness.start(spec(), runner({}), {} as never);
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+      live.set('b-tools', { settings: {}, flags: ['--verbose', '--debug'] });
+
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'drifted', sections: ['settings'] });
+    });
   });
 
   test('a start and a resume turn the spec’s readable folders into one read-only allowance each, and nothing more', async () => {
@@ -1704,7 +1797,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
   });
 
-  describe('!A525 the default permission mode is bypass: a harness file that says nothing skips every prompt', () => {
+  describe('^A525 the default permission mode is bypass: a harness file that says nothing skips every prompt', () => {
     const modeOf = (command: readonly string[] | undefined): string | undefined =>
       command?.[(command?.indexOf('--permission-mode') ?? -1) + 1];
     const launchedWith = async (file: () => unknown, call: 'start' | 'resume' = 'start') => {
@@ -1755,7 +1848,68 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     });
   });
 
-  describe('the question tool (!A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
+  describe('O11b: the prompt keys a real start asserts', () => {
+    const WAIVER = 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1';
+    const config = (permissionMode: 'auto' | 'skip', dangerousRmWaiver: boolean) => ({
+      file: () => ({ searchPaths: [], permissionMode, questionTool: false, dangerousRmWaiver }),
+      collection: () => new Map(),
+    });
+    const command = async (options: Parameters<typeof build>[0]): Promise<readonly string[]> => {
+      const started: { command?: readonly string[] } = {};
+      expect((await build(options).harness.start(spec(), runner(started), {} as never)).ok).toBe(true);
+      return started.command ?? [];
+    };
+
+    test('the full rm waiver is set only by the setting on in bypass mode, and a start never sets it by default', async () => {
+      expect(await command({})).not.toContain(WAIVER);
+      expect(await command({ config: config('skip', false) })).not.toContain(WAIVER);
+      expect(await command({ config: config('auto', true) })).not.toContain(WAIVER);
+      expect(await command({ config: config('skip', true) })).toContain(WAIVER);
+    });
+
+    test('a start seeds the installed version as the last release notes seen, replacing an older one', async () => {
+      const { harness } = build();
+      await harness.prepareHome(spec());
+      const older = JSON.parse(await readFile(join(HOME, '.claude.json'), 'utf8')) as Record<string, unknown>;
+      await writeFile(join(HOME, '.claude.json'), JSON.stringify({ ...older, lastReleaseNotesSeen: '2.1.100' }));
+
+      await harness.start(spec(), runner({}), {} as never);
+
+      const now = JSON.parse(await readFile(join(HOME, '.claude.json'), 'utf8')) as Record<string, unknown>;
+      expect(now.lastReleaseNotesSeen).toBe('2.1.220');
+      expect(now.lspRecommendationDisabled).toBe(true);
+      expect(now.claudeCodeHints).toEqual({ disabled: true });
+    });
+
+    test('turning the waiver on (effective in bypass mode) marks a running ferret outdated', async () => {
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      let waiver = false;
+      const live = {
+        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        collection: () => new Map(),
+      };
+      const { harness } = build({ state, config: live });
+      await harness.start(spec(), runner({}), {} as never);
+      waiver = true;
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'drifted', sections: ['fixed-layer'] });
+    });
+
+    test('turning the waiver off marks a ferret launched with it on outdated', async () => {
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      let waiver = true;
+      const live = {
+        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        collection: () => new Map(),
+      };
+      const { harness } = build({ state, config: live });
+      await harness.start(spec(), runner({}), {} as never);
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
+      waiver = false;
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'drifted', sections: ['fixed-layer'] });
+    });
+  });
+
+  describe('the question tool (^A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
     const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
     const optedIn = {
       file: () => ({ searchPaths: [], permissionMode: 'auto', questionTool: true }),
@@ -1912,7 +2066,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
   });
 });
 
-// ─── skills: Skills' shared folders linked into the ferret home (kernel batch #10, owner decision !A466) ─────────────
+// ─── skills: Skills' shared folders linked into the ferret home (kernel batch #10, owner decision ^A466) ─────────────
 
 describe('F-0006 prepareHome links the selected skills into the ferret home', () => {
   async function minted(name: string) {
@@ -2001,5 +2155,113 @@ describe('a login’s provider values are not pinned in the home’s launch over
 
     const overlay = JSON.parse(await readFile(join(HOME, 'launch-settings.json'), 'utf8')) as { env?: unknown };
     expect(overlay.env).toBeUndefined();
+  });
+});
+
+/**
+ * Ferretry's message channel, at the launch argv of the harness `fy new` really uses (not the runtime wrapper): whether a
+ * ferret gets the flag, the tools server and the instruction follows the `channels` setting, else the login's type.
+ */
+describe('the Claude channel in a real launch (ClaudeHarness.start)', () => {
+  const CHANNEL_FLAG = '--dangerously-load-development-channels=server:ferretry';
+  const account = (organizationType?: string) => ({
+    kind: 'account',
+    ...(organizationType === undefined ? {} : { organizationType }),
+  });
+  const launched = async (options: { channels?: boolean; parts?: unknown[]; method?: 'start' | 'resume' }) => {
+    const { harness } = build({
+      config: {
+        file: () => ({
+          searchPaths: [],
+          permissionMode: 'auto',
+          ...(options.channels === undefined ? {} : { channels: options.channels }),
+        }),
+        collection: () => new Map(),
+      },
+    });
+    const started: { command?: readonly string[] } = {};
+    const input = spec({ parts: options.parts ?? [account('claude_max')] });
+    const result =
+      options.method === 'resume'
+        ? await harness.resume(input, runner(started), {} as never, 'conv-resume')
+        : await harness.start(input, runner(started), {} as never);
+    expect(result.ok).toBe(true);
+    const memory = await readFile(join(HOME, 'CLAUDE.md'), 'utf8');
+    const mcp = await readFile(join(HOME, 'mcp.json'), 'utf8').catch(() => undefined);
+    return { argv: started.command ?? [], memory, mcp };
+  };
+
+  for (const method of ['start', 'resume'] as const)
+    test(`a claude_max login is launched (${method}) with the channel flag, the tools server on the MCP file and the instruction`, async () => {
+      const { argv, memory, mcp } = await launched({ method });
+
+      expect(argv).toContain(CHANNEL_FLAG);
+      expect(argv).toContain('--mcp-config');
+      expect(argv[argv.indexOf('--mcp-config') + 1]).toBe(join(HOME, 'mcp.json'));
+      const server = (JSON.parse(mcp ?? '{}') as { mcpServers: Record<string, unknown> }).mcpServers.ferretry;
+      expect(server).toEqual({
+        type: 'stdio',
+        command: 'fy',
+        args: ['mcp', 'serve'],
+        env: { FY_TOKEN: '', [CHANNEL_LAUNCH_ENV]: '1' },
+      });
+      expect(memory).toContain('<channel source="ferretry">');
+      expect(memory).toContain('act on them as work messages');
+    });
+
+  test('the argv puts the channel flag once, before the model, and the marker only beside it', async () => {
+    const { argv, mcp } = await launched({});
+
+    expect(argv.filter(word => word === CHANNEL_FLAG)).toHaveLength(1);
+    expect(argv.indexOf(CHANNEL_FLAG)).toBeLessThan(argv.indexOf('--session-id'));
+    expect(mcp).toContain('FERRETRY_CHANNEL');
+  });
+
+  test('an Enterprise or Team login, an unnamed type and no account at all are launched with no channel and no instruction', async () => {
+    for (const parts of [[account('claude_enterprise')], [account('claude_team')], [account()], []] as unknown[][]) {
+      const { argv, memory, mcp } = await launched({ parts });
+
+      expect(argv.some(word => word.includes('development-channels'))).toBe(false);
+      expect(argv).not.toContain('--mcp-config');
+      expect(mcp).toBeUndefined();
+      expect(memory).not.toContain('<channel source="ferretry">');
+    }
+  });
+
+  test('an explicit `channels: false` wins over a claude_max login', async () => {
+    const { argv, memory, mcp } = await launched({ channels: false });
+
+    expect(argv.some(word => word.includes('development-channels'))).toBe(false);
+    expect(mcp).toBeUndefined();
+    expect(memory).not.toContain('<channel source="ferretry">');
+  });
+
+  test('an explicit `channels: true` wins over an Enterprise login', async () => {
+    const { argv, memory } = await launched({ channels: true, parts: [account('claude_enterprise')] });
+
+    expect(argv).toContain(CHANNEL_FLAG);
+    expect(memory).toContain('<channel source="ferretry">');
+  });
+
+  test('a profile’s own MCP server keeps its place, and a profile server named ferretry never replaces the channel’s', async () => {
+    const { mcp } = await launched({
+      parts: [
+        account('claude_max'),
+        { kind: 'mcp', name: 'docs', config: { command: 'docs-mcp' } },
+        { kind: 'mcp', name: 'ferretry', config: { command: 'someone-else' } },
+      ],
+    });
+
+    const servers = (JSON.parse(mcp ?? '{}') as { mcpServers: Record<string, { command: string }> }).mcpServers;
+    expect(servers.docs?.command).toBe('docs-mcp');
+    expect(servers.ferretry?.command).toBe('fy');
+  });
+
+  test('prepareHome writes the same MCP file and memory the launch will run on', async () => {
+    const { harness } = build();
+    await harness.prepareHome(spec({ parts: [account('claude_max')] }));
+
+    expect(await readFile(join(HOME, 'mcp.json'), 'utf8')).toContain('FERRETRY_CHANNEL');
+    expect(await readFile(join(HOME, 'CLAUDE.md'), 'utf8')).toContain('<channel source="ferretry">');
   });
 });

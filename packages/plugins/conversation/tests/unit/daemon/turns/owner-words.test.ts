@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import type { StatePort } from '@ferretry/kernel/contract';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
-import { CONVERSATION_STATE, ConversationPort, type QueuedMessage } from '../../../../contract/index.ts';
+import { type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { CONVERSATION_STATE, ConversationPort } from '../../../../contract/index.ts';
 import daemon from '../../../../daemon/index.ts';
 import { StateSendLedger } from '../../../../daemon/delivery/adapters/index.ts';
-import { StateQueueStore } from '../../../../daemon/queue/adapters/index.ts';
 import { parseSessionId } from '../../../../daemon/seams/ferret-id.ts';
 import {
   NO_TURN_DOCUMENTS,
@@ -140,7 +141,7 @@ describe('the owner’s words from the queue and the send ledger', () => {
   test('ownerPartOf drops a ferret’s message whole and Ferretry’s notices by paragraph', () => {
     expect(ownerPartOf('[reply from ferret a] ok')).toBeNull();
     expect(ownerPartOf('The Warden stopped you.\n\nkeep going')).toBe('keep going');
-    expect(ownerPartOf('[answer to !A3] yes')).toBe('[answer to !A3] yes');
+    expect(ownerPartOf('[answer to ^A3] yes')).toBe('[answer to ^A3] yes');
   });
 
   test('no turn documents are written yet, so the words come from the queue and the ledger alone', async () => {
@@ -177,22 +178,18 @@ describe('Conversation’s port answers what the owner said', () => {
         return build({ ...ctx, kernel: { ...ctx.kernel, state } });
       },
     } as typeof daemon;
+    const queue = new FakeMailbox();
     const host = await testHost({
       plugins: [implementation],
-      fakes: { ferrets, asks: new FakeAsks() },
+      fakes: { mailbox: queue, ferrets, asks: new FakeAsks() },
       clock: fixedClock('2026-11-07T09:00:00Z'),
     });
-    return { host, state, api: () => host.provided(ConversationPort) };
+    return { host, state, queue, api: () => host.provided(ConversationPort) };
   }
 
   test('F-0001 the words are the queue’s and the ledger’s, and the answer is the contract’s', async () => {
-    const { host, state, api } = await conversation();
-    await new StateQueueStore(state).append(ID, {
-      v: 1,
-      kind: 'enqueued',
-      at: AT,
-      message: queued({ text: 'build the board', state: 'queued' }),
-    });
+    const { host, state, queue, api } = await conversation();
+    queue.seed(ID, queued({ text: 'build the board', state: 'queued' }));
     await new StateSendLedger(state, { now: () => AT }).accept(ID, {
       sendId: 's1',
       acceptedAt: AT,
@@ -212,13 +209,8 @@ describe('Conversation’s port answers what the owner said', () => {
   });
 
   test('F-0001 a strict read of a ferret the registry no longer has answers "not started by a ferret", as today’s parent lookup does', async () => {
-    const { host, state, api } = await conversation(undefined, false);
-    await new StateQueueStore(state).append(ID, {
-      v: 1,
-      kind: 'enqueued',
-      at: AT,
-      message: queued({ text: 'build the board', state: 'queued' }),
-    });
+    const { queue, host, api } = await conversation(undefined, false);
+    queue.seed(ID, queued({ text: 'build the board', state: 'queued' }));
     const strict = await api().ownerWords(ferretId('lead'), { strict: true });
     expect(strict).toEqual({ ok: true, value: { v: 1, ferret: ferretId('lead'), words: ['build the board'] } });
     expect(await api().ownerWords(ferretId('lead'))).toMatchObject({ ok: true, value: { words: ['build the board'] } });

@@ -7,6 +7,9 @@ import { bunSpawn, bunWebSockets, bunWorkers, globalFetch } from './adapters/pro
 import { scratchPort } from './scratch.ts';
 import { nodeHostFacts } from './adapters/host-facts.ts';
 import { nodeSelfCounters } from './adapters/self-counters.ts';
+import { configTreeEvents, type FileEvents, nodeFileEvents } from './adapters/file-events.ts';
+import { workerLoopWatchdog } from './adapters/loop-watchdog.ts';
+import { procIoPressure } from './adapters/proc-io-pressure.ts';
 import { launchGuardFor } from './adapters/launch-guard.ts';
 import { NodeGzip } from './adapters/node-gzip.ts';
 import { updateHostFor } from './adapters/update-host.ts';
@@ -117,10 +120,22 @@ export function stateOpener(
   };
 }
 
-export function configService(home: string, fs: StateFs, clock: Clock, log: Log, binary: string) {
+/**
+ * The config service over the home's files. With `fileEvents` the watcher reads the tree when a folder reports an
+ * event (and on its slow backstop); without, it polls every second, as a suite with no platform watcher does.
+ */
+export function configService(
+  home: string,
+  fs: StateFs,
+  clock: Clock,
+  log: Log,
+  binary: string,
+  fileEvents?: FileEvents,
+) {
   return (
     declarations: readonly { readonly plugin: string; readonly def: ConfigDef }[],
     judge?: ConfigJudge,
+    etagKey?: Uint8Array,
   ): HostConfig => {
     const service = createConfigFiles({
       home,
@@ -130,6 +145,7 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       log,
       binary,
       ...(judge === undefined ? {} : { judge }),
+      ...(etagKey === undefined ? {} : { etagKey }),
     });
     return {
       port: plugin => service.port(plugin),
@@ -139,9 +155,22 @@ export function configService(home: string, fs: StateFs, clock: Clock, log: Log,
       status: () => service.status(),
       reload: () => service.reload(),
       publishSchemas: () => service.publishSchemas(),
-      startWatching: () => service.startWatching(),
+      startWatching: () =>
+        service.startWatching(
+          fileEvents === undefined ? undefined : configTreeEvents(fileEvents, () => service.directories()),
+        ),
       onStateChange: listener => service.onStateChange(listener),
     };
+  };
+}
+
+/** The disk reader and, when the limit is above 0, the watchdog thread (started when the host asks, one per boot). */
+function loopHealthFor(clock: Clock, watchdogLimitMs: number): NonNullable<HostAdapters['loopHealth']> {
+  return {
+    ioPressure: procIoPressure(clock),
+    ...(watchdogLimitMs > 0
+      ? { watchdog: () => workerLoopWatchdog({ limitMs: watchdogLimitMs, nowMs: clock.nowMs, prefix: 'fyd ' }) }
+      : {}),
   };
 }
 
@@ -158,6 +187,11 @@ export function realAdapters(
     readonly managerEnv?: Readonly<Record<string, string>>;
     /** The names a SEALED child (a secure copy's command capture) inherits (see `sealedEnvironment`). */
     readonly sealedEnv?: Readonly<Record<string, string>>;
+    /**
+     * Turns the loop-health tick on (see `HostAdapters.loopHealth`): the disk reader, and the watchdog thread unless
+     * `watchdogLimitMs` is 0 (`FYD_WATCHDOG_SECONDS=0`).
+     */
+    readonly loopHealth?: { readonly watchdogLimitMs: number };
     /** The release this build carries, for `kernel.updateHost`; absent, no plugin can launch an update. */
     readonly release?: string;
   },
@@ -165,13 +199,15 @@ export function realAdapters(
   const clock = systemClock();
   const log = scopedLog(logSink, 'kernel');
   const stateFs = createNodeHostFs();
+  const fileEvents = nodeFileEvents(clock);
   return {
     clock,
     logSink,
     fs: nodeFs(random),
     random,
     state: stateOpener(home, stateFs, clock, log.child('state')),
-    config: configService(home, stateFs, clock, log.child('config'), options.binary),
+    config: configService(home, stateFs, clock, log.child('config'), options.binary, fileEvents),
+    fileEvents,
     spawn: bunSpawn(
       options.childEnv ?? {},
       undefined,
@@ -192,6 +228,9 @@ export function realAdapters(
     pinner: platformRootPinner(),
     scratch: scratchPort(),
     hostFacts: nodeHostFacts({ launchGuard: launchGuardFor({ home }) }),
+    ...(options.loopHealth === undefined
+      ? {}
+      : { loopHealth: loopHealthFor(clock, options.loopHealth.watchdogLimitMs) }),
     selfCounters: nodeSelfCounters(),
     // Today's Codex stopper's table: `/proc` on Linux, the kernel's own `ps` (system folders, then PATH) elsewhere.
     processTable: hostProcessTable({

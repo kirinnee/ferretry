@@ -1,3 +1,4 @@
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import type { CliContext, VerbHandler, VerbInvocation } from '@ferretry/kernel/manifest';
 import type {
   KeepResult,
@@ -40,8 +41,8 @@ const number = (invocation: VerbInvocation, name: string): number | undefined =>
 const flat = (text: string): string => text.replace(/\s+/gu, ' ').trim();
 const clip = (text: string, width: number): string => (text.length <= width ? text : `${text.slice(0, width - 1)}…`);
 
-/** `&F303` for a card, `!A3` for an ask: how a hit is cited. */
-const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : '!'}${hit.id}`;
+/** `&F303` for a card, `^A3` for an ask: how a hit is cited. */
+const reference = (hit: WorkHit): string => `${hit.kind === 'card' ? '&' : ASK_REFERENCE_SIGIL}${hit.id}`;
 
 /** The matching line, unless it only repeats the title or the id the reader already sees. */
 const matchLine = (hit: WorkHit): string => {
@@ -67,19 +68,24 @@ function renderHits(hits: readonly WorkHit[], own: string | undefined): string[]
   });
 }
 
+const INDEXING_LINE =
+  'Still reading your conversation history; this list is what is read so far. Run it again in a moment.';
+
 function renderListing(listing: LinkListing): string {
-  if (listing.conversations.length === 0) return 'No conversations match.';
+  const indexing = listing.indexing === true ? [INDEXING_LINE] : [];
+  if (listing.conversations.length === 0) return ['No conversations match.', ...indexing].join('\n');
   const lines = listing.conversations.map(row => {
     const kept = row.keptBy === undefined ? '' : `  (kept by ${row.keptBy})`;
+    const also = row.alsoOnComputer === true ? '  (also in your own history)' : '';
     const floor = row.turnsAtLeast === true ? '+' : '';
-    return `${row.id}  ${row.harness}  ${row.lastActivityAt.slice(0, 16).replace('T', ' ')}  ${String(row.turns)}${floor} turns  ${row.name ?? clip(flat(row.preview), 60)}${kept}`;
+    return `${row.id}  ${row.harness}  ${row.lastActivityAt.slice(0, 16).replace('T', ' ')}  ${String(row.turns)}${floor} turns  ${clip(flat(row.name ?? row.preview), 80)}${kept}${also}`;
   });
   const more =
     listing.matched > listing.conversations.length
       ? [`Showing ${String(listing.conversations.length)} of ${String(listing.matched)}.`]
       : [];
   const skipped = listing.skipped > 0 ? [`${String(listing.skipped)} could not be read and are not listed.`] : [];
-  return [...lines, ...more, ...skipped].join('\n');
+  return [...lines, ...more, ...skipped, ...indexing].join('\n');
 }
 
 function renderKeep(result: KeepResult): string {

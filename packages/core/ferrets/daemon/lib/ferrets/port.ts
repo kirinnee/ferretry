@@ -15,6 +15,8 @@ import type { FerretsService } from './service.ts';
 
 /** The plugin that may speak as Ferretry's Warden through this port. */
 const WARDEN_PLUGIN = 'warden';
+/** The plugin that copies a kept conversation into a harness's pool, so the only one that may ask for it. */
+const CONVERSATION_PLUGIN = 'conversation';
 /** The plugin that owns runtimes, and so the only one that tells Ferrets one was renamed. */
 const RUNTIMES_PLUGIN = 'runtimes';
 
@@ -49,6 +51,7 @@ const NOT_A_MOVER = 'a move names who moved it as owner, session:<ferret id> or 
 
 const NO_ORIGIN = 'a launch must say who it is for: its origin is missing or not one of person, daemon or agent';
 const NOT_THE_WARDEN = 'only the Warden is recorded as the Warden';
+const NOT_THE_WARDEN_REPLACE = 'only the Warden replaces a live pane';
 const NOT_THE_WARDEN_LABEL = 'only the Warden starts a ferret under its own label';
 const NOT_THE_WARDEN_PARENT = 'only the Warden names a parent in its own tree';
 
@@ -94,10 +97,11 @@ async function inWardenTree(service: FerretsService, ferret: FerretId): Promise<
  *
  * `start` and `move` read the caller's request once and forward a rebuilt copy, never the caller's own object.
  *
- * Whatever else the service has — a stop's end `cause`, a move's `replaceLiveTerminal` and `target`, a route's
+ * Whatever else the service has — a stop's end `cause`, a move's `target`, a route's
  * `confirmRestore`, `revokeToken`, `rename`, the launch and its tokens — is for this plugin's own callers and is not
  * reachable here at runtime, not just refused by the types. `resume` forwards only `automatic`, an `actor` of
- * `warden` (the Warden's alone) or `peer` (attribution only), `decided` and `onCarried`. `effectiveLimits` is served: it
+ * `warden` (the Warden's alone) or `peer` (attribution only), `decided`, `onCarried` and the Warden's alone
+ * `replaceLiveTerminal`. `markStalled` is the Warden's alone. `effectiveLimits` is served: it
  * answers `limits.yaml` as in effect, read fresh on every call.
  */
 export function ferretsPort(service: FerretsService, consumer: string): FerretsApi {
@@ -112,6 +116,14 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
     mayTouch: (caller, target) => service.mayTouch(caller, target),
     children: ferret => service.children(ferret),
     harnesses: () => service.harnesses(),
+    importConversation: async (harness, input) => {
+      if (consumer !== CONVERSATION_PLUGIN)
+        throw new ApiError(403, 'only the Conversation plugin copies a conversation into a harness pool', 'forbidden');
+      // Read once into a fresh object: only the two names the copy is made of reach the harness.
+      const { id, source } = input;
+      return await service.importConversation(harness, { id, source });
+    },
+    historySources: async () => await service.historySources(),
     start: async (asked, askedOrigin): Promise<Result<FerretId, StartFailure>> => {
       // Fail closed: a launch whose origin was not stated (a plugin's cast) is refused, never taken as a person's. The
       // origin is read ONCE into a fresh object, as the request is.
@@ -154,10 +166,14 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       // caller-stated attribution (it changes no policy), so any consumer may say it.
       const actor = options.actor;
       if (actor === 'warden' && !warden) return refused(NOT_THE_WARDEN);
+      // Stopping a live pane is the Warden's remedy alone; `false` asks for nothing, so it is not forwarded.
+      const replaceLive = options.replaceLiveTerminal === true;
+      if (replaceLive && !warden) return refused(NOT_THE_WARDEN_REPLACE);
       // Only what the port declares: automated recovery, the turn author's attribution, who must be told what the
       // resume decided, and who must be told what it typed for the message.
       const forwarded = {
         origin,
+        ...(replaceLive ? { replaceLiveTerminal: true } : {}),
         ...(options.automatic === true ? { automatic: true } : {}),
         ...(actor === 'warden' || actor === 'peer' ? { actor } : {}),
         ...(options.decided === undefined ? {} : { decided: options.decided }),
@@ -172,6 +188,10 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       return await service.attach(ferret, handle, stated.data);
     },
     handle: ferret => service.handle(ferret),
+    markStalled: async (ferret, stalled) => {
+      if (!warden) throw new ApiError(403, 'only the Warden marks a ferret stalled', 'forbidden');
+      return await service.markStalled(ferret, stalled);
+    },
     workFolder: ferret => service.workFolder(ferret),
     sitrep: ferret => service.sitrep(ferret),
     summary: ferret => service.summary(ferret),

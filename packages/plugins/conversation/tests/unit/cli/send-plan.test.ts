@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import type { SendEnvironment } from '../../../cli/lib/send/ports.ts';
-import type { SendRecord, SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendResult } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import { at } from '../../support/instant.ts';
 
@@ -151,6 +151,16 @@ describe('describeDisposition', () => {
 });
 
 describe('describeSendResult', () => {
+  it('should say a channel send was handed to the ferret’s Ferretry channel, never that it was typed into its prompt', () => {
+    for (const fate of ['accepted', 'queued', 'delivered'] as const) {
+      const said = describeSendResult({ disposition: 'sent', fate, path: 'channel' });
+      should(said).match(/^handed to the ferret's Ferretry channel/);
+      should(said).match(/reads it at its next step/);
+      should(said).not.match(/typed into the busy agent/);
+    }
+    should(describeSendResult({ disposition: 'sent', fate: 'accepted' })).match(/typed into the busy agent's prompt/);
+  });
+
   it('should say a message still in Ferretry’s queue is not delivered, and why, never the agent’s own queue', () => {
     const said = describeSendResult({ disposition: 'queued', fate: 'accepted', waitReason: 'question' });
     should(said).match(

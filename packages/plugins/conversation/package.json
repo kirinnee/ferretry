@@ -24,6 +24,7 @@
     "@ferretry/core-asks": "workspace:*",
     "@ferretry/core-ferrets": "workspace:*",
     "@ferretry/core-gate": "workspace:*",
+    "@ferretry/core-mailbox": "workspace:*",
     "@ferretry/plugin-claude-code": "workspace:*",
     "@ferretry/app": "workspace:*",
     "chart.js": "4.6.1",

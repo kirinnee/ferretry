@@ -1,3 +1,4 @@
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { describe, expect, test } from 'bun:test';
 import {
   type AskDraft,
@@ -11,7 +12,7 @@ import {
 import type { Instant } from '@ferretry/std';
 import { CONVERSATION_STATE, QuestionSchema } from '../../../contract/index.ts';
 import { memoryStatePort } from '../../support/state.ts';
-import type { HarnessGate } from '../../../daemon/harness-seam.ts';
+import type { HarnessGate } from '@ferretry/core-mailbox/contract';
 import { buildConversationA } from '../../../daemon/host.ts';
 import { QUESTION_WATCH_MS } from '../../../daemon/questions/lib/watch.ts';
 import type { TranscriptEvent } from '../../../daemon/seams/transcript-types.ts';
@@ -140,6 +141,7 @@ function daemon(options: {
     log: { info: () => undefined, warn: (line: string) => void warned.push(line) },
   } as never;
   const half = buildConversationA({
+    mailbox: new FakeMailbox(),
     kernel,
     ferrets: (options.ferrets ?? {
       get: async () => ({ id: 'cody', state: 'working' }),

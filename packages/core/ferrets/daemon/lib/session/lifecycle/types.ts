@@ -60,7 +60,7 @@ const AbsolutePathSchema = z
   .min(1)
   .refine(value => isAbsolute(value), 'must be an absolute path');
 
-export const SessionLifecycleConfigSchema = z.object({
+const SessionLifecycleConfigSchema = z.object({
   id: SessionIdSchema,
   name: z.string().min(1).max(MAX_SESSION_TITLE_LENGTH),
   /** Who chose `name`: the daemon (`auto`, retitlable) or a person (`owner`, final). */
@@ -187,6 +187,12 @@ export interface SessionLifecycleLauncher {
    * cannot say; the lifecycle then keeps whatever the record already held.
    */
   launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined>;
+  /**
+   * The pid of the process the session's pane runs (tmux `#{pane_pid}`), read after {@link launch}; `undefined` when it
+   * cannot be told. The conversation lease moves onto it. Optional: a launcher that has none leaves the lease on the
+   * daemon's pid, and the lease then refuses a start that names a conversation (fail closed).
+   */
+  panePid?(record: SessionLifecycleRecord): Promise<number | undefined>;
   /**
    * Why a start of this session must be refused BEFORE anything changes — its record, its credential or its conversation
    * lease — or `undefined` when {@link launch} will open a pane. Asked once, ahead of the first write of a start that is

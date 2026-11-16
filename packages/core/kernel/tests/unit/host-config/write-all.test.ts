@@ -7,7 +7,7 @@ import { createStatePort } from '../../../host/state/state-port.ts';
 import { createMemoryHostFs, type MemoryHostFs } from '../../../host/state/memory-fs.ts';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { z } from 'zod';
-import { captureLog, HOME, loginsDef, manualClock, updatesDef } from './support.ts';
+import { captureLog, HOME, loginsDef, manualClock, TEST_ETAG_KEY, updatesDef } from './support.ts';
 
 /**
  * `ConfigPort.writeAll`: several of a plugin's own files as ONE act. All or none, each document's own `ifMatch`, each
@@ -47,6 +47,7 @@ function harness(options: { readonly verdict?: boolean; readonly fs?: HostFs; re
     clock: manualClock(),
     log,
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     defs: [
       { plugin: 'p', def: updatesDef },
       { plugin: 'p', def: loginsDef },

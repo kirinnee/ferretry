@@ -4,6 +4,8 @@ import {
   CODEX_AGENT_HOMES,
   CODEX_CONFIG,
   CODEX_DISCOVERY,
+  CODEX_HISTORY_ENTRIES,
+  CODEX_HISTORY_POOL,
   CODEX_FAST_CATALOG,
   CODEX_HOOKS,
   CODEX_READ_MODELS,
@@ -14,7 +16,8 @@ import {
   CodexUpdateFinished,
 } from './contract/index.ts';
 import { cap } from '@ferretry/core-gate/contract';
-import { Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import { FerretsChanged, Harnesses, StartDecide } from '@ferretry/core-ferrets/contract';
+import { LoginChanged } from '@ferretry/plugin-logins/contract';
 import {
   PROFILE_COMPONENTS_KEY,
   ProfileCodexHooksSource,
@@ -129,10 +132,20 @@ export default definePlugin({
   },
 
   data: {
-    state: [CODEX_AGENT_HOMES, CODEX_DISCOVERY, CODEX_FAST_CATALOG, CODEX_ROLLOUTS, CODEX_LAUNCH_SETTINGS],
+    state: [
+      CODEX_AGENT_HOMES,
+      CODEX_HISTORY_POOL,
+      CODEX_DISCOVERY,
+      CODEX_FAST_CATALOG,
+      CODEX_ROLLOUTS,
+      CODEX_LAUNCH_SETTINGS,
+    ],
     config: [CODEX_CONFIG, CODEX_SETTINGS, CODEX_HOOKS],
     readModels: CODEX_READ_MODELS,
     publishes: [CodexUpdateFinished],
+    // A ferret that stopped or went away, and a login removed, signed out or switched off, each take the login's sign-in
+    // back out of the Codex homes it was linked into (`RootHandle.linkCredential` makes the link; nothing else removes it).
+    subscribes: [FerretsChanged, LoginChanged],
   },
 
   hooks: {
@@ -149,6 +162,8 @@ export default definePlugin({
   doctor: ['codex-paths'],
 
   permissions: {
+    // Every ferret home links these entries to one pool of this plugin's own (`RootHandle.linkHistory`).
+    historyPool: { state: CODEX_HISTORY_POOL.name, entries: CODEX_HISTORY_ENTRIES },
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
     spawn: [

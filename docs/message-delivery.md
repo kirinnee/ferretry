@@ -22,6 +22,19 @@ this page, which is still how a message reaches the pane.
 - **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
+  **5.0 rotates it** (`StateQueueStore`, `lib/rotation.ts`): `queue.jsonl` is a short LIVE SEGMENT, and at 2,000
+  events its finished messages (`read`, `cancelled`, `failed`) are sealed into an immutable shard,
+  `queue-shards/<ferret>~<through>.json`, while its open ones are carried into `queue-carry/<ferret>~<base>.json` — a
+  document, not records of the log, because a record is capped at 1 MiB and a long open message that later gains a wait
+  reason can pass it. The new segment's first line is `{"kind":"segment","base":N,"accepted":M,"carried":K}`: `base` is
+  how many events came before the segment, so a message's `version` (the position of its latest change) and its place in
+  the list survive any number of rotations unchanged, and a file with no header is a segment at base 0, so every log
+  written before rotation reads as it did. The shard and the carry file are written first and the live file replaced
+  second, all atomically, and a reader uses only shards at or before the live `base` and only the carry file of that
+  `base`: a crash between leaves the old segment authoritative. A rotation runs under the per-ferret queue lock every
+  append already holds; one that cannot be written (the disk) is logged once with the ferret, the events and the size
+  and tried again at the next append. (Why: one ferret's log reached 29.5 MB / 228,788 lines for 1,727 messages and
+  every look re-read all of it, several times, every five seconds.)
 - **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
   one message (or one combined delivery, [below](#labels-and-combined-delivery)) typing at a time
   (`planDelivery`). The daemon's notice may pass a ferret message that is still being HELD for combining —
@@ -162,7 +175,7 @@ this page, which is still how a message reaches the pane.
   as **Not sent** and not retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has
   left they fall through to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched, and so
   do the Agenda items a reply is about (the composer's "re" chips, `referencesOf`): they are stored beside the
-  words and sent as the `!A3` prefix on every attempt, so a reply that leaves after a reload is still about its
+  words and sent as the `^A3` prefix on every attempt, so a reply that leaves after a reload is still about its
   item, while an edit shows only what was typed.
 - **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
   **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every

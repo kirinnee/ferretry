@@ -291,7 +291,7 @@ describe('SendOutbox', () => {
     host.state.up = true;
     const reloaded = outboxOver(backend, host);
     await reloaded.drainAll();
-    expect(host.received.map(call => call.message)).toEqual(['!A3 yes, ship it']);
+    expect(host.received.map(call => call.message)).toEqual(['^A3 yes, ship it']);
   });
 
   test('an edit keeps the item a message is about, and a message about none is sent as typed', async () => {
@@ -303,7 +303,7 @@ describe('SendOutbox', () => {
     expect(outbox.snapshot()[1]).not.toHaveProperty('references');
     host.state.up = true;
     await outbox.drainAll();
-    expect(host.received.map(call => call.message)).toEqual(['!A3 !A9 ok, do it', 'plain']);
+    expect(host.received.map(call => call.message)).toEqual(['^A3 ^A9 ok, do it', 'plain']);
   });
 
   test('attachments upload as part of the drain, before the send, and are not uploaded twice after a failure', async () => {

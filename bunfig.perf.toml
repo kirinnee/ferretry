@@ -1,0 +1,16 @@
+[test]
+# The PERF tier (owner, 2026-11-16: "dont mix performance and correctness test together"): every test whose
+# claim is a SPEED or SIZE budget - no synchronous slice over N ms, linear time on adversarial input, a parse
+# within a wall-clock bound, a memory ceiling. It is blocking, like unit, but runs on its own: `scripts/ci/test.sh
+# perf` is ONE bun process with nothing else on its runner (the `perf` CI job), because a budget measured beside
+# other test processes measures the neighbours. The correctness half of such a test stays in the unit tier at a
+# small size; `scripts/validate/test-tiers.sh` refuses a timing claim in the unit tier.
+# Every tier runs offline (scripts/ci/test.sh exports the switches).
+root = "packages"
+pathIgnorePatterns = ["**/tests/unit/**", "**/tests/integration/**", "**/tests/sit/**", "**/tests/realworld/**"]
+# The unit tier's DOM clean-up, for the perf tests of app code.
+preload = ["./packages/app/tests/support/dom-leak-guard.ts"]
+# THE PER-TEST TIMEOUT IS NOT SET HERE (`timeout` under `[test]` is ignored by Bun): test.sh passes it.
+#
+# NO COVERAGE LEDGER. A budget proves how fast or small the code ran, not that a line is correct; the lines a
+# perf test reaches are owned by the unit ledger, which must be green without it.

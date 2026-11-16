@@ -105,6 +105,13 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
   `dismissed_version` empty, measured on both versions), so the next launch asks again and a person at the
   terminal still sees it. "Update now" would run a package manager on the owner's machine and "Skip until
   next version" would record a choice, so neither is picked.
+- **Claude "WARNING: Loading development channels" → "I am using this for local development".** Every launch with
+  `--dangerously-load-development-channels` shows it, and the Claude Code launch adds that flag for Ferretry's own channel
+  (see [launch-settings.md](launch-settings.md#the-claude-channel)). Only the ACTIVE bottom dialog is answered: the exact
+  title line "WARNING: Loading development channels" inside the bottom window, exactly the two rows `1. I am using this for
+local development` and `2. Exit` with nothing else numbered, and the selection on row 1 alone — a quoted copy above
+  another dialog, or a cursor resting on Exit, is not answered. Enter takes it, and **Exit is never chosen** (a daemon that left it would stop every ferret it launched). The answer repeats the decision
+  the flag already made, so it grants nothing new.
 - Unchanged from before: Claude's theme picker, its "Make auto mode your default permission mode?" nudge
   (answered No, which keeps the owner's mode), the large-session resume menu, the custom-API-key
   confirmation the wrapper's own key raises, and the launch-folder trust dialogs — the folder the fixed
@@ -117,6 +124,113 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
   folder its config marks untrusted.
 
 The rest — hooks, MCP servers, sign-in, settings errors, anything unrecognised — wait for a person.
+
+## Pre-answered in the ferret's own home (5.0, O11)
+
+Nothing should wait on a screen a key can answer. Every key below is written into **the ferret's own generated home**
+(the fixed layer; never the owner's `~/.claude` or `~/.codex`) and is part of the launch-settings fingerprint, so a
+change marks a running ferret Restart.
+
+| Harness | Screen                                                                       | Key                                                                                                                                                                                                                    | What it allows                                                                                                           |
+| ------- | ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| Claude  | Trust this folder                                                            | `.claude.json` `projects[<cwd>].hasTrustDialogAccepted`                                                                                                                                                                | the ferret's OWN working folder only (not a parent, not all): its settings and hooks run                                 |
+| Claude  | New MCP server found in this project                                         | none: NOT pre-answered                                                                                                                                                                                                 | nothing: the owner chooses in the ferret’s terminal (the one notice below)                                               |
+| Claude  | Bypass-mode / auto-mode warning                                              | `skipDangerousModePermissionPrompt` (bypass) / `skipAutoPermissionPrompt` (auto), settings                                                                                                                             | shows no warning; the mode itself is the owner's `permissionMode`, held when loosened                                    |
+| Claude  | Onboarding, theme, Chrome, nudges                                            | `hasCompletedOnboarding`, `hasCompletedClaudeInChromeOnboarding`, `hasSeen…Nudge`                                                                                                                                      | nothing: they are seen screens                                                                                           |
+| Claude  | Update notice / self-update                                                  | `DISABLE_AUTOUPDATER=1` in the launch's process environment (v4's probe sets the same)                                                                                                                                 | nothing is installed by Claude; Ferretry applies updates                                                                 |
+| Claude  | Plugin / LSP recommendation                                                  | `.claude.json` `lspRecommendationDisabled` and `claudeCodeHints.disabled`, written only where absent                                                                                                                   | nothing: both screens are suggestions; a value the owner set to another one stays                                        |
+| Claude  | What's new after an upgrade                                                  | `.claude.json` `lastReleaseNotesSeen` = the installed version, re-seeded on every launch (skipped when the version is unknown)                                                                                         | nothing: it is bookkeeping                                                                                               |
+| Claude  | Feedback survey                                                              | `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1` in the launch environment                                                                                                                                                      | nothing                                                                                                                  |
+| Claude  | (the rm waivers' precondition)                                               | `env -u CLAUDE_CODE_CHILD_SESSION`                                                                                                                                                                                     | a ferret started from a Claude Bash shell inherits it, and it voids the waivers                                          |
+| Claude  | Full dangerous-`rm` waiver: the check is skipped, never answered             | `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, `CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1`, `CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1`, all three only with `dangerousRmWaiver: true` AND bypass mode | **off by default**; without it a dangerous `rm` is always denied. Turning it on is held for the owner like any loosening |
+| Codex   | Update available                                                             | `config.toml` `check_for_update_on_startup = false`, unless a settings item sets it                                                                                                                                    | nothing is installed; Ferretry applies updates                                                                           |
+| Codex   | Trust this folder                                                            | `-c projects={"<cwd>"={trust_level="trusted"}}`                                                                                                                                                                        | the ferret's OWN working folder only; it also lets that folder's `.codex/config.toml` load                               |
+| Codex   | Approvals and sandbox                                                        | `-c approval_policy` / `sandbox_mode` (`never` + `danger-full-access` when bypassing)                                                                                                                                  | bypass mode never asks; auto mode asks on request                                                                        |
+| Codex   | Full-access / world-writable warnings, rate-limit and model-migration nudges | `-c notice={hide_…=true}`                                                                                                                                                                                              | nothing: they are notices                                                                                                |
+
+The Claude and Codex rows from `.claude.json` `lspRecommendationDisabled` down to `check_for_update_on_startup` (O11b) were read
+off the **Claude Code 2.1.317 / Codex 0.166.0 binary strings** (the harness's own text, no network). They are outside the
+launch-settings fingerprint — none changes what an agent may do, so a ferret already running never reads as outdated — and
+they land at the ferret's next launch. A key is written only where it is absent (a value the owner set to another one
+stays, a nested object keeps its other keys); `lastReleaseNotesSeen` is the exception, as it is bookkeeping and not a choice.
+Claude has the one rm sentence in its fixed instructions (`packages/plugins/claude-code/instructions/rm.md`): write rm
+targets as explicit absolute paths, never `"$VAR"`, a `$(cmd)`-derived variable, or `rm` inside `bash -c`, so the guard does
+not stop it. Codex has no such guard. **A ferret home never gets a Bash deny/ask permission rule or a `PermissionRequest`
+hook from the fixed layer** — either silently voids the waivers — and a unit test fails if one appears. (A `PreToolUse` hook
+is allowed: the rm guard's own may add one.)
+
+**The project-MCP approval has no safe key.** `enableAllProjectMcpServers` approves EVERY server a folder's
+`.mcp.json` ever declares, and 5.0 has no owner-approved per-server list to write instead; v4 never wrote it. So a
+ferret launched in a folder with a new MCP server stops at that screen, and the owner is told once (below). An
+`enableAllProjectMcpServers` the owner (or Claude, on their answer) already put in the home is never touched.
+
+What no key answers is **told to the owner once** (`packages/plugins/warden/daemon/lib/dialog-watch.ts`): the Warden
+reads each ferret's recorded `harnessDialog` or `permissionRequest` every 10 s and raises ONE plain notice on that
+ferret's agenda per dialog **episode** — the same dialog on the same ferret is one episode, however many looks see it
+and however often the owner closes the notice; a look that misses it twice in a row ends the episode, and a different
+dialog starts a new one. The usage-limit dialog is the auto-move's, not this notice's. The Warden picks a row only through
+a rule, below, and a rule never picks a row that trusts, approves or allows anything.
+
+## Cleared at once by a rule (5.0, O14)
+
+A screen a key can **dismiss or decline** should not wait for a person (a dangerous `rm` sat on its prompt for 1.5 minutes
+before anyone noticed). In the same look that reads a ferret's dialog, the Warden checks it against a table of rules and,
+for a match, presses the way out through the ferret's own terminal (Ferrets' form seam: the runner masks every read and
+holds every key under `kernel.act(<pane>, 'keys')`, so a Vault hold presses nothing). A rule is
+(harness, dialog kind, a FIXED title pattern, and for a harness phrase printed only on the frame, one fixed line) → **Esc**
+or **the row whose label is exactly this**. Free pane text never picks a rule.
+
+| Harness | Screen (`kind`)                                  | Rule id                     | Keys                                                        |
+| ------- | ------------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
+| Claude  | "Dangerous rm operation detected" (`permission`) | `claude-dangerous-rm`       | Esc (the deny; see below)                                   |
+| Claude  | New MCP server found (`mcp-servers`)             | `claude-mcp-servers`        | ↓/↑ to "Continue without using this MCP server", Enter      |
+| Claude  | Settings Error (`settings-error`)                | `claude-settings-error`     | ↓/↑ to "Continue without these settings", Enter             |
+| Claude  | LSP plugin recommendation (`other`)              | `claude-lsp-recommendation` | ↓/↑ to "No, not now", Enter                                 |
+| Codex   | Hooks need review (`hooks-review`)               | `codex-hooks-review`        | ↓/↑ to "Continue without trusting (hooks won't run)", Enter |
+| Codex   | The hook list (`hooks-list`)                     | `codex-hooks-list`          | Esc                                                         |
+| Codex   | Update available (`update`)                      | `codex-update`              | ↓/↑ to "Skip", Enter                                        |
+| Codex   | "Meet GPT-6 Sol" model successor (`other`)       | `codex-model-successor`     | ↓/↑ to "Use existing model", Enter                          |
+
+What has **no** rule, and stays a notice: folder trust (its only ways out trust the folder or exit the ferret), the
+sign-in screen, Codex's folder-access screens, the usage-limit screen (the auto-move's), a tool prompt that is not a
+dangerous `rm`, and any screen this build has no name for.
+
+**Never a grant.** A `choose` row must not read as granting (`yes`, `allow`, `always`, `approve`, `trust`, `use this…`, `don't ask
+again`, `install`, `update now`…, unless it says _without_ / _not_), and the planner also refuses any row the harness marked
+`grantsTrust`. That is checked three times: the rules file's schema, the table's own test (over every known screen), and the
+planner at the moment of pressing. A screen whose only way out grants something has no plan and stays a notice.
+
+**What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
+on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows
+move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. (3) ONE
+journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda card, no pane text. The same
+dialog on the same ferret is never keyed twice; if the next look still sees it on screen the keys failed (or a hold refused
+them) and the owner is told once, as before (`fleet.warden_dialog_clear_failed`). The look runs every 10 s.
+
+**Dangerous `rm`: Esc, then a nudge — no hook.** Claude 2.1.317's prompt comes from a shell _parser_ inside the binary with
+a dozen branches (an `rm` on a possibly-empty variable path, on a command substitution's output, in a `bash -c` script, an
+`eval` trap, a parse it could not finish) — read off its strings, never by running it — so nothing here tries to predict it.
+The Esc rule above declines it at once. Right after that Esc the Warden types ONE fixed message to the ferret (its own next
+message; a queue if the pane is busy — never a hook, and never pane text) saying why the `rm` was denied: _use explicit
+absolute rm paths; never "$VAR", a $(cmd) variable or rm inside bash -c_, so it retries with a path. The nudge is fire and
+forget: a failed one changes nothing. The launch instruction `claude-code/instructions/rm.md` says the same up front.
+`dangerousRmWaiver` stays off.
+
+**Teaching Ferretry an unknown screen.** The notice for a screen no rule knows says how: leave the ferret on it, then
+`fy warden dialog learn <ferret>` (or Settings › Warden › Screens Ferretry clears › "Look at its screen"). That reads the
+ferret's current frame, MASKS it (the secret masker plus a shape pass) and keeps it in the Warden's own `0600` state
+(`dialog-frames/<ferret>`, declared private) — never in the agenda, a log or a notice — and PROPOSES a rule from the screen's
+own title and its decline or dismiss row (`--row N` picks another; a row that grants is held and can never be saved). Nothing is
+saved until the owner says yes: `fy warden dialog learn <ferret> --confirm` or the app's "Save this rule". The rule is
+written to `config/warden-dialogs.yaml` (`personOnly`, so no agent edits it; every added rule is a loosening, so an edit by
+anyone but the owner is held for the owner, as every held config edit is) and the next appearance is cleared. A tool
+permission prompt and the usage-limit screen are never taught.
+
+**The notice carries no pane text.** A dialog's title, body and row labels, and a tool prompt's command, path or URL
+(a `curl` with a bearer token, say), are served only to a caller holding `terminal.use`; the agenda carries no
+capability and keeps every ask version. So the notice says only fixed words: "<ferret> is waiting on a <kind> prompt in
+<harness>; open its terminal to read and choose", sits on that ferret's own board (the link to the ferret and its
+terminal), and names no row. What the screen says is read in the terminal.
 
 ## Declared gaps
 

@@ -1,21 +1,17 @@
 import { PERSON_ORIGIN, START_EXPLAINED_MAX } from '../../../../contract/index.ts';
-import { afterEach, describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import { describe, expect, test } from 'bun:test';
+import { lstat, mkdir, mkdtemp, readdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle } from '@ferretry/kernel/contract';
-import { diskPaths, diskSessionsRoot, type MemoryStateFolder } from '@ferretry/kernel/testing';
-import { err, ok, type Result } from '@ferretry/std';
+import { err, ok } from '@ferretry/std';
 import {
   FerretConfigFile,
   type FerretRecord,
   type OpeningAttachmentsSource,
   type RunnerHandle,
   type RunnerLook,
-  type RunningFerret,
-  type RunSpec,
-  type StartRefusal,
 } from '../../../../contract/index.ts';
-import { emptyChildEnvironment, FakeHarness, FakeRunner, fenced, T0 } from '../../../../contract/testing/index.ts';
+import { T0 } from '../../../../contract/testing/index.ts';
 import { ferretsPort } from '../../../../daemon/lib/ferrets/port.ts';
 import {
   CONVERSATION_NOT_FOUND,
@@ -23,15 +19,12 @@ import {
   FerretsService,
   type FerretsPorts,
 } from '../../../../daemon/lib/ferrets/service.ts';
-import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
-import { FerretTokenDirectory } from '../../../../daemon/lib/tokens/tokens.ts';
-import { SessionFiles } from '../../../../daemon/modules/session-files.ts';
 import { SessionConfigSchema, SessionStateSchema } from '../../../../daemon/lib/protocol/session.ts';
 import { parseSessionId } from '../../../../daemon/lib/session-id.ts';
 import { queuedMessageInstruction, turnFileInstruction } from '../../../../daemon/lib/protocol/turn-handoff.ts';
 import { defaultSessionResumeSettings } from '../../../../daemon/lib/session/resume/settings.ts';
 import type { ResumeActor } from '../../../../daemon/lib/session/resume/types.ts';
-import { memoryStorage } from '../../../support/daemon/storage.ts';
+import { IDS, parents, started, turnFile, world, type World } from '../../../support/daemon/deliver-turns-world.ts';
 
 /**
  * The deliver seam (U3) end to end on the service: the start's assigned task, a revive's numbered turn and its markers,
@@ -39,180 +32,6 @@ import { memoryStorage } from '../../../support/daemon/storage.ts';
  * session store is the real one over a memory state folder; the ferret folders are real ones on the internal
  * `sessions` root of a temporary home. Fixture values only.
  */
-
-const NOW = '2026-11-08T10:00:00.000Z';
-const IDS = ['mw7bp88g-00000001', 'mw7bp88g-00000002', 'mw7bp88g-00000003', 'mw7bp88g-00000004'] as const;
-const parents: string[] = [];
-afterEach(async () => {
-  for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
-});
-
-/** A runner whose next starts can be refused, and that tells a test what it saw at the moment of each start. */
-class ScriptedRunner extends FakeRunner {
-  refuseStarts = 0;
-  /** Today's startup wait, when a test gives the runner one; absent, a start does not wait (as a runner that cannot tell). */
-  settled?: (handle: RunnerHandle) => Promise<'settled' | 'timed-out'>;
-  /** What the pane last showed, when a test gives the runner a screen to read. */
-  lastScreen?: (handle: RunnerHandle) => Promise<string>;
-  readonly stopped: string[] = [];
-  override async stop(handle: RunnerHandle): Promise<void> {
-    this.stopped.push(handle);
-    await super.stop(handle);
-  }
-  onStart: ((spec: RunSpec) => Promise<void>) | undefined;
-  override async start(spec: RunSpec): Promise<Result<RunningFerret, StartRefusal>> {
-    await this.onStart?.(spec);
-    if (this.refuseStarts > 0) {
-      this.refuseStarts -= 1;
-      return err('failed');
-    }
-    return await super.start(spec);
-  }
-}
-
-interface World {
-  readonly service: FerretsService;
-  readonly registry: FerretRegistry;
-  readonly files: SessionFiles;
-  readonly runner: ScriptedRunner;
-  readonly harness: FakeHarness;
-  readonly tokens: FerretTokenDirectory;
-  readonly storage: Awaited<ReturnType<typeof memoryStorage>>['storage'];
-  readonly state: MemoryStateFolder;
-  readonly folderOf: (id: string) => string;
-  readonly warnings: string[];
-  /** Every history event the service recorded, in order. */
-  readonly history: {
-    readonly ferret: string;
-    readonly type: string;
-    readonly data: Readonly<Record<string, unknown>>;
-  }[];
-}
-
-/** One daemon over ferret folders that outlive it: `restart` builds the next one on the same state and disk. */
-async function world(
-  records: readonly FerretRecord[] = [],
-  reuse?: {
-    readonly state: MemoryStateFolder;
-    readonly handles: Readonly<Record<string, RootHandle>>;
-    readonly folders: Readonly<Record<string, string>>;
-  },
-  backfill = true,
-  openingSource?: OpeningAttachmentsSource,
-): Promise<World & { readonly reuse: NonNullable<typeof reuse> }> {
-  let handles = reuse?.handles;
-  let folders = reuse?.folders;
-  if (handles === undefined || folders === undefined) {
-    const parent = await mkdtemp(`${tmpdir()}/fy-deliver-`);
-    parents.push(parent);
-    const made: Record<string, RootHandle> = {};
-    const where: Record<string, string> = {};
-    for (const id of IDS) {
-      const disk = await diskSessionsRoot(parent, id);
-      made[id] = disk.root;
-      where[id] = disk.folder;
-      // The scope a send's file writer holds: the ferret's `attachments` folder alone, on the same real home.
-      made[`${id}/attachments`] = (await diskSessionsRoot(parent, `${id}/attachments`)).root;
-    }
-    handles = made;
-    folders = where;
-  }
-  const { storage, folder: state } = await memoryStorage({
-    clock: { now: () => NOW },
-    ...(reuse === undefined ? {} : { folder: reuse.state }),
-  });
-  const registry = new FerretRegistry(records);
-  const warnings: string[] = [];
-  const history: World['history'][number][] = [];
-  const files = new SessionFiles({
-    roots: {
-      root: (_name, scope) => {
-        const handle = handles[scope?.subfolder ?? ''];
-        if (handle === undefined) throw new Error(`no fixture folder for ${scope?.subfolder ?? ''}`);
-        return handle;
-      },
-    },
-    storage,
-    clock: { now: () => NOW },
-    sleep: async () => undefined,
-    paths: diskPaths(),
-    fleet: () =>
-      registry
-        .list()
-        .map(ferret => ({ id: ferret.id, ...(ferret.parent === undefined ? {} : { parent: ferret.parent }) })),
-    seed: id => {
-      const record = registry.get(id as never);
-      return record === undefined ? undefined : { record, details: registry.detailsOf(record.id) };
-    },
-    log: { warn: message => void warnings.push(message) },
-  });
-  const runner = new ScriptedRunner();
-  const harness = new FakeHarness();
-  let next = records.length;
-  const ports: FerretsPorts = {
-    now: () => T0,
-    newId: () => {
-      const id = IDS[next];
-      next += 1;
-      if (id === undefined) throw new Error('the fixture has no more ferret folders');
-      return id as never;
-    },
-    newName: taken => {
-      for (let n = 1; ; n += 1) if (!taken(`fern${n}`)) return `fern${n}`;
-    },
-    save: async () => {},
-    saveTokens: async () => {},
-    harness: () => harness,
-    harnessKeys: () => [harness.key],
-    runner: () => runner,
-    // Packs' admission stands in here: this fixture lets a helper start, so the stamp's ancestry is what decides.
-    decide: async () => ({ allow: true }),
-    launchParts: () => [],
-    openingAttachments: () => openingSource,
-    sitrepSources: () => [],
-    instructions: () => [],
-    folder: path => ok(fenced(path)),
-    changed: () => {},
-    vault: { childEnvironment: async () => ok(emptyChildEnvironment()) },
-    asks: { open: async () => [] },
-    session: files.port,
-    history: async (ferret, type, data) => void history.push({ ferret, type, data }),
-  };
-  const tokens = new FerretTokenDirectory();
-  const service = new FerretsService(registry, tokens, ports);
-  if (backfill) await files.backfill(async () => registry.list().map(ferret => ferret.id));
-  return {
-    service,
-    registry,
-    files,
-    runner,
-    harness,
-    tokens,
-    storage,
-    state,
-    folderOf: id => folders[id] ?? '',
-    warnings,
-    history,
-    reuse: { state, handles, folders },
-  };
-}
-
-const turnFile = (w: World, id: string, turn: number) =>
-  `${w.folderOf(id)}/turns/turn-${String(turn).padStart(3, '0')}.md`;
-
-async function started(w: World, prompt?: string, extra: Record<string, unknown> = {}): Promise<string> {
-  const result = await w.service.start(
-    {
-      folder: '/work',
-      by: 'owner',
-      ...(prompt === undefined ? {} : { prompt }),
-      ...extra,
-    },
-    PERSON_ORIGIN,
-  );
-  if (!result.ok) throw new Error(`start refused: ${result.error.reason}`);
-  return result.value;
-}
 
 const revive = async (w: World, id: string, message?: string, actor?: ResumeActor) =>
   await w.service.resume(id as never, message, { origin: PERSON_ORIGIN, ...(actor === undefined ? {} : { actor }) });
@@ -237,9 +56,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     const kept = await stat(turnFile(w, id, 2));
     expect((await revive(w, id, 'Carry on with the tests.')).ok).toBe(true);
     expect((await stat(turnFile(w, id, 2))).ino).toBe(kept.ino);
-    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
-      `Carry on with the tests.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(`Carry on with the tests.\n`);
     expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
       turnFileInstruction(turnFile(w, id, 3)),
     ]);
@@ -250,9 +67,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     // The next revive numbers after it, and an auto ferret with no message is given the default prompt.
     await w.service.stop(id as never, 'now');
     expect((await revive(w, id)).ok).toBe(true);
-    expect(await readFile(turnFile(w, id, 4), 'utf8')).toBe(
-      `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 4), 'utf8')).toBe(`${defaultSessionResumeSettings.defaultResumePrompt}\n`);
   });
 
   test('GAP(deliver) a revive writes turn-NNN.md once: a turn written but never counted is handed over again only as an exact replay, proved in place', async () => {
@@ -296,12 +111,12 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     // The owner's words stay theirs, and Ferretry's default prompt is never drawn as the owner's.
     expect(turns?.[1]).toEqual({
       turn: 2,
-      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Do X.\n`,
       by: { kind: 'owner' },
     });
     expect(turns?.[2]).toEqual({
       turn: 3,
-      text: `${defaultSessionResumeSettings.defaultResumePrompt}\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `${defaultSessionResumeSettings.defaultResumePrompt}\n`,
     });
   });
 
@@ -322,12 +137,12 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     const turns = await w.files.port.turns?.(id as never, { strict: true });
     expect(turns?.[1]).toEqual({
       turn: 2,
-      text: `Do X.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Do X.\n`,
       by: { kind: 'owner' },
     });
     expect(turns?.[2]).toEqual({
       turn: 3,
-      text: `Something else.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Something else.\n`,
     });
   });
 
@@ -341,12 +156,8 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
 
     expect((await revive(w, id, 'Second revive words.')).ok).toBe(true);
 
-    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(
-      `First revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
-    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(
-      `Second revive words.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
-    );
+    expect(await readFile(turnFile(w, id, 2), 'utf8')).toBe(`First revive words.\n`);
+    expect(await readFile(turnFile(w, id, 3), 'utf8')).toBe(`Second revive words.\n`);
     expect(w.runner.deliveries.slice(typed).map(delivery => delivery.delivery.text)).toEqual([
       turnFileInstruction(turnFile(w, id, 2)),
       turnFileInstruction(turnFile(w, id, 3)),
@@ -366,7 +177,7 @@ describe('GAP(deliver) a revive writes the numbered turn, clears the markers and
     await expect(stat(turnFile(w, id, 2).replace(/\.md$/u, '.by.json'))).rejects.toThrow();
     expect((await w.files.port.turns?.(id as never, { strict: true }))?.[1]).toEqual({
       turn: 2,
-      text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`,
+      text: `Again.\n`,
     });
   });
 
@@ -900,7 +711,7 @@ describe('FerretsApi.turns: a ferret’s turn documents, behind the mayTouch cal
 
     expect(await turns?.list()).toEqual([
       { turn: 1, text: '# Assigned task\n\nBuild the thing.\n' },
-      { turn: 2, text: `Again.\n\n${defaultSessionResumeSettings.turnProtocolReminder}\n`, by: { kind: 'owner' } },
+      { turn: 2, text: `Again.\n`, by: { kind: 'owner' } },
     ]);
     expect(await w.service.turns('mw7bp88g-0000ffff' as never)).toBeUndefined();
   });
@@ -953,26 +764,24 @@ describe('FerretHarness.queue: the runner’s own queue, never wrapped in a seco
 describe('ruling #45 (a): one look before deliver, so a send to a working ferret is answered busy at once', () => {
   /** A screen as the runner's `look` reads it: today's `activeWork` (the harness's working line) and no prompt. */
   const WORKING: RunnerLook = { frame: 'working', working: true, atPrompt: false, permission: false };
-  /** The delivery's own readiness wait, standing in for its ~27 s: it never answers within the test's window. */
-  const waitsOutItsReadiness = (w: World): void => {
-    w.runner.deliver = async () => await new Promise<never>(() => undefined);
+  /** The delivery's own readiness wait must never be entered: a delivery that reaches it fails the test at once. */
+  const failsIfReadinessEntered = (w: World): void => {
+    w.runner.deliver = async () => {
+      throw new Error('the readiness wait was entered');
+    };
   };
-  const within = async <T>(ms: number, work: Promise<T>): Promise<T | 'timed out'> =>
-    await Promise.race([work, new Promise<'timed out'>(resolve => setTimeout(() => resolve('timed out'), ms))]);
 
-  test('ruling #45 send to a working ferret answers in under 1 s: busy, nothing typed, the readiness wait never entered', async () => {
+  test('ruling #45 send to a working ferret answers busy, nothing typed, the readiness wait never entered', async () => {
     const w = await world();
     const id = await started(w);
     const handle = w.registry.get(id as never)?.handle as RunnerHandle;
     w.runner.screens.set(handle, WORKING);
-    waitsOutItsReadiness(w);
+    failsIfReadinessEntered(w);
     const seam = await w.service.harness(id as never);
 
-    const began = Date.now();
-    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE report to a busy lead' }))).toEqual(
+    expect(await seam!.deliver({ text: 'FIXTURE report to a busy lead' })).toEqual(
       err({ refused: 'not_ready', why: 'busy' }),
     );
-    expect(Date.now() - began).toBeLessThan(1_000);
     expect(w.runner.looked).toEqual([handle]);
     expect(w.runner.deliveries).toEqual([]);
   });
@@ -982,10 +791,10 @@ describe('ruling #45 (a): one look before deliver, so a send to a working ferret
     const id = await started(w);
     const handle = w.registry.get(id as never)?.handle as RunnerHandle;
     w.runner.screens.set(handle, { ...WORKING, permission: true });
-    waitsOutItsReadiness(w);
+    failsIfReadinessEntered(w);
     const seam = await w.service.harness(id as never);
 
-    expect(await within(1_000, seam!.deliver({ text: 'FIXTURE words to a parked ferret' }))).toEqual(
+    expect(await seam!.deliver({ text: 'FIXTURE words to a parked ferret' })).toEqual(
       err({ refused: 'not_ready', why: 'dialog' }),
     );
     expect(w.runner.looked).toEqual([handle]);
@@ -1216,10 +1025,10 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Warden�
     return { root, child, grandchild };
   }
 
-  test('KCB-S B1 the registry does not say it, the documents do: C is unlabelled in the summary and stamped into the lineage on disk', async () => {
+  test('KCB-S B1 the registry says it too (c58-59): C carries the forced Warden label in the summary and is stamped into the lineage on disk', async () => {
     const w = await world();
     const { child } = await wardenTree(w);
-    expect(w.registry.summary(child as never)?.label).toBeUndefined();
+    expect(w.registry.summary(child as never)?.label).toBe('fleet-warden');
     const document = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(child)));
     expect(document.provenance).toMatchObject({ origin: 'warden', wardenLineage: true });
   });

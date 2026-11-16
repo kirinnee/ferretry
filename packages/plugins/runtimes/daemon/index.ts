@@ -46,12 +46,15 @@ import {
   endedSeams,
   fileAssembly,
   checkEnvironmentSource,
+  hostClaudeAccountText,
   launchFactsSource,
   MANIFEST_REPAIR_JOB,
   manifestUnreadableProbe,
   RepairOwner,
   repairRequester,
 } from './host-assembly.ts';
+import { organizationTypeOfAccountDocument } from './lib/account-organization-type.ts';
+import { loginOrganizationType } from './lib/login-organization-type.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -120,6 +123,8 @@ export interface RuntimesAssembly {
    * carries. Absent: a start of a runtime is refused rather than launched unchecked.
    */
   readonly launchFacts?: RuntimeLaunchFactsSource;
+  /** The text of the person's own Claude account file, for the channel's default of a host-kept login. Absent: none is read. */
+  readonly hostClaudeAccount?: () => Promise<string | undefined>;
   /** What a published runtime's launch carries, for a consumer that fills `${VAR}` from it. Absent: nothing is offered. */
   readonly checkEnvironment?: (runtime: string) => Promise<RuntimeCheckEnvironment | undefined>;
   /**
@@ -268,6 +273,7 @@ export const hostAssembly: RuntimesAssembler = ctx => {
     ),
     profileEtag: async profile => await assembled().profileEtag(profile),
     launchFacts: launchFactsSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
+    hostClaudeAccount: hostClaudeAccountText(ctx.kernel),
     checkEnvironment: checkEnvironmentSource(ctx.kernel, publication, repairRequester(ctx.kernel, repair)),
     manifestUnreadable: manifestUnreadableProbe(ctx.kernel, publication),
     repair,
@@ -518,13 +524,21 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       };
 
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
-      const launchGate = new LaunchGate({ source: launchFacts });
+      // The login's organisation type, for the Claude harness's channel default: Logins names it for a login it keeps (its
+      // own account file), and for a host-kept one the person's `~/.claude.json` says. One non-secret field, never a token.
+      const organizationType = async (login: string): Promise<string | undefined> =>
+        await loginOrganizationType(
+          ctx.needs.logins,
+          async () => organizationTypeOfAccountDocument(await assembly.hostClaudeAccount?.()),
+          login,
+        );
+      const launchGate = new LaunchGate({ source: launchFacts, organizationType });
 
       return {
         routes: {
           ...fleetCatalogRoutes(assembly.catalog),
           ...fleetSetupRoutes(assembly.setup),
-          ...ferretRuntimeRoutes(assembly.runtime),
+          ...ferretRuntimeRoutes(assembly.runtime ?? ctx.needs.ferrets.runtimeControl),
         },
         provides: {
           runtimes: {
@@ -589,6 +603,8 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
               resolve: async id => await api.resolve(id),
               default: async () => await api.default(),
               logins: ctx.needs.logins,
+              // What the runtime serves, for a move or handover to plan its model on (`catalog?`): the published view.
+              catalog: facts.catalog,
             }),
           },
           // A start's own compaction trigger is judged against its model's window, and the facts launch.parts uses are read

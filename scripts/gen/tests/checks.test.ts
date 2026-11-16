@@ -368,6 +368,60 @@ describe('context-imports', () => {
     expect(found).toContain('packages/app/vite.config.ts:2: ../plugins/alpha/app/view.tsx');
   });
 
+  test('a daemon half may import its own generated feature list and no other generated file', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'daemon/features/one.feature.ts': 'export default {};\n',
+          'daemon/generated/features.ts': "import one from '../features/one.feature.ts';\nexport default [one];\n",
+          'daemon/generated/other.ts': 'export {};\n',
+          'daemon/build.ts':
+            "import features from './generated/features.ts';\nimport './generated/other.ts';\nexport { features };\n",
+        },
+      },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./generated/features.ts');
+    expect(found).toContain('alpha/daemon/build.ts:2: ./generated/other.ts');
+  });
+
+  test("only Conversation's tests may import the Mailbox's daemon half: its own daemon half, and any other package's tests, are still refused", async () => {
+    const f = ws([
+      {
+        id: 'conversation',
+        files: {
+          'tests/send.test.ts': `import '@ferretry/core-mailbox/daemon';\n`,
+          'daemon/host.ts': `import '@ferretry/core-mailbox/daemon';\n`,
+        },
+      },
+      { id: 'mailbox', core: true },
+      { id: 'other', files: { 'tests/send.test.ts': `import '@ferretry/core-mailbox/daemon';\n` } },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('conversation/tests/send.test.ts');
+    expect(found).toContain('conversation/daemon/host.ts:1: @ferretry/core-mailbox/daemon');
+    expect(found).toContain('other/tests/send.test.ts:1: @ferretry/core-mailbox/daemon');
+  });
+
+  test('a cli half may import its own generated verb list and no other generated file', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'cli/verbs/one.verb.ts': 'export default {};\n',
+          'cli/generated/verbs.ts': "import one from '../verbs/one.verb.ts';\nexport default [one];\n",
+          'cli/generated/other.ts': 'export {};\n',
+          'cli/build.ts':
+            "import verbs from './generated/verbs.ts';\nimport './generated/other.ts';\nexport { verbs };\n",
+        },
+      },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./generated/verbs.ts');
+    expect(found).toContain('alpha/cli/build.ts:2: ./generated/other.ts');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [
@@ -388,6 +442,86 @@ describe('context-imports', () => {
     expect(found).toContain('a contract imports only zod');
     expect(found).toContain('alpha/daemon/lib/x.ts:1: @ferretry/plugin-beta/daemon');
     expect(found).not.toContain('@ferretry/plugin-beta/contract');
+  });
+});
+
+describe('context-imports: a manifest split into fragments (manifest/)', () => {
+  const fragments = (body: string): Fixture =>
+    ws(
+      [
+        {
+          id: 'alpha',
+          contract: 'export const x = 1;\n',
+          files: {
+            'daemon/index.ts': 'export {};\n',
+            'manifest/kit.ts': `import { z } from 'zod';\nimport { route } from '${SDK}';\nimport { x } from '../contract/index.ts';\nexport const kit = [z, route, x];\n`,
+            'manifest/actions/10-a.actions.ts': body,
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+
+  test('a fragment may import its kit, the kernel manifest, a contract and zod', async () => {
+    const f = fragments(
+      `import { z } from 'zod';\nimport { route } from '${SDK}';\nimport { x } from '../../contract/index.ts';\nimport { kit } from '../kit.ts';\nexport default [z, route, x, kit];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('manifest/actions/10-a.actions.ts');
+    expect(found).not.toContain('manifest/kit.ts');
+  });
+
+  test('planted: a fragment that imports its own daemon, or node:fs, is refused', async () => {
+    const f = fragments(
+      `import '../../daemon/index.ts';\nimport { readFileSync } from 'node:fs';\nexport default [readFileSync];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).toContain('alpha/manifest/actions/10-a.actions.ts:1: ../../daemon/index.ts');
+    expect(found).toContain('a manifest imports only');
+    expect(found).toContain('node:fs');
+  });
+
+  test("manifest.ts keeps its narrow exemption: its own fragments' generated list and nothing else generated", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          files: {
+            'manifest/generated/actions.ts': 'export default [];\n',
+            'manifest/generated/other.ts': 'export default [];\n',
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+    f.write(
+      'packages/plugins/alpha/manifest.ts',
+      `import actions from './manifest/generated/actions.ts';\nimport other from './manifest/generated/other.ts';\nexport default [actions, other];\n`,
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./manifest/generated/actions.ts');
+    expect(found).toContain('./manifest/generated/other.ts');
+  });
+});
+
+describe('context-imports: the generated barrels of a contract', () => {
+  test("a contract may import its own folders' generated barrel, and no other generated file", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          contract: `export * from './generated/slots.ts';\nexport * from '../daemon/generated/features.ts';\n`,
+          files: {
+            'contract/generated/slots.ts': 'export const s = 1;\n',
+            'daemon/generated/features.ts': 'export default [];\n',
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).toContain('../daemon/generated/features.ts');
+    expect(found).not.toContain('./generated/slots.ts:');
   });
 });
 

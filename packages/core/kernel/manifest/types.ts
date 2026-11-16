@@ -254,6 +254,24 @@ export interface ProcessesPermission {
   readonly environment: readonly string[];
 }
 
+/** One entry a history pool may hold: a name in a harness home, and whether the pool keeps it as a folder or a file. */
+export interface HistoryPoolEntryDecl {
+  /** One plain segment (`projects`, `history.jsonl`): never hidden, never a path, never on the kernel's deny list. */
+  readonly name: string;
+  /** What the kernel makes in the pool on first use: a `0700` folder, or an empty `0600` file. */
+  readonly kind: 'folder' | 'file';
+}
+
+/**
+ * `permissions.historyPool`: the pool's state tree and the closed list of entries that may be linked to it.
+ * `state` is the NAME of one of the plugin's own `data.state` defs, which must be an opaque `<folder>/*` tree
+ * (`history-pool/*`); the pool is `state/<plugin>/<folder>`, outside every root, so it is never a credential home.
+ */
+export interface HistoryPoolPermission {
+  readonly state: string;
+  readonly entries: readonly HistoryPoolEntryDecl[];
+}
+
 /** What it may touch outside its own folder (§3.7). Anything undeclared is refused by the kernel ports. */
 export interface Permissions {
   readonly roots?: readonly RootName[];
@@ -283,6 +301,8 @@ export interface Permissions {
   readonly hostFacts?: true;
   /** It reads THIS process's own `/proc/self/io` and `/proc/self/stat` through `kernel.selfCounters` (Usage's profile), and no other file or pid. */
   readonly selfCounters?: true;
+  /** It lists the directories the host polls instead of watching through `kernel.fileEvents.polled()` (Usage's profile); it watches none. */
+  readonly fileEvents?: true;
   /**
    * It asks `kernel.paths.checkDirectory` whether an owner-named absolute path is a directory (Ferrets' session
    * working directory, today's resolver). The check answers for ANY absolute path with no root and no fence, so a
@@ -320,6 +340,14 @@ export interface Permissions {
    * nothing. Only the plugin that may hold `credentials` can mint, whatever it declares. Absent: every mint is refused.
    */
   readonly shareCredentials?: readonly string[];
+  /**
+   * It links a harness home's HISTORY entries to ONE shared pool of its own through `RootHandle.linkHistory` on its
+   * `agent-homes` handle (Claude Code and Codex: every ferret on the harness reads and continues any other's
+   * conversations). The kernel makes `<ferret home>/<entry>` a symlink to the real path of
+   * `state/<plugin>/<pool folder>/<entry>`; the list is fixed and closed, and the kernel's own deny list (sign-ins,
+   * settings, instruction files, `skills`, `plugins`, any hidden name) holds whatever is declared. See {@link HistoryPoolPermission}.
+   */
+  readonly historyPool?: HistoryPoolPermission;
   /**
    * It asks `kernel.processes` about this user's live processes and SIGTERMs one that runs from its own folder
    * (Runtimes: an ended Codex ferret's app-server pair). `environment` lists, by exact name, the variables `usersOf`

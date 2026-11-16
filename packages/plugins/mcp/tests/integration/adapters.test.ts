@@ -53,6 +53,8 @@ function memoryRoot(
     copyTree: () => Promise.reject(new Error('the fixture has no copyTree')),
     copyShared: () => Promise.reject(new Error('the fixture has no copyShared')),
     linkCredential: () => Promise.reject(new Error('the fixture has no linkCredential')),
+    linkHistory: () => Promise.reject(new Error('the fixture has no linkHistory')),
+    moveToHistoryPool: () => Promise.reject(new Error('the fixture has no linkHistory')),
     ensurePrivateDirectory: () => Promise.reject(new Error('the fixture has no ensurePrivateDirectory')),
     entries: () => Promise.reject(new Error('the fixture has no entries')),
     lstat: async path =>

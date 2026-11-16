@@ -5,7 +5,7 @@ import {
   type QueueWaitReason,
   type SendRecord,
   type SendResult,
-} from '../../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 
 /** How a send reached the ferret, as the daemon answered. */
 type SendDisposition = SendResult['disposition'];
@@ -93,6 +93,10 @@ function planLabel(flags: SendFlags): PeerMessageLabel {
   return urgent ? 'blocker' : (asked ?? 'action');
 }
 
+/** What a sender is told of a message handed to a ferret's Ferretry channel (nothing was typed into its prompt). */
+const CHANNEL_NOTE =
+  "handed to the ferret's Ferretry channel (nothing was typed); it reads it at its next step, and the daemon is watching for that";
+
 const DISPOSITION_NOTES: Readonly<Record<SendDisposition, string>> = {
   delivered: 'delivered',
   queued: "queued in the agent's own queue (it auto-submits at the turn boundary)",
@@ -115,6 +119,7 @@ const WAIT_REASON_NOTES: Readonly<Record<QueueWaitReason, string>> = {
   draft: 'its input box holds unsent text',
   unreadable: 'its screen cannot be read',
   stopped: 'it is not running',
+  compacting: 'the agent is compacting its context',
 };
 
 /**
@@ -141,8 +146,10 @@ export function waitingInFerretryQueue(
  * what it waits behind is an unconfirmed send of Ferretry's own — that a re-submit was attempted.
  */
 export function describeSendResult(
-  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'waitBehind' | 'label' | 'heldUntil'>,
+  result: Pick<SendResult, 'disposition' | 'fate' | 'waitReason' | 'waitBehind' | 'label' | 'heldUntil' | 'path'>,
 ): string {
+  // A channel send typed nothing: it was handed to the ferret's Ferretry channel, which it reads at its next step.
+  if (result.path === 'channel') return CHANNEL_NOTE;
   if (!waitingInFerretryQueue(result)) return describeDisposition(result.disposition);
   if (result.heldUntil !== undefined) return describeHold(result.label ?? 'action', result.heldUntil);
   if (result.waitBehind !== undefined)

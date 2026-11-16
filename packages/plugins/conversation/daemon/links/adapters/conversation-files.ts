@@ -1,48 +1,62 @@
-import type { FencedPath, RootHandle } from '@ferretry/kernel/contract';
+import { HARNESS_HISTORY_READ_MAX_BYTES, type HarnessHistoryFiles } from '@ferretry/core-ferrets/contract';
 import type { ConversationFileEntry, ConversationFiles } from '../lib/conversation-describer.ts';
 
 /**
- * The read-only `ConversationFiles` port over the `harness-history` root (G162: transcripts of other tools are read in
- * place, never written). Paths are relative to the root, so a harness's home is a folder name there. The root offers whole
- * or prefix reads only, so a tail is a prefix read to the file's end and a slice of it.
+ * The read-only `ConversationFiles` port over one history tree a harness handed over (`HarnessHistoryFiles`, G162:
+ * transcripts of other tools are read in place, never written). Paths are relative to the tree. A tail is a ranged read of the
+ * file's last bytes, never the file read whole.
  */
-export function conversationFiles(root: RootHandle): ConversationFiles {
-  const fenced = (relative: string): FencedPath | undefined => {
-    const resolved = root.resolve(relative);
-    return resolved.ok ? resolved.value : undefined;
-  };
+export function conversationFiles(files: HarnessHistoryFiles): ConversationFiles {
   const decode = (bytes: Uint8Array): string => new TextDecoder('utf-8').decode(bytes);
+
+  /**
+   * `length` bytes from `offset`, however many reads the port's per-read cap needs: one `read` returns at most
+   * {@link HARNESS_HISTORY_READ_MAX_BYTES}, and a caller that asked for more must not be handed that prefix as if it were
+   * the answer. Stops early at the end of the file (a short or empty read); `undefined` when the first read fails.
+   */
+  async function readRange(path: string, offset: number, length: number): Promise<Uint8Array | undefined> {
+    const chunks: Uint8Array[] = [];
+    let got = 0;
+    while (got < length) {
+      const want = Math.min(HARNESS_HISTORY_READ_MAX_BYTES, length - got);
+      const chunk = await files.read(path, offset + got, want);
+      if (chunk === undefined) {
+        if (chunks.length === 0) return undefined;
+        break;
+      }
+      if (chunk.length === 0) break;
+      chunks.push(chunk);
+      got += chunk.length;
+      if (chunk.length < want) break;
+    }
+    if (chunks.length === 1) return chunks[0];
+    const out = new Uint8Array(got);
+    let at = 0;
+    for (const chunk of chunks) {
+      out.set(chunk, at);
+      at += chunk.length;
+    }
+    return out;
+  }
+
   return {
     async entries(directory): Promise<readonly ConversationFileEntry[]> {
-      const path = fenced(directory);
-      if (path === undefined) return [];
-      const names = await root.list(path).catch((): readonly string[] => []);
-      const entries: ConversationFileEntry[] = [];
-      for (const name of names) {
-        const child = fenced(`${directory}/${name}`);
-        const stat = child === undefined ? undefined : await root.stat(child).catch(() => undefined);
-        entries.push({ name, kind: stat === undefined ? 'other' : stat.kind });
-      }
-      return entries;
+      return (await files.entries(directory)).map(entry => ({ name: entry.name, kind: entry.kind }));
     },
     async info(file) {
-      const path = fenced(file);
-      const stat = path === undefined ? undefined : await root.stat(path).catch(() => undefined);
-      if (stat === undefined || stat.kind !== 'file') return undefined;
-      return { modifiedAtMs: Date.parse(stat.modified), size: stat.size };
+      const stat = await files.stat(file);
+      return stat === undefined ? undefined : { modifiedAtMs: stat.modifiedMs, size: stat.size };
     },
     async head(file, maxBytes) {
-      const path = fenced(file);
-      if (path === undefined) return undefined;
-      return await root.readBytes(path, maxBytes).then(decode, () => undefined);
+      const bytes = await readRange(file, 0, maxBytes);
+      return bytes === undefined ? undefined : decode(bytes);
     },
     async tail(file, maxBytes) {
-      const path = fenced(file);
-      if (path === undefined) return undefined;
-      const stat = await root.stat(path).catch(() => undefined);
+      const stat = await files.stat(file);
       if (stat === undefined) return undefined;
-      const bytes = await root.readBytes(path, stat.size).catch(() => undefined);
-      return bytes === undefined ? undefined : decode(bytes.subarray(Math.max(0, bytes.byteLength - maxBytes)));
+      const from = Math.max(0, stat.size - maxBytes);
+      const bytes = await readRange(file, from, stat.size - from);
+      return bytes === undefined ? undefined : decode(bytes);
     },
   };
 }

@@ -102,7 +102,7 @@ describe('the board is opt-in', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).startWith('The ferretry board is off, so this work needs no card');
-    should(error.message).containEql('fy ask -k yesno "Track this on the board?"');
+    should(error.message).containEql('fy agenda add -k yesno "Track this on the board?"');
     should(ports.store.cards.size).equal(0);
   });
 
@@ -230,7 +230,7 @@ describe('the board is opt-in', () => {
     // Assert
     should(made.card.id).equal('F1');
     should(error).be.instanceOf(BoardError);
-    should(error?.message).containEql('!A12 already made &F1');
+    should(error?.message).containEql('^A12 already made &F1');
     should(keys).eql(['board:approval:lead:A12', 'board:approval:lead:A12']);
   });
 
@@ -243,7 +243,7 @@ describe('the board is opt-in', () => {
     const error = await refusal(service.create(create({ approval: 'A12' }), lead));
 
     // Assert
-    should(error.message).containEql('The approval does not count: !A12 already made &F4; one Yes makes one card.');
+    should(error.message).containEql('The approval does not count: ^A12 already made &F4; one Yes makes one card.');
   });
 
   it("should refuse another ferret's Yes and a No", async () => {
@@ -256,8 +256,8 @@ describe('the board is opt-in', () => {
     const no = await refusal(service.create(create({ approval: 'A13' }), lead));
 
     // Assert
-    should(theirs.message).containEql('!A12 is not an answered ask on your ledger');
-    should(no.message).containEql('the owner did not answer Yes to !A13');
+    should(theirs.message).containEql('^A12 is not an answered ask on your ledger');
+    should(no.message).containEql('the owner did not answer Yes to ^A13');
   });
 
   it('should read a ledger that cannot be read as no Yes', async () => {
@@ -268,7 +268,7 @@ describe('the board is opt-in', () => {
     const error = await refusal(service.create(create({ approval: 'A12' }), lead));
 
     // Assert
-    should(error.message).containEql('!A12 is not an answered ask on your ledger');
+    should(error.message).containEql('^A12 is not an answered ask on your ledger');
   });
 
   it('should ignore an approval where the board is on, and record none', async () => {

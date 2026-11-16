@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test';
+import { CHANNEL_WRITE_BUDGET_MS } from '../../../contract/wire-channel.ts';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { join } from 'node:path';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
@@ -26,13 +28,8 @@ import { definePlugin, implementDaemon, type Needer } from '@ferretry/kernel/man
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
-import {
-  CONVERSATION_STATE,
-  ConversationPort,
-  STUCK_FRAME_STATES,
-  parseMessageAttachments,
-  parsePeerEnvelope,
-} from '../../../contract/index.ts';
+import { parseMessageAttachments, parsePeerEnvelope } from '@ferretry/core-mailbox/contract';
+import { CONVERSATION_STATE, ConversationPort, STUCK_FRAME_STATES } from '../../../contract/index.ts';
 import { conversationDaemon } from '../../../daemon/index.ts';
 import {
   type HarnessGate,
@@ -42,7 +39,7 @@ import {
   SEND_UNAVAILABLE,
   STRANDED_SENTENCE,
   UNCONFIRMED_SENTENCE,
-} from '../../../daemon/harness-seam.ts';
+} from '@ferretry/core-mailbox/contract';
 import { writeAskedQuestion } from '../../../daemon/questions/adapters/state-asked-question.ts';
 import { KeyedSerialExecutor } from '../../../daemon/seams/keyed-serial-executor.ts';
 import { fixtureTexts } from '../../support/fixtures.ts';
@@ -248,25 +245,57 @@ async function conversation(
   const acted: string[] = [];
   const base = memoryStatePort(CONVERSATION_STATE);
   /** Set to make every appended line fail (the send ledger appends each accept, settle and withdrawal). */
-  const writes = { fail: false };
+  const writes: { fail: boolean; onLines?: (() => void) | undefined } = { fail: false };
   const state: typeof base = {
     ...base,
+    // A test may run something at the next read of any ledger (a claim granted while the fall back is about to type).
+    lines: ((...args: Parameters<typeof base.lines>) => {
+      writes.onLines?.();
+      return base.lines(...args);
+    }) as typeof base.lines,
     append: async (...args: Parameters<typeof base.append>) => {
       if (writes.fail) throw new Error('ENOSPC: no space left on device, write /state/sends/f1.jsonl');
       return await base.append(...args);
     },
   };
+  const guardedAct = () =>
+    (async (target: unknown) => {
+      acted.push(String(JSON.stringify(target)));
+      throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
+    }) as never;
   const served = conversationDaemon(gate);
   const implementation = {
     ...served,
     build: (ctx: Parameters<NonNullable<typeof served.build>>[0]) => {
       const build = served.build;
       if (build === undefined) throw new Error('the conversation daemon half has no build');
-      const act = (async (target: unknown) => {
-        acted.push(String(JSON.stringify(target)));
-        throw new Error('Conversation entered kernel.act around the harness seam: that deadlocks the runner');
-      }) as typeof ctx.kernel.act;
-      const built = build({ ...ctx, kernel: { ...ctx.kernel, act, state } });
+      const unstamped = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct(), state } });
+      // The host's stand-in admission names the caller but stamps no credential; Gate's real one attaches the ferret's own,
+      // which is what `ferretOf` reads in the daemon, so the channel tools get exactly that and nothing else.
+      const credentialed =
+        (handler: (call: never, input: unknown) => unknown) =>
+        (call: { caller?: { kind: string; id?: string } }, input: unknown) =>
+          handler(
+            (call.caller?.kind === 'ferret'
+              ? { ...call, credential: { tokenClass: 'ferret', ferret: call.caller.id } }
+              : call) as never,
+            input,
+          );
+      return {
+        ...unstamped,
+        tools: Object.fromEntries(
+          Object.entries(unstamped.tools ?? {}).map(([name, handler]) => [name, credentialed(handler as never)]),
+        ),
+      } as unknown as typeof unstamped;
+    },
+  } as typeof served;
+  /** The send routes are the Mailbox's now: a test that stamps a standing on one wraps the Mailbox's half. */
+  const mailbox = {
+    ...mailboxDaemon,
+    build: (ctx: Parameters<NonNullable<typeof mailboxDaemon.build>>[0]) => {
+      const build = mailboxDaemon.build;
+      if (build === undefined) throw new Error('the mailbox daemon half has no build');
+      const built = build({ ...ctx, kernel: { ...ctx.kernel, act: guardedAct() } });
       const stamped = [
         [SEND_ROUTE, options.sendStanding],
         [ENTER_ROUTE, options.enterStanding],
@@ -277,16 +306,16 @@ async function conversation(
       for (const [key, standing] of stamped) {
         if (standing === undefined) continue;
         const handler = routes[key];
-        if (handler === undefined) throw new Error(`the conversation daemon half serves no ${key} route`);
+        if (handler === undefined) throw new Error(`the mailbox daemon half serves no ${key} route`);
         const peer: RouteHandler = async call => await handler({ ...call, ...standing } as typeof call);
         wrapped = { ...wrapped, [key]: peer };
       }
       return { ...built, routes: wrapped } as typeof built;
     },
-  } as typeof served;
+  } as typeof mailboxDaemon;
   const clock = fixedClock('2026-11-08T09:00:00Z');
   const host = await testHost({
-    plugins: [implementation, ...(options.consumers ?? []).map(consumerPlugin)],
+    plugins: [mailbox, implementation, ...(options.consumers ?? []).map(consumerPlugin)],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
@@ -444,6 +473,19 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
     // The same id again types nothing: the kept record answers it (as today's duplicate is answered from its record).
     expect((await send(host)).status).toBe(200);
     expect(ferrets.delivered).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('a runner that rejects with a failure it already worded keeps it: the record STAYS and the answer is the runner’s own', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => {
+      throw new ApiError(502, 'the runner could not reach the terminal', 'runner_unreachable');
+    };
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([502, 'runner_unreachable']);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate])).toEqual([['req-1', 'accepted']]);
     await host.stop();
   });
 
@@ -2735,4 +2777,543 @@ describe('a send to a box that cannot be read is kept and delivered once it read
     expect(ferrets.delivered.length).toBeGreaterThan(tries);
     await host.stop();
   }, 30_000);
+});
+
+/**
+ * THE CLAUDE CHANNEL. A ferret's message, or the daemon's own, to a Claude ferret whose MCP server is listening is OFFERED
+ * to that server (`channel_poll`), which CLAIMS it (`channel_claim`) right before writing it, instead of the message being
+ * typed; the transcript's `enqueue` line is the receipt and the user entry the delivery. A claim is never a receipt: with
+ * no receipt within the window the message is typed ONCE — by moving the same ledger row to the typing path — and a
+ * claimed message that went unreceived marks the channel broken. The owner's words are never channelled.
+ */
+describe('a ferret’s message to a Claude ferret goes through its channel', () => {
+  const settle = async (): Promise<void> => {
+    for (let index = 0; index < 40; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const pass = async (clock: { advance(by: number): Promise<void> }, ms: number): Promise<void> => {
+    for (let gone = 0; gone < ms; gone += 1_000) {
+      await clock.advance(1_000);
+      await settle();
+    }
+  };
+  const AS_F1 = asFerret('f1');
+  const GEN = 'gen-1';
+  const SENT = `${banner('message')}ship the report`;
+  const LEAD = { kind: 'ferret', ferret: CALLER } as const;
+  const AT = '2026-11-08T09:00:00.500Z';
+  /** What the Claude plugin reads out of the transcript: the harness's receipt, then the delivery. */
+  const receipt = {
+    id: 'queue-operation:1',
+    at: AT,
+    role: 'system',
+    text: SENT,
+    data: { proof: 'queue-operation', operation: 'enqueue', channelSendId: 'lead-1' },
+  };
+  // What the Claude reader makes of the user record the channel message becomes: the wrapper off, its send_id kept.
+  const delivery = {
+    id: 'u-1',
+    at: '2026-11-08T09:00:00.700Z',
+    role: 'user',
+    text: SENT,
+    data: { channelSendId: 'lead-1' },
+  };
+  const unrelated = { id: 'u-0', at: '2026-11-08T08:00:00.000Z', role: 'user', text: 'something earlier' };
+  type Host = Awaited<ReturnType<typeof conversation>>['host'];
+  const poll = async (host: Host, generation = GEN) =>
+    await host.tool('channel_poll', { generation, waitMs: 0 }, { as: AS_F1 });
+  const claim = async (host: Host, sendId: string, generation = GEN) =>
+    await host.tool('channel_claim', { generation, sendId }, { as: AS_F1 });
+  const rows = async (api: Awaited<ReturnType<typeof conversation>>['api'], sendId: string) =>
+    (await api().sends(F1)).sends.filter(entry => entry.sendId === sendId);
+  const row = async (api: Awaited<ReturnType<typeof conversation>>['api'], sendId: string) =>
+    (await rows(api, sendId)).find(entry => entry.withdrawn !== true);
+
+  /** Two sends on one lane: the first claimed at 0s and never received, the second claimed at 11s (its grant still live when the first expires at 12s). */
+  const expiredFirstLiveSecond = async () => {
+    const world = await conversation();
+    const { host, ferrets, api, clock } = world;
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'first', sendId: 'lead-1' });
+    await poll(host);
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 11_000);
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'second', sendId: 'lead-2' });
+    await poll(host);
+    expect(await claim(host, 'lead-2')).toMatchObject({
+      data: { claimed: true, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
+    });
+    return world;
+  };
+
+  test('REGRESSION: one expired claim preserves another live grant — the second send is not typed under its own live claim', async () => {
+    const { host, ferrets, api, clock } = await expiredFirstLiveSecond();
+    try {
+      // The first expires at 12s (its tracker look lands a second later): the lane is broken and the first is typed; the
+      // second's grant (11s) is still live, so it is neither typed nor read as never claimed.
+      await pass(clock, 2_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'accepted' });
+      // The second waits out its own grant + write budget + receipt window (11s + 2s + 10s), then is typed exactly once.
+      await pass(clock, 9_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      await pass(clock, 1_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([
+        `${banner('message')}first`,
+        `${banner('message')}second`,
+      ]);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('REGRESSION: the second send, still granted when the lane breaks, is delivered by its own receipt and never typed', async () => {
+    const { host, ferrets, api, clock } = await expiredFirstLiveSecond();
+    try {
+      await pass(clock, 1_000);
+      const entries = [
+        unrelated,
+        {
+          ...receipt,
+          id: 'queue-operation:2',
+          at: '2026-11-08T09:00:12.500Z',
+          text: `${banner('message')}second`,
+          data: { ...receipt.data, channelSendId: 'lead-2' },
+        },
+        {
+          ...delivery,
+          id: 'u-2',
+          at: '2026-11-08T09:00:12.700Z',
+          text: `${banner('message')}second`,
+          data: { channelSendId: 'lead-2' },
+        },
+      ];
+      ferrets.reviewEntries = entries;
+      // The look at the second send is its own deadline (11s + 2s + 10s): the receipt is read then, and it is delivered.
+      await pass(clock, 12_000);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'delivered' });
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('REGRESSION: both identical channel sends require and receive their own user proof', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    await claim(host, 'lead-2');
+    ferrets.reviewEntries = [
+      unrelated,
+      receipt,
+      delivery,
+      { ...receipt, id: 'queue-operation:2', data: { ...receipt.data, channelSendId: 'lead-2' } },
+      { ...delivery, id: 'u-2', data: { channelSendId: 'lead-2' } },
+    ];
+    await pass(clock, 2_000);
+    try {
+      expect(await row(api, 'lead-1')).toMatchObject({ fate: 'delivered', path: 'channel' });
+      expect(await row(api, 'lead-2')).toMatchObject({ fate: 'delivered', path: 'channel' });
+      expect(ferrets.delivered).toEqual([]);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('an agent send to a connected Claude ferret is handed to the channel, typed nowhere, then proven by the transcript', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+
+    const sent = await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+
+    // The answer names the channel (so the sender is never told something was typed), and so does a repeat of the same send.
+    expect(sent).toMatchObject({
+      ok: true,
+      value: { disposition: 'sent', fate: 'accepted', sendId: 'lead-1', path: 'channel' },
+    });
+    expect(await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' })).toMatchObject({
+      ok: true,
+      value: { sendId: 'lead-1', path: 'channel' },
+    });
+    expect(ferrets.delivered).toEqual([]);
+    expect(ferrets.queued).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', senderKind: 'agent', from: 'lead' });
+    // The MCP server polls, is OFFERED the exact text that would have been typed (banner included), and claims it.
+    const polled = await poll(host);
+    expect(polled.data).toEqual({ messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }] });
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
+
+    // Claude writes the enqueue line at once and the user entry when the turn takes it: delivered, never typed.
+    ferrets.reviewEntries = [unrelated, receipt, delivery];
+    await pass(clock, 6_000);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'delivered' });
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('a receipt alone (a busy ferret) makes it queued and it is still never typed', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    ferrets.reviewEntries = [unrelated, receipt];
+
+    await pass(clock, 8_000);
+
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued', queueProof: 'transcript' });
+    expect(ferrets.delivered).toEqual([]);
+    await host.stop();
+  });
+
+  test('a CLAIMED message with no receipt in the window marks the channel broken and is typed ONCE; nothing more is channelled', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    // The server claimed (and wrote) it, but Claude refused the channel: no enqueue line ever appears.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
+    ferrets.reviewEntries = [unrelated];
+
+    await pass(clock, 12_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct', senderKind: 'agent', from: 'lead' });
+    // No duplicate row, and no withdrawn one: the SAME row moved from the channel to typing.
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+
+    // The server is still polling (it does not know Claude dropped the channel): the broken channel routes nothing.
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'second thing', sendId: 'lead-2' });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT, `${banner('message')}second thing`]);
+    expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    expect((await poll(host)).data).toEqual({ messages: [] });
+    await host.stop();
+  });
+
+  test('withdraw racing a delayed poll response: the late claim is refused, so exactly one transport carries the message', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    // The poll answer carrying it has LEFT the daemon, and is delayed on its way to the server.
+    expect((await poll(host)).data).toEqual({ messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }] });
+    ferrets.reviewEntries = [unrelated];
+
+    // No receipt and no claim in the window: the fallback types it.
+    await pass(clock, 12_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+
+    // The delayed answer finally reaches the server, which asks to push: refused, so nothing is written to Claude.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: false } });
+    expect((await poll(host)).data).toEqual({ messages: [] });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await host.stop();
+  });
+
+  test('a claim from an older subscriber generation is refused once a newer server polled', async () => {
+    const { host, api } = await conversation();
+    await poll(host, 'old');
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host, 'old');
+
+    // The server restarted: a new generation polls and is offered the unclaimed message again.
+    expect((await poll(host, 'new')).data).toEqual({
+      messages: [{ sendId: 'lead-1', text: SENT, from: LEAD_NAME }],
+    });
+
+    expect(await claim(host, 'lead-1', 'old')).toMatchObject({ data: { claimed: false } });
+    expect(await claim(host, 'lead-1', 'new')).toMatchObject({ data: { claimed: true } });
+    await host.stop();
+  });
+
+  test('a fall back that cannot type (the bind failed) leaves the row on the typing path, retried and typed once when it works', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 5_000);
+    // From here every try to reach the pane fails, as a failed bind or a refusal in between would.
+    ferrets.script.observe = () => Promise.reject(new Error('the pane could not be bound'));
+
+    await pass(clock, 8_000);
+
+    // Nothing was typed, nothing was lost, and the row was moved — not withdrawn and re-created.
+    expect(ferrets.delivered).toEqual([]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct', fate: 'accepted', attempt: 1 });
+
+    // The pane comes back: the tracker's next look types it, exactly once.
+    ferrets.script.observe = undefined;
+    await pass(clock, 3_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await pass(clock, 10_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('a claim granted late (past the receipt window of the send) is waited out: grant + write budget + window pass before anything is typed, then it is typed ONCE', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 9_000);
+    // The daemon grants the claim just before the send's own window ends; the answer may reach the server late.
+    expect(await claim(host, 'lead-1')).toMatchObject({
+      data: { claimed: true, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
+    });
+
+    // Past the send's own window and past grant + window (19 s), a second short of grant + budget + window: nothing typed.
+    await pass(clock, 11_000);
+    expect(ferrets.delivered).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
+
+    await pass(clock, 2_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct' });
+    await pass(clock, 10_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    // The server's late answer is the daemon's refusal: nothing more can be pushed.
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: false } });
+    await host.stop();
+  });
+
+  test('a claim granted in the instant between the last look and the typing keeps the row on the channel: nothing is typed inside the write budget', async () => {
+    const { host, ferrets, api, clock, writes } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    let racing = false;
+    let granted: ReturnType<typeof claim> | undefined;
+    Object.defineProperty(ferrets, 'reviewEntries', {
+      configurable: true,
+      get: () => {
+        if (racing) {
+          racing = false;
+          // The next ledger read is the fall back's own: the server's claim lands there.
+          writes.onLines = () => {
+            writes.onLines = undefined;
+            granted = claim(host, 'lead-1');
+          };
+        }
+        return [unrelated];
+      },
+    });
+    await pass(clock, 8_000);
+    racing = true;
+
+    await pass(clock, 4_000);
+    expect(await granted).toMatchObject({ data: { claimed: true } });
+    expect(ferrets.delivered).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'accepted' });
+
+    // Its own deadline is grant + budget + window: only then is it typed, once.
+    await pass(clock, 14_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await rows(api, 'lead-1')).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('two IDENTICAL channel sends do not share one receipt: only lead-1 was enqueued, so lead-2 is typed once and lead-1 never', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    await claim(host, 'lead-2');
+    // Claude's transcript shows ONE enqueue line, for lead-1 (its entry carries the wrapper's send id).
+    ferrets.reviewEntries = [unrelated, receipt];
+
+    await pass(clock, 14_000);
+
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued', queueProof: 'transcript' });
+    expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await host.stop();
+  });
+
+  test('a slow receipt that shows up just before the typing means nothing is typed', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 8_000);
+    // The enqueue line is written between the last look and the deadline's own.
+    ferrets.reviewEntries = [unrelated, receipt];
+
+    await pass(clock, 6_000);
+
+    expect(ferrets.delivered).toEqual([]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', fate: 'queued' });
+    await host.stop();
+  });
+
+  test('the daemon’s own notice goes through the channel too, from Ferretry', async () => {
+    const { host, ferrets, api, apiFor } = await conversation(
+      new HarnessFerrets(),
+      OPEN,
+      {},
+      { consumers: ['agenda'] },
+    );
+    await poll(host);
+
+    // Agenda's turn-end check is the daemon speaking; it reaches the port as its own plugin.
+    await apiFor('agenda').send(F1, { kind: 'agenda' }, { message: 'finish your turn', sendId: 'agenda-1' });
+
+    expect(ferrets.delivered).toEqual([]);
+    expect((await poll(host)).data).toEqual({
+      messages: [{ sendId: 'agenda-1', text: 'finish your turn', from: 'Ferretry' }],
+    });
+    expect(await row(api, 'agenda-1')).toMatchObject({ path: 'channel', senderKind: 'daemon' });
+    await host.stop();
+  });
+
+  test('the owner’s own message is typed, never channelled, even while the channel is connected', async () => {
+    const { host, ferrets } = await conversation();
+    await poll(host);
+
+    await send(host, 'owner-1', 'f1', { message: 'from the owner' });
+
+    expect(ferrets.delivered).toEqual([{ text: 'from the owner' }]);
+    expect((await poll(host)).data).toEqual({ messages: [] });
+    await host.stop();
+  });
+
+  test('the Warden speaks by typing, never through the channel', async () => {
+    const { host, ferrets, api } = await conversation();
+    await poll(host);
+
+    await api().send(F1, { kind: 'warden' }, { message: 'press on', sendId: 'w-1' });
+
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual(['press on']);
+    await host.stop();
+  });
+
+  test('a ferret that is not connected is typed to, as before', async () => {
+    const { host, ferrets, api } = await conversation();
+
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    expect(await row(api, 'lead-1')).toMatchObject({ path: 'direct' });
+    await host.stop();
+  });
+
+  test('a Codex ferret is typed to even when something is polling its name', async () => {
+    const ferrets = new HarnessFerrets();
+    const { host, api } = await conversation(ferrets, OPEN, { harness: 'codex' });
+    await poll(host);
+
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([SENT]);
+    await host.stop();
+  });
+
+  test('the channel tools answer only a ferret, and refuse what they cannot read', async () => {
+    const { host } = await conversation();
+
+    expect(await host.tool('channel_poll', { generation: GEN, waitMs: 0 }, { as: owner() })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_claim', { generation: GEN, sendId: 'x' }, { as: owner() })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_poll', { generation: GEN, waitMs: 99_000 }, { as: AS_F1 })).toMatchObject({
+      isError: true,
+    });
+    expect(await host.tool('channel_poll', { waitMs: 0 }, { as: AS_F1 })).toMatchObject({ isError: true });
+    expect(await host.tool('channel_claim', { generation: GEN }, { as: AS_F1 })).toMatchObject({ isError: true });
+    expect(await poll(host)).toMatchObject({ text: 'no messages' });
+    expect(await claim(host, 'never-offered')).toMatchObject({ text: 'not claimed', data: { claimed: false } });
+    await host.stop();
+  });
+});
+
+/**
+ * THE SAFE PANE (owner ruling 2026-11-15): nothing is typed into a pane that is compacting, parked on a dialog or consent
+ * prompt, or (for a ferret's message) holding text in its composer. The send is kept and the tracker looks every second.
+ */
+describe('a send waits for a safe pane and is typed within a second of it clearing', () => {
+  const settle = async (): Promise<void> => {
+    for (let index = 0; index < 40; index += 1) await new Promise(resolve => setTimeout(resolve, 0));
+  };
+  const pass = async (clock: { advance(by: number): Promise<void> }, ms: number): Promise<void> => {
+    for (let gone = 0; gone < ms; gone += 1_000) {
+      await clock.advance(1_000);
+      await settle();
+    }
+  };
+  const idle = ok({ alive: true, dead: false, promptReady: true, activeWork: false });
+  const cases = [
+    [
+      'compacting its context',
+      ok({ alive: true, dead: false, promptReady: false, activeWork: true, compacting: true }),
+      'busy',
+    ],
+    [
+      'parked on a dialog',
+      ok({
+        alive: true,
+        dead: false,
+        promptReady: false,
+        activeWork: false,
+        blockingPrompt: 'Do you want to proceed?',
+      }),
+      'dialog',
+    ],
+  ] as const;
+  for (const [name, held, waitReason] of cases) {
+    test(`the owner’s send is kept while the pane is ${name} and typed once it clears`, async () => {
+      const { host, ferrets, api, clock } = await conversation();
+      let pane: typeof idle | typeof held = held;
+      ferrets.script.observe = async () => pane;
+
+      const kept = await send(host, 'owner-1', 'f1', { message: 'hello again' });
+
+      expect(kept.json()).toMatchObject({ fate: 'accepted', waitReason });
+      await pass(clock, 3_000);
+      expect(ferrets.delivered).toEqual([]);
+      expect(ferrets.queued).toEqual([]);
+      pane = idle;
+      await pass(clock, 1_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual(['hello again']);
+      expect((await api().sends(F1)).sends.filter(entry => entry.withdrawn !== true)).toHaveLength(1);
+      await host.stop();
+    });
+  }
+
+  test('a ferret’s send is kept while text sits in the composer and typed within a second of it being empty', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    let pane: Awaited<ReturnType<NonNullable<typeof ferrets.script.observe>>> = ok({
+      alive: true,
+      dead: false,
+      promptReady: true,
+      activeWork: false,
+      draft: 'half a thought',
+    });
+    ferrets.script.observe = async () => pane;
+
+    const kept = await api().send(
+      F1,
+      { kind: 'ferret', ferret: CALLER },
+      { message: 'ship the report', sendId: 'lead-1' },
+    );
+
+    expect(kept).toMatchObject({ ok: true, value: { fate: 'accepted', waitReason: 'draft' } });
+    await pass(clock, 3_000);
+    expect(ferrets.delivered).toEqual([]);
+    pane = ok({ alive: true, dead: false, promptReady: true, activeWork: false });
+    await pass(clock, 1_000);
+    expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}ship the report`]);
+    await host.stop();
+  });
 });

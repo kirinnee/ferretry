@@ -5,6 +5,8 @@ import {
   CLAUDE_CODE_AUDIT,
   CLAUDE_CODE_CONFIG,
   CLAUDE_CODE_DISCOVERY,
+  CLAUDE_CODE_HISTORY_ENTRIES,
+  CLAUDE_CODE_HISTORY_POOL,
   CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_READ_MODELS,
@@ -220,7 +222,7 @@ export default definePlugin({
   },
 
   data: {
-    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_DISCOVERY, CLAUDE_CODE_LAUNCH_SETTINGS],
+    state: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL, CLAUDE_CODE_DISCOVERY, CLAUDE_CODE_LAUNCH_SETTINGS],
     config: [CLAUDE_CODE_CONFIG, CLAUDE_CODE_SETTINGS, CLAUDE_CODE_HOOKS],
     readModels: CLAUDE_CODE_READ_MODELS,
     publishes: [ClaudeCodeUpdateFinished],
@@ -236,10 +238,15 @@ export default definePlugin({
     ],
   },
 
+  // The one sentence that keeps Claude's dangerous-rm guard from stopping a Claude ferret (c58 O11b). Claude only: Codex has no such guard.
+  instructions: [{ id: 'rm-targets', text: 'instructions/rm.md', when: { role: 'any', harness: CLAUDE_CODE } }],
+
   onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],
   doctor: ['claude-code-paths'],
 
   permissions: {
+    // Every ferret home links these entries to one pool of this plugin's own (`RootHandle.linkHistory`).
+    historyPool: { state: CLAUDE_CODE_HISTORY_POOL.name, entries: CLAUDE_CODE_HISTORY_ENTRIES },
     roots: ['agent-homes', 'harness-history'],
     network: ['registry.npmjs.org'],
     // tmux: the answers type into the ferret's pane; which, readlink, uname, printenv: the facts the kernel has no port for.

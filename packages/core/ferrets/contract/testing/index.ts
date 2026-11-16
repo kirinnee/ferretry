@@ -47,10 +47,12 @@ import {
   type QueueOutcome,
   type Runner,
   type RunnerHandle,
+  type RunnerPaneIdentity,
   runnerDeliveryFailure,
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
   type FormKey,
+  type PickerKey,
   type RunnerFormCapture,
   type TranscriptEntry,
   type RunnerHeldAt,
@@ -148,6 +150,14 @@ export class FakeRunner implements Runner {
   async alive(handle: RunnerHandle): Promise<boolean> {
     return this.#live.has(handle);
   }
+  /** What the next `identify` answers instead of the live pane: a test's own `'gone'`, or `undefined` for a runner that cannot tell. */
+  identity: 'gone' | undefined | 'live' = 'live';
+  async identify(handle: RunnerHandle): Promise<RunnerPaneIdentity | 'gone' | undefined> {
+    if (this.identity !== 'live') return this.identity;
+    const live = this.#live.get(handle);
+    if (live === undefined) return 'gone';
+    return { handle, ...(live.pid === undefined ? {} : { pid: live.pid }), processStart: String(live.startedAt) };
+  }
   async signal(): Promise<void> {}
   async deliver(handle: RunnerHandle, delivery: RunnerDelivery): Promise<DeliveryOutcome> {
     this.#fail();
@@ -236,6 +246,12 @@ export class FakeRunner implements Runner {
     if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.formKeys.push({ handle, key });
     this.onFormWrite({ key });
+  }
+  readonly pickerKeys: { readonly handle: RunnerHandle; readonly key: PickerKey }[] = [];
+  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.pickerKeys.push({ handle, key });
   }
   async formPaste(handle: RunnerHandle, text: string): Promise<void> {
     this.#fail();
@@ -438,7 +454,7 @@ export class FakeHarness implements Harness {
   readonly bytes = new Map<FerretId, Uint8Array>();
   /** Which parser speaks the fake's bytes. */
   bytesFormat: 'claude' | 'codex' = 'claude';
-  /** Every ferret `transcriptBytes` was asked about, in order. */
+  /** Every ferret a `transcriptBytes` ask OPENED a handle for, in order (an ask that proves no transcript opens none, so it is not counted: it leaves nothing to close). */
   readonly bytesAsked: FerretId[] = [];
   /** Every ferret whose handle was closed, in order (a handle's `close()` is idempotent in the real harnesses, not here). */
   readonly bytesClosed: FerretId[] = [];
@@ -465,9 +481,9 @@ export class FakeHarness implements Harness {
     return this.transcripts.get(ferret)?.stamp;
   }
   async transcriptBytes(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined> {
-    this.bytesAsked.push(ferret);
     const opened = this.bytes.get(ferret);
     if (opened === undefined) return undefined;
+    this.bytesAsked.push(ferret);
     let file = this.#bytesTokens.get(opened);
     if (file === undefined) {
       this.#bytesOpened += 1;

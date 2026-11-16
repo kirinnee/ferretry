@@ -38,6 +38,8 @@ export function sessionMoveNeedsForTest(overrides: Partial<SessionMoveNeeds> = {
     resume: refusing('resume'),
     launch: refusing('launch'),
     preflight: refusing('preflight'),
+    pane: () => refusing('pane'),
+    restart: refusing('restart'),
     askAgent: async () => {
       throw new Error('askAgent is not exercised by the session-move fixture');
     },

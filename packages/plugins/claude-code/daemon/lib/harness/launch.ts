@@ -1,7 +1,21 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
-import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import {
+  CHANNEL_AGENT_INSTRUCTION,
+  CLAUDE_CHANNELS_FLAG,
+  channelToolsServer,
+  claudeChannelsFor,
+  FERRETRY_MCP_SERVER,
+} from '@ferretry/plugin-runtimes/contract';
+import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
-import { fixedLayer } from './fixed-layer.ts';
+import {
+  CLAUDE_HOME_ENV,
+  CLAUDE_PROMPT_ENV,
+  CLAUDE_RM_WAIVER_ENV,
+  CLAUDE_UNSET_ENV,
+  fixedLayer,
+  rmWaiverApplies,
+} from './fixed-layer.ts';
 import { deepMergeSettings } from './settings.ts';
 import { startupModelArguments } from './startup.ts';
 
@@ -34,7 +48,22 @@ export interface HomeInputs {
   readonly effort?: string | undefined;
   /** The start asked for (`true`) or against (`false`) the harness's fast mode; absent leaves Claude's own setting. */
   readonly fast?: boolean | undefined;
+  /**
+   * The ferret is launched with Ferretry's message channel (see {@link channelsOn}): the tools server is added to its MCP
+   * servers (run as {@link HomeInputs.fyCommand}, with the launch marker) and its memory says how to treat channel messages.
+   */
+  readonly channels?: boolean | undefined;
+  /** The `fy` executable the tools server runs as; read only with {@link HomeInputs.channels}. */
+  readonly fyCommand?: string | undefined;
 }
+
+/**
+ * Whether a launch gets the channel: the `channels` setting when it is written, otherwise only a login whose own account file
+ * says `claude_max` (the `account` part Runtimes adds). Team, Enterprise, any other type and an unknown one are OFF: a refused
+ * channel would only cost every message a receipt window before it was typed.
+ */
+export const channelsOn = (explicit: boolean | undefined, parts: readonly LaunchPart[]): boolean =>
+  claudeChannelsFor(explicit, parts.flatMap(part => (part.kind === 'account' ? [part.organizationType] : [])).at(-1));
 
 export interface HomeText {
   readonly memory: string;
@@ -70,12 +99,17 @@ export function homeText(inputs: HomeInputs): HomeText {
   const memory = [
     ...inputs.instructions.map(entry => entry.text.trim()),
     ...inputs.parts.flatMap(part => (part.kind === 'instruction' ? [part.text.trim()] : [])),
+    ...(inputs.channels === true ? [CHANNEL_AGENT_INSTRUCTION] : []),
   ]
     .filter(text => text !== '')
     .join('\n\n');
-  const servers = Object.fromEntries(
-    inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : [])),
-  );
+  const servers = {
+    ...Object.fromEntries(inputs.parts.flatMap(part => (part.kind === 'mcp' ? [[part.name, part.config]] : []))),
+    // Ours is added LAST: a profile's own server of that name never replaces the one the channel is loaded from.
+    ...(inputs.channels === true
+      ? { [FERRETRY_MCP_SERVER]: channelToolsServer(inputs.fyCommand ?? 'fy') as never }
+      : {}),
+  };
   const settings = deepMergeSettings(settingsDocument(inputs), fixed.settings);
   // The compaction trigger a login publishes (a `compact` part), where Claude reads it: `autoCompactWindow`.
   const compactAt = inputs.parts.flatMap(part => (part.kind === 'compact' ? [part.at] : [])).at(-1);
@@ -93,17 +127,30 @@ export function homeText(inputs: HomeInputs): HomeText {
   };
 }
 
+/**
+ * The launch flags the selected settings items carry, item by item in name order (the order their settings merge in, so
+ * the later item's flag comes later on the command line). Every word is its own argv word, whatever it holds.
+ */
+export const settingsFlags = (settings: ReadonlyMap<string, SettingsItem>): readonly string[] =>
+  byName(settings).flatMap(item => item.flags ?? []);
+
 export interface CommandInputs {
   readonly binary: string;
+  /** The settings items' launch flags ({@link settingsFlags}): passed first, so every flag the launch sets wins. */
+  readonly flags?: readonly string[] | undefined;
   /** The ferret's home, which is Claude's `CLAUDE_CONFIG_DIR`. */
   readonly home: string;
   readonly permissionMode: HarnessConfig['permissionMode'];
   readonly model?: string | undefined;
   readonly hasMcp: boolean;
+  /** Ferretry's message channel is loaded (see {@link HomeInputs.channels}): its flag is on the argv and the MCP file is named. */
+  readonly channels?: boolean | undefined;
   /** The ferret's mode (`LaunchSpec.mode`): with {@link questionTool} on, only an interactive one keeps the question tool. */
   readonly mode?: 'interactive' | 'auto' | undefined;
   /** `HarnessConfig.questionTool`: the opt-in that gives an interactive ferret its question tool back. */
   readonly questionTool: HarnessConfig['questionTool'];
+  /** `HarnessConfig.dangerousRmWaiver`: with bypass mode, the one way the full dangerous-rm waiver is set. */
+  readonly dangerousRmWaiver?: HarnessConfig['dangerousRmWaiver'] | undefined;
   /** The conversation id: assigned at a start (Claude takes `--session-id`), named at a resume. */
   readonly conversation: { readonly kind: 'new' | 'resume'; readonly id: string };
   /** The absolute folders Ferrets lets this ferret read without asking (`LaunchSpec.readable`). */
@@ -131,19 +178,34 @@ export function readAllowArguments(folders: readonly string[]): readonly string[
  * before anything risky) or `bypassPermissions`.
  */
 export function launchCommand(inputs: CommandInputs): readonly string[] {
-  return ['env', `CLAUDE_CONFIG_DIR=${inputs.home}`, ...seededCommand(claudeCommand(inputs))];
+  const waiver = rmWaiverApplies(inputs.dangerousRmWaiver ?? false, inputs.permissionMode) ? CLAUDE_RM_WAIVER_ENV : {};
+  const fixed = Object.entries({ ...CLAUDE_HOME_ENV, ...CLAUDE_PROMPT_ENV, ...waiver }).map(
+    ([name, value]) => `${name}=${value}`,
+  );
+  // `-u` first: `env` takes its options before the assignments.
+  const unset = CLAUDE_UNSET_ENV.flatMap(name => ['-u', name]);
+  return ['env', ...unset, `CLAUDE_CONFIG_DIR=${inputs.home}`, ...fixed, ...seededCommand(claudeCommand(inputs))];
 }
 
 /** Claude itself and its flags: what the seed `exec`s. */
 function claudeCommand(inputs: CommandInputs): readonly string[] {
+  const itemFlags = launchFlagsKept(inputs.flags ?? []);
   return [
     inputs.binary,
+    // The items' flags come BEFORE every flag the launch sets: Claude takes the last of a repeated flag, and the ones the
+    // launch decides (permission mode, conversation, settings and MCP files) are dropped from them (`launchFlagsKept`).
+    ...itemFlags,
+    // A flag the items leave valueless at their end (`--model`, `--add-dir`) takes the NEXT word whatever it is. This
+    // disposable copy of the overlay, one attached word, is what it takes; the real pair after it is never eaten.
+    ...(itemFlags.length === 0 ? [] : [`--settings=${inputs.home}/${HOME_FILES.overlay}`]),
+    // The channel's flag, with `=` (the option takes several servers; a bare one would swallow the arguments after it).
+    ...(inputs.channels === true ? [CLAUDE_CHANNELS_FLAG] : []),
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
     inputs.permissionMode === 'skip' ? 'bypassPermissions' : 'auto',
     ...questionArguments(inputs.mode, inputs.questionTool),
-    ...(inputs.hasMcp ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
+    ...(inputs.hasMcp || inputs.channels === true ? ['--mcp-config', `${inputs.home}/${HOME_FILES.mcp}`] : []),
     inputs.conversation.kind === 'new' ? '--session-id' : '--resume',
     inputs.conversation.id,
     ...readAllowArguments(inputs.readable ?? []),

@@ -22,10 +22,13 @@ import {
   type HarnessCliView,
   type HarnessConfig,
   HooksItemSchema,
+  type SettingsItem,
   SettingsItemSchema,
 } from './wire.ts';
+import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */
 export const CODEX = 'codex' as const;
@@ -91,6 +94,28 @@ export const CODEX_AGENT_HOMES = defineState({
   format: 1,
 });
 
+/**
+ * The ONE history pool every Codex ferret shares (docs/design/shared-history.md): a plain folder of this plugin's state,
+ * never inside `agent-homes`. `sqlite` in it is Codex's state database folder, reached by `CODEX_SQLITE_HOME` (an env var,
+ * not a link); the entries below are linked into each ferret home. `auth.json` and `config.toml` stay the ferret's own.
+ */
+export const CODEX_HISTORY_POOL = defineState({
+  name: 'historyPool',
+  path: 'history-pool/*',
+  store: 'opaque',
+  format: 1,
+});
+
+/** The entries of a Codex home that are history (v4's list), each linked to the same name in the pool. */
+export const CODEX_HISTORY_ENTRIES = [
+  { name: 'sessions', kind: 'folder' },
+  { name: 'archived_sessions', kind: 'folder' },
+  { name: 'history.jsonl', kind: 'file' },
+] as const;
+
+/** The folder of the pool that holds Codex's SQLite state (`CODEX_SQLITE_HOME`). */
+export const CODEX_POOL_SQLITE = 'sqlite';
+
 export const CODEX_DISCOVERY = defineState({
   name: 'discovery',
   path: 'discovery.json',
@@ -114,6 +139,11 @@ export const CodexRolloutBindingSchema = z.strictObject({
   baseline: z.array(z.string()),
   /** Whether the baseline saw every rollout already there (absent in a binding written before it was recorded). */
   baselineComplete: z.boolean().optional(),
+  /** A pooled launch of a NEW conversation: the first day (`YYYY-MM-DD`) its rollout can be filed under; older days are never read. */
+  since: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/u)
+    .optional(),
   native: z.string().optional(),
 });
 export type CodexRolloutBinding = z.infer<typeof CodexRolloutBindingSchema>;
@@ -193,14 +223,23 @@ export const CODEX_CONFIG = configDef(
   }),
 );
 
-/** `config/codex/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
+/**
+ * A settings item loosens when an edit adds a launch flag that sets the approval policy or sandbox (`--sandbox`, `-a`,
+ * `--full-auto`, `-c approval_policy=…`): the same loosening as a looser `permissionMode`, so an agent's edit waits for
+ * the owner and the owner's own edit does not. The launch drops those flags anyway (`./launch-flags.ts`); the hold is so
+ * none is ever written unseen.
+ */
+export const settingsItemLoosens: Loosens<SettingsItem> = (before, after) =>
+  launchFlagsLoosen(before?.flags ?? [], after.flags ?? []);
+
+/** `config/codex/settings/<name>.yaml`: a config document and its launch flags. */
 export const CODEX_SETTINGS = configDef(
   defineConfig({
     collection: 'codex/settings',
     name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: settingsItemLoosens,
   }),
 );
 

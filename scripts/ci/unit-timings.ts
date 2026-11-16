@@ -26,6 +26,13 @@ if (import.meta.main) {
   const summary = ['\n| Unit part | Slowest test | Test |', '| --- | --- | --- |'];
   let missing = false;
   for (const { name } of groups) {
+    // A group a SCOPED run emptied (test.sh leaves this marker) ran nothing, so it has no report and no slowest test.
+    if (existsSync(`coverage/unit/groups/${name}/scoped-out`)) {
+      rows.push(`${name}\tscoped-out\tno test file left in the scope`);
+      summary.push(`| unit-${name} | scoped out | no test file left in the scope |`);
+      console.log(`📝 unit-${name}: scoped out, no test file left in the scope`);
+      continue;
+    }
     const path = `coverage/unit/groups/${name}/junit.xml`;
     const test = existsSync(path) ? slowestTest(readFileSync(path, 'utf8')) : undefined;
     const seconds = test?.seconds.toFixed(6) ?? 'missing';

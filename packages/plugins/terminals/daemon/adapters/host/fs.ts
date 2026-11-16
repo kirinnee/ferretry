@@ -30,7 +30,7 @@ export const hostUid: number = process.getuid?.() ?? 0;
 export const hostUserId: number | undefined = process.getuid?.();
 
 /** Sends one signal to one pid (`process.kill`). The caller has already re-proved which process that pid is. */
-export function signalProcess(pid: number, signal: 'SIGTERM'): void {
+export function signalProcess(pid: number, signal: 'SIGTERM' | 'SIGKILL'): void {
   process.kill(pid, signal);
 }
 

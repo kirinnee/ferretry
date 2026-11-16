@@ -150,11 +150,9 @@ const spend = (host: Awaited<ReturnType<typeof world>>, ferret: string): void =>
         usage: { input_tokens: inputTokens, output_tokens: outputTokens },
       },
     });
-  host.putRoot(
-    'agent-homes',
-    `${ferret}/projects/-work-project/${binding.id}.jsonl`,
-    `${record(1200, 100)}\n${record(0, 300)}\n`,
-  );
+  host
+    .state('claude-code')
+    .files.set(`history-pool/projects/-work-project/${binding.id}.jsonl`, `${record(1200, 100)}\n${record(0, 300)}\n`);
 };
 
 const budgetsAs = async (host: Awaited<ReturnType<typeof world>>, caller?: string) =>

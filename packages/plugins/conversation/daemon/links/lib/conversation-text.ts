@@ -3,7 +3,7 @@ import { CONVERSATION_EXCHANGE_TEXT_MAX, type LinkPreview } from '../../../contr
 import { CONVERSATION_EXCHANGE_COUNT } from '../../../contract/index.ts';
 
 type ConversationExchangeMessage = LinkPreview['messages'][number];
-import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '../../../contract/index.ts';
+import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '@ferretry/core-mailbox/contract';
 import { isOwnerMessage } from '../../reader/lib/transcript/owner.ts';
 import type { TranscriptEvent } from '../../reader/lib/transcript/types.ts';
 
@@ -194,6 +194,19 @@ export function spokenMessages(
     if (!isOwnerMessage(event)) return [];
     const spoken = spokenText(event.text, documents);
     return spoken === undefined ? [] : [spoken];
+  });
+}
+
+/**
+ * What the owner's messages say AS WRITTEN: a hand-off pointer is its own line, not skipped. For a conversation whose every
+ * message is a pointer (a ferret's: its turns arrive as "Read the file …/turn-001.md"), where {@link spokenMessages} finds
+ * nothing to describe it by. Reminders, a CLI's own tagged blocks and interruption markers still say nothing.
+ */
+export function writtenMessages(events: readonly TranscriptEvent[]): readonly string[] {
+  return events.flatMap(event => {
+    if (!isOwnerMessage(event)) return [];
+    const written = collapse(withoutDeliveryWrappers(event.text));
+    return written === '' || written.startsWith('<') || NOISE.has(written) ? [] : [written];
   });
 }
 

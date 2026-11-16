@@ -22,6 +22,7 @@ import { useInstallHost } from './catalogs-views.tsx';
 
 export { createAddSkillsRowPanel } from './add-skills-row.tsx';
 export { createSkillsRowPanel } from './skills-row.tsx';
+export { createMcpInstallPanel, createMcpRowPanel } from './mcp-row.tsx';
 
 const THIS_DAEMON = 'this';
 

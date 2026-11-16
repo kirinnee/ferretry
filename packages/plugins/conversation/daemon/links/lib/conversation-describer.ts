@@ -20,6 +20,7 @@ import {
   recentExchanges,
   spokenMessages,
   wrapperOnlyWords,
+  writtenMessages,
 } from './conversation-text.ts';
 
 /**
@@ -69,7 +70,7 @@ export type DescribedConversation = Omit<LinkableConversation, 'harness' | 'kept
 };
 
 /** Describes the conversation one transcript holds; where its read and parse run is the adapter's choice. */
-export interface ConversationDescriber {
+interface ConversationDescriber {
   /** The row `candidate` describes, or `undefined` when its file is gone or describes no conversation. */
   describe(candidate: ConversationCandidate): Promise<DescribedConversation | undefined>;
   /**
@@ -168,7 +169,7 @@ function conversationIdOf(
  * name is the owner's, else the CLI's generated one unless that title describes the wrapper it was
  * generated from (a turn-file pointer, an AGENTS.md block) — then the first real message heads it.
  */
-function describeConversation(
+export function describeConversation(
   candidate: { readonly harness: Harness; readonly nameId?: string | undefined },
   text: string,
   events: readonly TranscriptEvent[],
@@ -176,13 +177,19 @@ function describeConversation(
   documents?: HandoffDocuments,
   /** The transcript's middle was not read, so the spoken messages counted are only some of them. */
   partial = false,
+  /**
+   * A conversation whose every message is a hand-off pointer is described by the pointer lines as written, instead of by
+   * nothing (the index lists it, named by its ferret or title; a preview of it reads as the line the CLI was given).
+   */
+  pointersAsWritten = false,
 ): DescribedConversation | undefined {
   const head = conversationHead(candidate.harness, text);
   if (head === undefined) return undefined;
   const { project } = head;
   const id = conversationIdOf(candidate, head);
   if (id === undefined) return undefined;
-  const spoken = spokenMessages(events, documents);
+  const said = spokenMessages(events, documents);
+  const spoken = said.length > 0 || !pointersAsWritten ? said : writtenMessages(events);
   const first = spoken[0];
   if (first === undefined) return undefined;
   const names = transcriptNames(candidate.harness, text);

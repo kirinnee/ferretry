@@ -11,8 +11,6 @@ import {
   BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
-  CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
   claudeToolsConfig,
@@ -202,7 +200,6 @@ describe('fixedLayerFor — Claude', () => {
           permissions: { defaultMode: 'auto' },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
-          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,
@@ -235,7 +232,6 @@ describe('fixedLayerFor — Claude', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
-      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
@@ -244,7 +240,7 @@ describe('fixedLayerFor — Claude', () => {
     ]);
   });
 
-  it('should hand the daemon every question Claude asks through an overlay hook, and never through settings', () => {
+  it('should write no question hook: an open question is read off the pane, so neither the overlay nor the settings carry one (M7)', () => {
     // Act
     const actual = layerOf({
       harness: 'claude',
@@ -254,15 +250,10 @@ describe('fixedLayerFor — Claude', () => {
       acceptsAutoPermissionMode: false,
     });
 
-    // Assert — Claude 2.1.281 writes an AskUserQuestion call to its transcript only once the form is
-    // answered, so the hook is how the daemon learns of an open one: before the form, for that tool alone.
-    should(actual.claudeSettingsOverlay?.hooks).deepEqual({
-      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-    });
-    // The file it writes is the one the daemon names per pane, and it never fails the tool it watches.
-    should(CLAUDE_QUESTION_HOOK_COMMAND).containEql('"$FY_QUESTION_FILE"');
-    should(CLAUDE_QUESTION_HOOK_COMMAND).endWith('exit 0');
-    // A settings entry is written OVER the profile's own settings, which would drop a person's own hooks.
+    // Assert
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('AskUserQuestion');
+    should(JSON.stringify(actual.claudeSettingsOverlay)).not.containEql('PreToolUse');
+    should(actual.claudeSettingsOverlay?.hooks).be.undefined();
     should(actual.entries.some(entry => entry.path[0] === 'hooks')).be.false();
   });
 
@@ -756,10 +747,10 @@ describe('NOTIFY_INSTRUCTION', () => {
     const text = NOTIFY_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Notify: the owner reads the Inbox, not your replies.');
+    should(text).startWith('Notify: the owner reads their notices, not your replies.');
     should(text).containEql('`zz notify "<summary>" [--body "<detail>"]`');
-    should(text).containEql('a quiet Inbox notice');
-    should(text).containEql('Add `--ping` only when it must reach their phone now.');
+    should(text).containEql('a quiet notice');
+    should(text).containEql('Add `--buzz` only when it must reach their phone now.');
     should(text).containEql('Never notify progress or chatter.');
     // The agenda is its own switchable section: the always-on rule never teaches it, and never says Attention.
     should(text).not.containEql('agenda');
@@ -838,7 +829,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // No item type (the owner: "now agenda doesn't have a "main" type any more"): the stage chain is not taught.
     should(text).not.containEql('Type:');
     should(text).not.containEql('`--stage`');
-    // All discussion about an agenda lands in it, the owner's words verbatim (!A304), copied by `log` (DoD 16).
+    // All discussion about an agenda lands in it, the owner's words verbatim (^A304), copied by `log` (DoD 16).
     should(text).containEql(
       'Chat: `log <id> --reply|--rest` logs their words verbatim; link it; unsure→closest, say so.',
     );
@@ -874,7 +865,7 @@ describe('AGENDA_INSTRUCTION', () => {
     // Assert — measured 1,269: main's 1,236 plus PR 3's `log`, `split` and `merge` (the chat line names `log`, the
     // split line names both verbs), paid for in part by `answer <id> "…"`, plus the `done` verb and "say so", paid
     // for by "logs their words verbatim" and "unsure→closest". Then 1,289: the body as the live document (F909, the
-    // owner on !A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
+    // owner on ^A332) — `--where`=short status, and the body rewritten whole with `edit --body-file` while the chat
     // only points at it — paid for in part by the old "(rest: `--body`, one-screen summary; full report: `--link`)",
     // ", `--where`=now" and "Keep current (`edit`)" (cap 1,270 → 1,300). The tabs (&F923) kept it at 1,289: the main tab
     // and a ferret's own tabs, paid for by dropping ", `--where`=short status". Then 1,311: the owner's split rule (&F946),
@@ -903,10 +894,11 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the daemon's opt-in refusal says how to ask for the Yes (`board/opt-in.ts`).
-    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
+    should(text).startWith('Board: opt-in, enforced; overrides other card rules.');
     should(text).containEql(
-      "Card only if `zz board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`).",
+      "Card only if the project's board is on (`zz board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`).",
     );
+    should(text).not.containEql('!A'); // `!` starts a shell command in the agent's composer: only `^A<n>` is taught
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
   });
@@ -916,7 +908,9 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
-    should(text).containEql('Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it.');
+    should(text).containEql(
+      "Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it.",
+    );
     should(text).containEql('One outcome, no umbrellas; add to a related card.');
   });
 
@@ -925,10 +919,10 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "planning can be a phase!", "reading the title should directly reflect what is doing".
-    should(text).containEql('Planning is a phase.');
+    should(text).containEql('Planning is a lane.');
     should(text).containEql("Title+summary=what it's doing (sitrep).");
     should(text).containEql(
-      'Each step: `zz task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz task patch <id> --file f`.',
+      'Each step: `zz card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz card patch <id> --file f`.',
     );
     should(text).not.containEql('no cards for planning');
   });
@@ -939,7 +933,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — the board answers "status of all I asked?"; a sub-card or a private card is hidden from it.
     should(text).containEql(
-      'Public=the owner\'s asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards.',
+      'Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards.',
     );
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
@@ -954,10 +948,10 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
     should(text).containEql('howToTest (where/do/see) before try');
-    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql('`zz card move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('Blocked: `zz task depend`/`block`.');
-    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
+    should(text).containEql('Blocked: `zz card depend`/`block`.');
+    should(text).containEql('`zz card reopen <id> --to <lane> --ask "<words>"`');
     should(text).containEql("Owner's bug:");
     should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
@@ -969,7 +963,8 @@ describe('BOARD_INSTRUCTION', () => {
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
     // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
     // the three-part status (cap 760 → 820).
-    should(BOARD_INSTRUCTION('fy').length).be.below(820);
+    // → 852 once it said the same words as the board plugin's own file (cap 820 → 860).
+    should(BOARD_INSTRUCTION('fy').length).be.below(860);
   });
 });
 
@@ -1039,7 +1034,7 @@ describe('AGENT_TOOLS_INSTRUCTION — one-time codes', () => {
 });
 
 describe('launchInstructions', () => {
-  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (!A527)', () => {
+  it('should name every section the wrapper would compose for an interactive ferret, with each size, and withhold its question tool (^A527)', () => {
     // Arrange
     const binary = 'zz';
     const env = {
@@ -1203,22 +1198,23 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
-    should(text).containEql('Link your PR `zz task link <id> --pr <url>` (or `--branch`)');
-    should(text).containEql('`zz task note`');
+    should(text).containEql('Link your PR `zz card link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('`zz card note`');
     should(text).containEql(
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make.',
     );
     // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one card edit a sub-ferret may make.
     should(text).containEql(
-      'With a card: each step, `zz task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `zz task patch <id> --file f`; `zz task note` adds history.',
+      'With a card: each step, `zz card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `zz card patch <id> --file f`; `zz card note` adds history.',
     );
     // The holder writes its own How to test now, so its report no longer carries the steps.
     should(text).not.containEql('Your final report says how the owner tests it.');
     should(text).containEql(
-      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz task claim <id>`, don't ask. No card? Make none.",
+      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz card claim <id>`, don't ask. No card? Make none.",
     );
     should(text).not.containEql('agenda add');
-    should(text).not.containEql('task move');
+    should(text).not.containEql('card move');
+    should(text).not.containEql('task ');
   });
 
   it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
@@ -1257,5 +1253,25 @@ describe('SUB_FERRET_INSTRUCTION', () => {
       'board',
       'agenda',
     ]);
+  });
+});
+
+describe('the exact words of the Notify, Board and Sub-ferret rules (snapshots)', () => {
+  it('should say exactly this for Notify', () => {
+    should(NOTIFY_INSTRUCTION('fy')).equal(
+      'Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.',
+    );
+  });
+
+  it('should say exactly this for Board', () => {
+    should(BOARD_INSTRUCTION('fy')).equal(
+      'Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (`fy board`), under your card (`--parent`), or on the owner\'s Yes (`--approval <ask>`). Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card\'s ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it\'s doing (sitrep). Each step: `fy card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy card patch <id> --file f`. `fy card move <id> <lane> --reason "<why>"`. Blocked: `fy card depend`/`block`. Owner\'s bug: `fy card reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.',
+    );
+  });
+
+  it('should say exactly this for the Sub-ferret card line', () => {
+    should(SUB_FERRET_INSTRUCTION('fy').split('\n')[1]).equal(
+      "With a card: each step, `fy card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy card patch <id> --file f`; `fy card note` adds history. Link your PR `fy card link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy card claim <id>`, don't ask. No card? Make none.",
+    );
   });
 });

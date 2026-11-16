@@ -1,11 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { z } from 'zod';
-import {
-  AGENT_CONFIG_TEXT_MAX_BYTES,
-  AGENT_CONFIG_TOOLS,
-  AgentConfigCallSchema,
-  type AgentConfigCall,
-} from '../../../contract/agent-config.ts';
+import { AGENT_CONFIG_TOOLS, AgentConfigCallSchema, type AgentConfigCall } from '../../../contract/agent-config.ts';
 import {
   AGENT_CONTROL_KINDS,
   type AgentControlKind,
@@ -19,6 +14,7 @@ import { agentMayName } from '../../../host/config/agent-reach.ts';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import kernelManifest from '../../../plugin.ts';
+import { aliasShapes } from './alias-shapes.ts';
 import { captureLog, HOME, loginsDef, manualClock, updatesDef } from './support.ts';
 
 /** Fake only: shaped like a key, never one. */
@@ -551,6 +547,8 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
 
   test('R-0073 today’s reach in 5.0’s names, path by path: each of today’s 14 entries where its file holds loosenings', () => {
     for (const path of [
+      'browsers.yaml',
+      'usage.yaml',
       'warden.yaml',
       'voice.yaml',
       'limits.yaml',
@@ -585,9 +583,7 @@ describe('the files an agent may name are today’s and no more (C2)', () => {
       'presets/x.yaml',
       'components/mcp/github.yaml',
       'components/modelSets/fast.yaml',
-      // Not mapped until their loosenings are ported, or holding what today's agent never reached (GAP lines).
-      'browsers.yaml',
-      'usage.yaml',
+      // Holding what today's agent never reached (GAP lines).
       // Only the two exact harness files are reached: no other `harness-*` name, no folder, no path around them.
       'harness-gemini.yaml',
       'harness-claude-code.yml',
@@ -805,45 +801,28 @@ describe('Gate’s refusals of the route, in today’s words (round-2 m-c)', () 
   });
 });
 
-describe('a file at the size limit is checked in one pass, whatever its aliases do (R5 critical)', () => {
-  /** A hard bound per call, far above one linear pass; the quadratic reads this guards took minutes at this size. */
-  const BOUND_MS = 1500;
-  const fill = (head: string, line: string, tail = ''): string =>
-    head + line.repeat(Math.floor((AGENT_CONFIG_TEXT_MAX_BYTES - 64 - head.length - tail.length) / line.length)) + tail;
-  const laughs = Array.from(
-    { length: 10 },
-    (_, level) =>
-      `l${level}: &l${level} [${Array.from({ length: 9 }, () => (level === 0 ? 'lol' : `*l${level - 1}`)).join(', ')}]\n`,
-  ).join('');
-
-  for (const [label, text] of [
-    ['many aliases, the last unresolved', fill('limit: 5\nnote: &a x\nmore:\n', '  - *a\n', '  - *nope\n')],
-    ['an alias bomb (billion laughs), padded', fill(laughs, '# padding\n')],
-    ['an anchor of an empty anchor, aliased many times', fill('e: &e []\na: &a [*e]\nb:\n', '  - *a\n')],
-    ['an alias loop at the end', fill('limit: 5\nnote: &a\n  b:\n', '    - 1\n', '    - *a\n')],
-  ] as const) {
-    test(`T-0033 T-0034 ${label}: validate and write each answer in under ${BOUND_MS} ms, nothing is written`, async () => {
+describe('a file with hostile aliases is refused, and the last good version stays (R5 critical)', () => {
+  // Small on purpose: the answer is the same at any size; the one-pass bound at the size limit is
+  // tests/perf/host-config/agent-config-alias-bound.test.ts.
+  for (const [label, text] of aliasShapes(4096)) {
+    test(`T-0033 T-0034 ${label}: validate and write each refuse it, nothing is written`, async () => {
       const { agent, fs, files } = world();
       fs.seed(UPDATES, 'limit: 7\n');
       await files.reload();
       for (const tool of ['config.validate', 'config.write'] as const) {
-        const started = performance.now();
         const answer = await agent.run(call({ tool, path: 'voice.yaml', text }), ferretStanding);
-        expect(performance.now() - started).toBeLessThan(BOUND_MS);
         expect(answer.issues?.length).toBeGreaterThan(0);
       }
       expect(await fs.readText(UPDATES)).toBe('limit: 7\n');
       expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });
 
-    test(`T-0032 ${label}, hand-written: the reload answers in under ${BOUND_MS} ms and the last good stays`, async () => {
+    test(`T-0032 ${label}, hand-written: the reload keeps the last good`, async () => {
       const { fs, files } = world();
       fs.seed(UPDATES, 'limit: 7\n');
       await files.reload();
       fs.seed(UPDATES, text);
-      const started = performance.now();
       await files.reload();
-      expect(performance.now() - started).toBeLessThan(BOUND_MS);
       expect(files.status().files.find(file => file.path === 'voice.yaml')?.state).toBe('invalid');
       expect(files.port('voice').file(voiceDef)?.limit).toBe(7);
     });

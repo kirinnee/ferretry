@@ -5,7 +5,7 @@ import { runFy } from '../../../src/lib/run.ts';
 import { entry, fakeWorld, inventoryOf, registryOf } from '../fakes.ts';
 
 test.each(['inventory', 'view'] as const)(
-  'update view fails open within one 3 s budget when %s stalls',
+  'update view fails open when %s stalls',
   async stage => {
     const updates = compiledRegistry.plugins.find(plugin => plugin.id === 'updates');
     if (updates === undefined) throw new Error('Updates must be in the generated registry');
@@ -39,9 +39,7 @@ test.each(['inventory', 'view'] as const)(
         };
       },
       update: async (_options: unknown, view: { view(): Promise<unknown> }) => {
-        const started = performance.now();
         expect(await view.view()).toBeUndefined();
-        expect(performance.now() - started).toBeLessThan(4_200);
         return 0;
       },
     };

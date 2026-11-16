@@ -29,7 +29,7 @@ nobody's turn. The summary is the whole notification; `--body` is the longer rea
 Every ferret is told this rule, whatever its mode (`NOTIFY_INSTRUCTION` in `@ferretry/fleet`, quoted
 verbatim; `fy` is the binary name):
 
-> Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet Inbox notice. Add `--ping` only when it must reach their phone now. Never notify progress or chatter.
+> Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.
 
 ## When the phone buzzes
 
@@ -209,7 +209,7 @@ without a new rule. The **stop's line** ("N need you") comes down only once no i
 owner's turn, because until then its words are still true.
 
 **When the owner opens the item.** Opening an item's card anywhere in the app takes its alerts down too: the Inbox
-deck's top card, or the item's card in its conversation (an agenda row, a `!A3` reference, a notification tap, paging
+deck's top card, or the item's card in its conversation (an agenda row, a `^A3` reference, a notification tap, paging
 to it). The app closes that item's lines on the device in the owner's hand at once, and tells the machine
 (`POST /v1/push/seen`, `fleet.use`, only where the machine lists `push.clear.1`). The machine clears every OTHER device
 and answers the tags it named, so the app closes those here too, the stop's line included when it was the last item.

@@ -1,9 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretId, FerretTurnDocument, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
-import { HandoffDocumentSchema } from '../../../contract/index.ts';
+import { HandoffDocumentSchema } from '@ferretry/core-mailbox/contract';
 import daemon from '../../../daemon/index.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 
@@ -37,7 +38,7 @@ async function world(documents: readonly FerretTurnDocument[]) {
   ferrets.add({ id: F1, state: 'idle' });
   ferrets.documents = documents;
   const host = await testHost({
-    plugins: [daemon, wardenStandIn],
+    plugins: [mailboxDaemon, daemon, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-08T09:00:00Z'),
   });

@@ -7,6 +7,7 @@ import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { ok } from '@ferretry/std';
 import { CONVERSATION_STATE, ConversationPort, QUEUE_STATE, SENDS_STATE } from '../../../contract/index.ts';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
 import { StateQueueStore } from '../../../daemon/queue/adapters/index.ts';
@@ -58,7 +59,7 @@ async function conversation(state: StatePort = memoryStatePort(CONVERSATION_STAT
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation],
+    plugins: [mailboxDaemon, implementation],
     fakes: { ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });

@@ -220,8 +220,9 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
 - **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
   normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
   returned byte for byte.
-- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
-  file a write must match (`If-Match`).
+- **The etag is a keyed digest (HMAC-SHA256) of the text on disk**, not of what is shown, so a read of a masked file
+  still names the file a write must match (`If-Match`). The key is the daemon's own and no reader holds it, so an
+  etag cannot be used to test a guess at a hidden value (`docs/secrets.md`).
 - **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
   holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
   from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never
@@ -255,8 +256,8 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
   unparsed text is shown as it is).
 
 What this does not do: a word shorter than 7 characters is never searched for a cut (`MIN_CUT_WORD`), and a value
-under 8 characters is no credential by a secret name (a URL's password is cut at any length); a JSON document inside a
-flag and a plain password stuck to a one-letter flag (`-p<password>`) are not cut; and a text that does not parse can
+under 8 characters is no credential by a secret name (a URL's password is cut at any length); a password stuck to `-p`
+that holds a plain `=` or blank is not cut; and a text that does not parse can
 show what neither check recognised. The full list is in [secrets.md](secrets.md#secret-shaped-values-in-a-files-text).
 
 ## Editing
@@ -682,10 +683,13 @@ there too, and journalled as `fleet.warden_leftover_closed`.
 
 ### Moving a ferret that hit a limit
 
-**Off by default.** With `autoMigrate.enabled`, a ferret whose login runs out is moved to another login — the
+**On by default** (owner ruling 2026-11-15; v4 shipped it off). Unless `warden.yaml` says `enabled: false` under
+this section — an explicit `false` is kept exactly as written, including in a home converted from v4 — a ferret
+whose login runs out is moved to another login — the
 same session, the same chat, the same card and lineage; only the login changes. It is the migration `fy migrate`
 makes, through the same safety check, never with a smaller context window, and the turn the ferret is handed
-opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent.
+opens with why, drawn as Ferretry · Warden. A rule: no Jev, no investigation, nothing spent. (In 5.0 the section is
+spelled `autoMove`; the converter carries every key of v4's `autoMigrate` across unchanged.)
 
 ```yaml
 autoMigrate:
@@ -704,8 +708,14 @@ autoMigrate:
   installed, signed in, not switched off, not holding spend, not out of quota — and never the login that ran out,
   or another runtime on it. `targets: []` stays within the provider (a catalog's provider, the harness's own for
   a native login; a hand-made environment login is its own provider) and takes the one with most headroom. A
-  named list is tried in order and is the only way a move crosses to another provider. When nothing qualifies
+  named list is tried in order and is the only way a move crosses to another provider. **A non-empty `targets` is
+  a hard list:** a ferret goes to a login on it or nowhere, however much room another login has — a work login
+  you did not list is never a candidate. When nothing qualifies
   the owner is told once, in one line naming every login tried and why it was refused.
+- **Nowhere to go.** The ferret stays where it is and **resumes by itself at the reset time its login showed**, with Jev and
+  investigations off (a rule, listed as an `auto` resume under Recent triggers; once per reset; only while
+  `mayActAlone.resume` is on, and never under something of yours). The same one notice says when, in Pacific time.
+  A ferret whose limit shows no reset time waits for you.
 - **Never** while the ferret has an input card open, a sign-in waiting on your phone, a plan card waiting for you,
   holds a secure copy, handed a terminal or browser to the owner, or waits on a permission prompt or a dialog; never a Warden or anything a Warden started; never more than
   `maxMovesPerHour` times an hour.
@@ -867,19 +877,20 @@ that key is new in 5.0, and no agent had it before.
 
 The tools reach the files that now hold what they always reached, and no more:
 
-| Before 5.0                                       | The file the tools reach                                                |
-| ------------------------------------------------ | ----------------------------------------------------------------------- |
-| `warden.yaml`, `voice.yaml`, `limits.yaml`       | the same files (`limits.yaml` also holds the agent-control switches)    |
-| `learning.yaml`                                  | `lessons.yaml`                                                          |
-| `pack.yaml`, `models-guide.yaml`                 | `packs.yaml` (the routing prompt is its `routing` block)                |
-| `account-defaults.yaml`                          | `accounts.yaml`                                                         |
-| `machine.yaml`: the default runtime, agenda mode | `runtimes.yaml`, `agenda.yaml`                                          |
-| `machine.yaml`: keep conversations in sync       | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`) |
-| `logins/`, `profiles/`, `runtimes/`, `models/`   | the same folders                                                        |
-| `components/mcp/`, `components/skills/`          | `mcp/`, `skills/`                                                       |
-| `components/settings/`, `components/hooks/`      | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`        |
-| `machine.yaml`: the agent permission mode        | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)            |
-| `components/modelSets/`                          | `model-sets/`                                                           |
+| Before 5.0                                                        | The file the tools reach                                                                                                 |
+| ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `warden.yaml`, `voice.yaml`, `limits.yaml`                        | the same files (`limits.yaml` also holds the agent-control switches)                                                     |
+| `learning.yaml`                                                   | `lessons.yaml`                                                                                                           |
+| `pack.yaml`, `models-guide.yaml`                                  | `packs.yaml` (the routing prompt is its `routing` block)                                                                 |
+| `account-defaults.yaml`                                           | `accounts.yaml`                                                                                                          |
+| `machine.yaml`: the default runtime, agenda mode                  | `runtimes.yaml`, `agenda.yaml`                                                                                           |
+| `machine.yaml`: keep conversations in sync                        | `conversation.yaml` (its `keepInSync` was `conversations.listComputer`)                                                  |
+| `logins/`, `profiles/`, `runtimes/`, `models/`                    | the same folders                                                                                                         |
+| `components/mcp/`, `components/skills/`                           | `mcp/`, `skills/`                                                                                                        |
+| `components/settings/`, `components/hooks/`                       | `claude-code/settings/`, `codex/settings/`, `claude-code/hooks/`                                                         |
+| `machine.yaml`: browser mode and proxy, time zone and public feed | `browsers.yaml` (a new or re-aimed proxy is held), `usage.yaml` (any time-zone change, and the public feed on, are held) |
+| `machine.yaml`: the agent permission mode                         | `harness-claude-code.yaml`, `harness-codex.yaml` (see below)                                                             |
+| `components/modelSets/`                                           | `model-sets/`                                                                                                            |
 
 Any other file, and every person-only one (`gate.yaml`, `plugins.yaml`, `catalogs.yaml`), is refused on read,
 check and write. A file whose text holds anything shaped like a secret — parsed or not, in a comment or a tag
@@ -899,10 +910,18 @@ Both files also take `questionTool: true` (default `false`, owner !A527): by def
 question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
 **interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
 `--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
-so it is **never held**. Not reached yet, each a declared GAP:
+so it is **never held**.
 
-- `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
-- `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.
+`harness-claude-code.yaml` also takes `channels` (unset by default): whether a Claude ferret gets Ferretry's message
+channel (the tools server loaded as a development channel). Unset, it follows each ferret's login (**on** for a `claude_max`
+login, **off** for every other type or an unreadable one); `true` or `false` wins for every login. Read at each launch;
+not a loosening, so never held ([launch-settings.md](launch-settings.md#the-claude-channel)).
+
+`harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
+dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
+mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
+
 - `components/instructions/` (now `instructions/<name>.yaml`, a `text:` document that Runtimes owns, which an agent does
   not reach) and `presets/` (no successor declared yet).
 

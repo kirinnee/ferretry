@@ -72,7 +72,7 @@ describe('the reading verbs', () => {
     expect(await run(verbs.search, ['backend'])).toBe(0);
     const text = out.join('');
     expect(text).toContain('&F303  card  In progress  Search backend');
-    expect(text).toContain('!A3    ask   open         Pick one — which backend');
+    expect(text).toContain('^A3    ask   open         Pick one — which backend');
     expect(text).toContain('Showing 2 of 5');
     expect(text).toContain('2 older closed items hidden');
   });
@@ -143,6 +143,45 @@ describe('the reading verbs', () => {
     expect(out.join('')).toContain('(kept by lead)');
     await run(verbs['link preview'], ['codex', 'c1']);
     expect(out.join('')).toContain('user: hello');
+  });
+
+  test('link prints a name on every row (the ferret’s name leads), says when a copy is also in the owner’s history, and says the index is still being read', async () => {
+    const { verbs, out } = harness({
+      'GET /v1/links/conversations': {
+        conversations: [
+          {
+            id: 'c1',
+            harness: 'claude-code',
+            project: '/w',
+            name: 'Billing scout — Invoice dig',
+            ferretName: 'Billing scout',
+            title: 'Invoice dig',
+            preview: 'look at invoices',
+            lastActivityAt: '2026-02-01T09:05:00.000Z',
+            turns: 3,
+            keptIn: 'ferretry',
+            alsoOnComputer: true,
+          },
+          {
+            id: 'c2',
+            harness: 'codex',
+            project: '/w',
+            preview: 'take notes\nfor the meeting',
+            lastActivityAt: '2026-02-01T08:05:00.000Z',
+            turns: 1,
+          },
+        ],
+        matched: 2,
+        skipped: 0,
+        indexing: true,
+      },
+    });
+    await run(verbs['link [query...]'], []);
+    const text = out.join('');
+    expect(text).toContain('Billing scout — Invoice dig');
+    expect(text).toContain('(also in your own history)');
+    expect(text).toContain('take notes for the meeting');
+    expect(text).toContain('Still reading your conversation history');
   });
 
   test('link --since <n>d|h|w goes to the wire as the ISO instant that long ago (v4’s sinceInstant), by the shell’s clock', async () => {

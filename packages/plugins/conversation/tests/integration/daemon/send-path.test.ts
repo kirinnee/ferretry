@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
   FerretHarness,
@@ -24,7 +25,7 @@ import { CONVERSATION_STATE, ConversationPort } from '../../../contract/index.ts
 import { ClientConversationGateway } from '../../../cli/lib/gateway.ts';
 import daemon from '../../../daemon/index.ts';
 import { StateSendLedger } from '../../../daemon/delivery/adapters/index.ts';
-import { queuedPayloadInstruction, turnInstruction } from '../../../daemon/delivery/lib/index.ts';
+import { queuedPayloadInstruction, turnInstruction } from '@ferretry/core-mailbox/contract';
 import { parseSessionId } from '../../../daemon/seams/ferret-id.ts';
 import { callOf } from '../../support/mount-call.ts';
 import { memoryStatePort } from '../../support/state.ts';
@@ -38,6 +39,18 @@ import { wardenStandIn } from '../../support/warden-plugin.ts';
  */
 
 const F1 = ferretId('f1');
+
+/** A ferret changed: Conversation follows it for its turn boundaries and the Mailbox for the send tracker's turn guard. */
+const fireChanged = (
+  built: {
+    half?: { hooks: Record<string, unknown> };
+    mailbox?: { hooks?: Record<string, unknown> };
+  },
+  payload: unknown,
+): void => {
+  for (const half of [built.half, built.mailbox])
+    (half?.hooks as Record<string, (p: unknown) => void> | undefined)?.['ferret.changed']?.(payload);
+};
 const F2 = ferretId('f2');
 const F3 = ferretId('f3');
 const START = '2026-11-07T09:00:00Z';
@@ -197,7 +210,10 @@ async function conversation(
   ferrets.add({ id: F2, state: 'idle' });
   setup(ferrets);
   const clock = fixedClock(START);
-  const built: { half?: ReturnType<NonNullable<typeof daemon.build>> } = {};
+  const built: {
+    half?: ReturnType<NonNullable<typeof daemon.build>>;
+    mailbox?: ReturnType<NonNullable<typeof mailboxDaemon.build>>;
+  } = {};
   const implementation = {
     ...daemon,
     build: (ctx: Parameters<NonNullable<typeof daemon.build>>[0]) => {
@@ -208,8 +224,18 @@ async function conversation(
       return half;
     },
   } as typeof daemon;
+  const mailbox = {
+    ...mailboxDaemon,
+    build: (ctx: Parameters<NonNullable<typeof mailboxDaemon.build>>[0]) => {
+      const build = mailboxDaemon.build;
+      if (build === undefined) throw new Error('the mailbox daemon half has no build');
+      const half = build(ctx);
+      built.mailbox = half;
+      return half;
+    },
+  } as typeof mailboxDaemon;
   const host = await testHost({
-    plugins: [implementation, wardenStandIn],
+    plugins: [mailbox, implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
     secrets,
@@ -602,7 +628,7 @@ describe('BG-052 only proof moves a fate', () => {
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE boundary', sendId: 's-boundary' });
     ferrets.transcript = [userEntry('FIXTURE boundary')];
 
-    built.half?.hooks['ferret.changed']?.({ ferret: F1, state: 'idle', previous: 'working', change: 'state' });
+    fireChanged(built, { ferret: F1, state: 'idle', previous: 'working', change: 'state' });
     await settle();
 
     expect((await stored('s-boundary'))?.fate).toBe('delivered');
@@ -616,7 +642,7 @@ describe('BG-052 only proof moves a fate', () => {
     await api().send(F1, { kind: 'owner' }, { message: 'FIXTURE going to work', sendId: 's-working' });
     ferrets.transcript = [userEntry('FIXTURE going to work')];
 
-    built.half?.hooks['ferret.changed']?.({ ferret: F1, state: 'working', previous: 'idle', change: 'state' });
+    fireChanged(built, { ferret: F1, state: 'working', previous: 'idle', change: 'state' });
     await settle();
 
     expect((await stored('s-working'))?.fate).toBe('queued');
@@ -858,7 +884,7 @@ describe('M2 the --wait long-poll holds a bounded number of waiters', () => {
     for (let index = 0; index < 8; index += 1)
       await api().send(F1, { kind: 'owner' }, { message: `FIXTURE total ${index}`, sendId: `s-total-${index}` });
     // The test host gives every caller one actor, so the route is called with a call of its own: a ferret's credential each.
-    const route = built.half?.routes['GET /v1/ferrets/:ferretId/sends/:sendId'];
+    const route = built.mailbox?.routes?.['GET /v1/ferrets/:ferretId/sends/:sendId'];
     if (route === undefined) throw new Error('the send status route is not mounted');
     const as = (caller: number, sendId: string) =>
       route({
@@ -1112,7 +1138,7 @@ describe('M4 a turn that started after a send holds it off the retype', () => {
     return world;
   };
   const changed = (world: Awaited<ReturnType<typeof conversation>>, state: 'working' | 'idle', change = 'state') =>
-    world.built.half?.hooks['ferret.changed']?.({
+    fireChanged(world.built, {
       ferret: F1,
       state,
       previous: state === 'working' ? 'idle' : 'working',
@@ -1310,7 +1336,7 @@ describe('ask.delivery:ferret answers an agenda ask through this same send path'
  */
 describe('a CLI send crosses the real send route', () => {
   /** The plugin client the CLI holds, answered by the half's own handler: params, body and the one header a half may set. */
-  const cliClient = (half: ReturnType<NonNullable<typeof daemon.build>>): Pick<PluginClient, 'call'> => ({
+  const cliClient = (half: ReturnType<NonNullable<typeof mailboxDaemon.build>>): Pick<PluginClient, 'call'> => ({
     call: (async (
       key: string,
       init?: { params?: Record<string, string>; body?: unknown; headers?: Record<string, string> },
@@ -1326,8 +1352,8 @@ describe('a CLI send crosses the real send route', () => {
 
   test('fy send is accepted, and a retry under the same id is the same message, not a second one', async () => {
     const { host, ferrets, built, row } = await conversation();
-    const half = built.half;
-    if (half === undefined) throw new Error('the conversation half was not built');
+    const half = built.mailbox;
+    if (half === undefined) throw new Error('the mailbox half was not built');
     const client = cliClient(half);
 
     const first = await new ClientConversationGateway(client, () => 'cli-send-1').send('f1', {

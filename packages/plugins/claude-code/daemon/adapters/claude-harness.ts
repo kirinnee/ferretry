@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
 import type {
   ConversationFinder,
+  ConversationImport,
   Delivery,
   DialogReader,
   FoundConversation,
   Harness,
   HarnessDialog as FerretDialog,
+  HarnessHistorySource,
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
+  HarnessRuntimeSwitch,
   HarnessTranscriptBytes,
   HarnessTranscriptStamp,
   HarnessTranscriptTail,
@@ -25,7 +28,13 @@ import type {
   UpdateResult,
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
-import { LaunchRefusal, materializeSkills, openTranscriptBytes } from '@ferretry/core-ferrets/contract';
+import {
+  historyFilesOver,
+  LaunchRefusal,
+  materializeSkills,
+  openTranscriptBytes,
+  poolHomeHistory,
+} from '@ferretry/core-ferrets/contract';
 import { MAX_ROOT_WINDOW_BYTES } from '@ferretry/kernel/contract';
 import type {
   ChildEnvironment,
@@ -45,6 +54,7 @@ import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { err, milliseconds, ok, type Result } from '@ferretry/std';
 import {
   CLAUDE_CODE_CONFIG,
+  CLAUDE_CODE_HISTORY_ENTRIES,
   CLAUDE_CODE_HOOKS,
   CLAUDE_CODE_LAUNCH_SETTINGS,
   CLAUDE_CODE_SETTINGS,
@@ -53,7 +63,8 @@ import {
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
-import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
+import { channelsOn, HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
+import { CLAUDE_RUNTIME_SWITCH } from '../lib/harness/runtime-switch.ts';
 import {
   compareLaunchSettings,
   type LaunchSettingsInputs,
@@ -90,6 +101,10 @@ export interface ClaudeHarnessDeps {
   readonly newConversationId: () => string;
   /** The user's documented Claude history home; only its projects subtree is read. */
   readonly historyHome: () => Promise<string>;
+  /** The `fy` the Ferretry tools server runs as when a ferret gets the channel (default `fy`, found on the ferret's PATH). */
+  readonly fyCommand?: string;
+  /** Says one plain sentence in the daemon log (a pooling that was skipped, a file kept aside); absent: nothing is said. */
+  readonly warn?: (message: string) => void;
 }
 
 const TMUX_TIMEOUT_MS = 5_000;
@@ -98,7 +113,11 @@ const TMUX_TIMEOUT_MS = 5_000;
  * folders it was launched in (a handful); a home with more proves nothing either way.
  */
 const MAX_PROJECT_FOLDERS = 1_000;
+/** The same, for the shared pool, which holds the folders of every ferret on this harness. */
+const MAX_POOL_PROJECT_FOLDERS = 5_000;
 const MAX_TRANSCRIPT_BYTES = 8 * 1024 * 1024;
+/** The largest transcript copy-on-link copies (the owner's biggest was 939 MB; p99 was 12 MB): a copy is held whole in memory. */
+const MAX_IMPORT_BYTES = 256 * 1024 * 1024;
 /** How much of the end of a transcript one tail read takes: a turn's records are near the end. */
 const TAIL_READ_BYTES = 512 * 1024;
 const FIRST_RECORDS_BYTES = 16 * 1024;
@@ -167,11 +186,18 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
-  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
+  private async prepareHomeFrom(
+    spec: LaunchSpec,
+    inputs: LaunchSettingsInputs & { readonly channels?: boolean },
+    version?: string | undefined,
+  ): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // Nothing is written into a home under a folder chain another user could rewrite (v4's checked directory chain, now the
     // kernel's rule).
     await this.requirePrivateChain(home);
+    // An entry refused before any move stays this ferret's own. A merge interrupted after a move refuses this launch
+    // until a retry completes it, so a missing local transcript cannot silently become a new conversation.
+    await this.poolHistory(spec.ferret);
     // The selected skills: Skills' shared folders linked into `skills/`, the rest of that folder swept (one link rule).
     await materializeSkills(home, spec.parts, []);
     const text = homeText({
@@ -183,6 +209,8 @@ export class ClaudeHarness implements Harness {
       hooks: inputs.hooks as never,
       effort: spec.effort,
       fast: spec.options?.fast,
+      channels: channelsOn(inputs.channels, spec.parts),
+      fyCommand: this.deps.fyCommand ?? 'fy',
     });
     const files: FencedPath[] = [];
     const write = async (name: string, content: string): Promise<void> => {
@@ -195,10 +223,24 @@ export class ClaudeHarness implements Harness {
     await write(HOME_FILES.overlay, text.overlay);
     // MERGED into the document already there, never replaced: Claude keeps its own decisions in it (a project
     // server the person disabled among them), and a launch must not undo them (today's wrapper seed).
-    const claudeJson = await this.claudeJsonText(home, text.claudeJson);
+    const claudeJson = await this.claudeJsonText(home, text.claudeJson, version);
     if (claudeJson !== undefined) await write(HOME_FILES.claudeJson, claudeJson);
     if (text.mcp !== undefined) await write(HOME_FILES.mcp, text.mcp);
     return { files, args: [] };
+  }
+
+  /** Links the home's history entries to the pool (idempotent), logs what was kept aside and the one sentence if any stayed unpooled. */
+  private async poolHistory(ferret: FerretId): Promise<void> {
+    const pooled = await poolHomeHistory({
+      roots: this.deps.roots,
+      ferret,
+      entries: CLAUDE_CODE_HISTORY_ENTRIES,
+    });
+    if (pooled.conflicts.length > 0)
+      this.deps.warn?.(
+        `Ferret ${ferret}: ${pooled.conflicts.length} file(s) it already had were kept in the pool's .conflicts folder because the shared pool already held a file of that name.`,
+      );
+    if (pooled.sentence !== undefined) this.deps.warn?.(pooled.sentence);
   }
 
   async start(spec: LaunchSpec, runner: Runner, env: ChildEnvironment): Promise<Result<Started, StartRefusal>> {
@@ -227,16 +269,27 @@ export class ClaudeHarness implements Harness {
   async hasConversation(spec: LaunchSpec, harnessConversation: string): Promise<boolean | undefined> {
     if (!isConversationId(harnessConversation) || !isConversationId(spec.ferret)) return undefined;
     try {
-      const home = this.home(spec.ferret);
-      const projects = home.resolve('projects');
-      if (!projects.ok) return undefined;
-      const folder = await home.lstat(projects.value);
+      const own = this.home(spec.ferret);
+      const link = own.resolve('projects');
+      if (!link.ok) return undefined;
+      const there = await own.lstat(link.value);
       // No `projects` folder: Claude has written no conversation in this home.
+      if (there === undefined) return false;
+      // `projects` is the link to the shared pool: the conversation is looked for in the pool, which every ferret on this
+      // harness reads (one `projects/*/<id>.jsonl` lookup), so a pooled conversation is resumed, never restarted.
+      const pooled = there.kind === 'symlink';
+      const home = pooled ? this.deps.roots.historyPool() : own;
+      const projects = pooled ? home.resolve('projects') : link;
+      if (!projects.ok) return undefined;
+      const folder = pooled ? await home.lstat(projects.value) : there;
       if (folder === undefined) return false;
       if (folder.kind !== 'directory') return undefined;
-      const entries = await home.entries(projects.value);
-      if (entries.length > MAX_PROJECT_FOLDERS) return undefined;
       const ours = claudeTranscriptPath(spec.folder, harnessConversation);
+      // Ferretry's own spelling is one lookup, before any listing: the common answer needs no walk of a big pool.
+      const direct = home.resolve(ours);
+      if (direct.ok && (await home.lstat(direct.value))?.kind === 'file') return true;
+      const entries = await home.entries(projects.value);
+      if (entries.length > (pooled ? MAX_POOL_PROJECT_FOLDERS : MAX_PROJECT_FOLDERS)) return undefined;
       let elsewhere = false;
       for (const entry of entries) {
         // A link could lead to the conversation, and is never followed to find out.
@@ -252,6 +305,39 @@ export class ClaudeHarness implements Harness {
       return elsewhere ? undefined : false;
     } catch {
       return undefined;
+    }
+  }
+
+  /**
+   * Copy-on-link (docs/design/shared-history.md, 3.2): the owner's own `~/.claude/projects/<folder>/<id>.jsonl` copied
+   * into the shared pool at the same relative path, so a ferret started on it resumes the copy. The original is read
+   * through the read-only `harness-history` root and is never written, linked or locked; the copy is written whole and
+   * only if the pool has nothing at that name (a pooled file is never overwritten).
+   */
+  async importConversation(input: ConversationImport): Promise<Result<void, { readonly reason: string }>> {
+    const refuse = (reason: string): Result<void, { readonly reason: string }> => err({ reason });
+    if (!isConversationId(input.id) || !new RegExp(`^projects/[^/]+/${input.id}\\.jsonl$`, 'u').test(input.source))
+      return refuse('That is not a Claude Code conversation file of this id.');
+    try {
+      const historyHome = await this.deps.historyHome();
+      if (!historyHome.startsWith('/')) return refuse("Claude Code's history folder is not known on this machine.");
+      const history = this.deps.roots.root('harness-history', { subfolder: historyHome });
+      const from = history.resolve(input.source);
+      const pool = this.deps.roots.historyPool();
+      const to = pool.resolve(input.source);
+      if (!from.ok || !to.ok) return refuse('That conversation file is outside the folders Ferretry may use.');
+      if ((await pool.lstat(to.value)) !== undefined) return ok(undefined);
+      const found = await history.stat(from.value);
+      if (found?.kind !== 'file') return refuse('That conversation file is not there any more.');
+      if (found.size > MAX_IMPORT_BYTES) return refuse('That conversation file is too large to copy (over 256 MB).');
+      const folder = pool.resolve(input.source.slice(0, input.source.lastIndexOf('/')));
+      if (!folder.ok) return refuse('That conversation file is outside the folders Ferretry may use.');
+      await pool.makeDirectory(folder.value, { mode: 0o700 });
+      const bytes = await history.readBytes(from.value, MAX_IMPORT_BYTES);
+      await pool.writeBytes(to.value, bytes, { exclusive: true });
+      return ok(undefined);
+    } catch {
+      return refuse('The conversation could not be copied.');
     }
   }
 
@@ -380,6 +466,35 @@ export class ClaudeHarness implements Harness {
     },
   };
 
+  /**
+   * The past conversations Claude holds, as read-only trees for Conversation's index: the owner's own home (read in place
+   * through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never followed,
+   * so a pooled home lists nothing itself; the pool source lists its transcripts once. Nothing is written.
+   */
+  async historySources(): Promise<readonly HarnessHistorySource[]> {
+    const sources: HarnessHistorySource[] = [];
+    const historyHome = await this.deps.historyHome().catch(() => '');
+    if (historyHome.startsWith('/'))
+      sources.push({
+        kind: 'computer',
+        label: 'owner',
+        files: historyFilesOver(this.deps.roots.root('harness-history', { subfolder: historyHome })),
+      });
+    try {
+      sources.push({ kind: 'pool', label: 'pool', files: historyFilesOver(this.deps.roots.historyPool()) });
+    } catch {
+      // A composition without pooling still offers the owner's and individual homes' history.
+    }
+    const homes = this.deps.roots.root('agent-homes');
+    const top = homes.resolve('');
+    if (!top.ok) return sources;
+    for (const entry of await homes.entries(top.value).catch(() => [])) {
+      if (entry.kind !== 'directory') continue;
+      sources.push({ kind: 'ferret-home', label: entry.name, files: historyFilesOver(homes, entry.name) });
+    }
+    return sources;
+  }
+
   // ─── internals ──────────────────────────────────────────────────────────────────────────────────────────────
 
   private async launch(
@@ -394,15 +509,18 @@ export class ClaudeHarness implements Harness {
     // ONE read of the configuration per launch: the home, the argv and the record all describe the same settings, so a
     // reload between them cannot leave a record that differs from what the process runs on.
     const inputs = await this.launchInputs(spec.runtime);
-    await this.prepareHomeFrom(spec, inputs);
+    await this.prepareHomeFrom(spec, inputs, found.version);
     const command = launchCommand({
       binary: found.binary,
+      flags: settingsFlags(inputs.settings),
       home: spec.home,
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
+      channels: channelsOn(inputs.channels, spec.parts),
       mode: spec.mode,
       questionTool: inputs.questionTool,
+      dangerousRmWaiver: inputs.dangerousRmWaiver,
       conversation,
       readable: spec.readable,
     });
@@ -451,12 +569,16 @@ export class ClaudeHarness implements Harness {
    * merged — see `mergeClaudeJson`). Read through the ferret's own home, so a link or a file the root refuses fails
    * the launch exactly as the write would; one too large to read is left as it is, like one that is not JSON.
    */
-  private async claudeJsonText(home: RootHandle, fresh: string): Promise<string | undefined> {
+  private async claudeJsonText(
+    home: RootHandle,
+    fresh: string,
+    version: string | undefined,
+  ): Promise<string | undefined> {
     const path = this.fenced(home.resolve(HOME_FILES.claudeJson));
     const info = await home.stat(path);
-    if (info === undefined || info.kind !== 'file') return mergeClaudeJson(undefined, fresh);
+    if (info === undefined || info.kind !== 'file') return mergeClaudeJson(undefined, fresh, version);
     if (info.size > MAX_CLAUDE_JSON_BYTES) return undefined;
-    return mergeClaudeJson(await home.readText(path, MAX_CLAUDE_JSON_BYTES), fresh);
+    return mergeClaudeJson(await home.readText(path, MAX_CLAUDE_JSON_BYTES), fresh, version);
   }
 
   private home(ferret: FerretId): RootHandle {
@@ -497,6 +619,14 @@ export class ClaudeHarness implements Harness {
     const found = await this.transcriptFile(ferret);
     if (found === undefined) return undefined;
     return { file: found.file, size: found.stat.size, mtimeMs: Date.parse(found.stat.modified) };
+  }
+
+  /**
+   * Live model, effort and fast-mode switching of a running ferret (`Harness.runtimeSwitch`). Claude Code switches by typed
+   * command, so there is no picker to drive and nothing per ferret to hold: the same switch serves every pane.
+   */
+  runtimeSwitch(): HarnessRuntimeSwitch {
+    return CLAUDE_RUNTIME_SWITCH;
   }
 
   /**
@@ -556,9 +686,13 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private async launchInputs(
-    runtime: string | undefined,
-  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean }> {
+  private async launchInputs(runtime: string | undefined): Promise<
+    LaunchSettingsInputs & {
+      readonly questionTool: boolean;
+      readonly dangerousRmWaiver: boolean;
+      readonly channels?: boolean;
+    }
+  > {
     const selected = await this.deps.selected(runtime);
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
@@ -567,6 +701,10 @@ export class ClaudeHarness implements Harness {
       permissionMode: file?.permissionMode ?? 'skip',
       // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
       questionTool: file?.questionTool ?? false,
+      // In the record, but only as its effect on the fixed layer (setting on AND bypass mode): see launchSettingsRecord.
+      dangerousRmWaiver: file?.dangerousRmWaiver ?? false,
+      // Outside the recorded launch settings too: the channel is decided per launch (setting, else the login's type).
+      ...(file?.channels === undefined ? {} : { channels: file.channels }),
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),
@@ -610,11 +748,16 @@ export class ClaudeHarness implements Harness {
     if (typeof identity !== 'object' || identity === null) return undefined;
     const { format, id, cwd } = identity as { format?: unknown; id?: unknown; cwd?: unknown };
     if (format !== 1 || !isConversationId(id) || typeof cwd !== 'string' || !cwd.startsWith('/')) return undefined;
-    const file = home.resolve(claudeTranscriptPath(cwd, id));
+    // `projects` is a link to the shared pool in a pooled home: the root never follows a link out, so the transcript is
+    // read through the pool's own handle at the same relative path.
+    const projects = home.resolve('projects');
+    const pooled = projects.ok && (await home.lstat(projects.value))?.kind === 'symlink';
+    const root = pooled ? this.deps.roots.historyPool() : home;
+    const file = root.resolve(claudeTranscriptPath(cwd, id));
     if (!file.ok) return undefined;
-    const stat = await home.stat(file.value);
+    const stat = await root.stat(file.value);
     if (stat?.kind !== 'file') return undefined;
-    return { home, file: file.value, stat };
+    return { home: root, file: file.value, stat };
   }
 
   /** Read only the assigned id in its encoded cwd, including after a daemon restart. */

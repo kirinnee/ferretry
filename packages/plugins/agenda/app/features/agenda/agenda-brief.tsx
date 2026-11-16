@@ -20,6 +20,7 @@
 
 import {
   agendaCardKind,
+  ASK_REFERENCE_SIGIL_CLASS,
   type AgendaItem,
   type AgendaLink,
   type AgendaQuestion,
@@ -189,7 +190,10 @@ function Section({
   );
 }
 
-const REFERENCE_TARGET = /^(?:[#!][A-Za-z]?\d+|@\S+|[%][a-z]+:\S+|&\S+|[$/][A-Za-z][\w-]*)$/u;
+const REFERENCE_TARGET = new RegExp(
+  `^(?:(?:#|${ASK_REFERENCE_SIGIL_CLASS})[A-Za-z]?\\d+|@\\S+|[%][a-z]+:\\S+|&\\S+|[$/][A-Za-z][\\w-]*)$`,
+  'u',
+);
 const PATH_TARGET = /^(?:\.{0,2}\/|~\/)\S+$/u;
 
 /** One link: a URL opens outside, a reference or a file goes through the reference surface. */

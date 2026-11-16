@@ -1,5 +1,6 @@
 import { locateCommand, realpath } from '../host/fs.ts';
 import { isAbsolute, resolve } from 'node:path';
+import type { ChildEnvironment, HandleCommandLookup } from '@ferretry/kernel/contract';
 import {
   GUARDED_HARNESS_NAMES,
   RealHarnessRefusedError,
@@ -12,6 +13,9 @@ import {
 /** Finds a bare command name on a colon-separated search path, as the pane's shell would. */
 export type CommandLocator = (name: string, searchPath: string) => string | undefined;
 
+/** Where a bare command resolves on the PATH an opaque environment handle will set (`kernel.paths.whichFor`). */
+export type HandleCommandLocator = (name: string, env: ChildEnvironment) => Promise<HandleCommandLookup>;
+
 /**
  * Refuses a launch that would reach the owner's real Claude Code or Codex.
  *
@@ -21,15 +25,15 @@ export type CommandLocator = (name: string, searchPath: string) => string | unde
  * whose `claude` was the real one. The pane's PATH is the launch's own `PATH` when it carries one and
  * otherwise this daemon's, because the tmux server the daemon starts inherits the daemon's.
  *
- * IT FAILS CLOSED when it cannot make that search: a launch whose opaque environment handle sets `PATH`
- * (`envNames`; the value never reaches this plugin), or no search path at all. Either way the pane could reach a
- * `claude` the guard never looked at, so the launch is refused rather than passed (`UnprovableHarnessError`).
+ * A LAUNCH WHOSE OPAQUE ENVIRONMENT HANDLE SETS `PATH` (`envNames`; the value never reaches this plugin, so every
+ * ferret with a Shells launch part) is searched through `kernel.paths.whichFor`: each name is resolved on the PATH the
+ * handle WILL set, and on nothing else (the daemon's own PATH is not what the pane sees), without opening or spending
+ * the handle. The kernel hands back a path, never the PATH, and the located path is judged exactly as above.
  *
- * DECLARED DIFFERENCE FROM TODAY: today searched a launch's PATH by value, so a shell PATH holding no real
- * `claude` passed. 5.0 cannot read the handle, so every armed launch whose handle names `PATH` is refused —
- * that is every ferret with a Shells launch part, since Shells always sets PATH — and so is a launch with no
- * search path at all, where today searched `''` and passed. Both fail closed (409 `real_harness`). Judging
- * such a launch on its real PATH waits for a kernel/Vault-side resolve (GAP in `ports-pending.json`).
+ * IT FAILS CLOSED when it cannot make that search: a handle that sets `PATH` when no handle (or no `whichFor`) was
+ * handed, a handle whose PATH the kernel cannot prove (a secret-derived, foreign, spent or unreadable one, an answer of
+ * `unprovable`, or a `whichFor` that throws), or no search path at all. Either way the pane could reach a `claude` the
+ * guard never looked at, so the launch is refused rather than passed (`UnprovableHarnessError`).
  *
  * Every path is compared after symlinks are resolved and before, so a profile link and the store path
  * it points into are both recognised.
@@ -39,15 +43,29 @@ export class RealHarnessLaunchGuard implements TmuxLaunchGuard {
     /** The daemon's `PATH` as the kernel's launch-guard fact names it (`hostFacts.launchGuard().searchPath`). */
     private readonly daemonSearchPath: () => string | undefined,
     private readonly locate: CommandLocator = locateCommand,
+    /** `kernel.paths.whichFor`: absent, a launch whose handle sets PATH cannot be proved and is refused. */
+    private readonly whichFor?: HandleCommandLocator,
   ) {}
 
   async check(launch: TmuxLaunch): Promise<void> {
-    const ownPath = launch.env?.PATH;
-    if (ownPath === undefined && launch.envNames?.includes('PATH') === true)
-      throw new UnprovableHarnessError('own-path');
-    const searchPath = ownPath ?? this.daemonSearchPath();
-    if (searchPath === undefined || searchPath === '') throw new UnprovableHarnessError('no-path');
     const [program] = launch.command;
+    const ownPath = launch.env?.PATH;
+    const handlePath = ownPath === undefined && launch.envNames?.includes('PATH') === true;
+    let find: (name: string) => Promise<string | undefined>;
+    if (handlePath) {
+      const handle = launch.handle;
+      const whichFor = this.whichFor;
+      if (handle === undefined || whichFor === undefined) throw new UnprovableHarnessError('own-path');
+      find = async name => {
+        const answer = await whichFor(name, handle).catch((): HandleCommandLookup => ({ kind: 'unprovable' }));
+        if (answer.kind === 'unprovable') throw new UnprovableHarnessError('own-path');
+        return answer.kind === 'found' ? answer.path : undefined;
+      };
+    } else {
+      const searchPath = ownPath ?? this.daemonSearchPath();
+      if (searchPath === undefined || searchPath === '') throw new UnprovableHarnessError('no-path');
+      find = async name => this.locate(name, searchPath);
+    }
     const candidates: { readonly name: string; readonly path: string | undefined }[] = [
       {
         name: program,
@@ -55,10 +73,10 @@ export class RealHarnessLaunchGuard implements TmuxLaunchGuard {
           ? isAbsolute(program)
             ? program
             : resolve(launch.cwd, program)
-          : this.locate(program, searchPath),
+          : await find(program),
       },
-      ...GUARDED_HARNESS_NAMES.map(name => ({ name, path: this.locate(name, searchPath) })),
     ];
+    for (const name of GUARDED_HARNESS_NAMES) candidates.push({ name, path: await find(name) });
     for (const candidate of candidates) {
       if (candidate.path === undefined) continue;
       const resolved = await realpath(candidate.path).catch(() => candidate.path as string);

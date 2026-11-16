@@ -33,7 +33,7 @@ const ASK = {
   howToResolve: 'Answer yes or no.',
   ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
 };
-const ANSWER = '[answer to !A1 «Ship it?»] Yes';
+const ANSWER = '[answer to ^A1 «Ship it?»] Yes';
 
 type Entry = { id: string; role: string; text: string; at: string };
 
@@ -61,6 +61,7 @@ const world = async () => {
     plugins: [
       real('asks'),
       real('ferrets'),
+      real('mailbox'),
       real('conversation'),
       real('board'),
       stub('packs', { 'start.decide': () => ({ allow: true }) }, { takes: [{ hook: StartDecide }] }),
@@ -224,7 +225,7 @@ describe('R-0334 V-0032: an owner’s answer reaches the ferret through the real
         sends: { sendId: string; message: string; matchText?: string; fate?: string }[];
       }>().sends;
     await settled(async () => (await sendsOf()).length > 0);
-    const typed = () => w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to !A1'));
+    const typed = () => w.runner.deliveries.filter(d => d.delivery.text.includes('[answer to ^A1'));
     const sends = await sendsOf();
     expect(sends).toHaveLength(1);
     expect(typed()).toHaveLength(1);

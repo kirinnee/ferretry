@@ -11,7 +11,7 @@ import {
   tool,
   verb,
 } from '@ferretry/kernel/manifest';
-import { AgendaContext, AskAnswered, AsksPort, AskSources } from '@ferretry/core-asks/contract';
+import { AgendaContext, AskAnswered, AsksPort, askReference, AskSources } from '@ferretry/core-asks/contract';
 import { ArchiveKeeps, FerretStarted, FerretsPort, SitrepLines, StartDecide } from '@ferretry/core-ferrets/contract';
 import { ConversationPort, ReferenceCatalog, SearchSources, TurnEnded } from '@ferretry/plugin-conversation/contract';
 import {
@@ -382,11 +382,11 @@ export default definePlugin({
           },
           {
             flag: '--approval <id>',
-            help: 'where the board is off: your answered "Track this on the board?" item (!A12) the owner said Yes to',
+            help: `where the board is off: your answered "Track this on the board?" item (${askReference('A12')}) the owner said Yes to`,
           },
           {
             flag: '--thread <id>',
-            help: 'the open thread on your agenda (!A12) this card carries out; the owner is already asked there, so the card is your own errand',
+            help: `the open thread on your agenda (${askReference('A12')}) this card carries out; the owner is already asked there, so the card is your own errand`,
           },
           { flag: '--assignee <who>', help: 'the ferret doing it: a callsign or a session id' },
           { flag: '--project <name>', help: 'the board to create it on; default: the board of the calling session' },
@@ -766,7 +766,7 @@ export default definePlugin({
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },
 
-  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'any' } }],
+  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'lead' } }],
   doctor: ['board-store'],
   permissions: { roots: [], network: ['api.github.com'], spawn: ['gh', 'git', 'ssh'], secrets: [] },
 });

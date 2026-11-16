@@ -3,7 +3,14 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { RootHandle, RootsPort } from '@ferretry/kernel/contract';
 import { diskPaths, diskSessionsRoot } from '@ferretry/kernel/testing';
-import { ok } from '@ferretry/std';
+import { err, ok } from '@ferretry/std';
+import {
+  type ConversationId,
+  ConversationIdSchema,
+  type ConversationLeaseDisk,
+  ConversationLeaseStore,
+  type HistoryHarness,
+} from '../../../../contract/conversation-lease.ts';
 import type { FerretRecord, RunnerHandle } from '../../../../contract/index.ts';
 import {
   emptyChildEnvironment,
@@ -13,6 +20,10 @@ import {
   ferretId,
   T0,
 } from '../../../../contract/testing/index.ts';
+import {
+  ConversationLeases,
+  registryLeaseSessions,
+} from '../../../../daemon/lib/session/lifecycle/conversation-leases.ts';
 import { heldLifecycleLauncher } from '../../../../daemon/adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
 import { FerretsService } from '../../../../daemon/lib/ferrets/service.ts';
 import { FerretRegistry } from '../../../../daemon/lib/registry/registry.ts';
@@ -45,13 +56,22 @@ class RecordingLeases implements SessionConversationLeases {
     this.calls.push(`claim ${sessionId} ${command.join(' ')}`);
     if (this.claimError !== undefined) throw this.claimError;
   }
+  async moveToPane(sessionId: string, _command: readonly string[], pid: number): Promise<void> {
+    this.calls.push(`move ${sessionId} ${pid}`);
+  }
   async release(sessionId: string): Promise<void> {
     this.calls.push(`release ${sessionId}`);
   }
 }
 
 async function wired(
-  options: { readonly leases?: SessionConversationLeases; readonly record?: Partial<FerretRecord> } = {},
+  options: {
+    readonly leases?: SessionConversationLeases;
+    readonly record?: Partial<FerretRecord>;
+    readonly command?: readonly string[];
+    /** The daemon's REAL leases over this pool, instead of `leases`. */
+    readonly pool?: MemoryPool;
+  } = {},
 ) {
   const parent = await mkdtemp(`${tmpdir()}/fy-lifecycle-through-ferrets-`);
   parents.push(parent);
@@ -100,7 +120,11 @@ async function wired(
       sleep: async () => undefined,
       nowMs: () => 0,
     }),
-    ...(options.leases === undefined ? {} : { leases: options.leases }),
+    ...(options.pool !== undefined
+      ? { leases: realLeases(options.pool, registry) }
+      : options.leases === undefined
+        ? {}
+        : { leases: options.leases }),
     log: { warn: () => undefined },
   });
   service = new FerretsService(registry, tokens, {
@@ -125,7 +149,13 @@ async function wired(
     cutOffMark: files.cutOffMark,
   });
   const lifecycle = files.createLifecycle(FERRET, sessionEnvelope());
-  await lifecycle.create({ agent: '/opt/fleet/bin/claude', cwd: `${parent}/work`, mode: 'auto', prompt: 'work' });
+  await lifecycle.create({
+    agent: options.command?.[0] ?? '/opt/fleet/bin/claude',
+    cwd: `${parent}/work`,
+    mode: 'auto',
+    prompt: 'work',
+    ...(options.command === undefined ? {} : { command: options.command }),
+  });
   return { files, lifecycle, registry, runner, service, storage };
 }
 
@@ -184,9 +214,10 @@ describe('a lifecycle start of a ferret the registry holds', () => {
     const claimedAt = leases.calls.length;
     await f.lifecycle.stop(FERRET);
 
-    // Assert — one claim for this session, made before the launch, and one release after the stop
+    // Assert — one claim for this session, made before the launch, then its move onto the pane's pid, and one release after the stop
     expect(leases.calls[0]?.startsWith(`claim ${FERRET} `)).toBe(true);
-    expect(claimedAt).toBe(1);
+    expect(leases.calls[1]).toBe(`move ${FERRET} 1001`);
+    expect(claimedAt).toBe(2);
     expect(leases.calls.at(-1)).toBe(`release ${FERRET}`);
   });
 
@@ -258,5 +289,102 @@ describe('a lifecycle start of a ferret the registry holds', () => {
     // Assert
     await expect(starting).rejects.toThrow(`no ferret ${stranger}`);
     expect(f.runner.starts).toBe(0);
+  });
+});
+
+const DAEMON_PID = 4000;
+const CONVERSATION = ConversationIdSchema.parse('0b7e4c1a-1d2f-4c3b-9a8e-7f6d5c4b3a21');
+const FRESH = ['/opt/fleet/bin/claude', '--session-id', CONVERSATION];
+
+/** The daemon's REAL leases over an in-memory pool; every process is running unless it is named `dead`. */
+class MemoryPool implements ConversationLeaseDisk {
+  readonly files = new Map<string, string>();
+  readonly dead = new Set<number>();
+  async exclusive<T>(_harness: HistoryHarness, work: () => Promise<T>): Promise<T> {
+    return await work();
+  }
+  async read(harness: HistoryHarness, conversation: ConversationId): Promise<string | undefined> {
+    return this.files.get(`${harness}/${conversation}`);
+  }
+  async write(harness: HistoryHarness, conversation: ConversationId, text: string): Promise<void> {
+    this.files.set(`${harness}/${conversation}`, text);
+  }
+  async remove(harness: HistoryHarness, conversation: ConversationId): Promise<void> {
+    this.files.delete(`${harness}/${conversation}`);
+  }
+  async list(harness: HistoryHarness): Promise<readonly string[]> {
+    return [...this.files.keys()]
+      .filter(key => key.startsWith(`${harness}/`))
+      .map(key => key.slice(harness.length + 1));
+  }
+  async startOf(pid: number): Promise<number | undefined> {
+    return this.dead.has(pid) ? undefined : 1;
+  }
+}
+
+/** The real leases, built over the registry the way the daemon's root builds them. */
+function realLeases(pool: MemoryPool, registry: FerretRegistry): ConversationLeases {
+  return new ConversationLeases(
+    new ConversationLeaseStore(pool, () => new Date(NOW)),
+    registryLeaseSessions(registry, async () => undefined),
+    DAEMON_PID,
+  );
+}
+
+/** What `fy history claim` in a person's terminal asks: no session, so a session's lease is only ever read by its pid. */
+async function terminalClaim(pool: MemoryPool, harness: HistoryHarness) {
+  return await new ConversationLeaseStore(pool, () => new Date(NOW)).claim(
+    { harness, conversation: CONVERSATION, holder: { pid: 9000 } },
+    async () => 'unknown',
+  );
+}
+
+describe('a lifecycle start with the daemon’s real conversation leases (c58-36c-r1)', () => {
+  test('should keep a pane’s conversation held against a terminal claim after the daemon that launched it is gone', async () => {
+    // Arrange — the pane is launched by the real launch path (the runner, never the wrapper)
+    const pool = new MemoryPool();
+    const f = await wired({ pool, command: FRESH });
+
+    // Act — a daemon restart: the daemon pid is dead, the pane is still running
+    await f.lifecycle.start(FERRET);
+    pool.dead.add(DAEMON_PID);
+    const claim = await terminalClaim(pool, 'claude');
+
+    // Assert
+    expect(claim.kind).toBe('held');
+    expect(claim.lease.holder.pid).not.toBe(DAEMON_PID);
+    expect(claim.lease.holder.session).toBe(FERRET);
+  });
+
+  test('should still let a terminal claim take the conversation once the pane itself has ended', async () => {
+    // Arrange
+    const pool = new MemoryPool();
+    const f = await wired({ pool, command: FRESH });
+    await f.lifecycle.start(FERRET);
+    const held = await terminalClaim(pool, 'claude');
+    pool.dead.add(DAEMON_PID);
+    pool.dead.add(held.lease.holder.pid);
+
+    // Act
+    const claim = await terminalClaim(pool, 'claude');
+
+    // Assert
+    expect(claim.kind).toBe('claimed');
+  });
+
+  test('should stop the pane and fail the start, saying why, when the lease cannot be moved onto the pane', async () => {
+    // Arrange — the runner cannot say which process the pane runs
+    const pool = new MemoryPool();
+    const f = await wired({ pool, command: FRESH });
+    f.runner.attach = async () => err('gone');
+
+    // Act
+    const starting = f.lifecycle.start(FERRET);
+
+    // Assert — nothing keeps writing, and the lease is freed with it
+    await expect(starting).rejects.toThrow('could not tell which process runs its terminal');
+    expect(await f.runner.alive('%1' as RunnerHandle)).toBe(false);
+    expect(pool.files.size).toBe(0);
+    expect(f.registry.get(ferretId(FERRET))?.state).toBe('stopped');
   });
 });

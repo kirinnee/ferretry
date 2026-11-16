@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, testHost } from '@ferretry/kernel/testing';
@@ -12,7 +13,7 @@ async function boot() {
   ferrets.add({ id: F1, state: 'working' });
   return await testHost({
     plugins: [daemon],
-    fakes: { ferrets, asks: new FakeAsks() },
+    fakes: { mailbox: new FakeMailbox(), ferrets, asks: new FakeAsks() },
     clock: fixedClock('2026-11-07T09:00:00Z'),
   });
 }

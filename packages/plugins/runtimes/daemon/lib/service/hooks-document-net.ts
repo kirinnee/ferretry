@@ -139,13 +139,13 @@ export function hooksDocumentRefusedLines(text: string): RefusedHooksLines | und
   } catch {
     return undefined;
   }
-  const targets = targetsOf(document);
-  if (targets === undefined) return undefined;
   try {
-    return linesOf(text, targets);
+    const targets = targetsOf(document);
+    return targets === undefined ? undefined : linesOf(text, targets);
   } catch {
-    // `TooDeep` is the only thing `linesOf` throws: the text parsed as JSON above, so the scan's own reads (a key
-    // string, a bracket) cannot fail, and the depth is capped so the stack cannot overflow. Any failure withholds whole.
+    // `TooDeep` is what `linesOf` throws past the depth cap. The text parsed as JSON above, so the scan's own reads (a
+    // key string, a bracket) cannot fail, and the write rule's walkers are iterative, so a file nested as deep as the
+    // parser allows is read too. Any failure still withholds the whole text: it never errors the listing.
     return 'whole';
   }
 }

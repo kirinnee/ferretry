@@ -16,6 +16,15 @@ when a ferret is created).
 | Passive learning, per ferret (Actions)                            | re-instructs the running ferret with a queued message ([lessons.md](lessons.md))         |
 | Warden, speed-up keys, secrets in the secret store                | the daemon reads them when it uses them, never the CLI                                   |
 
+The model, effort and fast switches go through `POST /v1/ferrets/:id/runtime` (Runtimes mounts it, Ferrets serves it over the
+ferret's own harness). **A person may switch any ferret; a ferret may switch only itself and its helpers (its descendants), never its lead** — anyone else
+is refused `403 forbidden`. A harness that cannot be switched while it runs answers `422 runtime_control_unsupported`.
+
+Which models a ferret may be switched to is what **the runtime it was started on** serves, read from the ferret's own record
+(never from the request). Claude Code switches by typed command, so a request names a model **or** an effort **or** fast mode,
+not two of them; a model the runtime does not serve is refused unless its catalog takes custom ids. A ferret with no recorded
+runtime, or whose runtime serves no model, answers `503 runtime_catalog_unavailable` rather than guessing.
+
 ## On restart
 
 Everything the CLI itself reads at launch. **Restart CLI** (Actions, or Info › Runtime's Settings row), a
@@ -70,10 +79,11 @@ ferret is bound to — as if only the process had restarted:
   first turn wrote a rollout, or a v4 ferret whose rollout v4 never found) starts a NEW one and says so the same way:
   history `session.conversation_not_found` with `{ unknown: true }`, and a fixed sentence before an autonomous
   ferret's revive turn, so it never forgets everything in silence.
-- **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
-  Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
-  harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and
-  resumes that one.
+- **Go back to the earlier conversation** (Actions, or `--conversation previous`) is **not built yet (GAP)**. The
+  harness's finder lists the owner's own history, never the ferret's home, so answering it would unbind the ferret's
+  real conversation for one of the person's. A Restart that asks for it is refused `unavailable` (503 `agent_unavailable`: "going back to an
+  earlier conversation is not built yet") before anything is written or killed, as `convert` does; it waits for a
+  reader the harness scopes to the ferret's own home.
 
 Moving between harnesses is not a restart: a plain move stays refused (`harness_mismatch`). It is done by
 **converting** the conversation (Move to Codex…/Move to Claude…, `--convert`) — see
@@ -296,32 +306,50 @@ no flag was found that turns Plan mode's off. The Runtimes wrapper has no opt-in
 never enables Codex's (declared GAP; the setting governs the harness launch). The pane is also handed
 `FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part. The setting and a
 ferret's mode are outside the recorded launch's fixed-layer fingerprint, so changing either cannot make a running
-ferret read as outdated; it takes effect at the ferret's next launch.
+ferret read as outdated; it takes effect at the ferret's next launch. The Claude `dangerousRmWaiver` setting is the
+exception: its EFFECT (the setting on AND bypass mode) is in the `fixed-layer` fingerprint, so turning it off leaves a
+ferret launched with it on **Restart needed**. A record from before this reads as off, so no earlier ferret is flagged.
 
-## Claude's questions reach the app through a hook
+## Claude's questions reach the app from the screen, not a hook
 
-An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the
-question is open, and the daemon learns that from evidence, never from the screen alone. Claude Code 2.1.220
-wrote the call to its transcript as it asked it. Live ferrets on 2.1.281 do not: the call reaches the
-transcript only in the same write as its answer, so the transcript said nothing while the form waited, the
-session read `working`, and the only way to answer was raw keys in the Console.
+An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the question is
+open. Claude Code 2.1.281 writes the call to its transcript only in the same write as its answer, so the transcript says
+nothing while the form waits. The fixed layer used to put a `PreToolUse` hook in the overlay for that; **it no longer
+writes one** (M7, owner: "dont use hooks"). The conversation plugin's question watch
+(`questions/lib/watch.ts`) reads the pane instead, through the same form seam the answer driver uses:
 
-The **fixed layer** therefore also puts one `PreToolUse` hook for `AskUserQuestion` into the `--settings`
-overlay (fast mode's replacement overlay copies it along). It fires before the form is drawn and copies its
-payload — the real `tool_use_id` and the whole question — into the file the daemon names for that pane in
-`FY_QUESTION_FILE` (`state/sessions/<id>/question-asked.json`). Both observer hosts read it beside the
-transcript tail (`lib/session/question/asked.ts`): the recorded call counts as open only while the
-transcript has nothing newer — no record of the call, of its result, or of anything at all after it — so the
-moment the form is answered or cancelled the transcript takes over again, and a stale file cannot bring back
-a form that is gone. The hook is in the overlay only, never in a settings entry, so a person's own
-`PreToolUse` hooks keep running beside it; it prints nothing and always exits 0, so it never changes what
-Claude decides.
+- a pane that shows Claude's own form — its rule and `☐ Header` chip or tab strip, exactly one selection cursor, and its
+  `Enter to select` / `Esc to cancel` footer — is stored as `question.json`, the same file the hook produced, so the
+  mailbox waits on it as before (`reasonForWaiting`: `question`). A numbered list in prose never has that footer or top,
+  and a pane the runner reads as a permission prompt or dialog is never read as a question;
+- a `tool_use` of the question tool in the transcript with no result (a Claude that writes it early) is stored under its
+  own id, as Codex's is;
+- it ends when the transcript records a result for those words after it was asked (an answer or a dismissal), when the
+  answered stamp names it, or when a readable pane has shown no numbered surface for two looks running.
 
-Declared gaps: a ferret launched before this change has neither the hook nor the variable until its next
-launch; and the hold-back itself is live-only — against a loopback model both versions write the call early —
-so the contract test (`packages/daemon/tests/contract/question-hook.test.ts`) pins the hook mechanism on the
-real CLI, and the live bytes that showed the regression are the unit fixtures
-(`packages/daemon/tests/fixtures/question-asked/`).
+The pane is read only for a ferret that is working (or already holds a pane question), never every idle ferret.
+Declared gaps: a form of SEVERAL questions shows one tab at a time, so only the visible question is stored (it asks, so the
+mailbox waits, but the app cannot answer it for the person); a ferret launched before this change still has the hook in its
+settings and its file is still read; and the Ferrets observer's own `awaiting_question` state still comes from that file
+alone, so a new launch does not read as `awaiting_question` (the mailbox does not use it).
+
+## After a compaction a Claude ferret re-reads what it owes
+
+A compaction keeps a summary and drops the rest, so a ferret can lose its assigned task, its card, its open agenda
+items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
+(`daemon/lib/harness/compaction.ts` in the Claude Code plugin), and never in a settings entry:
+
+- `PreCompact` (manual and auto) prints what the summary must keep — task, card id and status, agenda item ids, owed
+  messages, PR links;
+- `SessionStart` with the matcher `compact` prints, once the compaction is done, what to read again:
+  `fy logs <session> --turn 1`, `fy card show <card id>` (`fy board status` when the id is lost), `fy agenda ls` and
+  `fy agenda show <id>`, `fy transcript <session> --tail` and `fy reply <id> <text>`. The only value it reads is
+  `FY_SESSION_ID`; it prints no credential and always exits 0.
+
+Both are in the `fixed-layer` fingerprint, so a ferret launched before them reads as **Restart needed**. A Codex ferret
+has no equivalent yet: no compact-prompt setting is documented in this repo, and a hook of Ferretry's own would need its
+own `hooks.state` trust entry (`harness-dialogs.md`); the declared gap is `GAP(codex-compaction)` in the Codex
+plugin's `ports-pending.json`.
 
 The model a relaunch asks for is the one the ferret is on: the CLI's own report when it is newer than the
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;
@@ -356,3 +384,40 @@ a handover freezes the provenance with the resolved model in its plan, so a fork
 - A change of the runtime, the profile or the credential's environment since the launch is not detected either:
   today's wrapper digest covered them, but in 5.0 nothing Runtimes or the Vault supply is compared. Restart the
   ferret to apply it.
+
+## The Claude channel
+
+A Claude Code ferret can be handed a message **without anything being typed into its composer**: Claude Code accepts
+a push from an MCP server that declares the `claude/channel` capability and sends `notifications/claude/channel`.
+Ferretry's own tools server (`fy mcp serve`, registered under the name `ferretry`) is that server.
+
+- **The launch.** The harness a `fy new` really starts (the Claude Code plugin's launch, the same single builder as every
+  other launch: start, Restart CLI, migrate, revive) — not the runtime wrapper a person runs by hand — adds, when the channel
+  is on for that ferret: `--dangerously-load-development-channels=server:ferretry` to the argv; the Ferretry tools server
+  (`fy mcp serve`, registered as `ferretry`, `FY_TOKEN` emptied, `FERRETRY_CHANNEL=1`) to the `--mcp-config` file beside the
+  profile's own servers; and one paragraph to the ferret's memory (the layer that carries Ferretry's agent instructions)
+  saying that `<channel source="ferretry">` messages are work from its lead or other ferrets and are acted on exactly like
+  those messages typed, though Claude marks channel content untrusted. Claude's plain `--channels` refuses a server that is
+  not on its approved list, so the development spelling is the only one that works. Every launch with it shows a "WARNING:
+  Loading development channels" screen, which the daemon answers with option 1 and never with Exit
+  ([harness-dialogs.md](harness-dialogs.md)).
+- **The switch.** Per launch. `channels` in `config/harness-claude-code.yaml` is **unset by default**, and unset means:
+  **on** for a login whose own Claude account file says `oauthAccount.organizationType: claude_max`, **off** for
+  `claude_enterprise`, `claude_team`, any other type, and a login whose type cannot be read (an organisation's policy
+  blocks channels, and an unknown login is not assumed to allow them). Ferretry reads **only that one non-secret field**,
+  never a token: Runtimes' launch hook adds it to the launch (an `account` part) from what Logins names for a login it keeps,
+  and from the person's own `~/.claude.json` for a login kept by the host (`store: host`). Written `channels: true` or
+  `false` it wins for every login. The value is read at each launch and applies at the next one (it is **on restart**). It is not a loosening, so an edit that turns it on is not held. Off
+  means no flag, no `FERRETRY_CHANNEL` marker, no polling, and every message is typed as before. If a channel is on but Claude
+  refuses it, the first message goes unreceived for the 10 s window, the channel is marked broken for that ferret, and
+  everything is typed.
+- **The path.** The tools server polls the daemon for messages held for ITS session (`channel_poll`, a long poll that
+  also says the channel is connected) and writes each as one `notifications/claude/channel` carrying the exact text
+  that would have been typed, with `meta` `{ send_id, from }` (never a `source` key: it collides with the tag's own
+  attribute); the server asks the daemon to **claim** each one just before writing it (`channel_claim`), so a message the
+  daemon already typed instead can never be pushed late ([claude-channel.md](claude-channel.md)). The server does this only
+  when the launch set `FERRETRY_CHANNEL=1` beside the flag. Neither tool is in the list a model sees. The server's instructions tell the
+  model that `<channel source="ferretry">` messages are work from Ferretry and other ferrets, and that the owner's own
+  words arrive as normal prompts, never through the channel.
+- **Measured** (Claude Code 2.1.317, a personal Max login): an idle session takes a message in about 15 ms and starts a
+  turn; a busy one takes it at the next tool boundary, in order, none lost.

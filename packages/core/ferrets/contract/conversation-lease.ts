@@ -17,7 +17,12 @@ import { z } from 'zod';
 /**
  * The exit status `fy history claim` answers when another session is writing the conversation: the ONE status a wrapper
  * turns into not launching (75, `EX_TEMPFAIL`). Every other failure of `fy` launches anyway, because a lease bug must
- * never stop a person's own CLI from starting.
+ * never stop a person's own CLI from starting — except a wrapper run for a session (`FY_SESSION_ID` set), which fails
+ * closed with 75 too (the Warden leaves a 75 alone, so it is never revived into the same refusal). A pane the DAEMON
+ * launches runs the real harness binary, not this wrapper. Only a start through `SessionLifecycleService.start` (the
+ * fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the other
+ * launch paths (`fy new`, resume, Warden revive, Restart, move relaunch) claim it in `FerretsService.launch`, and a Restart or
+ * move hands it to the ferret across the pane's replacement instead of freeing it (c58-36d, c58-37).
  */
 export const HISTORY_CLAIM_HELD_EXIT_CODE = 75;
 

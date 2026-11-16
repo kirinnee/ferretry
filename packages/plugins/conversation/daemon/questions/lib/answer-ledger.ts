@@ -1,4 +1,5 @@
-import type { SessionState, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { SessionState } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 
 /** The fields of a session document that decide what an answer receipt or a projected question means. */
@@ -77,8 +78,7 @@ export type AnswerOutcome =
 /** A possibly live form. Send/resume must continue treating this as an unknown native modal. */
 export const STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND = 'structured-answer-unconfirmed';
 
-/** A form positively released from the pane. This warning is advisory, not an input modal. */
-export const STRUCTURED_ANSWER_RELEASED_AGENDA_KIND = 'structured-answer-released-unconfirmed';
+export { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '@ferretry/core-mailbox/contract';
 
 /** One answer operation, durably, from the instant it was admitted. */
 export interface AnswerOperationRecord {

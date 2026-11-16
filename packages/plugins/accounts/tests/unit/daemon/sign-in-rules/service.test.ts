@@ -696,7 +696,7 @@ describe('expiry', () => {
   });
 });
 
-// R3c-T (owner decision !A197): standing rules for sudo, su or doas, red, a day by default, a week at most.
+// R3c-T (owner decision ^A197): standing rules for sudo, su or doas, red, a day by default, a week at most.
 describe('a terminal rule: sudo, su or doas, the password only, root (invariants 24, 36)', () => {
   const SUDO_DRAFT: SignInRuleDraft = { signIn: SUDO, fields: ['password'] };
 
@@ -867,7 +867,7 @@ describe('a terminal rule: sudo, su or doas, the password only, root (invariants
   });
 });
 
-// Owner decision !A226: this build reports `sign-in-rules-terminal.1`, so sudo, su and doas can have a rule.
+// Owner decision ^A226: this build reports `sign-in-rules-terminal.1`, so sudo, su and doas can have a rule.
 describe('terminal rules as this build reports them', () => {
   const built = TERMINAL_RULES_OFFERED;
 

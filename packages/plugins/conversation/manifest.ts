@@ -16,7 +16,6 @@ import {
   ATTACHMENT_UNLOCKED_AUDIT,
   cap,
   COMPACT_AT_CHANGED_AUDIT,
-  COMPOSER_ACTED_AUDIT,
   CONVERSATION_CONFIG,
   CONVERSATION_STATE,
   AGENDA_CONVERSATION_SLOT,
@@ -26,13 +25,12 @@ import {
   HYPERMEDIA_CHANGED_AUDIT,
   LINKS_ADOPTED_AUDIT,
   LinkKept,
-  MESSAGE_SENT_AUDIT,
+  MAILBOX_HOST_KEY,
+  MailboxHosts,
+  MailboxPort,
   MessageBeforeSend,
   MessageSent,
   QUESTION_ANSWERED_AUDIT,
-  QUEUE_CANCELLED_AUDIT,
-  QUEUE_EDITED_AUDIT,
-  QueueChanged,
   QuestionAnswered,
   QuestionAsked,
   PromptAskRefSchema,
@@ -40,12 +38,10 @@ import {
   ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
   RENDER_SAVED_AUDIT,
-  SEND_CANCELLED_AUDIT,
-  SEND_ENTERED_AUDIT,
-  SEND_RETRIED_AUDIT,
   SearchSources,
+  ChannelClaimInputSchema,
+  ChannelPollInputSchema,
   SearchWorkToolInputSchema,
-  TURN_INTERRUPTED_AUDIT,
   TurnEnded,
 } from './contract/index.ts';
 import {
@@ -67,6 +63,8 @@ import {
   LaunchParts,
   OPENING_ATTACHMENTS_KEY,
   OpeningAttachments,
+  QUESTION_OPEN_KEY,
+  QuestionOpen,
   SitrepLines,
 } from '@ferretry/core-ferrets/contract';
 import { ClaudeCodePort } from '@ferretry/plugin-claude-code/contract';
@@ -112,7 +110,7 @@ export default definePlugin({
     },
   ],
 
-  needs: { ferrets: FerretsPort, asks: AsksPort },
+  needs: { ferrets: FerretsPort, asks: AsksPort, mailbox: MailboxPort },
   // Optional: the chat reads the observer's stored turn state and its instant, and what the pane is stopped on, from Claude
   // Code's redacted prompt route (`GET /v1/ferrets/:ferretId/prompt`). Without it the chat claims no dated turn.
   uses: { claudeCode: ClaudeCodePort },
@@ -120,58 +118,6 @@ export default definePlugin({
 
   actions: {
     routes: [
-      // ── send, queue, ledger (session-send) ────────────────────────────────────────────────────
-      route('POST /v1/ferrets/:ferretId/send', {
-        ...FERRET,
-        audit: { record: MESSAGE_SENT_AUDIT },
-        // The one carve-out (today's): a composer_occupied refusal returns the composer's text from the pane (the person's
-        // own draft, or a peer's message a queue left stranded there).
-        guard: {
-          none: "answers an acknowledgement; no page or vault text, and no pane text except the composer's text a composer_occupied refusal returns, as today",
-        },
-      }),
-      route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
-      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
-      route('PATCH /v1/ferrets/:ferretId/queue/:messageId', {
-        ...FERRET,
-        audit: { record: QUEUE_EDITED_AUDIT },
-        ...SECRETS,
-      }),
-      route('DELETE /v1/ferrets/:ferretId/queue/:messageId', {
-        ...FERRET,
-        audit: { record: QUEUE_CANCELLED_AUDIT },
-        ...SECRETS,
-      }),
-      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
-      // A person's alone: a retry is the one act that clears an update-unconfirmed send's mark and types it again.
-      route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
-        ...PERSON,
-        audit: { record: SEND_RETRIED_AUDIT },
-        ...ACK,
-      }),
-      route('POST /v1/ferrets/:ferretId/sends/:sendId/cancel', {
-        ...FERRET,
-        audit: { record: SEND_CANCELLED_AUDIT },
-        ...ACK,
-      }),
-      route('POST /v1/ferrets/:ferretId/sends/:sendId/enter', {
-        ...FERRET,
-        audit: { record: SEND_ENTERED_AUDIT },
-        ...ACK,
-      }),
-      route('POST /v1/ferrets/:ferretId/composer', {
-        ...PERSON,
-        capability: cap('terminal', 'use'),
-        audit: { record: COMPOSER_ACTED_AUDIT },
-        // The composer's draft text goes to a pane; the answer is the outcome word only. A refusal can quote the pane's
-        // blocking prompt (masked), as today's refusal did; the draft itself is never in an answer.
-        guard: {
-          none: "answers an outcome word; a refusal may quote the pane's masked blocking prompt; no page or vault text",
-        },
-      }),
-
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
       route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R265: strong etag over redacted text
       route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R266 (kept half)
@@ -473,6 +419,27 @@ export default definePlugin({
         summary: 'Find cards and asks by words or id before filing a duplicate; `all` adds old closed ones.',
         input: SearchWorkToolInputSchema,
       }),
+      // The Claude channel pump of `fy mcp serve` (contract/wire-channel.ts): called as the session by the server itself,
+      // never listed to a model. Polled every few seconds for the life of a ferret, so neither is audit-recorded.
+      tool('channel_poll', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: { skip: 'read' },
+        guard: { none: 'the messages already shown to the ferret, as typed' },
+        summary: 'The channel pump: wait for messages to forward into this Claude session.',
+        input: ChannelPollInputSchema,
+      }),
+      tool('channel_claim', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: { skip: 'not recorded: bookkeeping for a message the daemon already ledgered' },
+        guard: { none: 'ids only' },
+        summary:
+          'The channel pump: claim one polled message before writing it to this Claude session (granted only while it is not withdrawn).',
+        input: ChannelClaimInputSchema,
+      }),
     ],
     app: [
       appAction('turn.interrupt', { on: 'ferret', label: 'Stop turn', calls: 'POST /v1/ferrets/:ferretId/interrupt' }),
@@ -527,7 +494,7 @@ export default definePlugin({
     state: CONVERSATION_STATE,
     config: [CONVERSATION_CONFIG],
     readModels: ['transcript', 'queue', 'sends', 'logs', 'search', 'links'],
-    publishes: [QueueChanged, MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
+    publishes: [MessageSent, QuestionAsked, QuestionAnswered, DraftChanged, LinkKept],
     subscribes: [AskAnswered, AsksChanged],
   },
 
@@ -556,13 +523,19 @@ export default definePlugin({
       // take a plugin's hook, so Ferrets cannot provide them).
       { hook: ReferenceCatalog, key: ':' },
       { hook: ReferenceCatalog, key: '@' },
+      // The queue log and send ledger the Mailbox runs over: the files stay in this plugin's folder (the one provider of this
+      // security-path hook, `takers: ['conversation']`).
+      { hook: MailboxHosts, key: MAILBOX_HOST_KEY },
+      // Whether a ferret has a question open: the stored `question.json` is this plugin's, and Ferrets' turn watch reads a
+      // yes as "waiting on a person" (the one provider: `takers: ['conversation']`).
+      { hook: QuestionOpen, key: QUESTION_OPEN_KEY },
     ],
     offers: [{ hook: MessageBeforeSend }, { hook: TurnEnded }, { hook: SearchSources }, { hook: ReferenceCatalog }],
   },
 
-  // The harness plugins read their own history through `harness-history` (links); `imports` is the one path the owner
-  // names for an attachment, once (§7.7). Transcripts are read only through the harness's `TranscriptReader`.
+  // Conversation reads the owner's history through `harness-history` (links); copy-on-link is the harness plugin's own act
+  // (`FerretsApi.importConversation`). Transcripts are read only through the harness's `TranscriptReader`.
   doctor: ['conversation-store', 'conversation-search-index'],
   workers: ['pdf-decrypt'],
-  permissions: { roots: ['harness-history', 'imports'] },
+  permissions: { roots: ['harness-history'] },
 });

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
   FerretHarness,
@@ -138,7 +139,7 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation, wardenStandIn],
+    plugins: [mailboxDaemon, implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
@@ -188,8 +189,10 @@ describe('B187 a stranded direct send', () => {
     await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE later B', sendId: 's-b' });
     await advance(5 * MINUTE);
 
-    // The tracker saw the text in the box, said so once, and ONE Enter submitted it; the harness's record proved it.
-    expect(world.events()).toContain('control.send_typed_not_sent');
+    // The two sends met a box holding text, so they were KEPT untyped (nothing was typed behind the ghost); the first of them
+    // finished the stranded text with ONE Enter, and the harness's record proved it.
+    expect(world.events().filter(event => event === 'control.send_deferred')).toHaveLength(2);
+    expect(world.events()).toContain('control.send_resubmitted');
     expect(ferrets.pane.submitted).toEqual([text]);
     expect(await world.stored('s-nelly')).toMatchObject({ fate: 'delivered' });
     expect(ferrets.pane.draft).toBeUndefined();

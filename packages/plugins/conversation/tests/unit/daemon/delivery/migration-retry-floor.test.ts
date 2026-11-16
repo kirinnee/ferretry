@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { SendLineSchema, SENDS_STATE } from '../../../../contract/index.ts';
+import { SendLineSchema } from '@ferretry/core-mailbox/contract';
+import { SENDS_STATE } from '../../../../contract/index.ts';
 import { StateSendLedger } from '../../../../daemon/delivery/adapters/state-send-ledger.ts';
 import {
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
   SendRefused,
   SendRetypeWithheld,
-  SendTracker,
-  SessionSendService,
-} from '../../../../daemon/delivery/lib/index.ts';
+} from '@ferretry/core-mailbox/contract';
+import { SendTracker, SessionSendService } from '../../../../../../core/mailbox/daemon/lib/delivery/index.ts';
 import type { ObservedHumanInput } from '../../../../daemon/seams/transcript-types.ts';
 import { memoryStatePort } from '../../../support/state.ts';
 

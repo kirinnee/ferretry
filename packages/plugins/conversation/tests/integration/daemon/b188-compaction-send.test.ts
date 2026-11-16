@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import mailboxDaemon from '@ferretry/core-mailbox/daemon';
 import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type {
   FerretHarness,
@@ -134,7 +135,7 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
     },
   } as typeof daemon;
   const host = await testHost({
-    plugins: [implementation, wardenStandIn],
+    plugins: [mailboxDaemon, implementation, wardenStandIn],
     fakes: { ferrets, asks: new FakeAsks() },
     clock,
   });
@@ -154,7 +155,7 @@ async function rig(state: StatePort = memoryStatePort(CONVERSATION_STATE)) {
 }
 
 describe('B188 an idle ferret starts compacting', () => {
-  test('B188 a peer send handed over while an idle ferret compacts rides the harness queue, and nothing is typed through the idle path', async () => {
+  test('B188 a peer send handed over while an idle ferret compacts is kept, typed nowhere, and typed once the compaction is over', async () => {
     const world = await rig();
     const { ferrets, advance } = world;
     ferrets.pane.compacting = true;
@@ -164,13 +165,21 @@ describe('B188 an idle ferret starts compacting', () => {
     await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: PEER, sendId: 's-peer' });
     await advance(5 * MINUTE);
 
-    // The send rode the harness's own queue (busy), never the idle path that types into a composer.
-    expect(ferrets.pane.queued).toHaveLength(1);
-    expect(ferrets.pane.queued[0]).toContain(PEER);
-    expect(ferrets.pane.typed).toEqual([]);
+    // Owner ruling 2026-11-15: nothing is typed into a compacting pane — not through the idle path, not into the harness's
+    // own queue — however long the compaction runs. The send is kept untyped.
+    // (The 2-minute stuck notice to the SENDER is its own message, typed to its own pane; only the peer's words count here.)
+    const aboutPeer = (texts: readonly string[]) => texts.filter(text => text.includes(PEER));
+    expect(aboutPeer(ferrets.pane.queued)).toEqual([]);
+    expect(aboutPeer(ferrets.pane.typed)).toEqual([]);
     // No turn document was written for it: a compacting pane is not somewhere a turn starts (the idle route writes one).
     expect(ferrets.stored).toEqual([]);
-    expect(await world.stored('s-peer')).toMatchObject({ path: 'native-inline' });
+    expect(await world.stored('s-peer')).toMatchObject({ fate: 'accepted', untyped: true });
+
+    // The compaction ends: the very next look (one second) types it, once, at the idle prompt.
+    ferrets.pane.compacting = false;
+    await advance(2_000, 1_000);
+    expect(aboutPeer(ferrets.pane.queued)).toEqual([]);
+    expect(aboutPeer(ferrets.pane.typed)).toHaveLength(1);
     await world.host.stop();
   });
 

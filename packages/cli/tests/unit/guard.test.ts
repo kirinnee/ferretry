@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { PROTOCOL } from '@ferretry/kernel/contract';
+import { CORE_IDS, PROTOCOL } from '@ferretry/kernel/contract';
 import should from 'should';
 import { judgeCall, judgePlugin, pausedSentence } from '../../src/lib/guard.ts';
 import { inventoryOf } from './fakes.ts';
@@ -64,14 +64,12 @@ describe('judgePlugin (the client guard, §9.6)', () => {
 });
 
 describe('judgeCall (every core package first, §9.6)', () => {
-  const compiled = { kernel: 'hk', gate: 'hg', asks: 'ha', vault: 'hv', ferrets: 'hf', board: 'h1' };
-  const core = [
-    { id: 'kernel', contract: 'hk' },
-    { id: 'gate', contract: 'hg' },
-    { id: 'asks', contract: 'ha' },
-    { id: 'vault', contract: 'hv' },
-    { id: 'ferrets', contract: 'hf' },
-  ];
+  // Derived from the kernel's CORE_IDS so the next core piece cannot leave this fixture behind.
+  const core = CORE_IDS.map(id => ({ id: id as string, contract: `h-${id}` }));
+  const compiled: Record<string, string> = {
+    ...Object.fromEntries(core.map(entry => [entry.id, entry.contract])),
+    board: 'h1',
+  };
 
   it('should allow a plugin when every core package and the plugin match', () => {
     should(judgeCall(inventoryOf(...core, { id: 'board', contract: 'h1' }), compiled, 'board')).deepEqual({ ok: true });
@@ -94,7 +92,10 @@ describe('judgeCall (every core package first, §9.6)', () => {
     });
     const noFerrets = {
       protocol: PROTOCOL,
-      plugins: [...core.slice(0, 4), { id: 'board', contract: 'h1' }].map(entry => ({ ...entry, on: true })),
+      plugins: [...core.filter(entry => entry.id !== 'ferrets'), { id: 'board', contract: 'h1' }].map(entry => ({
+        ...entry,
+        on: true,
+      })),
     };
     should(judgeCall(noFerrets, compiled, 'board')).deepEqual({
       ok: false,

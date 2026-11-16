@@ -36,6 +36,13 @@ export interface BootPhases {
   mark(label: string): void;
   /** The one line that says each phase's duration, in boot order. `knownIds` are the plugin ids the host holds. */
   line(knownIds: ReadonlySet<string>): string;
+  /**
+   * The phase the boot is in now, as the public liveness answer names it: the phase kind, plus the plugin id only where
+   * `classify` would print one (`state:board`), never a label's other text. `undefined` before the first mark.
+   */
+  current(
+    knownIds: ReadonlySet<string>,
+  ): { readonly step: string; readonly stepElapsedMs: number; readonly bootElapsedMs: number } | undefined;
 }
 
 interface Mark {
@@ -54,6 +61,18 @@ export function createBootPhases(nowMs: () => number, trace: string[]): BootPhas
   const marks: Mark[] = [];
   let told = false;
   return {
+    current(knownIds) {
+      const last = marks[marks.length - 1];
+      const first = marks[0];
+      if (last === undefined || first === undefined) return undefined;
+      const { kind, id } = classify(last.label, knownIds);
+      const now = nowMs();
+      return {
+        step: id === undefined ? kind : `${kind}:${id}`,
+        stepElapsedMs: Math.max(0, now - last.at),
+        bootElapsedMs: Math.max(0, now - first.at),
+      };
+    },
     mark(label) {
       trace.push(label);
       // Once the line is told nothing reads the marks, so a later carrier change adds to the trace only.

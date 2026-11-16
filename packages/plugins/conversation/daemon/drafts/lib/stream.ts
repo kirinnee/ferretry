@@ -13,8 +13,8 @@
  * PRESENCE IS NEVER STORED. It lives in {@link SharedDraftPresence} for as long as the stream is open and
  * is gone when it closes; nothing about who typed where reaches the disk or the journal.
  */
+import { type AgendaId } from '@ferretry/core-mailbox/contract';
 import {
-  type AgendaId,
   SHARED_DRAFT_ERROR_CODES,
   SHARED_DRAFT_STREAM_FRAME_BUDGET,
   SHARED_DRAFT_STREAM_RESYNC_CLOSE,

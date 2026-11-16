@@ -11,7 +11,6 @@ import type {
 import { HistoryConversationFiles } from '../adapters/moves/history-conversation-files.ts';
 import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
 import { StateMoveReportStore } from '../adapters/moves/state-move-report.ts';
-import { lifecycleConfigDocument } from '../adapters/session/lifecycle/index.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import { type AgentJobControl, AgentJobStopper } from '../lib/moves/stop-jobs.ts';
@@ -33,6 +32,7 @@ import {
 import { harnessConversionRefusal, harnessMoveRefusal } from '../lib/moves/harness-compatibility.ts';
 import type { ObservedSession } from '../lib/moves/outcome-render.ts';
 import type { MovePreflight } from '../lib/moves/preflight-service.ts';
+import type { MovePane } from '../lib/moves/process-inventory-port.ts';
 import type { ProcRow } from '../lib/moves/process-table.ts';
 import type { MoveReportStore } from '../lib/moves/report-store.ts';
 import {
@@ -63,7 +63,7 @@ import { sessionMoveContribution } from '../lib/runtime/mounts/session-move.ts';
 import { currentLaunchEffort, movedModel, movedModelSource } from '../lib/session/launch/index.ts';
 import { transcriptLaunchArguments } from '../lib/session/peers/transcript-launch.ts';
 import type { RelaunchDrift } from './relaunch-settings.ts';
-import { SessionLifecycleConfigSchema } from '../lib/session/lifecycle/types.ts';
+import { priorMoves, type RestartNeeds, restartInPlace } from './restart-in-place.ts';
 import {
   type AccountInventoryPort,
   canServeModel,
@@ -126,6 +126,10 @@ export interface SessionMoveNeeds {
   /** The relaunch-settings read (W2-c): asked whether a relaunch would run the ferret on other harness settings. */
   readonly launch: RelaunchDrift;
   readonly preflight: MovePreflight;
+  /** The ferret's pane, reached through its runner by the registry's handle: what the gate reads (never a tmux session name). */
+  readonly pane: (id: SessionId) => MovePane;
+  /** What a Restart on the runtime a ferret is already on needs of the Ferrets service (`restart-in-place.ts`). */
+  readonly restart: RestartNeeds;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
   readonly askAgent: SessionMoveParts['askAgent'];
   readonly planner: SessionPlanner;
@@ -182,6 +186,8 @@ interface SessionMoveParts {
   /** The SAME service the revive uses — see `createSessionResumeSubsystem`. */
   readonly resume: Pick<SessionResumeService, 'resume'>;
   readonly preflight: MovePreflight;
+  readonly pane: (id: SessionId) => MovePane;
+  readonly restart: RestartNeeds;
   /**
    * Puts one Ferretry-authored message in the session's queue — the only thing a refused move's
    * "ask the agent to stop its background jobs" does. `created` is false when `messageId` was queued before.
@@ -244,9 +250,6 @@ interface SessionMoveParts {
 interface MoveSubject {
   readonly config: z.infer<typeof SessionConfigSchema>;
   readonly state: z.infer<typeof SessionStateSchema>;
-  readonly tmuxSession: string;
-  /** The command the session document records: a move leaves it as it is (the launch path builds a relaunch itself). */
-  readonly command: readonly string[];
 }
 
 /** How each account-resolution refusal is restated in the move's own taxonomy. The resolver is
@@ -577,13 +580,15 @@ async function decideRelaunchConversation(
  */
 function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsystem & AgentJobControl {
   /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
-  const inspect = async (id: SessionId, { config, state, tmuxSession }: MoveSubject) =>
+  const inspect = async (id: SessionId, { config, state }: MoveSubject, requesterPid?: number) =>
     await parts.preflight.inspect(
       {
         sessionId: id,
         harness: config.harness,
-        tmuxSession,
+        pane: parts.pane(id),
         status: state.status,
+        ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
+        ...(state.permissionRequest === undefined ? {} : { awaitingPermission: true }),
         turn: state.turn,
         // The state document's own record of the tool calls this session has open.
         openTools: state.openTools ?? [],
@@ -594,9 +599,10 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       // the move — the same fail-closed answer this call gave before, now reached only when
       // the evidence is genuinely absent rather than always.
       await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+      requesterPid === undefined ? {} : { requesterPid },
     );
 
-  /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
+  /** Both documents, or a stated refusal. A session whose pair does not parse
    *  is one nothing may restamp: the write would merge new fields over a document already broken. */
   const subject = async (id: SessionId): Promise<MoveSubject> => {
     const raw = await parts.storage.readConfig(id);
@@ -604,17 +610,9 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     const state = SessionStateSchema.safeParse(await parts.storage.readState(id));
     if (!config.success || !state.success)
       throw new SessionMoveError('unusable', `the documents for session ${id} do not satisfy the protocol`);
-    // The tmux address lives in the lifecycle's half of the same document, and it is what every
-    // signal the preflight reads is addressed by.
-    const lifecycle = SessionLifecycleConfigSchema.safeParse(lifecycleConfigDocument(raw));
-    if (!lifecycle.success)
-      throw new SessionMoveError('unusable', `session ${id} records no terminal this daemon could inspect`);
-    return {
-      config: config.data,
-      state: state.data,
-      tmuxSession: lifecycle.data.tmuxSession,
-      command: lifecycle.data.command,
-    };
+    // The pane is the ferret's own, reached through its runner by the registry's handle: the session document no longer
+    // carries a terminal address (a 5.0 ferret has none), so nothing here parses one.
+    return { config: config.data, state: state.data };
   };
 
   /** The view of a session this mount just moved. A document it cannot read back is a wiring fault. */
@@ -690,7 +688,36 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
   };
 
   const move = async (id: SessionId, request: Parameters<SessionMoveSubsystem['move']>[1]): Promise<SessionView> => {
-    const { config, state, tmuxSession, command } = await subject(id);
+    const { config, state } = await subject(id);
+    // A RESTART — the ferret's own runtime named — is relaunched in place (`restart-in-place.ts`): its subject is the registry
+    // record, nothing is planned and no account is asked. A move onto ANOTHER runtime continues below, which asks Runtimes
+    // to resolve it, so it refuses by name until that is bound (c58-37 PR6).
+    const own = parts.restart.record(id);
+    if (own !== undefined && request.agent === own.runtime)
+      return await restartInPlace(
+        {
+          storage: parts.storage,
+          clock: parts.clock,
+          reports: parts.reports,
+          preflight: parts.preflight,
+          restart: parts.restart,
+          paneIdentity: parts.paneIdentity,
+          inspect: async () => await inspect(id, { config, state }, trustedRequesterPid(parts.log, id, request)),
+          refused: async (report, decision) =>
+            await recordMoveRefusal(parts.storage, parts.log, id, {
+              to: own.runtime,
+              verdict: report.worstVerdict,
+              cause: decision.reason,
+              described: parts.preflight.describe(report),
+              by: request.movedBy ?? 'owner',
+            }),
+          view: async when => await view(id, when),
+          observed: async () => await observed(id),
+        },
+        id,
+        request,
+        config,
+      );
     const { account, executable } = await resolveTarget(request.agent);
     // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
     // other work at all. Everything below it either reads the host or writes the session: the planner,
@@ -764,7 +791,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await inspect(id, { config, state, tmuxSession, command });
+    const report = await inspect(id, { config, state }, trustedRequesterPid(parts.log, id, request));
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed) {
       // EVERY REFUSAL IS COUNTED. A 409 used to be recorded nowhere, so nobody could say how often the gate said no or
@@ -884,7 +911,6 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           model: plan.model,
         }),
         modelHint: request.model ?? account.defaultModel ?? '',
-        command: [...command],
         incarnation: `${id}-${generation}`,
         runtimeGeneration: generation,
         move: { from, to: account.agent, at },
@@ -1110,16 +1136,6 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
   };
 }
 
-/**
- * A session's moves before this one, oldest first: its `moves` list. Read from the raw config, so a malformed entry
- * is dropped, not thrown.
- */
-function priorMoves(config: Readonly<Record<string, unknown>>): { from: string; to: string; at: string }[] {
-  const parsed = SessionConfigSchema.pick({ moves: true }).safeParse(config);
-  if (!parsed.success) return [];
-  return [...(parsed.data.moves ?? [])];
-}
-
 export const sessionMoveModule: SessionMoveModule = {
   id: 'sessionMove',
   build: (needs, _seams, _lifecycle) => {
@@ -1132,6 +1148,8 @@ export const sessionMoveModule: SessionMoveModule = {
       sessions: needs.sessions,
       resume: needs.resume,
       preflight: needs.preflight,
+      pane: needs.pane,
+      restart: needs.restart,
       askAgent: needs.askAgent,
       reports: new StateMoveReportStore(state),
       planner: needs.planner,
@@ -1215,6 +1233,27 @@ function blockersOf(described: {
   return described.items
     .filter(item => item.blocks)
     .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) }));
+}
+
+/**
+ * The `fy` pid the gate may leave out as the requesting call — only from the session ITSELF moving itself (`movedBy` is
+ * the admitted session credential's own `session:<id>`, never a field of the body). Any other caller (the owner, another
+ * ferret, a script) names a pid for no call of this session's, so it is ignored, and said so: a pid from elsewhere would
+ * otherwise exempt a running job from the gate without a trace.
+ */
+export function trustedRequesterPid(
+  log: Pick<Log, 'warn'>,
+  id: SessionId,
+  request: { readonly requesterPid?: number; readonly movedBy?: string },
+): number | undefined {
+  if (request.requesterPid === undefined) return undefined;
+  if (request.movedBy === `session:${id}`) return request.requesterPid;
+  log.warn('a move named a requesting pid but is not a self-move; the pid is ignored and the gate sees every process', {
+    session: id,
+    by: request.movedBy ?? 'owner',
+    requesterPid: request.requesterPid,
+  });
+  return undefined;
 }
 
 /**

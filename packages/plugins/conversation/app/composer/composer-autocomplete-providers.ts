@@ -21,6 +21,7 @@
  */
 
 import { formatReference, parseReferenceToken, type Reference } from '@ferretry/app';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import {
   REFERENCE_CATALOG_FILE_MAX_ENTRIES,
   type ReferenceCatalogEntry,
@@ -761,11 +762,11 @@ const snapshotTracker = (scopeKey: string) => {
 
 // ─── the reference families, projected once ───────────────────────────────────────────────────────────────────────
 
-type ReferenceFamily = ':' | '!' | '&';
+type ReferenceFamily = ':' | typeof ASK_REFERENCE_SIGIL | '&';
 
 const FAMILY_LABELS: Readonly<Record<ReferenceFamily, { readonly ladder: string; readonly direct: string }>> = {
   ':': { ladder: 'Agents', direct: ': fleet agents' },
-  '!': { ladder: 'Asks', direct: '! open asks' },
+  [ASK_REFERENCE_SIGIL]: { ladder: 'Asks', direct: `${ASK_REFERENCE_SIGIL} open asks` },
   '&': { ladder: 'Cards', direct: '& cards' },
 };
 
@@ -779,7 +780,8 @@ const familyResult = (
 ): ComposerProviderResult => {
   if (family === ':')
     return { candidates: agentCandidates(scope, entries), filterQuery: query, limit: MAX_AGENT_RESULTS, contextLabel };
-  if (family === '!') return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
+  if (family === ASK_REFERENCE_SIGIL)
+    return { candidates: agendaCandidates(scope, entries), filterQuery: query, contextLabel };
   return {
     candidates: taskCandidates(scope, entries, query, includeAgentCards),
     filterQuery: query,
@@ -828,7 +830,7 @@ const familyAnswers = (
   },
 });
 
-const TIER_FAMILY: Readonly<Record<number, ReferenceFamily>> = { 2: ':', 3: '!', 4: '&' };
+const TIER_FAMILY: Readonly<Record<number, ReferenceFamily>> = { 2: ':', 3: ASK_REFERENCE_SIGIL, 4: '&' };
 
 export function createReferencesProvider(
   options: ComposerAutocompleteProvidersOptions,
@@ -856,7 +858,7 @@ export function createReferencesProvider(
     get snapshotKey() {
       return track([
         source.known(':'),
-        source.known('!'),
+        source.known(ASK_REFERENCE_SIGIL),
         source.known('&'),
         options.getIncludeAgentTasks?.(),
         options.getWorkSearch?.(),
@@ -882,7 +884,7 @@ export function createReferencesProvider(
       return await withWorkHits(
         local,
         context,
-        family === '!' ? 'ask' : 'card',
+        family === ASK_REFERENCE_SIGIL ? 'ask' : 'card',
         scope,
         options.getWorkSearch?.(),
         options.getProjectNames?.(),
@@ -892,9 +894,9 @@ export function createReferencesProvider(
 }
 
 /**
- * `:` `!` `&` — the same three families, one keystroke instead of two to four.
+ * `:` `^` `&` — the same three families, one keystroke instead of two to four.
  *
- * They exist because the tokens themselves start with these sigils: a reader who has learned that an ask is `!A3`
+ * They exist because the tokens themselves start with these sigils: a reader who has learned that an ask is `^A3`
  * should not have to learn `@@@` as well. The ladder stays because it is DISCOVERABLE — one sigil, repeated, teaches
  * four families with a legend — while a direct sigil is what you use once you know. Neither reads a catalog the other
  * does not.
@@ -918,7 +920,7 @@ export function createDirectReferenceProviders(
     initialCandidates: ({ query }) => families.initial(family, query, FAMILY_LABELS[family].direct),
     candidates: ({ query, signal }) => families.read(family, query, FAMILY_LABELS[family].direct, signal),
   });
-  return [direct(':', 'agents'), direct('!', 'attention'), direct('&', 'task')];
+  return [direct(':', 'agents'), direct(ASK_REFERENCE_SIGIL, 'attention'), direct('&', 'task')];
 }
 
 // ─── surfaces ─────────────────────────────────────────────────────────────────────────────────────────────────────

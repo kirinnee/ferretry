@@ -26,11 +26,19 @@ sections below still describe the 4.x pipeline in places; on the 5.0 tree the di
   (`harness-contract-latest.yaml` and its realworld leg), and Realworld's macOS containment, Safari and
   tmux 3.8 proofs. Realworld is nightly and dispatch only (#1573).
 - **Quick Checks** on every pull request: install (whose `postinstall` regenerates the plugin
-  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (one `all` group
-  globbing `packages/`), the coverage ledger over every `lib/` directory at any depth, treefmt, every
+  registries, `scripts/local/gen.sh`), the unit tier through `config/test-groups.json` (five groups split by
+  package, run side by side, longest first) with the repository tooling's own tests beside them, and the coverage
+  ledger over every `lib/` directory at any depth.
+- **Static Checks** on exactly the same events, BESIDE Quick (`quick.sh --static`): treefmt, every
   pre-commit hook (typecheck of every workspace package and `scripts/`, the 5.0 checks through
   `scripts/validate/rebuild-checks.sh`), and the build part (Nix `fy` + `fyd`, the Worker rehearsals once
-  ported, the app bundle once it has a build script).
+  ported, the app bundle once it has a build script), and the `guards` part: the repository-tooling tests that open
+  the real tree's TypeScript program (`config/static-tests.txt`, today `scripts/gen/tests/fleet-link-callers.test.ts`).
+  That guard takes ~25 s alone but hit its 180 s timeout beside the six unit groups in Quick (PR 1715 run
+  43840838787 and two more); Quick's `scripts` part runs every other scripts test, and
+  `scripts/ci/static-tests.test.ts` proves the two parts cover every scripts test exactly once. `guards` runs
+  AFTER the format/gates/build pool, alone: beside the typecheck gate it got `tsc` OOM-killed on the 8x16 (PR 1730
+  run 43860826531). Both always run; a failure in either fails Static. Never scoped.
 - **Full set** (`full-ci` label): integration groups (none configured until an integration test exists),
   Knip, the cross-compile of `fy` (packages/cli) and `fyd` (packages/core/kernel `bin`) plus SIT, and the
   Linux and darwin smokes — which are the launch stage only (`--version`) until the hosts gain the
@@ -46,17 +54,19 @@ every subsequent push with that label runs it again, proving the exact head SHA.
 Adding any other label is a no-op and uses its own concurrency group, so it cannot
 cancel a running set.
 
-| Set / job                                                | PR runner           | Other events                          | Work                                                        |
-| -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | units first, then format/gates/build; complete unit ledger  |
-| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
-| Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
-| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
-| E2E shards                                               | Namespace 2x4       | GitHub                                | journeys and advisory policy as before                      |
-| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                | existing geometry assertions and evidence                   |
-| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)    | machine budgets on a quiet dedicated VM                     |
-| Linux smoke and macOS jobs                               | GitHub              | GitHub                                | stock platform proofs; existing macOS policy                |
-| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                | seconds of API/shell work, no Nix                           |
+| Set / job                                                | PR runner           | Other events                           | Work                                                        |
+| -------------------------------------------------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------- |
+| Quick Checks                                             | Namespace 8x16      | Namespace 8x16 on main; dispatch picks | six unit groups + scripts tests side by side; unit ledger   |
+| Static Checks                                            | Namespace 8x16      | Namespace 8x16                         | format, every pre-commit gate, build checks                 |
+| Integration Tests                                        | Namespace 8x16      | Namespace 8x16                         | six isolated groups, then the integration ledger            |
+| Full Gates                                               | Namespace 4x8       | GitHub                                 | both Knip checks and route agreement (Knip needs >4GB)      |
+| Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                 | cross-compile, upload the binaries, then SIT on those bytes |
+| E2E shards                                               | Namespace 2x4       | GitHub                                 | journeys and advisory policy as before                      |
+| PWA Settings / Gallery                                   | Namespace 2x4 / 4x8 | GitHub                                 | existing geometry assertions and evidence                   |
+| Realworld Tests (advisory, nightly only)                 | not run             | Namespace 8x16 (nightly, dispatch)     | machine budgets on a quiet dedicated VM                     |
+| Linux smoke and macOS jobs                               | GitHub              | GitHub                                 | stock platform proofs; existing macOS policy                |
+| Full CI Pending, Full CI, PWA/E2E relevance, E2E summary | GitHub              | GitHub                                 | seconds of API/shell work, no Nix                           |
+| Proof Reuse                                              | GitHub              | GitHub                                 | a few API calls, no Nix                                     |
 
 The owner's **2026-11-06 direction (Go given)** supersedes the Oct 30 prohibition
 on processes inside a job for **Quick Checks and Integration Tests only**: consolidate
@@ -98,11 +108,30 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   status, waits for all parts even after a failure, and writes per-part durations to
   the job summary and `coverage/ci/<set>/results.tsv`. Each tier's 100% ledger runs
   in the same job after its groups; a missing or failed group keeps the job red.
-  Quick finishes all unit groups first, then runs format/gates/build under
-  `nice -n 10`. The first 8x16 run doubled the archive unit test from 3.819 seconds
-  on its separate runner to 8.371 seconds, so the owner/lead contention rule requires
-  this ordering rather than a timeout increase. Its summary names each group's
-  slowest test and duration from JUnit, with `unit-timings.tsv` in the part artifact.
+  `parallel.sh` is a POOL: the next part starts the moment any running part ends, so parts are listed longest
+  first. The contention rule still holds - no test budget is raised to make room for other work - and is now met by
+  RUNNER, not by ordering: the static parts (format/gates/build, `nice -n 10`) run in their own `Static Checks` job,
+  so Quick's 8x16 runs only the unit groups and the scripts tests, six at a time. Static
+  Checks is an 8x16 with three parts and four gates at a time, as on Quick's runner before (on a 4x8 the TypeScript 7
+  tsc was OOM-killed with four gates and with two). The first 8x16
+  run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
+  instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
+  `unit-timings.tsv` in the part artifact.
+- **Why six unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
+  files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
+  260 s (its `tests/unit/host-config/` alone 147 s), runtimes 149, voice 75, conversation 58, catalogs 31, std 24,
+  browsers 23, terminals 23, board 20, ferrets 20, everything else ~118. The groups balance by those seconds:
+  `runtimes` (~150), `kernel-host-config` (~145), `conversation-voice` (~133), `kernel` (the rest, ~110), `plugins-a`
+  (catalogs, browsers, terminals, std: ~100) and `everything-else` (~160). A plugin package stays whole (the ledger
+  passes a file only when ONE group covers it 100%); the kernel is split by test folder because it has a single
+  `lib/` file (`app/lib/`), which its `kernel` group covers alone, so the split cannot move a judged file between
+  groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-card
+  tick writes) passed every time behind app, cli, core and the plugins before it in one process, and missed the budget
+  (128-164 ms) twice as the FIRST files of a fresh process - with six and with four processes at once, so not CPU. The
+  budget is unchanged; the test keeps the position it always passed in. Rebalance from
+  `unit-timings.tsv` and the JUnit per-file times, never by guessing. A SCOPED run may leave a group with no file;
+  only then is an empty group not a failure (`group-files.sh` says so, `test.sh` leaves an empty ledger and a
+  `scoped-out` marker).
 - **One-folder rule.** `one-folder.yaml` runs `scripts/ci/one-folder.ts` on a pull request into `rebuild/5.0-after`: every changed
   file outside the PR's home package must be named under `## Outside files` in the PR body, with a reason (the rule is
   [Architecture, "One feature, one folder"](../architecture/index.md)). It is a workflow of its own because it reads the PR body, so
@@ -204,10 +233,13 @@ run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <
   their own. Local typechecks keep their ordinary non-incremental default.
   The Quick summary records the cache action's exact hit/miss output (or unknown),
   so partial/missing cache paths remain visible rather than inferred from speed.
-  Main's Quick uses Namespace 4x8, with up to three parts and two gate hooks at once;
-  Knip is outside Quick, and units finish before builds/typechecks start, limiting
-  memory overlap. A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) lets a branch
-  measure main's 4x8 shape before merge; pull requests and main ignore it.
+  Main's Quick uses the pull-request 8x16 too. The six unit groups and the scripts tests do
+  not fit a 4x8: dispatch run 43825305638 took 8.4 min with three parts at once and the
+  real-tree TypeScript guard (`scripts/gen/tests/fleet-link-callers.test.ts`) hit its 180 s
+  timeout, where the 8x16 ran the same parts in 3.8 min. Main's Quick runs only when no pull
+  request proved the merged tree, so it is the fallback and must be the shape that is green.
+  A `workflow_dispatch` input `quick_shape` (8x16 default, or 4x8) measures another shape;
+  pull requests and main ignore it.
 - **Measure instances, not just step time.** One unit-minute is one vCPU with 2 GB RAM
   for a billed minute, with a one-minute minimum per instance. Namespace instance
   lifetime includes boot/teardown; cache snapshots bill attached GB × instance-hours.
@@ -340,6 +372,10 @@ repository variable **`MACOS_SMOKE`** is the owner's way out, the macOS twin of 
   (a job-level `if:`), so nothing waits 15 minutes for a runner. `CI` still succeeds, so `Release` still runs, and
   `GoReleaser Publish` runs when the smoke was **skipped by the switch** as well as when it passed. It never runs
   past a failed `compile` or a smoke that ran and failed.
+- **It skips the release `compile` too.** `compile` in `cd.yaml` exists only to feed `smoke-darwin`, so the switch
+  skips both and `goreleaser` starts at once instead of waiting 1.5-2.5 minutes for a build nobody uses. The gate
+  has two exclusive halves: switch off, `compile` AND the smoke both `success`; switch on, both `skipped`. A mixed
+  state (a variable flipped mid-run) publishes nothing.
 - **It ships an unproven darwin binary.** Nothing else runs the cross-compiled darwin binary, so while the switch is
   on, a release is published without the darwin binary having started once on a Mac.
 - **It is never silent.** `compile` (`ci.yaml`) and `goreleaser` (`cd.yaml`) run
@@ -364,25 +400,29 @@ vars.MACOS_SMOKE=skip (owner); darwin binary released unproven`.
 
 The fast E2E jobs now live in `ci.yaml`; there is no separate `e2e.yaml`.
 Realworld and Slow remain advisory and outside the Full CI verdict. Release still
-waits on the entire CI workflow on `main`, where Quick and Full both always run.
+waits on the entire CI workflow on `main`, where Quick and Full both run — or, when the merged pull
+request already proved the identical tree, are replaced by that proof ([Proof reuse on
+main](#proof-reuse-on-main)).
 
 ## CI jobs
 
-| Job              | Check name                           | Work                                                                                                                                                |
-| ---------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `quick`          | Quick Checks                         | `quick.sh`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, three unit groups and their ledger                                  |
-| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                         |
-| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                      |
-| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                          |
-| `compile`        | Compile Binaries + SIT               | compile, list and upload the binaries, then check `dist/bin` against its manifest and run SIT against those very files                              |
-| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                  |
-| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                              |
-| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                              |
-| `pwa-screenshot` | PWA Settings Geometry / Full Gallery | `needs: pwa-relevance`; skipped (and accepted by the verdict) only when it succeeded with `run == false`; existing geometry assertions and evidence |
-| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                                                      |
-| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                          |
-| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                 |
-| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                  |
+| Job              | Check name                           | Work                                                                                                                                                                   |
+| ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
+| `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                     |
+| `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build, whole-tree guards                                                             |
+| `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
+| `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
+| `full-gates`     | Full Gates                           | both Knip checks and route agreement, serially (format runs in Quick only)                                                                                             |
+| `compile`        | Compile Binaries + SIT               | compile, list and upload the binaries, then check `dist/bin` against its manifest and run SIT against those very files                                                 |
+| `smoke`          | Smoke linux-\*                       | both Linux targets                                                                                                                                                     |
+| `smoke-darwin`   | Smoke darwin-arm64                   | reusable smoke and existing owner skip/advisory policy                                                                                                                 |
+| `pwa-relevance`  | PWA Relevance                        | does this pull request change anything the PWA browser gate reads (`pwa-relevance.sh`); GitHub, no Nix                                                                 |
+| `pwa-screenshot` | PWA Settings Geometry / Full Gallery | `needs: pwa-relevance`; skipped (and accepted by the verdict) only when it succeeded with `run == false`; existing geometry assertions and evidence                    |
+| `relevance`      | E2E Relevance                        | decide whether journeys have anything to prove                                                                                                                         |
+| `journeys`       | E2E Shard (1..3)                     | existing three fast shards                                                                                                                                             |
+| `summary`        | E2E Journeys                         | existing relevance/advisory verdict                                                                                                                                    |
+| `full`           | Full CI                              | always judges all needed jobs when this is a full-set event; posts head-SHA status                                                                                     |
 
 **The merge gate is the commit status `Full CI` on the exact PR head SHA.** Quick
 posts pending with `full set not run on this commit: add the full-ci label`. Full's
@@ -564,6 +604,61 @@ code, run where a failure cannot hold anything up.
   files issues, and the newer run proves every commit the older one held (the `main` group now holds only the macOS and tmux 3.8 proofs). The nightly and a manual
   dispatch keep a group of their own run id, so neither is ever superseded or supersedes a `main` run.
 
+## Proof reuse on main
+
+`main`'s push run used to re-run the identical full suite the merged pull request had just passed: for the last
+ten merges (#1590-#1598, #1673) the merge commit's **tree was byte-identical** to the tree the PR's own run
+had tested, and `Release` waited ~6.5 minutes (the E2E shards are the pole) for the second proof of it. The
+rule below skips that repeat **only when it can show the first proof**, and **fails closed**: any doubt is
+"run everything", exactly as before. A wrong filter here silently skips tests on `main`, so the burden is
+on proving, never on ruling out.
+
+**What the PR records.** A `pull_request` verdict that is success appends the tree it tested to the
+`Full CI` status description: `quick checks and the full set passed on this commit; tree <40-hex>`
+(`scripts/ci/full-status.sh`). That tree is `git rev-parse HEAD^{tree}` of the `full` job's checkout, which
+for a pull request is GitHub's merge commit `github.sha` — exactly the tree every job tested, **not** the PR
+head's own tree. Failure and pending descriptions are unchanged; a tree that cannot be read leaves a
+success without one, which `main` will never reuse.
+
+**What `main` checks.** The `proof` job (`Proof Reuse`, `ubuntu-latest`, 5 minutes, read-only
+`contents`/`statuses`/`pull-requests`/`actions`) runs on every event that runs anything and `scripts/ci/proof-reuse.sh` sets
+`proved=true` only when **all** of these hold, printing every check to the log and the job summary:
+
+| Rule | Must hold                                                                                                                                                              |
+| ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| a    | the event is a `push` to `refs/heads/main`                                                                                                                             |
+| b    | `vars.MACOS_SMOKE` is `skip`: a PR's darwin smoke is advisory but `main`'s is required, so with darwin on the PR proof never covered what `main` requires              |
+| c    | T = the tree of this push's `github.sha` is readable                                                                                                                   |
+| d    | the commit belongs to **exactly one** pull request with `merged_at` set and `base.ref == main`; H = its head SHA                                                       |
+| e    | the newest (greatest id) `Full CI` status on H is `success`, posted by `github-actions[bot]`, and its description names tree T                                         |
+| f    | its `target_url` is a run of **this** repository whose `path` is `.github/workflows/ci.yaml`, `event` is `pull_request`, `head_sha` is H and `conclusion` is `success` |
+
+A status is only a claim; rule f reads the run behind it. The decision is
+`Proof reuse: YES - tree <T> passed the full set in <run url> (PR #N head <H>)` or
+`Proof reuse: NO - <reason>. Every job runs.`
+
+**What a yes skips.** Every expensive job — `quick`, `int`, `strict-guarantees`, `full-gates`, `compile`, `smoke`, `smoke-darwin` — has
+`proof` in its `needs` and `!(needs.proof.outputs.decided == 'true' && needs.proof.outputs.proved == 'true')` in its `if` — **reuse only a SEALED yes**. `full-pending` is untouched (already
+pull-request only). `proof` itself carries `quick`'s event guard, so an unrelated label or a retitle still runs no job.
+**A failed proof job must not skip tests**, so a job that had no status function now starts with
+`!cancelled() &&`: a `proof` that died before sealing leaves `decided` empty, the condition is true, and the job runs. Where the
+job had an implicit `success()` over another need (`smoke`, `smoke-darwin`) it also keeps
+`needs.compile.result == 'success'`, so a failed `compile` still skips it as before.
+`scripts/test/ci-sets.ts` compares every job's start condition, with the proof failed or cancelled (even with `proved=true` written), unsealed, empty or `false`,
+against the pre-proof graph written out in the test, across events and need results.
+
+**The verdict.** `full` needs `proof` and gets `PROOF_DECIDED`/`PROOF_REUSED`/`PROOF_URL`. With a sealed, reused proof `full-status.sh`
+succeeds on a **push** that has a URL (no job failed or was cancelled), writing the proof line to the
+summary; a pull request or dispatch never reuses a proof, and with no sealed `proved=true` the verdict judges the jobs
+exactly as before. `proof` itself is never a gate: its failure changes no verdict.
+
+**Why `decided`, and why `continue-on-error`.** A job's outputs are read whatever its result, so a crash, post-step failure or timeout after `proved=true` was written would still look like a yes. The `proof` job therefore ends with a `seal` step (`if: success()`) that alone writes `decided=true`; an earlier failure or a timeout leaves it empty and every job runs. Separately the job is `continue-on-error: true`, so a failed proof cannot turn the CI workflow red and stop `Release`, which listens to the workflow conclusion ([GitHub: `jobs.<job_id>.continue-on-error`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error)). That setting makes the job's `needs.proof.result` read `success` even when it failed, which is why consumers read `decided` and never `result`. `ci-sets.ts` pins both: the flag and the last-step seal, and a model of the workflow conclusion. `Release` is unchanged — it
+fires on CI `completed` + `success`, which a reused proof produces.
+
+**Known cost.** A reused push does not run `quick`, the job that refreshes the Namespace Nix/tsc cache from
+`main`. Those caches change only when inputs do (`flake.lock`, dependencies), and the next push whose tree
+was not proved by a PR (a conflict-resolved merge, a direct commit, the darwin switch off) refreshes them.
+
 ## Release gating
 
 **`Release` waits on `CI` and nothing else.** It fires on the `workflow_run` of `CI` on `main`
@@ -712,7 +807,7 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
 - Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
   `quick` 20, `pwa-screenshot` 20, `pwa-relevance` 5, `full-gates` 15, `compile` (with SIT) 20,
   `smoke` 10, `full-pending` and `full` 5; E2E relevance and summary 5; `Harness Contract (latest)`
-  20 and its report 10; `CD` `compile` 15, `goreleaser` 30 and `sign` 15; the darwin smoke
+  20 and its report 10; `CD` `compile` 15, `goreleaser` 30, `fury` 15 and `sign` 15; the darwin smoke
   (`smoke-darwin.yaml`) attempts 10 each, backoffs 5 and 8, verdict 5; `macOS Advisory` 5; `Deploy PWA to Pages` build 15, sign 10,
   deploy 10; `Deploy Hosted Relay` jobs 20; `Release` 20.
 - A new job states its ceiling when it is added, sized from its first green runs.
@@ -786,11 +881,26 @@ un-fired and no release published. The job passes `secrets.RELEASE_TOKEN`.
 `CD` reacts to the tag. Before it publishes anything it compiles the binaries once more and starts the
 darwin-arm64 one on a real Mac (`smoke-darwin`, `advisory: false`): a release proves darwin works, a macOS
 runner that never comes is re-queued up to 3 times, and only then does the release stop, saying the runner was
-unavailable ([macOS runner shortage](#macos-runner-shortage)). `goreleaser` `needs` that job. It then checks out with `fetch-depth: 0`, and runs
+unavailable ([macOS runner shortage](#macos-runner-shortage)). `goreleaser` `needs` that job, `compile` (which
+the owner's switch skips together with the smoke) and `main-only`, and its `if` requires `main-only` to have
+_succeeded_: a refused tag skips `compile` and the smoke exactly as the switch does, so a skipped compile alone
+proves nothing about the tag (`scripts/validate/release-guards.sh` holds it). It then checks out with `fetch-depth: 0`, and runs
 `nix develop .#releaser -c ./scripts/release/publish.sh` — the `.#releaser` shell is the only
 one with `goreleaser` and `go`. GoReleaser owns the GitHub release, archives, checksums, the
 installer, and the in-repo Homebrew cask. See
 [Semantic Release](../semantic-release/index.md) for what each half owns.
+
+**Two jobs follow `goreleaser` and neither waits for the other.** `sign` signs `checksums.txt`. `fury` pushes the
+`.deb`/`.rpm` assets of the tag's GitHub release (`gh release download --pattern '*.deb' --pattern '*.rpm'`) to
+Gemfury with `scripts/release/fury.sh`, every package in parallel, failing if any push failed (a 409 stays a
+warning). Gemfury indexes an rpm for ~85 s, so pushed inside `goreleaser` and one by one it held the GitHub
+release's job open for 193 s and `sign` behind it. `fury` alone holds `FURY_PUSH_TOKEN`
+(`scripts/validate/macos-policy.sh` pins both), and a red `fury` is re-run by itself: the release and its
+signature are already out.
+
+**The release job's critical path is measured, not guessed** (v4.291.19, 2026-11-16): `CI` 6.5 min, `Release` 2.6 min,
+`compile` 81 s, `smoke-darwin` 70 s, `goreleaser` 5.75 min, `sign` 15 s. Each of the changes above removes a wait
+that nothing downstream needed; a new step in this chain states what it makes later jobs wait for.
 
 ## Permissions and checkout
 
@@ -813,7 +923,9 @@ and adds what the network demanded, including on `main`, where a red CI skips a 
 - **Namespace or not.** `namespacelabels` is `true` when `runner.environment == 'self-hosted'` (how every
   workflow already tells a Namespace runner from a GitHub-hosted one). On Namespace the setup action mounts
   `/nix` and `~/.cache/nix` from the cache volume **itself**, so a job no longer mounts `/nix` first; Quick
-  still mounts `~/.cache/ferretry-tsc` (and reads that step's `cache-hit`) with its own cache step. Every other
+  and Static Checks still mount `~/.cache/ferretry-tsc` (and read that step's `cache-hit`) with their own cache
+  step, and Performance Tests mounts nothing. No workflow or composite action uses another Nix installer, so the
+  old and new layouts never share a store. Every other
   runner (GitHub-hosted Linux, macOS) gets the plain Determinate installer.
 - **The installer's download.** The installer fetches before anything is installed, so a DNS blip fails the
   step with nothing to clean up: the action runs it once more after 60 seconds, with a `::warning::`, and

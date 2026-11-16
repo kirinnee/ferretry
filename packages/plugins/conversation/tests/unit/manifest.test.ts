@@ -5,8 +5,8 @@ describe('conversation manifest', () => {
   const routes = manifest.actions.routes;
   test('declares every route of the conversation mounts, each with a full descriptor', () => {
     // Today's 38, the composer's reference menus (lead decision Q6), and the ferret's hypermedia switch
-    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th.
-    expect(routes).toHaveLength(40);
+    // (GET /v1/ferrets/:ferretId/hypermedia) as the 40th, less the twelve send, queue and composer routes the Mailbox serves.
+    expect(routes).toHaveLength(28);
     expect(manifest.actions.sockets).toHaveLength(1);
     for (const route of routes) {
       expect(['operator', 'authenticated']).toContain(route.minimum);
@@ -20,10 +20,8 @@ describe('conversation manifest', () => {
       expect(route.path).not.toMatch(/\/v1\/sessions\/|\/v1\/imports\//);
   });
   test('answering a question and every shared-draft route are the owner’s, never a ferret’s', () => {
-    const mine = [...routes, ...manifest.actions.sockets].filter(
-      route => /\/answer$|shared-draft/.test(route.path) || route.path.endsWith('/composer'),
-    );
-    expect(mine.length).toBe(5);
+    const mine = [...routes, ...manifest.actions.sockets].filter(route => /\/answer$|shared-draft/.test(route.path));
+    expect(mine.length).toBe(4);
     for (const route of mine) expect(route.caller).toBe('person');
   });
   test('a body that can show a transcript, pane or draft is built under the secrets guard', () => {
@@ -46,7 +44,7 @@ describe('conversation manifest', () => {
       expect(route.guard).toEqual({ none: expect.stringContaining('positional edits need the raw text') });
     }
   });
-  test('takes the question and prompt sources, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments, ask.delivery, ask.owner-chat and reference.catalog for the : and @ menus; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
+  test('takes the question and prompt sources, sitrep lines, ferret.changed, ferret.stopping, launch.parts, opening.attachments, ask.delivery, ask.owner-chat, reference.catalog for the : and @ menus and mailbox.host; offers message.before-send, turn.ended, search.sources and reference.catalog', () => {
     expect(manifest.hooks.takes.map(take => take.hook.name)).toEqual([
       'ask.sources',
       'ask.sources',
@@ -59,7 +57,11 @@ describe('conversation manifest', () => {
       'ask.owner-chat',
       'reference.catalog',
       'reference.catalog',
+      'mailbox.host',
+      'turn.question-open',
     ]);
+    expect(manifest.hooks.takes[11]?.key).toBe('ferret');
+    expect(manifest.hooks.takes[12]?.key).toBe('question');
     expect(manifest.hooks.takes[9]?.key).toBe(':');
     expect(manifest.hooks.takes[10]?.key).toBe('@');
     expect(manifest.hooks.takes[0]?.key).toBe('question');
@@ -87,9 +89,13 @@ describe('conversation manifest', () => {
     expect(verbs).not.toContain('snapshot');
     expect(verbs).not.toContain('events');
   });
-  test('the verbs and the one agent tool are declared', () => {
+  test('the verbs and the agent tools are declared: the work search, and the two a Claude ferret\u2019s MCP server pumps its channel with', () => {
     expect(manifest.actions.cli.map(verb => verb.verb)).toContain('link keep');
-    expect(manifest.actions.agentTools.map(item => item.name)).toEqual(['search_work']);
+    expect(manifest.actions.agentTools.map(item => item.name)).toEqual([
+      'search_work',
+      'channel_poll',
+      'channel_claim',
+    ]);
   });
 });
 

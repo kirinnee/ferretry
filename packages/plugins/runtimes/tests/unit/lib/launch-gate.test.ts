@@ -1,7 +1,7 @@
 /**
  * What a runtime's login does to a Claude launch: its compaction trigger, as a `compact` part from the facts `start.decide`
  * checked. The gate never touches the login's ENVIRONMENT: a project's own `.claude` env wins over it (v4 before 4.291.9;
- * owner, !A500), so it reads no folder, pins nothing and refuses no start over a key a folder sets. The parts source reads
+ * owner, ^A500), so it reads no folder, pins nothing and refuses no start over a key a folder sets. The parts source reads
  * nothing again and is required.
  */
 import { describe, it } from 'bun:test';
@@ -62,7 +62,7 @@ describe('LaunchGate.decide', () => {
   });
 
   it('should allow a Claude start of a published runtime: it needs no folder, so none is ever read or refused', async () => {
-    // The gate has no folder reader (a project’s `.claude` env wins over a login’s: owner, !A500), so nothing a folder
+    // The gate has no folder reader (a project’s `.claude` env wins over a login’s: owner, ^A500), so nothing a folder
     // sets, a `${secret:}` key or a bare $OTHER key included, can be a reason to refuse.
     should((await gate(FACTS).decide(input())).allow).be.true();
   });
@@ -226,5 +226,48 @@ describe('LaunchGate.parts', () => {
     should(await unpublished.parts.parts(spec())).deepEqual([]);
     should(await codex.parts.parts(spec())).deepEqual([]);
     should(await bare.parts.parts(spec())).deepEqual([]);
+  });
+});
+
+describe('LaunchGate.parts: the organisation type of the login a launch spends (the Claude channel default)', () => {
+  const asked: string[] = [];
+  const gateWith = (organizationType: (login: string) => Promise<string | undefined>) =>
+    new LaunchGate({
+      source: source(FACTS),
+      organizationType: async login => {
+        asked.push(login);
+        return await organizationType(login);
+      },
+    });
+
+  it('should add the type the login’s own account file records as an `account` part, beside the compaction trigger', async () => {
+    const launch = gateWith(async () => 'claude_max');
+    await launch.decide(input());
+
+    should(await launch.parts.parts(spec({ login: 'claude-host', compactAt: 100_000 }))).deepEqual([
+      { kind: 'compact', at: 100_000 },
+      { kind: 'account', organizationType: 'claude_max' },
+    ]);
+    should(asked.at(-1)).equal('claude-host');
+  });
+
+  it('should add nothing for a login with no recorded type, for one that cannot be read, and for a launch that names no login', async () => {
+    const none = gateWith(async () => undefined);
+    const broken = gateWith(async () => {
+      throw new Error('logins unavailable');
+    });
+    const named = gateWith(async () => 'claude_team');
+    for (const launch of [none, broken, named]) await launch.decide(input());
+
+    should(await none.parts.parts(spec({ login: 'a' }))).deepEqual([]);
+    should(await broken.parts.parts(spec({ login: 'a' }))).deepEqual([]);
+    should(await named.parts.parts(spec())).deepEqual([]);
+  });
+
+  it('should add no account part when the gate was given no way to ask', async () => {
+    const launch = gate(FACTS);
+    await launch.decide(input());
+
+    should(await launch.parts.parts(spec({ login: 'a' }))).deepEqual([]);
   });
 });

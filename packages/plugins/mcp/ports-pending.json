@@ -3,10 +3,6 @@
   "pending": ["mcp"],
   "pendingReasons": {
     "mcp": [
-      "[compose] GAP(mcp): endpointAllowed strips ONE trailing dot, so `localhost..` is judged a public host, as in v4 (the URL parser keeps it). A resolver that resolves it could reach this host; glibc does not, so the request fails closed here. Nothing a public server names reaches more than in v4",
-      "[compose] GAP(mcp): endpointAllowed judges the IPv4-translated literal `[::ffff:0:7f00:1]` (::ffff:0:0/96) a public host, as in v4. Linux does not route it to loopback; an endpoint that names it is not refused",
-      "[compose] GAP(mcp): endpointAllowed judges the NAT64 literal `[64:ff9b::7f00:1]` a public host, as in v4. Linux does not route it to loopback; an endpoint that names it is not refused",
-      "[cross: catalogs] MCP rows in the ferret panel: share / add to a catalog, “installed from” and install from a file need Catalogs’ row host; the half has no Catalogs edge",
       "[cross: conversation] GAP(conversation): the servers panel hides “Add…” when FerretWorkspace's canControl is false, but ChatScreen never computes that flag from this connection's grants, so the real chat always passes true and a caller who may not control the ferret is still offered “Add…” (the daemon still refuses the write). MISSING SEAM: Conversation's ChatScreen does not derive canControl from the caller's grants.",
       "[cross: runtimes] An MCP server's status (runtimes.component-mcp) is drawn only under its row in the Profiles library: the profile contents list does not mount the slot, and there is no server page with v4's Status section."
     ]

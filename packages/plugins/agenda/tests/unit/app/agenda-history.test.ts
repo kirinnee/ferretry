@@ -50,15 +50,15 @@ describe('the history of one agenda item', () => {
 
   test('keeps a plain reply that cites the item, without the reference the composer put in front of it', () => {
     const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 take the second option', 1),
-      entry('u2', 'user', 'unrelated !A470 message', 2),
+      entry('u1', 'user', '^A47 take the second option', 1),
+      entry('u2', 'user', 'unrelated ^A470 message', 2),
       entry('u3', 'user', 'no mention at all', 3),
     ]);
     expect(said(events)).toEqual(['owner: take the second option']);
   });
 
   test('never reads a message another ferret sent as the owner’s', () => {
-    const peer = { ...entry('u1', 'user', '!A47 from a peer', 1), peer: { name: 'piper' } } as TranscriptEntry;
+    const peer = { ...entry('u1', 'user', '^A47 from a peer', 1), peer: { name: 'piper' } } as TranscriptEntry;
     expect(itemHistory(item(), [peer])).toEqual([]);
   });
 
@@ -68,23 +68,23 @@ describe('the history of one agenda item', () => {
       '',
       'Ferret kylene is still on the lockfile bump.',
       '',
-      'On !A47: pause does not kill a running turn, it finishes first.',
+      'On ^A47: pause does not kill a running turn, it finishes first.',
       '',
       'Nothing else is waiting on you.',
     ].join('\n');
     const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('u1', 'user', '^A47 does pause kill a running turn?', 1),
       entry('a1', 'assistant', reply, 2),
     ]);
     expect(said(events)).toEqual([
       'owner: does pause kill a running turn?',
-      'ferret: On !A47: pause does not kill a running turn, it finishes first.',
+      'ferret: On ^A47: pause does not kill a running turn, it finishes first.',
     ]);
   });
 
   test('shows nothing for a reply that never cites the item, even right after an owner row about it', () => {
     const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('u1', 'user', '^A47 does pause kill a running turn?', 1),
       entry('a1', 'assistant', 'Let me check the runner.', 2),
       entry('t1', 'tool', 'Read(runner.ts) → 140 lines', 3),
       entry('a2', 'assistant', 'No. A running turn finishes. Also the lockfile is bumped.', 4),
@@ -95,11 +95,11 @@ describe('the history of one agenda item', () => {
   test('keeps only the list items that cite the item, not their siblings', () => {
     const reply = [
       '- piper: relay probe done',
-      '- !A47 — answered, pause waits for the turn',
+      '- ^A47 — answered, pause waits for the turn',
       '- kylene: lockfile',
     ].join('\n');
     expect(said(itemHistory(item(), [entry('a1', 'assistant', reply, 1)]))).toEqual([
-      'ferret: - !A47 — answered, pause waits for the turn',
+      'ferret: - ^A47 — answered, pause waits for the turn',
     ]);
   });
 
@@ -107,7 +107,7 @@ describe('the history of one agenda item', () => {
     const reply = [
       '## Relay probe',
       'Piper is done.',
-      '## !A47 pause behaviour',
+      '## ^A47 pause behaviour',
       'A running turn finishes first.',
       '',
       '- then the queue pauses',
@@ -118,7 +118,7 @@ describe('the history of one agenda item', () => {
     ].join('\n');
     expect(said(itemHistory(item(), [entry('a1', 'assistant', reply, 1)]))).toEqual([
       [
-        'ferret: ## !A47 pause behaviour',
+        'ferret: ## ^A47 pause behaviour',
         'A running turn finishes first.',
         '- then the queue pauses',
         '### Detail',
@@ -134,20 +134,20 @@ describe('the history of one agenda item', () => {
       'Q: Does the lockfile need a bump?',
       'A: Yes, bumped.',
       '',
-      'Q: !A47 ship the relay fix?',
+      'Q: ^A47 ship the relay fix?',
       'A: Yes, on staging first.',
       '',
       'Q: Does pause kill a running turn',
       'A: No. A running turn finishes.',
     ].join('\n');
     const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('u1', 'user', '^A47 does pause kill a running turn?', 1),
       entry('a1', 'assistant', reply, 2),
     ]);
     expect(said(events)).toEqual([
       'owner: does pause kill a running turn?',
       [
-        'ferret: Q: !A47 ship the relay fix?\n\nA: Yes, on staging first.',
+        'ferret: Q: ^A47 ship the relay fix?\n\nA: Yes, on staging first.',
         'Q: Does pause kill a running turn\n\nA: No. A running turn finishes.',
       ].join('\n\n'),
     ]);
@@ -156,21 +156,21 @@ describe('the history of one agenda item', () => {
   test('does not keep a recap pair whose Q is only about something else', () => {
     const reply = 'Q: Does the lockfile need a bump?\nA: Yes, bumped.';
     const events = itemHistory(item(), [
-      entry('u1', 'user', '!A47 does pause kill a running turn?', 1),
+      entry('u1', 'user', '^A47 does pause kill a running turn?', 1),
       entry('a1', 'assistant', reply, 2),
     ]);
     expect(said(events)).toEqual(['owner: does pause kill a running turn?']);
   });
 
   test('keeps the cited part of a reply WHOLE however long it is, and nothing from other rows', () => {
-    const long = `Re !A47: ${'x'.repeat(20_000)}`;
+    const long = `Re ^A47: ${'x'.repeat(20_000)}`;
     const events = itemHistory(item(), [
       entry('a0', 'assistant', 'Building the settings page.', 0),
-      entry('a1', 'assistant', 'About !A47 — done.', 1),
+      entry('a1', 'assistant', 'About ^A47 — done.', 1),
       entry('a2', 'assistant', long, 2),
-      entry('a3', 'assistant', 'About !A4 only', 3),
-      entry('t1', 'tool', 'mentions !A47 but is a tool row', 4),
-      entry('c1', 'command', '/model !A47', 5),
+      entry('a3', 'assistant', 'About ^A4 only', 3),
+      entry('t1', 'tool', 'mentions ^A47 but is a tool row', 4),
+      entry('c1', 'command', '/model ^A47', 5),
     ]);
     expect(events.map(event => event.kind)).toEqual(['ferret', 'ferret']);
     const second = events[1];
@@ -248,10 +248,10 @@ describe('the history of one agenda item', () => {
     ] as unknown as AgendaItem['revisions'];
     const base = Date.parse('2026-08-01T10:00:00.000Z');
     const events = itemHistory(item({ revisions }), [
-      entry('a0', 'assistant', 'before: !A47', base - 1_000),
-      entry('a1', 'assistant', 'same moment: !A47', base),
-      entry('a2', 'assistant', 'no clock: !A47'),
-      entry('a3', 'assistant', 'later: !A47', base + 5_000),
+      entry('a0', 'assistant', 'before: ^A47', base - 1_000),
+      entry('a1', 'assistant', 'same moment: ^A47', base),
+      entry('a2', 'assistant', 'no clock: ^A47'),
+      entry('a3', 'assistant', 'later: ^A47', base + 5_000),
     ]);
     expect(events.map(event => event.kind)).toEqual(['ferret', 'revision', 'ferret', 'ferret', 'ferret']);
     expect(events[3]?.at).toBe(base);
@@ -279,9 +279,9 @@ describe('how far the owner’s words got, read from the ferret’s transcript',
       fate: 'delivered',
     } as const;
     const events = itemHistory(item(), [
-      { ...entry('u1', 'user', '!A47 first', 1), send },
+      { ...entry('u1', 'user', '^A47 first', 1), send },
       entry('a1', 'assistant', 'something else entirely', 2),
-      entry('u2', 'user', '!A47 second', 3),
+      entry('u2', 'user', '^A47 second', 3),
     ]);
     expect(reachOf(events)).toEqual([
       { via: 'transcript', answered: true, send },

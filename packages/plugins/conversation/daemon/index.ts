@@ -15,7 +15,7 @@ import { PDF_WORKER_URL } from './attachments/adapters/decrypt-pdf.ts';
 import { openingAttachmentsSource } from './attachments/adapters/opening-attachments.ts';
 import { followFerretChanges, followFerretStopping } from './ferret-changes.ts';
 import { buildConversationA } from './host.ts';
-import { type HarnessGate, HARNESS_OPEN } from './harness-seam.ts';
+import { type HarnessGate, HARNESS_OPEN } from '@ferretry/core-mailbox/contract';
 import { hypermediaLaunchEnvironment } from './hypermedia/lib/launch.ts';
 import { buildReading } from './reading.ts';
 import { addressedByCallsign } from './seams/ferret-address.ts';
@@ -86,6 +86,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         asks: ctx.needs.asks,
         hooks: ctx.hooks,
         gate,
+        mailbox: ctx.needs.mailbox,
         // The stored originals a send hands to the agent (part b owns the store).
         attachments: { download: (ferret, id) => b.download(ferret, id) },
         // A Codex ferret's question is in its transcript (part b reads it).
@@ -137,6 +138,7 @@ export const conversationDaemon = (gate: HarnessGate) =>
         sockets,
         tools: {
           search_work: b.tools.search_work,
+          ...a.tools,
         },
         provides: { conversation: perNeeder(needer => conversationFor(needer.id, api)) },
         hooks: {
@@ -163,8 +165,12 @@ export const conversationDaemon = (gate: HarnessGate) =>
           // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
           // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
           'opening.attachments:opening': openingAttachmentsSource(),
+          // Ferrets' turn watch asks once per look whether a question is open: the stored `question.json` answers.
+          'turn.question-open:question': { isOpen: async ferret => (await api.question(ferret)) !== undefined },
           'ask.delivery:ferret': askDeliveryOf(api),
           'ask.owner-chat:conversation': a.ownerChat,
+          // Where the Mailbox keeps a ferret's queue and send ledger: the files stay in this plugin's folder.
+          'mailbox.host:ferret': a.mailboxHost,
           // The composer's `:` (fleet callsigns) and `@` (one folder of the ferret's files) menus, each declaring the demand
           // its own read route asks (fleet, filesystem); the route asks it of the caller before they run.
           'reference.catalog::': new AgentsReferenceMenu(ctx.needs.ferrets),

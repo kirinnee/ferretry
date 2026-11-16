@@ -15,12 +15,13 @@ test('through the port, a live ferret keeps its pane and runtime even when a plu
     replaceLiveTerminal: true,
     target: { runtime: 'codex-two', harness: 'codex' },
   };
-  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean }>)(
+  const answer = await (port.resume as unknown as (...args: unknown[]) => Promise<{ ok: boolean; error?: unknown }>)(
     f.id,
     undefined,
     sneaky,
   );
-  expect(answer.ok).toBe(true);
+  // Only the Warden replaces a live pane: for any other consumer it is a refusal, and nothing is resumed.
+  expect(answer).toEqual({ ok: false, error: { code: 'refused', reason: 'only the Warden replaces a live pane' } });
   expect(await f.service.handle(f.id)).toBe(before);
   expect(await f.runner.alive(before)).toBe(true);
   expect(f.runner.starts).toBe(1);
@@ -110,9 +111,12 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'handle',
       'harness',
       'harnesses',
+      'importConversation',
+      'historySources',
       'lastSnapshot',
       'list',
       'managedWorktrees',
+      'markStalled',
       'mayTouch',
       'move',
       'prompt',
@@ -142,4 +146,86 @@ test('resolve answers an id or a callsign (any case, with the composer’s colon
   expect(await port.resolve(name)).toEqual({ kind: 'ferret', id: f.id });
   expect(await port.resolve(`:${name.toUpperCase()}`)).toEqual({ kind: 'ferret', id: f.id });
   expect(await port.resolve('nobody-has-this-name')).toEqual({ kind: 'unknown' });
+});
+
+test('historySources offers each harness that has any, and a harness that throws or offers none is left out', async () => {
+  const f = additivesFixture();
+  const files = { entries: async () => [], stat: async () => undefined, read: async () => undefined };
+  const source = { kind: 'computer', label: 'owner', files } as const;
+  const harnesses: Record<string, unknown> = {
+    'claude-code': { historySources: async () => [source] },
+    codex: { historySources: async () => Promise.reject(new Error('gone')) },
+    plain: {},
+  };
+  (f.service as unknown as { ports: Record<string, unknown> }).ports = {
+    ...(f.service as unknown as { ports: Record<string, unknown> }).ports,
+    harnessKeys: () => Object.keys(harnesses),
+    harness: (key: string) => harnesses[key],
+  };
+  const port = ferretsPort(f.service, 'conversation');
+  expect(await port.historySources?.()).toEqual([{ harness: 'claude-code', sources: [source] }]);
+});
+
+test('only Conversation can import a transcript, and only id/source are forwarded in a fresh request', async () => {
+  const seen: { harness: string; input: unknown }[] = [];
+  const service = {
+    importConversation: async (harness: string, input: unknown) => {
+      seen.push({ harness, input });
+      return { ok: true, value: undefined };
+    },
+  };
+  const denied = ferretsPort(service as never, 'board').importConversation;
+  if (denied === undefined) throw new Error('the import boundary is missing');
+  await expect(denied('claude-code', { id: 'c1', source: 'projects/p/c1.jsonl' })).rejects.toThrow(
+    'only the Conversation plugin',
+  );
+  expect(seen).toEqual([]);
+  const allowed = ferretsPort(service as never, 'conversation').importConversation;
+  if (allowed === undefined) throw new Error('the import boundary is missing');
+  const request = { id: 'c1', source: 'projects/p/c1.jsonl', credential: 'must-not-be-forwarded' };
+  expect(await allowed('claude-code', request)).toEqual({ ok: true, value: undefined });
+  expect(seen).toEqual([{ harness: 'claude-code', input: { id: 'c1', source: 'projects/p/c1.jsonl' } }]);
+  expect(seen[0]?.input).not.toBe(request);
+});
+
+test('a shared copy delegates to its harness and reports unavailable, unsupported and failed imports without leaking an exception', async () => {
+  const f = additivesFixture();
+  const input = { id: 'c1', source: 'projects/p/c1.jsonl' };
+  const seen: unknown[] = [];
+  const harnesses: Record<string, unknown> = {
+    'claude-code': {
+      importConversation: async (request: unknown) => {
+        seen.push(request);
+        return { ok: true, value: undefined };
+      },
+    },
+  };
+  (f.service as unknown as { ports: Record<string, unknown> }).ports = {
+    ...(f.service as unknown as { ports: Record<string, unknown> }).ports,
+    harness: (key: string) => harnesses[key],
+  };
+  const copy = ferretsPort(f.service, 'conversation').importConversation;
+  if (copy === undefined) throw new Error('the import boundary is missing');
+  expect(await copy('codex', input)).toEqual({
+    ok: false,
+    error: { reason: 'The codex harness is off, so its conversation cannot be copied.' },
+  });
+  harnesses.codex = {};
+  expect(await copy('codex', input)).toEqual({
+    ok: false,
+    error: { reason: 'The codex harness keeps no shared copy of a conversation.' },
+  });
+  harnesses.codex = {
+    importConversation: async () => {
+      throw new Error('private failure detail');
+    },
+  };
+  expect(await copy('codex', input)).toEqual({
+    ok: false,
+    error: { reason: 'The conversation could not be copied.' },
+  });
+  harnesses.codex = { importConversation: async () => ({ ok: false, error: { reason: 'the transcript is absent' } }) };
+  expect(await copy('codex', input)).toEqual({ ok: false, error: { reason: 'the transcript is absent' } });
+  expect(await copy('claude-code', input)).toEqual({ ok: true, value: undefined });
+  expect(seen).toEqual([input]);
 });

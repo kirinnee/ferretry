@@ -3,7 +3,7 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { absolute } from '../host/fence-guard.ts';
 import { insideFence } from '../contract/home.ts';
-import { isKernelMadeRoot } from '../host/internal-roots.ts';
+import { isKernelMadeRoot } from '../contract/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
   internalRootRelative,
@@ -38,12 +38,30 @@ import {
   placedLinkMoveVerdict,
   SharedCredentials,
 } from '../host/shared-credentials.ts';
-import { ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
+import { holdsPrivate, ownStateTree, receivingRoot, refuseShared, SharedTrees } from '../host/shared-trees.ts';
+import {
+  historyEntryFor,
+  historyMoveNames,
+  historyRoot,
+  isFerretHome,
+  ownHistoryPool,
+  poolEntryFolder,
+  refuseHistory,
+} from '../host/history-pool.ts';
+import { memoryPoolStore } from './history-pool.ts';
 import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
 import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, FetchPort, HostFactsPort, SelfCountersPort, UpdateHostPort } from '../contract/ports.ts';
+import type {
+  ContractSurface,
+  FetchPort,
+  FileEventsPort,
+  HostFactsPort,
+  SelfCountersPort,
+  UpdateHostPort,
+} from '../contract/ports.ts';
+import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from '../host/adapters/file-events.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from '../host/adapters/self-counters.ts';
 import { nodeFs } from '../host/adapters/node-fs.ts';
@@ -317,6 +335,8 @@ export interface TestHostOptions {
   readonly hostFacts?: HostFactsPort;
   /** What `kernel.selfCounters` answers to a plugin that declared `permissions.selfCounters`. Absent: every read refuses. */
   readonly selfCounters?: SelfCountersPort;
+  /** What `kernel.fileEvents` lists to a plugin that declared `permissions.fileEvents`. Absent: nothing is polled. */
+  readonly fileEvents?: FileEventsPort;
   /**
    * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
    * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
@@ -326,6 +346,8 @@ export interface TestHostOptions {
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
+  /** What `kernel.loop.blockedMs()` answers. Default: 0 (the loop never blocked). */
+  readonly loopBlockedMs?: () => number;
   /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
@@ -1362,6 +1384,7 @@ async function start(world: World): Promise<TestHost> {
   );
   /** The test roots' stand-in inodes, so `fileIdentity` can tell two publishes of one name apart. */
   const inodes = new Map<string, bigint>();
+  const poolFileMarks = new Map<string, Uint8Array | string>();
   let nextInode = 0n;
   /** The test roots each handle was made for: its plugin, root, scope and key prefix (for `share` / `copyShared`). */
   const testHandles = new WeakMap<
@@ -1371,8 +1394,10 @@ async function start(world: World): Promise<TestHost> {
       readonly root: RootName;
       readonly ferret?: FerretId;
       readonly prefix: string | undefined;
+      readonly pool?: ReturnType<typeof memoryPoolStore>;
     }
   >();
+  const testPoolViews = new WeakSet<object>();
   /**
    * The test world's own-root check: a folder of a handle made for `plugin`, inside its scope, that exists (a file is
    * beneath it). The world has no links, so its one spelling is the path itself.
@@ -1514,7 +1539,37 @@ async function start(world: World): Promise<TestHost> {
       [...entries]
         .filter(([key]) => key.startsWith(`${folder}/`))
         .map(([key, value]) => [key.slice(folder.length + 1), value]);
-    return {
+    const stateForPool = (): MemoryStateFolder => {
+      let state = world.states.get(manifest.id);
+      if (state === undefined) {
+        state = new MemoryStateFolder(() => clock.nowMs());
+        world.states.set(manifest.id, state);
+      }
+      return state;
+    };
+    const bootPermission = manifest.permissions?.historyPool;
+    const bootEntry =
+      bootPermission === undefined
+        ? undefined
+        : poolEntryFolder(bootPermission, manifest.data?.state ?? [], 'projects');
+    if (
+      bootEntry !== undefined &&
+      (manifest.permissions?.roots ?? []).includes('agent-homes') &&
+      !holdsPrivate(manifest.id, posix.dirname(bootEntry), privateFiles)
+    ) {
+      const state = stateForPool();
+      const folder = posix.dirname(bootEntry);
+      if (!state.files.has(folder) && !state.bytes.has(folder) && !state.symlinks.has(folder))
+        state.directories.set(folder, { mode: 0o700, modifiedMs: clock.nowMs() });
+    }
+
+    const make = (poolFolder?: string): KernelPorts['roots'] => ({
+      historyPool: () => {
+        const folder = ownHistoryPool(manifest.permissions?.historyPool, manifest.data?.state ?? []);
+        if (holdsPrivate(manifest.id, folder, privateFiles)) return refuseHistory('not_own');
+        if (!(manifest.permissions?.roots ?? []).includes('agent-homes')) throw new RootError('not_declared');
+        return make(folder).root('agent-homes');
+      },
       harnessFile: absolutePath => testHarnessFile(manifest, absolutePath),
       share: async source => {
         if (manifest.permissions?.shareTrees !== true) return refuseShared('not_permitted');
@@ -1562,6 +1617,24 @@ async function start(world: World): Promise<TestHost> {
         );
       },
       root(name, scope) {
+        const pool =
+          poolFolder === undefined
+            ? undefined
+            : memoryPoolStore(stateForPool(), manifest.id, poolFolder, () => clock.nowMs());
+        const rootFiles = pool?.files ?? world.roots;
+        const fileInode = (path: string): bigint => {
+          const version = pool?.version(path);
+          if (version !== undefined && poolFileMarks.get(path) !== version) {
+            poolFileMarks.set(path, version);
+            inodes.set(path, ++nextInode);
+          }
+          return inodes.get(path) ?? 0n;
+        };
+        const rootLinks = pool?.links ?? testLinks;
+        const rootFolders = pool?.folders ?? testMadeFolders;
+        const rootFolderExists = (path: string): boolean =>
+          rootFolders.has(path) ||
+          [...rootFiles.keys(), ...rootLinks.keys(), ...rootFolders].some(key => key.startsWith(path + '/'));
         if (!(manifest.permissions?.roots ?? []).includes(name) || !mayHoldRoot(manifest.id, name)) {
           // The real host's refusal for the one root whose twin is the real rules (`testing/project-files.ts`).
           if (name === 'project-files') throw new RootError('not_declared');
@@ -1592,8 +1665,8 @@ async function start(world: World): Promise<TestHost> {
             fenceHome: options.fenceHome ?? '/test-home',
             setModeDeclared: manifest.permissions?.setMode === true,
             noDescriptorReach: options.noDescriptorReach === true,
-            files: world.roots,
-            links: testLinks,
+            files: rootFiles,
+            links: rootLinks,
             hardLinks: testHardLinks,
             modes: testModes,
             inodes,
@@ -1622,22 +1695,24 @@ async function start(world: World): Promise<TestHost> {
             ? absolute(scope.subfolder, 'a root')
             : undefined;
         const below = anchoredFolder(named) === undefined && scope?.within !== undefined ? undefined : scoped;
-        const prefix = below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`;
+        const prefix =
+          pool?.base ?? (below === undefined ? undefined : below === '' ? `/${name}` : `/${name}/${below}`);
         const fileStat = (path: string) => ({
           kind: 'file' as const,
-          size: (world.roots.get(path) ?? '').length,
+          size: pool?.read(path)?.length ?? (rootFiles.get(path) ?? '').length,
           modified: testModified.get(path) ?? clock.now(),
           mode: testModes.get(path) ?? 0o600,
-          links: 1,
+          links: pool?.hardLinked(path) === true || testHardLinks.has(path) ? 2 : 1,
         });
         /** `path` with every link on the way (the leaf's too) replaced by what it points at; one that leaves this root is `link_escape`. */
         const followLinks = (path: string): string => {
+          if (pool !== undefined) path = pool.checked(path);
           let current = path;
           for (let hops = 0; hops <= 40; hops += 1) {
             const parts = current.split('/');
-            const linked = parts.findIndex((_, index) => testLinks.has(parts.slice(0, index + 1).join('/')));
+            const linked = parts.findIndex((_, index) => rootLinks.has(parts.slice(0, index + 1).join('/')));
             if (linked < 0) return current;
-            const pointsAt = testLinks.get(parts.slice(0, linked + 1).join('/')) as string;
+            const pointsAt = rootLinks.get(parts.slice(0, linked + 1).join('/')) as string;
             if (prefix === undefined || (pointsAt !== prefix && !pointsAt.startsWith(`${prefix}/`)))
               throw new RootError('link_escape');
             current = [pointsAt, ...parts.slice(linked + 1)].join('/');
@@ -1656,9 +1731,9 @@ async function start(world: World): Promise<TestHost> {
               else if (!found.has(rest.slice(0, slash))) found.set(rest.slice(0, slash), 'directory');
             }
           };
-          note(testMadeFolders, 'directory');
-          note(testLinks.keys(), 'symlink');
-          note(world.roots.keys(), 'file');
+          note(rootFolders, 'directory');
+          note(rootLinks.keys(), 'symlink');
+          note(rootFiles.keys(), 'file');
           return new Map([...found].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
         };
         /**
@@ -1690,12 +1765,16 @@ async function start(world: World): Promise<TestHost> {
           // As production: a link on the way (the leaf's too) is followed and judged — one that reaches outside this root is
           // `link_escape`, so no plugin reads through a link into another root (the placed sign-in link included).
           readText: async path => {
-            const text = world.roots.get(followLinks(path));
+            if (pool !== undefined && testHardLinks.has(path)) throw new RootError('hard_link');
+            const text = rootFiles.get(followLinks(path));
             if (text === undefined) throw new Error(`no such file ${path}`);
             return text;
           },
           readBytes: async (path, limit) => {
-            const bytes = new TextEncoder().encode(await handle.readText(path));
+            const bytes =
+              pool === undefined ? new TextEncoder().encode(await handle.readText(path)) : pool.read(followLinks(path));
+            if (bytes === undefined) throw new RootError('outside');
+            if (pool !== undefined && testHardLinks.has(path)) throw new RootError('hard_link');
             if (typeof limit === 'number') return bytes.slice(0, limit);
             if (limit === undefined) return bytes;
             if (limit.length > MAX_ROOT_WINDOW_BYTES || limit.offset < 0 || limit.length < 0)
@@ -1704,53 +1783,68 @@ async function start(world: World): Promise<TestHost> {
           },
           readTail: async (path, maxBytes) => {
             if (maxBytes > MAX_ROOT_WINDOW_BYTES || maxBytes < 0) throw new Error('the tail is out of range');
-            const bytes = new TextEncoder().encode(await handle.readText(path));
+            const bytes = await handle.readBytes(path);
             return { bytes: bytes.slice(Math.max(0, bytes.length - maxBytes)), size: bytes.length };
           },
           writeText: async (path, text, writeOptions) => {
-            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
-              throw new Error(`no such file ${path}`);
+            pool?.checked(path);
+            if (writeOptions?.exclusive === true && rootFiles.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !rootFiles.has(path)) throw new Error(`no such file ${path}`);
             writingFile(path);
-            world.roots.set(path, text);
+            rootFiles.set(path, text);
           },
           writeBytes: async (path, bytes, writeOptions) => {
-            if (writeOptions?.exclusive === true && world.roots.has(path)) throw new Error(`${path} already exists`);
-            if (writeOptions?.replaceExisting === true && !world.roots.has(path))
-              throw new Error(`no such file ${path}`);
+            if (pool !== undefined) {
+              pool.checked(path);
+              if (writeOptions?.exclusive === true && rootFiles.has(path)) throw new RootError('outside');
+              if (writeOptions?.replaceExisting === true && !rootFiles.has(path)) throw new RootError('outside');
+              writingFile(path);
+              pool.write(path, bytes);
+              return;
+            }
+            if (writeOptions?.exclusive === true && rootFiles.has(path)) throw new Error(`${path} already exists`);
+            if (writeOptions?.replaceExisting === true && !rootFiles.has(path)) throw new Error(`no such file ${path}`);
             writingFile(path);
-            world.roots.set(path, new TextDecoder().decode(bytes));
+            rootFiles.set(path, new TextDecoder().decode(bytes));
           },
           publish: async (path, bytes, publishOptions) => {
-            if (publishOptions?.exclusive === true && world.roots.has(path)) return { outcome: 'exists' };
-            world.roots.set(path, new TextDecoder().decode(bytes));
+            if (publishOptions?.exclusive === true && rootFiles.has(path)) return { outcome: 'exists' };
+            if (pool === undefined) rootFiles.set(path, new TextDecoder().decode(bytes));
+            else pool.write(path, bytes);
             nextInode += 1n;
             const inode = nextInode;
             inodes.set(path, inode);
+            if (pool !== undefined) poolFileMarks.set(path, pool.version(path) as Uint8Array);
             return { outcome: 'published', identity: { device: 1n, inode } };
           },
           readDurable: async (path, limit, hold) => {
-            const text = world.roots.get(path);
+            const text = rootFiles.get(path);
             if (text === undefined) return undefined;
-            const bytes = new TextEncoder().encode(text);
-            const identity = { device: 1n, inode: inodes.get(path) ?? 0n };
+            const bytes = pool?.read(path) ?? new TextEncoder().encode(text);
+            const identity = { device: 1n, inode: fileInode(path) };
             const read = { bytes: limit === undefined ? bytes : bytes.slice(0, limit), identity };
             if (hold === undefined) return read as never;
             return await hold({
               ...read,
-              stillNames: async () => world.roots.has(path) && (inodes.get(path) ?? 0n) === identity.inode,
+              stillNames: async () => {
+                try {
+                  pool?.checked(path);
+                } catch {
+                  return false;
+                }
+                return rootFiles.has(path) && fileInode(path) === identity.inode;
+              },
             });
           },
           syncDirectory: async () => {},
-          fileIdentity: async path =>
-            world.roots.has(path) ? { device: 1n, inode: inodes.get(path) ?? 0n } : undefined,
+          fileIdentity: async path => (rootFiles.has(path) ? { device: 1n, inode: fileInode(path) } : undefined),
           copyShared: async (tree, to, copyOptions) => {
+            if (pool !== undefined && copyOptions?.link === true) throw new RootError('link_escape');
             if (!receivingRoot(name)) return refuseShared('not_internal');
             const shared = sharedTrees.open(tree);
             // As production: the destination lies inside the receiving handle's scope, is NEW, and the walk is bounded.
             const place = ownPath(to);
-            if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
-              throw new RootError('outside');
+            if (rootFiles.has(place) || rootLinks.has(place) || rootFolderExists(place)) throw new RootError('outside');
             const files = shared.files();
             const folders = new Set(
               files.flatMap(([key]) =>
@@ -1763,10 +1857,11 @@ async function start(world: World): Promise<TestHost> {
             if (files.length + folders.size > (copyOptions?.maxEntries ?? DEFAULT_COPY_ENTRIES))
               throw new RootError('outside');
             // the test roots are one flat map: a link and a copy both put every file under `to`
-            for (const [key, value] of files) world.roots.set(`${to}/${key}`, value);
+            for (const [key, value] of files) rootFiles.set(`${to}/${key}`, value);
             return copyOptions?.link === true ? 'linked' : 'copied';
           },
           linkCredential: async (credential, to) => {
+            if (pool !== undefined) throw new RootError('link_escape');
             if (!receivingRoot(name)) return refuseShared('not_internal');
             // As production: single-use. The first link that stays spends it; an attempt that made none gives it back.
             const claim = sharedCredentials.claim(credential, manifest.id);
@@ -1778,7 +1873,7 @@ async function start(world: World): Promise<TestHost> {
               if (!credentialPlacement(prefix, minted.file, place)) throw new RootError('outside');
               // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
               const steps = prefix.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
-              if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
+              if (steps.some(step => step !== '' && rootLinks.has(step))) throw new RootError('link_escape');
               const reached = (() => {
                 try {
                   return minted.reach();
@@ -1788,9 +1883,9 @@ async function start(world: World): Promise<TestHost> {
               })();
               if (!isMintedInode({ device: 1n, inode: minted.inode }, { device: 1n, inode: reached.inode }))
                 throw new RootError('changed');
-              if (world.roots.has(place) || testLinks.has(place) || testFolderExists(place))
+              if (rootFiles.has(place) || rootLinks.has(place) || rootFolderExists(place))
                 throw new RootError('outside');
-              testLinks.set(place, reached.key);
+              rootLinks.set(place, reached.key);
               placedCredentialLinks.place(place, reached.key);
             } catch (error) {
               claim.release();
@@ -1798,7 +1893,80 @@ async function start(world: World): Promise<TestHost> {
             }
             claim.spend();
           },
+          // The same rules as production (`linkHistory` in `host/roots.ts`), over the flat world, in the same order: the
+          // root, the permission, the entry, the pool, the home, then the disk-shaped checks. The pool is the plugin's own
+          // state tree in the test store (`<folder>/<entry>`); the link points at `/state/<plugin>/<folder>/<entry>`.
+          linkHistory: async (ferretHome, entryName) => {
+            if (!historyRoot(name) || pool !== undefined) return refuseHistory('not_internal');
+            const permission = manifest.permissions?.historyPool;
+            const declared = historyEntryFor(permission, entryName);
+            const pooled =
+              permission === undefined ? undefined : poolEntryFolder(permission, manifest.data?.state ?? [], entryName);
+            if (pooled === undefined || holdsPrivate(manifest.id, pooled, privateFiles))
+              return refuseHistory('not_own');
+            if (prefix === undefined) throw new RootError('outside');
+            // (the scope's own folder is the path itself: `ownPath` names a LEAF of the scope, as production's `lexicalInRoot` does not)
+            const place = ferretHome === prefix ? prefix : ownPath(ferretHome);
+            if (!isFerretHome('/agent-homes', place)) return refuseHistory('not_home');
+            // As production: no link on the way to the home (the root, the home or any folder between): `link_escape`.
+            const steps = place.split('/').map((_, at, all) => all.slice(0, at + 1).join('/'));
+            if (steps.some(step => step !== '' && rootLinks.has(step))) throw new RootError('link_escape');
+            // The home must already be there (this call never makes one).
+            if (rootFiles.has(place) || !rootFolderExists(place)) throw new RootError('outside');
+            if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
+            const leaf = `${place}/${entryName}`;
+            // (production asks `refuseHeldName` first: a name that is an ALIAS of a private place, by identity, is `fenced`. The
+            // flat world has no identities, so it answers `exists` — a declared testing-host gap, as for `linkCredential`.)
+            if (rootFiles.has(leaf) || rootLinks.has(leaf) || rootFolderExists(leaf)) return refuseHistory('exists');
+
+            // Every refusal is behind us: the pool folder and its entry are made now, owner-only.
+            let state = world.states.get(manifest.id);
+            if (state === undefined) {
+              state = new MemoryStateFolder(() => clock.nowMs());
+              world.states.set(manifest.id, state);
+            }
+            const poolFolder = pooled.slice(0, pooled.lastIndexOf('/'));
+            // As production (`reachHistoryEntry`): what is already in the pool is judged by name BEFORE anything is made. A
+            // link at the pool folder or at the entry is `link_escape` (nothing is followed); a file where the pool folder
+            // belongs is `changed`, and the testing host never invents a folder beside it.
+            if (state.symlinks.has(poolFolder)) throw new RootError('link_escape');
+            if (state.files.has(poolFolder) || state.bytes.has(poolFolder)) throw new RootError('changed');
+            if (state.directories.has(poolFolder) && state.symlinks.has(pooled)) throw new RootError('link_escape');
+            if (!state.directories.has(poolFolder))
+              state.directories.set(poolFolder, { mode: 0o700, modifiedMs: clock.nowMs() });
+            if (declared.kind === 'folder') {
+              if (state.files.has(pooled) || state.bytes.has(pooled) || state.symlinks.has(pooled))
+                throw new RootError('changed');
+              if (!state.directories.has(pooled))
+                state.directories.set(pooled, { mode: 0o700, modifiedMs: clock.nowMs() });
+            } else {
+              if (state.directories.has(pooled) || state.symlinks.has(pooled)) throw new RootError('changed');
+              if (!state.files.has(pooled) && !state.bytes.has(pooled)) state.bytes.set(pooled, new Uint8Array());
+            }
+            rootLinks.set(leaf, `/state/${manifest.id}/${pooled}`);
+          },
           copyTree: async (source, from, to, copyOptions) => {
+            if (copyOptions?.link === true && (pool !== undefined || testPoolViews.has(source)))
+              throw new RootError('link_escape');
+            if (pool !== undefined || testPoolViews.has(source)) {
+              if (testHandles.get(source)?.plugin !== manifest.id) throw new RootError('not_declared');
+              if ((await handle.lstat(to)) !== undefined) throw new RootError('outside');
+              let left = copyOptions?.maxEntries ?? DEFAULT_COPY_ENTRIES;
+              const copy = async (at: FencedPath, target: FencedPath): Promise<void> => {
+                const entries = await source.entries(at);
+                await handle.makeDirectory(target);
+                for (const entry of entries) {
+                  if (--left < 0) throw new RootError('outside');
+                  if (entry.kind === 'symlink' || entry.links > 1) continue;
+                  const fromChild = `${at}/${entry.name}` as FencedPath;
+                  const toChild = `${target}/${entry.name}` as FencedPath;
+                  if (entry.kind === 'directory') await copy(fromChild, toChild);
+                  else await handle.writeBytes(toChild, await source.readBytes(fromChild));
+                }
+              };
+              await copy(from, to);
+              return;
+            }
             // A SOURCE that is a project folder is gated by its own handle (the declared set, no link on the way), and no
             // link is ever made from one into another root: the same two refusals as production (`HANDLES.real`, `linkTarget`).
             const projectSource = PROJECT_SOURCES.get(source);
@@ -1816,11 +1984,11 @@ async function start(world: World): Promise<TestHost> {
             }
             // the test roots are one flat map: copy (or, for a link, alias) every file under `from`
             const fromKey = projectSource === undefined ? from : projectFileKey(from);
-            for (const [key, text] of [...world.roots])
-              if (key.startsWith(`${fromKey}/`)) world.roots.set(`${to}${key.slice(fromKey.length)}`, text);
+            for (const [key, text] of [...rootFiles])
+              if (key.startsWith(`${fromKey}/`)) rootFiles.set(`${to}${key.slice(fromKey.length)}`, text);
           },
           ensurePrivateDirectory: async path => {
-            testMadeFolders.add(ownPath(path));
+            rootFolders.add(ownPath(path));
           },
           // The real host's rule (`chainFault`) over the flat test world: a folder at or above the base of an internal root
           // is a real folder unless `setHomeFolder` says otherwise; one below it exists as the flat world says it does.
@@ -1857,11 +2025,11 @@ async function start(world: World): Promise<TestHost> {
               .filter(part => part !== '' && part !== '.');
             for (let depth = 1; depth <= lower.length; depth += 1) {
               const key = `/${name}/${lower.slice(0, depth).join('/')}`;
-              const found = testLinks.has(key)
+              const found = rootLinks.has(key)
                 ? { kind: 'link' as const }
-                : world.roots.has(key)
+                : rootFiles.has(key)
                   ? { kind: 'file' as const }
-                  : testFolderExists(key)
+                  : rootFolderExists(key)
                     ? { kind: 'directory' as const }
                     : undefined;
               chain.push({
@@ -1876,20 +2044,20 @@ async function start(world: World): Promise<TestHost> {
             return ok(undefined);
           },
           lstat: async path => {
-            if (testLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
-            if (world.roots.has(path)) return fileStat(path);
-            return testFolderExists(path)
+            if (rootLinks.has(path)) return { kind: 'symlink', size: 0, modified: clock.now(), mode: 0o777, links: 1 };
+            if (rootFiles.has(path)) return fileStat(path);
+            return rootFolderExists(path)
               ? { kind: 'directory', size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
           makeDirectory: async path => {
-            testMadeFolders.add(ownPath(path));
+            rootFolders.add(ownPath(path));
           },
           // As production: every link on the way (the leaf's too) is resolved, and what it reaches must lie inside this
           // root (`link_escape`) and exist (a link that reaches nothing is no real path: a plain error).
           realPath: async path => {
             const reached = followLinks(path);
-            if (!world.roots.has(reached) && !testFolderExists(reached)) throw new Error(`no such file ${path}`);
+            if (!rootFiles.has(reached) && !rootFolderExists(reached)) throw new Error(`no such file ${path}`);
             return reached as FencedPath;
           },
           // A folder's DIRECT children (a made empty folder too, a link by its own name), sorted, as the real host lists
@@ -1912,8 +2080,8 @@ async function start(world: World): Promise<TestHost> {
           // `stat` says; a link on the way is followed and judged first, as `readText` does.
           stat: async path => {
             const reached = followLinks(path);
-            if (world.roots.has(reached)) return fileStat(reached);
-            return testFolderExists(reached.replace(/\/+$/u, ''))
+            if (rootFiles.has(reached)) return fileStat(reached);
+            return rootFolderExists(reached.replace(/\/+$/u, ''))
               ? { kind: 'directory' as const, size: 0, modified: clock.now(), mode: 0o700, links: 1 }
               : undefined;
           },
@@ -1929,12 +2097,12 @@ async function start(world: World): Promise<TestHost> {
             // it, and without the option everything goes with it (the flat world has no base folder to be left missing).
             if (named === `${prefix}/.`) {
               const inside = (key: string): boolean => key.startsWith(`${prefix}/`);
-              const holds = [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(inside);
+              const holds = [...rootFiles.keys(), ...rootLinks.keys(), ...rootFolders].some(inside);
               if (removeOptions?.onlyIfEmpty === true && holds) throw new RootError('not_empty');
-              for (const key of [...world.roots.keys()]) if (inside(key)) world.roots.delete(key);
-              for (const key of [...testLinks.keys()]) if (inside(key)) testLinks.delete(key);
+              for (const key of [...rootFiles.keys()]) if (inside(key)) rootFiles.delete(key);
+              for (const key of [...rootLinks.keys()]) if (inside(key)) rootLinks.delete(key);
               for (const key of [...testModes.keys()]) if (inside(key)) testModes.delete(key);
-              for (const key of [...testMadeFolders]) if (inside(key)) testMadeFolders.delete(key);
+              for (const key of [...rootFolders]) if (inside(key)) rootFolders.delete(key);
               return;
             }
             // The PARENT is resolved (a link on the way is followed, and judged: one that leaves this root is
@@ -1942,44 +2110,45 @@ async function start(world: World): Promise<TestHost> {
             let parent = named.slice(0, named.lastIndexOf('/'));
             for (let hops = 0; ; hops += 1) {
               const parts = parent.split('/');
-              const index = parts.findIndex((_, at) => testLinks.has(parts.slice(0, at + 1).join('/')));
+              const index = parts.findIndex((_, at) => rootLinks.has(parts.slice(0, at + 1).join('/')));
               if (index < 0) break;
-              const pointsAt = testLinks.get(parts.slice(0, index + 1).join('/')) as string;
+              const pointsAt = rootLinks.get(parts.slice(0, index + 1).join('/')) as string;
               if (hops > 40 || prefix === undefined || (pointsAt !== prefix && !pointsAt.startsWith(`${prefix}/`)))
                 throw new RootError('link_escape');
               parent = [pointsAt, ...parts.slice(index + 1)].join('/');
             }
-            if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+            if (parent !== prefix && (rootFiles.has(parent) || !rootFolderExists(parent)))
               throw new RootError('changed');
             const place = `${parent}/${named.slice(named.lastIndexOf('/') + 1)}`;
             const under = (key: string): boolean => key === place || key.startsWith(`${place}/`);
-            if (testLinks.has(place)) {
-              testLinks.delete(place);
+            if (rootLinks.has(place)) {
+              rootLinks.delete(place);
               testModes.delete(place);
               placedCredentialLinks.forgetUnder(place);
               return;
             }
-            if (world.roots.has(place)) {
-              world.roots.delete(place);
+            if (rootFiles.has(place)) {
+              rootFiles.delete(place);
               inodes.delete(place);
               testModes.delete(place);
               return;
             }
-            if (!testFolderExists(place)) return;
+            if (!rootFolderExists(place)) return;
             if (removeOptions?.onlyIfEmpty === true) {
-              const holdsEntry = [...world.roots.keys(), ...testLinks.keys(), ...testMadeFolders].some(key =>
+              const holdsEntry = [...rootFiles.keys(), ...rootLinks.keys(), ...rootFolders].some(key =>
                 key.startsWith(`${place}/`),
               );
               if (holdsEntry) throw new RootError('not_empty');
             }
-            for (const key of [...world.roots.keys()]) if (under(key)) world.roots.delete(key);
-            for (const key of [...testLinks.keys()]) if (under(key)) testLinks.delete(key);
+            for (const key of [...rootFiles.keys()]) if (under(key)) rootFiles.delete(key);
+            for (const key of [...rootLinks.keys()]) if (under(key)) rootLinks.delete(key);
             for (const key of [...testModes.keys()]) if (under(key)) testModes.delete(key);
-            for (const key of [...testMadeFolders]) if (under(key)) testMadeFolders.delete(key);
+            for (const key of [...rootFolders]) if (under(key)) rootFolders.delete(key);
             placedCredentialLinks.forgetUnder(place);
           },
           // The real host's rules (`host/root-rules.ts`) over the flat test world, with the same refusals.
           linkTo: async (at, target) => {
+            if (pool !== undefined || testPoolViews.has(target?.root ?? {})) throw new RootError('link_escape');
             if (isReadOnlyRoot(name) || !takesLinks(name)) throw new RootError('read_only');
             const known = testHandles.get(target?.root ?? {});
             if (known === undefined || known.plugin !== manifest.id) throw new RootError('not_declared');
@@ -1992,13 +2161,57 @@ async function start(world: World): Promise<TestHost> {
             const within = known.prefix;
             if (within === undefined || to.split('/').includes('..') || (to !== within && !to.startsWith(`${within}/`)))
               throw new RootError('outside');
-            if (testLinks.has(to)) throw new RootError('link_escape');
-            if (!world.roots.has(to) && !testFolderExists(to) && target.dangling !== true)
-              throw new RootError('outside');
+            if (rootLinks.has(to)) throw new RootError('link_escape');
+            if (!rootFiles.has(to) && !rootFolderExists(to) && target.dangling !== true) throw new RootError('outside');
             const place = ownPath(at);
-            if (world.roots.has(place) || testFolderExists(place) || testLinks.has(place))
+            if (rootFiles.has(place) || rootFolderExists(place) || rootLinks.has(place)) throw new RootError('outside');
+            rootLinks.set(place, to);
+          },
+          moveToHistoryPool: async (from, targetPool, to) => {
+            if (!historyRoot(name) || pool !== undefined) return refuseHistory('not_internal');
+            const permission = manifest.permissions?.historyPool;
+            const folder = ownHistoryPool(permission, manifest.data?.state ?? []);
+            if (holdsPrivate(manifest.id, folder, privateFiles)) return refuseHistory('not_own');
+            const known = testHandles.get(targetPool);
+            if (!testPoolViews.has(targetPool) || known?.plugin !== manifest.id || known.pool === undefined)
+              return refuseHistory('not_own');
+            const destination = known.pool;
+            const source = from === prefix ? from : ownPath(from);
+            // Both names are fenced before the pure naming policy, exactly as on the real host.
+            const target = destination.checked(to, true);
+            historyMoveNames(permission, '/agent-homes', source, destination.base, target);
+            const parent = posix.dirname(source);
+            const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
+            if (steps.some(step => testLinks.has(step))) throw new RootError('link_escape');
+            if (steps.some(step => world.roots.has(step))) throw new RootError('link_escape');
+            if (!testFolderExists(parent)) throw new RootError('outside');
+            if (!world.roots.has(source) && !testLinks.has(source) && !testFolderExists(source))
               throw new RootError('outside');
-            testLinks.set(place, to);
+            // As production: a placed credential, itself or below, is judged first (`placedMoveGuard`), then ONE regular
+            // file moves, never a folder (its children were never each proved) or a link.
+            const carried = placedCredentialLinks
+              .affected(source)
+              .filter(([path, mark]) => testLinks.get(path) === mark);
+            const verdict = placedLinkMoveVerdict(carried);
+            if (verdict !== undefined) throw new RootError(verdict);
+            if (!world.roots.has(source) || testLinks.has(source)) return refuseHistory('not_file');
+            if (testHardLinks.has(source)) throw new RootError('hard_link');
+            if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
+            await targetPool.makeDirectory(posix.dirname(target) as FencedPath);
+            // As production's `renameat2(RENAME_NOREPLACE)`: anything at the target refuses `exists`, the source untouched.
+            if (destination.files.has(target) || destination.links.has(target) || destination.folders.has(target))
+              return refuseHistory('exists');
+            destination.files.set(target, world.roots.get(source) as string);
+            inodes.set(target, inodes.get(source) ?? ++nextInode);
+            poolFileMarks.set(target, destination.version(target) as Uint8Array);
+            inodes.delete(source);
+            world.roots.delete(source);
+            const mode = testModes.get(source);
+            if (mode !== undefined) testModes.set(target, mode);
+            testModes.delete(source);
+            const modified = testModified.get(source);
+            if (modified !== undefined) testModified.set(target, modified);
+            testModified.delete(source);
           },
           rename: async (from, to) => {
             if (isReadOnlyRoot(name) || !takesRenames(name)) throw new RootError('read_only');
@@ -2015,31 +2228,31 @@ async function start(world: World): Promise<TestHost> {
               parent
                 .split('/')
                 .map((_, index, parts) => parts.slice(0, index + 1).join('/'))
-                .filter(step => step !== '' && testLinks.has(step));
+                .filter(step => step !== '' && rootLinks.has(step));
             const reaches = (step: string): boolean => {
               // a link to a link is followed to its end, as `realpath` does; a chain that ends nowhere reaches nothing
-              let end = testLinks.get(step) as string;
-              for (let hops = 0; hops < 40 && testLinks.has(end); hops += 1) end = testLinks.get(end) as string;
-              return !testLinks.has(end) && (world.roots.has(end) || testFolderExists(end));
+              let end = rootLinks.get(step) as string;
+              for (let hops = 0; hops < 40 && rootLinks.has(end); hops += 1) end = rootLinks.get(end) as string;
+              return !rootLinks.has(end) && (rootFiles.has(end) || rootFolderExists(end));
             };
             for (const parent of parents) if (stepsOf(parent).some(reaches)) throw new RootError('link_escape');
             for (const parent of parents) {
               if (stepsOf(parent).length > 0) throw new RootError('changed');
-              if (parent !== prefix && (world.roots.has(parent) || !testFolderExists(parent)))
+              if (parent !== prefix && (rootFiles.has(parent) || !rootFolderExists(parent)))
                 throw new RootError('changed');
             }
-            const isFile = world.roots.has(source);
-            const isLink = testLinks.has(source);
-            const isFolder = testFolderExists(source);
+            const isFile = rootFiles.has(source);
+            const isLink = rootLinks.has(source);
+            const isFolder = rootFolderExists(source);
             if (!isFile && !isLink && !isFolder) throw new RootError('outside');
-            if (world.roots.has(target) || testLinks.has(target) || testFolderExists(target))
+            if (rootFiles.has(target) || rootLinks.has(target) || rootFolderExists(target))
               throw new RootError('outside');
             if (target.startsWith(`${source}/`)) throw new RootError('changed');
             // As production: a placed credential link (judged by what was recorded, not its name) is not moved, itself or
             // inside a folder that goes.
             const carried = placedCredentialLinks
               .affected(source)
-              .filter(([path, mark]) => testLinks.get(path) === mark);
+              .filter(([path, mark]) => rootLinks.get(path) === mark);
             const verdict = placedLinkMoveVerdict(carried);
             if (verdict !== undefined) throw new RootError(verdict);
             // (The record of a link below `source` is dropped once the move is made: nothing is there any more.)
@@ -2048,25 +2261,25 @@ async function start(world: World): Promise<TestHost> {
             // or under it moves to the same place under `target`, a link as the text it holds.
             const under = (key: string): boolean => key === source || key.startsWith(`${source}/`);
             const placed = (key: string): string => `${target}${key.slice(source.length)}`;
-            for (const [key, text] of [...world.roots])
+            for (const [key, text] of [...rootFiles])
               if (under(key)) {
-                world.roots.set(placed(key), text);
-                world.roots.delete(key);
+                rootFiles.set(placed(key), text);
+                rootFiles.delete(key);
               }
-            for (const [key, pointsAt] of [...testLinks])
+            for (const [key, pointsAt] of [...rootLinks])
               if (under(key)) {
-                testLinks.set(placed(key), pointsAt);
-                testLinks.delete(key);
+                rootLinks.set(placed(key), pointsAt);
+                rootLinks.delete(key);
               }
             for (const [key, mode] of [...testModes])
               if (under(key)) {
                 testModes.set(placed(key), mode);
                 testModes.delete(key);
               }
-            for (const key of [...testMadeFolders])
+            for (const key of [...rootFolders])
               if (under(key)) {
-                testMadeFolders.delete(key);
-                testMadeFolders.add(placed(key));
+                rootFolders.delete(key);
+                rootFolders.add(placed(key));
               }
           },
           unlink: async linkName => {
@@ -2077,9 +2290,9 @@ async function start(world: World): Promise<TestHost> {
             // As production, the parent is opened first: a link anywhere on the way to it is `link_escape`.
             const parent = place.slice(0, place.lastIndexOf('/'));
             const steps = parent.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
-            if (steps.some(step => step !== '' && testLinks.has(step))) throw new RootError('link_escape');
-            if (!testLinks.has(place)) throw new RootError('outside');
-            testLinks.delete(place);
+            if (steps.some(step => step !== '' && rootLinks.has(step))) throw new RootError('link_escape');
+            if (!rootLinks.has(place)) throw new RootError('outside');
+            rootLinks.delete(place);
             placedCredentialLinks.forgetUnder(place);
           },
           setMode: async (path, mode) => {
@@ -2088,8 +2301,8 @@ async function start(world: World): Promise<TestHost> {
             const bits = permittedMode(isKernelMadeRoot(name), mode);
             if (bits === undefined) throw new RootError('outside');
             const place = ownPath(path);
-            if (testLinks.has(place)) throw new RootError('link_escape');
-            if (!world.roots.has(place) && !testFolderExists(place)) throw new RootError('outside');
+            if (rootLinks.has(place)) throw new RootError('link_escape');
+            if (!rootFiles.has(place) && !rootFolderExists(place)) throw new RootError('outside');
             testModes.set(place, bits);
           },
           pin: async (path, pinOptions) => {
@@ -2103,10 +2316,111 @@ async function start(world: World): Promise<TestHost> {
           root: name,
           ...(scope?.ferret === undefined ? {} : { ferret: scope.ferret }),
           prefix,
+          ...(pool === undefined ? {} : { pool }),
         });
+        if (pool !== undefined) {
+          testPoolViews.add(handle);
+          handle.openBytes = async path => {
+            const named = pool.checked(path) as FencedPath;
+            if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
+            if (testHardLinks.has(named) || pool.hardLinked(named)) throw new RootError('hard_link');
+            const bytes = pool.read(named);
+            if (bytes === undefined) return undefined;
+            const identity = { device: 1n, inode: fileInode(named) };
+            let closed = false;
+            const open = (): void => {
+              if (closed) throw new RootError('changed');
+            };
+            return {
+              identity,
+              birthNs: undefined,
+              read: async (offset, length) => {
+                open();
+                if (
+                  !Number.isSafeInteger(offset) ||
+                  !Number.isSafeInteger(length) ||
+                  offset < 0 ||
+                  length < 0 ||
+                  length > MAX_ROOT_WINDOW_BYTES
+                )
+                  throw new RootError('outside');
+                return bytes.slice(offset, offset + length);
+              },
+              stat: async () => {
+                open();
+                return { size: bytes.length, mtimeMs: clock.nowMs() };
+              },
+              stillNames: async () => {
+                try {
+                  pool.checked(named);
+                } catch {
+                  return false;
+                }
+                return !closed && pool.files.has(named) && fileInode(named) === identity.inode;
+              },
+              close: async () => {
+                closed = true;
+              },
+            };
+          };
+          // The pool uses internal no-follow semantics for every existing RootHandle operation too.
+          for (const method of [
+            'readText',
+            'readBytes',
+            'readTail',
+            'writeText',
+            'writeBytes',
+            'publish',
+            'readDurable',
+            'syncDirectory',
+            'fileIdentity',
+            'ensurePrivateDirectory',
+            'checkPrivateChain',
+            'list',
+            'entries',
+            'stat',
+            'lstat',
+            'makeDirectory',
+            'realPath',
+            'pin',
+            'remove',
+            'rename',
+            'unlink',
+            'setMode',
+          ] as const) {
+            const original = handle[method] as (path: FencedPath, ...args: unknown[]) => Promise<unknown>;
+            Object.defineProperty(handle, method, {
+              value: async (path: FencedPath, ...args: unknown[]) => {
+                const keepLeaf = ['lstat', 'fileIdentity', 'remove', 'rename', 'unlink'].includes(method);
+                const checked = pool.checked(path, keepLeaf) as FencedPath;
+                if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
+                if (
+                  (testHardLinks.has(checked) || pool.hardLinked(checked)) &&
+                  !['lstat', 'fileIdentity', 'remove', 'rename', 'unlink'].includes(method)
+                )
+                  throw new RootError('hard_link');
+                if (method === 'makeDirectory' || method === 'ensurePrivateDirectory') {
+                  const segments = posix.relative(pool.base, checked).split('/').filter(Boolean);
+                  let at = pool.base;
+                  pool.folders.add(at);
+                  for (const segment of segments) {
+                    at += '/' + segment;
+                    if (pool.files.has(at))
+                      throw new RootError(method === 'ensurePrivateDirectory' ? 'outside' : 'link_escape');
+                    pool.folders.add(at);
+                  }
+                  return;
+                }
+                if (method === 'rename') pool.checked(args[0] as string, true);
+                return await original(checked, ...args);
+              },
+            });
+          }
+        }
         return handle;
       },
-    };
+    });
+    return make();
   };
 
   // What an item names, by the real host's rule (`host/items.ts`): the installed items `options.items` names, united with
@@ -2382,6 +2696,10 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.selfCounters === true && options.selfCounters !== undefined
           ? options.selfCounters
           : undeclaredSelfCounters(manifest.id, (options.selfCounters ?? NO_SELF_COUNTERS).platform),
+      fileEvents:
+        manifest.permissions?.fileEvents === true
+          ? polledOnly(options.fileEvents ?? NO_FILE_EVENTS)
+          : undeclaredFileEvents(manifest.id),
       processes: processesPortFor(
         manifest.id,
         manifest.permissions?.processes,
@@ -2389,6 +2707,7 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      loop: { blockedMs: options.loopBlockedMs ?? (() => 0) },
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
       // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(

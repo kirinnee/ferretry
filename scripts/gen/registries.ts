@@ -21,7 +21,14 @@
  * from a fresh generation (`registries-fresh`).
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
+import {
+  type FolderEntry,
+  type FolderRegistrySpec,
+  folderRegistries,
+  ident,
+  importPath,
+} from './lib/folder-registry.ts';
 import { buildGraph, hookOrder } from './lib/graph.ts';
 import type { StartGraph } from './lib/graph.ts';
 import {
@@ -124,13 +131,6 @@ export async function buildModel(root: string, precise = true): Promise<Model> {
     hashes: effectiveHashes(canonical, consumed, member),
   };
 }
-
-function importPath(fromFile: string, target: string): string {
-  const rel = relative(dirname(fromFile), target).split(sep).join('/');
-  return rel.startsWith('.') ? rel : `./${rel}`;
-}
-
-const ident = (prefix: string, id: string): string => `${prefix}_${id.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
 function hashesLiteral(model: Model, ids: readonly string[]): string {
   const lines = ids
@@ -298,6 +298,8 @@ function slimEntry(model: Model): string {
     `  version: ${JSON.stringify(version)},`,
     `  load: async () => (await import('${file(SLIM_SERVE.plugin, SLIM_SERVE.serve)}')).serveTools,`,
     `  instructions: async () => (await import('${file(SLIM_SERVE.instructionsPlugin, SLIM_SERVE.instructions)}')).TOOLS_SERVER_INSTRUCTIONS,`,
+    // The variable the Claude launch sets only when it passes the channel flag (Runtimes owns the name).
+    `  channelEnv: async () => (await import('${file(SLIM_SERVE.instructionsPlugin, SLIM_SERVE.instructions)}')).CHANNEL_LAUNCH_ENV,`,
     '};',
     '',
   ].join('\n');
@@ -438,9 +440,216 @@ function hashesJson(model: Model): string {
   return `${JSON.stringify({ format: 1, hashes: record }, null, 2)}\n`;
 }
 
+/** A package's feature folder: every `*.feature.ts` in it is one feature the package's daemon half registers. */
+export const FEATURES_DIR = 'daemon/features';
+const FEATURES_OUT = 'daemon/generated/features.ts';
+export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/${FEATURES_OUT}`;
+
+/** The feature list's shape: one default import per file, default-exported as one `as const` array. */
+const FEATURE_REGISTRY: FolderRegistrySpec = {
+  dir: FEATURES_DIR,
+  glob: '*.feature.ts',
+  out: FEATURES_OUT,
+  prefix: 'feature',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      `/** Every feature of this package's daemon half, by file name (${FEATURES_DIR}/*.feature.ts). */`,
+      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      '',
+    ].join('\n'),
+};
+
+/**
+ * `<package>/daemon/generated/features.ts`, one per package that has `daemon/features/*.feature.ts`: the files that
+ * folder holds, by file name, so a feature is added by adding a file and no list is edited. Each file default-exports
+ * one feature; the package's `build()` registers the lot.
+ */
+export function featureRegistries(model: Model): ReadonlyMap<string, string> {
+  return folderRegistries(model.ws.packages, FEATURE_REGISTRY);
+}
+
+/**
+ * Ferrets' contract folders: `contract/{slots,hooks,kinds,app-hooks}/` hold one file per slot, hook, kind or app hook, and
+ * `contract/generated/<folder>.ts` re-exports them (the committed `contract/<folder>.ts` re-exports that), so a new one
+ * is a new file and no list is edited. Slots and app hooks also get the lists that name them: `FERRET_SLOTS` (the account
+ * slots, then every `*.slot.ts` by file name) and the two app-hook records, each file default-exporting `{ name, narrow }`.
+ */
+const FERRETS_CONTRACT = 'packages/core/ferrets';
+/** What a contract folder's generated file adds to its barrel: the imports it needs, then the list(s). */
+interface ContractList {
+  readonly imports: readonly string[];
+  readonly body: readonly string[];
+}
+const CONTRACT_LISTS: Readonly<Record<string, (entries: readonly FolderEntry[]) => ContractList>> = {
+  slots: entries => {
+    const slots = entries.filter(entry => entry.file.endsWith('.slot.ts'));
+    const account = entries.find(entry => entry.file === 'account-slots.ts');
+    return {
+      imports: [
+        ...(account === undefined ? [] : [`import { FERRET_ACCOUNT_SLOTS } from '${account.importPath}';`]),
+        ...slots.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      ],
+      body: [
+        "/** Every slot Ferrets' pages offer, in one list a test can pair: the account slots, then one per `slots/*.slot.ts`. */",
+        `export const FERRET_SLOTS = [${[...(account === undefined ? [] : ['...FERRET_ACCOUNT_SLOTS']), ...slots.map(entry => `${entry.name}.slot`)].join(', ')}] as const;`,
+        'export type FerretSlot = (typeof FERRET_SLOTS)[number];',
+      ],
+    };
+  },
+  'app-hooks': entries => {
+    const hooks = (suffix: string): readonly FolderEntry[] => entries.filter(entry => entry.file.endsWith(suffix));
+    const record = (name: string, what: string, suffix: string): readonly string[] => [
+      `/** ${what}, by name, each with the narrowing that says a value has its shape (\`app-hooks/*${suffix}\`). */`,
+      `export const ${name} = {`,
+      ...hooks(suffix).map(entry => `  [${entry.name}.name]: ${entry.name}.narrow,`),
+      '} as const;',
+    ];
+    return {
+      imports: [...hooks('.app-hook.ts'), ...hooks('.provided-hook.ts')].map(
+        entry => `import ${entry.name} from '${entry.importPath}';`,
+      ),
+      body: [
+        ...record('FERRETS_APP_HOOKS', 'Every app hook Ferrets offers', '.app-hook.ts'),
+        ...record('FERRETS_PROVIDED_APP_HOOKS', 'The hooks Ferrets provides', '.provided-hook.ts'),
+      ],
+    };
+  },
+};
+
+const contractFolder = (folder: string): FolderRegistrySpec => ({
+  dir: `contract/${folder}`,
+  glob: '*.ts',
+  out: `contract/generated/${folder}.ts`,
+  prefix: 'contract',
+  emit: ({ entries }) => {
+    const list = CONTRACT_LISTS[folder]?.(entries);
+    return [
+      HEADER,
+      ...(list?.imports ?? []),
+      ...entries.map(entry => `export * from '${entry.importPath}';`),
+      ...(list === undefined ? [] : ['', ...list.body]),
+      '',
+    ].join('\n');
+  },
+});
+
+/**
+ * `packages/core/ferrets/contract/generated/<folder>.ts` for each contract folder that holds a file. Built from the folders
+ * alone and written BEFORE any manifest loads, because a manifest imports the contract and the contract imports these.
+ */
+export function contractRegistries(ws: Workspace, home: string = FERRETS_CONTRACT): ReadonlyMap<string, string> {
+  const ferrets = ws.packages.filter(pkg => pkg.rel === home);
+  return new Map(
+    ['slots', 'hooks', 'kinds', 'app-hooks'].flatMap(folder => [...folderRegistries(ferrets, contractFolder(folder))]),
+  );
+}
+
+/** The kinds of action a manifest fragment holds, in the order the merged `actions` lists them. */
+const ACTION_KINDS = ['routes', 'sockets', 'agentTools', 'cli'] as const;
+
+/**
+ * A package's manifest fragments: every `manifest/actions/*.actions.ts` default-exports one feature's `routes`, `sockets`,
+ * `agentTools` and `cli` (the `fragment()` of its `manifest/kit.ts`), and `manifest/generated/actions.ts` spreads them, in
+ * file-name order, into one `as const` `actions` the manifest uses as it was written, so a route is added by editing or adding
+ * one fragment and no list is edited. The file name's order is the declaration order, which a package's contract hash covers.
+ */
+const MANIFEST_ACTIONS_REGISTRY: FolderRegistrySpec = {
+  dir: 'manifest/actions',
+  glob: '*.actions.ts',
+  out: 'manifest/generated/actions.ts',
+  prefix: 'actions',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      '/** Every manifest fragment of this package (manifest/actions/*.actions.ts), merged in file-name order. */',
+      'export default {',
+      ...ACTION_KINDS.map(
+        kind => `  ${kind}: [${entries.map(entry => `...${entry.name}.${kind}`).join(', ')}] as const,`,
+      ),
+      '} as const;',
+      '',
+    ].join('\n'),
+};
+
+/**
+ * `<package>/manifest/generated/actions.ts` for each package that has manifest fragments. Built from the folder alone and
+ * written BEFORE any manifest loads, because the manifest imports it.
+ */
+export function manifestRegistries(ws: Workspace): ReadonlyMap<string, string> {
+  return folderRegistries(ws.packages, MANIFEST_ACTIONS_REGISTRY);
+}
+
+/** `ids.port.ts` → `IdsApi`, `runtime-records.port.ts` → `RuntimeRecordsApi`: the interface a slice file exports. */
+const sliceApiName = (file: string): string =>
+  `${file.replace(/\.port\.ts$/, '').replace(/(^|-)(\w)/g, (_m, _dash, c: string) => c.toUpperCase())}Api`;
+
+/**
+ * Ferrets' port: `FerretsApi` is the composition of every `contract/ports/<slice>.port.ts` (each exports one
+ * `interface <Slice>Api`), so a new port member is a new or edited slice file and the composed interface is never edited.
+ * The generated file also re-exports each slice's TYPES, so `contract/port.ts` keeps exporting every type it ever did (types
+ * only: the manifest loader runs before this file exists, so no runtime path may go through it).
+ */
+const FERRETS_API_REGISTRY: FolderRegistrySpec = {
+  dir: 'contract/ports',
+  glob: '*.port.ts',
+  out: 'contract/generated/ferrets-api.ts',
+  prefix: 'port',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import type { ${sliceApiName(entry.file)} } from '${entry.importPath}';`),
+      '',
+      ...entries.map(entry => `export type * from '${entry.importPath}';`),
+      '',
+      '/** The Ferrets port: every slice under contract/ports/*.port.ts, composed. */',
+      `export interface FerretsApi extends ${entries.map(entry => sliceApiName(entry.file)).join(', ')} {}`,
+      '',
+    ].join('\n'),
+};
+
+/** `packages/core/ferrets/contract/generated/ferrets-api.ts`: the composed `FerretsApi` (see {@link FERRETS_API_REGISTRY}). */
+export function ferretsApiRegistries(model: Model): ReadonlyMap<string, string> {
+  return folderRegistries(model.ws.packages, FERRETS_API_REGISTRY);
+}
+
+/**
+ * A package's CLI verbs: every `*.verb.ts` under `cli/verbs/` default-exports the handlers of the verbs it owns
+ * (`defineVerbs`), and `cli/generated/verbs.ts` lists them, so a verb is added by adding a file and no hand list is edited.
+ */
+const CLI_VERBS_REGISTRY: FolderRegistrySpec = {
+  dir: 'cli/verbs',
+  glob: '*.verb.ts',
+  out: 'cli/generated/verbs.ts',
+  prefix: 'verb',
+  emit: ({ entries }) =>
+    [
+      HEADER,
+      ...entries.map(entry => `import ${entry.name} from '${entry.importPath}';`),
+      '',
+      "/** Every verb file of this package's CLI half, by file name (cli/verbs/*.verb.ts). */",
+      `export default [${entries.map(entry => entry.name).join(', ')}] as const;`,
+      '',
+    ].join('\n'),
+};
+
+/** `<package>/cli/generated/verbs.ts`, one per package that has `cli/verbs/*.verb.ts` (see {@link CLI_VERBS_REGISTRY}). */
+export function cliVerbRegistries(model: Model): ReadonlyMap<string, string> {
+  return folderRegistries(model.ws.packages, CLI_VERBS_REGISTRY);
+}
+
 /** The global registries, keyed by root-relative path. */
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
+    ...featureRegistries(model),
+    ...cliVerbRegistries(model),
+    ...contractRegistries(model.ws),
+    ...manifestRegistries(model.ws),
+    ...ferretsApiRegistries(model),
     [
       GENERATED.plugins,
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),
@@ -529,6 +738,12 @@ function argValue(args: readonly string[], flag: string): string | undefined {
 async function main(args: readonly string[]): Promise<number> {
   const root = argValue(args, '--root') ?? join(import.meta.dir, '..', '..');
   const only = argValue(args, '--package');
+  // The contract barrels and the manifest fragments first: a manifest imports both, so none loads without them. `--check` writes nothing.
+  if (!args.includes('--check')) {
+    const ws = loadWorkspace(root);
+    writeFiles(root, contractRegistries(ws));
+    writeFiles(root, manifestRegistries(ws));
+  }
   const model = await buildModel(root, false);
   for (const failure of model.failures) console.error(`⚠️  ${failure}`);
   const files = only === undefined ? generateGlobal(model) : generatePackage(model, only);

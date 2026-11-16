@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { FakeMailbox } from '@ferretry/core-mailbox/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
-import { HypermediaResultSchema, HypermediaStateSchema } from '../../../../contract/index.ts';
+import { HypermediaResultSchema, HypermediaStateSchema } from '@ferretry/core-mailbox/contract';
 import daemon from '../../../../daemon/index.ts';
 import { SessionHypermediaError } from '../../../../daemon/hypermedia/lib/service.ts';
 import { sessionHypermediaRoutes } from '../../../../daemon/hypermedia/lib/mounts/session-hypermedia.ts';
@@ -27,6 +28,7 @@ async function world() {
   const host = await testHost({
     plugins: [implementation],
     fakes: {
+      mailbox: new FakeMailbox(),
       ferrets: {
         get: async (id: string) => summaries[id],
         list: async () => [],

@@ -50,10 +50,9 @@
  *   still turns it on for the one ferret that asks (`remoteControlArgs`), and only an org policy lock
  *   can outrank us. Codex has nothing to switch: its `remote_control` feature is removed (0.156.1) and
  *   its remote control is a separate `codex remote-control` daemon, not a session startup behaviour.
- * - The overlay carries one `PreToolUse` hook for `AskUserQuestion` ({@link CLAUDE_QUESTION_HOOKS}).
- *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
- *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
- *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
+ * - The overlay carries NO question hook (M7). Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript
+ *   only once the form is answered, so the conversation plugin's question watch reads an open form off the pane
+ *   instead (`questions/lib/watch.ts`).
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.
@@ -76,6 +75,7 @@ import {
   sameSettingsValue,
   settingsKey,
 } from './layering.ts';
+import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
 import type { AgentPermissions } from './schema.ts';
 import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
@@ -219,44 +219,12 @@ export const CODEX_QUESTIONS_OFF_OVERRIDE = 'features.default_mode_request_user_
 /** Claude's "start Remote Control in every session" preference. */
 const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
 
-/**
- * The launch variable naming the file a ferret's question hook writes, set by the daemon per session
- * (its own state folder). Unset — a person's own terminal, an older daemon — the hook writes nothing.
- */
-const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
-
-/**
- * The hook that tells the daemon a question is open. Claude Code 2.1.281 keeps an `AskUserQuestion` call
- * out of its transcript until the form is answered, so the daemon — which reads the transcript — saw no
- * question at all and offered only the Console. `PreToolUse` fires before the form is drawn, with the real
- * `tool_use_id` and the whole input on stdin: copied whole into {@link QUESTION_ASKED_FILE_ENV} (a rename,
- * so a reader never sees half a file). Its exit is always 0 and it prints nothing, even when the file
- * cannot be written, so it never changes what Claude decides; stdin is drained on every path, so Claude
- * never writes into a closed pipe.
- */
-export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
-
-/**
- * The overlay's `hooks` block. In the OVERLAY only, never a `settings` entry: an entry is written over the
- * profile's settings, and would replace whatever `PreToolUse` hooks a person keeps there. Claude merges the
- * hooks of every settings source, so the overlay adds one beside theirs.
- */
-export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
-  PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-};
-
 /** The launch variable naming a ferret's mode (`interactive` or `auto`); written by the daemon at creation. */
 export { SESSION_MODE_ENV };
 
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
-
-/** The name the Ferretry tools server is registered under, in both harnesses. */
-const FERRETRY_MCP_SERVER = 'ferretry';
-
-/** How the harness starts the tools server: the `fy` the wrapper already uses, as `fy mcp serve`. */
-const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
 
 /**
  * The variables the tools server needs from the agent's environment: where the daemon is, and the
@@ -396,7 +364,9 @@ export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
       command: fyCommand,
       args: [...FERRETRY_MCP_ARGS],
       // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
-      env: { FY_TOKEN: '' },
+      env: {
+        FY_TOKEN: '',
+      },
     },
   },
 });
@@ -474,7 +444,7 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
  * {@link AGENDA_INSTRUCTION}. docs/notifications.md quotes this text verbatim.
  */
 export const NOTIFY_INSTRUCTION = (fy: string): string =>
-  `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
+  `Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet notice. Add \`--buzz\` only when it must reach their phone now. Never notify progress or chatter.`;
 
 /**
  * BOARD — whether a ferret makes a card at all, and how it works one it has (`board-design.md` §3.2), in every
@@ -486,18 +456,18 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * start, a PR, a release); this is the rest, which only the ferret knows. The daemon's turn-end check backs it
  * up on a board that is on (`board/turn-check.ts` in the daemon). The board runs itself (the owner, 2026-11-04: "TASK
  * no longer have user interactivity anymore! agenda tracks all those"): a card never asks — every answer, test and
- * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy task
- * create` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
+ * Done rides the card's agenda, which moves the card — and one card is one outcome, never an umbrella (`fy card
+ * new` lists the related cards and refuses a broad one without `--broad`). Public cards are the owner's asks, so
  * the board answers "what's the sitrep?"; planning is a phase, not a reason to skip a card; the title and summary say
  * what the work is doing; and the card's `status` (Now / Done so far / Next) is rewritten whole at each step.
  * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other task rules. Card only if \`${fy} board status\` is on, under your card (\`--parent\`), or on the owner's Yes (\`--approval !A<n>\`). Public=the owner's asks ("status of all I asked?"): top-level, never \`--private\`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (\`${fy} board\`), under your card (\`--parent\`), or on the owner's Yes (\`--approval <ask>\`). Public=the owner's asks ("everything I asked?"): top-level, never \`--private\`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: \`${fy} card show <id> --yaml\`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} card patch <id> --file f\`. \`${fy} card move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} card depend\`/\`block\`. Owner's bug: \`${fy} card reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
- * writes {@link SUB_FERRET_ENV} `1` from the session's `parent`, and the wrapper then swaps the notify and
+ * writes {@link SUB_FERRET_ENV} `1` for `role: helper` or a `parent`, and the wrapper then swaps the notify and
  * board rules for {@link SUB_FERRET_INSTRUCTION} and leaves out the agenda section: the daemon refuses a
  * sub-ferret the agenda and the board's moves, so a prompt that taught them would only teach refusals.
  */
@@ -510,7 +480,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: each step, \`${fy} task show <id> --yaml\`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} task claim <id>\`, don't ask. No card? Make none.`,
+    `With a card: each step, \`${fy} card show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} card patch <id> --file f\`; \`${fy} card note\` adds history. Link your PR \`${fy} card link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} card claim <id>\`, don't ask. No card? Make none.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */
@@ -645,7 +615,6 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           permissions: { defaultMode: mode },
           [CLAUDE_REMOTE_CONTROL_KEY]: false,
           ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
-          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,

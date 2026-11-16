@@ -325,13 +325,35 @@ export const HarnessConfigSchema = z.strictObject({
    * rather than act, so it is never held.
    */
   questionTool: z.boolean().default(false),
+  /**
+   * The full dangerous-rm waiver (`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`), so Claude's guard on `rm` stops
+   * no ferret. Default OFF until the owner rules (c58 O11b). Set only when this is true AND the permission mode is
+   * `skip`. A loosening: an agent's edit turning it on is held for the owner.
+   */
+  dangerousRmWaiver: z.boolean().default(false),
+  /**
+   * "Ferretry message channel" (docs/claude-channel.md): whether a Claude ferret is launched with Ferretry's own tools server
+   * loaded as a development channel, so a message from another ferret or from Ferretry reaches it through the channel instead
+   * of being typed into its composer. UNSET (the default), it follows the login each ferret spends: ON for a `claude_max`
+   * login, OFF for Team, Enterprise or anything else (an organisation's policy blocks channels, and a login whose type is not
+   * known is not assumed to allow them). `true` or `false` wins for every login. Read at each launch; not a loosening.
+   */
+  channels: z.boolean().optional(),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 
-/** A settings component: the harness's own settings document, as data. Values never hold a raw secret (`${secret:NAME}` only). */
+/**
+ * A settings component: the harness's own settings document, as data, and the launch flags that go with it. Values never
+ * hold a raw secret (`${secret:NAME}` only); the kernel's write rule refuses a flag value that looks like one.
+ *
+ * `flags` are argv words in order, ANY flag (there is no name allowlist, owner decision !A525): each is passed to Claude
+ * as its own word, never through a shell and never re-split. Which flags the launch keeps for itself is
+ * `./launch-flags.ts`.
+ */
 export const SettingsItemSchema = z.strictObject({
   description: z.string().optional(),
-  settings: z.record(z.string(), z.unknown()),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  flags: z.array(z.string().min(1)).optional(),
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 

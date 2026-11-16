@@ -17,7 +17,7 @@ import {
 import type { ReplaceableDisk } from '../../../../daemon/adapters/system/replaceable-file.ts';
 
 /**
- * A PROGRAM FROM THE OWNER'S OWN NIX PROFILE (docs/secure-copy.md, owner decision !A182): proved only when the profile
+ * A PROGRAM FROM THE OWNER'S OWN NIX PROFILE (docs/secure-copy.md, owner decision ^A182): proved only when the profile
  * entry walks, through links that stay inside the profile chain, to the very store file a process runs. A Nix store
  * cannot be assumed on every runner, so the chain is a described disk; this machine's own profile is looked at too
  * when it has one.

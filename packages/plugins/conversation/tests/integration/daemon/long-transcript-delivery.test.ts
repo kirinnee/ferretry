@@ -11,8 +11,8 @@ import { describe, expect, test } from 'bun:test';
 import type { BoundTranscriptReader, TranscriptEntry } from '@ferretry/core-ferrets/contract';
 import type { Instant } from '@ferretry/std';
 import { EntriesSendEvidence } from '../../../daemon/delivery/adapters/entries-send-evidence.ts';
-import { SendTracker } from '../../../daemon/delivery/lib/tracker.ts';
-import { defaultSendTrackerSettings } from '../../../daemon/delivery/lib/tracking.ts';
+import { SendTracker } from '../../../../../core/mailbox/daemon/lib/delivery/tracker.ts';
+import { defaultSendTrackerSettings } from '@ferretry/core-mailbox/contract';
 
 const AT = '2026-11-11T00:00:00.000Z';
 const MESSAGE = 'this input was already delivered at the end of the long transcript';

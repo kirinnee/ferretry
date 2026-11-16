@@ -1,5 +1,6 @@
 /** What `fy gc` and `fy tidy` print. Copied from today's `lib/scratch/render.ts` and `lib/tidy/render.ts`, in 5.0's words. */
 import type { ScratchPlanView, ScratchSweepView, TidyPlan } from '../../contract/index.ts';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 /** Compact byte counts. */
 function humanBytes(bytes: number): string {
@@ -56,7 +57,7 @@ export interface TidyResult {
 }
 
 const card = (id: string) => `&${id}`;
-const ask = (id: string) => `!${id}`;
+const ask = (id: string) => `${ASK_REFERENCE_SIGIL}${id}`;
 
 function section(heading: string, rows: readonly string[]): string[] {
   return rows.length === 0 ? [] : ['', heading, ...rows.map(row => `  ${row}`)];

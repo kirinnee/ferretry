@@ -1,9 +1,9 @@
 /** The Actions ▾ row "Add skills…", offered through Ferrets' `ferrets.actions-row` slot: the same way in as Skills' "+ Add skills". */
 import { describe, expect, it } from 'bun:test';
 import { ScreenHrefProvider } from '@ferretry/app';
-import { interact, mount, must, noteClientDaemon, RouterProvider, settleUntil } from '@ferretry/app/testing';
+import { interact, mount, must, noteClientDaemon, RouterProvider } from '@ferretry/app/testing';
 import type { ActionsRowOffer } from '@ferretry/core-ferrets/contract';
-import { type FunctionComponent, Suspense } from 'react';
+import { act, type FunctionComponent, Suspense } from 'react';
 import half from '../../../../app/index.ts';
 import { placeQuery } from '../../../../app/lib/add-skills-address.ts';
 import manifest from '../../../../manifest.ts';
@@ -25,7 +25,11 @@ const INVENTORY = {
   truncated: false,
 };
 
-/** Mounts the row for a ferret and returns what it offered. `answer` scripts the ferret's inventory read. */
+/**
+ * Mounts the row for a ferret and returns what it offered. `answer` scripts the ferret's inventory read. It waits for the
+ * row's own first offer (an event, not a count of event-loop turns, which are microseconds and say nothing about how long
+ * React takes to flush the mount); a row that is never offered ends at the test's own timeout.
+ */
 const mountRow = async (
   answer: () => Promise<unknown>,
   props: Record<string, unknown> = {},
@@ -45,6 +49,10 @@ const mountRow = async (
   } as never;
   noteClientDaemon(client, 'alpha');
   const offers: (readonly [string, ActionsRowOffer | null])[] = [];
+  let offered = (): void => {};
+  const firstOffer = new Promise<void>(resolve => {
+    offered = resolve;
+  });
   const built = half.build?.({ manifest: half.manifest, client });
   const Panel = built?.panels?.['add-skills-row'] as unknown as FunctionComponent<Record<string, unknown>>;
   const view = await mount(
@@ -55,15 +63,29 @@ const mountRow = async (
             ferret="f1"
             name="Marin"
             canControl
-            offer={(id: string, row: ActionsRowOffer | null) => offers.push([id, row])}
+            offer={(id: string, row: ActionsRowOffer | null) => {
+              offers.push([id, row]);
+              offered();
+            }}
             {...props}
           />
         </ScreenHrefProvider>
       </Suspense>
     </RouterProvider>,
   );
-  await settleUntil(() => offers.length > 0, 'the offer', interact);
+  await firstOffer;
   return { offers, calls, view };
+};
+
+/**
+ * An `act` scope somebody else still holds open (the previous file's last test, in the one process the unit tier shares):
+ * React flushes nothing a nested `act` queues until that scope closes, so the row is not offered for as many event-loop
+ * turns as the holder takes — turns are microseconds, not time, which is what a counted wait mistakes for "never".
+ */
+const holdActScope = async (turns: number): Promise<void> => {
+  await act(async () => {
+    for (let turn = 0; turn < turns; turn += 1) await new Promise<void>(resolve => setImmediate(resolve));
+  });
 };
 
 const run = async (row: ActionsRowOffer | null | undefined): Promise<void> => {
@@ -80,9 +102,17 @@ describe('catalogs: Actions › Add skills… row', () => {
       'skills.add/add-skills',
       'ferrets.actions-row/add-skills-row',
       'skills.row/skills-row',
+      'mcp.row/mcp-row',
+      'mcp.install/mcp-install',
     ]);
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row', 'skills-row']);
+    expect(Object.keys(built?.panels ?? {})).toEqual([
+      'add-skills',
+      'add-skills-row',
+      'skills-row',
+      'mcp-row',
+      'mcp-install',
+    ]);
   });
 
   it('offers one row to a caller who may control the ferret, and goes to the page with the ferret’s place from run', async () => {
@@ -116,6 +146,17 @@ describe('catalogs: Actions › Add skills… row', () => {
     expect(globalThis.location.search).not.toContain('runtime=');
     expect(globalThis.location.search).toContain('folder=%2Fwork%2Fapp');
     await bare.view.unmount();
+  });
+
+  it('offers the row once React has flushed it, however many event-loop turns that takes', async () => {
+    const held = holdActScope(3_000);
+    try {
+      const { offers, view } = await mountRow(async () => INVENTORY);
+      expect(offers).toHaveLength(1);
+      await view.unmount();
+    } finally {
+      await held;
+    }
   });
 
   it('withdraws the row for a caller who may not control the ferret', async () => {

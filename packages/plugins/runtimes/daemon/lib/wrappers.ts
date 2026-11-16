@@ -403,6 +403,12 @@ const CONVERSATION_ARGUMENT_PATTERNS: Readonly<Record<HarnessKind, string>> = {
  * harness. Exits ONLY when the claim is refused because somebody else is writing it. Every other
  * failure — no `fy`, a lease store that errors — prints one line and launches anyway, because a lease
  * bug must never stop the person's own CLI from starting.
+ *
+ * EXCEPT a wrapper run for a session (`FY_SESSION_ID` set): a harness this wrapper cannot check must not write
+ * unchecked, so there the failure is closed — the same status (75, which the Warden does not revive), with the
+ * reason said. A pane the DAEMON launches runs the real harness binary and never this wrapper. Only a lifecycle
+ * start (the fork binder) holds a lease and moves it onto the pane's pid (`SessionConversationLeases.moveToPane`); the
+ * other launch paths hold none yet (unit c58-36d).
  */
 const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly string[] => {
   const fy = shellPath(fyCommand);
@@ -420,9 +426,17 @@ const historyClaimLines = (harness: HarnessKind, fyCommand: string): readonly st
     '    _fy_status=$?',
     `    if [ "$_fy_status" -eq ${HISTORY_CLAIM_HELD_EXIT_CODE} ]; then exit ${HISTORY_CLAIM_HELD_EXIT_CODE}; fi`,
     '    if [ "$_fy_status" -ne 0 ]; then',
+    '      if [ -n "${FY_SESSION_ID:-}" ]; then',
+    '        echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so not launching: this session must hold its conversation before it writes" >&2',
+    `        exit ${HISTORY_CLAIM_HELD_EXIT_CODE}`,
+    '      fi',
     '      echo "ferretry: could not check whether another session is writing this conversation (fy history claim exited $_fy_status), so launching anyway" >&2',
     '    fi',
     '  else',
+    '    if [ -n "${FY_SESSION_ID:-}" ]; then',
+    '      echo "ferretry: fy was not found, so this session could not check whether another session is writing this conversation; not launching" >&2',
+    `      exit ${HISTORY_CLAIM_HELD_EXIT_CODE}`,
+    '    fi',
     '    echo "ferretry: fy was not found, so this launch did not check whether another session is writing this conversation; launching anyway" >&2',
     '  fi',
     'fi',

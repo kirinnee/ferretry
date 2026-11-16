@@ -50,9 +50,11 @@ const call = (
   query: Record<string, string> = {},
   headers: Record<string, string> = {},
   params: Record<string, string> = {},
+  build?: string,
 ) =>
   ({
     request: {
+      ...(build === undefined ? {} : { build }),
       query: new Map(Object.entries(query).map(([key, value]) => [key, [value]])),
       headers: { get: (name: string) => headers[name] },
       text: async () => '',
@@ -78,6 +80,15 @@ describe('the transcript routes', () => {
     const again = await routes['GET /v1/ferrets/:ferretId/logs'](call({}, { 'if-none-match': etag }));
     expect(again.status).toBe(304);
     expect(again.body).toBe('');
+  });
+
+  test('R265 the etag names the daemon build: same semver, another build, is a 200 with the body', async () => {
+    const path = 'GET /v1/ferrets/:ferretId/logs';
+    const held = (await routes[path](call({}, {}, {}, '5.0.0+aaa'))).headers.get('etag') as string;
+    expect((await routes[path](call({}, { 'if-none-match': held }, {}, '5.0.0+aaa'))).status).toBe(304);
+    const upgraded = await routes[path](call({}, { 'if-none-match': held }, {}, '5.0.0+bbb'));
+    expect(upgraded.status).toBe(200);
+    expect(upgraded.body).not.toBe('');
   });
 
   test('R265 a changed conversation changes the etag', async () => {
@@ -174,5 +185,11 @@ describe('the transcript image route with a real handle', () => {
     expect(served.status).toBe(200);
     const body = TranscriptImageDownloadSchema.parse(JSON.parse(served.body));
     expect(body.image).toEqual({ handle, mediaType: 'image/png', byteLength: 32 });
+    // The image tag names the daemon build too: the same handle under another build is served again.
+    const held = (await routes.transcriptImage(call({}, {}, { handle }, '5.0.0+aaa'))).headers.get('etag') as string;
+    const same = await routes.transcriptImage(call({}, { 'if-none-match': held }, { handle }, '5.0.0+aaa'));
+    expect(same.status).toBe(304);
+    const upgraded = await routes.transcriptImage(call({}, { 'if-none-match': held }, { handle }, '5.0.0+bbb'));
+    expect(upgraded.status).toBe(200);
   });
 });

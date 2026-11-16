@@ -1,4 +1,4 @@
-import type { QueuedMessage, QueueWaitReason } from '../../../contract/index.ts';
+import type { QueuedMessage, QueueWaitReason } from '@ferretry/core-mailbox/contract';
 
 /** The tick a person reads for each state: one when accepted, two when delivered, three when read. */
 const MARK: Readonly<Record<QueuedMessage['state'], string>> = {
@@ -20,6 +20,7 @@ const WAITING: Readonly<Record<QueueWaitReason, string>> = {
   draft: 'its box holds a draft',
   unreadable: "its screen can't be read",
   stopped: 'the ferret is not running',
+  compacting: 'the ferret is compacting its context',
 };
 
 /** The longest stretch of a message shown on its line. */

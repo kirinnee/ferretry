@@ -17,7 +17,7 @@ describe('agenda log', () => {
     const { controller, gateway } = build();
 
     // Act
-    await controller.log('!A1', { reply: ' use eu-west ', message: ' m1 ' });
+    await controller.log('^A1', { reply: ' use eu-west ', message: ' m1 ' });
     await controller.log('A1', { rest: 'checking quota' });
 
     // Assert
@@ -44,7 +44,7 @@ describe('agenda merge', () => {
     const { controller, gateway } = build();
 
     // Act
-    await controller.merge('!A2', '!A1', {});
+    await controller.merge('^A2', '^A1', {});
 
     // Assert
     should(gateway.applied.map(each => each.request)).deepEqual([{ action: 'merge', id: 'A2', from: 'A1' }]);
@@ -57,7 +57,7 @@ describe('agenda split', () => {
     const gateway = new RecordingAgendaGateway(board, after);
     const out = new CapturingOutput();
     const controller = new AgendaController(gateway, out, SESSION);
-    await controller.split('!A1', ['Which cache?'], {
+    await controller.split('^A1', ['Which cache?'], {
       title: 'Cache',
       premise: ['A cache is needed.'],
       context: ['It has its own rollout.'],
@@ -69,7 +69,7 @@ describe('agenda split', () => {
       item: { subject: 'Which cache?', title: 'Cache' },
       moveCards: [{ id: 'F12' }, { id: 'F13' }],
     });
-    should(out.messages.join('\n')).containEql('!A3');
+    should(out.messages.join('\n')).containEql('^A3');
   });
 
   it('refuses invalid moved-card references before writing', async () => {

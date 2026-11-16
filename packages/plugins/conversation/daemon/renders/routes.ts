@@ -1,4 +1,5 @@
 import {
+  conditionalTag,
   ApiError,
   type ApiResponse,
   arrivedOnHost,
@@ -9,7 +10,7 @@ import {
 } from '@ferretry/kernel/contract';
 import { ferretOf } from '@ferretry/core-gate/contract';
 import { RenderIdSchema, RenderSaveRequestSchema } from '../../contract/index.ts';
-import { namesTag, parseBody } from '../reader/lib/http.ts';
+import { parseBody } from '../reader/lib/http.ts';
 import { RENDER_MAX_BODY_BYTES } from './lib/constants.ts';
 import { RenderError, type RenderErrorCode } from './lib/types.ts';
 import type { RenderService } from './lib/service.ts';
@@ -109,11 +110,9 @@ export function metaRoute(renders: RenderService): RouteHandler {
 export function bodyRoute(renders: RenderService): RouteHandler {
   return safely(async call => {
     const found = await renders.body(renderId(call));
-    const etag = `"${found.meta.sha256}"`;
+    const { etag, held } = conditionalTag(call.request, `"${found.meta.sha256}"`);
     const headers = { ...SAFE_HEADERS, 'cache-control': PAYLOAD_CACHE_CONTROL, etag };
-    const ifNoneMatch = call.request.headers.get('if-none-match');
-    if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, etag))
-      return { status: 304, headers: new Map(Object.entries(headers)), body: '' };
+    if (held) return { status: 304, headers: new Map(Object.entries(headers)), body: '' };
     return jsonResponse(found, 200, headers);
   });
 }

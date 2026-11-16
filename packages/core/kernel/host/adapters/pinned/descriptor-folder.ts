@@ -428,3 +428,6 @@ const EMPTY: HeldIdentity = {
   owner: 0,
   group: 0,
 };
+
+/** The held folder `handle` stands for (recorded by {@link holdFolder}), or `undefined` for a handle this host never gave out. */
+export const heldFolderOf = (handle: object): HeldFolder | undefined => held.get(handle);

@@ -65,7 +65,7 @@ PIN_URL="http://127.0.0.1:9"
 QUIET_TRIES="${MIGRATE_QUIET_TRIES:-10}"
 CONVERTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# What the owner chose NOT to carry (ruling !A516). The six items are left-behind.txt, the file the converter reads for its own
+# What the owner chose NOT to carry (ruling !A516). The items are left-behind.txt, the file the converter reads for its own
 # report, so the prompt and the report say the same words. $1 is the path the v4 home stays at.
 left_behind() {
   local item

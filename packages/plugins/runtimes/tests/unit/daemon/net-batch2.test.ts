@@ -3,8 +3,7 @@
  * (`valueWithheld`, `valueSaid`): a conflict sentence, a non-scalar settings value, a fixed-layer overridden row, a
  * Resolved MCP url, and a command whose last word is a flag (`srv --token` beside its arguments). Fake values only.
  *
- * Per-test limit (testing standard): each test builds a small model and reads it once, about 20 ms; the default 5 s
- * limit is a margin, and the 256 KiB test names its own.
+ * How it grows at 256 KiB is tests/perf/daemon/net-batch2.test.ts.
  */
 import { describe, it } from 'bun:test';
 import should from 'should';
@@ -18,7 +17,6 @@ import {
   runtimeCatalog,
 } from '../../../daemon/lib/service/catalog.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
-import { ratioOf } from '@ferretry/std/testing/linear-time';
 
 const V = 'Zk3pQ9vXw2LmN7rT';
 const W = 'Hy8cBt4Fg6SdJ1uE';
@@ -337,39 +335,6 @@ describe('(F) a word the raw-secret rule refuses withholds its list in every vie
       .find(component => component.reference === 'mcp/srv')?.detail;
     should(detail?.kind === 'mcp' ? detail.args : undefined).eql(['-y', '@scope/pkg', '--config=/etc/app.json']);
   });
-});
-
-describe('the batch 2 nets stay linear to 256 KiB', () => {
-  const shapes: Readonly<Record<string, (size: number) => () => void>> = {
-    'one long settings value': size => () => valueWithheld('x', 'ab1X'.repeat(size / 4)),
-    'a long list of settings words': size => () =>
-      valueWithheld(
-        'x',
-        Array.from({ length: size / 8 }, () => 'ab1X-yz9'),
-      ),
-    'a long list of arguments': size => () => {
-      const parsed = model(
-        { mcp: { srv: { command: 'srv', args: Array.from({ length: size / 8 }, () => 'ab1X-yz9') } } },
-        { p: { layers: ['mcp/srv'] } },
-      );
-      const resolved = resolveProfile({ model: parsed, profile: 'p', harness: 'claude', settingsBodies: {} });
-      if (resolved.ok) resolvedEntries(resolved.resolved);
-    },
-    'a long url path': size => () => {
-      const parsed = model(
-        { mcp: { srv: { url: `https://h.example/${'a1B2/'.repeat(size / 5)}` } } },
-        { p: { layers: ['mcp/srv'] } },
-      );
-      const resolved = resolveProfile({ model: parsed, profile: 'p', harness: 'claude', settingsBodies: {} });
-      if (resolved.ok) resolvedEntries(resolved.resolved);
-    },
-  };
-  for (const [name, make] of Object.entries(shapes)) {
-    it(`should grow under 3x from 128 to 256 KiB: ${name}`, () => {
-      const ratio = ratioOf(make(256 * 1024), make(128 * 1024));
-      should(ratio).be.below(3);
-    }, 60_000);
-  }
 });
 
 describe('controls in the views: nothing the write rule accepts is withheld by the batch 2 nets', () => {

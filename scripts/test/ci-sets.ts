@@ -7,12 +7,14 @@ import { slowestTest } from '../ci/unit-timings.ts';
 
 type Job = {
   if?: string;
-  needs?: string[];
+  needs?: string[] | string;
   name: string;
   'runs-on'?: string[] | string;
   permissions?: Record<string, string>;
   env?: Record<string, string>;
-  steps?: { name?: string; env?: Record<string, string> }[];
+  'continue-on-error'?: boolean;
+  outputs?: Record<string, string>;
+  steps?: { id?: string; if?: string; name?: string; env?: Record<string, string> }[];
 };
 type Workflow = {
   on?: { pull_request?: { types?: string[] } };
@@ -22,6 +24,13 @@ type Workflow = {
 };
 const load = (name: string) => Bun.YAML.parse(readFileSync(`.github/workflows/${name}.yaml`, 'utf8')) as Workflow;
 const ci = load('ci');
+// check-base.sh's anchor override exists for its own test only: a workflow that sets it moves the only-down baseline.
+for (const file of new Bun.Glob('.github/workflows/*.y{a,}ml').scanSync('.')) {
+  assert.ok(
+    !readFileSync(file, 'utf8').includes('FY_CHECK_BASE_TEST_ANCHOR'),
+    `${file} must not set FY_CHECK_BASE_TEST_ANCHOR`,
+  );
+}
 // The root typecheck covers this file under noUncheckedIndexedAccess. A job or field a fixture names must exist:
 // a missing one fails the fixture here, saying which, instead of being asserted away.
 const need = <T>(value: T | undefined, what: string): T => {
@@ -30,7 +39,11 @@ const need = <T>(value: T | undefined, what: string): T => {
 };
 const jobOf = (workflow: Workflow, name: string): Job => need(workflow.jobs[name], `job '${name}'`);
 const conditionOf = (workflow: Workflow, name: string) => need(jobOf(workflow, name).if, `'if' of job '${name}'`);
-const needsOf = (name: string) => need(jobOf(ci, name).needs, `'needs' of job '${name}'`);
+const needsList = (job: Job): string[] => (job.needs === undefined ? [] : [job.needs].flat());
+const needsOf = (name: string) => {
+  need(jobOf(ci, name).needs, `'needs' of job '${name}'`);
+  return needsList(jobOf(ci, name));
+};
 const runsOnOf = (name: string) => need(jobOf(ci, name)['runs-on'], `'runs-on' of job '${name}'`);
 const runsOnExpression = (name: string) => {
   const runsOn = runsOnOf(name);
@@ -95,14 +108,23 @@ const event = (eventName: string, action = '', labels: string[] = [], label = ''
     pull_request: { number: 42, labels: labels.map(name => ({ name })) },
   },
 });
-const fullJobs = Object.keys(ci.jobs).filter(name => !['quick', 'full-pending', 'full'].includes(name));
+// `proof` runs on the events that run anything (quick's guard) and answers "no" off main (scripts/ci/proof-reuse.sh).
+const fullJobs = Object.keys(ci.jobs).filter(
+  name => !['quick', 'static', 'perf', 'full-pending', 'full', 'proof'].includes(name),
+);
+// Static Checks is half of the quick set (`quick.sh --static`) and the perf tier is blocking: both run on EXACTLY
+// Quick's events, never scoped, and are skipped by a sealed proof exactly when Quick is.
+assert.equal(conditionOf(ci, 'static'), conditionOf(ci, 'quick'), 'Static Checks must run whenever Quick runs');
+assert.equal(conditionOf(ci, 'perf'), conditionOf(ci, 'quick'), 'Performance Tests must run whenever Quick runs');
 const successful = Object.fromEntries(
   Object.keys(ci.jobs).map(name => [name, { result: 'success', outputs: { run: 'true' } }]),
 );
 for (const action of ['opened', 'synchronize', 'reopened']) {
   const quick = event('pull_request', action);
-  assert.equal(evaluate(conditionOf(ci, 'quick'), quick), true);
-  assert.equal(evaluate(conditionOf(ci, 'full-pending'), quick), true);
+  assert.equal(evaluate(conditionOf(ci, 'quick'), quick, successful), true);
+  assert.equal(evaluate(conditionOf(ci, 'static'), quick, successful), true);
+  assert.equal(evaluate(conditionOf(ci, 'perf'), quick, successful), true);
+  assert.equal(evaluate(conditionOf(ci, 'full-pending'), quick, successful), true);
   for (const name of [...fullJobs, 'full'])
     assert.equal(evaluate(conditionOf(ci, name), quick, successful), false, `${name} ran without full-ci`);
 }
@@ -116,8 +138,12 @@ const retarget = event('pull_request', 'edited', [], '', { base: { ref: { from: 
 const retitle = event('pull_request', 'edited', [], '', { title: { from: 'old' } });
 const groupOf = (workflow: Workflow) =>
   need(workflow.concurrency.group.match(/-\$\{\{([\s\S]*)\}\}/)?.[1], `${workflow.concurrency.group} expression`);
-assert.equal(evaluate(conditionOf(ci, 'quick'), retarget), true, 'a retarget must re-run Quick');
-assert.equal(evaluate(conditionOf(ci, 'full-pending'), retarget), true, 'a retarget needs a fresh exact-head status');
+assert.equal(evaluate(conditionOf(ci, 'quick'), retarget, successful), true, 'a retarget must re-run Quick');
+assert.equal(
+  evaluate(conditionOf(ci, 'full-pending'), retarget, successful),
+  true,
+  'a retarget needs a fresh exact-head status',
+);
 assert.equal(
   evaluate(groupOf(ci), retarget),
   'pr-42',
@@ -187,7 +213,7 @@ assert.deepEqual(
   Object.keys(ci.jobs)
     .filter(name => name !== 'full')
     .sort(),
-  'verdict must need every job',
+  'verdict must need every job (the proof job included: it reads its decision)',
 );
 assert.ok(conditionOf(ci, 'full').includes('always()'), 'full verdict must run after failed or skipped dependencies');
 assert.ok(
@@ -195,9 +221,13 @@ assert.ok(
     'nscloud-ubuntu-24.04-amd64-8x16-with-cache',
   ),
 );
-assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
-// A dispatch picks Quick's shape so main's 4x8 can be measured on a branch; the input never moves a PR or main.
-for (const [shape, pushShape] of [['8x16', '4x8']] as const) {
+// Main runs Quick on the pull-request shape: the unit groups do not fit a 4x8 (dispatch run 43825305638).
+assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
+// A dispatch picks Quick's shape so another one can be measured on a branch; the input never moves a PR or main.
+for (const [shape, pushShape] of [
+  ['8x16', '8x16'],
+  ['4x8', '8x16'],
+] as const) {
   const quickShape = (github: object, input: string) =>
     evaluate(runsOnExpression('quick'), github, {}, {}, { quick_shape: input });
   assert.ok(quickShape(event('workflow_dispatch'), '4x8').includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
@@ -222,7 +252,7 @@ const dispatchShape = (input: string) => ({
     { quick_shape: input },
   ),
 });
-assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', "a 4x8 dispatch must run main's part limits");
+assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', 'a 4x8 dispatch runs three parts at once');
 assert.equal(dispatchShape('8x16').FY_CI_QUICK_PARALLEL, '6');
 assert.ok(runsOnOf('int').includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
 const prRunner = (name: string) =>
@@ -246,8 +276,8 @@ assert.equal(ci.jobs.sit, undefined, 'SIT is a step of compile, not a job of its
 }
 assert.equal(evaluate(runsOnExpression('full-gates'), event('push'), {}, {}), 'ubuntu-latest');
 assert.ok(
-  jobOf(ci, 'full').permissions?.['pull-requests'] === 'read',
-  'the verdict reads the PR head and labels: it needs pull-requests: read',
+  jobOf(ci, 'full').permissions?.['pull-requests'] === 'write',
+  'the verdict reads the PR head and removes the full-ci label from a pull request: it needs pull-requests: write',
 );
 
 const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwitch = '') =>
@@ -264,7 +294,8 @@ const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwit
     stderr: 'pipe',
   }).exitCode;
 assert.equal(judge(successful), 0);
-for (const name of needsOf('full')) {
+// `proof` is not a gate: when it did not prove anything the verdict judges the jobs exactly as before.
+for (const name of needsOf('full').filter(dependency => dependency !== 'proof')) {
   for (const result of ['failure', 'cancelled', 'skipped']) {
     assert.notEqual(judge({ ...successful, [name]: { result } }), 0, `gate accepted ${name} ${result}`);
   }
@@ -289,6 +320,260 @@ assert.equal(judge(darwinSkipped, 'skip'), 0);
 assert.equal(judge(darwinSkipped, 'SKIP'), 0);
 assert.notEqual(judge({ ...darwinSkipped, compile: { result: 'failure' } }, 'skip'), 0);
 assert.equal(judge({ ...successful, 'full-pending': { result: 'skipped' } }, '', 'push'), 0);
+
+for (const result of ['failure', 'cancelled', 'skipped'])
+  assert.equal(judge({ ...successful, proof: { result } }), 0, `a ${result} proof job must not change the verdict`);
+
+// ─── Proof reuse on main ──────────────────────────────────────────────────────────────────────────
+// The job graph under each `proof` outcome. GitHub runs a job whose `if:` has no status function only when
+// every job it needs succeeded (a skipped or failed need skips it), and one that has `!cancelled()` /
+// `always()` whatever they did. `Legacy` is the graph before the `proof` job existed, written out, so the
+// claim "a proof that proved nothing leaves every job and every gate exactly as it was" is a comparison.
+const A =
+  "(github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-ci')) && (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)";
+const guard =
+  "(github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null)";
+const legacy: Record<string, { needs: string[]; if: string }> = {
+  quick: { needs: [], if: guard },
+  int: { needs: [], if: A },
+  'strict-guarantees': { needs: ['quick', 'int'], if: `!cancelled() && ${A}` },
+  'full-gates': { needs: [], if: A },
+  compile: { needs: [], if: A },
+  smoke: { needs: ['compile'], if: A },
+  'smoke-darwin': { needs: ['compile'], if: `vars.MACOS_SMOKE != 'skip' && (${A})` },
+};
+const expensive = Object.keys(legacy);
+// Does GitHub start this job? `needs` carries every needed job's result; the model matches the doc'd rule above.
+const starts = (condition: string, needsList: string[], github: object, needs: Record<string, unknown>, vars = {}) => {
+  const hasStatusFunction = /(^|[^.\w])(always|cancelled|failure|success)\(\)/.test(condition);
+  if (!hasStatusFunction && !needsList.every(name => (needs[name] as { result: string }).result === 'success'))
+    return false;
+  return evaluate(condition, github, needs, vars) === true;
+};
+type Result = 'success' | 'failure' | 'skipped';
+const results: Result[] = ['success', 'failure', 'skipped'];
+const combinations = (names: string[]): Record<string, { result: Result; outputs: { run: string } }>[] =>
+  names.reduce<Record<string, { result: Result; outputs: { run: string } }>[]>(
+    (all, name) =>
+      all.flatMap(partial =>
+        results.flatMap(result =>
+          ['true'].map(run => ({
+            ...partial,
+            [name]: { result, outputs: { run } },
+          })),
+        ),
+      ),
+    [{}],
+  );
+const events: [string, object][] = [
+  ['pull_request opened', event('pull_request', 'opened')],
+  ['pull_request labeled full-ci', event('pull_request', 'labeled', ['full-ci'], 'full-ci')],
+  ['pull_request synchronize full-ci', event('pull_request', 'synchronize', ['full-ci'])],
+  ['pull_request labeled other', event('pull_request', 'labeled', ['full-ci'], 'documentation')],
+  ['pull_request retarget', event('pull_request', 'edited', [], '', { base: { ref: { from: 'x' } } })],
+  ['pull_request retarget full-ci', event('pull_request', 'edited', ['full-ci'], '', { base: { ref: { from: 'x' } } })],
+  ['pull_request retitle', event('pull_request', 'edited', ['full-ci'], '', { title: { from: 'old' } })],
+  ['push main', event('push')],
+  ['workflow_dispatch', event('workflow_dispatch')],
+];
+let graphChecks = 0;
+for (const name of Object.keys(legacy)) {
+  const before = need(legacy[name], `legacy job ${name}`);
+  const job = jobOf(ci, name);
+  assert.ok(needsList(job).includes('proof'), `${name} must need proof`);
+  const others = needsList(job).filter(dependency => dependency !== 'proof');
+  assert.deepEqual([...others].sort(), [...before.needs].sort(), `${name}: proof must be the only need added`);
+  for (const [label, github] of events)
+    for (const vars of [{}, { MACOS_SMOKE: 'skip' }, { MACOS_SMOKE: 'other' }])
+      for (const needs of combinations(others)) {
+        // Nothing proved: the proof job failed or was cancelled (no output), or succeeded with `false`.
+        for (const proof of [
+          { result: 'failure', outputs: {} },
+          { result: 'failure', outputs: { proved: 'true', proof: 'https://x' } },
+          { result: 'cancelled', outputs: { proved: 'true', proof: 'https://x' } },
+          { result: 'success', outputs: { proved: 'true', proof: 'https://x' } }, // continue-on-error: failed, result reads success
+          { result: 'success', outputs: { decided: '', proved: 'true', proof: 'https://x' } },
+          { result: 'success', outputs: { proved: 'false', proof: '' } },
+          { result: 'success', outputs: { proved: '', proof: '' } },
+        ]) {
+          graphChecks++;
+          assert.equal(
+            starts(need(job.if, `if of ${name}`), needsList(job), github, { ...needs, proof }, vars),
+            starts(before.if, before.needs, github, needs, vars),
+            `${name} on ${label} with proof ${proof.result}/${JSON.stringify(proof.outputs)} must start exactly when it did before the proof job`,
+          );
+        }
+      }
+}
+for (const [label, github] of events)
+  assert.equal(
+    evaluate(conditionOf(ci, 'proof'), github),
+    evaluate(legacy.quick!.if, github),
+    `proof must run on exactly the events that run anything (${label})`,
+  );
+assert.ok(graphChecks > 1000, 'the graph comparison must have covered the matrix');
+// A proved push starts none of the expensive jobs, whatever else is true; every other event is unaffected.
+for (const name of expensive) {
+  const job = jobOf(ci, name);
+  for (const vars of [{}, { MACOS_SMOKE: 'skip' }])
+    for (const needs of combinations(needsList(job).filter(dependency => dependency !== 'proof')))
+      assert.equal(
+        starts(
+          need(job.if, `if of ${name}`),
+          needsList(job),
+          event('push'),
+          { ...needs, proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: 'https://x' } } },
+          vars,
+        ),
+        false,
+        `${name} must not start on a push whose proof was reused`,
+      );
+}
+assert.equal(
+  starts(conditionOf(ci, 'full'), needsOf('full'), event('push'), {
+    ...successful,
+    proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: 'https://x' } },
+  }),
+  true,
+  'the verdict still runs when the proof is reused',
+);
+const fullEnv = need(
+  need(
+    jobOf(ci, 'full').steps?.find(step => step.name?.startsWith('Judge')),
+    'judge step',
+  ).env,
+  'judge env',
+);
+assert.equal(fullEnv.PROOF_DECIDED, '${{ needs.proof.outputs.decided }}');
+assert.equal(fullEnv.PROOF_REUSED, '${{ needs.proof.outputs.proved }}');
+assert.equal(fullEnv.PROOF_URL, '${{ needs.proof.outputs.proof }}');
+assert.deepEqual(Object.keys(need(jobOf(ci, 'proof').permissions, 'proof permissions')).sort(), [
+  'actions',
+  'contents',
+  'pull-requests',
+  'statuses',
+]);
+
+// The proved verdict: a reused proof is a success on a push, skipped jobs and all; it is honoured nowhere else.
+const proofUrl = 'https://github.com/fixture/repo/actions/runs/77';
+const skippedAll = Object.fromEntries(Object.keys(ci.jobs).map(name => [name, { result: 'skipped', outputs: {} }]));
+const reusedNeeds = {
+  ...skippedAll,
+  proof: { result: 'success', outputs: { decided: 'true', proved: 'true', proof: proofUrl } },
+};
+const judgeProof = (needs: object, env: Record<string, string>, eventName = 'push') => {
+  const summaryFile = join(tmpdir(), `ci-proof-summary-${process.pid}-${Math.random().toString(36).slice(2)}`);
+  writeFileSync(summaryFile, '');
+  const result = Bun.spawnSync(['./scripts/ci/full-status.sh', 'judge'], {
+    env: {
+      ...process.env,
+      NEEDS: JSON.stringify(needs),
+      MACOS_SMOKE: 'skip',
+      EVENT_NAME: eventName,
+      GITHUB_STEP_SUMMARY: summaryFile,
+      ...env,
+    },
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+  const written = readFileSync(summaryFile, 'utf8');
+  rmSync(summaryFile);
+  return { code: result.exitCode, summary: written, stderr: result.stderr.toString() };
+};
+{
+  const reused = judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl });
+  assert.equal(reused.code, 0, 'a reused proof on a push is a success');
+  assert.ok(reused.summary.includes(proofUrl), 'the summary shows the proof it relied on');
+  // Not proved: the very same skipped graph is a failure, as it always was.
+  assert.notEqual(
+    judgeProof(reusedNeeds, { PROOF_REUSED: 'false' }).code,
+    0,
+    'all-skipped is no proof without a reused one',
+  );
+  assert.notEqual(judgeProof(reusedNeeds, { PROOF_REUSED: '' }).code, 0);
+  assert.notEqual(judgeProof(reusedNeeds, {}).code, 0);
+  // An unsealed decision (the proof job died after writing proved=true) is no proof, whatever else is true.
+  for (const decided of ['', 'false'])
+    assert.notEqual(
+      judgeProof(reusedNeeds, { PROOF_DECIDED: decided, PROOF_REUSED: 'true', PROOF_URL: proofUrl }).code,
+      0,
+      `an unsealed decision (${JSON.stringify(decided)}) cannot reuse a proof`,
+    );
+  // Only a push, and only with a URL to show.
+  for (const eventName of ['pull_request', 'workflow_dispatch'])
+    assert.notEqual(
+      judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl }, eventName).code,
+      0,
+      `${eventName} cannot reuse a proof`,
+    );
+  assert.notEqual(
+    judgeProof(reusedNeeds, { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: '' }).code,
+    0,
+    'a reused proof needs its URL',
+  );
+  // A job that failed or was cancelled is never excused by a proof.
+  for (const result of ['failure', 'cancelled'])
+    assert.notEqual(
+      judgeProof(
+        { ...reusedNeeds, int: { result } },
+        { PROOF_DECIDED: 'true', PROOF_REUSED: 'true', PROOF_URL: proofUrl },
+      ).code,
+      0,
+      `a ${result} job beside a reused proof is a failure`,
+    );
+  // Without a reused proof the ordinary full graph still passes on a push.
+  assert.equal(judgeProof(successful, { PROOF_REUSED: 'false' }).code, 0);
+  assert.equal(
+    judgeProof({ ...successful, proof: { result: 'success', outputs: { proved: 'false' } } }, { PROOF_REUSED: 'false' })
+      .code,
+    0,
+  );
+}
+
+// ─── The proof job is an optimisation, never a gate ───────────────────────────────────────────────
+// GitHub semantics relied on (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#jobsjob_idcontinue-on-error):
+// a job with `continue-on-error: true` that fails does not fail the workflow run, and `needs.<job>.result` reads
+// `success`. So (1) the workflow conclusion is modelled below as "red iff a job WITHOUT continue-on-error failed",
+// and (2) `result` is useless as a signal; the `decided` output, written only by the last step under `success()`,
+// is the one the consumers read (asserted through every `if:` and the verdict env above).
+{
+  const proofJob = jobOf(ci, 'proof');
+  assert.equal(proofJob['continue-on-error'], true, 'a failed proof job must not fail the CI workflow (Release)');
+  const steps = need(proofJob.steps, 'proof steps');
+  const last = need(steps[steps.length - 1], 'last proof step');
+  assert.equal(last.id, 'seal', 'the sealing step must be the last step');
+  assert.equal(last.if, '${{ success() }}', 'the seal runs only when every earlier step succeeded');
+  assert.equal(need(proofJob.outputs, 'proof outputs').decided, '${{ steps.seal.outputs.decided }}');
+  assert.deepEqual(
+    steps.filter(step => step.id !== undefined && step.id !== 'seal' && step.id !== 'decide').map(step => step.id),
+    [],
+    'nothing but decide and seal may write the proof outputs',
+  );
+  const workflowRed = (outcomes: Record<string, 'success' | 'failure' | 'cancelled' | 'skipped'>) =>
+    Object.entries(outcomes).some(
+      ([name, outcome]) => outcome === 'failure' && jobOf(ci, name)['continue-on-error'] !== true,
+    );
+  const allGreen = Object.fromEntries(Object.keys(ci.jobs).map(name => [name, 'success'] as const));
+  assert.equal(workflowRed(allGreen), false);
+  assert.equal(
+    workflowRed({ ...allGreen, proof: 'failure' }),
+    false,
+    'proof failing alone must keep the workflow green',
+  );
+  assert.equal(workflowRed({ ...allGreen, proof: 'failure', int: 'failure' }), true, 'other failures still fail it');
+  assert.equal(workflowRed({ ...allGreen, quick: 'failure' }), true);
+  // A failed proof leaves the expensive jobs running (decided empty), so the old gates judge the tree as before.
+  assert.equal(
+    judge({ ...successful, proof: { result: 'success', outputs: { proved: 'true', proof: proofUrl } } }, '', 'push'),
+    0,
+    'a failed proof with the full set green keeps the verdict green',
+  );
+  assert.notEqual(
+    judge({ ...successful, int: { result: 'failure' }, proof: { result: 'success', outputs: { proved: 'true' } } }),
+    0,
+    'a failed proof never excuses a failed gate',
+  );
+}
 
 const temporary = mkdtempSync(join(tmpdir(), 'ci-parts-'));
 try {
@@ -378,6 +663,21 @@ esac
     }
   }
   assert.ok(statusCalls(successful).calls.includes('repos/fixture/repo/statuses/tested-head'));
+  // WHAT was proved: a pull request's success names the tree its checkout holds (the merge commit's tree, which is
+  // what every job tested), within the 140 characters a status description allows. Failures say nothing of a tree.
+  {
+    const tree = new TextDecoder().decode(Bun.spawnSync(['git', 'rev-parse', 'HEAD^{tree}']).stdout).trim();
+    assert.match(tree, /^[0-9a-f]{40}$/);
+    const description = (calls: string) => calls.match(/description=(.*?) -f target_url/)?.[1] ?? '';
+    const proved = description(statusCalls(successful).calls);
+    assert.equal(proved, `quick checks and the full set passed on this commit; tree ${tree}`);
+    assert.ok(proved.length <= 140, 'a status description is at most 140 characters');
+    assert.equal(description(statusCalls(failed).calls), 'one or more checks in the full set did not succeed');
+    assert.equal(
+      description(statusCalls({ ...successful, int: { result: 'skipped' } }).calls),
+      'one or more checks in the full set did not succeed',
+    );
+  }
   // Skipped jobs alone are not a failure of this proof.
   assert.ok(!statusCalls({ ...successful, int: { result: 'skipped' } }).calls.includes('--method DELETE'));
   assert.equal(statusCalls(successful).code, 0);
