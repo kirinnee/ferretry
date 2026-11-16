@@ -371,6 +371,13 @@ describe('Codex background terminals the tree already shows', () => {
     );
   });
 
+  it('should word the terminal table and the forensic report the same way: no double count', () => {
+    should(renderInflightCli(codexReport(1))).containEql('codex 1 background terminal, all listed above');
+    should(renderInflightCli(codexReport(3))).containEql('codex 2 background terminals [UNKNOWN');
+    const text = renderInflightReport(codexReport(1), { sessionId: 's', targetAgent: 'a', forced: false, at: 'x' });
+    should(text).not.containEql('### Codex background terminals');
+  });
+
   it('should keep the blocking item, worded as all listed, when the children cover the footer', () => {
     const item = describeInflight(codexReport(1)).items.find(one => one.kind === 'terminal');
     should(item?.title).equal('Codex counts 1 background terminal, all listed above');
