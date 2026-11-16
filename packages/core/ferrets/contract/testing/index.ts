@@ -52,6 +52,7 @@ import {
   type RunnerComposerCleared,
   type RunnerComposerSubmitted,
   type FormKey,
+  type PickerKey,
   type RunnerFormCapture,
   type TranscriptEntry,
   type RunnerHeldAt,
@@ -245,6 +246,12 @@ export class FakeRunner implements Runner {
     if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
     this.formKeys.push({ handle, key });
     this.onFormWrite({ key });
+  }
+  readonly pickerKeys: { readonly handle: RunnerHandle; readonly key: PickerKey }[] = [];
+  async pickerKey(handle: RunnerHandle, key: PickerKey): Promise<void> {
+    this.#fail();
+    if (!this.#live.has(handle)) throw new FakeRunnerFailure({ kind: 'not_ready', why: 'exited' });
+    this.pickerKeys.push({ handle, key });
   }
   async formPaste(handle: RunnerHandle, text: string): Promise<void> {
     this.#fail();

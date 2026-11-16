@@ -8,6 +8,7 @@ import {
   type FerretHarness,
   type FerretId,
   type FormKey,
+  type PickerKey,
   type HarnessDeliveryFailure,
   type HarnessFile,
   type HarnessForm,
@@ -331,6 +332,14 @@ export async function openHarness(
         if (!found.ok) return found;
         const { handle, runner } = found.value;
         const press = runner.formKey?.bind(runner);
+        if (press === undefined) return err({ refused: 'plugin_unavailable' });
+        return await written(async () => await press(handle, key));
+      },
+      pickerKey: async (key: PickerKey): Promise<Result<void, HarnessDeliveryFailure>> => {
+        const found = pane();
+        if (!found.ok) return found;
+        const { handle, runner } = found.value;
+        const press = runner.pickerKey?.bind(runner);
         if (press === undefined) return err({ refused: 'plugin_unavailable' });
         return await written(async () => await press(handle, key));
       },
