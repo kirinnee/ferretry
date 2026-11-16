@@ -67,7 +67,14 @@ const consumer = implementDaemon(
 
 async function boot(runner: FakeRunner): Promise<TestHost> {
   return await testHost({
-    plugins: [real('ferrets'), real('conversation'), harnessPlugin(new FakeHarness()), runnerPlugin(runner), consumer],
+    plugins: [
+      real('ferrets'),
+      real('mailbox'),
+      real('conversation'),
+      harnessPlugin(new FakeHarness()),
+      runnerPlugin(runner),
+      consumer,
+    ],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     everyDirectory: true,

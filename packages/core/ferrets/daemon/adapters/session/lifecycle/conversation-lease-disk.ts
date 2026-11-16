@@ -54,6 +54,8 @@ export class ConversationLeaseStateDisk implements ConversationLeaseDisk {
   private readonly waitMs: number;
   private readonly pollMs: number;
   private readonly loadLock: () => ConversationLeaseLock;
+  /** The claimant of each pool that is in line or running in THIS process: the tail of its queue. */
+  private readonly queues = new Map<HistoryHarness, Promise<unknown>>();
 
   constructor(
     private readonly state: LeaseState,
@@ -67,7 +69,25 @@ export class ConversationLeaseStateDisk implements ConversationLeaseDisk {
     this.loadLock = options.loadLock ?? (() => loadConversationLeaseLock(platform));
   }
 
+  /**
+   * Claimants in THIS process take their turn here, in order, so two launches at the same instant never reach the lock
+   * together: `flock` is for the other programs (a person's `fy history claim`), and a claimant that met its own daemon's
+   * hold would otherwise poll the kernel clock for it.
+   */
   async exclusive<T>(harness: HistoryHarness, work: () => Promise<T>): Promise<T> {
+    const turn = (this.queues.get(harness) ?? Promise.resolve()).then(async () => await this.locked(harness, work));
+    const settled = turn.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.queues.set(harness, settled);
+    void settled.then(() => {
+      if (this.queues.get(harness) === settled) this.queues.delete(harness);
+    });
+    return await turn;
+  }
+
+  private async locked<T>(harness: HistoryHarness, work: () => Promise<T>): Promise<T> {
     let lock: ConversationLeaseLock;
     try {
       lock = this.loadLock();

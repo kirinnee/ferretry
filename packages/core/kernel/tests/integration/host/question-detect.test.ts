@@ -70,7 +70,7 @@ async function boot() {
   const harness = new FakeHarness();
   const runner = new FakeRunner();
   const h = await testHost({
-    plugins: [real('ferrets'), real('conversation'), harnessPlugin(harness), runnerPlugin(runner)],
+    plugins: [real('ferrets'), real('mailbox'), real('conversation'), harnessPlugin(harness), runnerPlugin(runner)],
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
     everyDirectory: true,
