@@ -15,7 +15,7 @@ import {
   createPasskey,
   PasskeyCeremonyError,
   passkeySentence,
-} from './passkeys.ts';
+} from '@ferretry/app';
 import {
   fetchPasskeys,
   passkeyRegistrationOptions,

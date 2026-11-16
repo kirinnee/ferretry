@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { QrEncodeError } from '@ferretry/std/qr';
 import should from 'should';
 import { ShareController, type ShareMintOptions } from '../../../../cli/lib/catalog-share/controller';
 import { CapturingOutput, CATALOG_ID, OTHER_CATALOG_ID, ScriptedPrompt } from '../catalog/fixtures';
@@ -246,6 +247,27 @@ describe('ShareController.share QR', () => {
     const { controller, qr } = build();
     await controller.share(['Team tools'], { ...forSam, large: true });
     should(qr.requests).eql([{ value: LINK, size: 'large' }]);
+  });
+
+  it('should print the link without a code when the link is too long to encode, never abort after the mint', async () => {
+    const { controller, screen, qr } = build();
+    qr.encode = async () => {
+      await Promise.resolve();
+      throw new QrEncodeError('this value is too long for a QR symbol');
+    };
+    await controller.share(['Team tools'], forSam);
+    should(screen.writes).have.length(1);
+    should(screen.text).containEql(LINK);
+    should(screen.text).not.containEql('█▀█');
+  });
+
+  it('should still propagate an encoder bug that is not a QrEncodeError', async () => {
+    const { controller, qr } = build();
+    qr.encode = async () => {
+      await Promise.resolve();
+      throw new TypeError('a QR symbol encodes text');
+    };
+    await should(controller.share(['Team tools'], forSam)).rejectedWith(TypeError);
   });
 
   it('should withhold a QR wider than the terminal, say so, and still print the link', async () => {

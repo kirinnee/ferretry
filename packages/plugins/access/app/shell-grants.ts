@@ -21,7 +21,7 @@
  *   - installPlatform / InstallEnvironment  pwa/src/lib/install-prompt.ts  nowhere (copy)
  *   - IFyApiClient ............... protocol/src/lib/client.ts ............ nowhere (`request` only)
  *   - FyHttpError ................ protocol/src/adapters/fy-api-client.ts  nowhere (typed stand-in)
- *   - toBase64Url / fromBase64Url  relay/src/lib/binary.ts ............... `@ferretry/app` (REPLACED)
+ *   - toBase64Url ................ relay/src/lib/binary.ts ............... `@ferretry/app` (REPLACED; fromBase64Url is read by the passkey ceremony there)
  *   - SecurityNumberField, SecuritySettingsChange(Schema)  protocol/src/lib/security.ts  not in Gate's contract (copy)
  *   - UnlockGranted .............. protocol/src/lib/security.ts ........... Gate exports only the schema (type here)
  *   - AuditEvent ................. protocol/src/lib/audit.ts .............. Gate's `AuditKindName` (alias here)
@@ -196,7 +196,7 @@ export const installPlatform = (environment: InstallEnvironment): InstallPlatfor
 
 // ─── base64url (the app shell's session wire) ─────────────────────────────────────────────────────────────────────
 
-export { fromBase64Url, toBase64Url } from '@ferretry/app';
+export { toBase64Url } from '@ferretry/app';
 
 // ─── wire names Gate's contract does not carry yet (copies of protocol/src/lib/security.ts and audit.ts) ─────────
 
