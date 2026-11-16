@@ -6,7 +6,7 @@ import should from 'should';
 import { CLAUDE_CODE_CONFIG, HarnessConfigSchema } from '../../../contract/index.ts';
 import manifest from '../../../manifest.ts';
 import { mergeClaudeJson } from '../../../daemon/lib/harness/claude-json.ts';
-import { CLAUDE_QUESTION_HOOKS, fixedLayer } from '../../../daemon/lib/harness/fixed-layer.ts';
+import { fixedLayer } from '../../../daemon/lib/harness/fixed-layer.ts';
 import { homeText, launchCommand } from '../../../daemon/lib/harness/launch.ts';
 
 /**
@@ -205,7 +205,7 @@ describe('what the fixed layer never writes (O11b, invariant 10)', () => {
   });
 
   // A PermissionRequest hook (like a Bash deny/ask rule) silently voids the rm waivers. A PreToolUse hook is allowed:
-  // the question hook is one, and the rm guard's own (O14) may add another.
+  // the rm guard's own (O14) may add one.
   it('should carry no PermissionRequest hook, in either mode', () => {
     for (const permissionMode of ['auto', 'skip'] as const)
       for (const document of surveyed(permissionMode)) {
@@ -214,9 +214,15 @@ describe('what the fixed layer never writes (O11b, invariant 10)', () => {
       }
   });
 
-  it('should still carry the question hook as a PreToolUse hook on AskUserQuestion', () => {
-    should(Object.keys(CLAUDE_QUESTION_HOOKS)).containEql('PreToolUse');
-    should(CLAUDE_QUESTION_HOOKS.PreToolUse.map(group => group.matcher)).containEql('AskUserQuestion');
+  // M7: an open AskUserQuestion form is read off the pane by the question watch, so no hook is written for it.
+  it('should write no hook for AskUserQuestion, in either mode', () => {
+    for (const permissionMode of ['auto', 'skip'] as const)
+      for (const document of surveyed(permissionMode)) {
+        const hooks = (document.hooks ?? {}) as Record<string, { matcher?: string }[]>;
+        should(JSON.stringify(document)).not.containEql('AskUserQuestion');
+        should(JSON.stringify(document)).not.containEql('FY_QUESTION_FILE');
+        should((hooks.PreToolUse ?? []).map(group => group.matcher)).not.containEql('AskUserQuestion');
+      }
   });
 });
 

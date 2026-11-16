@@ -9,7 +9,7 @@ export interface FerretChangeFollowers {
   readonly look: (ferret: string, phase: TurnPhase) => void;
   /** The ferret is gone: nothing is held for it any more. */
   readonly forget: (ferret: string) => void;
-  /** The ferret changed state while it can be asking: one look at the file its question hook left (the 2 s watch also looks). */
+  /** The ferret changed state while it can be asking: one look at its question: the pane and the transcript (the 2 s watch also looks). */
   readonly lookQuestion?: (ferret: string) => void;
   /** The ferret changed state while it can be parked on a prompt: its pane is read on the next sweep (and only then). */
   readonly lookPrompt?: (ferret: string) => void;

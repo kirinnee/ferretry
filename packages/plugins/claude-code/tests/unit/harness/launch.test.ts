@@ -1,7 +1,4 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
 import should from 'should';
 import {
@@ -18,12 +15,7 @@ import {
   API_KEY_SEED_SHELL,
 } from '../../../daemon/lib/harness/api-key-seed.ts';
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
-import {
-  CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_QUESTION_HOOKS,
-  CLAUDE_PROMPTS_SEEN,
-  fixedLayer,
-} from '../../../daemon/lib/harness/fixed-layer.ts';
+import { CLAUDE_PROMPTS_SEEN, fixedLayer } from '../../../daemon/lib/harness/fixed-layer.ts';
 import { CLAUDE_COMPACTION_HOOKS } from '../../../daemon/lib/harness/compaction.ts';
 import pending from '../../../ports-pending.json';
 
@@ -80,32 +72,7 @@ describe('settingsDocument', () => {
 });
 
 describe('homeText', () => {
-  it('question hook writes the complete tool input quietly and drains input when unset or unwritable', async () => {
-    const folder = await mkdtemp(join(tmpdir(), 'claude-question-hook-'));
-    const body = JSON.stringify({ tool_use_id: 'question-1', tool_input: { questions: [{ question: 'Which?' }] } });
-    const file = join(folder, 'question.json');
-    try {
-      for (const target of [file, undefined, join(folder, 'missing/question.json')]) {
-        const child = Bun.spawn(['sh', '-c', CLAUDE_QUESTION_HOOK_COMMAND], {
-          env: { PATH: '/usr/bin:/bin', ...(target === undefined ? {} : { FY_QUESTION_FILE: target }) },
-          // A `Buffer`, not a `Blob`: once a DOM suite has registered happy-dom in this process (the unit tier runs every
-          // package in one), the global `Blob` is happy-dom's and `Bun.spawn` refuses it as stdio.
-          stdin: Buffer.from(body),
-          stdout: 'pipe',
-          stderr: 'pipe',
-        });
-        should(await child.exited).equal(0);
-        should(await new Response(child.stdout).text()).equal('');
-        should(await new Response(child.stderr).text()).equal('');
-      }
-      should(await readFile(file, 'utf8')).equal(body);
-      should(await Bun.file(`${file}.tmp`).exists()).equal(false);
-    } finally {
-      await rm(folder, { recursive: true, force: true });
-    }
-  });
-
-  it('applies fixed launch precedence, onboarding and trust, and keeps the question hook in its own overlay', () => {
+  it('applies fixed launch precedence, onboarding and trust, and keeps the compaction hooks in its own overlay', () => {
     for (const permissionMode of ['auto', 'skip'] as const) {
       const userHook = { matcher: 'Read', hooks: [{ type: 'command', command: 'true' }] };
       const text = homeText({
@@ -143,7 +110,7 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS },
+        hooks: { ...CLAUDE_COMPACTION_HOOKS },
       });
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
@@ -632,8 +599,11 @@ describe('the question tool (^A527: withheld from every ferret unless the questi
     );
   });
 
-  it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
-    should(fixedLayer('auto', '/f').overlay.hooks).eql({ ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS });
-    should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
+  // M7: a runtime that turns the tool back on has its open form read off the pane, so the layer writes no hook for it.
+  it('writes no PreToolUse hook on AskUserQuestion, so the flag overlay carries the compaction hooks alone', () => {
+    for (const mode of ['auto', 'skip'] as const) {
+      should(fixedLayer(mode, '/f').overlay.hooks).eql({ ...CLAUDE_COMPACTION_HOOKS });
+      should(JSON.stringify(fixedLayer(mode, '/f'))).not.containEql('AskUserQuestion');
+    }
   });
 });
