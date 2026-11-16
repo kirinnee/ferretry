@@ -3,24 +3,24 @@ import { describe, expect, it } from 'bun:test';
 import { FY_RENDER_LIMITS } from '@ferretry/app';
 import { parseFyRenderEmbed } from '../../../../app/render/fy-render-embed.ts';
 
-const refused = (type: 'card' | 'board', payload: string): string => {
+const refused = (type: 'task' | 'board', payload: string): string => {
   const result = parseFyRenderEmbed(type, payload);
   if (result.ok) throw new Error('expected a refusal');
   return result.reason;
 };
 
-describe('parseFyRenderEmbed: card', () => {
-  it('reads exactly one card reference', () => {
-    expect(parseFyRenderEmbed('card', '&F12')).toEqual({ ok: true, spec: { kind: 'card', id: 'F12' } });
-    expect(parseFyRenderEmbed('card', '\n  &F12  \n')).toEqual({ ok: true, spec: { kind: 'card', id: 'F12' } });
+describe('parseFyRenderEmbed: task', () => {
+  it('reads exactly one task reference', () => {
+    expect(parseFyRenderEmbed('task', '&F12')).toEqual({ ok: true, spec: { kind: 'card', id: 'F12' } });
+    expect(parseFyRenderEmbed('task', '\n  &F12  \n')).toEqual({ ok: true, spec: { kind: 'card', id: 'F12' } });
   });
 
-  it('refuses nothing, two cards, a non-card and a parent line', () => {
-    expect(refused('card', '')).toContain('needs a payload');
-    expect(refused('card', '&F1 &F2')).toContain('exactly one card');
-    expect(refused('card', 'F12')).toContain('not a card reference');
-    expect(refused('card', '@file')).toContain('not a card reference');
-    expect(refused('card', 'parent: &F1')).toContain('Only a board');
+  it('refuses nothing, two tasks, a non-task and a parent line', () => {
+    expect(refused('task', '')).toContain('needs a payload');
+    expect(refused('task', '&F1 &F2')).toContain('exactly one task');
+    expect(refused('task', 'F12')).toContain('not a task reference');
+    expect(refused('task', '@file')).toContain('not a task reference');
+    expect(refused('task', 'parent: &F1')).toContain('Only a board');
   });
 });
 
@@ -39,8 +39,8 @@ describe('parseFyRenderEmbed: board', () => {
     });
   });
 
-  it('refuses a parent that is not a card, or mixed with a list', () => {
-    expect(refused('board', 'parent: F559')).toContain('not a card reference');
+  it('refuses a parent that is not a task, or mixed with a list', () => {
+    expect(refused('board', 'parent: F559')).toContain('not a task reference');
     expect(refused('board', 'parent: &F1\n&F2')).toContain('never both');
   });
 

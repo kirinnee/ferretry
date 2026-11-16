@@ -168,7 +168,7 @@ export class PlanController {
     say(TASK_PLAN_HONEST_LIMIT);
     const card = await this.ports.gateway.confirmInApp(plan.sessionId, plan.id, staged.stage);
     say(
-      `Confirm it with your passkey on the plan's card ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${plan.sessionId}).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the plan's item ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${plan.sessionId}).\nNothing is approved until you do; waiting up to ${String(TASK_PLAN_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     await this.#showCard(plan, card.agendaItemId, options, say);
     const state = await this.#wait(plan, staged.stage);
@@ -198,7 +198,7 @@ export class PlanController {
     const daemonId = machine === undefined ? undefined : await machine().catch(() => undefined);
     const link = `${appOrigin.replace(/\/+$/u, '')}/${agendaDeepLinkFragment(agendaItemId, plan.sessionId, daemonId)}`;
     if (appOriginNote !== undefined) say(appOriginNote);
-    say(`Open the card: ${link}`);
+    say(`Open the item: ${link}`);
     if (options.open !== true) return;
     say(
       openLink !== undefined && (await openLink(link))

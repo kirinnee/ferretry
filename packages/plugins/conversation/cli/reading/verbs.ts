@@ -161,7 +161,9 @@ export function readingVerbs({ client, io, clock }: Context) {
       const query = words(invocation);
       if (query === '') throw new Usage(`say what to look for: ${BIN} search <words...>`);
       const kind = option(invocation, 'kind');
-      if (kind !== undefined && kind !== 'card' && kind !== 'ask') throw new Usage('--kind is one of card | ask');
+      // `card` is the name this option took before the rename; the daemon reads both (`wire-search.ts`).
+      if (kind !== undefined && kind !== 'task' && kind !== 'card' && kind !== 'ask')
+        throw new Usage('--kind is one of task | ask');
       const limit = number(invocation, 'limit');
       const answer = await client.call<WorkSearchResponse>('GET /v1/search', {
         query: {
@@ -181,7 +183,7 @@ export function readingVerbs({ client, io, clock }: Context) {
               `${String(answer.olderHidden)} older closed ${answer.olderHidden === 1 ? 'item' : 'items'} hidden — ${BIN} search --all ${query}`,
             ];
       if (answer.hits.length === 0) {
-        const subject = kind === 'card' ? 'cards' : kind === 'ask' ? 'asks' : 'cards or asks';
+        const subject = kind === 'card' || kind === 'task' ? 'tasks' : kind === 'ask' ? 'asks' : 'tasks or asks';
         return print([`No ${subject} match “${query}”.`, ...older].join('\n'));
       }
       const more =

@@ -642,7 +642,7 @@ export const RULES: readonly Rule[] = [
     'pwa/.*(?:phone-approval|two-factor|login-form|login-recipe|logins-|secrets-card|secret-copy|copy-plan|copy-rules|secure-copy|accounts-|automatic-codes|rule-deep-link|input-card-sign-in|input-card-task-plan|mcp-sign-in)',
     'accounts app',
   ],
-  ['vault', 'pwa/.*input-card', 'input cards app'],
+  ['vault', 'pwa/.*input-card', 'input app'],
   ['catalogs', 'pwa/.*(?:features/shared|update-install-sheet|shared-(?:with-me|entry|screens))', 'catalogs app'],
   ['skills', 'pwa/.*(?:skills-|session-skills|local-skills)', 'skills app'],
   [

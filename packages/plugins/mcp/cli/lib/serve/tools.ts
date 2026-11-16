@@ -155,6 +155,23 @@ const object = (properties: Record<string, unknown>, required: readonly string[]
   additionalProperties: false,
 });
 
+/** Accounts' sign-in plan tool (`signin_plan`) and its old name `task_plan`: the same input under either name. */
+const signinPlanTool = (name: string, description: string): McpToolDefinition => ({
+  name,
+  description,
+  inputSchema: object(
+    {
+      lines: {
+        type: 'array',
+        description:
+          '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
+      },
+      expiresInSeconds: { type: 'integer' },
+    },
+    ['lines'],
+  ),
+});
+
 /** The tools, each with the wire tool it is. */
 const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   {
@@ -766,21 +783,9 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
       ['handle', 'to', 'prompt'],
     ),
   },
-  {
-    name: 'task_plan',
-    description: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
-    inputSchema: object(
-      {
-        lines: {
-          type: 'array',
-          description:
-            '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
-        },
-        expiresInSeconds: { type: 'integer' },
-      },
-      ['lines'],
-    ),
-  },
+  signinPlanTool('signin_plan', 'Before your work, ask the owner once to pre-approve its sign-ins and pastes.'),
+  // The old name of signin_plan, on the same handler: an old instruction still works.
+  signinPlanTool('task_plan', 'Old name of signin_plan: ask the owner once to pre-approve sign-ins and pastes.'),
 ];
 
 const CONFIG_PATH = {

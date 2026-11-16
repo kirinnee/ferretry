@@ -34,8 +34,8 @@ interface TaskPlansCardProps {
 export function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardProps) {
   const live = plans.filter(isPlanLive);
   return (
-    <section className="kt-panel p-panel" aria-label="Task plans" data-task-plans="">
-      <h3 className="m-0 text-row font-semibold text-fg">Task plans</h3>
+    <section className="kt-panel p-panel" aria-label="Sign-in plans" data-task-plans="">
+      <h3 className="m-0 text-row font-semibold text-fg">Sign-in plans</h3>
       <p className="mb-0 mt-1 text-cell leading-base text-muted">
         What a ferret may sign in or paste without asking, from a plan you approved. They end on time and when this
         machine restarts.
@@ -50,7 +50,7 @@ export function TaskPlansCard({ plans, busy, error, onRevoke }: TaskPlansCardPro
       )}
       {live.length === 0 ? (
         <p className="mb-0 mt-3 text-ui text-faint" data-task-plans-empty="">
-          No live task plans. Every sign-in and paste asks you.
+          No live sign-in plans. Every sign-in and paste asks you.
         </p>
       ) : (
         <ul className="m-0 mt-3 flex list-none flex-col gap-3 p-0">
@@ -129,7 +129,7 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
         setError(
           isForbidden(cause)
             ? NO_ACCOUNTS_DEVICE_WORDS
-            : `This browser could not read this daemon’s task plans: ${failureWords(cause)}`,
+            : `This browser could not read this daemon’s sign-in plans: ${failureWords(cause)}`,
         );
       });
     return () => {
@@ -155,8 +155,8 @@ export function TaskPlansSurface({ client }: { readonly client: TaskPlanClient }
 
   if (plans === null && error === null)
     return (
-      <section className="kt-panel p-panel" role="status" aria-label="Loading task plans">
-        <p className="m-0 text-ui text-faint">Reading this daemon’s task plans…</p>
+      <section className="kt-panel p-panel" role="status" aria-label="Loading sign-in plans">
+        <p className="m-0 text-ui text-faint">Reading this daemon’s sign-in plans…</p>
       </section>
     );
   return (

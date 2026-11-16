@@ -462,7 +462,7 @@ baseline)
     orig_env "${v4_fy}" board --project all --state "${s}" --all --json >"${base}/board-${s}.raw.json" || fail "v4 'fy board --state ${s}' failed"
     jq -S '{truncated: (.nextCursor != null), cards: ([.cards[] | {id, laneId}] | sort_by(.id))}' "${base}/board-${s}.raw.json" >"${base}/board-${s}.json" || fail "cannot read the v4 board (${s})"
     rm -f "${base}/board-${s}.raw.json"
-    [ "$(jq -r '.truncated' "${base}/board-${s}.json")" = false ] || fail "the v4 board has more than 500 ${s} cards; fy board cannot page past that: tell the owner"
+    [ "$(jq -r '.truncated' "${base}/board-${s}.json")" = false ] || fail "the v4 board has more than 500 ${s} tasks; fy board cannot page past that: tell the owner"
   done
 
   # Login names (file names only) and secret NAMES (never values).
@@ -965,12 +965,12 @@ verify)
   for s in open closed dropped; do
     if fy5 board --project all --state "${s}" --all --json >"${work}/board-${s}.raw" && jq -S '{truncated: (.nextCursor != null), cards: ([.cards[] | {id, laneId}] | sort_by(.id))}' "${work}/board-${s}.raw" >"${work}/board-${s}.json"; then
       if [ "$(jq -c '[.cards[].id]' "${base}/board-${s}.json")" != "$(jq -c '[.cards[].id]' "${work}/board-${s}.json")" ] || [ "$(jq -r '.truncated' "${work}/board-${s}.json")" != false ]; then
-        row "board ${s}: card ids" FAIL "differ from the baseline (or the board is truncated)"
+        row "board ${s}: task ids" FAIL "differ from the baseline (or the board is truncated)"
       elif [ "$(jq -c '.cards' "${base}/board-${s}.json")" != "$(jq -c '.cards' "${work}/board-${s}.json")" ]; then
-        row "board ${s}: card ids" OK "$(jq '.cards | length' "${base}/board-${s}.json") cards"
-        row "board ${s}: lanes" REVIEW "some cards sit in another lane: show the owner, who decides"
+        row "board ${s}: task ids" OK "$(jq '.cards | length' "${base}/board-${s}.json") tasks"
+        row "board ${s}: lanes" REVIEW "some tasks sit in another lane: show the owner, who decides"
       else
-        row "board ${s}" OK "$(jq '.cards | length' "${base}/board-${s}.json") cards, same lanes"
+        row "board ${s}" OK "$(jq '.cards | length' "${base}/board-${s}.json") tasks, same lanes"
       fi
     else
       row "board ${s}" FAIL "v5 'fy board --state ${s}' failed"
@@ -1020,7 +1020,7 @@ verify)
   [ "${bad}" = 0 ] || fail "verify found a difference (FAIL rows above): stop, tell the owner, offer the rollback"
   mark verified
   left_behind "$(note_get B)"
-  say "✅ verify: no FAIL row. By eye, with the owner: message one running ferret, resume one stopped ferret, open one card with history, reload the app on a phone"
+  say "✅ verify: no FAIL row. By eye, with the owner: message one running ferret, resume one stopped ferret, open one task with history, reload the app on a phone"
   ;;
 
 # ================================================================ rollback
@@ -1031,7 +1031,7 @@ rollback)
   stamp="$(note_get STAMP)"
   base="$(note_get BASE)"
   v4_version="$(note_get V4_VERSION)"
-  [ "${owner_yes}" = 1 ] || fail "tell the owner what a rollback costs: v4 returns exactly as it was at the backup; anything done in v5 since the start (messages, cards, asks, new ferrets, new secrets) stays whole in ${H}-v5-failed-${stamp} and is not in v4. With their yes pass --owner-yes"
+  [ "${owner_yes}" = 1 ] || fail "tell the owner what a rollback costs: v4 returns exactly as it was at the backup; anything done in v5 since the start (messages, tasks, asks, new ferrets, new secrets) stays whole in ${H}-v5-failed-${stamp} and is not in v4. With their yes pass --owner-yes"
   mark rolling-back
 
   # 1. Quiet first, then the daemon. The panes of the harnesses run in tmux whether or not any daemon does, so a quiet

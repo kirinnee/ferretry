@@ -295,7 +295,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     '- svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.',
     '- html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.',
     `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
-    `- card, board (live cards), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
+    `- task, board (live tasks), map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
     '```fy-render',
     'type: mermaid',
     'alt: Request flow',
@@ -303,7 +303,7 @@ export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
     'flowchart TB',
     '  Phone --> Relay --> Daemon',
     '```',
-    'Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.',
+    'Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.',
   ].join('\n');
 
 /**
@@ -354,7 +354,7 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
-  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.";
+  "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value in an input; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The input flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask. Before every push, rebase your own branch onto the latest base (`git fetch && git rebase origin/<base>`) and push with `--force-with-lease`; never rewrite main, a release or integration branch, or a branch another PR stacks on: merge the base into those.";
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
@@ -463,7 +463,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (\`${fy} board\`), under your card (\`--parent\`), or on the owner's Yes (\`--approval <ask>\`). Public=the owner's asks ("everything I asked?"): top-level, never \`--private\`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: \`${fy} card show <id> --yaml\`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} card patch <id> --file f\`. \`${fy} card move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} card depend\`/\`block\`. Owner's bug: \`${fy} card reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
+  `Board: opt-in, enforced; overrides other task rules. Task only if the project\'s board is on (\`${fy} board\`), under your task (\`--parent\`), or on the owner's Yes (\`--approval <ask>\`). Public=the owner's asks ("everything I asked?"): top-level, never \`--private\`; private=your helper tasks. Tasks (&F<n>) never ask: answers, tests, Done ride the task's ask on the agenda, which moves it. One outcome, no umbrellas; add to a related task. Planning is a lane. Title+summary=what it's doing (sitrep). Each step: \`${fy} task show <id> --yaml\`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then \`${fy} task patch <id> --file f\`. \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked: \`${fy} task depend\`/\`block\`. Owner's bug: \`${fy} task reopen <id> --to <lane> --ask "<words>"\`. PRs, merges, \`${fy} signal done\` self-move.`;
 
 /**
  * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
@@ -480,7 +480,7 @@ export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
 export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
   [
     `Sub-ferret: you were started by a lead ferret. Never raise agenda items or notify the owner; message your lead (\`${fy} send <lead-callsign> "<message>"\`) only for a result, a blocker or a decision it must make. Label every send: \`--kind blocker\` (stuck until answered; at once), \`--kind action\` (default; to do; batched a minute), \`--kind fyi\` (rarely; no action; at the receiver's turn end). Only a password, code or approval the daemon asks for reaches the owner from you.`,
-    `With a card: each step, \`${fy} card show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} card patch <id> --file f\`; \`${fy} card note\` adds history. Link your PR \`${fy} card link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's card? \`${fy} card claim <id>\`, don't ask. No card? Make none.`,
+    `With a task: each step, \`${fy} task show <id> --yaml\`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then \`${fy} task patch <id> --file f\`; \`${fy} task note\` adds history. Link your PR \`${fy} task link <id> --pr <url>\` (or \`--branch\`); it moves itself (start, PR, merge, \`${fy} signal done\`). Lead's task? \`${fy} task claim <id>\`, don't ask. No task? Make none.`,
   ].join('\n');
 
 /** What a lead is told after the base instruction: the notify rule, then the board rules. */

@@ -17,7 +17,7 @@ export default fragment({
       args: [
         {
           name: 'type',
-          help: 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie, card, board',
+          help: 'mermaid, svg, html, chart, map, image, video, audio, pdf, lottie, task, board',
           optional: true,
         },
       ],

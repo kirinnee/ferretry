@@ -32,7 +32,7 @@ describe('an input card on the agenda', () => {
     const { input: _input, ...bare } = ITEM;
 
     should(AgendaItemSchema.safeParse(bare).success).be.false();
-    should(agendaInputProblems(bare)).deepEqual(['an input card names its input request']);
+    should(agendaInputProblems(bare)).deepEqual(['an input item names its input request']);
   });
 
   it('should refuse a request on any other kind of card', () => {

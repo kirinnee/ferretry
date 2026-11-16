@@ -194,7 +194,7 @@ describe('fy plan approve: a sign-in line is never approved without the app', ()
     should(slept).eql([1_000]);
     should(said[0]).equal('  Sign in as GITHUB_WORK on github.com');
     should(said[1]).equal(TASK_PLAN_HONEST_LIMIT);
-    should(said[2]).containEql("card ^A9 in the app's Inbox (session s1)");
+    should(said[2]).containEql("item ^A9 in the app's Inbox (session s1)");
     should(said[2]).not.containEql('Agenda');
     should(said[2]).containEql('Nothing is approved until you do');
     should(said[3]).startWith('Approved.');
@@ -244,7 +244,7 @@ describe('fy plan approve: the link to the card of the plan', () => {
 
     await controller.approve('feed', ['3'], {});
 
-    should(said).containEql(`Open the card: ${LINK}`);
+    should(said).containEql(`Open the item: ${LINK}`);
     should(opened).eql([]);
   });
 
@@ -276,8 +276,8 @@ describe('fy plan approve: the link to the card of the plan', () => {
 
     await controller.approve('feed', ['3'], {});
 
-    const link = said.find(line => line.startsWith('Open the card: '));
-    should(link).equal(`Open the card: ${LINK}`);
+    const link = said.find(line => line.startsWith('Open the item: '));
+    should(link).equal(`Open the item: ${LINK}`);
   });
 
   it('should name this machine in the link so the app opens it (C7), and keep working when the id cannot be read', async () => {
@@ -299,7 +299,7 @@ describe('fy plan approve: the link to the card of the plan', () => {
     await unreadable.controller.approve('feed', ['3'], {});
 
     should(opened).eql([`${LINK}&machine=${machine}`]);
-    should(unreadable.said).containEql(`Open the card: ${LINK}`);
+    should(unreadable.said).containEql(`Open the item: ${LINK}`);
   });
 });
 
@@ -571,7 +571,7 @@ describe('fy plan: the less common lines and answers', () => {
     should(JSON.parse(said[0] as string)).eql({ state: 'approved' });
     should(warned[0]).equal('  Sign in as GITHUB_WORK on github.com');
     should(warned[1]).equal(TASK_PLAN_HONEST_LIMIT);
-    should(warned[2]).containEql('card ^A9');
+    should(warned[2]).containEql('item ^A9');
   });
 
   it('should report the plan in force when the owner re-ticked the lines in the app and the stage was replaced', async () => {

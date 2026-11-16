@@ -92,7 +92,7 @@ jobs:
       proved: ${{ steps.decide.outputs.proved }}
       proof: ${{ steps.decide.outputs.proof }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -134,15 +134,15 @@ jobs:
         (github.event_name == 'workflow_dispatch' && inputs.quick_shape)
         || '8x16')) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
+      - name: Mount the tsc cache
         id: cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
-          cache: nix
+          path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
       # The only-down checks (ports-pending, after-merge) need the commit they may not grow from; a one-commit
       # checkout has none. The repository is public, so this fetch needs no credentials.
@@ -172,7 +172,7 @@ jobs:
       - name: Upload unit coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-unit
           path: coverage/unit/
@@ -181,7 +181,7 @@ jobs:
       - name: Upload scripts test results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-scripts
           path: coverage/scripts/
@@ -189,7 +189,7 @@ jobs:
       - name: Upload quick part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: quick-parts
           path: |
@@ -220,15 +220,14 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
+      - name: Mount the tsc cache
         id: cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
-          cache: nix
           path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
       # The only-down gates (ports-pending, after-merge) need the commit they may not grow from.
@@ -249,7 +248,7 @@ jobs:
       - name: Upload static part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: static-parts
           path: |
@@ -281,14 +280,9 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run the perf tier
         env:
@@ -298,7 +292,7 @@ jobs:
       - name: Upload perf results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: perf-results
           path: coverage/perf/
@@ -314,7 +308,7 @@ jobs:
       statuses: write
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
@@ -343,21 +337,16 @@ jobs:
         nscloud-cache-allow-commit-from-main,
       ]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run every integration group and its ledger
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/integration.sh
       - name: Upload integration coverage
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: coverage-int
           path: coverage/int/
@@ -365,7 +354,7 @@ jobs:
       - name: Upload integration part results
         if: always()
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: integration-parts
           path: |
@@ -399,14 +388,9 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       # A report the earlier jobs failed to upload is a missing artifact here, not a reason to stop: the count then
       # says "no JUnit report found" rather than guessing.
@@ -452,14 +436,9 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run the full-only static gates
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/full-gates.sh
@@ -481,17 +460,12 @@ jobs:
         || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
       }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Say that the macOS smoke was skipped
         if: ${{ vars.MACOS_SMOKE == 'skip' }}
         run: ./scripts/ci/macos-smoke-skipped.sh
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
         run: ./scripts/ci/in-devshell.sh ./scripts/release/compile.sh
@@ -501,7 +475,7 @@ jobs:
       - name: Upload binaries
         id: upload_3
         continue-on-error: true
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -510,7 +484,7 @@ jobs:
       # now and then) is retried once from the same files; a second failure fails the job as before.
       - name: Upload binaries (retry)
         if: steps.upload_3.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cli-binaries
           path: dist/bin/
@@ -540,7 +514,7 @@ jobs:
             runs_on: ubuntu-24.04-arm
     runs-on: ${{ matrix.runs_on }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Download compiled binaries
@@ -597,7 +571,7 @@ jobs:
       actions: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci

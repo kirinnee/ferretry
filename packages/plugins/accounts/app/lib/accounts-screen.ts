@@ -192,7 +192,7 @@ export function scopedLinesFor(
 
 /** What a refusal of the default line becomes, in the daemon's own words where it gave them. */
 export const DEFAULT_ONLY_ORDERS =
-  'A default only decides which account a sign-in card lists first. Nothing signs in until you tap it.';
+  'A default only decides which account a sign-in item lists first. Nothing signs in until you tap it.';
 
 /** Said in place of the lines when the defaults file on disk is a held change, which is not in effect. */
 export const DEFAULTS_PENDING_WORDS =

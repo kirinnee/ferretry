@@ -43,7 +43,7 @@ export const FY_RENDER_TYPES = [
   'mermaid',
   'map',
   'chart',
-  'card',
+  'task',
   'board',
   'image',
   'video',
@@ -51,6 +51,12 @@ export const FY_RENDER_TYPES = [
   'pdf',
 ] as const;
 export type FyRenderType = (typeof FY_RENDER_TYPES)[number];
+
+/**
+ * A type a transcript written before the rename still holds, read as the type it became. A fence is part of a
+ * saved message, so it is read forever and never written: the guide, the docs and every example say the new type.
+ */
+export const FY_RENDER_FORMER_TYPES: ReadonlyMap<string, FyRenderType> = new Map([['card', 'task']]);
 
 /** The types a `src:` header may name, and the only ones it may appear on. */
 export const FY_RENDER_MEDIA_TYPES = ['image', 'video', 'audio', 'pdf'] as const;
@@ -162,7 +168,8 @@ export function parseFyRenderHeaders(lines: readonly string[]): FyRenderParsedHe
 
   // Present because the line above proved the first header line declared it;
   // there is deliberately no second "missing type" check to drift from that one.
-  const type = headers.get('type') ?? '';
+  const written = headers.get('type') ?? '';
+  const type = FY_RENDER_FORMER_TYPES.get(written) ?? written;
   const alt = headers.get('alt');
   const mime = headers.get('mime');
   const rawSrc = headers.get('src');

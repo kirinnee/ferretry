@@ -9,6 +9,8 @@
  * under the `render-guide-doc` contract without this code noticing.
  */
 
+import { FY_RENDER_FORMER_TYPES } from '../../contract/fy-render.ts';
+
 /** The heading that opens the guide section, matched as a whole line. */
 const RENDER_GUIDE_HEADING = '## Guide for agents';
 
@@ -24,7 +26,7 @@ export const RENDER_GUIDE_TYPES = [
   'audio',
   'pdf',
   'lottie',
-  'card',
+  'task',
   'board',
 ] as const;
 
@@ -33,7 +35,7 @@ type RenderGuideType = (typeof RENDER_GUIDE_TYPES)[number];
 
 /**
  * Which `###` section answers a type. `image`, `video`, `audio` and `pdf` share `media`: they name
- * bytes the same way, and the doc keeps one section for the four; `card` and `board` share `card`, which names cards.
+ * bytes the same way, and the doc keeps one section for the four; `task` and `board` share `task`, which names tasks.
  */
 const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
   mermaid: 'mermaid',
@@ -46,13 +48,17 @@ const SECTION_FOR_TYPE: Record<RenderGuideType, string> = {
   audio: 'media',
   pdf: 'media',
   lottie: 'lottie',
-  card: 'card',
-  board: 'card',
+  task: 'task',
+  board: 'task',
 };
 
-/** The section that answers `type`, or `undefined` when `fy render guide` refuses it. */
+/**
+ * The section that answers `type`, or `undefined` when `fy render guide` refuses it. An agent that still types the
+ * type a fence had before the rename (`FY_RENDER_FORMER_TYPES`) is answered with the new type's section.
+ */
 export function renderGuideSectionName(type: string): string | undefined {
-  return type in SECTION_FOR_TYPE ? SECTION_FOR_TYPE[type as RenderGuideType] : undefined;
+  const named = FY_RENDER_FORMER_TYPES.get(type) ?? type;
+  return named in SECTION_FOR_TYPE ? SECTION_FOR_TYPE[named as RenderGuideType] : undefined;
 }
 
 /**

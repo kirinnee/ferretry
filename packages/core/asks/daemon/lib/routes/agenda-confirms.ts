@@ -179,7 +179,7 @@ export async function answerConfirmation(
     );
     throw new ApiError(
       409,
-      `${path} was edited after ${answer.id} was raised, so nothing was ${VERB[decision]}: the card now shows the change as it is — read it and answer again`,
+      `${path} was edited after ${answer.id} was raised, so nothing was ${VERB[decision]}: the item now shows the change as it is — read it and answer again`,
       AGENDA_CONFIG_CHANGED_CODE,
     );
   }

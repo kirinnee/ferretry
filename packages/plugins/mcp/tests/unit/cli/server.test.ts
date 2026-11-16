@@ -95,7 +95,7 @@ describe('McpServer — the tools', () => {
     ])
       should(names).containEql(name);
     for (const name of ['secure_copy', 'secure_list', 'secure_discard', 'secure_paste']) should(names).containEql(name);
-    for (const name of ['account_propose', 'task_plan']) should(names).containEql(name);
+    for (const name of ['account_propose', 'signin_plan', 'task_plan']) should(names).containEql(name);
     should(new Set(names).size).equal(names.length);
     should(answer.result.tools).have.length(MCP_TOOLS.length);
     for (const tool of answer.result.tools) should(tool.inputSchema).have.property('type', 'object');

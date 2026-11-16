@@ -1,4 +1,4 @@
-import type { Log, StateDamage, StateFileDef, StatePort } from '@ferretry/kernel/contract';
+import type { Log, StatePort } from '@ferretry/kernel/contract';
 import {
   canonicalJsonValue,
   deepFreezeJson,
@@ -41,7 +41,26 @@ import type {
 } from '../../lib/storage-types.ts';
 import { KeyedSerialExecutor } from './keyed-serial-executor.ts';
 import { ListedSessionIndex } from './listed-session-index.ts';
+import {
+  DurableEventIndexError,
+  InvalidStateDocumentError,
+  MissingSessionJournalError,
+} from './session-storage-errors.ts';
+import type {
+  ArchiveVerdict,
+  DocumentFreshness,
+  JournalRead,
+  SessionDirectorySurvey,
+  SessionInspection,
+  SessionNames,
+  SessionRead,
+  SourceCollection,
+} from './session-storage-shapes.ts';
+import { assertFleetTailLimit, fileOf, sameFingerprint } from './session-storage-support.ts';
 import { StateSqliteIndex } from './sqlite-index.ts';
+
+export { InvalidStateDocumentError } from './session-storage-errors.ts';
+export type { ArchiveVerdict, DocumentFreshness, SessionDirectorySurvey } from './session-storage-shapes.ts';
 
 /**
  * THE SESSION STORE, ON FERRETS' STATE PORT.
@@ -63,131 +82,6 @@ import { StateSqliteIndex } from './sqlite-index.ts';
  * and the archive registry, and a transform may be asynchronous (the exit observer's compare-and-set reads the pane
  * registration inside it), which `StatePort.update`'s synchronous function cannot host.
  */
-
-/**
- * The kinds of a refused document, a fixed vocabulary: the port's damage kinds for a file it could not read, and
- * `refused_write` for a value THIS daemon computed and the declared schema refused before it reached the disk (the file
- * on disk is then not what is wrong).
- */
-export type InvalidDocumentKind = StateDamage['reason'] | 'refused_write';
-
-export class InvalidStateDocumentError extends Error {
-  constructor(
-    readonly file: string,
-    readonly reason: string,
-    /** The kind, from a fixed vocabulary ({@link InvalidDocumentKind}): safe to log, never a quote of the file. */
-    readonly damage: InvalidDocumentKind = 'schema',
-    /**
-     * The file as last written: the state port's version etag (inode, size and modification time), so the same damage
-     * is the same report until the file is written again (any rewrite is a new etag, even of identical bytes; it is a
-     * write identity, not a digest of the bytes). `undefined` when the port could not say.
-     */
-    readonly etag?: string,
-  ) {
-    super(`invalid JSON document ${file}: ${reason}`);
-    this.name = 'InvalidStateDocumentError';
-  }
-}
-
-class MissingSessionJournalError extends Error {
-  constructor(
-    readonly sessionId: SessionId,
-    readonly file: string,
-  ) {
-    super(`session ${sessionId} has lost its durable journal ${file}; refusing to treat it as empty`);
-    this.name = 'MissingSessionJournalError';
-  }
-}
-
-class DurableEventIndexError extends Error {
-  readonly durable = true;
-
-  constructor(
-    readonly sessionId: SessionId,
-    options: ErrorOptions,
-  ) {
-    super(`event for ${sessionId} is durable in the journal but could not be indexed`, options);
-    this.name = 'DurableEventIndexError';
-  }
-}
-
-interface SourceCollection {
-  readonly sources: readonly SessionSource[];
-  /** The sessions whose journal was NOT read because its version is the one the index row records. */
-  readonly unchanged: ReadonlySet<string>;
-  readonly problems: readonly JournalProblem[];
-  readonly failedSessionIds: readonly string[];
-  readonly lostJournalSessionIds: readonly string[];
-}
-
-/** One session as a health tick sees it: cheap to obtain, enough to spot lost history. */
-export interface SessionDirectorySurvey {
-  readonly id: SessionId;
-  /**
-   * True when the journal is gone from a session that owes one: the index witnesses a journal the session used to
-   * have, and the state folder no longer holds it.
-   */
-  readonly journalLost: boolean;
-}
-
-type SessionInspection =
-  | { readonly kind: 'current'; readonly session?: IndexedSession }
-  | { readonly kind: 'repair'; readonly source: SessionSource | null; readonly session?: IndexedSession };
-
-/** A session's journal as read: its lines, and whether the read reached the end of the file. */
-interface JournalRead {
-  readonly lines: readonly JournalLine[];
-  readonly complete: boolean;
-}
-
-/** A session's three files as read in one pass. */
-interface SessionRead {
-  readonly source: SessionSource | undefined;
-  readonly journal: JournalRead;
-}
-
-/** Which sessions hold which files, from the state port's listings. */
-interface SessionNames {
-  readonly all: readonly string[];
-  readonly configs: ReadonlySet<string>;
-  readonly states: ReadonlySet<string>;
-  readonly histories: ReadonlySet<string>;
-}
-
-function sameFingerprint(left: JournalFingerprint | null, right: JournalFingerprint | null): boolean {
-  return (
-    left === right ||
-    (left !== null &&
-      right !== null &&
-      left.device === right.device &&
-      left.inode === right.inode &&
-      left.size === right.size &&
-      left.modifiedAtMs === right.modifiedAtMs)
-  );
-}
-
-/** Where a collection file of `id` lives, for messages: the declared path with its `*` filled. */
-function fileOf(file: StateFileDef, id: SessionId): string {
-  return file.path.replace('*', id);
-}
-
-/**
- * How fresh a read must be. Kept so every caller is unchanged; the state port proves every read, so both answer the
- * file as it is now.
- */
-export type DocumentFreshness = 'proved' | 'heard';
-
-function assertFleetTailLimit(limit: number): void {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000)
-    throw new Error('fleet event limit must be an integer between 1 and 10000');
-}
-
-/** What the archive records of a session it is about to take: the name it answered to and what that name's hold runs from. */
-export interface ArchiveVerdict {
-  readonly name?: string;
-  /** The configuration's `createdAt` and `updatedAt`: what a callsign's hold on its name is measured from. */
-  readonly configTimes?: { readonly createdAt: string; readonly updatedAt: string };
-}
 
 export class DaemonStorage {
   private closed = false;

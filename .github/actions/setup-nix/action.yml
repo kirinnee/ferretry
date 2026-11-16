@@ -1,0 +1,584 @@
+name: Setup AtomiCloud CI Nix
+description: 'Setup AtomiCloud CI Nix (Compatible with Namespace)'
+inputs:
+  namespacelabs:
+    default: 'true'
+    description: "Using Namespace Lab's runners"
+  darwin-cache-path:
+    default: '/tmp/nix-cache'
+    description: 'Mount path for the Namespace cache volume used as a file:// binary cache on macOS'
+  checkout:
+    default: 'true'
+    description: 'Whether to checkout the repository'
+  short-length:
+    default: 7
+    description: length for short values
+  github-slug:
+    default: 'true'
+    description: "Export the GITHUB_*_SLUG / GITHUB_*_SHORT environment variables (plain bash, the same variables and rules as rlespinasse/github-slug-action v5). Only release/tagging jobs need them: set 'false' for plain test jobs. The default keeps today's behaviour."
+  fetch-depth:
+    default: '0'
+    description: "Linux checkout depth. '0' (default) = full history and every branch and tag. Test/build jobs that never read history can set '1'."
+  deepen:
+    default: 'true'
+    description: "macOS: after the shallow checkout, fetch the full history of the current ref plus tags (~0.4-1.2 s). Test/build jobs that never read history can set 'false'."
+  warm-bootstrap:
+    default: 'true'
+    description: "Namespace Linux only. Re-create Nix from the persisted /nix cache volume without running the Determinate installer (~0.4s instead of ~6s). Any verification failure falls back to the installer. Set 'false' to always run the installer."
+  warm-max-age-days:
+    default: '7'
+    description: 'Namespace Linux only. A persisted Nix install older than this many days is refreshed by the installer instead of being re-used, so the Determinate Nix version still follows the installer'
+  devshell-cache:
+    default: 'true'
+    description: "Namespace Linux, and Namespace macOS when the store image is attached. On by default: durian-shell's dev-shell cache. A repo keeping it on asserts its dev shell depends only on flake.nix, flake.lock and nix/** (plus DURIAN_SHELL_PATHS): not on `self`/git metadata, nor on other files. Set 'false' to make durian-shell plain `nix develop`."
+  devshell-prewarm:
+    default: ''
+    description: "With devshell-cache only. Space-separated installables (e.g. '.#ci .#cd'), written exactly as the jobs pass them to durian-shell. Every job makes sure ALL of them are cached (a miss is evaluated and stored), so a shell used by few jobs is not lost when parallel jobs write the cache volume back last-writer-wins. Empty: each job caches only the shell it runs."
+  devshell-scope:
+    default: ${{ github.repository }}
+    description: "With devshell-cache only. Which subfolder of the dev-shell cache this job's shells live in (lowercased, other characters become '-', plus a short hash of the exact value). Default: the repository, so repos sharing one cache tag never prune each other's shells (the keep-newest limit counts per scope). Empty: one shared folder, as in v3.8.0."
+  store-guard:
+    default: 'true'
+    description: "Namespace Linux only. Size warnings for the /nix cache volume (at 85% and over the size, where Namespace starts the next job on the tag from an EMPTY volume; the size is read from the mounted volume, so it follows the nscloud-cache-size-NNgb label), and an end-of-job notice when the job changed nothing in /nix but will still commit its copy. Never fails the job and never deletes anything. 'false' turns all of it off; 'always' also runs it on other Linux runners (self-hosted with a persistent /nix, tests)."
+  idle-commit-notice-minutes:
+    default: '0'
+    description: "With store-guard. End-of-job notice when the job changed nothing in /nix (no store path, no dev shell) and ran at least this many minutes: Namespace still commits its older copy over what other jobs on the tag wrote, so such jobs may want the nscloud-cache-exp-do-not-commit label. '0': always; 'off': never."
+  flakehub-login:
+    default: 'true'
+    description: "Log in to FlakeHub with the job's OIDC token on the warm-bootstrap path (only happens when the job has `id-token: write`). Set 'false' when the job needs OIDC for something else but uses no FlakeHub cache or private flakes: a login without FlakeHub access fails after ~10-30s of retries. The Determinate installer action (cold volume, GitHub-hosted) has no such switch and still logs in whenever the job has OIDC: drop `id-token: write` from jobs that do not need it."
+  auth-bot-app-id:
+    default: ''
+    description: App Id for auth bot
+  auth-bot-secret-key:
+    default: ''
+    description: Private key for auth bot
+  attic:
+    default: 'true'
+    description: 'Configure attic as a substituter. Reads need no token (the cache is public); pushes additionally require attic-token.'
+  attic-user:
+    default: 'primordial'
+    description: 'Local server alias used by `attic login`'
+  attic-url:
+    default: 'https://attic.primordial.atomi.cloud'
+    description: 'Pull URL (Cloudflare-proxied; NARs are edge-cached)'
+  attic-push-url:
+    default: 'https://attic-direct.primordial.atomi.cloud'
+    description: 'Push URL (DNS-only, bypasses the Cloudflare 100MB request-body limit that 413s large NAR uploads)'
+  attic-priority:
+    default: ''
+    description: "Substituter priority of attic (lower wins; cache.nixos.org is 40). Empty: 35 on Linux, 45 on macOS (behind cache.nixos.org: attic's cold edge serves the big darwin NARs slowly)."
+  attic-public-key:
+    default: 'primordial:puK/sRe9wgfcreXNCR+rym2gwLuICwIWyAwTSG9ctkU='
+    description: 'Public key for attic'
+  attic-cache:
+    default: 'primordial'
+    description: 'Attic cache name'
+  attic-token:
+    default: ''
+    description: 'Token for attic'
+
+branding:
+  color: blue
+  icon: settings
+
+runs:
+  using: 'composite'
+  steps:
+    # Plain bash instead of rlespinasse/github-slug-action: GitHub downloads every action a
+    # composite names, even skipped ones (that action pulls 3 repos: ~0.3 s on every job).
+    # Same variables and the same rules (rlespinasse/slugify-value, shortify-git-revision):
+    # test.yaml diffs this step against the real action on every push.
+    - name: Inject enhanced GitHub environment variables
+      if: inputs.github-slug == 'true'
+      shell: bash
+      env:
+        SHORT_LENGTH: ${{ inputs.short-length }}
+        EVENT_REF: ${{ github.event.ref }}
+        PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      run: |
+        set -euo pipefail
+        # slugify-value rules: strip one refs/<kind>/ prefix, runs of other characters become
+        # '-', no leading '-', cut to 63, no trailing '-'. url: '.' and '_' go too.
+        slug() { sed -E 's#refs/[^/]*/##;s/[^a-zA-Z0-9._-]+/-/g;s/^-*//' <<<"$1" | cut -c1-63 | sed -E 's/-*$//'; }
+        slug_url() { sed -E 's#refs/[^/]*/##;s/[^a-zA-Z0-9-]+/-/g;s/^-*//' <<<"$1" | cut -c1-63 | sed -E 's/-*$//'; }
+        emit() { # <NAME> <raw value>
+          local lo
+          lo="$(tr '[:upper:]' '[:lower:]' <<<"$2")"
+          {
+            echo "$1=$2"
+            echo "$1_SLUG=$(slug "$lo")"
+            echo "$1_SLUG_CS=$(slug "$2")"
+            echo "$1_SLUG_URL=$(slug_url "$lo")"
+            echo "$1_SLUG_URL_CS=$(slug_url "$2")"
+          } >>"$GITHUB_ENV"
+        }
+        short() { # <NAME> <sha>, like shortify-git-revision: git's abbreviation when the object
+          # exists here (git keeps at least 4 characters and extends an ambiguous prefix), else the
+          # first SHORT_LENGTH characters. Empty sha: nothing.
+          local s
+          [ -n "$2" ] || return 0
+          if git cat-file -e "$2" 2>/dev/null; then
+            s="$(git rev-parse "--short${SHORT_LENGTH:+=$SHORT_LENGTH}" "$2")"
+          else
+            s="${2:0:$SHORT_LENGTH}"
+          fi
+          { echo "$1=$2"; echo "$1_SHORT=$s"; } >>"$GITHUB_ENV"
+        }
+        emit GITHUB_REPOSITORY "$GITHUB_REPOSITORY"
+        emit GITHUB_REF "$GITHUB_REF"
+        emit GITHUB_HEAD_REF "${GITHUB_HEAD_REF:-}"
+        emit GITHUB_BASE_REF "${GITHUB_BASE_REF:-}"
+        emit GITHUB_EVENT_REF "$EVENT_REF"
+        emit GITHUB_REF_NAME "$GITHUB_REF_NAME"
+        emit GITHUB_REF_POINT "${GITHUB_HEAD_REF:-$GITHUB_REF_NAME}"
+        emit GITHUB_REPOSITORY_OWNER_PART "${GITHUB_REPOSITORY%%/*}"
+        emit GITHUB_REPOSITORY_NAME_PART "${GITHUB_REPOSITORY#*/}"
+        short GITHUB_SHA "$GITHUB_SHA"
+        short GITHUB_EVENT_PULL_REQUEST_HEAD_SHA "$PR_HEAD_SHA"
+
+    # NOTE (macOS casing): reftable refs would dodge the APFS case-collision problem,
+    # but nix reads git flakes through libgit2, which cannot open reftable repos
+    # ("unsupported extension name extensions.refstorage") — so loose refs it is, and
+    # macOS instead avoids fetching foreign branch refs altogether (see below).
+    - name: Generate Github App Token
+      uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+      if: inputs.auth-bot-app-id != '' && inputs.auth-bot-secret-key != ''
+      id: app-token
+      with:
+        app-id: ${{ inputs.auth-bot-app-id }}
+        private-key: ${{ inputs.auth-bot-secret-key }}
+
+    - name: Checkout Repository With Auth Bot
+      if: inputs.checkout == 'true' && inputs.auth-bot-app-id != '' && inputs.auth-bot-secret-key != '' && runner.os != 'macOS'
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      with:
+        fetch-depth: 0
+        token: ${{ steps.app-token.outputs.token }}
+
+    - name: Checkout Repository With Auth Bot (macOS)
+      if: inputs.checkout == 'true' && inputs.auth-bot-app-id != '' && inputs.auth-bot-secret-key != '' && runner.os == 'macOS'
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      with:
+        fetch-depth: 1
+        token: ${{ steps.app-token.outputs.token }}
+
+    - name: Checkout Config
+      if: inputs.checkout == 'true' && inputs.auth-bot-app-id != '' && inputs.auth-bot-secret-key != ''
+      shell: bash
+      run: |
+        git config user.name auth-bot
+        git config user.email auth-bot@atomi.cloud
+
+    - name: Checkout Repository
+      if: inputs.checkout == 'true' && inputs.auth-bot-app-id == '' && inputs.auth-bot-secret-key == '' && runner.os != 'macOS'
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      with:
+        fetch-depth: ${{ inputs.fetch-depth }}
+
+    - name: Checkout Repository (macOS)
+      if: inputs.checkout == 'true' && inputs.auth-bot-app-id == '' && inputs.auth-bot-secret-key == '' && runner.os == 'macOS'
+      uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      with:
+        fetch-depth: 1
+
+    # macOS runners checkout onto case-insensitive APFS: fetch-depth 0 fetches EVERY
+    # branch ref, and two branches whose names differ only in case
+    # (Adelphi-Liong/feat-1 vs adelphi-liong/feat-2) collide as loose-ref files and
+    # corrupt the checkout. So on macOS: shallow single-ref checkout above, then deepen
+    # ONLY the current ref (full history) and grab tags — foreign branch refs are never
+    # written, so they can never collide.
+    - name: Deepen current ref (macOS)
+      if: inputs.checkout == 'true' && runner.os == 'macOS' && inputs.deepen == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --unshallow --tags origin "$(git rev-parse HEAD)"
+        else
+          git fetch --tags origin "$(git rev-parse HEAD)"
+        fi
+
+    # COMPUTE NIX CONFIG
+    # One source of truth for substituters / trusted-public-keys, consumed by whichever
+    # single installer runs below. Keeps the existing combinations byte-identical while
+    # adding the macOS Namespace file:// binary cache.
+    - name: Compute Nix Config
+      id: nixconf
+      shell: bash
+      env:
+        NAMESPACELABS: ${{ inputs.namespacelabs }}
+        RUNNER_OS: ${{ runner.os }}
+        ATTIC: ${{ inputs.attic }}
+        ATTIC_URL: ${{ inputs.attic-url }}
+        ATTIC_CACHE: ${{ inputs.attic-cache }}
+        ATTIC_PUBLIC_KEY: ${{ inputs.attic-public-key }}
+        ATTIC_PRIORITY: ${{ inputs.attic-priority }}
+        DARWIN_CACHE_PATH: ${{ inputs.darwin-cache-path }}
+      run: |
+        set -euo pipefail
+        base_subs="https://nix-community.cachix.org?priority=41 https://numtide.cachix.org?priority=42 https://cache.nixos.org/"
+        base_keys="cache.nixos.org-1:6NCHdD59X431o0gWypbMrAURkbJ16ZPMQFGspcDShjY= nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs= numtide.cachix.org-1:2ps1kLBUWjxIneOy1Ik6cQjb41X0iXVXeHigGmycPPE="
+
+        subs="$base_subs"
+        keys="$base_keys"
+
+        # macOS Namespace runners cannot mount /nix (sealed APFS root); prepend a local
+        # file:// binary cache served off the Namespace cache volume instead.
+        darwin_ns="false"
+        if [ "$NAMESPACELABS" = "true" ] && [ "$RUNNER_OS" = "macOS" ]; then
+          darwin_ns="true"
+          subs="file://${DARWIN_CACHE_PATH}?priority=10 $subs"
+        fi
+
+        if [ "$ATTIC" = "true" ]; then
+          # Priority 35: ahead of cache.nixos.org (40) — attic is a full mirror
+          # served zstd-compressed from the Cloudflare edge, which beats nixos'
+          # xz over origin for both transfer and decompress. Misses fall through.
+          # macOS: 45, behind cache.nixos.org. The iOS shells' big darwin NARs (LLVM,
+          # apple-sdk, ruby, python) come off a cold attic edge at well under 1 MB/s:
+          # a cold job took 1,058 s in `nix develop` with attic first and 53-56 s with
+          # cache.nixos.org first, which holds 185 of the 188 paths attic served.
+          attic_prio="${ATTIC_PRIORITY:-}"
+          if [ -z "$attic_prio" ]; then
+            if [ "$RUNNER_OS" = "macOS" ]; then attic_prio=45; else attic_prio=35; fi
+          fi
+          subs="$subs ${ATTIC_URL}/${ATTIC_CACHE}?priority=${attic_prio}"
+          keys="$keys $ATTIC_PUBLIC_KEY"
+        fi
+
+        {
+          echo "config<<__DURIAN_NIXCONF__"
+          echo "fallback = true"
+          echo "substituters = $subs"
+          echo "trusted-public-keys = $keys"
+          # Paths copied into the file:// cache via `nix copy` are unsigned.
+          if [ "$darwin_ns" = "true" ]; then
+            echo "require-sigs = false"
+          fi
+          # Lazy trees skip copying/hashing the source tree into the store at
+          # eval time. Determinate Nix runs on every path now, so this is safe
+          # unconditionally.
+          echo "lazy-trees = true"
+          echo "__DURIAN_NIXCONF__"
+        } >> "$GITHUB_OUTPUT"
+
+    # NAMESPACE LAB VERSION (Linux): persist the nix store directly on the cache volume.
+    - name: Setup Nix Folder
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux'
+      run: |
+        sudo mkdir /nix
+        sudo chown "$USER" /nix
+    - name: Cache Nix
+      uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux'
+      with:
+        # ~/.cache/nix holds the flake eval cache — persisting it lets repeat
+        # `nix develop`/`nix eval` invocations skip re-evaluation.
+        path: |
+          /nix
+          ~/.cache/nix
+
+    # NAMESPACE LAB VERSION (macOS): the APFS root volume is sealed, so /nix cannot be a
+    # mount point. Persist a local file:// binary cache on the Namespace cache volume
+    # instead. Must run AFTER checkout (Namespace requirement).
+    - name: Cache Nix (Darwin file:// binary cache)
+      uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+      if: inputs.namespacelabs == 'true' && runner.os == 'macOS'
+      with:
+        # ~/.cache/nix holds the flake eval cache and the flake-input fetcher cache —
+        # doubly valuable on macOS where /nix itself starts empty every run.
+        path: |
+          ${{ inputs.darwin-cache-path }}
+          ~/.cache/nix
+
+    # The cache action mounts the path root-owned on macOS, but the post-push hook's
+    # `nix copy` runs as the runner user and dies with EACCES ("opening file …: Permission
+    # denied"), leaving the cache permanently empty. Own it — the macOS mirror of the
+    # Linux branch's `sudo chown $USER /nix`.
+    - name: Own Darwin cache path
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'macOS'
+      env:
+        DARWIN_CACHE_PATH: ${{ inputs.darwin-cache-path }}
+      run: |
+        set -euo pipefail
+        target="$(readlink -f "$DARWIN_CACHE_PATH" 2>/dev/null || echo "$DARWIN_CACHE_PATH")"
+        # The mount point is root-owned; what earlier jobs wrote is already ours, so chown
+        # only what is not (a recursive chown of the whole cache took ~0.4 s every job).
+        sudo chown "$USER" "$target"
+        find "$target" ! -user "$USER" -print0 | xargs -0 sudo chown "$USER" 2>/dev/null ||
+          sudo chown -R "$USER" "$target"
+
+    # The cache action can mount ~/.cache/nix root-owned (same failure mode as the darwin
+    # cache path above); nix then silently skips writing the eval cache, wasting the mount.
+    - name: Own Nix eval cache
+      shell: bash
+      if: inputs.namespacelabs == 'true'
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.cache/nix"
+        sudo chown -R "$USER" "$HOME/.cache/nix"
+
+    # STORE IMAGE (Namespace macOS): a persisted APFS sparse image on the cache volume
+    # IS the nix store. Attaching it at /nix (~1s) replaces the multi-GB NAR unpack
+    # that otherwise dominates warm macOS jobs. Every failure path discards the image
+    # and falls back to the plain file:// substitution flow — and Namespace commits
+    # the volume only on job success, so a crashed job's dirty image dies with its
+    # fork instead of propagating.
+    - name: Attach Nix store image (macOS)
+      id: niximg
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'macOS'
+      env:
+        DARWIN_CACHE_PATH: ${{ inputs.darwin-cache-path }}
+      run: |
+        set -euo pipefail
+        img="${DARWIN_CACHE_PATH}/nix-store.sparseimage"
+        attached=false
+        # A poison marker means the previous run could not detach cleanly — the
+        # committed image may be dirty; rebuild it rather than trust it.
+        if [ -f "${img}.dirty" ]; then
+          echo "::warning::store image is marked dirty (unclean detach); discarding it"
+          rm -f "$img" "${img}.dirty"
+        fi
+        if [ -f "$img" ]; then
+          # /nix must exist on the sealed root before anything can mount there.
+          if [ ! -d /nix ]; then
+            printf 'nix\n' | sudo tee -a /etc/synthetic.conf >/dev/null
+            sudo /System/Library/Filesystems/apfs.fs/Contents/Resources/apfs.util -B / 2>/dev/null ||
+              sudo /System/Library/Filesystems/apfs.fs/Contents/Resources/apfs.util -t / 2>/dev/null || true
+          fi
+          if [ -d /nix ] && sudo hdiutil attach -mountpoint /nix -nobrowse -owners on "$img" >/dev/null; then
+            if [ -d /nix/store ] && [ -x /nix/var/nix/profiles/default/bin/nix-daemon ] &&
+              sudo sqlite3 /nix/var/nix/db/db.sqlite 'PRAGMA quick_check;' 2>/dev/null | grep -q '^ok$'; then
+              echo "✅ store image attached at /nix"
+              attached=true
+            else
+              echo "::warning::store image failed verification; discarding it"
+              sudo hdiutil detach /nix -force >/dev/null 2>&1 || true
+              rm -f "$img"
+            fi
+          else
+            echo "::warning::store image could not be attached; discarding it"
+            rm -f "$img"
+          fi
+        else
+          echo "no store image yet; post hook will create one"
+        fi
+        echo "attached=$attached" >> "$GITHUB_OUTPUT"
+        # The post hook must distinguish image-backed /nix from the installer's own
+        # APFS volume (both are mounts) — tell it explicitly.
+        echo "DURIAN_NIX_IMAGE_ATTACHED=$attached" >> "$GITHUB_ENV"
+
+    # INSTALL NIX — the Determinate installer runs on every path (it is the only
+    # installer that supports lazy-trees), fed by the single computed config above.
+    #
+    # On Namespace Linux the warm cache volume persists the previous run's install
+    # receipt at /nix/receipt.json; the installer refuses to run when it exists
+    # ("Nix is already installed") even though this VM is fresh and still needs the
+    # daemon, /etc/nix and profiles set up. Drop the receipt (and the previous
+    # profile symlinks the installer wants to create itself) and install over the
+    # existing store — store paths and the sqlite db are untouched, which is the
+    # whole point of the volume.
+    # WARM FAST PATH (Namespace Linux): the persisted /nix already holds a working Nix.
+    # Only what lives OUTSIDE /nix (nix.conf, determinate-nixd, build users, the daemon
+    # process) is gone with the fresh VM, so recreate exactly that instead of running
+    # the installer. Verifies the store first and rolls back + reports bootstrapped=false
+    # on any problem, in which case the installer steps below run as before.
+    - name: Bootstrap Nix from persisted /nix (Namespace Linux)
+      id: linuxwarm
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && inputs.warm-bootstrap == 'true'
+      env:
+        NIX_CONF: ${{ steps.nixconf.outputs.config }}
+        GITHUB_TOKEN_VALUE: ${{ github.token }}
+        MAX_AGE_DAYS: ${{ inputs.warm-max-age-days }}
+        FLAKEHUB_LOGIN: ${{ inputs.flakehub-login }}
+      run: '"$GITHUB_ACTION_PATH/scripts/linux-warm-nix.sh" bootstrap'
+
+    - name: Prepare warm Nix store for installer (Namespace Linux)
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && steps.linuxwarm.outputs.bootstrapped != 'true'
+      run: |
+        set -euo pipefail
+        sudo rm -f /nix/receipt.json
+        sudo rm -rf /nix/var/nix/profiles/default /nix/var/nix/profiles/default-*-link
+
+    # When the store image is attached, the installer must NOT run — it creates its
+    # own APFS volume and mounts it over /nix, shadowing the image (observed). The
+    # bootstrap below replaces it, which also removes its ~60s from the warm path.
+    - name: Install Nix (Determinate Systems)
+      if: steps.niximg.outputs.attached != 'true' && steps.linuxwarm.outputs.bootstrapped != 'true'
+      uses: DeterminateSystems/nix-installer-action@3138316df39ed29be04236d7ffc686fa525866aa # v23
+      with:
+        extra-conf: ${{ steps.nixconf.outputs.config }}
+
+    # Snapshot what the installer just wrote outside /nix onto the cache volume, so the
+    # next Namespace Linux job can take the warm fast path above.
+    - name: Capture Nix install state for warm jobs (Namespace Linux)
+      shell: bash
+      if: inputs.namespacelabs == 'true' && runner.os == 'Linux' && inputs.warm-bootstrap == 'true' && steps.linuxwarm.outputs.bootstrapped != 'true'
+      run: '"$GITHUB_ACTION_PATH/scripts/linux-warm-nix.sh" capture'
+
+    - name: Bootstrap Nix from store image (macOS)
+      shell: bash
+      if: steps.niximg.outputs.attached == 'true'
+      env:
+        NIX_CONF: ${{ steps.nixconf.outputs.config }}
+      run: |
+        set -euo pipefail
+        profile=/nix/var/nix/profiles/default
+
+        # nix.conf — same computed config the installer would have received.
+        sudo mkdir -p /etc/nix
+        {
+          echo "build-users-group = nixbld"
+          echo "experimental-features = nix-command flakes"
+          printf '%s\n' "$NIX_CONF"
+        } | sudo tee /etc/nix/nix.conf >/dev/null
+
+        # Build users: the fresh VM has none; the daemon refuses to build without
+        # them. 8 is plenty for CI. One sudo, the 8 users in parallel: 41 sequential
+        # sudo dscl calls took ~0.75 s of every warm job.
+        if ! dscl . -read /Groups/nixbld >/dev/null 2>&1; then
+          # (errexit is not inherited into the sudo shell: set it, and wait on every worker)
+          sudo bash -c '
+            set -e
+            dscl . -create /Groups/nixbld PrimaryGroupID 30000
+            pids=""
+            for i in 1 2 3 4 5 6 7 8; do
+              ( set -e
+                u="/Users/_nixbld$i"
+                dscl . -create "$u" UniqueID $((30000 + i))
+                dscl . -create "$u" PrimaryGroupID 30000
+                dscl . -create "$u" UserShell /usr/bin/false
+                dscl . -create "$u" NFSHomeDirectory /var/empty ) &
+              pids="$pids $!"
+            done
+            for p in $pids; do wait "$p"; done
+            dscl . -create /Groups/nixbld GroupMembership _nixbld1 _nixbld2 _nixbld3 _nixbld4 _nixbld5 _nixbld6 _nixbld7 _nixbld8'
+        fi
+
+        # Plain nix-daemon from the image's profile (no determinate-nixd supervisor
+        # on this path — the standard daemon socket is all the client needs).
+        sudo tee /Library/LaunchDaemons/org.nixos.nix-daemon.plist >/dev/null <<PLIST
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+          <key>Label</key><string>org.nixos.nix-daemon</string>
+          <key>ProgramArguments</key>
+          <array><string>${profile}/bin/nix-daemon</string></array>
+          <key>KeepAlive</key><true/>
+          <key>EnvironmentVariables</key>
+          <dict>
+            <key>NIX_SSL_CERT_FILE</key><string>/etc/ssl/cert.pem</string>
+            <key>PATH</key><string>${profile}/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+          </dict>
+        </dict>
+        </plist>
+        PLIST
+        sudo launchctl load -w /Library/LaunchDaemons/org.nixos.nix-daemon.plist
+
+        # poll every 50 ms (a 1 s sleep cost a full second: the socket appears in ~0.1 s)
+        for _ in $(seq 1 600); do
+          [ -S /nix/var/nix/daemon-socket/socket ] && break
+          sleep 0.05
+        done
+        [ -S /nix/var/nix/daemon-socket/socket ] || { echo "::error::nix-daemon socket never appeared"; exit 1; }
+
+        echo "${profile}/bin" >> "$GITHUB_PATH"
+        echo "NIX_SSL_CERT_FILE=/etc/ssl/cert.pem" >> "$GITHUB_ENV"
+        "$profile/bin/nix" --version
+        echo "✅ nix bootstrapped from store image (no installer)"
+
+    # AUTOMATIC WRITE-BACK (Namespace macOS): register a post hook that pushes the realized
+    # devShell closures back to the file:// cache at end of job (only on success). Composite
+    # actions have no `post:`, and a relative `uses: ./...` resolves against the consumer's
+    # workspace, so symlink the bundled JS sub-action into the workspace and reference it by
+    # that path — works for external consumers with no version drift.
+    - name: Link cache push hook (Namespace macOS)
+      if: inputs.namespacelabs == 'true' && runner.os == 'macOS'
+      shell: bash
+      run: |
+        set -euo pipefail
+        ln -sfn "$GITHUB_ACTION_PATH/post-cache-push" "$GITHUB_WORKSPACE/.durian-nix-cache-push"
+
+    - name: Register cache push hook (Namespace macOS)
+      if: inputs.namespacelabs == 'true' && runner.os == 'macOS'
+      uses: ./.durian-nix-cache-push
+      with:
+        cache-path: ${{ inputs.darwin-cache-path }}
+
+    # SETUP ATTIC — nixpkgs' attic-client is prebuilt in cache.nixos.org; the upstream
+    # flake would compile rust from source on cold runners.
+    - name: Install Attic
+      shell: bash
+      if: inputs.attic-token != '' && inputs.attic == 'true'
+      run: |
+        nix profile install nixpkgs#attic-client
+
+    # Login against the PUSH url: uploads must bypass the Cloudflare proxy (100MB
+    # request-body cap → 413 on large NARs). Pulls still go through the proxied
+    # attic-url substituter, where NARs are edge-cached.
+    - name: Login to Attic
+      shell: bash
+      if: inputs.attic-token != '' && inputs.attic == 'true'
+      run: |
+        attic login "${{ inputs.attic-user }}" "${{ inputs.attic-push-url }}" "${{ inputs.attic-token }}"
+
+    # A shared cache tag is one volume for every job and repo that carries it: warn before it
+    # outgrows its size (then Namespace starts the next job on an EMPTY volume; the size is read
+    # from the mounted volume) and remember the store state for the end-of-job notice.
+    - name: Store guard (Namespace Linux)
+      if: runner.os == 'Linux' && (inputs.store-guard == 'always' || (inputs.store-guard == 'true' && inputs.namespacelabs == 'true'))
+      shell: bash
+      run: '"$GITHUB_ACTION_PATH/scripts/store-guard.sh" start'
+
+    # End-of-job half of the store guard: a JS sub-action whose `post:` runs the script above
+    # at end of job (composite actions cannot declare `post:`). Referenced as a REMOTE action
+    # pinned to a commit, so it lives in the runner's _actions dir: a later actions/checkout
+    # (e.g. setup-docker's) cleans the workspace, and v3.9.0's hook, linked into the workspace,
+    # was gone by post time and failed the job. Pinned to the commit that made the hook take no size input (immutable; a
+    # moving tag may point at a release without store-guard/). The hook only runs the script
+    # path it is given and turns every error into a warning; bump the pin only if
+    # store-guard/ itself changes.
+    - name: Register store guard hook (Namespace Linux)
+      if: runner.os == 'Linux' && (inputs.store-guard == 'always' || (inputs.store-guard == 'true' && inputs.namespacelabs == 'true'))
+      uses: ./.github/actions/setup-nix/store-guard
+      with:
+        script: ${{ github.action_path }}/scripts/store-guard.sh
+        idle-commit-notice-minutes: ${{ inputs.idle-commit-notice-minutes }}
+
+    # `durian-shell <flake>#<shell> -c <cmd...>`: `nix develop -c` with the evaluated dev
+    # env cached on the persisted /nix volume (Namespace Linux); a plain `nix develop`
+    # everywhere else. See bin/durian-shell.
+    - name: Add durian-shell to PATH
+      shell: bash
+      env:
+        CACHE_OK: ${{ inputs.devshell-cache == 'true' && inputs.namespacelabs == 'true' && (runner.os == 'Linux' || steps.niximg.outputs.attached == 'true') }}
+        SCOPE: ${{ inputs.devshell-scope }}
+      run: |
+        echo "$GITHUB_ACTION_PATH/bin" >> "$GITHUB_PATH"
+        # The dev-env cache lives on the persisted /nix: the Linux cache volume, or the
+        # macOS store image (when it was attached). Opt in only there.
+        if [ "$CACHE_OK" = "true" ]; then
+          echo "DURIAN_SHELL_CACHE=1" >> "$GITHUB_ENV"
+          if [ -n "$SCOPE" ]; then echo "DURIAN_SHELL_SCOPE=$SCOPE" >> "$GITHUB_ENV"; fi
+        fi
+
+    # Parallel jobs write the volume back last-writer-wins: a job that cached only its own
+    # shell can drop the shell another job stored. Warming the same list in every job keeps
+    # every listed shell in whichever volume wins (a hit costs ~0.2s per shell).
+    - name: Pre-warm dev shells
+      if: inputs.devshell-prewarm != '' && inputs.devshell-cache == 'true' && inputs.namespacelabs == 'true' && runner.os == 'Linux'
+      shell: bash
+      env:
+        DURIAN_SHELL_CACHE: '1'
+        DURIAN_SHELL_SCOPE: ${{ inputs.devshell-scope }}
+        PREWARM: ${{ inputs.devshell-prewarm }}
+      run: |
+        set -euo pipefail
+        read -ra shells <<<"$PREWARM"
+        "$GITHUB_ACTION_PATH/bin/durian-shell" --warm "${shells[@]}"

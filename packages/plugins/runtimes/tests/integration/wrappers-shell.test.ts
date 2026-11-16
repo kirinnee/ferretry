@@ -481,7 +481,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       'do it yourself first',
       'filling every non-secret field',
       'ALWAYS for sudo',
-      'The card flags any risk',
+      'The input flags any risk',
       'terminal_request_input',
       'input_wait',
       'you never receive it',

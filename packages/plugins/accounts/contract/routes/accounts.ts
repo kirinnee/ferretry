@@ -771,7 +771,7 @@ export const StageTwoFactorSeedRequestSchema = z
   })
   .refine(body => body.submit === undefined || body.request !== undefined, {
     path: ['submit'],
-    message: 'submit is for the card a seed is set up from: send it with request',
+    message: 'submit is for the item a seed is set up from: send it with request',
   });
 export type StageTwoFactorSeedRequest = z.infer<typeof StageTwoFactorSeedRequestSchema>;
 

@@ -1,0 +1,11 @@
+name: 'AtomiCloud Nix Cache Push'
+description: 'Pushes realized devShell closures to a local file:// binary cache on job success (post hook).'
+inputs:
+  cache-path:
+    description: 'Path to the file:// binary cache directory (the Namespace cache volume mount).'
+    required: true
+runs:
+  using: node20
+  main: noop.js
+  post: push.js
+  post-if: success()

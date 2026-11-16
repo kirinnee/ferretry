@@ -557,7 +557,7 @@ const describeFyRender = (body: string): string | null => {
     audio: 'An audio clip',
     pdf: 'A PDF',
     lottie: 'An animation',
-    card: 'A card',
+    card: 'A task',
     board: 'A board',
   };
   const name = label[type] ?? 'A picture';

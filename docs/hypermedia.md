@@ -77,7 +77,7 @@ A fence whose info string is exactly fy-render: `type: <type>`, `alt: <one line>
 - svg: one self-contained <svg> (CSS animation ok); no script, foreignObject or links.
 - html: a fragment, inline CSS and <script> (isolated); no network; transparent, theme-token colours.
 - chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: `fy render guide chart`.
-- card, board (live cards), map, image, video, audio, pdf: `fy render guide <type>`.
+- task, board (live tasks), map, image, video, audio, pdf: `fy render guide <type>`.
 ```fy-render
 type: mermaid
 alt: Request flow
@@ -85,7 +85,7 @@ alt: Request flow
 flowchart TB
   Phone --> Relay --> Daemon
 ```
-Renders in chat, agenda tabs, cards; never in repo files, docs, commits, PRs.
+Renders in chat, agenda tabs, tasks; never in repo files, docs, commits, PRs.
 ````
 
 ## The supported forms

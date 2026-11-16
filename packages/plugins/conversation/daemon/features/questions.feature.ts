@@ -44,15 +44,15 @@ export default {
     const questionAsks = new QuestionAsks(asks, (ferret, error, outcome) =>
       kernel.log.warn(
         outcome === 'permanent'
-          ? `conversation could not raise the agenda card of the question of ${ferret} and will not try again: ${String(error)}`
-          : `conversation could not raise the agenda card of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
+          ? `conversation could not raise the agenda item of the question of ${ferret} and will not try again: ${String(error)}`
+          : `conversation could not raise the agenda item of the question of ${ferret} yet, and will try again when the agenda has room: ${String(error)}`,
       ),
     );
     /** Asks failing is never the question's failure: it is logged, owed and tried again on the watch's next look. */
     const askFailure =
       (what: string) =>
       (error: unknown): void =>
-        kernel.log.warn(`conversation could not ${what} the agenda card of a question: ${String(error)}`);
+        kernel.log.warn(`conversation could not ${what} the agenda item of a question: ${String(error)}`);
     /** The card of the exact question now stored, raised once (idempotent), after the question is durable. */
     const raiseQuestionAsk = async (ferret: string, toolUseId: string): Promise<void> => {
       const read = await kernel.state.read(QUESTION_STATE, ferret);

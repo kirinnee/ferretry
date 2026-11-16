@@ -138,7 +138,7 @@ describe('the sign-in-approval asks', () => {
     });
     if (!raised.ok) throw new Error('not raised');
 
-    await adapter.close('s1', raised.id, 'The task plan expired.');
+    await adapter.close('s1', raised.id, 'The sign-in plan expired.');
     await adapter.close('s1', raised.id, 'The ferret took the plan back.');
 
     should(asks.closed.map(([, reason]) => reason)).eql(['expired', 'withdrawn']);

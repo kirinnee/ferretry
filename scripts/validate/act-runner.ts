@@ -30,9 +30,9 @@ export const ACT_TYPES = 'packages/core/kernel/tests/types/act.types.ts';
  */
 export const EXEMPT_TOOLS: ReadonlyMap<string, string> = new Map([
   ['terminal_ask_owner', 'hands a terminal to the owner; raises an ask, never acts on a target'],
-  ['terminal_request_input', 'raises an input card through the Vault; answers its state, never acts on a target'],
+  ['terminal_request_input', 'raises an input through the Vault; answers its state, never acts on a target'],
   ['browser_ask_owner', 'hands a page to the owner; raises an ask, never acts on a target'],
-  ['browser_request_input', 'raises an input card through the Vault; answers its state, never acts on a target'],
+  ['browser_request_input', 'raises an input through the Vault; answers its state, never acts on a target'],
 ]);
 
 function callsAct(file: string): boolean {

@@ -84,7 +84,7 @@ export interface FyRenderFenceHost {
    * out — never a client, URL or token. Without it a workspace `src:` shows a card saying the view cannot read it.
    */
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader | undefined;
-  /** The daemon whose board a `card` or `board` block asks. Without it those blocks stay ordinary code fences. */
+  /** The daemon whose board a `task` or `board` block asks. Without it those blocks stay ordinary code fences. */
   readonly cardEmbed?: FyRenderCardEmbedHost | undefined;
 }
 
