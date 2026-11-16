@@ -5,11 +5,6 @@
     "access": [
       "[shell] GAP(access): app/harness/pair-from-menu.tsx is not reached: it is a dev harness page (?pair-from-menu) that v4's App never mounted, and 5.0 has no pairing-screen or menu contribution seam for a plugin to mount it in (the shell owns both) (owner: kaizen app shell)",
       "[cross: agenda] Settings › This device › Notifications draws no Mute on its machine rows (v4's shown toggle, onToggleShown): the reader's notification filter is Agenda's store and a device panel has no shell to read Agenda's app hook through, so Agenda draws the Mute as its own Settings › This device panel (one Mute per machine, right after Notifications). Two more differences from v4 stand: registered devices are listed under each machine's row (a device-level panel has no selected machine), where v4 listed the selected machine's under the permission block; and the notification filter settings (categories, quiet hours) that v4 drew last are on Agenda's settings tab now (Agenda's port)",
-      "[cli] GAP(access): cli/lib/grants/commands.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
-      "[cli] GAP(access): cli/lib/grants/controller.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
-      "[cli] GAP(access): cli/lib/grants/gateway.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
-      "[cli] GAP(access): cli/lib/grants/ports.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
-      "[cli] GAP(access): cli/lib/grants/render.ts is not reached by a `fy daemon config` verb (the manifest declares none) (owner: nelly)",
       "[shell] a notification tap tells a plugin (`ShellProvides.notificationOpened`) only for a machine that is already connected: a tap that cold-starts the app, before that machine's client exists, skips the plugin rather than holding the tap (v4 told no plugin on a tap, so nothing is lost today; no plugin provides the hook yet)"
     ]
   }
