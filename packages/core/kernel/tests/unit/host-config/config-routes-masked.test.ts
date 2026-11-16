@@ -6,7 +6,6 @@
  *
  * Fake only: every value is shaped like a credential and is none.
  */
-import { createHash } from 'node:crypto';
 import { describe, expect, test } from 'bun:test';
 import type { Admission, ConfigAccessJudgement, ConfigAccessVerdict } from '../../../contract/bound.ts';
 import { type ApiRequest, headersFrom, queryFrom } from '../../../contract/http.ts';
@@ -17,7 +16,7 @@ import { createConfigFiles } from '../../../host/config/service.ts';
 import { WITHHELD_WORDS } from '../../../host/config/shown-text.ts';
 import { localArrival } from '../../../host/listener.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
-import { captureLog, HOME, manualClock } from './support.ts';
+import { captureLog, HOME, manualClock, TEST_ETAG_KEY, testEtag } from './support.ts';
 import { flagForms, GLUED_POINTER_LINES, HIDDEN, mcpDef, OTHER_VALUE, TAIL_NAMES, VALUE } from './masked-support.ts';
 
 const FILE = `${HOME}/config/mcp/srv.yaml`;
@@ -25,7 +24,8 @@ const PATH = 'mcp/srv.yaml';
 /** Fake only: shaped like a provider key, never one. */
 const FAKE_KEY = `sk-ant-api03-${'A'.repeat(90)}`;
 
-const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+/** The etag of a text: the keyed digest of the service `world` makes (given `TEST_ETAG_KEY`). */
+const digest = testEtag;
 
 function world(answer: (input: ConfigAccessJudgement) => ConfigAccessVerdict = () => ({ allowed: true })) {
   const fs = createMemoryHostFs();
@@ -35,6 +35,7 @@ function world(answer: (input: ConfigAccessJudgement) => ConfigAccessVerdict = (
     clock: manualClock(),
     log: captureLog(),
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     defs: [{ plugin: 'mcp', def: mcpDef }],
   });
   const asked: ConfigAccessJudgement[] = [];

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConfigFiles } from '../../../host/config/service.ts';
 import { createNodeHostFs } from '../../../host/state/host-fs.ts';
-import { captureLog, loginsDef, manualClock, updatesDef } from '../../unit/host-config/support.ts';
+import { captureLog, loginsDef, manualClock, TEST_ETAG_KEY, updatesDef } from '../../unit/host-config/support.ts';
 
 const homes: string[] = [];
 afterEach(async () => {
@@ -21,6 +21,7 @@ async function freshFiles() {
       clock: manualClock(),
       log: captureLog(),
       binary: 'fy',
+      etagKey: TEST_ETAG_KEY,
       defs: [
         { plugin: 'updates', def: updatesDef },
         { plugin: 'logins', def: loginsDef },
