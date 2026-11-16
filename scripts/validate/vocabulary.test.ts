@@ -91,6 +91,11 @@ describe('what is scanned', () => {
     expect(await messages(history)).toEqual([]);
   });
 
+  test('a frozen v4 reader (a src/v4 folder) is not read', async () => {
+    const root = tree({ 'migration/tool/src/v4/frozen.ts': say("export const m = 'Open the OLD.';\n") });
+    expect(await messages(root)).toEqual([]);
+  });
+
   test('root docs, a package README, instructions and a skill are read', async () => {
     const root = tree({
       'README.md': say('a OLD\n'),

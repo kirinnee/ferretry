@@ -98,7 +98,7 @@ is not carried either; instead `state/ferrets/restarts.json` queues a v5 restart
 carried `working` and its `state.json` without v4's last turn (`turnState`, `turnStateAt`; a `created`/`starting` status
 becomes `running`), so the record goes `idle` only when v5's turn watch writes the first turn it sees itself: the
 restart runs on v5's own evidence, never on a stale v4 turn. Runtime
-`formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The card a session
+`formerNames` belongs to the pending Runtimes/Logins conversion, not the Ferrets callsign ledger. The task a session
 was anchored to is shown through `details.json`;
 name counters, extra history artifacts and pin/option leftovers are listed in `notCarried`. Frozen
 fork plans keep their original paths and fingerprints; changing their decision would invalidate replay checks.
@@ -113,14 +113,14 @@ history cursor is recomputed; version archives are copied and set to `user_versi
 (`agenda-versions.pending.json`, `agenda-history.jsonl.pending`) fails the
 step by name. A non-empty `agenda-changes.pending.json` is queued state and is carried (an empty `[]` one is skipped). `notifications.jsonl` yields only what v5 can meet again: an ask's own buzz and the owner's opens (seen).
 
-Board cards keep their ids exactly (`&F1792` names the same card); counters continue after the highest id; parent,
-dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed cards
-are ordinary cards. Every card is parsed by v5's strict `CardSchema`: v5 kept v4's field names (`machineId`,
+Board tasks keep their ids exactly (`&F1792` names the same task); counters continue after the highest id; parent,
+dependency, PR and approval links are kept (an approval names the same per-ferret ask `A<n>`); dropped and closed tasks
+are ordinary tasks. Every task is parsed by v5's strict `CardSchema`: v5 kept v4's field names (`machineId`,
 `projectId`, `laneId`, the ask's `text` and `source`), so only `v` → `format`, `status` → `progress` and the approval's
 `sessionId` → `ferret` change. Every actor takes v5's strict actor shape (owner `{via?}` with v4's `…Via` folded in,
 ferret `{name, ferret}` named by its callsign, daemon). Every v4 history event type maps to the v5 type of the same
 name, except `migrated` (dropped by v5), which becomes a `note` naming the legacy ref; an unknown type fails the step by
-card and type. Lane sets and the switch become one `boards/<project>.json` each (a gate's `reopen-with-agenda` is
+task and type. Lane sets and the switch become one `boards/<project>.json` each (a gate's `reopen-with-agenda` is
 `reopen-with-ask`), the sweep memory is carried whole, and each session's `focusTask`/`focusAnchor`/`boardSkip`
 becomes `state/board/focus.json`. `legacyRef`, the session an owner or the daemon acted from and the switch's
 `migratedAt` have no v5 field and are listed in `notCarried` (`src/steps/board.ts` has the full mapping).

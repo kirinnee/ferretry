@@ -90,6 +90,9 @@ const SKIPPED_SEGMENTS = new Set([
   'node_modules',
   'generated',
   'vendor',
+  // A frozen v4 reader (the one-time importer's `src/v4/`): vendored verbatim ("do not edit; re-vendor"), it quotes
+  // v4's own sentences and never speaks to the owner.
+  'v4',
   '.tmp',
 ]);
 
