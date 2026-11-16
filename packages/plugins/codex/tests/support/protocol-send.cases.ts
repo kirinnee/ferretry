@@ -69,19 +69,31 @@ export function protocolSendCases(): void {
       expect(box.queueRuns[0]?.args).toEqual(['queue', '--thread', 'native-proved', '--message=--resume please']);
     });
 
-    test('handed only on exit 0 AND Codex’s own "Queued message <id> for thread <thread>" line', async () => {
+    test('handed on Codex’s own "Queued message <id> for thread <thread>" line, whatever the exit; refused without it', async () => {
       const { box, harness, spec } = await proved();
       for (const answer of [
-        { exitCode: 1, stdout: queued },
+        { exitCode: 1, stdout: '' },
         { exitCode: 0, stdout: '' },
         { exitCode: 0, stdout: 'Queued message 0197-aa for thread some-other-thread\n' },
-        { exitCode: null, signal: 'SIGTERM', stdout: queued },
       ]) {
         box.answerQueue(answer);
         expect(await harness.inject?.(spec.ferret, 'hi')).toBe('unavailable');
       }
-      box.answerQueue({ exitCode: 0, stdout: queued });
-      expect(await harness.inject?.(spec.ferret, 'hi')).toBe('handed');
+      // Codex said it queued it: a later non-zero exit or signal does not make it unsent (review #F4344).
+      for (const answer of [
+        { exitCode: 0, stdout: queued },
+        { exitCode: 1, stdout: queued },
+        { exitCode: null, signal: 'SIGTERM', stdout: queued },
+      ]) {
+        box.answerQueue(answer);
+        expect(await harness.inject?.(spec.ferret, 'hi')).toBe('handed');
+      }
+    });
+
+    test('cut off by a signal (the timeout) with no acknowledgement: uncertain — it may still land, so it is never typed', async () => {
+      const { box, harness, spec } = await proved();
+      box.answerQueue({ exitCode: null, signal: 'SIGTERM', stdout: '' });
+      expect(await harness.inject?.(spec.ferret, 'hi')).toBe('uncertain');
     });
 
     test('a child that cannot start is unavailable, never a throw', async () => {

@@ -350,7 +350,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
      * "Queued message <id> for thread <thread>" line; anything else answers `unavailable` and sent nothing, so Ferrets
      * types the message as before. Total. The message text is never logged: ids only.
      */
-    async inject(ferret: FerretId, text: string): Promise<'handed' | 'unavailable'> {
+    async inject(ferret: FerretId, text: string): Promise<'handed' | 'unavailable' | 'uncertain'> {
       try {
         const spawn = kernel.spawn;
         if (spawn === undefined || new TextEncoder().encode(text).length > MAX_INJECT_BYTES) return 'unavailable';
@@ -364,8 +364,19 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
           env: { CODEX_HOME: homeOf(ferret) },
           timeout: INJECT_TIMEOUT,
         });
+        // Codex's own acknowledgement is the proof, whatever the exit: a message it said it queued is never typed again.
         const queued = new RegExp(`Queued message \\S+ for thread ${thread}`, 'u');
-        if (result.exitCode === 0 && queued.test(result.stdout)) return 'handed';
+        if (queued.test(result.stdout)) return 'handed';
+        // Cut off by a signal (the timeout included) after the request may have reached Codex: it may still land, so it is
+        // `uncertain` — answered unconfirmed and never sent again. An exit of its own without the line refused it.
+        if (result.exitCode === null) {
+          kernel.log.warn('codex queue was cut off; the message may still land and is not sent again', {
+            ferret,
+            thread,
+            signal: result.signal,
+          });
+          return 'uncertain';
+        }
         kernel.log.warn('codex queue did not hand a message over; it will be typed', {
           ferret,
           thread,

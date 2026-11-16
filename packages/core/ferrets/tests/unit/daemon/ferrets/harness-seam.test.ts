@@ -584,13 +584,13 @@ describe('structured questions: the form seam and the asked-question file', () =
 
 describe('codex-protocol-send: a harness that can be handed a message types nothing and reads no screen', () => {
   /** A running ferret whose harness answers `inject` as told; every look the runner is asked for is counted. */
-  async function injecting(answer: 'handed' | 'unavailable' | 'throws') {
+  async function injecting(answer: 'handed' | 'unavailable' | 'uncertain' | 'throws', busy = false) {
     const f = await running({ queueing: { held: new Set() } });
     const handedText: string[] = [];
     let looks = 0;
     (f.runner as { look?: unknown }).look = async () => {
       looks += 1;
-      return undefined;
+      return busy ? { working: true, atPrompt: false, permission: false } : undefined;
     };
     f.harness.inject = async (_ferret, text) => {
       handedText.push(text);
@@ -608,15 +608,20 @@ describe('codex-protocol-send: a harness that can be handed a message types noth
     expect(f.looks()).toBe(0);
   };
 
-  test('deliver + handed: answers turn-started, tells the service it delivered, and touches the runner not at all', async () => {
+  test('deliver answers BUSY for an injecting harness, handing and typing nothing: Conversation takes its queue path (review #F4344)', async () => {
+    // A hand-over shows nowhere until the agent's turn ends; a row Conversation recorded as typed-at-the-prompt was read
+    // as absent at its deadline and handed AGAIN. Its queue path marks the row queued and busy-typed first.
     const f = await injecting('handed');
-    expect(await f.seam.deliver({ text: 'hello there' })).toEqual({ ok: true, value: 'turn-started' });
-    expect(f.handedText).toEqual(['hello there']);
-    expect(f.told).toEqual([f.id]);
+    expect(await f.seam.deliver({ text: 'hello there' })).toEqual({
+      ok: false,
+      error: { refused: 'not_ready', why: 'busy' },
+    });
+    expect(f.handedText).toEqual([]);
+    expect(f.told).toEqual([]);
     nothingTyped(f);
   });
 
-  test('queue + handed: answers left with the FULL text (no file-backed pointer for an injected message), nothing typed', async () => {
+  test('queue + handed: answers left with the text as given (no file-backed pointer of its own), nothing typed', async () => {
     const f = await injecting('handed');
     const long = 'q'.repeat(5_000);
     expect(await f.seam.queue(long, { sendId: 'send-1' })).toEqual({ ok: true, value: 'left' });
@@ -629,26 +634,49 @@ describe('codex-protocol-send: a harness that can be handed a message types noth
     const f = await injecting('handed');
     const banner =
       '[message · action from ferret torrey (session mvtorre1-a41c8b02) — not from the owner] To reply: fy send torrey "<reply>"\n';
-    await f.seam.deliver({ text: `${banner}done: abc123` });
-    await f.seam.queue(`${banner}done: def456`, { sendId: 'send-2' });
-    await f.seam.deliver({ text: 'owner words, no banner' });
-    expect(f.handedText).toEqual([`${banner}done: abc123`, `${banner}done: def456`, 'owner words, no banner']);
+    await f.seam.queue(`${banner}done: abc123`, { sendId: 'send-2' });
+    await f.seam.queue('owner words, no banner', { sendId: 'send-3' });
+    expect(f.handedText).toEqual([`${banner}done: abc123`, 'owner words, no banner']);
   });
 
-  test('inject unavailable: today’s runner path runs unchanged (look, then the typed delivery; the pane’s own queue)', async () => {
+  test('uncertain (cut off after it may have been accepted): answered unconfirmed, and NOTHING is typed', async () => {
+    const f = await injecting('uncertain');
+    expect(await f.seam.queue('maybe landed', { sendId: 'send-4' })).toEqual({
+      ok: false,
+      error: { unconfirmed: true, stranded: false },
+    });
+    expect(f.told).toEqual([]);
+    nothingTyped(f);
+  });
+
+  test('inject unavailable at an IDLE pane: looked at, then typed at its prompt, answered left', async () => {
     const f = await injecting('unavailable');
-    expect(await f.seam.deliver({ text: 'typed instead' })).toEqual({ ok: true, value: 'turn-started' });
+    expect(await f.seam.queue('typed instead', { sendId: 'send-5' })).toEqual({ ok: true, value: 'left' });
     expect(f.looks()).toBe(1);
     expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['typed instead']);
-    expect(await f.seam.queue('also typed')).toEqual({ ok: true, value: 'held' });
+    expect(f.runner.queued).toEqual([]);
+    expect(f.told).toEqual([f.id]);
+  });
+
+  test('inject unavailable at a WORKING pane: looked at, then put in the pane’s own queue as today', async () => {
+    const f = await injecting('unavailable', true);
+    expect(await f.seam.queue('also typed', { sendId: 'send-6' })).toEqual({ ok: true, value: 'held' });
     expect(f.runner.queued.map(entry => entry.text)).toEqual(['also typed']);
-    expect(f.handedText).toEqual(['typed instead', 'also typed']);
+    expect(f.runner.deliveries).toEqual([]);
   });
 
   test('an inject that throws is the same as unavailable: the message is typed, nothing is lost', async () => {
     const f = await injecting('throws');
-    expect(await f.seam.deliver({ text: 'still typed' })).toEqual({ ok: true, value: 'turn-started' });
+    expect(await f.seam.queue('still typed', { sendId: 'send-7' })).toEqual({ ok: true, value: 'left' });
     expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['still typed']);
+  });
+
+  test('a slash command is never handed over: the TUI parses it, so it is typed as before (review #F4344)', async () => {
+    const f = await injecting('handed');
+    expect((await f.seam.deliver({ text: '/compact' })).ok).toBe(true);
+    expect(f.runner.deliveries.map(entry => entry.delivery.text)).toEqual(['/compact']);
+    expect(await f.seam.queue('  /status', { sendId: 'send-8' })).toEqual({ ok: true, value: 'held' });
+    expect(f.handedText).toEqual([]);
   });
 
   test('a harness without inject is unchanged: the runner types, and no inject is consulted', async () => {
@@ -663,6 +691,7 @@ describe('codex-protocol-send: a harness that can be handed a message types noth
     const f = await injecting('handed');
     await f.service.stop(f.id, 'now');
     expect(await f.seam.deliver({ text: 'x' })).toEqual({ ok: false, error: { refused: 'no_pane' } });
+    expect(await f.seam.queue('x', { sendId: 'send-9' })).toEqual({ ok: false, error: { refused: 'no_pane' } });
     expect(f.handedText).toEqual([]);
   });
 });

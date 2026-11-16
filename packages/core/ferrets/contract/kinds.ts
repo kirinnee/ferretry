@@ -855,10 +855,12 @@ export interface Harness {
    * accepted the full text for this ferret's conversation (it lands as the next user turn, in order, whether the ferret
    * is idle or busy), and Ferrets types nothing. `unavailable`: it was not handed (no conversation proved yet, the
    * harness could not be run, it refused, it timed out, or the text is too large) and NOTHING was sent, so Ferrets falls
-   * back to typing the message as it always did. Total: never throws, and never carries the message back in any answer
-   * or log. Absent (Claude Code): every message is typed.
+   * back to typing the message as it always did. `uncertain`: the hand-over was cut off (a timeout, a signal) after it may
+   * already have been accepted, so the message may still land and must NEVER be typed or handed again: Ferrets answers
+   * it as an unconfirmed delivery. Total: never throws, and never carries the message back in any answer or log. Absent
+   * (Claude Code): every message is typed.
    */
-  inject?(ferret: FerretId, text: string): Promise<'handed' | 'unavailable'>;
+  inject?(ferret: FerretId, text: string): Promise<'handed' | 'unavailable' | 'uncertain'>;
   /**
    * Additive (U3, today's `RuntimeSupervisedLauncher` explanation): the sentence a person can act on for a start whose
    * first turn could not be typed or whose pane died while starting, read off what the pane last showed
