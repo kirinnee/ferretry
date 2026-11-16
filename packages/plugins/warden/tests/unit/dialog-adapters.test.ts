@@ -78,6 +78,42 @@ describe('a ferret’s own pane', () => {
     should(await open.frame('f1')).eql({ visible: 'prompt', blocking: false });
   });
 
+  it('should type the nudge, else queue it, and never reject', async () => {
+    // Arrange
+    const typed: string[] = [];
+    const queued: string[] = [];
+    const seam = (deliverOk: boolean) =>
+      ({
+        harness: async () => ({
+          deliver: async ({ text }: { text: string }) => {
+            typed.push(text);
+            return { ok: deliverOk };
+          },
+          queue: async (text: string) => {
+            queued.push(text);
+            return { ok: true };
+          },
+        }),
+      }) as unknown as Pick<FerretsApi, 'harness'>;
+    const settle = async () => await new Promise(resolve => setTimeout(resolve, 5));
+
+    // Act
+    ferretClearPane(seam(true)).nudge('f1', 'one');
+    await settle();
+    ferretClearPane(seam(false)).nudge('f1', 'two');
+    await settle();
+    const rejects = { harness: async () => Promise.reject(new Error('gone')) } as unknown as Pick<
+      FerretsApi,
+      'harness'
+    >;
+    ferretClearPane(rejects).nudge('f1', 'three');
+    await settle();
+
+    // Assert
+    should(typed).eql(['one', 'two']);
+    should(queued).eql(['two']);
+  });
+
   it('should answer nothing for a refused or failed read, and for a ferret with no harness seam', async () => {
     // Assert
     should(

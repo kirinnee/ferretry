@@ -20,7 +20,7 @@ import {
 import { parseEntries, parseEntry, parseUsage } from '../../../daemon/lib/harness/transcript.ts';
 import {
   CLAUDE_QUESTION_HOOK_COMMAND,
-  CLAUDE_OVERLAY_HOOKS,
+  CLAUDE_QUESTION_HOOKS,
   CLAUDE_PROMPTS_SEEN,
   fixedLayer,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
@@ -143,15 +143,8 @@ describe('homeText', () => {
         ...(permissionMode === 'skip'
           ? { skipDangerousModePermissionPrompt: true }
           : { skipAutoPermissionPrompt: true }),
-        hooks: CLAUDE_OVERLAY_HOOKS,
+        hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS },
       });
-      // The ferret's overlay denies a dangerous rm up front, and never through a permission rule or hook of the wrong kind.
-      should(overlay.hooks.PreToolUse.map((entry: { matcher: string }) => entry.matcher)).eql([
-        'AskUserQuestion',
-        'Bash',
-      ]);
-      should(overlay.hooks).not.have.property('PermissionRequest');
-      should(JSON.stringify(overlay.permissions)).not.containEql('Bash(');
       should(JSON.parse(text.claudeJson)).eql({
         hasCompletedOnboarding: true,
         hasCompletedClaudeInChromeOnboarding: true,
@@ -640,11 +633,7 @@ describe('the question tool (!A527: withheld from every ferret unless the questi
   });
 
   it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
-    should(fixedLayer('auto', '/f').overlay.hooks).eql(CLAUDE_OVERLAY_HOOKS);
-    should(CLAUDE_OVERLAY_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
-    should(CLAUDE_OVERLAY_HOOKS.PreToolUse[1]?.matcher).equal('Bash');
-    should(Object.keys(CLAUDE_OVERLAY_HOOKS).sort()).eql(
-      Object.keys({ ...CLAUDE_COMPACTION_HOOKS, PreToolUse: 0 }).sort(),
-    );
+    should(fixedLayer('auto', '/f').overlay.hooks).eql({ ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS });
+    should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
   });
 });

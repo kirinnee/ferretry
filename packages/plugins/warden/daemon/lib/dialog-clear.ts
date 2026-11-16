@@ -27,6 +27,7 @@
  */
 import type { FormKey } from '@ferretry/core-ferrets/contract';
 import type { DialogRule } from '../../contract/dialog-rules.ts';
+import { DIALOG_NUDGES } from './dialog-rules-claude.ts';
 import { cursorRow, frameShows, planKeys, ruleFor } from './dialog-rules.ts';
 import type { WatchedDialog } from './dialog-watch.ts';
 import type { ClearableDialogWords } from './dialog-words.ts';
@@ -66,6 +67,8 @@ export interface DialogClearPorts {
   frame(sessionId: string): Promise<ClearFrame | undefined>;
   /** Presses one key; `false` when nothing was pressed. */
   key(sessionId: string, key: FormKey): Promise<boolean>;
+  /** Types a message to the ferret as its next turn. Never awaited, never fails the clear: it may wait for the pane. */
+  nudge(sessionId: string, text: string): void;
   sleep(ms: number): Promise<void>;
   /** `[dialogId]` per ferret already keyed this episode. */
   readonly memory: MachineMembersStore;
@@ -167,6 +170,8 @@ export class WardenDialogClear {
         return 'failed';
     }
     if (!(await this.ports.key(sessionId, plan.confirm))) return 'failed';
+    const nudge = DIALOG_NUDGES[rule.id];
+    if (nudge !== undefined) this.ports.nudge(sessionId, nudge);
     this.ports.record('fleet.warden_dialog_autocleared', {
       sessionId,
       harness: rule.harness,

@@ -27,7 +27,7 @@ export function dialogRulesInEffect(config: Pick<ConfigPort, 'file'>): () => Pro
  */
 export function ferretClearPane(
   ferrets: Pick<FerretsApi, 'harness' | 'prompt'>,
-): Pick<DialogClearPorts, 'frame' | 'key' | 'words'> {
+): Pick<DialogClearPorts, 'frame' | 'key' | 'nudge' | 'words'> {
   const form = async (sessionId: string) => (await ferrets.harness?.(sessionId as FerretId))?.form;
   return {
     words: async sessionId => dialogWordsOf(await ferrets.prompt?.(sessionId as FerretId).catch(() => undefined)),
@@ -38,6 +38,13 @@ export function ferretClearPane(
     key: async (sessionId, key) => {
       const typed = await (await form(sessionId))?.key(key).catch(() => undefined);
       return typed?.ok === true;
+    },
+    // After a declined prompt the pane is idle (or its turn goes on): type the message, else queue it. Never awaited.
+    nudge: (sessionId, text) => {
+      void (async () => {
+        const harness = await ferrets.harness?.(sessionId as FerretId);
+        if ((await harness?.deliver({ text }))?.ok !== true) await harness?.queue(text);
+      })().catch(() => undefined);
     },
   };
 }

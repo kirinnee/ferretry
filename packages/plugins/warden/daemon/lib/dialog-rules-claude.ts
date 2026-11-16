@@ -10,6 +10,15 @@
  */
 import type { DialogRule } from '../../contract/dialog-rules.ts';
 
+/**
+ * What a ferret is told, as its next message and by no hook, after a rule declined its prompt: why it was denied, so it
+ * tries again the way Claude accepts. Fixed words by rule id; never pane text. A rule with no entry says nothing.
+ */
+export const DIALOG_NUDGES: Readonly<Record<string, string>> = {
+  'claude-dangerous-rm':
+    'Your last command was denied: Claude Code flagged a dangerous rm. Retry it with explicit absolute rm paths; never "$VAR", a $(cmd) variable, or rm inside bash -c.',
+};
+
 export const CLAUDE_DIALOG_RULES: readonly DialogRule[] = [
   {
     // "Dangerous rm operation detected" and its two siblings (an rm on a possibly-empty variable path, an rm inside a

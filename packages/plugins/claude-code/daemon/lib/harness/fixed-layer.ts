@@ -1,6 +1,5 @@
 import type { HarnessConfig } from '../../../contract/index.ts';
 import { CLAUDE_COMPACTION_HOOKS } from './compaction.ts';
-import { CLAUDE_DANGEROUS_RM_HOOKS } from './dangerous-rm-hook.ts';
 
 // Copied from fleet/src/lib/account/fixed-layer.ts: these are seen screens, not owner choices.
 export const CLAUDE_PROMPTS_SEEN = {
@@ -14,15 +13,6 @@ const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
 export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
 export const CLAUDE_QUESTION_HOOKS = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
-};
-
-/**
- * Every hook the fixed overlay carries: the question hook and the dangerous-`rm` deny (`./dangerous-rm-hook.ts`), both
- * on PreToolUse, and the compaction hooks (`./compaction.ts`).
- */
-export const CLAUDE_OVERLAY_HOOKS = {
-  PreToolUse: [...CLAUDE_QUESTION_HOOKS.PreToolUse, ...CLAUDE_DANGEROUS_RM_HOOKS.PreToolUse],
-  ...CLAUDE_COMPACTION_HOOKS,
 };
 
 /**
@@ -117,7 +107,7 @@ export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd:
   };
   return {
     settings,
-    overlay: { ...settings, hooks: CLAUDE_OVERLAY_HOOKS },
+    overlay: { ...settings, hooks: { ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS } },
     claudeJson: {
       hasCompletedOnboarding: true,
       hasCompletedClaudeInChromeOnboarding: true,

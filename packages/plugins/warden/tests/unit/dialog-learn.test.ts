@@ -275,6 +275,7 @@ describe('the owner’s yes', () => {
         if (key === 'Enter' || key === 'Escape') state.gone = true;
         return true;
       },
+      nudge: () => undefined,
       sleep: async () => undefined,
       memory: { read: async () => ({}), write: async () => undefined },
       record: () => undefined,

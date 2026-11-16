@@ -194,21 +194,19 @@ again`, `install`, `update now`…, unless it says _without_ / _not_), and the p
 planner at the moment of pressing. A screen whose only way out grants something has no plan and stays a notice.
 
 **What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
-on a pane that moved on would interrupt a turn — and the runner's own reader must say a dialog or prompt blocks it. (2) Arrows
+on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows
 move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. (3) ONE
 journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda card, no pane text. The same
 dialog on the same ferret is never keyed twice; if the next look still sees it on screen the keys failed (or a hold refused
 them) and the owner is told once, as before (`fleet.warden_dialog_clear_failed`). The look runs every 10 s.
 
-**Dangerous `rm`: two layers, on purpose.** Claude 2.1.317's prompt comes from a shell _parser_ inside the binary with a dozen
-branches (an `rm` on a possibly-empty variable path, on a command substitution's output, in a `bash -c` script, an
-`eval` trap, a parse it could not finish) — read off its strings, never by running it. (a) **A `PreToolUse` Bash hook** in the
-ferret's launch overlay (`claude-code/daemon/lib/harness/dangerous-rm-hook.ts`) denies up front the three shapes the owner
-named — an `rm` whose target begins with a variable or command substitution, and an `rm` inside `sh`/`bash -c` — with the
-reason _use explicit absolute rm paths; never "$VAR", a $(cmd) variable or rm inside bash -c_, so the agent writes the path
-instead of retrying. It is `grep -E` over the hook's JSON (no `jq` or Python in a ferret's environment), fails open, and cannot
-mirror Claude's parser: it is a convenience, not the guarantee. (b) **The Esc rule above is the backstop** for whatever the
-hook misses, so no dangerous `rm` waits. Not a `PermissionRequest` hook and not a Bash deny/ask permission rule.
+**Dangerous `rm`: Esc, then a nudge — no hook.** Claude 2.1.317's prompt comes from a shell _parser_ inside the binary with
+a dozen branches (an `rm` on a possibly-empty variable path, on a command substitution's output, in a `bash -c` script, an
+`eval` trap, a parse it could not finish) — read off its strings, never by running it — so nothing here tries to predict it.
+The Esc rule above declines it at once. Right after that Esc the Warden types ONE fixed message to the ferret (its own next
+message; a queue if the pane is busy — never a hook, and never pane text) saying why the `rm` was denied: _use explicit
+absolute rm paths; never "$VAR", a $(cmd) variable or rm inside bash -c_, so it retries with a path. The nudge is fire and
+forget: a failed one changes nothing. The launch instruction `claude-code/instructions/rm.md` says the same up front.
 `dangerousRmWaiver` stays off.
 
 **Teaching Ferretry an unknown screen.** The notice for a screen no rule knows says how: leave the ferret on it, then

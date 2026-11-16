@@ -222,9 +222,13 @@ function fakePane(screen: Screen, options: { readonly stuck?: boolean; readonly 
 function stand(pane: Pick<DialogClearPorts, 'frame' | 'key' | 'words'>, rules = BUILT_IN) {
   let memory: Record<string, readonly string[]> = {};
   const events: { type: string; data: Readonly<Record<string, string>> }[] = [];
+  const nudges: { sessionId: string; text: string }[] = [];
   const clear = new WardenDialogClear({
     rules: async () => rules,
     ...pane,
+    nudge: (sessionId, text) => {
+      nudges.push({ sessionId, text });
+    },
     sleep: async () => undefined,
     memory: {
       read: async () => memory,
@@ -236,7 +240,7 @@ function stand(pane: Pick<DialogClearPorts, 'frame' | 'key' | 'words'>, rules = 
       events.push({ type, data });
     },
   });
-  return { clear, events, memory: () => memory };
+  return { clear, events, nudges, memory: () => memory };
 }
 
 const watched = (screen: Screen): WatchedDialog => ({ sessionId: 'f1', name: 'ada', dialog: screen.dialog });
@@ -413,6 +417,40 @@ describe('planning the keys', () => {
     // Assert
     const broken = { ...rule, title: '(' } as unknown as typeof rule;
     should(ruleFor(screen.dialog, [broken])).equal(undefined);
+  });
+});
+
+describe('what a ferret is told after its prompt was declined', () => {
+  it('should nudge the ferret, once and in plain words, after the dangerous-rm Esc — and say nothing after a choice', async () => {
+    // Arrange
+    const rm = SCREENS[0] as Screen;
+    const mcp = SCREENS[1] as Screen;
+    const first = stand(fakePane(rm).ports);
+    const second = stand(fakePane(mcp).ports);
+
+    // Act
+    await first.clear.clear([watched(rm)]);
+    await first.clear.clear([watched(rm)]);
+    await second.clear.clear([watched(mcp)]);
+
+    // Assert
+    should(first.nudges).have.length(1);
+    should(first.nudges[0]?.sessionId).equal('f1');
+    should(first.nudges[0]?.text).match(/explicit absolute rm paths/u);
+    should(second.nudges).eql([]);
+  });
+
+  it('should not nudge a ferret whose Esc was never pressed', async () => {
+    // Arrange
+    const rm = SCREENS[0] as Screen;
+    const { ports } = fakePane(rm, { refuse: true });
+    const { clear, nudges } = stand(ports);
+
+    // Act
+    await clear.clear([watched(rm)]);
+
+    // Assert
+    should(nudges).eql([]);
   });
 });
 
