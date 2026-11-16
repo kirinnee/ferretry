@@ -33,8 +33,9 @@ set -euo pipefail
 #      WHEN CD ITSELF CARRIES THE GUARD, which is true only of commits after this change.
 #   3. Any other workflow with a job that can write (`contents: write`), use an environment or read a secret has every
 #      such job gated on `github.ref == 'refs/heads/main'`, and no `push.tags` trigger.
-#   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/5.0` alone, every job is gated on
-#      that ref, and its signing and deploy jobs use environments of their own.
+#   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/5.0` and `rebuild/5.0-after` and
+#      no other branch, every job's `if` OPENS with exactly that two-ref guard, and its signing and deploy jobs use
+#      environments of their own.
 #   5. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -57,6 +58,7 @@ release=.github/workflows/release.yaml
 cd_workflow=.github/workflows/cd.yaml
 preview=.github/workflows/pwa-pages-v5.yaml
 main_ref="github.ref == 'refs/heads/main'"
+preview_ref_guard="(github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')"
 
 # 1. Release
 if [[ -f ${release} ]]; then
@@ -108,12 +110,13 @@ done
 
 # 4. The preview workflow
 if [[ -f ${preview} ]]; then
-  triggers "${preview}" | jq -e '.push.branches == ["rebuild/5.0"] and ((.push | has("tags")) | not) and ((.push | has("paths")) | not)' >/dev/null ||
-    fail "${preview} must be triggered by pushes to rebuild/5.0 alone"
+  triggers "${preview}" | jq -e '.push.branches == ["rebuild/5.0", "rebuild/5.0-after"] and ((.push | has("tags")) | not) and ((.push | has("paths")) | not)' >/dev/null ||
+    fail "${preview} must be triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone"
   triggers "${preview}" | jq -e '(keys | sort) == ["push", "workflow_dispatch"]' >/dev/null ||
     fail "${preview} may be triggered only by a push and a dispatch"
-  json "${preview}" | jq -e '[.jobs[] | .if // ""] | all(contains("github.ref == '"'"'refs/heads/rebuild/5.0'"'"'"))' >/dev/null ||
-    fail "every job of ${preview} must require github.ref == 'refs/heads/rebuild/5.0'"
+  # The guard must OPEN the `if` (so no `|| <another ref>` can ride along outside it); more `&&` conditions may follow.
+  json "${preview}" | jq -e --arg g "${preview_ref_guard}" '[.jobs[] | .if // ""] | all(startswith($g))' >/dev/null ||
+    fail "every job of ${preview} must open its if with ${preview_ref_guard}"
   json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||
@@ -135,4 +138,4 @@ for workflow in "${workflows[@]}"; do
 done
 
 ((status == 0)) || exit 1
-echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (a v* tag on a 5.0 commit made before this guard would still publish; no agent ever creates or pushes a tag); the preview deploys from rebuild/5.0 alone"
+echo "✅ every job of cd.yaml sits behind main-only, so a tag off main publishes nothing for commits made after this guard lands (a v* tag on a 5.0 commit made before this guard would still publish; no agent ever creates or pushes a tag); the preview deploys from rebuild/5.0 and rebuild/5.0-after alone"
