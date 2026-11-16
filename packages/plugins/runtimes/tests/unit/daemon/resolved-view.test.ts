@@ -966,6 +966,19 @@ describe('resolvedEntries — the #40 rule after review r2 (M1, M2, M3, G1)', ()
   });
 });
 
+describe('resolvedEntries — a long run of unclosed default references', () => {
+  it('should withhold in words a default-reference run past the scan window of the write rule (340 repeats)', () => {
+    // Arrange — 20 repeats stay under the window (the control above); 340 is 4427 characters, past SCAN_WINDOW (4096).
+    const defaults = `--set=${'API_KEY=${A:-'.repeat(340)}}`;
+
+    // Act
+    const actual = shownFlags([defaults]);
+
+    // Assert
+    should(actual.map(word => word.value)).deepEqual([WITHHELD_WORDS_TEXT]);
+  });
+});
+
 describe('resolvedEntries — the #40 rule after review r3 (N1, L1)', () => {
   const V = 'nested-fake-value-0000';
   const B64 = 'bm90LWEtcmVhbC0wMDAw';

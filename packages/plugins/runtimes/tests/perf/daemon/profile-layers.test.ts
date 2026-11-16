@@ -27,6 +27,8 @@ describe('R2 layers — a lattice of shared bases is judged at once', () => {
 
     // Assert — an expansion per path would take minutes.
     should(layers?.mcp.length).equal(41);
+    should(new Set(layers?.mcp).size).equal(41);
+    should(layers?.mcp.at(-1)).equal('a0');
     should(took).be.below(1000);
   });
 
@@ -39,16 +41,19 @@ describe('R2 layers — a lattice of shared bases is judged at once', () => {
 
     // Act
     const listedAt = performance.now();
-    await runtimes.profiles();
+    const listed = await runtimes.profiles();
     const listedTook = performance.now() - listedAt;
     const addedAt = performance.now();
-    await runtimes.changeProfileLayers({ kind: 'add', profile: 'a0', layer: 'mcp/extra' }, owner);
+    const added = await runtimes.changeProfileLayers({ kind: 'add', profile: 'a0', layer: 'mcp/extra' }, owner);
     const addedTook = performance.now() - addedAt;
     const removedAt = performance.now();
-    await runtimes.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/extra' }, owner);
+    const removed = await runtimes.changeProfileLayers({ kind: 'remove-everywhere', layer: 'mcp/extra' }, owner);
     const removedTook = performance.now() - removedAt;
 
     // Assert
+    should(listed.length).equal(42);
+    should(added).deepEqual({ kind: 'written', profiles: ['a0'] });
+    should(removed).deepEqual({ kind: 'written', profiles: ['a0'] });
     should(listedTook).be.below(1000);
     should(addedTook).be.below(1000);
     should(removedTook).be.below(1000);
