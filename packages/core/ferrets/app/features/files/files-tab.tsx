@@ -19,19 +19,20 @@
  * loading rather than painting the previous daemon's tree.
  */
 
-import { ArrowLeft, Code2, GitCompareArrows, ListTree, X } from 'lucide-react';
+import { ListTree } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { formatCodeReference, PanelSlot, useOptionalRouter } from '@ferretry/app';
+import { PanelSlot, useOptionalRouter } from '@ferretry/app';
 import { FILES_SEARCH_SLOT, type FilesSearchSlotProps, isOpenablePath } from '@ferretry/core-ferrets/contract';
-import { useInputModality, useLayoutMode } from '@ferretry/app/ui';
+import { useLayoutMode } from '@ferretry/app/ui';
 import { daemonOfRoute } from '../header/header-paths.ts';
+import { useFileInstanceSurface } from './file-instance-surface.tsx';
 import { FileTree } from './file-tree.tsx';
 import { fsApi, useFsProbe } from './files-api.ts';
-import { baseName, crumbs, parseUnifiedDiff, renderableDiffLines } from './files-model.ts';
+import { crumbs } from './files-model.ts';
 import { ReloadAction, StaleNotice } from './files-reload.tsx';
 import { useFsResource } from './files-resource.ts';
 import { type FilesScope, scopeKey } from './scope.ts';
-import type { FsFile, FsListing } from './wire.ts';
+import type { FsListing } from './wire.ts';
 import {
   type CodeReferenceOpenRequest,
   type ColumnCodeReference,
@@ -40,11 +41,10 @@ import {
   filesTreeOpenByDefault,
   type OpenFileTab,
   readFilesTabState,
-  scrollFileLineIntoView,
   selectionFromReference,
   writeFilesTabState,
 } from './files-tab-model.ts';
-import { BrowseList, DiffBody, Failed, FileBody, Loading, Note, OpenFileTabs, Unavailable } from './files-views.tsx';
+import { BrowseList, Failed, Loading, Note, OpenFileTabs, Unavailable } from './files-views.tsx';
 
 export interface FilesTabProps {
   scope: FilesScope;
@@ -64,11 +64,10 @@ export interface FilesTabProps {
    * When this is supplied, the pane is purely the PICKER — the tree, the
    * listing and the breadcrumbs — and every row-open, every code reference and
    * every Markdown file link is handed to the host, which opens the file as its
-   * own `file:<path>` tab rendered by `FileInstanceSurface`.
+   * own `file:<path>` tab. No host does yet (the side column has no tab strip: GAP(file-instance)).
    *
-   * Without it (a standalone host with no strip — the harness card), the pane
-   * keeps its own open-file tabs and viewer, which is the only way it can show
-   * a file at all.
+   * Without it, the pane keeps its own strip — one tab per file — and draws the
+   * file on show through `useFileInstanceSurface` (`file-instance-surface.tsx`).
    */
   onOpenFile?: (path: string, selection?: FileLineSelection) => void;
 }
@@ -93,12 +92,10 @@ export const FilesTab = ({
   const [treePref, setTreePref] = useState<boolean | undefined>(restored.tree);
   const [treeRefresh, setTreeRefresh] = useState(0);
   const [focusRequest, setFocusRequest] = useState(0);
-  const { touchAffected } = useInputModality();
-  const paneRef = useRef<HTMLDivElement>(null);
-  const targetLineRef = useRef<HTMLSpanElement>(null);
   const handledReference = useRef<number | null>(null);
-  const touchAffectedRef = useRef(touchAffected);
-  touchAffectedRef.current = touchAffected;
+  // The newest focus request the open file's surface has acted on: activating an EXISTING tab remounts the surface
+  // with the same request number and must not pull focus.
+  const focusedRequest = useRef(0);
   const stateMatchesScope = stateKey === key;
 
   useEffect(() => {
@@ -110,6 +107,7 @@ export const FilesTab = ({
     setTreePref(next.tree);
     setTreeRefresh(0);
     setFocusRequest(0);
+    focusedRequest.current = 0;
     handledReference.current = null;
     setStateKey(key);
   }, [key, scope, stateMatchesScope]);
@@ -204,15 +202,6 @@ export const FilesTab = ({
     onRequestedReferenceHandled?.(requestedReference.sequence);
   }, [onRequestedReferenceHandled, openReference, requestedReference, stateMatchesScope]);
 
-  // Never on touch: an unrequested focus there summons the keyboard and jumps
-  // the viewport (input capability, not viewport width, owns that policy).
-  // `focusRequest` is the ONLY dependency on purpose — raw/diff changes and file
-  // tab activation update `active` but must keep focus on the control used.
-  useEffect(() => {
-    if (touchAffectedRef.current || focusRequest === 0) return;
-    paneRef.current?.focus({ preventScroll: true });
-  }, [focusRequest]);
-
   // A daemon that cannot serve this surface at all is answered ONCE, above. Nothing below is fetched
   // in that state — a listing request would only earn a second panel contradicting the first.
   const unavailable = probe.state === 'unsupported';
@@ -228,31 +217,18 @@ export const FilesTab = ({
     { refetchOnRearm: true },
   );
 
-  const diffPath = !unavailable && active?.view === 'diff' && active.selection === undefined ? active.path : null;
-  const diff = useFsResource<string>(
-    diffPath ? `diff:${key}:${diffPath}` : null,
-    useCallback(signal => fsApi.diff(scope, diffPath ?? '', signal), [scope, diffPath]),
-  );
-
-  const filePath =
-    !unavailable && active && (active.view !== 'diff' || active.selection !== undefined) ? active.path : null;
-  const file = useFsResource<FsFile>(
-    filePath ? `file:${key}:${filePath}` : null,
-    useCallback(signal => fsApi.file(scope, filePath ?? '', undefined, signal), [scope, filePath]),
-  );
-
-  useEffect(() => {
-    if (!active?.selection || !file.data) return;
-    const pane = paneRef.current;
-    const target = targetLineRef.current;
-    if (!pane || !target) return;
-    scrollFileLineIntoView(pane, target);
-  }, [active?.selection, file.data]);
-
-  const parsedDiff = useMemo(() => (diff.data === null ? null : parseUnifiedDiff(diff.data)), [diff.data]);
-  // A diff that is nothing but plumbing headers has nothing to show — the
-  // emptiness test has to agree with what DiffBody actually renders.
-  const diffHasBody = useMemo(() => (parsedDiff ? renderableDiffLines(parsedDiff).length > 0 : false), [parsedDiff]);
+  const instance = useFileInstanceSurface({
+    scope,
+    tab: unavailable ? null : active,
+    repo,
+    probeRefreshing: probe.refreshing,
+    onReloadProbe: probe.refresh,
+    onBack: () => setActivePath(null),
+    onViewChange: setActiveView,
+    onClearSelection: clearActiveSelection,
+    focusRequest,
+    focusedRequest,
+  });
 
   if (!stateMatchesScope)
     return (
@@ -270,19 +246,31 @@ export const FilesTab = ({
       </div>
     );
 
-  const title = active ? formatCodeReference({ path: active.path, ...active.selection }) : '';
-  const rawActive = active?.view === 'raw';
-  const diffActive = active?.view === 'diff' && active.selection === undefined;
   const treeOpen = filesTreeOpenByDefault(treePref, layout);
-  // The pane shows exactly one resource at a time, and the SAME decision the
-  // instance viewer uses — the hook's own — says whether it is the newest.
-  const shown = diffActive ? diff : active ? file : listing;
-  const shownWhat = active ? (diffActive ? 'the diff' : baseName(active.path)) : dir || 'the ferret’s root';
   const reload = () => {
     probe.refresh();
-    shown.reload();
-    if (!active) setTreeRefresh(nonce => nonce + 1);
+    listing.reload();
+    setTreeRefresh(nonce => nonce + 1);
   };
+  // The tree stays mounted (hidden) while a file is open, so expansion and the loaded
+  // listings survive a read-then-back round trip. Keyed by the daemon
+  // scope so a connection switch rebuilds it rather than reusing one
+  // daemon's expanded folders against another's tree.
+  const tree = treeOpen ? (
+    <FileTree
+      key={key}
+      scope={scope}
+      dir={dir}
+      refreshNonce={treeRefresh}
+      hidden={!!active}
+      onEnter={setDir}
+      onOpenFile={openFile}
+    />
+  ) : null;
+  const strip =
+    !hostOwnsTabs && tabs.length > 0 ? (
+      <OpenFileTabs tabs={tabs} activePath={activePath} onActivate={setActivePath} onClose={closeFile} />
+    ) : null;
 
   return (
     // `.kt-fs` owns flex:1 + min-height:0 (files.css) — the pane fills what the
@@ -296,18 +284,8 @@ export const FilesTab = ({
           slot={FILES_SEARCH_SLOT}
         />
       )}
-      <div className="kt-fs-bar">
-        {active ? (
-          <button
-            type="button"
-            className="kt-fs-icon-button"
-            onClick={() => setActivePath(null)}
-            aria-label="Back to the file list"
-            title="Back to files"
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-          </button>
-        ) : (
+      {instance === null ? (
+        <div className="kt-fs-bar">
           <button
             type="button"
             className="kt-fs-icon-button"
@@ -319,12 +297,6 @@ export const FilesTab = ({
           >
             <ListTree size={16} aria-hidden="true" />
           </button>
-        )}
-        {active ? (
-          <span className="kt-fs-title" title={title}>
-            <span className="kt-fs-title-path">{title}</span>
-          </span>
-        ) : (
           <nav className="kt-fs-crumbs scroll-thin" aria-label="Folder path">
             {crumbs(dir).map((crumb, index) => (
               <span key={crumb.path || 'root'} className="contents">
@@ -346,124 +318,31 @@ export const FilesTab = ({
               </span>
             ))}
           </nav>
-        )}
-        <span className="kt-fs-actions">
-          {active?.selection && (
-            <button
-              type="button"
-              className="kt-fs-icon-button"
-              onClick={clearActiveSelection}
-              aria-label={`Clear line selection for ${active.path}`}
-              title={active.view === 'diff' ? 'Clear highlight and return to diff' : 'Clear line highlight'}
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
-          )}
-          {active && (
-            <button
-              type="button"
-              className="kt-fs-icon-button"
-              data-active={rawActive || undefined}
-              aria-pressed={rawActive}
-              onClick={() => setActiveView(rawActive ? 'normal' : 'raw')}
-              aria-label={rawActive ? `Show ${active.path} normally` : `Show raw bytes for ${active.path}`}
-              title={rawActive ? 'Show normally' : 'Show raw'}
-            >
-              <Code2 size={17} aria-hidden="true" />
-            </button>
-          )}
-          {active && repo && (
-            <button
-              type="button"
-              className="kt-fs-icon-button"
-              data-active={diffActive || undefined}
-              aria-pressed={diffActive}
-              onClick={() => setActiveView(diffActive ? 'normal' : 'diff')}
-              aria-label={diffActive ? `Show ${active.path} normally` : `Show git diff for ${active.path}`}
-              title={diffActive ? 'Show file' : 'Show git diff'}
-            >
-              <GitCompareArrows size={17} aria-hidden="true" />
-            </button>
-          )}
-          <ReloadAction
-            what={active ? active.path : 'files'}
-            busy={shown.refreshing || probe.refreshing}
-            onReload={reload}
-          />
-        </span>
-      </div>
+          <span className="kt-fs-actions">
+            <ReloadAction what="files" busy={listing.refreshing || probe.refreshing} onReload={reload} />
+          </span>
+        </div>
+      ) : (
+        // One open file is its own instance (`file-instance-surface.tsx`).
+        instance.bar
+      )}
 
       {/* The host's strip is the ONE strip when it owns the opens (#35). */}
-      {!hostOwnsTabs && tabs.length > 0 && (
-        <OpenFileTabs tabs={tabs} activePath={activePath} onActivate={setActivePath} onClose={closeFile} />
-      )}
+      {strip}
 
       {/* Directly above the content it is about, and OUTSIDE the scroller: the
           reading position is part of what a reload preserves. */}
-      <StaleNotice dismissible what={shownWhat} status={shown} onRetry={reload} />
+      {instance === null ? (
+        <StaleNotice dismissible what={dir || 'the ferret’s root'} status={listing} onRetry={reload} />
+      ) : (
+        instance.notice
+      )}
 
       <div className="kt-fs-body">
-        {treeOpen && (
-          // Mounted (hidden) while a file is open, so expansion and the loaded
-          // listings survive a read-then-back round trip. Keyed by the daemon
-          // scope so a connection switch rebuilds it rather than reusing one
-          // daemon's expanded folders against another's tree.
-          <FileTree
-            key={key}
-            scope={scope}
-            dir={dir}
-            refreshNonce={treeRefresh}
-            hidden={!!active}
-            onEnter={setDir}
-            onOpenFile={openFile}
-          />
-        )}
-        <div ref={paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
-          {/* Retained content is checked FIRST here too: the reader keeps the
-              bytes and the scroll offset while a reload runs or after it
-              fails, exactly as the instance viewer behaves. */}
-          {diffActive && active ? (
-            // Two answers, not three: a settled successful diff read is never
-            // null (`fsApi.diff` resolves a string), so there is no fourth state
-            // to describe. Same reasoning as `file-instance-surface.tsx`.
-            parsedDiff === null ? (
-              diff.error === null ? (
-                <Loading what="the diff" />
-              ) : (
-                <Failed what="the diff" error={diff.error} onRetry={diff.reload} />
-              )
-            ) : parsedDiff.binary ? (
-              <Note tone="warn" role="status">
-                git reports this pair as binary — there is no textual diff to show.
-              </Note>
-            ) : diffHasBody ? (
-              <>
-                <DiffBody parsed={parsedDiff} />
-                {parsedDiff.truncated && (
-                  <div className="kt-fs-note" role="status">
-                    Showing the first {parsedDiff.lines.length.toLocaleString()} of {parsedDiff.total.toLocaleString()}{' '}
-                    diff lines.
-                  </div>
-                )}
-              </>
-            ) : (
-              <Note role="status">No textual changes in this file.</Note>
-            )
-          ) : active ? (
-            file.data ? (
-              <FileBody
-                file={file.data}
-                path={active.path}
-                raw={rawActive}
-                selection={active.selection}
-                targetLineRef={targetLineRef}
-                preview={{ scope, revision: file.revision }}
-              />
-            ) : file.error ? (
-              <Failed what={baseName(active.path)} error={file.error} onRetry={file.reload} />
-            ) : (
-              <Loading what={baseName(active.path)} />
-            )
+        {tree}
+        <div ref={instance?.paneRef} tabIndex={-1} className="kt-fs-scroll scroll-thin outline-none">
+          {instance !== null ? (
+            instance.body
           ) : // "Files still browse normally" is a CLAIM, so it is made only where the listing beside it
           // proves it. Stated unconditionally it contradicted the failure panel underneath it, and a
           // reader had no way to tell which of the two to believe.
