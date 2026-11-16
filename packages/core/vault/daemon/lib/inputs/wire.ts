@@ -489,7 +489,7 @@ export const InputDeliverBodySchema = z
   })
   .superRefine((body, context) => {
     if (body.padded !== undefined && (body.entry !== undefined || body.fields !== undefined)) {
-      context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field card: send it alone' });
+      context.addIssue({ code: 'custom', message: 'padded is the one value of a one-field input: send it alone' });
     }
     if (body.signIn !== undefined && body.entry === undefined) {
       context.addIssue({

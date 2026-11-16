@@ -234,7 +234,7 @@ export class GateItems implements CardWriteObserver {
     signal?.throwIfAborted();
     await this.closeStrays(signal).catch((error: unknown) => {
       if (signal?.aborted === true) throw error;
-      this.ports.diagnostics.warn(`the sweep of stray card asks failed: ${errorText(error)}`);
+      this.ports.diagnostics.warn(`the sweep of stray task asks failed: ${errorText(error)}`);
     });
     return raised;
   }
@@ -256,7 +256,7 @@ export class GateItems implements CardWriteObserver {
       };
     } catch (error) {
       // "Not asking" would let a second ask through: with Asks unreadable, no card is reconciled this pass.
-      this.ports.diagnostics.warn(`the asks of the cards could not be read, so none was put: ${errorText(error)}`);
+      this.ports.diagnostics.warn(`the asks of the tasks could not be read, so none was put: ${errorText(error)}`);
       return 0;
     }
     for (const card of cards) {

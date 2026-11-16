@@ -111,7 +111,7 @@ class CardErrorBoundary extends Component<
 
   override componentDidCatch(error: unknown, info: ErrorInfo): void {
     const report = this.props.onReport ?? ((message, caught, stack) => console.warn(message, caught, stack));
-    report(`ferretry: card ${this.props.label} failed to render`, error, info?.componentStack);
+    report(`ferretry: task ${this.props.label} failed to render`, error, info?.componentStack);
   }
 
   override render(): ReactNode {
@@ -133,7 +133,7 @@ export function BoardDetail(props: BoardDetailProps) {
     <div className="fy-board-detail__scrim" data-mode={phone ? 'page' : 'drawer'}>
       <div aria-hidden="true" className="fy-board-detail__backdrop" onClick={onClose} />
       <aside
-        aria-label={`Card ${label}`}
+        aria-label={`Task ${label}`}
         className="fy-board-detail"
         data-mode={phone ? 'page' : 'drawer'}
         onKeyDown={event => {
@@ -152,7 +152,7 @@ export function BoardDetail(props: BoardDetailProps) {
           </CardErrorBoundary>
         ) : (
           <p className="fy-board-detail__empty" role="status">
-            {machine.name} has no card {label}.
+            {machine.name} has no task {label}.
           </p>
         )}
       </aside>
@@ -167,7 +167,7 @@ function LoadedCard(props: BoardDetailProps & { readonly id: CardId }) {
   if (state.missing) {
     return (
       <p className="fy-board-detail__empty" role="status">
-        {machine.name} has no card {label}.
+        {machine.name} has no task {label}.
       </p>
     );
   }
@@ -175,7 +175,7 @@ function LoadedCard(props: BoardDetailProps & { readonly id: CardId }) {
   if (state.status === 'error') {
     return (
       <p className="fy-board-detail__empty" role="alert">
-        The card could not be read: {state.error ?? 'the machine did not answer'}.
+        The task could not be read: {state.error ?? 'the machine did not answer'}.
       </p>
     );
   }
@@ -337,7 +337,7 @@ function DetailBody({
       </TermLayer>
 
       {children.length === 0 ? null : (
-        <DetailSection count={children.length} id="children" title="Sub-cards">
+        <DetailSection count={children.length} id="children" title="Sub-tasks">
           <ChildrenList lines={children} now={now} onOpen={open} />
         </DetailSection>
       )}

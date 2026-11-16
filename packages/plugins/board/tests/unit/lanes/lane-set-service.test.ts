@@ -268,7 +268,7 @@ describe('LaneSetService.apply', () => {
       ['ms8-abcd1234', `lanes:${FERRETRY_ID}:4`],
     ]);
     should(agenda.raised[0]?.[2].why).containEql(
-      'removes Released, which waits for the owner, and sends its cards into the closed lane, which closes them',
+      'removes Released, which waits for the owner, and sends its tasks into the closed lane, which closes them',
     );
     should(agenda.raised[0]?.[2].why).containEql('keeps its lanes until you accept');
   });

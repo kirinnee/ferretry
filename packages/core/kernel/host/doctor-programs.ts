@@ -98,7 +98,7 @@ export async function hostProgramLines(facts: ProgramFacts): Promise<readonly Do
       facts,
       'gh',
       'optional',
-      "The board's GitHub watcher cannot read PR state, link PRs or find releases; cards keep their PR state unknown.",
+      "The board's GitHub watcher cannot read PR state, link PRs or find releases; tasks keep their PR state unknown.",
     ),
   ];
 }

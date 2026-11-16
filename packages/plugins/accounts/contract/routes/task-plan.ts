@@ -190,10 +190,10 @@ const GRANT_MISS_WORDS = {
   'sign-in-gone': 'the sign-in was removed or moved to another account',
   'place-changed': "the sign-in's login domains changed since you approved it",
   'recipe-changed': "the sign-in's recipe changed since you approved it",
-  'field-not-covered': 'the card asks for a field the line does not cover',
-  'code-not-ticked': 'the card asks for a code, and you did not tick codes for this line',
-  'ferret-named-another': 'the ferret named another account for this card',
-  'account-lacks-field': "the account doesn't hold a value this card needs",
+  'field-not-covered': 'the input asks for a field the line does not cover',
+  'code-not-ticked': 'the input asks for a code, and you did not tick codes for this line',
+  'ferret-named-another': 'the ferret named another account for this input',
+  'account-lacks-field': "the account doesn't hold a value this input needs",
   rate: 'too many sign-ins were filled in the last hour',
   'not-https': 'the page is not on https',
   frame: 'a field is in a frame from another site',
@@ -212,7 +212,7 @@ const GRANT_MISS_WORDS = {
   'factor-changed': "the account's 2FA keys changed since you approved it",
   'proof-invalid': 'your passkey approval of it no longer checks out',
   'no-history': "you haven't signed in to this form yourself from the app yet",
-  'code-without-sign-in': 'the card asks for a code outside a sign-in the rule filled',
+  'code-without-sign-in': 'the input asks for a code outside a sign-in the rule filled',
   'scripted-origin': 'a ferret ran a page script on this site',
   'program-changed': 'the program reading the terminal changed while Ferretry was typing',
   'not-in-accounts': "it isn't in Accounts: add it in Settings › Accounts, or you'll be asked",
@@ -227,7 +227,7 @@ export const grantMissWords = (reason: GrantMissReason): string | undefined =>
 /** "Task plan line 2 didn't apply: the sign-in form changed since you approved it." `line` is 0-based. */
 export const grantMissLine = (line: number, reason: GrantMissReason): string | undefined => {
   const words = grantMissWords(reason);
-  return words === undefined ? undefined : `Task plan line ${String(line + 1)} didn't apply: ${words}.`;
+  return words === undefined ? undefined : `Sign-in plan line ${String(line + 1)} didn't apply: ${words}.`;
 };
 
 /** Where a standing rule's words differ from a plan line's for the same reason. */
@@ -294,12 +294,12 @@ export function grantFilledLineFor(
 ): string {
   const at = place === undefined || place === '' ? '' : ` on ${place}`;
   return note.by === 'plan'
-    ? `Filled under your task plan (line ${String(note.line + 1)})${at}.`
+    ? `Filled under your sign-in plan (line ${String(note.line + 1)})${at}.`
     : `Filled under your standing sign-in rule${at}.`;
 }
 
 /** What the FERRET is told when a plan did not fill a card: the same sentence for every reason. */
-export const TASK_PLAN_MISS_AGENT_NOTE = "Your task plan didn't cover this, so the owner was asked.";
+export const TASK_PLAN_MISS_AGENT_NOTE = "Your sign-in plan didn't cover this, so the owner was asked.";
 
 /**
  * The one line every plan card carries while no ferret on this machine can be walled off from Ferretry's own files
@@ -512,18 +512,18 @@ const STILL_ASKED_ITEMS: readonly {
   { what: 'Captchas and human checks', instead: 'the ferret asks you to do it', for: 'both' },
   {
     what: 'Sign-ins not in Accounts, and sign-ins through another account',
-    instead: 'the normal card',
+    instead: 'the normal input',
     for: 'plan',
   },
   {
     what: 'A paste that would replace a secret the store already holds',
-    instead: 'the normal card, in amber, every time',
+    instead: 'the normal input, in amber, every time',
     for: 'plan',
   },
   { what: 'A sign-in whose form changed since you approved it', instead: 'the rule stops and asks', for: 'rule' },
   {
     what: 'ssh, scp, npm or docker login, gh and any program but sudo, su and doas',
-    instead: 'the normal card',
+    instead: 'the normal input',
     for: 'both',
   },
   {
@@ -531,7 +531,7 @@ const STILL_ASKED_ITEMS: readonly {
     instead: 'the ferret reads its inbox, or you type it',
     for: 'both',
   },
-  { what: 'Anything after a line stopped', instead: 'the normal card, with the reason', for: 'plan' },
+  { what: 'Anything after a line stopped', instead: 'the normal input, with the reason', for: 'plan' },
 ];
 
 /** The "You'll still be asked" items one surface lists, in order. */
@@ -892,7 +892,7 @@ export function taskPlanSelection(plan: TaskPlan, approval: TaskPlanApproval): T
     const signIn = tick.signIn ?? only?.signIn;
     if (signIn === undefined) return refuse('pick one of the accounts first');
     const candidate = line.candidates.find(entry => entry.signIn === signIn);
-    if (candidate === undefined) return refuse('pick one of the accounts the card lists');
+    if (candidate === undefined) return refuse('pick one of the accounts the input lists');
     const already = picked.get(signIn);
     if (already !== undefined) return refuse(`this account is already ticked on line ${String(already + 1)}`);
     picked.set(signIn, line.line);

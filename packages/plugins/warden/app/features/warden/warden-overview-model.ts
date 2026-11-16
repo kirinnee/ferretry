@@ -215,7 +215,7 @@ export const wardenInboxLine = (agenda: WardenReadState<WardenAgendaView>): Ward
 };
 
 const SOURCE_CHIPS: Readonly<Record<Exclude<WardenAgendaItem['source'], 'warden-flag'>, WardenChip>> = {
-  card: chip('card', 'pend'),
+  card: chip('task', 'pend'),
   question: chip('question', 'warn'),
   'agent-raised': chip('asks for you', 'warn'),
   'warden-action': chip('asks you', 'warn'),

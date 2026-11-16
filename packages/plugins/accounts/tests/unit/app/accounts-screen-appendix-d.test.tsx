@@ -94,7 +94,7 @@ describe('Appendix D: the Accounts screen', () => {
     const s = await screen();
     await openSignIn(s, 'defaults');
     expect(s.q('[data-accounts-defaults-note]')?.textContent).toBe(DEFAULT_ONLY_ORDERS);
-    expect(DEFAULT_ONLY_ORDERS).toMatch(/which account a sign-in card lists first/u);
+    expect(DEFAULT_ONLY_ORDERS).toMatch(/which account a sign-in item lists first/u);
     // This build cannot read the file: it says so, and never draws "no defaults" or an offer to set one.
     expect(s.q('[data-accounts-defaults-unreadable]')?.textContent).toContain('not the same as having no defaults');
     expect(s.q('[data-accounts-default-key]')).toBeNull();

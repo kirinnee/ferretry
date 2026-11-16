@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	contract/wire.ts	1572	2026-12-16	the logins wire types; one file per flow to split out

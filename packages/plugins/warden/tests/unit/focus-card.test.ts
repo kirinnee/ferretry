@@ -42,26 +42,26 @@ describe('focusCardBrief', () => {
 
     // Assert
     should(text.split('\n').slice(0, 5)).eql([
-      'Your card: &F1 — Ship the thing',
+      'Your task: &F1 — Ship the thing',
       'Lane: Implement',
       '',
       'The ask, verbatim (owner):',
       'build the board',
     ]);
     should(text).endWith(
-      'Carry on with &F1: move it as you work (`fy card move F1 <lane>`), and note why if you stop.',
+      'Carry on with &F1: move it as you work (`fy task move F1 <lane>`), and note why if you stop.',
     );
   });
 
-  it('should not tell a sub-ferret to move its card: the card moves itself', () => {
+  it('should not tell a sub-ferret to move its task: the task moves itself', () => {
     // Act
     const text = focusCardBrief({ ...focus(), subFerret: true });
 
     // Assert
     should(text).endWith(
-      'Carry on with &F1: your card moves itself (start, PR, merge, `fy signal done`); note why if you stop.',
+      'Carry on with &F1: your task moves itself (start, PR, merge, `fy signal done`); note why if you stop.',
     );
-    should(text).not.containEql('task ');
+    should(text).not.containEql('fy task move');
   });
 
   it('should quote every clarification verbatim', () => {
@@ -113,7 +113,7 @@ describe('focusCardBrief', () => {
     should(focusCardBrief(focus())).not.containEql('Links:');
   });
 
-  it(`should show the newest ${FOCUS_HISTORY_LINES} history lines, in the words fy card show uses`, () => {
+  it(`should show the newest ${FOCUS_HISTORY_LINES} history lines, in the words fy task show uses`, () => {
     // Arrange
     const base = cardView();
     const history = [...base.history, ...[2, 3, 4, 5, 6, 7].map(seq => note(seq, `step ${seq}`))];
@@ -168,10 +168,10 @@ describe('wardenResumeMessage', () => {
 
     // Assert
     should(text).startWith(
-      "Ferretry's Warden resumed you: its turn died but the work should continue. Re-read your last turn, then continue from where you stopped, on the card below.\n\nYour card: ",
+      "Ferretry's Warden resumed you: its turn died but the work should continue. Re-read your last turn, then continue from where you stopped, on the task below.\n\nYour task: ",
     );
     should(text).not.containEql('not from the owner');
-    should(text).containEql('continue from where you stopped, on the card below.\n\nYour card: &F1 — Ship the thing');
+    should(text).containEql('continue from where you stopped, on the task below.\n\nYour task: &F1 — Ship the thing');
   });
 
   it('should say a restart kept the conversation', () => {

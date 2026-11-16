@@ -271,7 +271,7 @@ function overdueNudgeMessage(parent: WardenSessionView, minutes: number | undefi
   return (
     `The Warden checked on you: your turn ended${since} without answering ${ferretRef(parent)}'s last message. ` +
     `Send ${name} your result or status now (\`${cli} send ${name} "<result>"\`), or finish with ` +
-    `\`${cli} signal done "<result>"\` if the task is done. If you are blocked, say exactly what you need.`
+    `\`${cli} signal done "<result>"\` if the assignment is done. If you are blocked, say exactly what you need.`
   );
 }
 

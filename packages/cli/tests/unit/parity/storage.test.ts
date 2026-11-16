@@ -8,7 +8,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import * as fsp from 'node:fs/promises';
 import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { FileDaemonLifecycleLock } from '../../../src/adapters/daemon/lifecycle-lock.ts';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import type { DaemonLifecycleClaimRequest, IClockPort, IDaemonProcessPort } from '../../../src/lib/daemon/ports.ts';
@@ -114,5 +114,33 @@ describe('the daemon lock file', () => {
       searchPath: '/usr/bin',
     });
     expect(layout.daemonLockFile).toBe(join(home, 'fy-home', 'run', 'daemon.lock'));
+  });
+});
+
+describe('the artifact claim file', () => {
+  const layoutOf = (platform: string, daemonName = 'fyd') =>
+    resolveDaemonLayout({
+      platform,
+      homeDirectory: '/home/user',
+      stateDirectory: '/home/user/.local/state',
+      userId: 1000,
+      daemonName,
+      product: 'ferretry',
+      searchPath: '/usr/bin',
+    });
+
+  test('F-0018 the daemon artifact’s claim is a hidden .<len>-<artifact>.<len>-updates.lifecycle.lock file beside the artifact, under every manager', () => {
+    for (const platform of ['linux', 'darwin', 'freebsd']) {
+      const layout = layoutOf(platform);
+      const claim = '/home/user/.local/state/ferretry/updates/.3-fyd.7-updates.lifecycle.lock';
+      expect(layout.lifecycleLocks, platform).toContain(claim);
+      expect(dirname(claim)).toBe(join(layout.stateArtifactRoot, 'updates'));
+    }
+  });
+
+  test('F-0018 the claim keeps two daemons apart: names that would run together once joined with dots do not share a claim', () => {
+    const claims = ['a.b', 'a'].map(name => layoutOf('freebsd', name).lifecycleLocks[0]);
+    expect(new Set(claims).size).toBe(2);
+    expect(claims[0]).toContain('.3-a.b.7-updates.lifecycle.lock');
   });
 });

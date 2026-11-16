@@ -51,9 +51,9 @@ class DaemonRefusal extends Error {
 const plan: TidyPlan = {
   ferret: 'lead' as TidyPlan['ferret'],
   helper: false,
-  drop: [{ id: 'F1', title: 'A throwaway card', why: 'the board is off and nobody but you asked for it' }],
+  drop: [{ id: 'F1', title: 'A throwaway task', why: 'the board is off and nobody but you asked for it' }],
   close: [{ id: 'A2' as never, subject: 'Track it', code: 'status-only', why: 'it only tracks work' }],
-  keep: [{ kind: 'card', id: 'F3', title: 'Wanted', code: 'board-on', why: 'the board is on, so the card is wanted' }],
+  keep: [{ kind: 'card', id: 'F3', title: 'Wanted', code: 'board-on', why: 'the board is on, so the task is wanted' }],
 };
 
 describe('fy gc', () => {
@@ -88,36 +88,36 @@ describe('fy tidy', () => {
     expect(await t.verb('tidy')).toBe(0);
     expect(t.calls.map(call => call.route)).toEqual(['POST /v1/tidy/plan']);
     expect(t.out[0]).toContain('Dry run: nothing changed.');
-    expect(t.out[0]).toContain('&F1  A throwaway card');
+    expect(t.out[0]).toContain('&F1  A throwaway task');
     expect(t.out[0]).toContain('Apply it with: fy tidy --yes');
   });
   test('--yes drops each card and closes each ask with the reason, one by one', async () => {
     const t = run({
       'POST /v1/tidy/plan': plan,
-      'POST /v1/board/cards/:cardId': {},
+      'POST /v1/board/tasks/:taskId': {},
       'POST /v1/ferrets/:ferretId/agenda': {},
     });
     expect(await t.verb('tidy', { yes: true, reason: 'cleaning up' })).toBe(0);
     expect(t.calls.slice(1)).toEqual([
       {
-        route: 'POST /v1/board/cards/:cardId',
-        init: { params: { cardId: 'F1' }, body: { action: 'drop', reason: 'cleaning up' } },
+        route: 'POST /v1/board/tasks/:taskId',
+        init: { params: { taskId: 'F1' }, body: { action: 'drop', reason: 'cleaning up' } },
       },
       {
         route: 'POST /v1/ferrets/:ferretId/agenda',
         init: { params: { ferretId: 'lead' }, body: { action: 'resolve', id: 'A2', note: 'cleaning up' } },
       },
     ]);
-    expect(t.out[0]).toContain('Tidied: dropped 1 card(s), closed 1 ask(s).');
+    expect(t.out[0]).toContain('Tidied: dropped 1 task(s), closed 1 ask(s).');
   });
   test('a failed change is said, the rest still go, and the exit is not clean', async () => {
     const t = run({
       'POST /v1/tidy/plan': plan,
-      'POST /v1/board/cards/:cardId': new Error('the card is gone'),
+      'POST /v1/board/tasks/:taskId': new Error('the task is gone'),
       'POST /v1/ferrets/:ferretId/agenda': {},
     });
     expect(await t.verb('tidy', { yes: true })).toBe(1);
-    expect(t.out[0]).toContain('&F1  A throwaway card — FAILED: the card is gone');
+    expect(t.out[0]).toContain('&F1  A throwaway task — FAILED: the task is gone');
     expect(t.out[0]).toContain('closed 1 ask(s); 1 failed.');
     expect(t.calls.at(-1)?.init?.body).toMatchObject({ note: 'tidy: the board is opt-in and this only tracked work' });
   });
@@ -132,7 +132,7 @@ describe('fy tidy', () => {
   test('V-0494 --ferret <id> asks for that ferret’s plan and, with --yes, applies it to that ferret', async () => {
     const t = run({
       'POST /v1/tidy/plan': { ...plan, ferret: 'worker' },
-      'POST /v1/board/cards/:cardId': {},
+      'POST /v1/board/tasks/:taskId': {},
       'POST /v1/ferrets/:ferretId/agenda': {},
     });
     expect(await t.verb('tidy', { ferret: 'worker' })).toBe(0);
@@ -142,8 +142,8 @@ describe('fy tidy', () => {
     expect(await t.verb('tidy', { ferret: 'worker', yes: true, reason: 'owner clean-up' })).toBe(0);
     expect(t.calls.slice(2)).toEqual([
       {
-        route: 'POST /v1/board/cards/:cardId',
-        init: { params: { cardId: 'F1' }, body: { action: 'drop', reason: 'owner clean-up' } },
+        route: 'POST /v1/board/tasks/:taskId',
+        init: { params: { taskId: 'F1' }, body: { action: 'drop', reason: 'owner clean-up' } },
       },
       {
         route: 'POST /v1/ferrets/:ferretId/agenda',
@@ -183,7 +183,7 @@ describe('render', () => {
   });
   test('nothing to tidy still lists what was kept', () => {
     const text = renderDryRun({ ...plan, drop: [], close: [] }, 'fy');
-    expect(text).toContain('Nothing to tidy: no card to drop and no ask to close.');
+    expect(text).toContain('Nothing to tidy: no task to drop and no ask to close.');
     expect(text).toContain('Kept (1)');
   });
   test('a scratch plan marks FREE and keep with the reason', () => {

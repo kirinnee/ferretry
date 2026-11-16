@@ -47,12 +47,12 @@ if [[ ${mode} == "realworld" ]]; then
   exit 0
 fi
 if [[ ${mode} == "perf" ]]; then
-  # THE PERF TIER (bunfig.perf.toml): every speed or size budget, BLOCKING, in its own CI job (`perf`) with nothing
-  # but perf tests on the runner. FY_CI_PERF_PARALLEL bun processes (default 1; CI sets it to HALF the runner's vCPUs,
-  # so every process keeps a spare core for its GC and JIT threads and a budget measures the code, not a neighbour).
-  # No ledger, so the files are dealt one by one, round robin in path order: the same split on every run. Each
-  # process is swept on its own (TMPDIR, HOME, leak sweep) like the unit groups'. A budget keeps the generous per-test
-  # timeout of the other non-unit tiers.
+  # THE PERF TIER (bunfig.perf.toml): every speed or size budget, in its own CI job (`perf`) with nothing but perf
+  # tests on the runner. FY_CI_PERF_PARALLEL bun processes (default 1; CI sets it to HALF the runner's vCPUs, so every
+  # process keeps a spare core for its GC and JIT threads and a budget measures the code, not a neighbour). No ledger,
+  # so the files are dealt one by one, round robin in path order: the same split on every run. The runner, its
+  # verdict (REPORT-ONLY on a pull request, BLOCKING with one re-run of the failing files on main) and its summary
+  # live in scripts/ci/perf-tier.sh; this branch only enumerates the files.
   # ONE enumeration, status-checked: a failing `find` must never read as an empty tier (nothing would run, green).
   perf_list="$(mktemp)"
   if ! { find packages -path '*/node_modules' -prune -o -type f \( -name '*.test.ts' -o -name '*.test.tsx' \) -path '*/tests/perf/*' -print | sort; } >"${perf_list}"; then
@@ -61,33 +61,7 @@ if [[ ${mode} == "perf" ]]; then
   mapfile -t perf_files <"${perf_list}"
   rm -f "${perf_list}"
   [[ ${#perf_files[@]} -eq 0 ]] && empty_tier perf perf
-  perf_processes=${FY_CI_PERF_PARALLEL:-1}
-  [[ ${perf_processes} =~ ^[1-9][0-9]*$ ]] || { echo "❌ FY_CI_PERF_PARALLEL must be a positive integer" >&2 && exit 2; }
-  [[ ${perf_processes} -gt ${#perf_files[@]} ]] && perf_processes=${#perf_files[@]}
-  [[ ${perf_processes} -lt 1 ]] && echo "❌ ${#perf_files[@]} perf test files but no process to run them" >&2 && exit 1
-  rm -rf coverage/perf
-  echo "🧪 Running ${#perf_files[@]} perf test files in ${perf_processes} process(es)..."
-  perf_pids=()
-  for ((index = 0; index < perf_processes; index++)); do
-    perf_dir="coverage/perf/process-${index}"
-    mkdir -p "${perf_dir}"
-    share=()
-    for ((file = index; file < ${#perf_files[@]}; file += perf_processes)); do share+=("./${perf_files[file]}"); done
-    (
-      set +e
-      ./scripts/test/swept.sh bun scripts/test/stall-watch.ts "${FY_TEST_STALL_SECONDS:-300}" -- bun test --config=bunfig.perf.toml --timeout 120000 --reporter=junit --reporter-outfile="${perf_dir}/junit.xml" "${share[@]}" >"${perf_dir}/console.log" 2>&1
-    ) &
-    perf_pids+=("$!")
-  done
-  perf_status=0
-  for ((index = 0; index < perf_processes; index++)); do
-    wait "${perf_pids[index]}" || perf_status=1
-    echo "──── perf process ${index} ────"
-    cat "coverage/perf/process-${index}/console.log"
-  done
-  [[ ${perf_status} -ne 0 ]] && echo "❌ perf tests failed" >&2 && exit 1
-  echo "✅ perf tests passed"
-  exit 0
+  exec ./scripts/ci/perf-tier.sh "${perf_files[@]}"
 fi
 # THE REPOSITORY CONTRACTS ARE NOT CHECKED HERE. Pages config, the hosted relay config, macOS relevance and
 # the test tiers each have a pre-commit hook, and Quick's gates part runs every hook over every file on

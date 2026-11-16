@@ -159,7 +159,7 @@ export class PromptAsks {
       kind: 'task',
       subject: promptSubject(id, ref),
       why: `${id} is waiting on a prompt only you can answer.`,
-      howToResolve: 'Answer it in the ferret’s console; this card closes by itself when the wait ends.',
+      howToResolve: 'Answer it in the ferret’s console; this ask closes by itself when the wait ends.',
       context: words.slice(0, MAX_CONTEXT),
       raisedBy: { kind: 'daemon' },
       ferret: id,

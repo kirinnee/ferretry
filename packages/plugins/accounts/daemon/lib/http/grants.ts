@@ -63,7 +63,7 @@ export function refusedPageInput(context: RouteContext, act = 'allow a value int
 /** A route that answers ACCOUNT NAMES through another capability's route also needs `secrets.use`. */
 export function refusedAccountNames(
   context: RouteContext,
-  act = 'read the accounts a task plan names',
+  act = 'read the accounts a sign-in plan names',
 ): ApiResponse | undefined {
   return refusedExtra(
     context,

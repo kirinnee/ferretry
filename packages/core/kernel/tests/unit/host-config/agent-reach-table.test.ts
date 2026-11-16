@@ -97,7 +97,7 @@ const ROWS: readonly Row[] = [
     base: 'sites: {}\n',
     loosening: {
       text: 'sites:\n  github.com: HOME\n',
-      sentence: 'changes which account a card offers first for github.com',
+      sentence: 'changes which account a sign-in item offers first for github.com',
     },
   },
   {
@@ -640,7 +640,7 @@ const TODAY_HOLDS: readonly TodayHold[] = [
   // account-defaults.yaml → accounts.yaml: a line added, changed or taken away, by an agent
   {
     today: 'accountDefaults',
-    words: 'changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}',
+    words: 'changes which account a sign-in item offers first for ${line.key} in ${accountDefaultScopeWords(line)}',
     door: [
       { path: 'accounts.yaml', base: 'sites: {}\n', text: 'sites:\n  github.com: HOME\n' },
       { path: 'accounts.yaml', base: 'sites:\n  github.com: HOME\n', text: 'sites:\n  github.com: WORK\n' },

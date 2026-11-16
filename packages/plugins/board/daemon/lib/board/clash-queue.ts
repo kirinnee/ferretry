@@ -171,11 +171,11 @@ export const planClashes = (
     edges ??= unitWaits(index, laneSets, units);
     const cycle = dependencyCycle(index, card.id, clash.card);
     if (cycle !== null) {
-      unqueued.push({ ...clash, why: `${formatCardRef(target)} already waits on this card (${cycle})` });
+      unqueued.push({ ...clash, why: `${formatCardRef(target)} already waits on this task (${cycle})` });
     } else if (reaches(edges, units.key(target), units.rides(card))) {
-      unqueued.push({ ...clash, why: `${formatCardRef(target)}'s PR already waits on this card's PR` });
+      unqueued.push({ ...clash, why: `${formatCardRef(target)}'s PR already waits on this task's PR` });
     } else if (room <= 0) {
-      unqueued.push({ ...clash, why: `this card already has the most dependencies a card may hold` });
+      unqueued.push({ ...clash, why: `this task already has the most dependencies a task may hold` });
     } else {
       waits.push(clash);
       room -= 1;

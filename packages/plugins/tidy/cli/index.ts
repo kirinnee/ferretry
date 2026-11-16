@@ -98,8 +98,8 @@ export default implementCli(manifest, {
         for (const each of plan.drop) {
           const outcome = { reference: `&${each.id}`, title: each.title };
           try {
-            await client.call('POST /v1/board/cards/:cardId', {
-              params: { cardId: each.id },
+            await client.call('POST /v1/board/tasks/:taskId', {
+              params: { taskId: each.id },
               body: { action: 'drop', reason: why },
             });
             dropped.push(outcome);

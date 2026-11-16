@@ -153,7 +153,7 @@ describe('typing a code Ferretry makes', () => {
 
     const error = await refusal(w.service.deliver(SESSION, request.id, w.send(request, useCode()), OWNER));
 
-    should(error.message).containEql('this card has no code field for a 2FA key to fill');
+    should(error.message).containEql('this input has no code field for a 2FA key to fill');
     should(w.writes).eql([]);
   });
 
@@ -246,7 +246,7 @@ describe('typing a code Ferretry makes', () => {
     });
     const loginCard = await login.pending();
     const noField = await refuseWith({ w: login, request: loginCard });
-    should(noField.message).containEql('this card has no code field for a 2FA key to fill');
+    should(noField.message).containEql('this input has no code field for a 2FA key to fill');
     // A forbidden target: a page that is not https is never typed a code Ferretry made.
     const plain = await raiseCode(
       withKey({

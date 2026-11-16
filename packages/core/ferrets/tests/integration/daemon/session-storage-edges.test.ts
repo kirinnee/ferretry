@@ -114,7 +114,7 @@ describe('session storage — the journal and what listens to it', () => {
     const { storage } = await openStorage({
       wrapState: port => ({
         ...port,
-        lines: () => ({ [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(new Error('unreadable')) }) }),
+        version: () => Promise.reject(new Error('unreadable')),
       }),
     });
 

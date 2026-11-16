@@ -392,7 +392,7 @@ export const draftProblems = (current: Pick<LaneSet, 'lanes'>, draft: LaneDraft)
   }
   for (const removed of laneEditProblems(current, { layout: draft, relocate: draft.relocate })) {
     const name = current.lanes.find(lane => lane.id === removed)?.name ?? removed;
-    problems.push({ laneId: null, message: `Lane "${name}" was removed: choose where its cards go.` });
+    problems.push({ laneId: null, message: `Lane "${name}" was removed: choose where its tasks go.` });
   }
   return problems;
 };
@@ -486,7 +486,7 @@ export const laneWriteMessage = (error: Pick<LaneWriteError, 'code' | 'message'>
     case 'already-confirmed':
       return 'These lanes are already confirmed.';
     case 'relocation-missing':
-      return 'A removed lane needs a place for its cards.';
+      return 'A removed lane needs a place for its tasks.';
     case 'no-machine':
       return 'This machine is no longer paired.';
     default:

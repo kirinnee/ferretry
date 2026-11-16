@@ -38,7 +38,7 @@ export function focusCardBrief(card: WardenFocusCard): string {
   const { task, laneSet } = card;
   const ref = formatCardRef(task);
   const lines = [
-    `Your card: ${ref} — ${task.title}`,
+    `Your task: ${ref} — ${task.title}`,
     `Lane: ${laneName(laneSet, task.laneId)}`,
     '',
     `The ask, verbatim (${task.ask.source}):`,
@@ -56,7 +56,7 @@ export function focusCardBrief(card: WardenFocusCard): string {
   const recent = task.history.slice(-FOCUS_HISTORY_LINES);
   lines.push(
     '',
-    'Last on the card:',
+    'Last on the task:',
     ...recent.map(
       event =>
         `- ${event.at}  ${describeCardEvent(
@@ -67,8 +67,8 @@ export function focusCardBrief(card: WardenFocusCard): string {
     ),
     '',
     card.subFerret === true
-      ? `Carry on with ${ref}: your card moves itself (start, PR, merge, \`fy signal done\`); note why if you stop.`
-      : `Carry on with ${ref}: move it as you work (\`fy card move ${task.id} <lane>\`), and note why if you stop.`,
+      ? `Carry on with ${ref}: your task moves itself (start, PR, merge, \`fy signal done\`); note why if you stop.`
+      : `Carry on with ${ref}: move it as you work (\`fy task move ${task.id} <lane>\`), and note why if you stop.`,
   );
   return lines.join('\n');
 }
@@ -84,7 +84,7 @@ export function wardenResumeMessage(act: WardenResumeAct, reason: string, card: 
   const did = act === 'restart' ? 'restarted you with your conversation intact' : 'resumed you';
   const why = reason.trim().replace(/\.$/u, '');
   return (
-    `Ferretry's Warden ${did}: ${why}. Re-read your last turn, then continue from where you stopped, on the card below.\n\n` +
+    `Ferretry's Warden ${did}: ${why}. Re-read your last turn, then continue from where you stopped, on the task below.\n\n` +
     focusCardBrief(card)
   );
 }

@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	daemon/tools/service.ts	1869	2026-12-16	one browser tools service; split by tool when next touched

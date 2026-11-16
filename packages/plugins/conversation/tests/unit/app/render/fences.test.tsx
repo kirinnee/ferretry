@@ -28,26 +28,37 @@ const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
 const squareFence = (info = 'fy-render'): string =>
   fence(info, 'type: svg', 'alt: A ten by ten square', '---', SQUARE_SVG);
 
-describe('Markdown card and board blocks', () => {
-  const cardFence = fence('fy-render', 'type: card', 'alt: The card', '---', '&F12');
-  const badCardFence = fence('fy-render', 'type: card', 'alt: The card', '---', 'nope');
+describe('Markdown task and board blocks', () => {
+  const cardFence = fence('fy-render', 'type: task', 'alt: The task', '---', '&F12');
+  // A message saved before the rename holds the old spelling of the type; it is read for good.
+  const oldSpellingFence = fence('fy-render', 'type: card', 'alt: The task', '---', '&F12');
+  const badCardFence = fence('fy-render', 'type: task', 'alt: The task', '---', 'nope');
   const cardFences = fyRenderFences({ cardEmbed: { daemon: 'daemon-a' } });
 
-  test('should draw a card block only where the surface lent it a board to read', () => {
+  test('should draw a task block only where the surface lent it a board to read', () => {
     // Act
     const lent = render(<Markdown enableFyRender fences={cardFences} text={cardFence} />);
     const bare = render(<Markdown enableFyRender fences={FENCES} text={cardFence} />);
 
     // Assert — without a board the block is the ordinary escaped fence, as any block this build cannot draw is.
-    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'card' })).have.length(1);
+    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
     should(lent.root.findAllByType('pre')).be.empty();
-    should(bare.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
-    should(textOf(bare.root.findByType('code'))).containEql('type: card');
+    should(bare.root.findAllByProps({ 'data-fy-card-embed': 'task' })).be.empty();
+    should(textOf(bare.root.findByType('code'))).containEql('type: task');
   });
 
-  test('should leave a card block with a bad payload as an ordinary fence even where it could draw', () => {
+  test('should draw an old transcript whose block says card, as the task block it became', () => {
+    // Act
+    const lent = render(<Markdown enableFyRender fences={cardFences} text={oldSpellingFence} />);
+
+    // Assert — the saved message is never rewritten, so the old type is read forever.
+    should(lent.root.findAllByProps({ 'data-fy-card-embed': 'task' })).have.length(1);
+    should(lent.root.findAllByType('pre')).be.empty();
+  });
+
+  test('should leave a task block with a bad payload as an ordinary fence even where it could draw', () => {
     const tree = render(<Markdown enableFyRender fences={cardFences} text={badCardFence} />);
-    should(tree.root.findAllByProps({ 'data-fy-card-embed': 'card' })).be.empty();
+    should(tree.root.findAllByProps({ 'data-fy-card-embed': 'task' })).be.empty();
     should(textOf(tree.root.findByType('code'))).containEql('nope');
   });
 });

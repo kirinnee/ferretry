@@ -17,7 +17,7 @@ export function accountDefaultsDifferences(
   const sentences: string[] = [];
   for (const [where, line] of of === 'both' ? [...now, ...was] : [...now]) {
     if (was.get(where)?.account === now.get(where)?.account) continue;
-    const sentence = `changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}`;
+    const sentence = `changes which account a sign-in item offers first for ${line.key} in ${accountDefaultScopeWords(line)}`;
     if (!sentences.includes(sentence)) sentences.push(sentence);
   }
   return sentences;

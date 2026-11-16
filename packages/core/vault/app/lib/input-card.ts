@@ -288,8 +288,8 @@ const reboundWords = (kind: InputRequestView['target']['kind'] | undefined): str
   kind === 'terminal'
     ? 'The terminal redrew its prompt. Check it and send again.'
     : kind === 'secret'
-      ? 'The secret store changed. Check the card and send again.'
-      : 'The page changed. Check the card and send again.';
+      ? 'The secret store changed. Check the input and send again.'
+      : 'The page changed. Check the input and send again.';
 
 const REFUSED_WORDS = 'The daemon refused this.';
 
@@ -326,7 +326,7 @@ export const inputFailure = (
     return {
       kind: 'changed',
       definitive: true,
-      text: `The ${surface} is no longer what this card showed, so nothing was typed. Check the card before you send again.`,
+      text: `The ${surface} is no longer what this input showed, so nothing was typed. Check the input before you send again.`,
     };
   if (failure.status === 410 && failure.code === CODES.targetUnsettled)
     return {

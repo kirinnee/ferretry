@@ -404,7 +404,7 @@ const PREDICATE: Readonly<Record<WardenAnomalyKind, string>> = {
   agent_frozen: 'is frozen',
   provider_unavailable: 'can’t reach its provider',
   owner_request: 'was not investigated',
-  orphaned_card: 'left a card with nobody working on it',
+  orphaned_card: 'left a task with nobody working on it',
   report_overdue: 'has not answered its parent',
   input_stuck: 'is stuck on an unsent message',
   inbox_stuck: 'has messages stuck in Ferretry’s queue',

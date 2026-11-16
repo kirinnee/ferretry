@@ -148,8 +148,12 @@ ordinary code, so the easy path was to edit them anywhere.
 3. **Composition guard** (CI, U9): every package declares its composition files (registries and the few hand-written
    seams that remain). A PR that edits one fails unless its body has a `## Contract change` section that names each
    file and says why. Exempt: a pure one-line ADD to a registry, and line DELETIONS from a `ports-pending.json` ledger.
-4. **Size and churn check** (CI, H6): a source file over the size limit, or edited by too many separate PRs in a
-   window, is flagged so it is split before it becomes the next bottleneck.
+4. **Size and churn check** (CI, H6, `scripts/ci/size-churn.ts`, in the One Folder job): a source file (`.ts`/`.tsx`,
+   not a test or generated) that the PR changes fails if it has more than 1,500 lines, or if 6 or more of the last 80
+   merges edited it (one merge is one PR). The way out is a split, or an `oversize` row (limit, expiry date, reason) in
+   the package's `composition.tsv`: the file may not grow past the limit, and once the date passes, any PR touching it
+   fails until it is split or renewed. A `registry` file is exempt from churn. `bun scripts/ci/size-churn.ts --all`
+   judges the whole tree; `--replay [ref] [count]` shows what the rule would have flagged on past merges.
 5. **Rebase before pushing.** Before every push, rebase your own branch onto the latest base and push it with
    `--force-with-lease`. Never rewrite a shared branch (`main`, a release or integration branch, or a branch another PR
    stacks on): bring the base into it with a merge instead. A pre-push hook refuses a branch that does not contain its

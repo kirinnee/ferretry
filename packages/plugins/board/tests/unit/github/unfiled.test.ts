@@ -168,7 +168,7 @@ describe('UnfiledRefiler: the folder the card’s ferret works in', () => {
     should(sessions.asked).deepEqual(['lead']);
     should(subject.stored('F2')).match({ projectId: OTHER_PROJECT, laneId: 'implement' });
     should(subject.stored('F3').history.find(event => event.type === 'refiled')).match({
-      reason: "&F3's ferret lead works in Docs, so the card belongs on its board",
+      reason: "&F3's ferret lead works in Docs, so the task belongs on its board",
     });
   });
 
@@ -181,7 +181,7 @@ describe('UnfiledRefiler: the folder the card’s ferret works in', () => {
 
     // Assert
     should(subject.stored().history.find(event => event.type === 'refiled')).match({
-      reason: "&F1's ferret lead works in that project, so the card belongs on its board",
+      reason: "&F1's ferret lead works in that project, so the task belongs on its board",
     });
   });
 
@@ -338,7 +338,7 @@ describe('UnfiledRefiler: failures', () => {
     await unlisted.refiler.run();
 
     // Assert
-    should(unreadable.warnings).deepEqual(['Unfiled board: could not look for cards to refile: board damaged']);
+    should(unreadable.warnings).deepEqual(['Unfiled board: could not look for tasks to refile: board damaged']);
     should(unlisted.warnings).deepEqual(['Unfiled board: could not list the projects: registry damaged']);
     should(unlisted.stored().projectId).equal(UNFILED_PROJECT_ID);
   });
@@ -421,7 +421,7 @@ describe('UnfiledRefiler: the live audit after 4.147.0', () => {
 
     // Assert
     should(refused.warnings).deepEqual([
-      `Unfiled board: could not propose lanes for project ${NIX_REGISTRY}, so its cards stay Unfiled for now`,
+      `Unfiled board: could not propose lanes for project ${NIX_REGISTRY}, so its tasks stay Unfiled for now`,
     ]);
     should(refused.stored().projectId).equal(UNFILED_PROJECT_ID);
     should(throws.warnings).deepEqual([

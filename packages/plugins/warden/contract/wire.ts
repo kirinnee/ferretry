@@ -361,6 +361,9 @@ export const WardenFlagSchema = z.strictObject({
   assignedWarden: z.boolean().optional(),
   ledger: LivenessLedgerSchema.optional(),
   subject: z.string().min(1).optional(),
+  /** The board task an orphaned-task flag is about. */
+  task: z.strictObject({ id: z.string().min(1) }).optional(),
+  /** The key this flag carried one release ago; read, never written (`task` is the one the daemon sends). */
   card: z.strictObject({ id: z.string().min(1) }).optional(),
 });
 export type WardenFlag = z.infer<typeof WardenFlagSchema>;

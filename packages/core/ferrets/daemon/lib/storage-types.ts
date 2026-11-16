@@ -34,6 +34,12 @@ export interface IndexedSession {
   /** One-based source line at the indexed journal byte offset. */
   readonly journalLine: number;
   readonly journal: JournalFingerprint | null;
+  /**
+   * The state port's version etag of the journal file the row's journal fields were made from by a COMPLETE, undamaged
+   * read of it. A journal whose etag still equals this is unchanged, so a reconcile need not read it again. Absent
+   * means unknown, never "unchanged": the journal is read once and the version recorded.
+   */
+  readonly journalVersion?: string;
 }
 
 export interface JournalProblem {

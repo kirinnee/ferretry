@@ -29,6 +29,8 @@ import { contractPath } from '../gen/lib/workspace.ts';
 
 const CHECK = 'unwired-seams';
 const PORTS_PENDING = 'ports-pending.json';
+/** The stored JSON key that holds an entry's &F task; it is a name on disk, so a message names it as it is written. */
+const TASK_KEY = 'card';
 
 export interface UnwiredEntry {
   readonly seam: string;
@@ -66,8 +68,7 @@ export interface RawSeam {
 export const ONE_TIME_UNWIRED_ALLOWANCE: readonly { readonly seam: string; readonly reason: string }[] = [
   {
     seam: 'hook:task.moving',
-    reason:
-      'the same seam as hook:card.moving, renamed with the Board noun (O18, owner !A539); nothing is newly unwired',
+    reason: 'the same seam as before, renamed with the Board noun (O18, owner !A539); nothing is newly unwired',
   },
 ];
 
@@ -325,7 +326,8 @@ export function unwiredFindings(
     const where = PORTS_PENDING;
     if (seen.has(entry.seam)) at(where, `unwired "${entry.seam}" is listed twice`);
     seen.add(entry.seam);
-    if (!/^&F\d+$/.test(entry.card)) at(where, `unwired "${entry.seam}" has no &F<digits> card (got "${entry.card}")`);
+    if (!/^&F\d+$/.test(entry.card))
+      at(where, `unwired "${entry.seam}" has no &F<digits> task in "${TASK_KEY}" (got "${entry.card}")`);
     if (entry.why.trim() === '') at(where, `unwired "${entry.seam}" does not say why (what the owner loses)`);
     const [kind, name = '', ...rest] = entry.seam.split(':');
     let exists = true;
@@ -357,7 +359,7 @@ export function unwiredFindings(
     if (!entries.some(entry => covers(entry.seam, r.seam)))
       at(
         r.where,
-        `${r.message}: wire it, or list "${r.seam}" in ${PORTS_PENDING} "unwired" with a &F card and what the owner loses`,
+        `${r.message}: wire it, or list "${r.seam}" in ${PORTS_PENDING} "unwired" with a &F task and what the owner loses`,
       );
   if (base !== undefined) {
     for (const entry of entries)
@@ -386,7 +388,7 @@ export function parseUnwired(text: string, where: string): UnwiredEntry[] | unde
       typeof row.card !== 'string' ||
       typeof row.why !== 'string'
     )
-      throw new Error(`${where}: "unwired[${index}]" needs a string seam, card and why`);
+      throw new Error(`${where}: "unwired[${index}]" needs a string seam, why and "${TASK_KEY}" (the &F task)`);
     return { seam: row.seam, card: row.card, why: row.why };
   });
 }
@@ -418,7 +420,7 @@ export function readBaseUnwired(root: string, ref: string): UnwiredEntry[] | und
 export const check: Check = {
   name: CHECK,
   summary:
-    'a hook, port or unbound seam that is offered and not wired is listed with a card, and the list only shrinks',
+    'a hook, port or unbound seam that is offered and not wired is listed with a task, and the list only shrinks',
   async run(ctx) {
     let entries: UnwiredEntry[] = [];
     let base: UnwiredEntry[] | undefined;

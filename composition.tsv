@@ -3,3 +3,6 @@ composition	.github/workflows/one-folder.yaml	-	-	the workflow that runs the One
 composition	scripts/ci/composition-guard.ts	-	-	the composition guard itself: weakening it needs a Contract change section
 composition	scripts/ci/lib/composition.ts	-	-	the one reader of every composition.tsv the guard trusts
 composition	scripts/ci/one-folder.ts	-	-	the PR-body parser, reason rule and package roots the guard shares with One Folder
+composition	scripts/ci/size-churn.ts	-	-	the size/churn check: the limits and the expiry rule every oversize declaration answers to
+oversize	scripts/gen/registries.ts	1010	2026-11-30	the registry generator; expected churn, every registry kind edits it
+oversize	scripts/rebuild/parity.ts	2025	2026-12-16	grew on base before O18; split by section is an end-list unit

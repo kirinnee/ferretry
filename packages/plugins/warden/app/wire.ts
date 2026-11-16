@@ -109,6 +109,8 @@ export interface WardenFlag {
   readonly idleMinutes?: number;
   readonly assignedWarden?: boolean;
   readonly subject?: string;
+  readonly task?: { readonly id: string };
+  /** The key a flag carried one release ago; read, never written. */
   readonly card?: { readonly id: string };
 }
 

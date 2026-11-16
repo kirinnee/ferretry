@@ -197,7 +197,7 @@ const flatten = (value: string): string => value.replaceAll(/\s+/gu, ' ').trim()
 
 /** The ways out of an orphaned card, as commands. */
 const remedies = (view: CardView, assignee: string, cli: string): string =>
-  `Resume its ferret (\`${cli} resume ${assignee}\`), hand the card to another ferret (\`${cli} task assign ${view.id} <ferret>\`), or drop it (\`${cli} task drop ${view.id} --reason "<why>"\`).`;
+  `Resume its ferret (\`${cli} resume ${assignee}\`), hand the task to another ferret (\`${cli} task assign ${view.id} <ferret>\`), or drop it (\`${cli} task drop ${view.id} --reason "<why>"\`).`;
 
 /** What became of a ferret, for a reader who is not an engineer: it finished, failed, or is gone. */
 const endedWords = (sessionId: string, fleet: ReadonlyMap<string, WardenSessionView>): string => {
@@ -229,15 +229,15 @@ function orphanOwnerMessage(
 ): string {
   const assignee = effectiveAssignee(view);
   return (
-    `Your card ${formatCardRef(view)} "${flatten(view.title)}" has no ferret working on it. It is waiting in ${laneName(board, view)}, ` +
+    `Your task ${formatCardRef(view)} "${flatten(view.title)}" has no ferret working on it. It is waiting in ${laneName(board, view)}, ` +
     `but its ferret ${ferretRef(assignee, fleet)} ${endedWords(assignee, fleet)}, so nothing will happen to it. ` +
-    `You own the card, so pick it up: ${remedies(view, assignee, cli)}`
+    `You own the task, so pick it up: ${remedies(view, assignee, cli)}`
   );
 }
 
 /** The title of the machine item: one card, or how many. */
 export const orphanTitle = (count: number): string =>
-  count === 1 ? 'A card has nobody working on it' : `${String(count)} cards have nobody working on them`;
+  count === 1 ? 'A task has nobody working on it' : `${String(count)} tasks have nobody working on them`;
 
 /** A card as a row of the machine item. */
 const orphanedCard = (view: CardView, board: WardenBoardRead, assignee: string, since: string): OrphanedCard => ({
@@ -283,10 +283,10 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
     const sameEpisode = told?.assignee === assignee;
     const card = orphanedCard(view, input.board, assignee, anomaly.since ?? view.createdAt);
     if (told !== undefined && !sameEpisode)
-      closeAsk(view.id, told, 'Closed by the Warden: the card changed hands since.');
+      closeAsk(view.id, told, 'Closed by the Warden: the task changed hands since.');
     if (sameEpisode && told.via === 'notice') {
       // Already told by a per-card ask: it becomes a row of the list, news there, and the ask is closed.
-      closeAsk(view.id, told, 'Closed by the Warden: the orphaned cards are one item on the machine agenda now.');
+      closeAsk(view.id, told, 'Closed by the Warden: the orphaned tasks are one item on the machine agenda now.');
       listed(card);
       continue;
     }
@@ -322,7 +322,7 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
 
   for (const [taskId, told] of Object.entries(input.memory))
     if (!current.has(taskId))
-      closeAsk(taskId, told, 'Closed by the Warden: a ferret is on the card again, or it left its lane.');
+      closeAsk(taskId, told, 'Closed by the Warden: a ferret is on the task again, or it left its lane.');
 
   return { tell, list, resolve, memory };
 }

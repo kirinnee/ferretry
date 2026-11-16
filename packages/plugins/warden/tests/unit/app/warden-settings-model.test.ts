@@ -348,7 +348,7 @@ describe('moving a ferret that hit a limit', () => {
     // Assert
     expect(asked).toContain('No AI runs and nothing is spent.');
     expect(asked).toEndWith(
-      ' When its login hits a usage limit or its login passes its hard spend budget, a ferret is moved to another ready login of the same kind and provider — same chat, same card — at most once an hour. Its background jobs are never stopped by the Warden: it asks the ferret and waits 10 min, then tells you.',
+      ' When its login hits a usage limit or its login passes its hard spend budget, a ferret is moved to another ready login of the same kind and provider — same chat, same task — at most once an hour. Its background jobs are never stopped by the Warden: it asks the ferret and waits 10 min, then tells you.',
     );
     expect(forced).toContain('the first ready one of claude-b → glm-a');
     expect(forced).toContain('at most 2 times an hour');

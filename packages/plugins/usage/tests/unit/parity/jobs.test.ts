@@ -1,6 +1,6 @@
 /**
  * Parity rows J-0010, J-0020, J-0028, J-0041, J-0081, J-0082, J-0086, J-0090, J-0108, J-0115, J-0124, J-0138, J-0163,
- * J-0181, J-0263, J-0264, J-0268 (docs/design/rebuild-parity.md, usage).
+ * J-0181, J-0227, J-0263, J-0264, J-0268 (docs/design/rebuild-parity.md, usage).
  */
 import { describe, expect, test } from 'bun:test';
 import { milliseconds } from '@ferretry/std';
@@ -42,6 +42,22 @@ describe('the jobs the kernel arms', () => {
     await host.runJob('usage-ingest');
 
     expect(host.published.filter(entry => entry.event === InsightsChanged.name)).toHaveLength(1);
+    await host.stop();
+  });
+
+  test('J-0227 an ended turn nudges one ingestion pass thirty seconds on, and the fifteen-minute job stays the backstop', async () => {
+    const { host, scheduled, hooks } = await usageHost();
+    const changed = () => host.published.filter(entry => entry.event === InsightsChanged.name).length;
+    expect(scheduled.find(job => job.id === 'usage-ingest')?.schedule).toEqual({ every: milliseconds(15 * 60_000) });
+
+    hooks['turn.ended']?.({ ferret: 'done', turn: 't1', outcome: 'completed', endedAt: '2026-11-16T09:00:00.000Z' });
+    await host.clock.advance(29_999);
+    await host.settle();
+    expect(changed()).toBe(0);
+
+    await host.clock.advance(1);
+    await host.settle();
+    expect(changed()).toBe(1);
     await host.stop();
   });
 

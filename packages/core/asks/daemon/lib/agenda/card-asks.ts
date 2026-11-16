@@ -281,7 +281,7 @@ const operate = (
       return {
         kind: 'refused',
         code: 'full',
-        message: `${item.id} already carries ${String(MAX_AGENDA_CARD_ASKS)} open asks about cards`,
+        message: `${item.id} already carries ${String(MAX_AGENDA_CARD_ASKS)} open asks about tasks`,
       };
     }
     // A ferret's thread remembers the turn this ask ends; a second ask joining a first the owner has yet to look at
@@ -441,7 +441,7 @@ export const joinCardAsks = (
     return {
       kind: 'refused',
       code: 'invalid',
-      message: `${item.id} cannot carry a card's ask (${[...new Set(incoming.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ')})`,
+      message: `${item.id} cannot carry a task's ask (${[...new Set(incoming.map(ask => formatTaskRef({ id: ask.gate.cardId })))].join(', ')})`,
     };
   }
   const own = item.cardAsks ?? [];
@@ -455,7 +455,7 @@ export const joinCardAsks = (
     return {
       kind: 'refused',
       code: 'full',
-      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} asks about cards, answered or not: nothing is dropped to fit`,
+      message: `${item.id} would carry more than ${String(MAX_AGENDA_CARD_ASKS)} asks about tasks, answered or not: nothing is dropped to fit`,
     };
   }
   const waitingOn = (asks: readonly AgendaCardAsk[]): AgendaCardAsk[] =>

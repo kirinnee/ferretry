@@ -53,7 +53,7 @@ const scripted = (
       }
       switch (route) {
         case 'GET /v1/board/tasks/:taskId':
-          if (found === undefined) throw Object.assign(new Error('no such card'), { status: 404 });
+          if (found === undefined) throw Object.assign(new Error('no such task'), { status: 404 });
           return { card: found, laneSet };
         case 'GET /v1/board/ids':
           return { ids: cards.map(each => each.id) };
@@ -174,28 +174,28 @@ describe('agenda.card-answer: Done · closes is the board’s own Done', () => {
     const noDoneAnswer = answerOver(noDone.client);
     await read(noDoneAnswer, 'F3');
 
-    expect(await neverRead.done('F1')).toEqual({ ok: false, status: 0, message: 'the card could not be read' });
+    expect(await neverRead.done('F1')).toEqual({ ok: false, status: 0, message: 'the task could not be read' });
     expect(await droppedAnswer.done('F2')).toEqual({
       ok: false,
       status: 0,
-      message: 'the board has no Done for this card',
+      message: 'the board has no Done for this task',
     });
     expect(await noDoneAnswer.done('F3')).toEqual({
       ok: false,
       status: 0,
-      message: 'the board has no Done for this card',
+      message: 'the board has no Done for this task',
     });
     expect([...unread.sent, ...droppedWorld.sent, ...noDone.sent]).toEqual([]);
   });
 
   it('answers the daemon’s refusal in its own words: the route is the authority', async () => {
     const { client, sent } = scripted([card('F1', { laneId: 'tested' })], {
-      refuse: { status: 403, message: 'only the owner closes this card' },
+      refuse: { status: 403, message: 'only the owner closes this task' },
     });
     const answer = answerOver(client);
     await read(answer, 'F1');
 
-    expect(await answer.done('F1')).toEqual({ ok: false, status: 403, message: 'only the owner closes this card' });
+    expect(await answer.done('F1')).toEqual({ ok: false, status: 403, message: 'only the owner closes this task' });
     expect(sent).toHaveLength(1);
   });
 
@@ -241,7 +241,7 @@ describe('agenda.card-answer: a notice’s Start and Close', () => {
     const { client, sent } = scripted([]);
     const answer = answerOver(client);
 
-    expect(await answer.drop('not-a-card', 'x')).toMatchObject({ ok: false, message: 'that is not a card id' });
+    expect(await answer.drop('not-a-card', 'x')).toMatchObject({ ok: false, message: 'that is not a task id' });
     expect(await answer.start('A3', 'k')).toMatchObject({ ok: false });
     expect(sent).toEqual([]);
   });

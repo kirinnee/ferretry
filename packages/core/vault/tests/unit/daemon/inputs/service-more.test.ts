@@ -365,7 +365,7 @@ describe('a saved value that is typed or kept', () => {
       ),
     );
 
-    should(error.message).containEql('this card types the username itself');
+    should(error.message).containEql('this input types the username itself');
   });
 
   it('should not let a save into an account that exists pass without the owner’s explicit Update', async () => {
@@ -412,7 +412,7 @@ describe('a saved value that is typed or kept', () => {
     const someoneElse = await refusal(update('GITHUB', 'another@example.com'));
 
     should(gone.code).equal('not_found');
-    should(notOffered.message).containEql('is not the account this card can update');
+    should(notOffered.message).containEql('is not the account this input can update');
     should(someoneElse.code).equal('conflict');
     should(someoneElse.message).containEql('signing in someone else');
     should(w.writes).eql([]);
@@ -438,7 +438,7 @@ describe('a saved value that is typed or kept', () => {
     );
 
     should(fresh.saved?.update).be.undefined();
-    should(error.message).containEql('is not the account this card can update');
+    should(error.message).containEql('is not the account this input can update');
   });
 
   it('should refuse to save when the saved accounts cannot be read, typing nothing', async () => {

@@ -23,9 +23,9 @@ describe('the orphaned cards item', () => {
     const three = orphanItem([card(1), card(2), card(3)]);
 
     // Assert
-    should(one?.subject).equal('A card has nobody working on it');
+    should(one?.subject).equal('A task has nobody working on it');
     should(one?.why).containEql('This one was handed');
-    should(three?.subject).equal('3 cards have nobody working on them');
+    should(three?.subject).equal('3 tasks have nobody working on them');
     should(three?.why).containEql('These were handed');
     should(three?.why).not.containEql('nothing under it is alive');
     should(three?.howToResolve).containEql('start a ferret on it');
@@ -53,7 +53,7 @@ describe('the orphaned cards item', () => {
 
     // Assert
     should(MAX_LISTED_ORPHANS).equal(12);
-    should(item?.subject).equal('31 cards have nobody working on them');
+    should(item?.subject).equal('31 tasks have nobody working on them');
     const rows = item?.context.split('\n') ?? [];
     should(rows).have.length(13);
     should(rows.slice(0, 12).every(row => row.startsWith('- &F'))).be.true();
@@ -68,7 +68,7 @@ describe('the orphaned cards item', () => {
     const item = orphanItem(cards);
 
     // Assert
-    should(item?.subject).equal('10000 cards have nobody working on them');
+    should(item?.subject).equal('10000 tasks have nobody working on them');
     should(item?.context.split('\n')).have.length(13);
     should(item?.context.endsWith('…and 9988 more.')).be.true();
     should((item?.context.length ?? 0) <= MAX_AGENDA_DETAIL_LENGTH).be.true();

@@ -100,8 +100,8 @@ export const walkLadder = async (
   }
   diagnostics.warn(
     last.to === null
-      ? `${message} reached no ferret: the card's assignee and owner are gone, so it is orphaned`
-      : `${message} is held for ${last.to}'s next revive: no ferret on the card could be resumed now`,
+      ? `${message} reached no ferret: the task's assignee and owner are gone, so it is orphaned`
+      : `${message} is held for ${last.to}'s next revive: no ferret on the task could be resumed now`,
   );
   return last;
 };

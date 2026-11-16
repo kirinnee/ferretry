@@ -309,7 +309,7 @@ so it is never ambiguous there.
 token reader; what it draws (title, lane, progress, PRs) is whatever the board answered, and a card the daemon did not
 answer is never a link or a frame, only a quiet note. It is drawn only where the surface lends a board to read
 (`cardEmbed`, offered with a task route); anywhere else the fence stays an ordinary code fence
-([fy-render.md](fy-render.md#cards-and-boards)).
+([fy-render.md](fy-render.md#tasks-and-boards)).
 
 ## 7. References inside code
 

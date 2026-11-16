@@ -33,9 +33,9 @@ export interface WardenOwnerHoldPorts {
 }
 
 export async function ownerHoldReason(ports: WardenOwnerHoldPorts, sessionId: string): Promise<string | undefined> {
-  if (ports.inputCardOpen(sessionId)) return 'it has an input card open for the owner';
+  if (ports.inputCardOpen(sessionId)) return 'it has an input open for the owner';
   if (ports.phoneApprovalOpen(sessionId)) return 'it is waiting for the owner to approve a sign-in on their phone';
-  if (ports.planAwaitingOwner(sessionId)) return 'it has a plan card waiting for the owner';
+  if (ports.planAwaitingOwner(sessionId)) return 'it has a plan waiting for the owner';
   if (ports.heldSecrets(sessionId) > 0) return 'it holds a secret it copied, which a move would drop';
   for (const surface of ['terminal', 'browser'] as const) {
     const asked = await ports.surfaceAsked(sessionId, surface).catch(() => undefined);

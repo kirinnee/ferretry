@@ -242,13 +242,13 @@ const placeOf = (before: Layout, after: Layout, at: number): number => {
 export const describeRelocationProblem = (problem: RelocationProblem): string => {
   switch (problem.why) {
     case 'closes':
-      return `would close the cards of ${problem.from} in ${problem.to}, which only the owner does`;
+      return `would close the tasks of ${problem.from} in ${problem.to}, which only the owner does`;
     case 'leaves-gate':
-      return `would take the cards of ${problem.from} out of a gate the owner has not answered, into ${problem.to}`;
+      return `would take the tasks of ${problem.from} out of a gate the owner has not answered, into ${problem.to}`;
     case 'passes-gate':
-      return `would carry the cards of ${problem.from} past ${problem.gate ?? 'a gate'}, which waits for the owner, into ${problem.to}`;
+      return `would carry the tasks of ${problem.from} past ${problem.gate ?? 'a gate'}, which waits for the owner, into ${problem.to}`;
     case 'no-such-lane':
-      return `would move the cards of ${problem.from} into ${problem.to}, which the lanes do not have`;
+      return `would move the tasks of ${problem.from} into ${problem.to}, which the lanes do not have`;
   }
 };
 
@@ -325,7 +325,7 @@ export const describeLaneSetFailure = (
     case 'unknown-lane':
       return `the template has no lane ${failure.laneId}, so it cannot be renamed`;
     case 'relocation-missing':
-      return `lanes ${failure.laneIds.join(', ')} are removed without saying where their cards go`;
+      return `lanes ${failure.laneIds.join(', ')} are removed without saying where their tasks go`;
     case 'version-conflict':
       return `the lanes are at version ${String(failure.current)} now; read them again and retry`;
     case 'already-confirmed':

@@ -81,7 +81,7 @@ describe('laneGateProblems', () => {
     );
     // Moved after Review/CI, Plan's "OK to build" (next) now sends a card on to Merged: that is said too.
     should(whys(laneGateProblems(set, moved))).containEql(
-      'changes where "OK to build" on Plan/Design sends cards: Implement → Merged',
+      'changes where "OK to build" on Plan/Design sends tasks: Implement → Merged',
     );
   });
 
@@ -97,14 +97,14 @@ describe('laneGateProblems', () => {
   it('finds cards sent into a closed lane, or past a gate', () => {
     const without = withLanes(current(), lane => (lane.id === 'implement' || lane.id === 'review' ? undefined : lane));
     should(whys(laneGateProblems(current(), without, { implement: 'closed', review: 'merged' }))).eql([
-      'changes where "OK to build" on Plan/Design sends cards: Implement → Merged',
-      'removes Implement, and sends its cards into the closed lane, which closes them',
-      'removes Review/CI, and moves its cards to Merged',
-      'changes where "Not good" on To test sends cards: Implement → Plan/Design',
+      'changes where "OK to build" on Plan/Design sends tasks: Implement → Merged',
+      'removes Implement, and sends its tasks into the closed lane, which closes them',
+      'removes Review/CI, and moves its tasks to Merged',
+      'changes where "Not good" on To test sends tasks: Implement → Plan/Design',
     ]);
     const pastPlan = withLanes(current(), lane => (lane.id === 'todo' ? undefined : lane));
     should(whys(laneGateProblems(current(), pastPlan, { todo: 'implement' }))).eql([
-      'removes Todo, and sends its cards to Implement, past Plan/Design, which waits for the owner',
+      'removes Todo, and sends its tasks to Implement, past Plan/Design, which waits for the owner',
     ]);
   });
 });
@@ -220,9 +220,9 @@ describe('a relocation judged where the cards end up (kyan R3)', () => {
 
     // Assert
     should(whys(problems)).eql([
-      'changes where "OK to build" on Plan/Design sends cards: Implement → Review/CI',
-      'removes Implement, and sends its cards to Merged, past Review/CI, which waits for the owner',
-      'changes where "Not good" on To test sends cards: Implement → Plan/Design',
+      'changes where "OK to build" on Plan/Design sends tasks: Implement → Review/CI',
+      'removes Implement, and sends its tasks to Merged, past Review/CI, which waits for the owner',
+      'changes where "Not good" on To test sends tasks: Implement → Plan/Design',
     ]);
   });
 });

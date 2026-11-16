@@ -160,7 +160,7 @@ describe('a gate answer on the agenda route', () => {
     // Assert
     should(granted.asked[0]?.caller).eql({ kind: 'owner' });
     should(granted.permitted).eql([undefined]);
-    should(refused.permitted).eql(['this device may not use the agent fleet, so it may not move a card']);
+    should(refused.permitted).eql(['this device may not use the agent fleet, so it may not move a task']);
   });
 
   it('fails closed when the route was handed no standing to read', async () => {
@@ -171,7 +171,7 @@ describe('a gate answer on the agenda route', () => {
     await post(gates, { ...DEVICE, governance: undefined }, answer);
 
     // Assert
-    should(gates.permitted[0]).startWith('this daemon could not check whether this caller may move cards');
+    should(gates.permitted[0]).startWith('this daemon could not check whether this caller may move tasks');
   });
 
   it('never names a ferret the owner, and asks no grant of it', async () => {
@@ -236,7 +236,7 @@ describe('a gate answer on the agenda route', () => {
     // Assert
     should(response).eql({
       status: 400,
-      body: { error: 'files can only come with the answer to a card ask', code: 'invalid' },
+      body: { error: 'files can only come with the answer to a task ask', code: 'invalid' },
     });
   });
 
@@ -269,7 +269,7 @@ describe('Not needed on a gate item over the agenda route', () => {
     // Assert
     should(refused).match({
       status: 403,
-      body: { error: 'this device may not use the agent fleet, so it may not move a card' },
+      body: { error: 'this device may not use the agent fleet, so it may not move a task' },
     });
     should(granted.status).equal(404);
     should(closed.status).equal(403);
@@ -347,7 +347,7 @@ describe('files with a gate answer nobody handled', () => {
     // Assert
     should(response).eql({
       status: 400,
-      body: { error: 'files can only come with the answer to a card ask', code: 'invalid' },
+      body: { error: 'files can only come with the answer to a task ask', code: 'invalid' },
     });
     should(gates.asked).have.length(1);
   });

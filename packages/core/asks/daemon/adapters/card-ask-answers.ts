@@ -66,7 +66,7 @@ export function cardAskAnswers(
       if (answer.actor.kind !== 'human')
         return refused(
           'forbidden',
-          `only the owner answers ${answer.id}'s card ask: it decides where the card goes next`,
+          `only the owner answers ${answer.id}'s task ask: it decides where the task goes next`,
         );
       const denied = answer.permitted?.();
       if (denied !== undefined) return refused('forbidden', denied);
@@ -129,7 +129,7 @@ export function cardAskAnswers(
       }
       const spec = source();
       if (spec === 'unavailable' || spec.apply === undefined)
-        return refused('not-moved', `the board cannot move the card right now, so ${answer.id} stays open`);
+        return refused('not-moved', `the board cannot move the task right now, so ${answer.id} stays open`);
       const asked: AskAnswer = {
         id: `an_${receipt.slice(0, 24)}` as AnswerId,
         ferret: answer.sessionId,

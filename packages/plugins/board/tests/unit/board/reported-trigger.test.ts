@@ -387,7 +387,7 @@ describe('a reported trigger', () => {
 
       // Assert
       should(error.code).equal('owner-gate');
-      should(error.message).equal('deploy.done would close &F1 in done, and only the owner closes a card on a report');
+      should(error.message).equal('deploy.done would close &F1 in done, and only the owner closes a task on a report');
       should(ports.store.writes).eql([]);
     }
   });
@@ -495,7 +495,7 @@ describe('a helper reporting a trigger', () => {
     // Assert
     should(error.code).equal('forbidden');
     should(error.message).equal(
-      `You are a helper, so you can't report events on a card they are not doing. You may note on, set the progress and How to test of, and link a PR or branch to your own card, and drop or reassign cards in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
+      `You are a helper, so you can't report events on a task they are not doing. You may note on, set the progress and How to test of, and link a PR or branch to your own task, and drop or reassign tasks in your own subtree. For anything else ask your lead: fy send lizzette "…"`,
     );
     should(ports.store.writes).eql([]);
   });

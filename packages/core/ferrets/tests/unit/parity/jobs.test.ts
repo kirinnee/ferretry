@@ -634,7 +634,7 @@ describe('auto-resume and the agenda hook (J-0002 J-0015)', () => {
       },
     );
 
-  test('J-0002 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
+  test('J-0002 J-0016 auto-resume is a job the daemon arms once it serves: nothing is resumed before it runs, one run resumes the ferret a host restart took down', async () => {
     const runner = new FakeRunner();
     const asked: AutoResumeDecideInput[] = [];
     let h = await ferretsHost([], {
@@ -874,7 +874,7 @@ describe('the handover reconcile loop (J-0069 J-0107 J-0245 J-0247)', () => {
 });
 
 describe('the event stream keeps proving it is alive (J-0239)', () => {
-  test('J-0239 GET /v1/events is a declared socket, and a quiet stream says idle again every 30 s; a real event re-arms the window instead', async () => {
+  test('J-0239 J-0137 GET /v1/events is a declared socket, and a quiet stream says idle again every 30 s; a real event re-arms the window instead', async () => {
     expect(manifest.actions?.sockets?.map(socket => socket.key)).toContain('GET /v1/events');
     const port = state.createStatePort({
       home: '/home/fy',
@@ -971,6 +971,9 @@ describe('the session index is rebuilt at boot (BG-049, J-0159)', () => {
     let h = await ferretsHost([]);
     const folder = h.state('ferrets');
     const written = await generatedFleet(60, folder);
+    // An append records no journal version; the rebuild reads each journal in full and does. One reconcile puts the
+    // "before" rows on the same footing, so the comparison is of what the daemon had, version included.
+    await written.storage.reconcile();
     const sessionsBefore = sessionRows(folder);
     const eventsBefore = eventRows(folder);
     expect(sessionsBefore).toHaveLength(60);

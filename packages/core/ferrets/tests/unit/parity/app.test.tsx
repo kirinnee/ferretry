@@ -21,7 +21,7 @@ import { chatHref } from '../../../app/features/move/chat-href.ts';
 import { MovePage } from '../../../app/features/move/move-page.tsx';
 import { ferretChatHref } from '../../../app/features/new-ferret/hrefs.ts';
 import manifest from '../../../manifest.ts';
-import { scripted } from '../app/support/client.ts';
+import { type Call, scripted } from '../app/support/client.ts';
 import { interact, type Mounted, mount, must } from '../app/support/dom.ts';
 import { ferretSummary } from '../app/header/support.ts';
 import { ferretOf } from '../app/info/fixtures.ts';
@@ -71,7 +71,7 @@ const show = async (element: ReactElement): Promise<HTMLElement> => {
 };
 
 describe('the new-ferret screen (the page a ferret is started from)', () => {
-  it('S-0161 S-0348 S-0399 S-0374 the new-ferret screen is declared at /d/<daemon>/new and draws the start form', async () => {
+  it('S-0161 S-0348 S-0399 S-0374 S-0160 the new-ferret screen is declared at /d/<daemon>/new and draws the start form', async () => {
     // S-0399 screen 'new-session' -> screen `new-ferret`; S-0348 PAGE_SLOTS NewSession -> the built half's screen.
     expect(manifest.ui?.screens?.map(screen => screen.id)).toContain('new-ferret');
     expect(typeof half().screens?.['new-ferret']).toBe('function');
@@ -123,7 +123,7 @@ describe("the ferret list screen (today's sessions bar and its drawer)", () => {
     );
   };
 
-  it('S-0405 S-0380 S-0233 S-0354 S-0551 S-0552 the ferret list screen is declared at /d/<daemon>/ferrets with a Ferrets nav item and draws the live list', async () => {
+  it('S-0405 S-0380 S-0233 S-0354 S-0551 S-0552 S-0232 the ferret list screen is declared at /d/<daemon>/ferrets with a Ferrets nav item and draws the live list', async () => {
     // S-0405 screen 'sessions' -> screen `ferrets`; S-0551 the app-bar entry is the screen's `nav` item.
     const declared = manifest.ui?.screens?.find(screen => screen.id === 'ferrets');
     expect(declared?.path).toBe('ferrets');
@@ -302,6 +302,49 @@ describe('a restart the daemon paused (Actions › Restart CLI)', () => {
     expect(panel.textContent).toContain('There is no recorded conversation to resume.');
     expect(panel.querySelector('[data-restart-refusal-cancel]')?.textContent).toBe('Cancel');
     expect(panel.querySelector('[data-restart-refusal-anyway]')?.textContent).toBe('Start fresh');
+  });
+});
+
+describe('the move page, account side (Actions › Move…)', () => {
+  it('S-0157 MigrateSheet: the move page offers another account of the ferret’s CLI, then moves with one request and says it is done', async () => {
+    const calls: Call[] = [];
+    mounted = await mount(
+      <MovePage
+        client={scripted(
+          {
+            'GET /v1/ferrets/:ferretId': summaryOf({ id: 'f-1', harness: 'claude-code', runtime: 'claude-default' }),
+            'POST /v1/ferrets/:ferretId/move': summaryOf({ id: 'f-1', runtime: 'claude-b' }),
+          },
+          calls,
+        )}
+        ferret="f-1"
+        onClose={() => undefined}
+        slot={fakeSlot([chosenAccount('claude-b', 'claude-code')])}
+      />,
+    );
+    await settle();
+    const root = mounted.container;
+    const toggle = [...root.querySelectorAll('button')].find(button =>
+      (button.textContent ?? '').includes('Change model or account'),
+    );
+    expect(must(toggle, 'the account switch').getAttribute('aria-pressed')).toBe('true');
+    expect(calls.filter(call => call.route.startsWith('POST'))).toEqual([]);
+    await click(root, '[data-account="claude-b"]');
+    await interact(() =>
+      must(root.querySelector('form'), 'the move form').dispatchEvent(
+        new Event('submit', { bubbles: true, cancelable: true }),
+      ),
+    );
+    await settle();
+    const confirm = [...root.querySelectorAll('button')].find(button =>
+      (button.textContent ?? '').includes('Move and relaunch'),
+    );
+    await interact(() => must(confirm, 'the confirm button').click());
+    await settle();
+    expect(calls.filter(call => call.route.startsWith('POST')).map(call => call.body)).toEqual([
+      expect.objectContaining({ agent: 'claude-b' }),
+    ]);
+    expect(root.querySelector('[data-move-done]')?.textContent).toContain('Moved to claude-b.');
   });
 });
 

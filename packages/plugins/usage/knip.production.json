@@ -1,5 +1,5 @@
 {
   "entry": [],
   "project": ["**/*.{ts,tsx}", "!tests/**"],
-  "ignore": ["app/lib/move-triggers.ts", "daemon/lib/performance/sampler-tee.ts"]
+  "ignore": ["app/lib/move-triggers.ts"]
 }

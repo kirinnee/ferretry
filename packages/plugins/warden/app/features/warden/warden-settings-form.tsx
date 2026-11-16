@@ -388,7 +388,7 @@ function MoveToAnotherLogin({
     >
       <LayerRow
         title="Move the ferret to another login"
-        detail="Same chat, same card — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left; with none, it waits and carries on at the reset. Off: the Warden tells you and you move it."
+        detail="Same chat, same task — only the login changes. It goes to a login of the same kind that is ready, switched on, under its budget and has quota left; with none, it waits and carries on at the reset. Off: the Warden tells you and you move it."
         on={moving.enabled}
         onToggle={enabled => setMoving({ enabled })}
       >
@@ -485,7 +485,7 @@ function MoveToAnotherLogin({
           />
         </div>
         <p className="m-0 text-meta leading-base text-muted">
-          Never while it has a card open for you, holds a secret, or waits on a prompt. Every move is listed under
+          Never while it has an input open for you, holds a secret, or waits on a prompt. Every move is listed under
           Recent triggers.
         </p>
       </LayerRow>

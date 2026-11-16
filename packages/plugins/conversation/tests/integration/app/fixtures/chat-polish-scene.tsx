@@ -1,6 +1,6 @@
 /**
  * The browser entry for the chat polish batch: a ferret's bulky message at rest as its first line,
- * several image reads as ONE tool group, and the task picker's "Include agent cards" switch.
+ * several image reads as ONE tool group, and the task picker's "Include agent tasks" switch.
  *
  * Parameters (all optional):
  *
@@ -217,7 +217,7 @@ function Picker() {
           candidates: rows,
           activeIndex: 0,
           listboxId: 'chat-polish-picker',
-          contextLabel: '& cards',
+          contextLabel: '& tasks',
           accept: () => undefined,
         }}
       />

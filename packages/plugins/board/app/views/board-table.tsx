@@ -145,7 +145,7 @@ function TableRow({ row, env }: RowProps) {
 function TableHead() {
   return (
     <div aria-hidden="true" className="fy-board-table__head">
-      <span>Card</span>
+      <span>Task</span>
       <span data-col="people">Who</span>
       <span data-col="activity">Activity</span>
       <span data-col="pr">PR</span>
@@ -204,7 +204,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
       <div className="fy-board-table__what">
         <div className="fy-board-table__line">
           {entry.under === null ? null : (
-            <CornerDownRight aria-label="Made for the card above" className="fy-board-summary__under" size={12} />
+            <CornerDownRight aria-label="Made for the task above" className="fy-board-summary__under" size={12} />
           )}
           <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
             <span className="fy-board-table__ref">{formatCardRef({ id: task.id })}</span>{' '}

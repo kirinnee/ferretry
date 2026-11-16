@@ -65,7 +65,7 @@ export class TwoFactorSeedController {
       ...(session === undefined ? {} : { session }),
     });
     this.ports.out.success(
-      `Confirm it with your passkey on the card ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${card.session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
+      `Confirm it with your passkey on the item ${ASK_REFERENCE_SIGIL}${card.agendaItemId} in the app's Inbox (session ${card.session}). Nothing is saved until you do; waiting up to ${String(TWO_FACTOR_STAGE_TTL_SECONDS / 60)} minutes…`,
     );
     const final = await this.#wait(account.data, staged.stage);
     this.ports.out.success(OUTCOME[final.state](account.data));

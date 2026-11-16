@@ -270,7 +270,7 @@ describe('S-0273 TreeView', () => {
     await view.unmount();
     const empty = await boardModelOf([]);
     view = await mount(<TreeView env={envOf(empty)} model={empty} />);
-    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No cards match.');
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No tasks match.');
   });
 });
 
@@ -294,7 +294,7 @@ describe('S-0088 DependenciesView', () => {
     await view.unmount();
     const none = await boardModelOf([card('F9')]);
     view = await mount(<DependenciesView env={envOf(none)} model={none} />);
-    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No card depends on another.');
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No task depends on another.');
   });
 });
 
@@ -372,7 +372,7 @@ describe('S-0032 ArchiveView', () => {
     await view.render(<ArchiveView {...(await props({ shown: [], total: 0 }))} />);
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Nothing closed yet.');
     await view.render(<ArchiveView {...(await props({ shown: [], total: 0, query: 'zzz' }))} />);
-    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No archived card matches.');
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No archived task matches.');
   });
 
   it('shows the last page’s remainder, not a full page', async () => {

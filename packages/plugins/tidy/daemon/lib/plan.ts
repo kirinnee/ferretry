@@ -68,7 +68,7 @@ const cardKeep = (card: TidyCardFact, facts: TidyFacts): CardKeep | undefined =>
     why,
   });
   if (card.askedBy === 'person') return keep('owner-asked', 'the owner asked for it');
-  if (facts.boardsOn.has(card.project)) return keep('board-on', 'the board is on, so the card is wanted');
+  if (facts.boardsOn.has(card.project)) return keep('board-on', 'the board is on, so the task is wanted');
   const doing = effectiveAssignee(card);
   if (doing !== facts.ferret && facts.liveFerrets.has(doing))
     return keep('assigned-to-live-ferret', `${doing} is still working it`);
@@ -98,7 +98,7 @@ type AskVerdict = { readonly close: TidyClose } | { readonly keep: TidyKeep };
 
 const judgeAsk = (ask: TidyAskFact, facts: TidyFacts): AskVerdict => {
   if (ask.source === 'card' || ask.raisedBy.kind === 'daemon')
-    return { keep: keepsAsk(ask, 'gate', 'the daemon raised it for a card gate; the owner answers it') };
+    return { keep: keepsAsk(ask, 'gate', 'the daemon raised it for a task gate; the owner answers it') };
   if (ask.raisedBy.kind !== 'ferret' || ask.raisedBy.ferret !== facts.ferret)
     return { keep: keepsAsk(ask, 'not-yours', 'you did not raise it') };
   if (ask.state === 'answered') return { keep: keepsAsk(ask, 'owner-replying', 'the owner is answering it now') };

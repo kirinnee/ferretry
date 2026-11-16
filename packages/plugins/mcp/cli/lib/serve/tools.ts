@@ -133,7 +133,7 @@ const INPUT_OPTIONS = {
   submit: {
     type: 'string',
     enum: ['agent', 'offer-owner', 'owner-default'],
-    description: 'Who presses Enter; the card offers it by default.',
+    description: 'Who presses Enter; the input offers it by default.',
   },
   expiresInSeconds: {
     type: 'integer',
@@ -141,7 +141,7 @@ const INPUT_OPTIONS = {
     maximum: INPUT_MAX_EXPIRY_SECONDS,
   },
   blocking: { type: 'boolean', description: 'Ping the owner.' },
-  chain: { type: 'string', description: 'The card this login step follows, like A7.' },
+  chain: { type: 'string', description: 'The input this login step follows, like A7.' },
   secretHint: {
     type: 'string',
     description: 'Account you expect, by handle (SUDO_KIRIN_BOX): a hint only, the owner still taps.',
@@ -153,6 +153,23 @@ const object = (properties: Record<string, unknown>, required: readonly string[]
   properties,
   ...(required.length === 0 ? {} : { required }),
   additionalProperties: false,
+});
+
+/** Accounts' sign-in plan tool (`signin_plan`) and its old name `task_plan`: the same input under either name. */
+const signinPlanTool = (name: string, description: string): McpToolDefinition => ({
+  name,
+  description,
+  inputSchema: object(
+    {
+      lines: {
+        type: 'array',
+        description:
+          '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
+      },
+      expiresInSeconds: { type: 'integer' },
+    },
+    ['lines'],
+  ),
 });
 
 /** The tools, each with the wire tool it is. */
@@ -230,7 +247,7 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'terminal_request_input',
-    description: `Ask the owner to type ONE value into a terminal from a card: secret (a password; ALWAYS for sudo), code (a 2FA, email, SMS or device code; you see it), private (shows, not one-time) or plain (you see it). Returns ${INPUT_CARD}; then input_wait.`,
+    description: `Ask the owner to type ONE value into a terminal as an input: secret (a password; ALWAYS for sudo), code (a 2FA, email, SMS or device code; you see it), private (shows, not one-time) or plain (you see it). Returns ${INPUT_CARD}; then input_wait.`,
     inputSchema: object(
       {
         name: NAME,
@@ -245,10 +262,10 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   },
   {
     name: 'input_wait',
-    description: `Wait for the owner to answer your input card (${INPUT_CARD}): where it stands, then the screen with the value masked. Never the value.`,
+    description: `Wait for the owner to answer your input (${INPUT_CARD}): where it stands, then the screen with the value masked. Never the value.`,
     inputSchema: object(
       {
-        id: { type: 'string', description: `The card, like ${INPUT_CARD_EXAMPLE}, or a pa_ id.` },
+        id: { type: 'string', description: `The input, like ${INPUT_CARD_EXAMPLE}, or a pa_ id.` },
         timeoutMs: {
           type: 'integer',
           minimum: 100,
@@ -701,7 +718,7 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
   {
     name: 'browser_request_input',
     description:
-      'Ask the owner for a login form on ONE card; the daemon types each field: plain (an e-mail you see), secret (a password) or code (a 2FA, email or SMS code). Then input_wait. Next page: a new card with chain.',
+      'Ask the owner for a login form in ONE input; the daemon types each field: plain (an e-mail you see), secret (a password) or code (a 2FA, email or SMS code). Then input_wait. Next page: a new input with chain.',
     inputSchema: object(
       {
         name: NAME,
@@ -766,21 +783,9 @@ const TERMINAL_AND_BROWSER_TOOLS: readonly McpToolDefinition[] = [
       ['handle', 'to', 'prompt'],
     ),
   },
-  {
-    name: 'task_plan',
-    description: 'Before a task, ask the owner once to pre-approve its sign-ins and pastes.',
-    inputSchema: object(
-      {
-        lines: {
-          type: 'array',
-          description:
-            '{kind,uses,why} and: sign-in signIn|site,fields:[username,password,totp]; terminal-sign-in signIn|place; paste from,to',
-        },
-        expiresInSeconds: { type: 'integer' },
-      },
-      ['lines'],
-    ),
-  },
+  signinPlanTool('signin_plan', 'Before your work, ask the owner once to pre-approve its sign-ins and pastes.'),
+  // The old name of signin_plan, on the same handler: an old instruction still works.
+  signinPlanTool('task_plan', 'Old name of signin_plan: ask the owner once to pre-approve sign-ins and pastes.'),
 ];
 
 const CONFIG_PATH = {
@@ -857,7 +862,7 @@ const LESSON_TOOLS: readonly McpToolDefinition[] = [
 const SEARCH_TOOLS: readonly McpToolDefinition[] = [
   {
     name: 'search_work',
-    description: 'Find cards and agenda items by words or id (F303) before filing a duplicate; all adds old closed.',
+    description: 'Find tasks and agenda items by words or id (F303) before filing a duplicate; all adds old closed.',
     inputSchema: object(
       {
         query: { type: 'string', minLength: 1, maxLength: 200 },

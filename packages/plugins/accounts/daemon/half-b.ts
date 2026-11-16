@@ -48,6 +48,7 @@ export interface HalfBServices {
   /** The agent's two asking tools (`account_propose`, `task_plan`): each raises a card and changes nothing by itself. */
   readonly proposalTools: {
     readonly account_propose: ToolHandler;
+    readonly signin_plan: ToolHandler;
     readonly task_plan: ToolHandler;
   };
   /** A ferret ended: whatever it held (copies, page records) is let go. */

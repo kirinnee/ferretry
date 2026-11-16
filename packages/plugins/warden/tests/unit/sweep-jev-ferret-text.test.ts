@@ -137,7 +137,7 @@ describe('what reaches a ferret from Jev, whatever the act', () => {
       for (const remedy of subject.remedies) should(String(remedy.detail)).not.match(HOSTILE);
       // A restart or a resume is handed its card, and the reason given with it is a static leaf sentence.
       if (scenario.act === 'restart' || scenario.act === 'resume')
-        should(subject.remedies.map(remedy => String(remedy.detail)).join('\n')).containEql('Your card:');
+        should(subject.remedies.map(remedy => String(remedy.detail)).join('\n')).containEql('Your task:');
       // The ferret's views carry classifications and fixed sentences only.
       const seen = await ferretSees(subject);
       should(seen).not.match(HOSTILE);

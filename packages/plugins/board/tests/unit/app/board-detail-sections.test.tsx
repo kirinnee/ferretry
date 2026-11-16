@@ -218,7 +218,7 @@ describe('ChildrenList', () => {
 
   it('says there are no sub-cards', async () => {
     const root = await show(<ChildrenList lines={[]} now={NOW} onOpen={() => undefined} />);
-    expect(root.textContent).toBe('No sub-cards.');
+    expect(root.textContent).toBe('No sub-tasks.');
   });
 
   it('draws each child with its lane, activity and age, and opens it by id', async () => {

@@ -3030,7 +3030,7 @@ describe('Agenda state machine — an input card never keeps free text from the 
     // Assert
     should(parsed.success).be.false();
     should(parsed.error?.issues.map(issue => issue.message)).containEql(
-      'an input card is raised by an input request (terminal_request_input), never by an agenda add',
+      'an input is raised by an input request (terminal_request_input), never by an agenda add',
     );
   });
 

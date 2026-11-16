@@ -221,7 +221,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
-      'the daemon answered with a card this app cannot read',
+      'the daemon answered with a task this app cannot read',
     );
   },
   start: async (_daemon, id, key = crypto.randomUUID()) =>
@@ -248,7 +248,7 @@ export const clientBoardPort = (client: Pick<PluginClient, 'call'>): BoardPort =
         return parsed.success ? parsed.data : undefined;
       },
       writeError,
-      'the daemon answered with a card this app cannot read',
+      'the daemon answered with a task this app cannot read',
     );
   },
   lanes: async (_daemon, projectId, request) => {

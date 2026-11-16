@@ -435,7 +435,7 @@ describe('the card a revived ferret carries on', () => {
     // Assert
     should(asked).eql(['a']);
     should(h.resumed[0]?.message).containEql(
-      'continue from where you stopped, on the card below.\n\nYour card: &F1 — Ship the thing',
+      'continue from where you stopped, on the task below.\n\nYour task: &F1 — Ship the thing',
     );
   });
 
@@ -457,7 +457,7 @@ describe('the card a revived ferret carries on', () => {
 
     // Assert
     should(asked).be.empty();
-    should(h.resumed[0]?.message).not.containEql('Your card');
+    should(h.resumed[0]?.message).not.containEql('Your task');
   });
 
   it('should revive with the plain notice when the card cannot be read', async () => {

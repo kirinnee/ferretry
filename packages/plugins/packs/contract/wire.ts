@@ -436,7 +436,9 @@ export const PackNewOutcomeSchema = z.discriminatedUnion('outcome', [
     attempts: z.array(PackAttemptSchema).readonly(),
     /** Said when Jev was meant to decide and the routing prompt's order was used instead. */
     note: NonEmpty.optional(),
-    /** The helper's board card, when its start made or took one. */
+    /** The helper's board task, when its start made or took one. */
+    task: PackChildCardSchema.optional(),
+    /** What `task` was called in an answer a transcript holds from before the rename (`oldSpelling`); read, never written. */
     card: PackChildCardSchema.optional(),
   }),
   z.strictObject({

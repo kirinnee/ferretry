@@ -81,7 +81,7 @@ const report: DoctorReport = {
       status: 'missing',
       summary: 'not found on PATH',
       impact:
-        "The board's GitHub watcher cannot read PR state, link PRs or find releases; cards keep their PR state unknown.",
+        "The board's GitHub watcher cannot read PR state, link PRs or find releases; tasks keep their PR state unknown.",
     },
     {
       name: 'launchctl',

@@ -44,10 +44,10 @@ export function orphanItem(cards: readonly OrphanedCard[]): OrphanItem | undefin
   return {
     subject: clipAtWord(orphanTitle(ordered.length), MAX_AGENDA_SUBJECT_LENGTH),
     why: one
-      ? 'A card only moves when a ferret works on it. This one was handed to a ferret that has since finished, so it will sit where it is until you act.'
-      : 'A card only moves when a ferret works on it. These were handed to ferrets that have since finished, so they will sit where they are until you act.',
+      ? 'A task only moves when a ferret works on it. This one was handed to a ferret that has since finished, so it will sit where it is until you act.'
+      : 'A task only moves when a ferret works on it. These were handed to ferrets that have since finished, so they will sit where they are until you act.',
     howToResolve:
-      'For each card: open it to see where it stands, start a ferret on it to carry on, or close it if it is no longer needed. A card leaves this list once a ferret is on it again.',
+      'For each task: open it to see where it stands, start a ferret on it to carry on, or close it if it is no longer needed. A task leaves this list once a ferret is on it again.',
     context: bodyOf(rows, ordered.length - rows.length),
   };
 }

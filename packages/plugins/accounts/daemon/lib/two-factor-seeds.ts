@@ -436,7 +436,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       throw new TwoFactorSeedError(
         409,
         'no_session',
-        'no session is running for the confirm card to go under: start one, or name one with --session <id>',
+        'no session is running for the confirm item to go under: start one, or name one with --session <id>',
       );
     const target = await this.deps.accounts.seedTarget(accountId);
     const at = new Date(this.deps.clock.nowMs()).toISOString().slice(11, 16);
@@ -487,7 +487,7 @@ export class TwoFactorSeedStages implements RedactionValueSource {
       throw new TwoFactorSeedError(
         409,
         TWO_FACTOR_ERROR_CODES.notThisCardsAccount,
-        `that card is closed or is not for ${accountId}: a key set up from a card saves only to the account Ferretry matched for it`,
+        `that item is closed or is not for ${accountId}: a key set up from an item saves only to the account Ferretry matched for it`,
       );
   }
 

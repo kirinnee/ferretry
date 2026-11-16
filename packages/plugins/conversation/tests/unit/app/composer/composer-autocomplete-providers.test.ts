@@ -426,7 +426,7 @@ describe('composer reference families', () => {
       expect(replacements((await cards?.candidates(context('&', ''))) ?? { candidates: [] })).toEqual(['&F12']);
     });
 
-    it('is offered once "Include agent cards" is on, still never when closed', async () => {
+    it('is offered once "Include agent tasks" is on, still never when closed', async () => {
       let included = false;
       const options = optionsOf({ '&': MIXED }, { getIncludeAgentTasks: () => included });
       const ladder = createReferencesProvider(options);
@@ -557,9 +557,9 @@ describe('composer reference families', () => {
     );
   });
 
-  it('names the task menus the "Include agent cards" switch applies to', () => {
-    expect(isTaskMenuLabel('Cards')).toBe(true);
-    expect(isTaskMenuLabel('& cards')).toBe(true);
+  it('names the task menus the "Include agent tasks" switch applies to', () => {
+    expect(isTaskMenuLabel('Tasks')).toBe(true);
+    expect(isTaskMenuLabel('& tasks')).toBe(true);
     expect(isTaskMenuLabel('Asks')).toBe(false);
     expect(isTaskMenuLabel(undefined)).toBe(false);
   });

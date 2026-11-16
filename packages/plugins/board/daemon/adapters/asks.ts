@@ -148,7 +148,7 @@ export class AsksThreads implements BoardThreads {
   async link(): Promise<{ readonly ok: false; readonly message: string }> {
     return {
       ok: false,
-      message: 'an ask cannot be linked to a card on this daemon yet; make the card without --thread',
+      message: 'an ask cannot be linked to a task on this daemon yet; make the task without --thread',
     };
   }
 }

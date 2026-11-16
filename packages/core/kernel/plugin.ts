@@ -121,7 +121,7 @@ export default definePlugin({
         noStore: true,
         audit: { skip: 'a read of one configuration file' },
         guard: {
-          none: 'a configuration file names secrets as ${secret:NAME} and never holds a raw value (a raw secret is refused on write)',
+          none: 'a configuration file names secrets as ${secret:NAME} (a raw secret is refused on write; a file written before that rule can still hold one under a flag name, shown masked on every read)',
         },
       }),
       route('PUT /v1/config/file', {

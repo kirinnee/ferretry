@@ -192,7 +192,7 @@ const requireOwnerForClosed = (
   if (lane.category === 'closed' && lane.ownerGate === true && !mayPassGate(standing, audience)) {
     throw new BoardError(
       'owner-gate',
-      `only the owner closes a card; move ${formatCardRef(card)} to the lane before ${lane.name} and the owner closes it`,
+      `only the owner closes a task; move ${formatCardRef(card)} to the lane before ${lane.name} and the owner closes it`,
       ['owner-human'],
     );
   }
@@ -315,7 +315,7 @@ const reopen = (
   const ref = formatCardRef(card);
   const target = requireLane(context.laneSet, action.to);
   if (target.category === 'closed') {
-    throw new BoardError('invalid', `a reopen opens a card; to close ${ref}, move it to ${target.name}`);
+    throw new BoardError('invalid', `a reopen opens a task; to close ${ref}, move it to ${target.name}`);
   }
   if (card.dropped === null) {
     const backward = isBackwardMove(context.laneSet, card.laneId, action.to);
@@ -437,7 +437,7 @@ const report = (
       'owner-gate',
       target.ownerGate === true
         ? `${action.event} would close ${ref} in ${target.name}, which only the owner's own move enters`
-        : `${action.event} would close ${ref} in ${target.name}, and only the owner closes a card on a report`,
+        : `${action.event} would close ${ref} in ${target.name}, and only the owner closes a task on a report`,
       ['owner-human'],
     );
   }
@@ -579,11 +579,11 @@ export const requireLocalCard = (index: BoardIndex, ref: CardRef, role: string):
   if (!index.isLocal(ref)) {
     throw new BoardError(
       'invalid',
-      `${formatCardRef(ref)} is on another machine; a ${role} must be a card on this machine for now`,
+      `${formatCardRef(ref)} is on another machine; a ${role} must be a task on this machine for now`,
     );
   }
   const found = index.get(ref);
-  if (found === undefined) throw new BoardError('not-found', `there is no card ${formatCardRef(ref)} on this machine`);
+  if (found === undefined) throw new BoardError('not-found', `there is no task ${formatCardRef(ref)} on this machine`);
   return found;
 };
 
@@ -1012,7 +1012,7 @@ const reparent = (
     if (parentLoop(context.index, card.id, { id: parent.id })) {
       throw new BoardError(
         'cycle',
-        `${ref} cannot sit under ${formatCardRef(parent)}: that card is ${ref} or inside it`,
+        `${ref} cannot sit under ${formatCardRef(parent)}: that task is ${ref} or inside it`,
       );
     }
     to = { id: parent.id };

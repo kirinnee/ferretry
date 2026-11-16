@@ -271,7 +271,7 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   I161: {
     owner: 'vault',
     reason:
-      "enforced by the Vault input service (`savedForFields` redraws the offers at Send); Accounts keeps the card's shape (no value on any offer)",
+      "enforced by the Vault input service (`savedForFields` redraws the offers at Send); Accounts keeps the input's shape (no value on any offer)",
   },
   S114: {
     owner: 'vault',
@@ -286,7 +286,7 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   I163: {
     owner: 'vault',
     reason:
-      'enforced by the Vault input service (it draws the offers and refuses a hand pick the card did not offer); Accounts keeps the saved logins',
+      'enforced by the Vault input service (it draws the offers and refuses a hand pick the input did not offer); Accounts keeps the saved logins',
   },
   I164: {
     owner: 'vault',
@@ -296,7 +296,7 @@ export const OWNER_OVERRIDE: Record<string, { owner: string; reason: string }> =
   I168: {
     owner: 'vault',
     reason:
-      'enforced by the Vault input service (`codeTargetProblem`, checked at the card and at the write); Accounts only makes the code',
+      'enforced by the Vault input service (`codeTargetProblem`, checked at the input and at the write); Accounts only makes the code',
   },
   I170: {
     owner: 'vault',
