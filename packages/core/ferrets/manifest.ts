@@ -58,6 +58,14 @@ import {
 } from './contract/index.ts';
 
 /**
+ * What a ferret read asks of a REMOTE caller: `fleet.use`, so a device the owner narrowed to no fleet use is refused with
+ * `grant_device_not_granted` before anything is read (docs/grants.md). It is a device's gate only: a ferret's own credential is
+ * never grant-governed (`presentation.local`), so an agent reads exactly what 4.x gave it, and the host's admin token
+ * over loopback is ungoverned.
+ */
+const FLEET_USE = { capability: CAPABILITIES.fleet, axis: 'use' } as const;
+
+/**
  * Ferrets (§2.2): who each ferret is, its name, parent, pack, token and state. Starting and stopping are done by a
  * harness plugin through a runner. Core. Its routes (ferret list, start, stop, resume, fork, sitrep) are added by the
  * Ferrets port with today's descriptors; the day-1 spine declares the contract surface only.
@@ -87,6 +95,7 @@ export default definePlugin({
       socket('GET /v1/events', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         audit: { skip: 'a live read of the journals records nothing' },
         guard: 'secrets',
       }),
@@ -129,6 +138,7 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/handover', {
         minimum: 'authenticated',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a read of the handover receipt records nothing' },
         guard: { none: 'the handover receipt: ids, phases and accounts, no transcript text' },
@@ -145,6 +155,7 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/relaunch-settings', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a read records nothing' },
         guard: { none: 'whether the launch settings drifted, and which kind; no setting values' },
@@ -179,6 +190,7 @@ export default definePlugin({
       route('GET /v1/ferrets', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         compress: true,
         audit: { skip: 'a fleet read records nothing' },
@@ -197,6 +209,7 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a ferret read records nothing' },
         guard: { none: 'one ferret identity record' },
@@ -226,6 +239,7 @@ export default definePlugin({
       route('GET /v1/ferrets/by-request/:requestId', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a start recovery read records nothing, as today' },
         guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
@@ -248,6 +262,7 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/pins', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a pin board read records nothing, as today' },
         guard: { none: 'the notes and message references a person or the ferret pinned' },
@@ -367,6 +382,7 @@ export default definePlugin({
       route('GET /v1/restarts', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a restart list records nothing' },
         guard: { none: 'outdated ferret ids and the waiting restarts' },
@@ -383,6 +399,7 @@ export default definePlugin({
       route('GET /v1/archived-sessions', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'an archive read records nothing' },
         guard: { none: 'archived ferret identity records' },

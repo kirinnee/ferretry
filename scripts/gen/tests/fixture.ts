@@ -67,15 +67,15 @@ export function fixture(
   );
   // The generator reads the client binary name from the CLI's `bin` key (the two-name model), so every fixture has one.
   write('packages/cli/package.json', JSON.stringify({ name: 'fixture-cli', private: true, bin: { fx: './bin.ts' } }));
-  write(
-    'ports-pending.json',
-    JSON.stringify({
-      format: 1,
-      pending: options.pending ?? [],
-      ...(options.pendingReasons === undefined ? {} : { pendingReasons: options.pendingReasons }),
-      ...(options.pendingHalves === undefined ? {} : { pendingHalves: options.pendingHalves }),
-    }),
-  );
+  // Each id's lines live in its own package's file (the split layout); an id with no package is a plugin path.
+  const ownerFile = (id: string): string =>
+    `packages/${packages.some(pkg => pkg.id === id && pkg.core === true) ? 'core' : 'plugins'}/${id}/ports-pending.json`;
+  const owned = new Map<string, { pending?: string[]; pendingReasons?: object; pendingHalves?: object }>();
+  const mine = (id: string) => owned.get(ownerFile(id)) ?? owned.set(ownerFile(id), {}).get(ownerFile(id))!;
+  for (const id of options.pending ?? []) mine(id).pending = [id];
+  for (const [id, lines] of Object.entries(options.pendingReasons ?? {})) mine(id).pendingReasons = { [id]: lines };
+  for (const [id, halves] of Object.entries(options.pendingHalves ?? {})) mine(id).pendingHalves = { [id]: halves };
+  for (const [file, doc] of owned) write(file, JSON.stringify({ format: 1, ...doc }));
   for (const pkg of packages) {
     const dir = pkg.core === true ? `packages/core/${pkg.id}` : `packages/plugins/${pkg.id}`;
     const halves = pkg.halves !== false;

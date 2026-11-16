@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "pending": ["board"],
+  "pendingReasons": {
+    "board": [
+      "[own] GAP(board): linkNudgePullRequests in app/lib/board-nudge.ts is imported by the unmerged branch rebuild/port-ferrets-b (core/ferrets/app/components/agent-message-rows.tsx), so it stays until that branch lands (owner: nelly)"
+    ]
+  }
+}
