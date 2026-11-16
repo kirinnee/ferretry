@@ -17,6 +17,7 @@ import { isInternalRootFolder } from '../../contract/internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';
+import { streamJsonlLines } from './stream-lines.ts';
 import { nodeSqliteFiles, openSqlite, type SqliteFiles } from './sqlite-store.ts';
 
 const PRIVATE_FILE_MODE = 0o600;
@@ -376,8 +377,29 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
     },
 
     async *lines<Shape>(def: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape> {
-      // Today's journal read: a bad line is skipped and the rest still read (records() counts what was skipped).
-      for (const record of (await lenient(def, name, undefined)).records) yield record;
+      // Today's journal read, as a stream: the file is read a piece at a time and a record is handed out as soon as its
+      // line is complete, so a journal of any size costs one piece. A bad line is skipped and the rest still read
+      // (records() counts what was skipped).
+      const at = locate(def, name);
+      if (def.store !== 'jsonl') throw new TypeError(`state ${def.name}: only a jsonl file is read line by line`);
+      const stream = streamJsonlLines(fs, def, at.path, at.label);
+      try {
+        for (;;) {
+          const step = await stream.next();
+          if (!step.done) {
+            yield step.value;
+            continue;
+          }
+          // An io fault (or a missing required file) ends the read; records already handed out stand.
+          if (!step.value.ok) {
+            note(def, step.value.error);
+            if (def.onDamaged === 'subsystem') throw new StoreDamagedError(step.value.error);
+          }
+          return;
+        }
+      } finally {
+        await stream.return({ ok: true, value: 0 });
+      }
     },
 
     async version(def: StateFileDef, name?: string): Promise<StateVersion | undefined> {

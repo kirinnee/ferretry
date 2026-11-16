@@ -67,6 +67,9 @@ export interface StatePort {
   /**
    * Each record in order. A line that does not parse or check is SKIPPED and reading goes on (today's journal read);
    * `records()` says how many were skipped. Only an io fault or a missing `required` file is damage.
+   * The file is read a piece at a time, as the reader asks, and a record is handed out as soon as its line is complete:
+   * a journal of any size costs one piece, never the whole file. A fault part way ends the read after the records
+   * already handed out. Stopping early stops the read.
    */
   lines<Shape>(file: StateFileDef<string, Shape>, name?: string): AsyncIterable<Shape>;
   /**
