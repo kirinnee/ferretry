@@ -96,7 +96,7 @@ if rg -qi "darwin|macos" <<<"${smoke_code}"; then
 fi
 workflow_job_has "${ci_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
 workflow_job_has "${ci_workflow}" smoke-darwin "^      advisory: [\$][{][{] github[.]event_name == 'pull_request' [}][}]\$" 'must be advisory on a pull request and only there'
-workflow_job_has "${ci_workflow}" smoke-darwin '^    needs: compile$' 'must need compile'
+workflow_job_has "${ci_workflow}" smoke-darwin '^    needs: \[compile, proof\]$' 'must need compile (and the proof-reuse decision)'
 # Its one condition combines the full-set trigger with the owner's skip switch.
 [ "$(workflow_job_block "${ci_workflow}" smoke-darwin | rg -c '^    if:')" = 1 ] || fail "${ci_workflow}: Smoke darwin-arm64 must carry exactly one if:, the full-set condition and MACOS_SMOKE switch"
 workflow_job_has "${ci_workflow}" smoke-darwin "vars[.]MACOS_SMOKE != 'skip'" "must run in the full set unless vars.MACOS_SMOKE is 'skip'"

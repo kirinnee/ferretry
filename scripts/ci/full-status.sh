@@ -14,7 +14,23 @@ verdict | judge)
   # The strict-guarantee report (ci.yaml `FY_STRICT_GUARANTEES_BLOCKING`, the workflow env this script inherits) is
   # report-only while the switch is 'false': whatever that job ends as (a failed setup step, the timeout) cannot turn
   # Full CI red. Once the switch is 'true' it must succeed like every other job.
-  if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
+  proof_reused=false
+  # Proof reuse on main (scripts/ci/proof-reuse.sh): a push whose tree the merged pull request already
+  # proved with the whole set. Only a `push` may say so, and it is honoured only with a URL to show for it.
+  if [[ ${PROOF_REUSED:-} == true ]]; then
+    if [[ ${EVENT_NAME:-} == push && -n ${PROOF_URL:-} ]]; then
+      proof_reused=true
+    else
+      echo "⚠️ PROOF_REUSED=true ignored: only a push with a proof URL may reuse a proof; judging the jobs" >&2
+    fi
+  fi
+  if [[ ${proof_reused} == true ]]; then
+    # Belt and braces: the jobs were skipped on purpose, so a failed or cancelled one is something else.
+    if jq -e 'all(.[]; .result != "failure" and .result != "cancelled")' <<<"${NEEDS:?job results required}" >/dev/null; then
+      state=success
+      description="proof reused: this tree already passed the full set in ${PROOF_URL}"
+    fi
+  elif jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |
     ["quick", "int", "full-gates", "compile", "smoke"]
       | all(.[]; $needs[.].result == "success")
@@ -26,6 +42,17 @@ verdict | judge)
   ' <<<"${NEEDS:?job results required}" >/dev/null; then
     state=success
     description='quick checks and the full set passed on this commit'
+    # Record WHAT was proved: the tree this run's checkout holds. For a pull request that is GitHub's merge
+    # commit (github.sha), exactly the tree every job tested, not the PR head's own tree. `main` reads it back
+    # (proof-reuse.sh) to skip a second run of the identical suite. No tree is no claim: the status stays
+    # success without one and is simply never reused.
+    if [[ ${EVENT_NAME:-} == pull_request ]]; then
+      if tested_tree="$(git rev-parse 'HEAD^{tree}' 2>/dev/null)" && [[ ${tested_tree} =~ ^[0-9a-f]{40}$ ]]; then
+        description="${description}; tree ${tested_tree}"
+      else
+        echo "⚠️ could not read the tested tree; the status carries none and main will not reuse it" >&2
+      fi
+    fi
   fi
   printf 'Full CI: %s — %s\n' "${state}" "${description}" | tee -a "${GITHUB_STEP_SUMMARY:-/dev/null}"
   # Read-only fixture mode, also usable to diagnose a saved needs document.
@@ -56,9 +83,9 @@ gh api --method POST "repos/${GITHUB_REPOSITORY:?repository required}/statuses/$
 # this workflow exists for the same head SHA. A real `failure` always counts.
 remove_label=false
 if [[ ${mode} == verdict && ${state} == failure && ${EVENT_NAME:-} == pull_request ]]; then
-  if jq -e 'any(.[]; .result == "failure")' <<<"${NEEDS}" >/dev/null; then
+  if jq -e 'del(.proof) | any(.[]; .result == "failure")' <<<"${NEEDS}" >/dev/null; then
     remove_label=true
-  elif jq -e 'any(.[]; .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
+  elif jq -e 'del(.proof) | any(.[]; .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
     newer_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
       --jq "any(.workflow_runs[]; .id > ${GITHUB_RUN_ID} and .name == \"${GITHUB_WORKFLOW:-CI}\")")"
     [[ ${newer_run} == true ]] || remove_label=true
