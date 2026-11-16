@@ -6,7 +6,7 @@
  * and nothing else: there is deliberately no send. It says where the skill came from (This project, This account or
  * Ferretry) and, when a same-named one elsewhere wins, that it is not active; Open reads its SKILL.md.
  * The header offers the `skills.add` slot (contract/slots.ts): a plugin that knows another place skills come from puts
- * its "+ Add skills" there.
+ * its "+ Add skills" there. Each row offers `skills.row` after Open: where Catalogs draws "from Ines · v2" and its ⋯.
  */
 import {
   type ComposerQuoteTarget,
@@ -28,9 +28,11 @@ import type { AppComponent, PanelProps, PluginClient } from '@ferretry/kernel/ma
 import { type ReactNode, useCallback, useMemo, useState } from 'react';
 import {
   SKILLS_ADD_SLOT,
+  SKILLS_ROW_SLOT,
   type FerretSkillsInventory,
   type SkillEntry,
   type SkillsAddSlotProps,
+  type SkillsRowSlotProps,
 } from '../../contract/index.ts';
 import { readFerretSkillsInventory, readSkillFile } from '../lib/client.ts';
 import {
@@ -67,11 +69,14 @@ function SkillRow({
   invocation,
   onUse,
   onOpen,
+  rowSlot,
 }: {
   readonly skill: SkillEntry;
   readonly invocation: string;
   readonly onUse: () => void;
   readonly onOpen: () => void;
+  /** What other plugins put at the end of the row's first line (the `skills.row` slot). */
+  readonly rowSlot?: ReactNode;
 }) {
   const override = skillOverride(skill);
   return (
@@ -100,6 +105,7 @@ function SkillRow({
         <Button type="button" size="sm" onClick={onOpen} data-context-skill-open="">
           Open<span className="sr-only"> {skill.name}</span>
         </Button>
+        {rowSlot}
       </div>
       <p className="m-0 break-words text-meta text-muted" title={skill.description}>
         {skill.description}
@@ -118,6 +124,7 @@ function SkillsList({
   onUse,
   onOpen,
   addSlot,
+  rowSlot,
   searchDebounceMs,
 }: {
   readonly read: ContextRead<FerretSkillsInventory>;
@@ -128,6 +135,7 @@ function SkillsList({
   readonly onUse: (invocation: string) => void;
   readonly onOpen: (skill: SkillEntry) => void;
   readonly addSlot?: ReactNode;
+  readonly rowSlot?: (skill: SkillEntry, invocation: string) => ReactNode;
   readonly searchDebounceMs?: number;
 }): ReactNode {
   const { load, reload } = read;
@@ -167,15 +175,19 @@ function SkillsList({
         <ContextNote>{contextEmptyCopy(NO_SKILLS, total, query, chipLabel)}</ContextNote>
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" data-context-list="skills">
-          {visible.map(skill => (
-            <SkillRow
-              key={skill.path}
-              skill={skill}
-              invocation={skillInsertText(inventory.harness, skill.name)}
-              onUse={() => onUse(skillInsertText(inventory.harness, skill.name))}
-              onOpen={() => onOpen(skill)}
-            />
-          ))}
+          {visible.map(skill => {
+            const invocation = skillInsertText(inventory.harness, skill.name);
+            return (
+              <SkillRow
+                key={skill.path}
+                skill={skill}
+                invocation={invocation}
+                onUse={() => onUse(invocation)}
+                onOpen={() => onOpen(skill)}
+                rowSlot={rowSlot?.(skill, invocation)}
+              />
+            );
+          })}
         </ul>
       )}
     </div>
@@ -232,6 +244,27 @@ function FerretSkills({
       />
     );
 
+  const rowSlot =
+    daemon === undefined
+      ? undefined
+      : (skill: SkillEntry, invocation: string): ReactNode => (
+          <PanelSlot
+            daemon={daemon}
+            slot={SKILLS_ROW_SLOT}
+            subject={ferretId}
+            props={
+              {
+                ferret: ferretId,
+                name: skill.name,
+                invocation,
+                path: skill.path,
+                scope: skill.scope,
+                runtimes: skill.runtimes,
+              } satisfies SkillsRowSlotProps
+            }
+          />
+        );
+
   const use = (invocation: string): void => {
     const delivered = insertIntoComposer(scope === null ? null : composerQuoteTarget(scope), invocation);
     setNote(delivered ? `Put ${invocation} in the chat box.` : `Open this ferret’s chat to use ${invocation}.`);
@@ -248,6 +281,7 @@ function FerretSkills({
         onUse={use}
         onOpen={setOpened}
         addSlot={addSlot}
+        rowSlot={rowSlot}
       />
       {note === null ? null : (
         <p className="m-0 py-xs text-meta text-muted" role="status" data-context-skill-note="">

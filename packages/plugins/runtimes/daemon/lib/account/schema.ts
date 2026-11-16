@@ -161,7 +161,7 @@ const DEFAULT_RUNTIME_NAME = 'claude-default';
 
 /** The machine's settings, as a shape `machine.yaml` extends with `advanced` (`../config-files/kinds.ts`). */
 const MACHINE_SHAPE = {
-  agentPermissions: AgentPermissionsSchema.default('auto'),
+  agentPermissions: AgentPermissionsSchema.default('skip'),
   /**
    * "Default runtime for new agents" (T): the runtime a session starts on when nobody names one.
    * Unset rather than defaulted to {@link DEFAULT_RUNTIME_NAME} here, so a machine with no such

@@ -79,9 +79,10 @@ describe('catalogs: Actions › Add skills… row', () => {
     expect(manifest.ui?.panels?.map(panel => `${panel.slot}/${panel.id}`)).toEqual([
       'skills.add/add-skills',
       'ferrets.actions-row/add-skills-row',
+      'skills.row/skills-row',
     ]);
     const built = half.build?.({ manifest: half.manifest, client: { call: async () => ({}) } as never });
-    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row']);
+    expect(Object.keys(built?.panels ?? {})).toEqual(['add-skills', 'add-skills-row', 'skills-row']);
   });
 
   it('offers one row to a caller who may control the ferret, and goes to the page with the ferret’s place from run', async () => {
