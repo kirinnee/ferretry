@@ -1,4 +1,4 @@
-import type { ChosenDaemon } from '@ferretry/app';
+import type { ChooseDaemonOptions, ChosenDaemon } from '@ferretry/app';
 import type { ChooseInstall } from '../features/shared/shared-item-sheet.tsx';
 import { catalogClientOf } from './catalog-client.ts';
 import { daemonConnection } from './machine.ts';
@@ -11,11 +11,16 @@ export const INSTALL_ON_WHICH = 'Install on which machine?';
  * Install on a screen with no machine of its own (S10): ask the shell, and build the install host from the ONE machine
  * the person picked. Everything the install reads or sends rides that machine's Catalogs client, and the project list
  * is that machine's own, read through the same client. A cancel answers `undefined`; nothing is installed.
+ *
+ * With exactly ONE paired machine that qualifies, the shell answers with it and draws no picker (`answerAloneWhenOne`,
+ * v4's single-machine Install). It runs only after the person's Install click, and on THAT machine's own client.
  */
 export const installChooser =
-  (chooseDaemon: (purpose: string) => Promise<ChosenDaemon | undefined>): ChooseInstall =>
+  (
+    chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined>,
+  ): ChooseInstall =>
   async () => {
-    const chosen = await chooseDaemon(INSTALL_ON_WHICH);
+    const chosen = await chooseDaemon(INSTALL_ON_WHICH, { answerAloneWhenOne: true });
     if (chosen === undefined) return undefined;
     const own = catalogClientOf(chosen.client);
     return {

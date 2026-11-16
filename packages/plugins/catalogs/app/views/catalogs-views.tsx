@@ -171,7 +171,8 @@ export function createJoinScreen() {
 /**
  * `/shared`, what is shared with this browser across publishers. It has no client, so no machine is listed: Install
  * ASKS (`chooseDaemon`), and only the machine the person picks gives this half a client, its own on that machine. The
- * choice spends no share code: the item was already opened and verified through the member transport.
+ * choice spends no share code: the item was already opened and verified through the member transport. With exactly one
+ * qualifying machine the shell answers alone (no picker); the Install click is still the person's.
  */
 export function createSharedScreen(ports: Pick<DaemonlessPorts, 'daemons'>) {
   return function SharedRoute({ navigate, chooseDaemon }: DaemonlessScreenProps) {

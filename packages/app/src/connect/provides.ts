@@ -245,8 +245,19 @@ export interface DaemonlessScreenProps {
    * it. `undefined` when the person cancels; it never resolves without a click. A share code is never spent by the
    * choice itself. The chosen machine counts as the machine on screen until this screen unmounts, so its reads are not
    * left waiting for a passkey.
+   *
+   * Opt-in per call (`options.answerAloneWhenOne`): when EXACTLY ONE paired machine qualifies (reachable, with this
+   * plugin on: the machines the picker would list), the shell answers with it at once and draws no picker. Zero or
+   * two-or-more machines, a machine not yet answered (still connecting, so unknown rather than down), or the option
+   * left off, ask as ever. The caller's own click still starts the question.
    */
-  readonly chooseDaemon: (purpose: string) => Promise<ChosenDaemon | undefined>;
+  readonly chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined>;
+}
+
+/** How one `chooseDaemon` question differs from the plain one. Every field is off unless a caller turns it on. */
+export interface ChooseDaemonOptions {
+  /** Skip the picker when exactly one paired machine qualifies; that machine is the answer. */
+  readonly answerAloneWhenOne?: boolean;
 }
 
 /** The machine a person chose on a daemon-less screen, and the calling plugin's own client there. */
