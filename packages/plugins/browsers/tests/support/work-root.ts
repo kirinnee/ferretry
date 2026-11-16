@@ -73,6 +73,7 @@ export function workRoots(folder: string, stateHome: string): RootsPort {
     copyTree: unused('copyTree'),
     copyShared: unused('copyShared'),
     linkCredential: unused('linkCredential'),
+    linkHistory: unused('linkHistory'),
     ensurePrivateDirectory: unused('ensurePrivateDirectory'),
     entries: unused('entries'),
     lstat: unused('lstat'),

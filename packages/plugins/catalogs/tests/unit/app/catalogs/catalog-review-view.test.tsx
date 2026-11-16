@@ -115,11 +115,9 @@ describe('large files and long runs', () => {
     container.querySelector('details[data-review-file]') as HTMLDetailsElement;
 
   it('shows a 2 MiB file of zero-width spaces closed, with a note, and almost nothing in the page', async () => {
-    const started = performance.now();
     const view = await mount(
       <ReviewBody entries={[{ label: 'Skill file SKILL.md', text: ZWSP.repeat(2 * 1024 * 1024), document: true }]} />,
     );
-    expect(performance.now() - started).toBeLessThan(3000);
     expect(lastFile(view.container).open).toBe(false);
     expect(view.container.querySelector('[data-review-large]')?.textContent).toBe(
       'Large file: open to read it in full',

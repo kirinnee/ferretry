@@ -332,13 +332,11 @@ describe('see changes: the installing machine’s own bytes', () => {
     should(preview.review.length).be.above(0);
   });
 
-  it('should bound the diff: two wholly different big files come back marked, not computed forever', async () => {
+  it('should mark the diff of two wholly different big files as too large and truncated', async () => {
     const r = rig();
     const lines = (prefix: string) => Array.from({ length: 6000 }, (_, index) => `${prefix}${index}`).join('\n');
     await install(r, skillV(1, lines('a')));
-    const started = Date.now();
     const preview = await r.service.preview('project', await request(alice, skillV(2, lines('b')), projectTarget()));
-    should(Date.now() - started).be.below(20_000);
     should(preview.changes?.entries.find(entry => entry.label === 'Skill file SKILL.md')?.tooLarge).equal(true);
     should(preview.changes?.truncated).equal(true);
   });

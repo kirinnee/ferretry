@@ -6,6 +6,7 @@ import { wardenClientOf } from '../../../app/lib/warden-client.ts';
 import { daemonReach, homeClientFactory, wardenClientFactory } from '../../../app/lib/warden-clients.ts';
 import { daemonConnection } from '../../../app/lib/machine.ts';
 import type { PluginClient } from '@ferretry/kernel/manifest';
+import { FAKE_PROPOSAL, FAKE_VIEW } from '../../support/app/dialog-rules.ts';
 import { wardenConfig } from '../../support/app/warden.ts';
 
 describe('FormField', () => {
@@ -60,6 +61,24 @@ describe('wardenClientOf', () => {
 
     expect(calls).toEqual(['PATCH /v1/warden/config']);
     expect(view.warnings).toEqual(['held']);
+  });
+
+  it('should read the screens Ferretry clears, and answer a teach request with the proposal the daemon made', async () => {
+    const calls: string[] = [];
+    const client = wardenClientOf({
+      call: async (route: string) => {
+        calls.push(route);
+        return route.startsWith('GET') ? FAKE_VIEW : { proposal: FAKE_PROPOSAL, saved: false, heldFor: [] };
+      },
+      subscribe: () => () => {},
+    } as never);
+
+    const view = await client.dialogRules();
+    const answer = await client.learnDialog({ ferret: 'ada' });
+
+    expect(calls).toEqual(['GET /v1/warden/dialog/rules', 'POST /v1/warden/dialog/learn']);
+    expect(view.builtIn.length).toBeGreaterThan(0);
+    expect(answer.proposal.ferret).toBe('ada');
   });
 });
 

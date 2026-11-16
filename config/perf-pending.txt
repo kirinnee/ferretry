@@ -2,21 +2,6 @@
 # Each moves its budget to <package>/tests/perf/ and keeps its correctness checks in unit at a small size; then
 # its line goes. A listed file that no longer holds a budget, or a budget in an unlisted file, fails the gate.
 # This list only shrinks; empty means the unit tier holds no timing claim.
-packages/plugins/access/tests/unit/daemon/step-up/service.test.ts
-packages/plugins/agenda/tests/unit/app/agenda-diff.test.ts
-packages/plugins/agenda/tests/unit/app/use-agenda-replies.test.tsx
-packages/plugins/board/tests/unit/cli/patch-document-bounds.test.ts
-packages/plugins/board/tests/unit/github/watcher-slices.test.ts
-packages/plugins/board/tests/unit/github/watcher-stall.test.ts
-packages/plugins/browsers/tests/unit/address-rule-v4-1596-parity.test.ts
-packages/plugins/browsers/tests/unit/app/browsers-config-bounds.test.ts
-packages/plugins/catalogs/tests/unit/app/catalogs/catalog-review-view.test.tsx
-packages/plugins/catalogs/tests/unit/app/support/manual-clock.ts
-packages/plugins/catalogs/tests/unit/catalog-installs/conservative-changes.test.ts
-packages/plugins/catalogs/tests/unit/catalog-installs/service-hidden.test.ts
-packages/plugins/catalogs/tests/unit/catalog-installs/service-updates.test.ts
-packages/plugins/conversation/tests/unit/app/search/chat-search-bar.test.tsx
-packages/plugins/conversation/tests/unit/links/conversation-index-query.test.ts
 packages/plugins/logins/tests/unit/contract/login-env.test.ts
 packages/plugins/logins/tests/unit/contract/secret-shape.test.ts
 packages/plugins/logins/tests/unit/credentials/yaml-bounds.test.ts
@@ -34,6 +19,3 @@ packages/plugins/runtimes/tests/unit/lib/account-scope-memo.test.ts
 packages/plugins/usage/tests/unit/app/fixtures/performance-fixture.ts
 packages/plugins/usage/tests/unit/app/usage-file-bounds.test.ts
 packages/plugins/usage/tests/unit/cli/budget-bounds.test.ts
-packages/plugins/voice/tests/unit/app/stt/parakeet-voice.test.ts
-packages/plugins/voice/tests/unit/app/stt/speed-signals.test.ts
-packages/plugins/voice/tests/unit/app/stt/voice-cleanup-bounds.test.ts
