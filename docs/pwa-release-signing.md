@@ -338,6 +338,18 @@ touching none of it:
   `rebuild/5.0` builds, signs and deploys nothing when `refs/heads/rebuild/5.0-after` exists on origin (the `gate` job's
   read-only `git ls-remote`), because it would put older app code behind a newer run number. A run skipped that way is
   green with no deploy: read the `deploy` job's own conclusion, not the run's.
+- **A stale commit never deploys last.** The shared, non-cancelling concurrency group serialises the runs but does not
+  order them: pushes A then B can run B first, and re-running an older green run does the same, so A would overwrite the
+  production alias with older app code. So the `deploy` job's `Refuse a stale commit` step, the one right before
+  `wrangler pages deploy`, reads the CURRENT head of the run's own branch (read-only
+  `git ls-remote --exit-code --heads origin refs/heads/<branch>`) and lets the deploy proceed only when it equals
+  `GITHUB_SHA`. Otherwise it logs "a newer commit `<sha>` is on `<branch>`; its own run deploys it" and **exits
+  non-zero, so the `deploy` job concludes `failure`, never `success`**: a consumer that needs a green "Deploy PWA" job
+  for an exact commit (the upgrade-v5 gate) correctly reads a refused deploy as not deployed. A branch read that fails,
+  or returns anything but one `<sha> refs/heads/<branch>` line, fails the step too: never a guess, never a deploy. The
+  never-backwards `gate` for `rebuild/5.0` is unchanged, and `scripts/validate/release-guards.sh` refuses a workflow
+  whose deploy job lacks the check before the deploy command (and any job `if` whose two-ref guard is followed by a
+  top-level `||`).
 
 - **Its own counter, key and environments.** A workflow file of its own has its own run number. It signs with a key of
   its own, kept in the `pwa-release-v5` environment (signing) while the Cloudflare credentials live in `pwa-deploy-v5`

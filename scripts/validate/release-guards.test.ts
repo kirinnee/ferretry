@@ -221,6 +221,38 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(result.err).toContain('must open its if with');
   });
 
+  test('a preview job whose exact parenthesised guard is followed by a top-level || is refused', () => {
+    const result = gate(
+      checkout(p =>
+        edit(
+          p('.github/workflows/pwa-pages-v5.yaml'),
+          /    needs: \[gate, build\]\n    if: \(github\.ref == 'refs\/heads\/rebuild\/5\.0' \|\| github\.ref == 'refs\/heads\/rebuild\/5\.0-after'\)/,
+          "    needs: [gate, build]\n    if: (github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after') || github.event_name == 'push'",
+        ),
+      ),
+    );
+    expect(result.status).toBe(1);
+    expect(result.err).toContain('followed only by && conditions');
+  });
+
+  test('a top-level || hidden after an && condition is refused, but one inside parentheses or a string is not', () => {
+    const guard = "(github.ref == 'refs/heads/rebuild/5.0' || github.ref == 'refs/heads/rebuild/5.0-after')";
+    const withTail = (tail: string) =>
+      gate(
+        checkout(p =>
+          edit(
+            p('.github/workflows/pwa-pages-v5.yaml'),
+            /    needs: \[gate, build\]\n    if: \([^\n]*\n/,
+            `    needs: [gate, build]\n    if: ${guard}${tail}\n`,
+          ),
+        ),
+      );
+    expect(withTail(" && needs.gate.outputs.deploy == 'true' || github.event_name == 'push'").status).toBe(1);
+    expect(withTail(" && needs.gate.outputs.deploy == 'true' && needs.build.result == 'success'").status).toBe(0);
+    expect(withTail(" && (needs.gate.outputs.deploy == 'true' || needs.gate.outputs.deploy == 'yes')").status).toBe(0);
+    expect(withTail(" && needs.gate.outputs.deploy != '||'").status).toBe(0);
+  });
+
   test('a preview job guarded by a different ref is refused', () => {
     const result = gate(
       checkout(p =>
@@ -246,6 +278,71 @@ describe('scripts/validate/release-guards.sh', () => {
     expect(workflow).toContain('--project-name=ferretry-v5 --branch=rebuild/5.0');
     expect(workflow).not.toContain('--branch=rebuild/5.0-after');
     expect(workflow).not.toContain('--branch=${{');
+  });
+
+  describe('an older commit cannot publish after a newer one (stale-commit refusal before the deploy)', () => {
+    const workflowFile = '.github/workflows/pwa-pages-v5.yaml';
+    const staleStep =
+      /      # Runs inside the serialised path[\s\S]*?          echo "\$\{GITHUB_SHA\} is the head of \$\{BRANCH\}: deploying it"\n/u;
+    const refused = (mutate: (text: string) => string) => {
+      const result = gate(
+        checkout(p => {
+          writeFileSync(p(workflowFile), mutate(readFileSync(p(workflowFile), 'utf8')));
+        }),
+      );
+      expect(result.status).toBe(1);
+      expect(result.err).toContain('an older commit must not publish after a newer one');
+    };
+
+    test('the workflow reads the branch head and compares it with GITHUB_SHA before wrangler pages deploy', () => {
+      const text = readFileSync(join(repository, workflowFile), 'utf8');
+      const deploy = text.indexOf('nix develop .#ci -c bunx wrangler pages deploy');
+      const read = text.indexOf(
+        'git ls-remote --exit-code --heads "https://github.com/${REPOSITORY}" "refs/heads/${BRANCH}"',
+      );
+      const compare = text.indexOf('${current} != "${GITHUB_SHA}"');
+      expect(read).toBeGreaterThan(0);
+      expect(compare).toBeGreaterThan(read);
+      expect(deploy).toBeGreaterThan(compare);
+      expect(text).toContain('a newer commit ${current} is on ${BRANCH}; its own run deploys it');
+      // The shared non-cancelling group stays: it serialises, the check above orders.
+      expect(text).toContain('group: pwa-pages-v5\n  cancel-in-progress: false');
+      // The never-backwards gate for rebuild/5.0 is unchanged.
+      expect(text).toContain('refs/heads/rebuild/5.0-after >/dev/null');
+    });
+
+    test('mutation: removing the stale-commit step is refused', () => {
+      refused(text => {
+        const next = text.replace(staleStep, '');
+        if (next === text) throw new Error('the mutation did not apply');
+        return next;
+      });
+    });
+
+    test('mutation: moving the stale-commit step AFTER the deploy is refused', () => {
+      refused(text => {
+        const step = text.match(staleStep)?.[0];
+        if (step === undefined) throw new Error('the stale-commit step was not found');
+        const without = text.replace(step, '');
+        return `${without.trimEnd()}\n${step}`;
+      });
+    });
+
+    test('mutation: dropping the comparison with GITHUB_SHA is refused', () => {
+      refused(text => {
+        const next = text.replace('if [[ ${current} != "${GITHUB_SHA}" ]]', 'if [[ -z ${current} ]]');
+        if (next === text) throw new Error('the mutation did not apply');
+        return next;
+      });
+    });
+
+    test('mutation: reading something other than the run branch head is refused', () => {
+      refused(text => {
+        const next = text.replace('"refs/heads/${BRANCH}")" || status=$?', '"refs/heads/main")" || status=$?');
+        if (next === text) throw new Error('the mutation did not apply');
+        return next;
+      });
+    });
   });
 
   test("a preview signing job that shares production's environment is refused", () => {

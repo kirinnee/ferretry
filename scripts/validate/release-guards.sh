@@ -34,8 +34,9 @@ set -euo pipefail
 #   3. Any other workflow with a job that can write (`contents: write`), use an environment or read a secret has every
 #      such job gated on `github.ref == 'refs/heads/main'`, and no `push.tags` trigger.
 #   4. The preview workflow (`pwa-pages-v5.yaml`) is triggered by pushes to `rebuild/5.0` and `rebuild/5.0-after` and
-#      no other branch, every job's `if` OPENS with exactly that two-ref guard, and its signing and deploy jobs use
-#      environments of their own.
+#      no other branch, every job's `if` OPENS with exactly that two-ref guard (only `&&` may follow it, never a
+#      top-level `||`), its signing and deploy jobs use environments of their own, and its deploy job refuses a stale
+#      commit (the run branch's head must equal GITHUB_SHA) in a step before `wrangler pages deploy`.
 #   5. Nothing but CD and the Release workflow's own steps names `Casks/` or semantic-release.
 
 root_dir="$(git rev-parse --show-toplevel)"
@@ -114,9 +115,34 @@ if [[ -f ${preview} ]]; then
     fail "${preview} must be triggered by pushes to rebuild/5.0 and rebuild/5.0-after alone"
   triggers "${preview}" | jq -e '(keys | sort) == ["push", "workflow_dispatch"]' >/dev/null ||
     fail "${preview} may be triggered only by a push and a dispatch"
-  # The guard must OPEN the `if` (so no `|| <another ref>` can ride along outside it); more `&&` conditions may follow.
-  json "${preview}" | jq -e --arg g "${preview_ref_guard}" '[.jobs[] | .if // ""] | all(startswith($g))' >/dev/null ||
-    fail "every job of ${preview} must open its if with ${preview_ref_guard}"
+  # The guard must OPEN the `if`, and only `&&` may follow it: a correctly parenthesised guard followed by a top-level
+  # `|| <anything>` would let another condition (another ref, an event) ride along outside it. `||` inside parentheses
+  # or a quoted string is fine; one at parenthesis depth 0 after the guard is refused.
+  json "${preview}" | jq -e --arg g "${preview_ref_guard}" '
+    def top_level_or($s):
+      ($s | gsub("'"'"'[^'"'"']*'"'"'"; "'"''"'")) as $t
+      | (reduce ($t | explode[]) as $c ({d: 0, p: 0, bad: false};
+          if $c == 40 then .d += 1 | .p = $c
+          elif $c == 41 then .d -= 1 | .p = $c
+          elif $c == 124 and .p == 124 and .d == 0 then .bad = true | .p = 0
+          else .p = $c end)) | .bad;
+    [.jobs[] | .if // ""] | all(startswith($g) and (.[($g | length):] | top_level_or(.) | not))' >/dev/null ||
+    fail "every job of ${preview} must open its if with ${preview_ref_guard}, followed only by && conditions (no top-level ||)"
+  # A STALE COMMIT MUST NOT DEPLOY LAST. The concurrency group serialises runs but does not order them, so the deploy
+  # job must, in a step BEFORE the `wrangler pages deploy` one, read the run's own branch head (read-only
+  # `git ls-remote --exit-code --heads`), compare it with GITHUB_SHA and exit non-zero when they differ.
+  json "${preview}" | jq -e '
+    .jobs.deploy.steps as $steps
+    | ([$steps | to_entries[] | select((.value.run // "") | contains("wrangler pages deploy")) | .key] | first) as $deploy_at
+    | $deploy_at != null
+      and ([$steps | to_entries[]
+            | select(.key < $deploy_at)
+            | select((.value.run // "") as $r
+                | ($r | contains("git ls-remote --exit-code --heads \"https://github.com/${REPOSITORY}\" \"refs/heads/${BRANCH}\""))
+                  and ($r | contains("!= \"${GITHUB_SHA}\""))
+                  and ($r | contains("exit 1")))]
+           | length > 0)' >/dev/null ||
+    fail "${preview}: the deploy job must, before wrangler pages deploy, read the run branch head with git ls-remote --exit-code --heads, refuse (exit 1) unless it equals GITHUB_SHA (an older commit must not publish after a newer one)"
   json "${preview}" | jq -e '(.jobs.sign.environment == "pwa-release-v5") and (.jobs.deploy.environment == "pwa-deploy-v5")' >/dev/null ||
     fail "${preview}: sign must use pwa-release-v5 and deploy pwa-deploy-v5"
   json "${preview}" | jq -e '[.jobs[] | .permissions // {} | .["contents"] // "none"] | all(. == "read")' >/dev/null ||
