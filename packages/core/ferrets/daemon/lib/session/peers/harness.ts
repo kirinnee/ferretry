@@ -14,6 +14,7 @@ import type {
   CodexPickerDrivePort,
   FastModeFacts,
   PickerSleeper,
+  RuntimeSwitchAccount,
 } from '../../../../contract/kinds/runtime-switch.ts';
 import type { CoreAccount } from './core.ts';
 
@@ -62,7 +63,7 @@ export function pickerInputRefusal(binaryName: string): string {
  */
 export interface HarnessRuntimeCatalogs {
   /** Today's `claudeRuntimeCatalog(account)`. */
-  claudeRuntimeCatalog(account: CoreAccount): RuntimeModelCatalog;
+  claudeRuntimeCatalog(account: RuntimeSwitchAccount): RuntimeModelCatalog;
   /** Today's `codexRuntimeCatalog(choices, account?)`. */
   codexRuntimeCatalog(
     choices: readonly RuntimeModelChoice[],

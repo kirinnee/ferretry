@@ -13,15 +13,26 @@
  *
  * Pure apart from the seams it is handed.
  */
-import type { LoginStartResolution, RuntimeStartResolution, RuntimeStartSource } from '@ferretry/core-ferrets/contract';
+import type {
+  LoginStartResolution,
+  RuntimeModelCatalog,
+  RuntimeStartResolution,
+  RuntimeStartSource,
+} from '@ferretry/core-ferrets/contract';
 import type { LoginView, LoginsApi } from '@ferretry/plugin-logins/contract';
 import { RuntimeIdSchema, type RuntimesApi } from '../../../contract/index.ts';
+import { runtimeModelCatalog } from '../runtime-model-catalog.ts';
 
 export interface RuntimeStartAnswerDeps {
   readonly resolve: RuntimesApi['resolve'];
   /** The machine's default runtime; absent: the answer names none. */
   readonly default?: RuntimesApi['default'];
   readonly logins: Pick<LoginsApi, 'list'>;
+  /**
+   * The published runtimes (`RuntimesApi.catalog`), read for what a runtime serves. Absent: the answer has no `catalog`
+   * member, which a move onto another runtime reads as "not built yet".
+   */
+  readonly catalog?: RuntimesApi['catalog'];
 }
 
 const REMEDY = 'run `fy runtimes` to see what can start, or fix it in Runtimes';
@@ -65,5 +76,14 @@ export function runtimeStartAnswer(deps: RuntimeStartAnswerDeps): RuntimeStartSo
     return { ok: true, harness: resolved.runtime.harness, login: resolved.runtime.login };
   };
   const defaultRuntime = async (): Promise<string | undefined> => await deps.default?.().catch(() => undefined);
-  return { login, resolve, defaultRuntime };
+  const catalogDep = deps.catalog;
+  if (catalogDep === undefined) return { login, resolve, defaultRuntime };
+  // What the runtime NAMED serves, by name or by id, from the one published view; `undefined` when it is not published or
+  // the publication cannot be read (the contract's "cannot say"). Read-only and values-free (`runtimeModelCatalog`).
+  const catalog = async (runtime: string): Promise<RuntimeModelCatalog | undefined> => {
+    const published = await catalogDep().catch(() => undefined);
+    const view = published?.find(entry => entry.name === runtime || entry.id === runtime);
+    return view === undefined ? undefined : runtimeModelCatalog(view);
+  };
+  return { login, resolve, defaultRuntime, catalog };
 }
