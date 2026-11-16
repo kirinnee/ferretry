@@ -4,7 +4,6 @@
   "pendingReasons": {
     "browsers": [
       "[compose] GAP(daemon): daemon/holds/site.ts, daemon/stream/socket-downstream.ts, daemon/proxy/firewall/marker-reader.ts, daemon/proxy/firewall/state.ts and daemon/proxy/wire/firewall.ts are ported and tested but no daemon composition consumes them yet (the holds site key, the viewer socket transport and the loopback firewall status) (the file's OUTSIDE_THE_KERNEL exemption is permanent, #20; only its consumer is pending)",
-      "[own] GAP(browsers): browsers.yaml is kept out of the agent config tools (kernel agent-reach.ts) because its def holds no edit as a loosening (neverLoosens), and today a new or re-aimed browser proxy was held (machine.yaml, browserProxyLoosening); port that rule, then map browsers.yaml into the reach with its T-0034 row (owner: browsers port)",
       "[own] GAP(browsers): the shell asks Browsers where a link opens (shell.links, built per machine, S7) but Browsers does not provide it yet, so the in-app link sheet and workspace host are ported and nothing in the shell mounts them: links keep opening in this device's browser. Browsers also gives the anchor its ARIA when it provides links (LinkProvision.anchor: aria-haspopup dialog for the sheet, aria-controls for a pane), as v4 did"
     ]
   }

@@ -186,6 +186,24 @@ const ROWS: readonly Row[] = [
     secretAdded: 'hooks:\n  Stop:\n    - command: ${secret:OWNER_KEY}\n',
   },
   {
+    // T-0034 c58-54: today's browserProxyLoosening, ported as Browsers' `loosens`.
+    path: 'browsers.yaml',
+    base: 'mode: headless\n',
+    loosening: {
+      text: 'mode: headless\nproxy:\n  url: http://proxy.example:8080\n',
+      sentence: 'the agent browser now sends its traffic through the proxy at http://proxy.example:8080',
+    },
+  },
+  {
+    // T-0034 c58-54: today's time-zone rule (ANY change) and public-feed rule, ported as Usage's `loosens`.
+    path: 'usage.yaml',
+    base: 'publicFeed: false\n',
+    loosening: {
+      text: 'publicFeed: false\ntimeZone: Pacific/Kiritimati\n',
+      sentence: "budgets now reset in Pacific/Kiritimati instead of the host's time zone",
+    },
+  },
+  {
     path: 'model-sets/fast.yaml',
     base: 'models:\n  - a\ndefault: a\n',
     secretAdded: 'models:\n  - a\ndefault: a\nclonedFromKey: ${secret:OWNER_KEY}\n',
@@ -400,17 +418,33 @@ const TODAY_HOLDS: readonly TodayHold[] = [
     today: 'machine',
     words:
       'budgets now reset in ${after.machine.timeZone ?? "the host\'s time zone"} instead of ${before.machine.timeZone ?? "the host\'s time zone"}',
-    out: 'usage.yaml',
+    door: [
+      { path: 'usage.yaml', base: 'timeZone: UTC\n', text: 'timeZone: America/Los_Angeles\n' },
+      { path: 'usage.yaml', base: 'timeZone: UTC\n', text: 'budgets: {}\n' },
+      { path: 'usage.yaml', base: 'budgets: {}\n', text: 'timeZone: UTC\n' },
+    ],
   },
   {
     today: 'machine',
     words: 'any process on this host can now read quota percentages and account labels without a credential',
-    out: 'usage.yaml',
+    door: [{ path: 'usage.yaml', base: 'publicFeed: false\n', text: 'publicFeed: true\n' }],
   },
   {
     today: 'machine',
     words: 'the agent browser now sends its traffic through the proxy at ${after.url}',
-    out: 'browsers.yaml',
+    door: [
+      { path: 'browsers.yaml', base: 'mode: headless\n', text: 'proxy:\n  url: http://proxy.example:8080\n' },
+      {
+        path: 'browsers.yaml',
+        base: 'proxy:\n  url: http://proxy.example:8080\n',
+        text: 'proxy:\n  url: http://other.example:8080\n',
+      },
+      {
+        path: 'browsers.yaml',
+        base: 'proxy:\n  url: http://proxy.example:8080\n',
+        text: 'proxy:\n  url: http://proxy.example:8080\n  username: ${secret:PROXY_USER}\n  password: ${secret:PROXY_PASS}\n',
+      },
+    ],
   },
   // warden.yaml → warden.yaml
   {
@@ -734,6 +768,8 @@ const TODAY_KINDS_OF: Readonly<Record<string, readonly string[]>> = {
   'conversation.yaml': [],
   'harness-claude-code.yaml': ['machine'],
   'harness-codex.yaml': ['machine'],
+  'browsers.yaml': ['machine'],
+  'usage.yaml': ['machine'],
   logins: ['login'],
   runtimes: ['runtime'],
   profiles: [],
@@ -792,8 +828,7 @@ describe('T-0034 every declared file outside the reach is refused on read, valid
 
   test('R-0073 the files kept out include the person-only ones and the ones whose loosenings are not ported', () => {
     const places = outside.map(({ def }) => placeOf(def));
-    for (const place of ['gate.yaml', 'plugins.yaml', 'catalogs.yaml', 'browsers.yaml', 'usage.yaml', 'endpoints'])
-      expect(places).toContain(place);
+    for (const place of ['gate.yaml', 'plugins.yaml', 'catalogs.yaml', 'endpoints']) expect(places).toContain(place);
   });
 
   for (const { plugin, def } of outside)
@@ -996,6 +1031,6 @@ for (const { path, program } of HARNESS_FILES)
 test('T-0034 the reach grew by exactly the two harness files: no other file became reachable', () => {
   const reachable = DECLARED.filter(({ def }) => agentMayName(samplePath(def))).map(({ def }) => placeOf(def));
   for (const { path } of HARNESS_FILES) expect(reachable).toContain(path);
-  for (const place of ['gate.yaml', 'plugins.yaml', 'browsers.yaml', 'usage.yaml', 'endpoints'])
-    expect(reachable).not.toContain(place);
+  for (const place of ['gate.yaml', 'plugins.yaml', 'endpoints']) expect(reachable).not.toContain(place);
+  for (const place of ['browsers.yaml', 'usage.yaml']) expect(reachable).toContain(place);
 });
