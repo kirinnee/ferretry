@@ -671,6 +671,19 @@ export function buildConversationA(deps: {
           await failureNotifier.notify(sender, recipient, record);
         },
       },
+      // A send the tracker could not type for `stuckAlarmMs` is said LOUDLY, once: a warning in the daemon's log
+      // naming the ferret, the send and the wait. Ids and numbers only, never the message or the screen. The row's
+      // `stuckAt` is what the person who sent it sees; the tries go on.
+      alarm: {
+        stuck: async (recipient, record, waitedMs) => {
+          kernel.log.warn(
+            `a message to ferret ${recipient} is STUCK: nothing could be typed for it for ${Math.round(waitedMs / 1000)} s, ` +
+              "because the agent's input box could not be proven empty. Ferretry keeps trying every " +
+              `${Math.round(defaultSendTrackerSettings.untypedLookMs / 1000)} s; the ferret's terminal shows what is in the way`,
+            { ferret: recipient, sendId: record.sendId, senderKind: record.senderKind ?? 'unknown', waitedMs },
+          );
+        },
+      },
       scheduler,
       roster: { sessions: () => [...roster] },
       serial: new KeyedSerialExecutor(),

@@ -190,6 +190,13 @@ export interface SendRecord {
    * first key. The daemon's own bookkeeping: it never leaves the daemon.
    */
   readonly untyped?: boolean | undefined;
+  /**
+   * When an `untyped` send was said to be STUCK: still not typed `stuckAlarmMs` after it was accepted, because every
+   * try found a composer that could not be proven empty. Set once, so the warning is given once; cleared when a try
+   * finally types it, or when the send settles. Shown on the wire, so the person who sent it can see it is waiting
+   * on the agent's screen and what to do about it.
+   */
+  readonly stuckAt?: string | undefined;
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
   /**
@@ -220,6 +227,7 @@ export type SendSettlement = Partial<
     | 'submitNudges'
     | 'busyTyped'
     | 'untyped'
+    | 'stuckAt'
     | 'cancelEffect'
     | 'noticesOwed'
     | 'held'

@@ -4,6 +4,7 @@ import type { SessionView } from '../../../../daemon/lib/protocol/session.ts';
 import {
   displayModel,
   ingestEvidence,
+  liveRead,
   lastLineLength,
   parentOf,
   SUBTREE_LAST_LINE_MAX,
@@ -102,5 +103,27 @@ describe('ingestEvidence', () => {
       contextWindow: null,
       contextEndPercent: null,
     });
+  });
+});
+
+describe('liveRead', () => {
+  it('should serve the turns and the context the state document stands on now, and nothing else', () => {
+    should(
+      liveRead(
+        ingestEvidence(
+          { model: 'claude-opus-5-5' },
+          { turn: 6, startedAt: '2026-11-01T00:00:00.000Z', contextWindow: 200000, contextPercent: 41 },
+        ),
+      ),
+    ).deepEqual({ turns: 6, contextPercent: 41, contextWindow: 200000 });
+  });
+
+  it('should say null for a context the document does not state, and for a ferret whose documents did not parse', () => {
+    should(liveRead(ingestEvidence({}, { turn: 0 }))).deepEqual({
+      turns: 0,
+      contextPercent: null,
+      contextWindow: null,
+    });
+    should(liveRead(undefined)).deepEqual({ turns: null, contextPercent: null, contextWindow: null });
   });
 });

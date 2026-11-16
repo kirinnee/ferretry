@@ -123,6 +123,8 @@ export const SendLineSchema = z.strictObject({
   submitNudges: NonNegativeInteger.optional(),
   busyTyped: z.boolean().optional(),
   untyped: z.boolean().optional(),
+  /** When an untyped send was said to be stuck (`stuckAlarmMs`); cleared once a try types it or it settles. */
+  stuckAt: InstantSchema.optional(),
   cancelEffect: SendCancelEffectSchema.optional(),
   /** The failure notices a final fate still owes its senders, shortened one member at a time as each is sent. */
   noticesOwed: z.array(z.strictObject({ from: z.string().min(1), sendId: z.string().min(1) })).optional(),
