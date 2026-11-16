@@ -1116,7 +1116,7 @@ export class InputRequestService {
     if (before === undefined)
       throw new InputRequestError(
         'bad_request',
-        `chain names ${chain}, which is not an input request of this session; raise this card without chain`,
+        `chain names ${chain}, which is not an input request of this session; raise this input without chain`,
       );
     return Math.min(MAX_STEP, (before.request.step ?? 1) + 1);
   }
@@ -1920,10 +1920,10 @@ export class InputRequestService {
       if (pasted !== undefined && body.sealed !== true)
         throw new InputRequestError(
           'bad_request',
-          `this card pastes ${copyHandle(pasted)}: allow it, there is nothing to type`,
+          `this input pastes ${copyHandle(pasted)}: allow it, there is nothing to type`,
         );
       if (pasted === undefined && body.sealed === true)
-        throw new InputRequestError('bad_request', 'this card pastes no secure copy; type the value instead');
+        throw new InputRequestError('bad_request', 'this input pastes no secure copy; type the value instead');
       const typed = pasted === undefined ? typedValues(request, body) : new Map<string, string>();
       if (body.entry !== undefined && this.deps.logins === undefined)
         throw new InputRequestError('bad_request', 'this daemon keeps no accounts; type the value instead');
@@ -1939,7 +1939,7 @@ export class InputRequestService {
       if (body.factor !== undefined && codeFields.length === 0)
         throw new InputRequestError(
           'bad_request',
-          'this card has no code field for a 2FA key to fill: type the value instead. Nothing was typed',
+          'this input has no code field for a 2FA key to fill: type the value instead. Nothing was typed',
         );
       // A saved account is typed only as the card offers it NOW, and the tapped sign-in must be its offer's: the rules of
       // the card are the daemon's, not only the app's list. Checked before anything is opened or typed.
@@ -2323,7 +2323,7 @@ export class InputRequestService {
         'bad_request',
         request.fields.every(field => field.sensitivity === 'private' || field.sensitivity === 'code')
           ? 'a one-time code is not saved; add the 2FA key to the account in Settings instead'
-          : 'this card cannot be kept as one account (it has two usernames or two passwords); send without saving',
+          : 'this input cannot be kept as one account (it has two usernames or two passwords); send without saving',
       );
     const kept: { username?: string; password?: string } = {};
     for (const [id, role] of roles) {
@@ -2349,7 +2349,7 @@ export class InputRequestService {
       if ([...roles.values()].includes('username'))
         throw new InputRequestError(
           'bad_request',
-          'this card types the username itself, so Save as keeps that one; nothing was typed',
+          'this input types the username itself, so Save as keeps that one; nothing was typed',
         );
       kept.username = save.username;
     }
@@ -2394,7 +2394,7 @@ export class InputRequestService {
     if (offered?.id !== account.id)
       throw new InputRequestError(
         'bad_request',
-        `${account.label} is not the account this card can update: save it as a new account. Nothing was typed`,
+        `${account.label} is not the account this input can update: save it as a new account. Nothing was typed`,
       );
     // Another person: the page signs in someone the account is not (or the account has no username to say it is), or
     // the owner's box names another username than the one saved. Checked again under the store lock.
@@ -3128,7 +3128,7 @@ function requireOwner(caller: InputCaller): InputActor {
  * sent once Browsers is back on.
  */
 const BROWSERS_OFF_FOR_OWNER =
-  'Agents may no longer control browsers on this machine, so this card was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the card.';
+  'Agents may no longer control browsers on this machine, so this input was not typed into the page. Turn on Browsers under What agents may control and try again, or dismiss the input.';
 
 function inOwnerWords(error: unknown, kind: InputTarget['kind']): unknown {
   const browsersOff =
@@ -3142,7 +3142,7 @@ function inOwnerWords(error: unknown, kind: InputTarget['kind']): unknown {
 function targetChanged(kind: InputTarget['kind']): InputRequestError {
   return new InputRequestError(
     'conflict',
-    `what is on the ${surfaceWord(kind)} is no longer what the card showed; nothing was typed`,
+    `what is on the ${surfaceWord(kind)} is no longer what the input showed; nothing was typed`,
     INPUT_ERROR_CODES.targetChanged,
   );
 }
@@ -3151,7 +3151,7 @@ function targetChanged(kind: InputTarget['kind']): InputRequestError {
 function targetRebound(kind: InputTarget['kind']): InputRequestError {
   return new InputRequestError(
     'conflict',
-    `the ${surfaceWord(kind)} changed since the card was drawn, but it is the same ${kind === 'terminal' ? 'prompt' : 'field'}: Ferretry looked again and redrew the card; check it and send again. Nothing was typed`,
+    `the ${surfaceWord(kind)} changed since the input was drawn, but it is the same ${kind === 'terminal' ? 'prompt' : 'field'}: Ferretry looked again and redrew the input; check it and send again. Nothing was typed`,
     INPUT_ERROR_CODES.targetRebound,
   );
 }
@@ -3265,7 +3265,7 @@ function guardFields(target: InputTarget, fields: readonly InputFieldRaise[]): v
 function typedValues(request: InputRequest, body: InputDeliverBody): Map<string, string> {
   const typed = new Map<string, string>();
   const take = (field: InputRequestField | undefined, padded: string): void => {
-    if (field === undefined) throw new InputRequestError('bad_request', 'that field is not on this card');
+    if (field === undefined) throw new InputRequestError('bad_request', 'that field is not on this input');
     const value = unpadInputValue(padded);
     if (value === undefined) throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
     const problem = inputValueProblem(value, field.sensitivity);
@@ -3274,7 +3274,7 @@ function typedValues(request: InputRequest, body: InputDeliverBody): Map<string,
   };
   if (body.padded !== undefined) {
     if (request.fields.length !== 1)
-      throw new InputRequestError('bad_request', 'this card asks for several values: send each by its field');
+      throw new InputRequestError('bad_request', 'this input asks for several values: send each by its field');
     take(request.fields[0], body.padded);
   }
   for (const each of body.fields ?? [])
@@ -3670,7 +3670,7 @@ interface GrantMiss {
 /** A grant's second match, at the write, failed: nothing is typed, and the card stays for the owner. */
 class GrantMissed extends Error {
   constructor(readonly reason: GrantMissReason) {
-    super('a pre-approval did not cover this card; nothing was typed');
+    super('a pre-approval did not cover this input; nothing was typed');
     this.name = 'GrantMissed';
   }
 }

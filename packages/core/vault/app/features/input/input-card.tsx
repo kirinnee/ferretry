@@ -43,6 +43,9 @@ import {
 import type { InputRequestView } from '../../lib/input-wire.ts';
 import { Eye, EyeOff, ShieldAlert, type VaultClient } from '../../shell.tsx';
 
+/** The style hook of the input box: a class name, kept as it is (not owner text). */
+const INPUT_CLASS = 'fy-input-card';
+
 export interface InputCardProps {
   readonly request: InputRequestView;
   readonly client: VaultClient;
@@ -531,7 +534,7 @@ export function InputCard({
   return (
     <section
       {...(embedded ? { 'aria-label': title } : { 'aria-labelledby': headingId })}
-      className={`fy-input-card flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
+      className={`${INPUT_CLASS} flex min-w-0 flex-col gap-3${embedded ? '' : ' kt-panel p-panel'}`}
       data-input-embedded={embedded ? '' : undefined}
       data-input-request={request.id}
       data-input-state={settled === null ? request.state : 'settled'}

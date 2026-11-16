@@ -95,7 +95,7 @@ function ownerOnly(call: CallContext, act: string): void {
   if (!isFerretCall(call)) return;
   throw new ApiError(
     403,
-    `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see a card and type it), or paste a sealed copy into the store (secure copy). Both show the owner a card.`,
+    `a ferret cannot ${act}; the owner does. To get a value into the store, ask the owner with an input request (they see an input and type the value), or paste a sealed copy into the store (secure copy). Both show the owner an input.`,
     'forbidden',
   );
 }

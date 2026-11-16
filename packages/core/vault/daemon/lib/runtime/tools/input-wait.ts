@@ -83,10 +83,10 @@ export function inputTools(
     input_wait: async (call, input) => {
       const ferret = ferretOf(call);
       if (ferret === undefined)
-        return refusal('input_wait is a ferret’s own call: it waits on a card that ferret raised');
+        return refusal('input_wait is a ferret’s own call: it waits on an input that ferret raised');
       const parsed = InputWaitInputSchema.safeParse(input);
       if (!parsed.success)
-        return refusal(`input_wait takes a card id like ${askReference('A7')} and an optional timeoutMs`);
+        return refusal(`input_wait takes an input id like ${askReference('A7')} and an optional timeoutMs`);
       const waitMs = parsed.data.timeoutMs ?? INPUT_WAIT_DEFAULT_MS;
       if (PHONE_APPROVAL_ID_PATTERN.test(parsed.data.id)) {
         // A phone approval is Accounts': its own service answers, and only for the ferret that raised it.
