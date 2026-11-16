@@ -150,7 +150,7 @@ describe('a launch settles the ferret’s session folder and spawn stamp first',
       const stores: SessionStore[] =
         mediaFolder === undefined ? [] : [{ id: 'media-folder', variable: 'FY_MEDIA_DIR', locate: mediaFolder }];
       const f = fixture(recorder(log), [], log, {
-        launchSteps: { sealed: () => sealed, stores: () => stores },
+        launchSteps: { sealed: () => sealed, stores: () => stores, guards: () => [] },
         vault: {
           childEnvironment: async (_ferret, env) => {
             seen.push({ ...env });

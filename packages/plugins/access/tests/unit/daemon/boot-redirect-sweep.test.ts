@@ -6,6 +6,10 @@ import { fixedClock } from '@ferretry/kernel/testing';
 import { PairingRedirectsFile } from '../../../contract/index.ts';
 import daemon from '../../../daemon/index.ts';
 import type { PairingRedirectStatePort } from '../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
+import {
+  type PairingRedirectWriteState,
+  stateRedirectWriter,
+} from '../../../daemon/adapters/pairing/redirect-writer.ts';
 import manifest from '../../../manifest.ts';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import {
@@ -124,7 +128,7 @@ test('P106 daemon boot treats an absent redirect tree as a no-op', async () => {
 
 test('P106 CLI writes the same private opaque tree that daemon boot and the next pair sweep', async () => {
   const f = fixture();
-  const state: PairingRedirectCliStatePort & PairingRedirectStatePort = {
+  const state: PairingRedirectCliStatePort & PairingRedirectStatePort & PairingRedirectWriteState = {
     ...f.state,
     createPrivateDirectory: async (file, name) => {
       expect(file.name).toBe(PairingRedirectsFile.name);
@@ -138,7 +142,9 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
     },
     pathOf: (file, name) => `/fixture/state/access/${file.path.replace('*', name ?? '')}`,
   };
-  const page = await createPairingRedirectPage(state, '<html>fixture</html>');
+  // The daemon makes the page; its own writer runs here over the same fixture state.
+  const cli = { state, make: (made: string) => stateRedirectWriter(state).write(made) };
+  const page = await createPairingRedirectPage(cli, '<html>fixture</html>');
   expect(page.file).toMatch(/^\/fixture\/state\/access\/pairing-redirects\/pair-open-[A-Za-z0-9]{6}\/pairing.html$/u);
   expect(PairingRedirectsFile.mode).toBe(0o600);
   await f.boot();
@@ -146,7 +152,7 @@ test('P106 CLI writes the same private opaque tree that daemon boot and the next
   await f.clock.advance(30_001);
   await f.underLock(async () => await cliSweep(state, f.clock.nowMs()));
   expect(f.nodes.size).toBe(0);
-  await createPairingRedirectPage(state, '<html>fixture</html>');
+  await createPairingRedirectPage(cli, '<html>fixture</html>');
   await f.clock.advance(30_001);
   await f.boot();
   expect(f.nodes.size).toBe(0);

@@ -75,7 +75,9 @@ import {
 } from './lib/proof/device-proof.ts';
 import { buzzPayload, clearPayload, HighPushCap, PairedPushDevices, PushService } from './lib/push/index.ts';
 import type { PushHealth } from './lib/push/health.ts';
+import { stateRedirectWriter } from './adapters/pairing/redirect-writer.ts';
 import { pairingRoutes } from './lib/routes/pairing.ts';
+import { pairingRedirectRoutes } from './lib/routes/pairing-redirect.ts';
 import { pushRoutes } from './lib/routes/push.ts';
 import { stepUpRoutes } from './lib/routes/step-up.ts';
 import {
@@ -309,6 +311,7 @@ export class AccessRuntime {
     const routes = new Map<string, RouteHandler>();
     for (const route of [
       ...pairingRoutes(pairing, deviceGrants),
+      ...pairingRedirectRoutes(stateRedirectWriter(kernel.state)),
       ...pushRoutes(push, guard),
       ...this.#stepUpRoutes(stepUp),
     ])
