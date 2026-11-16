@@ -704,9 +704,9 @@ describe('the machine verbs through the router, by row', () => {
     should(transport.sent).deepEqual([]);
   });
 
-  it('V-0316 a switch that took the next word as its value is refused, not read as off', async () => {
+  it('V-0316 a switch given the next word as its attached value is refused, not read as off', async () => {
     const { world, io, transport } = wired([machineView()]);
-    should(await runFy(['machine', 'set', 'auto-resume', '--yes', 'off'], world)).equal(1);
+    should(await runFy(['machine', 'set', 'auto-resume', '--yes=off'], world)).equal(1);
     should(io.stderr()).containEql('--yes is a switch and took "off" as its value');
     should(transport.sent).deepEqual([]);
   });
@@ -736,11 +736,35 @@ describe('the machine verbs through the router, by row', () => {
     should(paths(transport.sent)).deepEqual(['/v1/runtimes/machine', '/v1/runtimes/setup/scan']);
   });
 
-  it('V-0315 fy machine install --yes claude is refused: the switch would have swallowed the tool', async () => {
+  it('V-0315 fy machine install --yes=claude is refused: the attached value would have lost the tool', async () => {
     const { world, io, transport } = wired([machineView()]);
-    should(await runFy(['machine', 'install', '--yes', 'claude'], world)).equal(1);
+    should(await runFy(['machine', 'install', '--yes=claude'], world)).equal(1);
     should(io.stderr()).containEql('--yes is a switch and took "claude"');
     should(transport.sent).deepEqual([]);
+  });
+
+  it('V-0315 fy machine install --dry-run codex: a declared switch before the tool never takes it', async () => {
+    const scan = {
+      machine: 'laptop',
+      format: 'present',
+      harnesses: [],
+      runtimes: [],
+      updates: [],
+      duplicates: [],
+      notes: [],
+      importing: { available: true },
+      tools: [
+        {
+          harness: 'codex',
+          label: 'Codex',
+          installed: false,
+          install: { kind: 'runnable', command: 'npm install -g @openai/codex' },
+        },
+      ],
+    };
+    const { world, io } = wired([machineView(), scan]);
+    should(await runFy(['machine', 'install', '--dry-run', 'codex'], world)).equal(0);
+    should(io.stdout()).containEql('Codex will be installed with: npm install -g @openai/codex');
   });
 
   it('V-0313 the old variadic form --skip a b is refused whole: b is not silently applied, and nothing is sent', async () => {

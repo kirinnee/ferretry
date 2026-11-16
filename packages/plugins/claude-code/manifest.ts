@@ -236,6 +236,9 @@ export default definePlugin({
     ],
   },
 
+  // The one sentence that keeps Claude's dangerous-rm guard from stopping a Claude ferret (c58 O11b). Claude only: Codex has no such guard.
+  instructions: [{ id: 'rm-targets', text: 'instructions/rm.md', when: { role: 'any', harness: CLAUDE_CODE } }],
+
   onboarding: [{ id: 'harness', title: 'Claude Code', order: 20 }],
   doctor: ['claude-code-paths'],
 
