@@ -13,7 +13,12 @@ const merged = (existing: unknown): unknown => {
 
 describe('mergeClaudeJson', () => {
   test('a home with no document (or an empty one) gets the fixed layer whole, with the Chrome keys of the seed', () => {
-    const whole = { ...(JSON.parse(FRESH) as object), claudeInChromeDefaultEnabled: false };
+    const whole = {
+      ...(JSON.parse(FRESH) as object),
+      claudeInChromeDefaultEnabled: false,
+      lspRecommendationDisabled: true,
+      claudeCodeHints: { disabled: true },
+    };
     expect(JSON.parse(mergeClaudeJson(undefined, FRESH) ?? '')).toEqual(whole);
     expect(JSON.parse(mergeClaudeJson('  \n', FRESH) ?? '')).toEqual(whole);
     expect(JSON.parse(mergeClaudeJson('null', FRESH) ?? '')).toEqual(whole);
@@ -60,6 +65,8 @@ describe('mergeClaudeJson', () => {
       hasCompletedOnboarding: true,
       hasCompletedClaudeInChromeOnboarding: true,
       claudeInChromeDefaultEnabled: false,
+      lspRecommendationDisabled: true,
+      claudeCodeHints: { disabled: true },
       projects: {
         [CWD]: {
           hasTrustDialogAccepted: true,

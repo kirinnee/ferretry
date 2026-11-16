@@ -15,6 +15,14 @@ const CODEX_HIDDEN_NOTICES = [
   'hide_gpt-5.1-codex-max_migration_prompt',
 ] as const;
 
+/**
+ * Top-level `config.toml` keys of the ferret's OWN home that a setting of the person's (a settings item) may still
+ * override: written only when no selected item says otherwise. O11b, Codex 0.166.0 binary strings:
+ * `check_for_update_on_startup = false` is the "Update available" screen, which a ferret must never stop on (Ferretry
+ * applies updates). It sits outside the launch fingerprint, which is the arguments above.
+ */
+export const CODEX_CONFIG_DEFAULTS = { check_for_update_on_startup: false } as const;
+
 export function codexFixedArguments(permissionMode: HarnessConfig['permissionMode'], cwd: string): readonly string[] {
   const { approvalPolicy, sandboxMode } = CODEX_PERMISSIONS[permissionMode];
   return [

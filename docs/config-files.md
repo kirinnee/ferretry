@@ -899,7 +899,10 @@ Both files also take `questionTool: true` (default `false`, owner !A527): by def
 question tool, so none stops on a form only the pane shows and each asks through the agenda; `true` gives an
 **interactive** ferret the tool back (Claude keeps `AskUserQuestion`, Codex gets
 `--enable default_mode_request_user_input`), and an auto ferret never has it. It makes ferrets block rather than act,
-so it is **never held**. Not reached yet, each a declared GAP:
+so it is **never held**. `harness-claude-code.yaml` also takes `dangerousRmWaiver: true` (default `false`): with it AND
+bypass mode (`permissionMode: skip`) a launch sets `CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1`, which waives Claude's
+dangerous-`rm` guard. It is a loosening, so an agent's edit turning it on is **held** for the owner like a looser permission
+mode (docs/harness-dialogs.md). Not reached yet, each a declared GAP:
 
 - `browsers.yaml` (the browser mode, proxy and ports): a new or re-aimed proxy is not held yet; before 5.0 it was.
 - `usage.yaml` (the time zone and the public feed): a time-zone change is not held yet; before 5.0 it was.

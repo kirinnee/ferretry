@@ -18,7 +18,20 @@ export const CLAUDE_QUESTION_HOOKS = {
  * `.claude.json` keys set ONLY when absent or `null` (today's `SEED_FILTER`): `claudeInChromeDefaultEnabled` is the
  * gate for Claude's browser prompt, and a home where somebody chose `true` must not be silently turned off.
  */
-export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as const;
+export const CLAUDE_JSON_DEFAULTS = {
+  claudeInChromeDefaultEnabled: false,
+  // O11b, Claude Code 2.1.317 binary strings: the "LSP plugin recommendation" and "Plugin recommendation" dialogs. A
+  // nested key is set only where ITS leaf is absent, so a `claudeCodeHints` the person already holds keeps its keys.
+  lspRecommendationDisabled: true,
+  claudeCodeHints: { disabled: true },
+} as const;
+
+/**
+ * `lastReleaseNotesSeen`: the "what's new" summary Claude shows once after an upgrade. It is bookkeeping, not a choice,
+ * so unlike the defaults above it is set to the installed version on EVERY launch (the launch knows the version, a
+ * constant cannot), and only when that version is known: a home prepared without a discovery asserts nothing.
+ */
+export const RELEASE_NOTES_KEY = 'lastReleaseNotesSeen';
 
 /**
  * What a ferret's home pre-answers so that no screen of the harness's own stops it (docs/harness-dialogs.md).
@@ -33,6 +46,38 @@ export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as c
  *   touched). It lets those servers start unasked; a name in `disabledMcpjsonServers` still wins over it.
  */
 export const CLAUDE_HOME_ENV = { DISABLE_AUTOUPDATER: '1' } as const;
+
+/**
+ * O11b (Claude Code 2.1.317 binary strings), set in the launch's process environment like {@link CLAUDE_HOME_ENV} but
+ * deliberately OUTSIDE the launch-settings fingerprint: none of them changes what an agent may do, so a ferret already
+ * running never reads as outdated for them.
+ *
+ * - `CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY`: the "How is Claude doing this session?" survey.
+ * - `CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT`: the dangerous-rm confirmation for `rm` inside `bash -c` / `sh -c`.
+ * - `CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT`: the same for a path on a mounted drive.
+ */
+export const CLAUDE_PROMPT_ENV = {
+  CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY: '1',
+  CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT: '1',
+  CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT: '1',
+} as const;
+
+/**
+ * Removed from the launched Claude's environment (`env -u`): a ferret started from inside a Claude Bash shell inherits
+ * it, and with it set Claude treats the session as a child whose rm waivers do not apply.
+ */
+export const CLAUDE_UNSET_ENV = ['CLAUDE_CODE_CHILD_SESSION'] as const;
+
+/**
+ * The full dangerous-rm waiver. A LOOSENING: it is set only when the `dangerousRmWaiver` setting
+ * (`config/harness-claude-code.yaml`, default off, held for the owner when an agent turns it on) is true AND the ferret
+ * runs in bypass mode, where the owner has already waived permission prompts.
+ */
+export const CLAUDE_RM_WAIVER_ENV = { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } as const;
+
+/** Whether a launch sets {@link CLAUDE_RM_WAIVER_ENV}: the setting on and bypass mode, never either alone. */
+export const rmWaiverApplies = (dangerousRmWaiver: boolean, permissionMode: HarnessConfig['permissionMode']): boolean =>
+  dangerousRmWaiver && permissionMode === 'skip';
 
 /** Fixed settings override item settings; the question hook is ONLY in the separate flag overlay. */
 export function fixedLayer(permissionMode: HarnessConfig['permissionMode'], cwd: string) {

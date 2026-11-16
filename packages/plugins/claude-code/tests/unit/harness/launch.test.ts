@@ -276,8 +276,13 @@ describe('launchCommand', () => {
   it('starts claude in the home with a session id and the auto permission mode', () => {
     should(launchCommand(base)).eql([
       'env',
+      '-u',
+      'CLAUDE_CODE_CHILD_SESSION',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
       'DISABLE_AUTOUPDATER=1',
+      'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
+      'CLAUDE_CODE_DISABLE_INLINE_SHELL_RM_PROMPT=1',
+      'CLAUDE_CODE_DISABLE_MOUNTED_DRIVE_RM_PROMPT=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -300,7 +305,7 @@ describe('launchCommand', () => {
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-9' },
     });
-    should(argv.slice(10)).eql([
+    should(argv.slice(argv.indexOf('--permission-mode'))).eql([
       '--permission-mode',
       'bypassPermissions',
       '--mcp-config',

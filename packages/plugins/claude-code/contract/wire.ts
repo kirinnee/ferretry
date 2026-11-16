@@ -325,6 +325,12 @@ export const HarnessConfigSchema = z.strictObject({
    * rather than act, so it is never held.
    */
   questionTool: z.boolean().default(false),
+  /**
+   * The full dangerous-rm waiver (`CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS`), so Claude's guard on `rm` stops
+   * no ferret. Default OFF until the owner rules (c58 O11b). Set only when this is true AND the permission mode is
+   * `skip`. A loosening: an agent's edit turning it on is held for the owner.
+   */
+  dangerousRmWaiver: z.boolean().default(false),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 

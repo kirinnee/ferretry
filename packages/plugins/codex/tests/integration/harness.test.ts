@@ -151,11 +151,12 @@ describe('the Codex harness', () => {
     ).eql({ found: false, reason: 'cannot run it' });
   });
 
-  it('writes AGENTS.md and config.toml inside the ferret’s home, and nothing when there is nothing to say', async () => {
+  it('writes AGENTS.md and config.toml inside the ferret’s home; with nothing to say only the update-prompt key', async () => {
     const { harness, written } = harnessOver(LOCATED);
     const empty = await harness.prepareHome(specOf());
-    should(empty.files).eql([]);
-    should(written.size).equal(0);
+    should(empty.files).eql([`${HOME}/config.toml`]);
+    should([...written.keys()]).eql([`${HOME}/config.toml`]);
+    should(written.get(`${HOME}/config.toml`)).equal('check_for_update_on_startup = false\n');
 
     const plan = await harness.prepareHome(
       specOf({
@@ -167,7 +168,9 @@ describe('the Codex harness', () => {
     );
     should(plan.files).eql([`${HOME}/AGENTS.md`, `${HOME}/config.toml`]);
     should(written.get(`${HOME}/AGENTS.md`)).equal('be brief\n');
-    should(written.get(`${HOME}/config.toml`)).equal('[mcp_servers.ferretry]\ncommand = "fy"\nargs = ["mcp"]\n');
+    should(written.get(`${HOME}/config.toml`)).equal(
+      'check_for_update_on_startup = false\n\n[mcp_servers.ferretry]\ncommand = "fy"\nargs = ["mcp"]\n',
+    );
   });
 
   it('starts Codex in the work folder with CODEX_HOME pointing at the ferret’s home', async () => {

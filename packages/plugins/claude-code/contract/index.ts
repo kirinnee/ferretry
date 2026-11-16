@@ -160,9 +160,16 @@ const harnessPathsChange: Loosens<HarnessConfig> = (before, after) => [
     : ['agents now look for the Claude Code program in different directories (searchPaths changed)']),
 ];
 
-/** What an agent's edit of this file is HELD for: a looser permission mode, or any change of where the program is. */
+/** Turning the dangerous-rm waiver on (it defaults off, so no value to `true` is a loosening too). */
+const rmWaiverLoosens: Loosens<HarnessConfig> = (before, after) =>
+  before?.dangerousRmWaiver !== true && after.dangerousRmWaiver
+    ? ['agents now run Claude Code with its dangerous-rm guard waived (bypass mode only)']
+    : [];
+
+/** What an agent's edit of this file is HELD for: a looser permission mode or rm guard, or any change of where the program is. */
 const harnessConfigHeld: Loosens<HarnessConfig> = (before, after) => [
   ...harnessConfigLoosens(before, after),
+  ...rmWaiverLoosens(before, after),
   ...harnessPathsChange(before, after),
 ];
 
