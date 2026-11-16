@@ -8,7 +8,7 @@
  */
 import type { RootName, SharedTree } from '../contract/ports.ts';
 import type { StateFileDef } from '../contract/define.ts';
-import { isInternalRootFolder } from './internal-roots.ts';
+import { isInternalRootFolder } from '../contract/internal-roots.ts';
 
 /** Why a shared tree was refused. One closed list, the same on both hosts. */
 export type SharedRefusal =

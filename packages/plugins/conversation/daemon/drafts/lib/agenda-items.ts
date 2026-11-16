@@ -7,7 +7,7 @@
  * change that sets `addressed`. A REPLIED item is parked, not closed: it stays on the board, so it keeps its
  * draft (the send already took out what was sent).
  */
-import type { AgendaId } from '../../seams/protocol.ts';
+import type { AgendaId } from '@ferretry/core-mailbox/contract';
 /** What a board change tells the discard: which item was closed, or that an answer rested it. */
 export interface AgendaBoardChange {
   readonly change: string;

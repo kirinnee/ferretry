@@ -1,7 +1,7 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { INBOX_STATE, OUTBOX_STATE } from '../../../contract/index.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { InboundMessage, OutboundMessage, SendChannel } from '../lib/types.ts';
+import type { InboundMessage, OutboundMessage, SendChannel } from '@ferretry/core-mailbox/contract';
 
 /** What reached a ferret (`inbox.jsonl`) and what it sent (`outbox.jsonl`), one line each, in its own state files. */
 export class StateSendChannel implements SendChannel {

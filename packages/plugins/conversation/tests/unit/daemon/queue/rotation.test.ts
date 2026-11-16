@@ -1,12 +1,7 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  type HeldMessage,
-  type QueueEvent,
-  SegmentFold,
-  type VersionedMessage,
-} from '../../../../daemon/queue/lib/model.ts';
+import { type HeldMessage, type QueueEvent, SegmentFold, type VersionedMessage } from '@ferretry/core-mailbox/contract';
 import {
   mergeByOrder,
   ROTATE_EVENTS,

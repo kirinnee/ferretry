@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { QueuedMessage } from '../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { queueCancelVerb, queueEditVerb, queueVerb } from '../../../cli/lib/queue/commands.ts';
 import { ClientQueueGateway } from '../../../cli/lib/queue/gateway.ts';
 import type { QueueGateway } from '../../../cli/lib/queue/ports.ts';

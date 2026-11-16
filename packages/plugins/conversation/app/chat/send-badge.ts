@@ -1,6 +1,6 @@
-import type { SendUnaccountedReason } from '../../contract/index.ts';
+import type { SendUnaccountedReason } from '@ferretry/core-mailbox/contract';
 import type { z } from 'zod';
-import type { SendCancelEffectSchema } from '../../contract/index.ts';
+import type { SendCancelEffectSchema } from '@ferretry/core-mailbox/contract';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import { isSessionEndedTimeout } from './send-ledger.ts';
 import { WAIT_REASON_COPY } from '../queue/send-queue.ts';

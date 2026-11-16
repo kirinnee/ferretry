@@ -3,13 +3,10 @@
  * contract. Where the contract renamed a thing to the words (§1: ferret, message, draft), the old name is still
  * exported here as an alias so the copied bodies read as they did; nothing here is a second definition.
  */
-import type { z } from 'zod';
 import {
   AnswerRequestSchema,
   type CompactAtPatchResult,
   CompactAtPatchSchema,
-  ComposerRequestSchema,
-  ComposerResultSchema,
   DRAFT_ERROR_CODES,
   DRAFT_HISTORY_LIMIT,
   DRAFT_ITEMS_BUDGET,
@@ -31,12 +28,6 @@ import {
   type DraftSnapshot,
   DraftSnapshotSchema,
   type FerretCompactAt,
-  HandoffNameSchema,
-  InterruptRequestSchema,
-  type SendCancelEffectSchema,
-  type SendDispositionSchema,
-  REQUEST_ID_HEADER,
-  type SenderKind,
   draftFrameBytes,
   isDraftItemSlot,
 } from '../../contract/index.ts';
@@ -45,22 +36,11 @@ export * from '../../contract/index.ts';
 
 // ── the old names, over the new ones ────────────────────────────────────────────────────────────────
 export const AnswerSessionRequestSchema = AnswerRequestSchema;
-export const ComposerDraftRequestSchema = ComposerRequestSchema;
-export type ComposerDraftRequest = z.infer<typeof ComposerRequestSchema>;
-
-export type ComposerDraftResult = z.infer<typeof ComposerResultSchema>;
-export const InterruptSessionRequestSchema = InterruptRequestSchema;
-
-export type SendSenderKind = SenderKind;
-
-export type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
-export type SendDisposition = z.infer<typeof SendDispositionSchema>;
 
 export type SessionCompactAt = FerretCompactAt;
 export const SessionCompactAtPatchSchema = CompactAtPatchSchema;
 
 export type SessionCompactAtPatchResult = CompactAtPatchResult;
-export const SessionHandoffNameSchema = HandoffNameSchema;
 
 // shared draft → draft
 export const SHARED_DRAFT_ERROR_CODES = DRAFT_ERROR_CODES;
@@ -85,10 +65,3 @@ export type SharedDraftSent = DraftSent;
 export type SharedDraftClientFrame = DraftClientFrame;
 export const SharedDraftClientFrameSchema = DraftClientFrameSchema;
 export type SharedDraftServerFrame = DraftServerFrame;
-
-export const FY_REQUEST_ID_HEADER = REQUEST_ID_HEADER;
-export * from './ferret-types.ts';
-export type {
-  HandoffDocument as SessionHandoff,
-  HandoffAttachment as SessionHandoffAttachment,
-} from '../../contract/index.ts';

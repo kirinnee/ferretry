@@ -26,13 +26,8 @@ import { definePlugin, implementDaemon, type Needer } from '@ferretry/kernel/man
 import { ferret as asFerret, fixedClock, owner, testHost, type TestCaller } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { err, ok, type Result } from '@ferretry/std';
-import {
-  CONVERSATION_STATE,
-  ConversationPort,
-  STUCK_FRAME_STATES,
-  parseMessageAttachments,
-  parsePeerEnvelope,
-} from '../../../contract/index.ts';
+import { parseMessageAttachments, parsePeerEnvelope } from '@ferretry/core-mailbox/contract';
+import { CONVERSATION_STATE, ConversationPort, STUCK_FRAME_STATES } from '../../../contract/index.ts';
 import { conversationDaemon } from '../../../daemon/index.ts';
 import {
   type HarnessGate,

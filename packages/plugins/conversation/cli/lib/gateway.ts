@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import {
+  type SendRecord,
+  SendRecordSchema,
+  type SendRequest,
+  type SendResult,
+  SendResultSchema,
+} from '@ferretry/core-mailbox/contract';
+import {
   type AnswerRequest,
   AskedQuestionViewSchema,
   AttachmentViewSchema,
@@ -9,11 +16,6 @@ import {
   CompactAtPatchResultSchema,
   type FerretCompactAt,
   FerretCompactAtSchema,
-  type SendRecord,
-  SendRecordSchema,
-  type SendRequest,
-  type SendResult,
-  SendResultSchema,
 } from '../../contract/index.ts';
 import { CommandError } from './errors.ts';
 import type { AnswerGateway } from './answer/controller.ts';

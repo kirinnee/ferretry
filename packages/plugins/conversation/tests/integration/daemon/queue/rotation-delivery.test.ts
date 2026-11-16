@@ -9,11 +9,11 @@ import {
   QueueDeliverer,
   type QueueDelivery,
 } from '../../../../daemon/queue/lib/deliverer.ts';
-import type { DeliveryView, HandOver } from '../../../../daemon/queue/lib/delivery.ts';
-import type { QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import type { DeliveryView, HandOver } from '@ferretry/core-mailbox/contract';
+import type { QueueEvent } from '@ferretry/core-mailbox/contract';
 import { SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
 import type { SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
-import type { SendFate } from '../../../../daemon/delivery/lib/types.ts';
+import type { SendFate } from '../../../../daemon/seams/ledger-types.ts';
 import { KeyedSerialExecutor } from '../../../../daemon/seams/keyed-serial-executor.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
 

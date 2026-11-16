@@ -18,7 +18,7 @@ import {
 import { parseAskedQuestion, withAskedQuestion } from '../../../daemon/questions/lib/asked.ts';
 import { projectStructuredQuestion, structuredQuestionStatePatch } from '../../../daemon/questions/lib/projection.ts';
 import { IncrementalTranscriptTail } from '../../../daemon/reader/lib/session/reader.ts';
-import { TranscriptSendEvidence } from '../../../daemon/delivery/lib/view.ts';
+import { TranscriptSendEvidence } from '@ferretry/core-mailbox/contract';
 import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../daemon/reader/lib/transcript/codex.ts';
 import type {
