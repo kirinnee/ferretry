@@ -1,3 +1,4 @@
+export * from './ferret-control.ts';
 export * from './ledger.ts';
 export * from './policy.ts';
 export * from './service.ts';

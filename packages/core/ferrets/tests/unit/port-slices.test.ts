@@ -27,6 +27,7 @@ import type {
   MoveFailure,
   MoveOptions,
   ResumeOptions,
+  RuntimeControlApi,
   Sitrep,
   StartFailure,
   StartRequest,
@@ -89,6 +90,7 @@ interface FerretsApiAtBase {
   runtimeRecords?(): Promise<readonly FerretRuntimeRecord[]>;
   repointRuntime?(rename: FerretRuntimeRename): Promise<number>;
   markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
+  runtimeControl?: RuntimeControlApi['runtimeControl'];
 }
 
 type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;

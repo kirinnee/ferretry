@@ -27,6 +27,12 @@ export interface InterruptedLaunchPorts {
   /** Frees the conversation a launch claimed; best effort, a terminal session's lease already reads stale. */
   readonly leases?: { release(id: SessionId): Promise<void> } | undefined;
   readonly clock: { now(): string };
+  /**
+   * The most launches ONE pass records failed (absent: no ceiling). A restart that interrupted a great many launches
+   * would otherwise write that many documents and journal lines in one sweep; the rest are kept `over-cap` and
+   * the next boot's pass takes them.
+   */
+  readonly cap?: number | undefined;
 }
 
 /** Why a session in a launch status was left as it was. */
@@ -40,7 +46,9 @@ export type InterruptedLaunchKept =
   /** Something else moved it on between the listing and the settle. */
   | 'moved'
   /** Reading or writing it failed; the next boot looks again. */
-  | 'error';
+  | 'error'
+  /** This pass had already recorded its cap of launches; the next boot's pass takes it. */
+  | 'over-cap';
 
 export interface InterruptedLaunchOutcome {
   /** Sessions recorded `failed` with {@link INTERRUPTED_LAUNCH_REASON}. */
@@ -74,6 +82,10 @@ export class InterruptedLaunchReconciler {
     const kept: { id: SessionId; why: InterruptedLaunchKept }[] = [];
     for (const listed of await this.ports.repository.list()) {
       if (!LAUNCH_IN_FLIGHT_STATUSES.has(listed.status)) continue;
+      if (this.ports.cap !== undefined && failed.length >= this.ports.cap) {
+        kept.push({ id: listed.id, why: 'over-cap' });
+        continue;
+      }
       const why = await this.ports.serial
         .run(listed.id, async () => await this.settle(listed.id))
         .catch((): InterruptedLaunchKept => 'error');

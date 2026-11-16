@@ -1025,10 +1025,10 @@ describe('KCB-S B1 a non-warden consumer cannot stamp a ferret into the Wardenâ€
     return { root, child, grandchild };
   }
 
-  test('KCB-S B1 the registry does not say it, the documents do: C is unlabelled in the summary and stamped into the lineage on disk', async () => {
+  test('KCB-S B1 the registry says it too (c58-59): C carries the forced Warden label in the summary and is stamped into the lineage on disk', async () => {
     const w = await world();
     const { child } = await wardenTree(w);
-    expect(w.registry.summary(child as never)?.label).toBeUndefined();
+    expect(w.registry.summary(child as never)?.label).toBe('fleet-warden');
     const document = SessionConfigSchema.parse(await w.storage.readConfig(parseSessionId(child)));
     expect(document.provenance).toMatchObject({ origin: 'warden', wardenLineage: true });
   });

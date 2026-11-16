@@ -143,12 +143,13 @@ const QUESTION_ASKED_FILE = 'question-asked.json';
  * One launch gate and one serial queue for the whole process: a second of either would not see the first one's launches.
  */
 export class SessionFiles {
-  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler. */
+  /** ONE gate, shared by the lifecycle, the resume, the sends, the exit observer and the interrupted-launch reconciler (the latter
+   * through the registry's own record of when a launch began, since FerretsService does not register in it). */
   readonly launchGate: InMemoryLaunchGate;
   /**
    * ONE per-session mutation queue (today's `sessionMutations`): the lifecycle uses it, and so does FerretsService's
-   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): the
-   * interrupted-launch reconciler, runtime control, Pack hooks and switches, and answers are not on it yet.
+   * start/stop/resume/revoke (the daemon binds it as `FerretsPorts.serial`). GAP(ports-pending: Session adapters): runtime
+   * control, Pack hooks and switches, and answers are not on it yet.
    */
   readonly serial = new KeyedSerialExecutor();
   private readonly credentials = new NodeSessionCredentialIssuer();
@@ -608,12 +609,12 @@ export class SessionFiles {
    * ferret the registry does not hold (none in this build reaches here) has no document to make; it records nothing and
    * says so. A document that is there and cannot take the stamp refuses the start.
    */
-  private async stampAtStart(request: SessionSpawnRequest): Promise<void> {
+  private async stampAtStart(request: SessionSpawnRequest): Promise<string | undefined> {
     const id = parseSessionId(request.id);
     await this.documented.catch(() => undefined);
     if (!(await this.ensureDocument(id))) {
       this.deps.log.warn('a ferret has no session document yet, so its spawn stamp was not recorded', { ferret: id });
-      return;
+      return undefined;
     }
     const stamped = this.stamper.stamp(request, await this.ancestry.snapshot());
     // The port admitted this start as outside the Warden's tree, reading the ancestry on its own: if lineage resolves
@@ -623,11 +624,13 @@ export class SessionFiles {
       throw new Error('a start the port admitted as outside the Warden’s tree would be stamped into it');
     const stored = await this.provenance.read(id);
     // The stored stamp wins: a start over a document that already carries one (a retried start) never rewrites it.
-    if (stored.provenance !== undefined) return;
+    if (stored.provenance !== undefined) return stored.provenance.wardenLineage ? stored.label : undefined;
     await this.provenance.write(id, {
       provenance: stamped.provenance,
       ...(stamped.label === undefined ? {} : { label: stamped.label }),
     });
+    // What the stamp FORCED (the Warden's label below the Warden) is told to the launch, which carries it to the record.
+    return stamped.provenance.wardenLineage ? stamped.label : undefined;
   }
 
   /**
@@ -641,18 +644,18 @@ export class SessionFiles {
    * `SessionConfigSchema`, throws, so the resume writes nothing and the stamp on disk stays as it was. The error names
    * the id only. A ferret that ran before the writer existed is given its document first (ruling #31b).
    */
-  private async carryOnResume(ferret: string): Promise<void> {
+  private async carryOnResume(ferret: string): Promise<string | undefined> {
     const id = parseSessionId(ferret);
     await this.documented.catch(() => undefined);
     // A ferret that ran before the writer existed gets its document now; no catch: an unreadable one brings nothing.
     await this.ensureDocument(id);
     const document = await this.deps.storage.readConfig(id);
-    if (document === undefined) return;
+    if (document === undefined) return undefined;
     const parsed = SessionConfigSchema.safeParse(document);
     if (!parsed.success)
       throw new Error(`session ${id}'s configuration is damaged, so its spawn stamp was not brought forward`);
     const { label, parent } = parsed.data;
-    await this.recorder.recordRelaunch({
+    const recorded = await this.recorder.recordRelaunch({
       id,
       ...(label === undefined ? {} : { label }),
       ...(parent === undefined ? {} : { parent }),
@@ -660,5 +663,6 @@ export class SessionFiles {
       // with no stamp and no parent was a root start, which is the human case (today's rule, word for word).
       requestedByHuman: parent === undefined,
     });
+    return recorded.provenance.wardenLineage ? recorded.label : undefined;
   }
 }

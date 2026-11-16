@@ -1,5 +1,6 @@
 import { type QueueEvent, QueueEventSchema, type QueueSegmentHeader, type SegmentMessage } from '../../lines.ts';
 import type { QueuedMessage, QueuedMessageState } from '../../wire-send.ts';
+import { laneOf } from './lane.ts';
 
 /**
  * A session's queue as a LOG OF WHAT HAPPENED, folded into the messages it holds.
@@ -61,6 +62,10 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
         ...(event.state === 'failed' && event.failure !== undefined ? { failure: event.failure } : {}),
       };
     }
+    case 'promoted':
+      return message.state === 'queued' && message.promoted === undefined
+        ? { ...message, promoted: event.to }
+        : message;
     case 'waiting': {
       if (message.state !== 'queued') return message;
       const { waitReason: _reason, waitBehind: _behind, ...rest } = message;
@@ -109,7 +114,7 @@ export class SegmentFold {
   ) {
     this.accepted = header.accepted;
     for (const { order, message } of [...carried].sort((a, b) => a.order - b.order))
-      this.held.set(message.id, { order, message });
+      this.held.set(message.id, { order, message: { ...message, lane: message.lane ?? laneOf(message) } });
   }
 
   /** How many events this segment has applied: the log's rotation counts these. */
@@ -139,7 +144,8 @@ export class SegmentFold {
       if (this.held.has(event.message.id) || this.sealed.has(event.message.id)) return;
       this.held.set(event.message.id, {
         order: this.accepted,
-        message: { ...event.message, version: position },
+        // A line written before lanes has none: it is derived ONCE here, from the fields it was written with.
+        message: { ...event.message, lane: event.message.lane ?? laneOf(event.message), version: position },
       });
       this.accepted += 1;
       return;
