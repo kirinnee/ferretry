@@ -41,6 +41,8 @@ describe('the Terminals host-fs seam', () => {
         'daemon/adapters/system/replaceable-file.ts',
         'daemon/adapters/terminal/system-login-shell.ts',
         'daemon/adapters/tmux/harness-launch-guard.ts',
+        // Reads only `/proc/<pid>/stat` of this daemon and its parents (the pids a descendant signal never reaches), and sends the one signal.
+        'daemon/adapters/tmux/pane-process-host.ts',
         'daemon/index.ts',
         'daemon/processes.ts',
       ].sort(),
