@@ -1,17 +1,29 @@
-import { mkdir, open, type FileHandle } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import { type FileHandle, mkdir, open } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { type QueueEvent, QueueEventSchema } from '../../../lib/session/queue/index.ts';
 import type { SessionQueueStore } from '../../../lib/session/queue/ports.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 
 /**
- * What one read already parsed of a log: the file it was (`dev`/`ino`), how many bytes of whole lines it
- * consumed, and the events those lines held. A read that finds the same file grown parses only the bytes
- * past `consumed`.
+ * The file exactly as this store last knew it: which file (`dev`/`ino`), how long, and when it last changed
+ * (`mtimeNs`, `ctimeNs`). Any write to a file moves its ctime, and nothing but the kernel can set ctime, so two
+ * equal stamps mean nobody has written the file in between.
+ */
+interface FileStamp {
+  readonly dev: bigint;
+  readonly ino: bigint;
+  readonly size: bigint;
+  readonly mtimeNs: bigint;
+  readonly ctimeNs: bigint;
+}
+
+/**
+ * What one read already parsed of a log: how many bytes of whole lines it consumed, the events those lines held,
+ * and the stamp of the file as it was then (or as this store's own append left it since).
  */
 interface ParsedPrefix {
-  readonly dev: number;
-  readonly ino: number;
+  readonly stamp: FileStamp;
   readonly consumed: number;
   readonly events: readonly QueueEvent[];
 }
@@ -35,10 +47,14 @@ const NEWLINE = 0x0a;
  * PARSED ONCE (&F4319). The deliverer reads a queue three or more times per look and looks every few
  * seconds, and a long-lived session's log only grows: a 29 MB, 228,788-line log cost ~300 ms of parsing on
  * the event loop per read, which starved every request until the app's reads timed out. So the whole lines
- * already parsed are kept — keyed on the file's identity and the bytes they came from — and a read parses
- * only what was appended since. A file that is replaced, shrank, or no longer ends a line where the kept
- * prefix ended is read again from the start. The torn tail (bytes after the last newline) is never kept: it
- * is parsed on each read as before, so a final line still being written is read once it is whole.
+ * already parsed are kept, and a read parses only what was appended — but ONLY while every write since is
+ * accounted for. The kept parse carries the file's stamp ({@link FileStamp}); a read that finds the file
+ * stamped exactly so trusts it, and this store's own `append` moves the stamp forward when it can prove its
+ * line was the only write (the file was stamped as kept just before, and grew by exactly that line). Any other
+ * write — a rewrite in place of any length, a replaced or shrunk file, a file made again on a reused inode, an
+ * append by another writer — leaves a stamp the store never saw, and the log is parsed again from the start.
+ * The torn tail (bytes after the last newline) is never kept: it is parsed on each read as before, so a final
+ * line still being written is read once it is whole.
  */
 export class FileSessionQueueStore implements SessionQueueStore {
   /** Insertion order is recency: a read moves its entry to the end, and the oldest is evicted past the cap. */
@@ -64,23 +80,17 @@ export class FileSessionQueueStore implements SessionQueueStore {
       return [];
     }
     try {
-      const facts = await handle.stat();
+      const stamp = stampOf(await handle.stat({ bigint: true }));
       const kept = this.parsed.get(file);
-      const prefix =
-        kept !== undefined &&
-        kept.dev === facts.dev &&
-        kept.ino === facts.ino &&
-        facts.size >= kept.consumed &&
-        (await endsLineAt(handle, kept.consumed))
-          ? kept
-          : { dev: facts.dev, ino: facts.ino, consumed: 0, events: [] };
-      const appended = await readFrom(handle, prefix.consumed, facts.size);
+      const prefix: ParsedPrefix =
+        kept !== undefined && sameStamp(kept.stamp, stamp) ? kept : { stamp, consumed: 0, events: [] };
+      const appended = await readFrom(handle, prefix.consumed, Number(stamp.size));
       const lastNewline = appended.lastIndexOf(NEWLINE);
       const whole = lastNewline < 0 ? 0 : lastNewline + 1;
       const fresh = parseLines(appended.subarray(0, whole).toString('utf8'));
       const tail = parseLines(appended.subarray(whole).toString('utf8'));
       const events = fresh.length === 0 ? prefix.events : [...prefix.events, ...fresh];
-      this.keep(file, { dev: prefix.dev, ino: prefix.ino, consumed: prefix.consumed + whole, events });
+      this.keep(file, { stamp, consumed: prefix.consumed + whole, events });
       return tail.length === 0 ? events : [...events, ...tail];
     } finally {
       await handle.close();
@@ -92,8 +102,22 @@ export class FileSessionQueueStore implements SessionQueueStore {
     await mkdir(dirname(file), { recursive: true, mode: 0o700 });
     const handle = await open(file, 'a', 0o600);
     try {
-      await handle.appendFile(`${JSON.stringify(event)}\n`, 'utf8');
+      const line = Buffer.from(`${JSON.stringify(event)}\n`, 'utf8');
+      const before = stampOf(await handle.stat({ bigint: true }));
+      await handle.appendFile(line);
       await handle.datasync();
+      const after = stampOf(await handle.stat({ bigint: true }));
+      // The kept parse still describes the file only if it was stamped as kept right before this write and this
+      // line is all that changed it; then the new bytes are past `consumed` and the next read parses just them.
+      const kept = this.parsed.get(file);
+      if (
+        kept !== undefined &&
+        sameStamp(kept.stamp, before) &&
+        after.dev === before.dev &&
+        after.ino === before.ino &&
+        after.size === before.size + BigInt(line.length)
+      )
+        this.parsed.set(file, { ...kept, stamp: after });
     } finally {
       await handle.close();
     }
@@ -109,20 +133,23 @@ export class FileSessionQueueStore implements SessionQueueStore {
   }
 }
 
-/** Whether the byte just before `offset` is a newline — the kept prefix still ends a line there. */
-async function endsLineAt(handle: FileHandle, offset: number): Promise<boolean> {
-  if (offset === 0) return true;
-  const byte = Buffer.alloc(1);
-  const { bytesRead } = await handle.read(byte, 0, 1, offset - 1);
-  return bytesRead === 1 && byte[0] === NEWLINE;
-}
+const stampOf = (facts: BigIntStats): FileStamp => ({
+  dev: facts.dev,
+  ino: facts.ino,
+  size: facts.size,
+  mtimeNs: facts.mtimeNs,
+  ctimeNs: facts.ctimeNs,
+});
+
+const sameStamp = (a: FileStamp, b: FileStamp): boolean =>
+  a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
 
 /**
  * The bytes from `start` up to `end` (the size the file had when stat'd). A short read is safe: only the whole
  * lines in what came back are kept, so whatever was not read is read next time, as is anything appended since.
  */
 async function readFrom(handle: FileHandle, start: number, end: number): Promise<Buffer> {
-  const buffer = Buffer.alloc(end - start);
+  const buffer = Buffer.alloc(Math.max(0, end - start));
   const { bytesRead } = await handle.read(buffer, 0, buffer.length, start);
   return buffer.subarray(0, bytesRead);
 }

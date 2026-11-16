@@ -254,6 +254,83 @@ describe('a queue log read again after it grew (&F4319)', () => {
     should((await subject.read(ID)).map(event => event.kind)).eql(['moved']);
   });
 
+  it('should read a whole file again when it was rewritten in place with exactly as many bytes', async () => {
+    // Same inode, same length, a newline at the same place: only the bytes themselves differ.
+    const { store: subject } = await store();
+    const other = {
+      ...enqueued,
+      message: { ...(enqueued.kind === 'enqueued' ? enqueued.message : ({} as never)), id: 'm2' },
+    };
+    await subject.append(ID, enqueued);
+    await subject.read(ID);
+    const before = await stat(subject.file(ID));
+
+    await writeFile(subject.file(ID), `${JSON.stringify(other)}\n`);
+    const after = await stat(subject.file(ID));
+
+    should([after.ino, after.size]).eql([before.ino, before.size]);
+    should(foldQueue(await subject.read(ID)).map(message => message.id)).eql(['m2']);
+  });
+
+  it('should read a whole file again when a long log is rewritten in place and grows, even ending a line where it did', async () => {
+    // Past the sampled bytes: a different first line is what gives the rewrite away.
+    const { store: subject } = await store();
+    for (let n = 0; n < 200; n++) await subject.append(ID, moved('m1', 'typing'));
+    await subject.append(ID, enqueued);
+    await subject.read(ID);
+    const size = (await stat(subject.file(ID))).size;
+
+    const fresh = `${JSON.stringify(enqueued)}\n${JSON.stringify(moved('m1', 'typing'))}\n`.padEnd(size + 10, '\n');
+    await writeFile(subject.file(ID), fresh);
+
+    should(foldQueue(await subject.read(ID)).map(message => message.state)).eql(['typing']);
+  });
+
+  it('should agree with a fresh store after an equal-length rewrite deep inside a long log', async () => {
+    // Sixty enqueues; only the middle id changes, to one exactly as long, so both ends and the size stay the same.
+    const { home, store: subject } = await store();
+    const base = enqueued.kind === 'enqueued' ? enqueued.message : (undefined as never);
+    const ids = Array.from({ length: 60 }, (_, n) => `m${String(n).padStart(2, '0')}`);
+    for (const id of ids) await subject.append(ID, { ...enqueued, message: { ...base, id } });
+    should(foldQueue(await subject.read(ID))).have.length(60);
+    const original = await readFile(subject.file(ID), 'utf8');
+
+    await writeFile(subject.file(ID), original.replace('"id":"m30"', '"id":"nw"'.padEnd('"id":"m30"'.length, ' ')));
+
+    const cached = foldQueue(await subject.read(ID)).map(message => message.id);
+    const fresh = foldQueue(await new FileSessionQueueStore(id => join(home, id)).read(ID)).map(message => message.id);
+    should((await stat(subject.file(ID))).size).equal(Buffer.byteLength(original));
+    should(cached).eql(fresh);
+    should(cached).containEql('nw');
+    should(cached).not.containEql('m30');
+  });
+
+  it('should keep its parse across its own appends, and drop it for a write it did not make', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    const first = await subject.read(ID);
+    await subject.append(ID, moved('m1', 'typing'));
+    const own = await subject.read(ID);
+
+    await appendFile(subject.file(ID), `${JSON.stringify(moved('m1', 'delivered'))}\n`);
+    const foreign = await subject.read(ID);
+
+    should(own[0]).equal(first[0]);
+    should(foreign[0]).not.equal(first[0]);
+    should(foreign).deepEqual([enqueued, moved('m1', 'typing'), moved('m1', 'delivered')]);
+  });
+
+  it('should keep following a long log as it grows', async () => {
+    const { store: subject } = await store();
+    await subject.append(ID, enqueued);
+    for (let round = 0; round < 3; round++) {
+      for (let n = 0; n < 100; n++) await subject.append(ID, moved('m1', 'typing'));
+      const events = await subject.read(ID);
+      should(events).have.length(1 + 100 * (round + 1));
+    }
+    should(foldQueue(await subject.read(ID)).map(message => message.state)).eql(['typing']);
+  });
+
   it('should read a torn final line once it is whole, and never keep it while torn', async () => {
     const { store: subject } = await store();
     await subject.append(ID, enqueued);
