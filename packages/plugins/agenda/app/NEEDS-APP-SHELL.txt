@@ -16,4 +16,4 @@ app/features/agenda/history-rows.tsx | GAP(agenda-chat-slot): History reads the 
 app/features/settings/notification-filter-settings.tsx | the sentence says "…is that machine's own notification switch" where today it said "…is in its row above": the rows are Access's now
 app/features/agenda/agenda-line.tsx, app/lib/agenda-chat.ts | mounted by app/views/agenda-line-panel.tsx in conversation.above-composer (see GAP(agenda-chat-slot) above)
 app/lib/answer-chip.ts | the "re:" chips prefix a reply typed in the host-bound composer AgendaInboxComposer draws; nothing binds one (Conversation's panel prefixes the ask's reference itself)
-app/lib/agenda-source-refs.ts | GAP(agenda-harness-prompt) the turn-end and rest nudges are unported (transcript seams, Asks resting items); they need the reserved sourceRef grammar
+app/lib/agenda-source-refs.ts | GAP(agenda-harness-prompt) the rest nudge is unported (Asks resting items and nudge counts); it needs the reserved sourceRef grammar
