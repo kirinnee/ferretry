@@ -81,7 +81,7 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles'>>;
+    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles' | 'currentRuntimeName'>>;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
@@ -288,6 +288,7 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
         harnesses: () => ctx.needs.ferrets.harnesses(),
         logins: ctx.needs.logins,
         now: () => clock.nowMs(),
+        currentName: async former => await assembly.catalog.currentRuntimeName?.(former),
       });
       // What a runtime's profile stack names, and the one act that edits a profile's layers: read live, written through
       // the kernel's config writer, never kept. The etag is the profile file's own, read when asked.

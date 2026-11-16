@@ -35,7 +35,7 @@ import type { LoginLaunchStore } from '@ferretry/plugin-logins/contract';
 import type { AccountModel } from '../account/schema.ts';
 import { standInsNamedBy, type StoodInLogin, stoodInLoginSentence } from '../account/runtimes-model.ts';
 import { type ClaudeStatuslineCommand, skillFrontmatterKeys, skillSourceReference } from '../account/adapt.ts';
-import { EMPTY_RUNTIME_IDS, type RuntimeIds, renameRuntimeId } from '../account/ids.ts';
+import { EMPTY_RUNTIME_IDS, type RuntimeIds, renameRuntimeId, resolveRuntimeReference } from '../account/ids.ts';
 import {
   FleetApplyFailureError,
   type FleetApplyPreview,
@@ -545,6 +545,17 @@ export class FleetCatalogService {
       [...Object.values(model.credentials), ...Object.values(model.runtimes)].map(entry => entry.disabled),
       this.deps.now(),
     );
+  }
+
+  /**
+   * The runtime a name it used to carry answers to now, from `ids.json` (`formerNames`), or `undefined` when no runtime
+   * claims it. A start of a session record a rename did not reach resolves through this. Throws when `ids.json` exists
+   * and cannot be read, so the caller refuses rather than reporting a runtime that exists as one that does not.
+   */
+  async currentRuntimeName(former: string): Promise<string | undefined> {
+    const ids = await this.deps.ids();
+    const found = ids === undefined ? undefined : resolveRuntimeReference(ids, former);
+    return found?.matched === 'former-name' ? found.name : undefined;
   }
 
   /** `GET /v1/fleet/runtimes`. */
