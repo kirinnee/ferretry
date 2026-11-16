@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import cli from '../../cli/index.ts';
 import manifest from '../../manifest.ts';
-import pending from '../../../../../ports-pending.json';
+import pending from '../../ports-pending.json';
 
 test('the five `fy harness codex settings` verbs run over the config routes, and their pending line is gone', async () => {
   expect(pending.pendingReasons.codex.join(' ')).not.toContain('settings` verbs refuse with exit 69');

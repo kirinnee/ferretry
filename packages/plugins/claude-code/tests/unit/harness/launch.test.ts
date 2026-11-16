@@ -22,7 +22,7 @@ import {
   CLAUDE_QUESTION_HOOKS,
   CLAUDE_PROMPTS_SEEN,
 } from '../../../daemon/lib/harness/fixed-layer.ts';
-import pending from '../../../../../../ports-pending.json';
+import pending from '../../../ports-pending.json';
 
 const settings = new Map([
   ['b-theme', { settings: { theme: 'dark', model: 'one' } }],
