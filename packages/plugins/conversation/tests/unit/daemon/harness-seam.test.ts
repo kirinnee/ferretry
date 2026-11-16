@@ -454,6 +454,19 @@ describe('Conversation types into a ferret through the Ferrets harness seam', ()
     await host.stop();
   });
 
+  test('a runner that rejects with a failure it already worded keeps it: the record STAYS and the answer is the runner’s own', async () => {
+    const { host, ferrets, api } = await conversation();
+    ferrets.script.deliver = async () => {
+      throw new ApiError(502, 'the runner could not reach the terminal', 'runner_unreachable');
+    };
+
+    const response = await send(host);
+
+    expect([response.status, response.json<{ code: string }>().code]).toEqual([502, 'runner_unreachable']);
+    expect((await api().sends(F1)).sends.map(row => [row.sendId, row.fate])).toEqual([['req-1', 'accepted']]);
+    await host.stop();
+  });
+
   test('a Ferrets that offers no harness seam answers 503 plugin_unavailable', async () => {
     const { host, api } = await conversation(new SeamlessFerrets());
 

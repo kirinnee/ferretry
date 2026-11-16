@@ -36,6 +36,7 @@ import { StateDraftRepository } from './drafts/adapters/index.ts';
 import {
   buildQuestionAnswering,
   clearAskedQuestion,
+  panePending,
   QuestionAsks,
   questionEntry,
   writeAskedQuestion,
@@ -330,6 +331,7 @@ export function buildConversationA(deps: {
       ? {}
       : {
           transcriptEvents: deps.questionEvents,
+          paneForm: panePending(ferrets),
           writeProjected: async (ferret, pending, askedAt) =>
             await writeProjectedQuestion(kernel.state, questionSerial, ferret, pending, askedAt, () =>
               kernel.clock.now(),

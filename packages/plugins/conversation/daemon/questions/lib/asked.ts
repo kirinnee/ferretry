@@ -17,10 +17,10 @@ import type { TranscriptEvent, TranscriptJsonValue, TranscriptQuestion } from '.
  * only the transcript therefore never sees an open question: the session reads `working`, no card is
  * drawn, and the only way to answer is the Console.
  *
- * The fleet's fixed layer installs a `PreToolUse` hook for `AskUserQuestion` that copies the hook's
- * payload into the session's own file (`FY_QUESTION_FILE`); it fires before the form is drawn, with the
- * real `tool_use_id` and the whole input. This module reads that file, and decides when it still
- * describes the form on screen.
+ * The fleet's fixed layer used to install a `PreToolUse` hook for `AskUserQuestion` that copied the hook's
+ * payload into the session's own file (`FY_QUESTION_FILE`) (M7 removed it: the pane is read instead, see
+ * `watch.ts`). This module still reads that file for a ferret launched before then, and decides when it
+ * still describes the form on screen.
  */
 export interface AskedQuestion {
   readonly toolUseId: string;

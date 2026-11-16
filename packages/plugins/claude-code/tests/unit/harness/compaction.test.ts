@@ -64,7 +64,8 @@ describe('the compaction hooks in the fixed layer', () => {
         { matcher: 'compact', hooks: [{ type: 'command', command: CLAUDE_REABSORB_COMMAND }] },
       ]);
       should(layer.overlay.hooks.PreCompact).eql([{ hooks: [{ type: 'command', command: CLAUDE_KEEP_COMMAND }] }]);
-      should(layer.overlay.hooks.PreToolUse[0]?.matcher).equal('AskUserQuestion');
+      // M7: the question hook is gone, so these two are the whole of it.
+      should(Object.keys(layer.overlay.hooks).toSorted()).eql(['PreCompact', 'SessionStart']);
       should('hooks' in layer.settings).equal(false);
     }
     should(CLAUDE_COMPACT_MATCHER).equal('compact');

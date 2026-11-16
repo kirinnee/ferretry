@@ -26,8 +26,9 @@ const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault
 /**
  * Mailbox (§2.3): the one way a message reaches a ferret. Core, because every message goes through it. It decides WHEN
  * and HOW a message is delivered (the queue, its lanes and gates, the send ledger and its proof); Conversation keeps the
- * chat. This first step (c58-m0a) only lays the package down: the contract the logic will live behind and the one slot
- * (`mailbox.host`) Conversation fills with the stores over the files it keeps. No route, tool or screen moves yet.
+ * chat. It serves the queue and the send path (the twelve send, queue, ledger and composer routes) and offers two slots:
+ * `mailbox.host`, which Conversation fills with what it keeps (the queue and send files, the transcript evidence, the gate),
+ * and `mailbox.delivery-way`, which ways of reaching a ferret fill. It has no screen of its own.
  */
 export default definePlugin({
   id: 'mailbox',

@@ -972,6 +972,39 @@ describe('re-attempting a send under its original id', () => {
     should(record).match({ fate: 'accepted', attempt: 2 });
   });
 
+  it('refuses a press of Enter for an update-unconfirmed send, naming the one act that may: a person’s Retry', async () => {
+    const { service, terminal } = await settled('unaccounted', { unaccountedReason: 'update_unconfirmed' });
+    const refused = await service.submit(ID, 'send-1').catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendRefused);
+    should((refused as Error).message).match(/only a person's Retry sends it again/);
+    should(terminal.typed).be.empty();
+  });
+
+  it('will not press Enter for an update-unconfirmed send typed in the composer, and says to clear it and send again', async () => {
+    const { service, terminal } = await settled('unaccounted', { unaccountedReason: 'update_unconfirmed' });
+    terminal.held.set('ship it', 'composer');
+    const withheld = await service
+      .reattempt(ID, 'send-1', { by: 'person', force: true })
+      .catch((error: unknown) => error);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('held');
+    should((withheld as Error).message).match(/will not press Enter for a send it can't confirm/);
+    should(terminal.typed).be.empty();
+  });
+
+  it('refuses an Enter on a composer draft that shows an update-unconfirmed send’s text, before any key', async () => {
+    const built = await settled('unaccounted', { unaccountedReason: 'update_unconfirmed' });
+    built.terminal.frozen = pane({ draft: 'ship it' });
+    built.terminal.calls.length = 0;
+    const refused = await built.service.resolveDraft(ID, 'submit', 'ship it').catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendRefused);
+    should((refused as Error).message).match(/only a person's Retry sends it again/);
+    should(built.terminal.calls).not.containEql('submitComposer');
+  });
+
   it('needs "send again anyway" for an unconfirmed send, and refuses everything else a person may not retry', async () => {
     const unconfirmed = await settled('unaccounted', { unaccountedReason: 'transcript_unreadable' });
     const refusedUnconfirmed = await unconfirmed.service

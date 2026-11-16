@@ -375,6 +375,33 @@ describe('the send ledger and the queue', () => {
     ]);
   });
 
+  it('refuses an agent’s Enter for an update-unconfirmed send (a person’s alone), and presses nothing', async () => {
+    const { subsystem, calls } = build();
+    const asking = {
+      ...subsystem,
+      sends: async () => [{ sendId: 's1', fate: 'unaccounted', unaccountedReason: 'update_unconfirmed' }],
+    } as unknown as SessionSendSubsystem;
+    const routes = sessionSendRoutes(asking);
+    const refused = await refusalOf(routes, 'POST', `${SENDS}/:sendId/enter`, {
+      params: { ferretId: 'f1', sendId: 's1' },
+      body: {},
+      standing: ferretStanding('f9' as FerretId),
+    });
+    expect(refused.status).toBe(403);
+    expect(refused.code).toBe('owner_only');
+    expect(calls.map(call => call.method)).not.toContain('submit');
+    // an ordinary send is not held to that: the agent's own Enter goes through
+    const plain = sessionSendRoutes({
+      ...subsystem,
+      sends: async () => [{ sendId: 's1', fate: 'accepted' }],
+    } as unknown as SessionSendSubsystem);
+    await answerOf(plain, 'POST', `${SENDS}/:sendId/enter`, {
+      params: { ferretId: 'f1', sendId: 's1' },
+      body: {},
+      standing: ferretStanding('f9' as FerretId),
+    });
+  });
+
   it('refuses a press of Enter that carries a body, and does not submit', async () => {
     const { subsystem, calls } = build();
     const routes = sessionSendRoutes(subsystem);

@@ -300,36 +300,34 @@ ferret read as outdated; it takes effect at the ferret's next launch. The Claude
 exception: its EFFECT (the setting on AND bypass mode) is in the `fixed-layer` fingerprint, so turning it off leaves a
 ferret launched with it on **Restart needed**. A record from before this reads as off, so no earlier ferret is flagged.
 
-## Claude's questions reach the app through a hook
+## Claude's questions reach the app from the screen, not a hook
 
-An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the
-question is open, and the daemon learns that from evidence, never from the screen alone. Claude Code 2.1.220
-wrote the call to its transcript as it asked it. Live ferrets on 2.1.281 do not: the call reaches the
-transcript only in the same write as its answer, so the transcript said nothing while the form waited, the
-session read `working`, and the only way to answer was raw keys in the Console.
+An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the question is
+open. Claude Code 2.1.281 writes the call to its transcript only in the same write as its answer, so the transcript says
+nothing while the form waits. The fixed layer used to put a `PreToolUse` hook in the overlay for that; **it no longer
+writes one** (M7, owner: "dont use hooks"). The conversation plugin's question watch
+(`questions/lib/watch.ts`) reads the pane instead, through the same form seam the answer driver uses:
 
-The **fixed layer** therefore also puts one `PreToolUse` hook for `AskUserQuestion` into the `--settings`
-overlay (fast mode's replacement overlay copies it along). It fires before the form is drawn and copies its
-payload — the real `tool_use_id` and the whole question — into the file the daemon names for that pane in
-`FY_QUESTION_FILE` (`state/sessions/<id>/question-asked.json`). Both observer hosts read it beside the
-transcript tail (`lib/session/question/asked.ts`): the recorded call counts as open only while the
-transcript has nothing newer — no record of the call, of its result, or of anything at all after it — so the
-moment the form is answered or cancelled the transcript takes over again, and a stale file cannot bring back
-a form that is gone. The hook is in the overlay only, never in a settings entry, so a person's own
-`PreToolUse` hooks keep running beside it; it prints nothing and always exits 0, so it never changes what
-Claude decides.
+- a pane that shows Claude's own form — its rule and `☐ Header` chip or tab strip, exactly one selection cursor, and its
+  `Enter to select` / `Esc to cancel` footer — is stored as `question.json`, the same file the hook produced, so the
+  mailbox waits on it as before (`reasonForWaiting`: `question`). A numbered list in prose never has that footer or top,
+  and a pane the runner reads as a permission prompt or dialog is never read as a question;
+- a `tool_use` of the question tool in the transcript with no result (a Claude that writes it early) is stored under its
+  own id, as Codex's is;
+- it ends when the transcript records a result for those words after it was asked (an answer or a dismissal), when the
+  answered stamp names it, or when a readable pane has shown no numbered surface for two looks running.
 
-Declared gaps: a ferret launched before this change has neither the hook nor the variable until its next
-launch; and the hold-back itself is live-only — against a loopback model both versions write the call early —
-so the contract test (`packages/daemon/tests/contract/question-hook.test.ts`) pins the hook mechanism on the
-real CLI, and the live bytes that showed the regression are the unit fixtures
-(`packages/daemon/tests/fixtures/question-asked/`).
+The pane is read only for a ferret that is working (or already holds a pane question), never every idle ferret.
+Declared gaps: a form of SEVERAL questions shows one tab at a time, so only the visible question is stored (it asks, so the
+mailbox waits, but the app cannot answer it for the person); a ferret launched before this change still has the hook in its
+settings and its file is still read; and the Ferrets observer's own `awaiting_question` state still comes from that file
+alone, so a new launch does not read as `awaiting_question` (the mailbox does not use it).
 
 ## After a compaction a Claude ferret re-reads what it owes
 
 A compaction keeps a summary and drops the rest, so a ferret can lose its assigned task, its card, its open agenda
 items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
-(`daemon/lib/harness/compaction.ts` in the Claude Code plugin), beside the question hook and never in a settings entry:
+(`daemon/lib/harness/compaction.ts` in the Claude Code plugin), and never in a settings entry:
 
 - `PreCompact` (manual and auto) prints what the summary must keep — task, card id and status, agenda item ids, owed
   messages, PR links;

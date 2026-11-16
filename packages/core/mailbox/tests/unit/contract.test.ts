@@ -19,6 +19,14 @@ describe('the Mailbox package', () => {
     expect(MailboxPort.name).toBe('mailbox');
   });
 
+  test('a retry and the composer are a person’s alone: the descriptors say caller person, the rest take any caller', () => {
+    const caller = (key: string) => manifest.actions.routes.find(route => route.key === key)?.caller;
+    expect(caller('POST /v1/ferrets/:ferretId/sends/:sendId/retry')).toBe('person');
+    expect(caller('POST /v1/ferrets/:ferretId/composer')).toBe('person');
+    expect(caller('POST /v1/ferrets/:ferretId/send')).toBe('any');
+    expect(caller('POST /v1/ferrets/:ferretId/sends/:sendId/cancel')).toBe('any');
+  });
+
   test('mailbox.host is a security-path provide hook: only Conversation may fill it, under one key', () => {
     expect(MailboxHosts.mode).toBe('provide');
     expect(MailboxHosts.takers).toEqual(['conversation']);

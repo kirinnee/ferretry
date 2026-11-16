@@ -7,5 +7,6 @@ export * from './patch.ts';
 export * from './policy.ts';
 export * from './port.ts';
 export * from './refs.ts';
+export * from './track-ask.ts';
 export * from './wire.ts';
 export * from './workflow.ts';
