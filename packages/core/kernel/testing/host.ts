@@ -3,7 +3,7 @@ import { MAX_ROOT_WINDOW_BYTES } from '../contract/ports.ts';
 import { beforeListen } from '../host/before-listen.ts';
 import { absolute } from '../host/fence-guard.ts';
 import { insideFence } from '../contract/home.ts';
-import { isKernelMadeRoot } from '../host/internal-roots.ts';
+import { isKernelMadeRoot } from '../contract/internal-roots.ts';
 import {
   DEFAULT_COPY_ENTRIES,
   internalRootRelative,
@@ -1821,6 +1821,8 @@ async function start(world: World): Promise<TestHost> {
             if (world.roots.has(place) || !testFolderExists(place)) throw new RootError('outside');
             if (options.noDescriptorReach === true) throw new RootError('no_descriptor_reach');
             const leaf = `${place}/${entryName}`;
+            // (production asks `refuseHeldName` first: a name that is an ALIAS of a private place, by identity, is `fenced`. The
+            // flat world has no identities, so it answers `exists` — a declared testing-host gap, as for `linkCredential`.)
             if (world.roots.has(leaf) || testLinks.has(leaf) || testFolderExists(leaf)) return refuseHistory('exists');
             // Every refusal is behind us: the pool folder and its entry are made now, owner-only.
             let state = world.states.get(manifest.id);
@@ -1829,6 +1831,12 @@ async function start(world: World): Promise<TestHost> {
               world.states.set(manifest.id, state);
             }
             const poolFolder = pooled.slice(0, pooled.lastIndexOf('/'));
+            // As production (`reachHistoryEntry`): what is already in the pool is judged by name BEFORE anything is made. A
+            // link at the pool folder or at the entry is `link_escape` (nothing is followed); a file where the pool folder
+            // belongs is `changed`, and the testing host never invents a folder beside it.
+            if (state.symlinks.has(poolFolder)) throw new RootError('link_escape');
+            if (state.files.has(poolFolder) || state.bytes.has(poolFolder)) throw new RootError('changed');
+            if (state.directories.has(poolFolder) && state.symlinks.has(pooled)) throw new RootError('link_escape');
             if (!state.directories.has(poolFolder))
               state.directories.set(poolFolder, { mode: 0o700, modifiedMs: clock.nowMs() });
             if (declared.kind === 'folder') {

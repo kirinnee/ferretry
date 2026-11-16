@@ -5,7 +5,21 @@
  * a link is proved before it stays, and that no other door (`linkTo`, `copyTree`, `linkCredential`) is widened.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, readFile, readlink, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
+import {
+  link as hardLink,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -52,6 +66,8 @@ afterEach(async () => {
   hook.beforeSymlink = undefined;
   hook.symlinkTo = undefined;
   hook.noReach = false;
+  hook.beforePool = undefined;
+  hook.afterSymlink = undefined;
   for (const parent of parents.splice(0)) await rm(parent, { recursive: true, force: true });
 });
 
@@ -61,14 +77,25 @@ const hook: {
   beforeSymlink: undefined | ((path: string) => Promise<void>);
   symlinkTo: undefined | ((target: string) => string);
   noReach: boolean;
-} = { beforeSymlink: undefined, symlinkTo: undefined, noReach: false };
+  /** Run once, just before the first folder of the plugin's state (outside `agent-homes`) is opened: the pool is reached. */
+  beforePool: undefined | (() => Promise<void>);
+  /** Run just after the link is made, before the kernel proves it: the target is replaced in that instant. */
+  afterSymlink: undefined | ((path: string) => Promise<void>);
+} = { beforeSymlink: undefined, symlinkTo: undefined, noReach: false, beforePool: undefined, afterSymlink: undefined };
+let stateOfPlugin = '';
 const fs: HostFs = {
   ...baseFs,
   symlink: async (target, path) => {
     await hook.beforeSymlink?.(path);
     await baseFs.symlink(hook.symlinkTo?.(target) ?? target, path);
+    await hook.afterSymlink?.(path);
   },
   openDirectory: async path => {
+    if (hook.beforePool !== undefined && path.startsWith(stateOfPlugin) && !path.includes('/agent-homes')) {
+      const run = hook.beforePool;
+      hook.beforePool = undefined;
+      await run();
+    }
     const folder = await baseFs.openDirectory(path);
     return hook.noReach ? { ...folder, entryPath: () => undefined, at: undefined } : folder;
   },
@@ -103,6 +130,7 @@ async function world() {
       privateFiles: options.privateFiles ?? [],
     });
   const claude = port('claude-code', ['agent-homes', 'downloads']);
+  stateOfPlugin = `${home}/state/claude-code`;
   const all = claude.root('agent-homes');
   const homePath = (ferret: string) => `${home}/state/claude-code/agent-homes/${ferret}`;
   const poolPath = `${home}/state/claude-code/history-pool`;
@@ -602,6 +630,115 @@ describe('the pool and the credential doors', () => {
     expect(await exists(`${w.homePath('f2')}/.claude.json`)).toBe(true);
     expect((await lstat(`${w.homePath('f1')}/.claude.json`)).isSymbolicLink()).toBe(false);
     expect((await lstat(`${w.homePath('f1')}/settings.json`)).isSymbolicLink()).toBe(false);
+  });
+});
+
+describe('RootHandle.linkHistory: the pool is reached by descriptor, and the target is proved after it is published', () => {
+  const homeNames = async (w: World, ferret: string): Promise<string[]> => (await readdir(w.homePath(ferret))).sort();
+
+  test('45: a pool folder swapped for a link to an agent home creates nothing in that home (pool already there)', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await w.makeHome('f2');
+    await mkdir(w.poolPath, { mode: 0o700 });
+    hook.beforePool = async () => {
+      await rename(w.poolPath, `${w.poolPath}.aside`);
+      await symlink(w.homePath('f2'), w.poolPath);
+    };
+    expect(await link(w, 'f1', 'projects')).toBe('root:link_escape');
+    expect(await homeNames(w, 'f2')).toEqual(['.claude.json']);
+    expect(await exists(`${w.homePath('f1')}/projects`)).toBe(false);
+  });
+
+  test('46: a pool folder that appears as a link to an agent home creates nothing in that home (pool not there yet)', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await w.makeHome('f2');
+    hook.beforePool = async () => {
+      await symlink(w.homePath('f2'), w.poolPath);
+    };
+    expect(await link(w, 'f1', 'history.jsonl')).toBe('root:link_escape');
+    expect(await homeNames(w, 'f2')).toEqual(['.claude.json']);
+    expect(await exists(`${w.homePath('f1')}/history.jsonl`)).toBe(false);
+  });
+
+  test('47: a pool folder swapped for another real directory of the state folder is changed, and nothing is made in it', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await mkdir(w.poolPath, { mode: 0o700 });
+    const decoy = `${w.home}/state/claude-code/decoy`;
+    await mkdir(decoy, { mode: 0o700 });
+    hook.beforePool = async () => {
+      await rename(w.poolPath, `${w.poolPath}.aside`);
+      await rename(decoy, w.poolPath);
+    };
+    expect(await link(w, 'f1', 'projects')).toBe('root:changed');
+    expect(await readdir(w.poolPath)).toEqual([]);
+    expect(await exists(`${w.homePath('f1')}/projects`)).toBe(false);
+  });
+
+  test('48: a pool folder that is a file is changed, nothing is made beside it', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await writeFile(w.poolPath, 'a file');
+    expect(await link(w, 'f1', 'projects')).toBe('root:changed');
+    expect((await lstat(w.poolPath)).isFile()).toBe(true);
+    expect(await exists(`${w.homePath('f1')}/projects`)).toBe(false);
+  });
+
+  test('49: a pool folder entry replaced by another folder after the link is made is changed, and only that link is taken back', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await link(w, 'f1', 'sessions');
+    hook.afterSymlink = async () => {
+      await rename(`${w.poolPath}/projects`, `${w.poolPath}/projects.aside`);
+      await mkdir(`${w.poolPath}/projects`, { mode: 0o700 });
+    };
+    expect(await link(w, 'f1', 'projects')).toBe('root:changed');
+    expect(await exists(`${w.homePath('f1')}/projects`)).toBe(false);
+    expect((await lstat(`${w.homePath('f1')}/sessions`)).isSymbolicLink()).toBe(true);
+  });
+
+  test('50: a pool file replaced by a different inode after the link is made is changed and the link is taken back', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    hook.afterSymlink = async () => {
+      // Made BESIDE the original first, so the two never share an inode, then renamed over it.
+      await writeFile(`${w.poolPath}/history.jsonl.new`, 'swapped', { mode: 0o600 });
+      await rename(`${w.poolPath}/history.jsonl.new`, `${w.poolPath}/history.jsonl`);
+    };
+    expect(await link(w, 'f1', 'history.jsonl')).toBe('root:changed');
+    expect(await exists(`${w.homePath('f1')}/history.jsonl`)).toBe(false);
+  });
+
+  test('51: a pool file given a second name (a credential alias) after the link is made is hard_link, and the link is taken back', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    hook.afterSymlink = async () => {
+      await hardLink(`${w.poolPath}/history.jsonl`, `${w.parent}/alias.json`);
+    };
+    expect(await link(w, 'f1', 'history.jsonl')).toBe('root:hard_link');
+    expect(await exists(`${w.homePath('f1')}/history.jsonl`)).toBe(false);
+  });
+
+  test('52: a pool entry made a link after the link is made is link_escape, and the link is taken back', async () => {
+    const w = await world();
+    await w.makeHome('f1');
+    await mkdir(`${w.parent}/elsewhere`, { recursive: true });
+    hook.afterSymlink = async () => {
+      await rename(`${w.poolPath}/projects`, `${w.poolPath}/projects.aside`);
+      await symlink(`${w.parent}/elsewhere`, `${w.poolPath}/projects`);
+    };
+    expect(await link(w, 'f1', 'projects')).toBe('root:link_escape');
+    expect(await exists(`${w.homePath('f1')}/projects`)).toBe(false);
+  });
+
+  test('53: a pool whose state folder is a kernel-made root is named at build/boot, not only when a link is made', () => {
+    for (const folder of ['agent-homes', 'credentials', 'sessions', 'downloads', 'Agent-Homes']) {
+      const def = defineState({ name: 'pool', path: `${folder}/*`, store: 'opaque', format: 1 });
+      expect(poolStateFolder(CLAUDE, [def])).toBeUndefined();
+      expect(historyPoolFault(CLAUDE, [def])).toContain('root the kernel makes');
+    }
   });
 });
 

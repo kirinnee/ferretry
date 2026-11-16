@@ -1791,13 +1791,20 @@ fact), identically on the real roots port and the testing host (`tests/unit/test
 | `not_own`                 | the pool is not the caller's own opaque `<one folder>/*` state tree, sits in a root the kernel makes (`agent-homes`, `credentials`, …), or holds a private place of the plugin                                                                                                                                                                                                                               |
 | `not_home`                | `home` is not exactly one ferret home folder at the top of `agent-homes` (the root itself, a folder two deep, and a scoped handle that is not one home)                                                                                                                                                                                                                                                      |
 | `exists`                  | anything (a folder, a file, a link) is already at `<home>/<entry>`: never an overwrite. A caller with a real folder moves it aside with `rename` first                                                                                                                                                                                                                                                       |
-| `outside` / `link_escape` | the home is missing (this call never makes one) or is, or sits behind, a link                                                                                                                                                                                                                                                                                                                                |
-| `changed` / `hard_link`   | the pool already holds the wrong kind at the entry, a link, or a file with a second name; or the link made did not land on the pool entry's real path (it is taken back)                                                                                                                                                                                                                                     |
+| `outside` / `link_escape` | the home is missing (this call never makes one) or is, or sits behind, a link; or the pool folder, or the entry in it, is a link (nothing is followed, nothing is made behind it)                                                                                                                                                                                                                            |
+| `changed` / `hard_link`   | the pool already holds the wrong kind at the entry (or a file where the pool folder belongs), or a file with a second name; or the link made did not land on the pool entry's real path, or the pool entry is no longer the one proved when it was made (a different inode, kind or link count, found again after the link is published): the link THIS call made is taken back                              |
 | `no_descriptor_reach`     | a host that reaches an open folder by no descriptor path (macOS today): the link is never made by a path a swapped parent could redirect                                                                                                                                                                                                                                                                     |
 
-The pool folder and the entry in it are made on first use by the kernel, through checked no-follow descriptors: a `0700`
-folder, or an empty `0600` file, and what is already in the pool is kept as it is. The link is proved to land on the pool
-entry's real path before it stays.
+The pool folder and the entry in it are made on first use by the kernel, and what is already in the pool is kept as it is.
+The pool is reached by ONE descent (`reachHistoryEntry` in `host/roots.ts`): the plugin's state folder is checked once and is
+the anchor; the pool folder and then the entry are opened from their parent's descriptor with `O_DIRECTORY | O_NOFOLLOW`
+(a `0700` folder, or an empty `0600` file made exclusively), and every component that is already there is judged by name
+first and must be the very folder opened (same device and inode). A pool folder swapped for a link, or for another
+directory of the plugin's state (an agent home), after the check is refused (`link_escape` / `changed`) before anything is
+made in it. After the link is published the kernel proves it as `linkCredential` proves its source: the link lands on the pool
+entry's real path, and the entry is reached AGAIN from the anchor (no link on the way, the declared kind, the hard-link
+count, the private-place fence) and is the same file or folder it held when it made the link; otherwise it takes back the
+link it made and refuses.
 
 **What it does not touch.** `credentialHomeLinkVerdict` is unchanged: `linkTo` and `copyTree` link mode still refuse every
 link into or out of `agent-homes` and `credentials`, the pool link included. The pool is not a credential's place or source:
@@ -1818,8 +1825,14 @@ kernel's own reads and writes never follow a pool link out of the root (`link_es
 - **Pool entry swapped by a ferret.** A ferret can replace a pool entry with a link (it writes the pool through its own
   link). The next `linkHistory` for that entry refuses (`link_escape`) and links nothing; a link already made then points at
   the replacement. The kernel does not repair the pool.
-- **A race can leave the pool folder.** The pool folder and entry are made after every other check; a name that appears in
-  the home in that instant is refused `exists` and the pool folder made is left (it is empty and owner-only).
+- **A race can leave the pool folder.** The pool folder and entry are made after every other check; a name that appears
+  in the home in that instant is refused `exists`, and a pool entry replaced after the link is published is refused
+  `changed` (its link taken back). In both the pool folder and entry made are left (empty or as found, and owner-only): the
+  refusal writes nothing in the home or outside the pool, but "nothing is made" is true of the checks that come first.
+- **A link made later is not re-proved.** The proof is made when this call makes the link; a pool entry replaced afterwards is
+  the "pool entry swapped by a ferret" gap above.
+- **The testing host has no identities.** A name in a home that is an alias of a private place (`fenced` in production) is
+  `exists` on the testing host, as for `linkCredential`; every other refusal here is mirrored (`history-pool-parity.test.ts`).
 - **Fitness test.** The new `RootHandle` member is a new link operation, so it is recorded in
   `scripts/gen/tests/fleet-link-callers.snapshot.json` with its guard: the `agent-homes` handle only, the plugin's own pool
   only, and no other root.

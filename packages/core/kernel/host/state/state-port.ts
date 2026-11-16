@@ -13,7 +13,7 @@ import {
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
 import type { HostFs } from './host-fs.ts';
-import { isInternalRootFolder } from '../internal-roots.ts';
+import { isInternalRootFolder } from '../../contract/internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
 import { KeyedSerialExecutor } from './serial-executor.ts';

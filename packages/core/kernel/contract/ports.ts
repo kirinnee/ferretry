@@ -927,7 +927,8 @@ export interface RootHandle {
    * It exists so every ferret on a harness reads and continues any other ferret's conversations (v4's behaviour): the one
    * thing it adds is exactly that, and nothing else in a home is shared by it.
    *
-   * Refused, with a closed reason (`HistoryPoolError.refusal`) and nothing written: the manifest lacks
+   * Refused, with a closed reason (`HistoryPoolError.refusal`) and nothing written in the home (the pool folder and entry may
+   * have been made, owner-only, when a race is lost after every check: see the GAP in `docs/secrets.md`): the manifest lacks
    * `permissions.historyPool` (`not_permitted`); `entry` is on the kernel's fixed deny list or is not one plain, non-hidden
    * name (`denied`: `.credentials.json`, `.claude.json`, `settings*.json`, `auth.json`, `config.toml`, `CLAUDE.md`,
    * `AGENTS.md`, `skills`, `plugins`, anything starting with `.`, a `/`, a NUL, `..`) whatever the manifest declares; `entry`
@@ -940,8 +941,12 @@ export interface RootHandle {
    *
    * The pool folder and the entry in it are made on first use, by the kernel, through checked no-follow descriptors: a
    * `0700` folder (`kind: 'folder'`) or an empty `0600` file (`kind: 'file'`), and an entry already in the pool must be that
-   * kind (a link or the wrong kind is `changed`). A link made is checked to land on the pool entry's real path before it
-   * stays; otherwise it is taken back and refused `changed`. A link made stays until its holder removes it (`unlink`):
+   * kind: a link at the pool folder or at the entry is `link_escape` (nothing is followed), the wrong kind `changed`, a file
+   * with a second name `hard_link`. The pool is reached by a no-follow descent from the checked plugin state folder, each
+   * folder opened from its parent's descriptor and proved to be the folder judged by name, so nothing is made behind a
+   * substituted folder. A link made is proved before it stays: it lands on the pool entry's real path AND the entry is
+   * judged again (no link on the way, its kind, its hard-link count, the private-place fence) and is the very file or
+   * folder held when it was made; otherwise only the link THIS call made is taken back and refused. A link made stays until its holder removes it (`unlink`):
    * revoking `permissions.historyPool` stops new links only (a declared GAP, `docs/secrets.md`).
    */
   linkHistory(home: FencedPath, entry: string): Promise<void>;

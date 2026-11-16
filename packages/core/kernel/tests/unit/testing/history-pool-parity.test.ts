@@ -5,7 +5,7 @@
  * link production makes. Every case runs on both and the outcomes must be equal.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { lstat, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { err } from '@ferretry/std';
 import type { FencedPath, WorkFolders } from '../../../contract/bound.ts';
@@ -61,6 +61,12 @@ interface Side {
   plantWrongKind(entry: string, kind: 'folder' | 'file'): Promise<void>;
   /** The ferret home `f3` planted as a link out of agent-homes. */
   plantHomeLink(): Promise<void>;
+  /** The pool folder itself planted as a link to somewhere else in the state folder, or as a plain file. */
+  plantPoolFolder(kind: 'link' | 'file'): Promise<void>;
+  /** The pool entry planted as a link to somewhere else. */
+  plantPoolEntryLink(entry: string): Promise<void>;
+  /** Whether anything exists in the plugin's state folder besides the pool and the roots (a folder invented beside the pool). */
+  strays(): Promise<readonly string[]>;
 }
 
 const parents: string[] = [];
@@ -107,6 +113,20 @@ async function real(): Promise<Side> {
       await mkdir(`${parent}/outside`, { recursive: true });
       await symlink(`${parent}/outside`, `${home}/state/harness/agent-homes/f3`);
     },
+    plantPoolFolder: async kind => {
+      await mkdir(`${home}/state/harness/inside`, { recursive: true });
+      if (kind === 'link') await symlink(`${home}/state/harness/inside`, pooled);
+      else await writeFile(pooled, 'a file', { mode: 0o600 });
+    },
+    plantPoolEntryLink: async entry => {
+      await mkdir(`${home}/state/harness/inside`, { recursive: true });
+      await mkdir(pooled, { recursive: true, mode: 0o700 });
+      await symlink(`${home}/state/harness/inside`, `${pooled}/${entry}`);
+    },
+    strays: async () =>
+      (await readdir(`${home}/state/harness`)).filter(
+        name => !['agent-homes', 'downloads', 'history-pool', 'inside'].includes(name),
+      ),
   };
 }
 
@@ -143,6 +163,16 @@ async function testing(): Promise<Side> {
     plantHomeLink: async () => {
       host.putRootLink('agent-homes', 'f3');
     },
+    plantPoolFolder: async kind => {
+      if (kind === 'link') state().symlinks.set('history-pool', '/state/harness/inside');
+      else state().files.set('history-pool', 'a file');
+    },
+    plantPoolEntryLink: async entry => {
+      state().directories.set('history-pool', { mode: 0o700, modifiedMs: 0 });
+      state().symlinks.set(`history-pool/${entry}`, '/state/harness/inside');
+    },
+    strays: async () =>
+      [...state().directories.keys()].filter(name => !name.startsWith('history-pool') && name !== 'inside'),
   };
 }
 
@@ -297,6 +327,22 @@ const CASES: Readonly<Record<string, Case>> = {
       file: await link(side.harness, 'f1', 'history.jsonl'),
     };
   },
+  'link_escape: the pool folder is a link, and the testing host makes no link behind it': async side => {
+    await side.plantPoolFolder('link');
+    return { result: await link(side.harness, 'f1', 'projects'), home: await side.pool('projects') };
+  },
+  'link_escape: a pool entry is a link, folder and file alike': async side => {
+    await side.plantPoolEntryLink('projects');
+    await side.plantPoolEntryLink('history.jsonl');
+    return {
+      folder: await link(side.harness, 'f1', 'projects'),
+      file: await link(side.harness, 'f1', 'history.jsonl'),
+    };
+  },
+  'changed: the pool folder is a file, and no folder is invented beside it': async side => {
+    await side.plantPoolFolder('file');
+    return { result: await link(side.harness, 'f1', 'projects'), strays: await side.strays() };
+  },
   'not_internal: a downloads handle has no history door': async side => {
     const downloads = side.harness.root('downloads');
     return await outcome(
@@ -342,6 +388,22 @@ test('the pinned outcomes, on the real roots', async () => {
   expect(await CASES['link_escape: the ferret home is itself a link']?.(await real())).toEqual({
     result: 'root:link_escape',
     pool: false,
+  });
+  expect(
+    await CASES['link_escape: the pool folder is a link, and the testing host makes no link behind it']?.(await real()),
+  ).toEqual({
+    result: 'root:link_escape',
+    home: 'nothing',
+  });
+  expect(await CASES['link_escape: a pool entry is a link, folder and file alike']?.(await real())).toEqual({
+    folder: 'root:link_escape',
+    file: 'root:link_escape',
+  });
+  expect(
+    await CASES['changed: the pool folder is a file, and no folder is invented beside it']?.(await real()),
+  ).toEqual({
+    result: 'root:changed',
+    strays: [],
   });
   expect(await CASES['not_internal: a downloads handle has no history door']?.(await real())).toBe(
     'refused:not_internal',

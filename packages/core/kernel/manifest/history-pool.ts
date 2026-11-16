@@ -10,6 +10,7 @@
  * credential or to reach another ferret's configuration.
  */
 import type { StateFileDef } from '../contract/define.ts';
+import { isInternalRootFolder } from '../contract/internal-roots.ts';
 import type { HistoryPoolEntryDecl, HistoryPoolPermission } from './types.ts';
 
 /** The longest entry name the door accepts (a file name on every supported filesystem). */
@@ -63,6 +64,11 @@ export function historyPoolFault(
 ): string | undefined {
   if (permission === undefined) return undefined;
   if (typeof permission !== 'object' || permission === null) return 'permissions.historyPool is an object';
+  const named =
+    typeof permission.state === 'string' ? states.find(state => state.name === permission.state) : undefined;
+  const top = named?.path.split('/')[0] ?? '';
+  if (named !== undefined && isInternalRootFolder(top))
+    return `permissions.historyPool.state '${permission.state}' lives in '${top}', a root the kernel makes (never a pool)`;
   if (poolStateFolder(permission, states) === undefined)
     return `permissions.historyPool.state names no opaque "<folder>/*" state tree of its own (found '${String(permission.state)}')`;
   if (!Array.isArray(permission.entries) || permission.entries.length === 0)
@@ -93,7 +99,8 @@ export function poolStateFolder(
   const def = typeof permission.state === 'string' ? states.find(state => state.name === permission.state) : undefined;
   if (def === undefined || def.store !== 'opaque' || !def.path.endsWith('/*')) return undefined;
   const folder = def.path.slice(0, -2);
-  return ENTRY_NAME.test(folder) && !folder.startsWith('.') ? folder : undefined;
+  // A kernel-made root's folder (`agent-homes`, `credentials`, `sessions`, `downloads`, any case) is never a pool.
+  return ENTRY_NAME.test(folder) && !folder.startsWith('.') && !isInternalRootFolder(folder) ? folder : undefined;
 }
 
 /**
