@@ -1,4 +1,4 @@
-import type { SendRecord, SendRequest, SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendRequest, SendResult } from '@ferretry/core-mailbox/contract';
 
 /** Ambient facts the shell may know: the ferret this `fy` runs inside. Unknown to a cli half unless `--session` names it. */
 export interface SendEnvironment {

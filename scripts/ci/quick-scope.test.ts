@@ -212,3 +212,74 @@ test('a scope-deps declaration naming nothing fails the run BEFORE any filtering
     expect(has(lines, 'CI scope:')).toBe(false);
   }
 });
+
+// SEVERAL UNIT GROUPS (config/test-groups.json splits the tier by package so the groups run side by side). The dry run
+// plans every group's files, and a SCOPED run that skips every plugin of a group leaves that group empty: the one empty
+// group that is not a failure, said out loud. Without the scope, the same group runs its files.
+test('a SCOPED run that skips every plugin of a group plans the other groups and reports the group as scoped out', () => {
+  const { fx } = workspace();
+  fx.write(
+    'config/test-groups.json',
+    JSON.stringify({
+      unit: [
+        { name: 'c-only', prefixes: ['packages/plugins/c/'] },
+        { name: 'rest', prefixes: ['packages/'] },
+      ],
+      int: [],
+    }),
+  );
+  git(fx.root, 'add', '--all');
+  git(fx.root, 'commit', '--quiet', '-m', 'two groups');
+  const twoGroups = git(fx.root, 'rev-parse', 'HEAD');
+  const head = change(fx, 'packages/plugins/d/daemon/lib/new.ts');
+  const { lines, status } = dryRun(fx, pr(twoGroups, head));
+  expect(status).toBe(0);
+  expect(has(lines, 'DRY RUN unit groups: c-only rest')).toBe(true);
+  expect(files(lines).sort()).toEqual([
+    './packages/core/kern/tests/unit/x.test.ts',
+    './packages/plugins/d/tests/unit/x.test.ts',
+  ]);
+  const groupFiles = (env: Record<string, string>) =>
+    spawnSync('bash', ['./scripts/ci/group-files.sh', 'unit', 'c-only'], {
+      cwd: fx.root,
+      encoding: 'utf8',
+      env: { ...cleanEnvironment(), GITHUB_STEP_SUMMARY: '/dev/null', ...env },
+    });
+  const scoped = groupFiles({ FY_CI_SCOPE_FILE: join(fx.root, 'coverage/ci/scope.json') });
+  expect(scoped.status).toBe(0);
+  expect(scoped.stdout).toBe('');
+  expect(scoped.stderr).toContain(
+    'SCOPED: unit group c-only has no test file left (all 1 belong to plugins the scope skipped)',
+  );
+  const full = groupFiles({});
+  expect(full.status).toBe(0);
+  expect(full.stdout.trim()).toBe('./packages/plugins/c/tests/unit/x.test.ts');
+});
+
+test('a group with no test file at all still fails, scoped or not', () => {
+  const { fx } = workspace();
+  fx.write(
+    'config/test-groups.json',
+    JSON.stringify({
+      unit: [
+        { name: 'nothing', prefixes: ['packages/plugins/zz/'] },
+        { name: 'rest', prefixes: ['packages/'] },
+      ],
+      int: [],
+    }),
+  );
+  git(fx.root, 'add', '--all');
+  git(fx.root, 'commit', '--quiet', '-m', 'empty group');
+  const emptyGroup = git(fx.root, 'rev-parse', 'HEAD');
+  const head = change(fx, 'packages/plugins/d/daemon/lib/new.ts');
+  dryRun(fx, pr(emptyGroup, head));
+  for (const env of [{ FY_CI_SCOPE_FILE: join(fx.root, 'coverage/ci/scope.json') }, {}]) {
+    const run = spawnSync('bash', ['./scripts/ci/group-files.sh', 'unit', 'nothing'], {
+      cwd: fx.root,
+      encoding: 'utf8',
+      env: { ...cleanEnvironment(), GITHUB_STEP_SUMMARY: '/dev/null', ...env },
+    });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain('unit test group nothing holds no test files');
+  }
+});

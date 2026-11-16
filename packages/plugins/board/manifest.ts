@@ -766,7 +766,7 @@ export default definePlugin({
     offers: [{ hook: CardMoving, timeoutMs: 200 }],
   },
 
-  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'any' } }],
+  instructions: [{ id: 'board', text: 'instructions/board.md', when: { role: 'lead' } }],
   doctor: ['board-store'],
   permissions: { roots: [], network: ['api.github.com'], spawn: ['gh', 'git', 'ssh'], secrets: [] },
 });

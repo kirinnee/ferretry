@@ -1,4 +1,5 @@
-import type { SessionState, SessionView, StructuredQuestionAnswer } from '../../seams/protocol.ts';
+import type { SessionState, SessionView } from '@ferretry/core-mailbox/contract';
+import type { StructuredQuestionAnswer } from '../../seams/protocol.ts';
 import type { ClockPort, SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
 import {

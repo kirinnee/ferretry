@@ -3,7 +3,7 @@ import {
   parseCombinedDelivery,
   parseFerretryNotice,
   parsePeerEnvelope,
-} from '../../contract/index.ts';
+} from '@ferretry/core-mailbox/contract';
 import { type ReactNode, useState } from 'react';
 import { isBoardNudge } from '../transcript/board-nudge.ts';
 import { ferretryFeatureOf } from '../composer/ferretry-sender.ts';

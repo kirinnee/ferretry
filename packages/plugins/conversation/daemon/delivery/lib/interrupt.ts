@@ -1,6 +1,12 @@
 import type { SerialExecutor } from '../../seams/ports.ts';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import { SendRefused, type SendRepository, type SendTarget, SendUnavailable, TERMINAL_SEND_STATUSES } from './types.ts';
+import {
+  SendRefused,
+  type SendRepository,
+  type SendTarget,
+  SendUnavailable,
+  TERMINAL_SEND_STATUSES,
+} from '@ferretry/core-mailbox/contract';
 
 /**
  * What the harness's turn stop did (Ferrets' `HarnessInterrupted`): whether its stop key was pressed — it is not at a

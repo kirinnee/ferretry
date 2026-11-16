@@ -1,11 +1,7 @@
 import type { StatePort } from '@ferretry/kernel/contract';
 import { DRAFTS_STATE } from '../../../contract/index.ts';
-import {
-  type AgendaId,
-  AgendaIdSchema,
-  type SharedDraftSnapshot,
-  SharedDraftSnapshotSchema,
-} from '../../seams/protocol.ts';
+import { type AgendaId, AgendaIdSchema } from '@ferretry/core-mailbox/contract';
+import { type SharedDraftSnapshot, SharedDraftSnapshotSchema } from '../../seams/protocol.ts';
 import type { SerialExecutor } from '../../seams/ports.ts';
 import type { SharedDraftRepository } from '../lib/index.ts';
 

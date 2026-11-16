@@ -2,7 +2,7 @@ import type { BoundTranscriptReader } from '@ferretry/core-ferrets/contract';
 import { instantFromEpochMs } from '@ferretry/std';
 import { inputObserverFor, observedInputsOf } from '../../reader/adapters/input-proof.ts';
 import type { TranscriptHarness } from '../../reader/lib/transcript/types.ts';
-import type { SendEvidenceReading, SendEvidenceSource } from '../lib/tracker.ts';
+import type { SendEvidenceReading, SendEvidenceSource } from '@ferretry/core-mailbox/contract';
 
 /** A ferret's conversation as its harness plugin reads it: which harness wrote it, and the reader bound to the ferret. */
 interface EvidenceTranscript {

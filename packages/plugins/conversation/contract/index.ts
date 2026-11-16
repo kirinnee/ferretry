@@ -1,4 +1,9 @@
-/** @ferretry/plugin-conversation/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). */
+/**
+ * @ferretry/plugin-conversation/contract — wire schemas, port + token, events, hook types, ids, policy refs (§2.1). The
+ * send and queue wire, its events and stored shapes are the Mailbox's (`@ferretry/core-mailbox/contract`), re-exported
+ * here so every importer reads them where it always did.
+ */
+export * from '@ferretry/core-mailbox/contract';
 export * from './consumer.ts';
 export * from './events.ts';
 export * from './hooks.ts';
@@ -15,12 +20,8 @@ export * from './wire-prompt.ts';
 export * from './wire-question.ts';
 export * from './wire-read.ts';
 export * from './wire-search.ts';
-export * from './wire-send.ts';
-export * from './codes.ts';
 export * from './compact-at-rules.ts';
 export * from './draft-ops.ts';
-export * from './peer-messages.ts';
-export * from './turn-handoff.ts';
 export * from './fy-render-caps.ts';
 export * from './fy-render.ts';
 export * from './reference-catalog.ts';

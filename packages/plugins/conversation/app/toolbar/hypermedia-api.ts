@@ -5,7 +5,7 @@
  */
 
 import type { PluginClient } from '@ferretry/kernel/manifest';
-import { type HypermediaResult, HypermediaResultSchema, HypermediaStateSchema } from '../../contract/index.ts';
+import { type HypermediaResult, HypermediaResultSchema, HypermediaStateSchema } from '@ferretry/core-mailbox/contract';
 
 export type HypermediaPatchResult = HypermediaResult;
 
