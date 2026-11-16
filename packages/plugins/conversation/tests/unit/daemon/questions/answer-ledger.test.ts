@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionState } from '../../../../daemon/seams/protocol.ts';
+import type { SessionState } from '@ferretry/core-mailbox/contract';
 import should from 'should';
 import {
   AnswerAcknowledged,

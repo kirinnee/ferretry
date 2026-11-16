@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { StatePort } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
+import { QueueEventSchema, SendLineSchema, SendRecordSchema } from '@ferretry/core-mailbox/contract';
 import {
   ANSWERS_STATE,
   AnswerLineSchema,
@@ -10,10 +11,7 @@ import {
   OUTBOX_STATE,
   OutboxLineSchema,
   QUEUE_STATE,
-  QueueEventSchema,
   SENDS_STATE,
-  SendLineSchema,
-  SendRecordSchema,
 } from '../../contract/index.ts';
 import { StateSendChannel, StateSendLedger } from '../../daemon/delivery/adapters/index.ts';
 import { StateQueueStore } from '../../daemon/queue/adapters/index.ts';

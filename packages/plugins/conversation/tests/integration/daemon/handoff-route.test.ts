@@ -3,7 +3,7 @@ import { FakeAsks } from '@ferretry/core-asks/contract/testing';
 import type { FerretId, FerretTurnDocument, FerretTurns } from '@ferretry/core-ferrets/contract';
 import { FakeFerrets, ferretId } from '@ferretry/core-ferrets/contract/testing';
 import { fixedClock, owner, testHost } from '@ferretry/kernel/testing';
-import { HandoffDocumentSchema } from '../../../contract/index.ts';
+import { HandoffDocumentSchema } from '@ferretry/core-mailbox/contract';
 import daemon from '../../../daemon/index.ts';
 import { wardenStandIn } from '../../support/warden-plugin.ts';
 

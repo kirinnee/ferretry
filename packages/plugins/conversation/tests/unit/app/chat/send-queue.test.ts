@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { QueuedMessage } from '../../../../contract/index.ts';
+import type { QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { DaemonCallError } from '@ferretry/app';
 import { type CallHandler, fakeClient } from '../../../support/app/fake-client.ts';
 import type { LedgerSendRecord } from '../../../../app/chat/send-ledger.ts';

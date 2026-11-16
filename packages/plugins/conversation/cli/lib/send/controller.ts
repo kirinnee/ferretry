@@ -1,4 +1,4 @@
-import type { SendRecord, SendResult } from '../../../contract/index.ts';
+import type { SendRecord, SendResult } from '@ferretry/core-mailbox/contract';
 import { CommandError } from '../errors.ts';
 import {
   describeFate,

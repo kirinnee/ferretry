@@ -1,6 +1,6 @@
 import type { Instant } from '@ferretry/std';
-import type { QueueEvent } from '../../daemon/queue/lib/model.ts';
-import type { QueuedMessage, QueuedMessageState } from '../../daemon/seams/protocol.ts';
+import type { QueueEvent } from '@ferretry/core-mailbox/contract';
+import type { QueuedMessage, QueuedMessageState } from '@ferretry/core-mailbox/contract';
 
 /** A small seeded generator, so a failing history can be replayed by its seed. */
 function mulberry32(seed: number): () => number {

@@ -1,6 +1,6 @@
 import { ApiError, decodeParameter, jsonResponse, parseBody } from '../../../seams/api.ts';
 import type { ApiResponse, MountRoute, RouteContext } from '../../../seams/api.ts';
-import { type HypermediaResult, HypermediaRequestSchema, type HypermediaState } from '../../../../contract/index.ts';
+import { type HypermediaResult, HypermediaRequestSchema, type HypermediaState } from '@ferretry/core-mailbox/contract';
 import { type HypermediaOutcome, SessionHypermediaError } from '../service.ts';
 
 /**

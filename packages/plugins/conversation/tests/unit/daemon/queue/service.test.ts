@@ -1,9 +1,8 @@
 import type { Instant } from '@ferretry/std';
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { defaultQueueCoalesceSettings } from '../../../../daemon/queue/lib/settings.ts';
-import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
-import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
+import { defaultQueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
+import { foldQueue, type QueueEvent, type QueuedMessage } from '@ferretry/core-mailbox/contract';
 import { QueueRefused, SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
 import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';

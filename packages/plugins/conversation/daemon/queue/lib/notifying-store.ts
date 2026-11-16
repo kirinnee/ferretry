@@ -1,6 +1,6 @@
-import { QUEUE_CHANGED_EVENT, type QueueChangedEventData, type QueuedMessage } from '../../seams/protocol.ts';
+import { QUEUE_CHANGED_EVENT, type QueueChangedEventData, type QueuedMessage } from '@ferretry/core-mailbox/contract';
 import type { SessionId } from '../../seams/ferret-id.ts';
-import type { QueueEvent } from './model.ts';
+import type { QueueEvent } from '@ferretry/core-mailbox/contract';
 import type { SessionQueueStore } from './ports.ts';
 
 /** Where a queue change is announced: the session's own journal, which `/v1/events` serves live. */

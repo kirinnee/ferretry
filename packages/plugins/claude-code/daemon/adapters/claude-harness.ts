@@ -682,6 +682,7 @@ export class ClaudeHarness implements Harness {
       permissionMode: file?.permissionMode ?? 'skip',
       // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
       questionTool: file?.questionTool ?? false,
+      // In the record, but only as its effect on the fixed layer (setting on AND bypass mode): see launchSettingsRecord.
       dangerousRmWaiver: file?.dangerousRmWaiver ?? false,
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),

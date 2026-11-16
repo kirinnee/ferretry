@@ -409,6 +409,27 @@ describe('context-imports', () => {
   });
 });
 
+describe('context-imports: the generated barrels of a contract', () => {
+  test("a contract may import its own folders' generated barrel, and no other generated file", async () => {
+    const f = ws(
+      [
+        {
+          id: 'alpha',
+          contract: `export * from './generated/slots.ts';\nexport * from '../daemon/generated/features.ts';\n`,
+          files: {
+            'contract/generated/slots.ts': 'export const s = 1;\n',
+            'daemon/generated/features.ts': 'export default [];\n',
+          },
+        },
+      ],
+      { pending: ['alpha'] },
+    );
+    const found = messages(await run(contextImports, f));
+    expect(found).toContain('../daemon/generated/features.ts');
+    expect(found).not.toContain('./generated/slots.ts:');
+  });
+});
+
 describe('contract-graph', () => {
   test('planted: a core contract imports a plugin contract; a plugin contract edge not on the allowed list; a cycle', async () => {
     const f = ws(
