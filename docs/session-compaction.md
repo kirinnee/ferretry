@@ -29,9 +29,13 @@ Codex paints `• Compacting (3s • Esc to interrupt)` and nothing more, and wr
 - **Nothing is estimated.** With no `percent` a reader shows a spinner, the real clock and "Usually ~Ns
   here" — never a percentage derived from elapsed time. (The protocol no longer has an estimator.)
 - **`expectedMs`** is how long a compaction usually takes here: the median of the compactions this daemon
-  watched from start to end (kept in `compaction-history.json` in the state home; `basis: history`). With
+  watched from start to end (kept by Usage in `compaction-history.json` under its state folder and asked for
+  through the `ferrets.compaction-history` hook; `basis: history`). With
   none yet it is a fixed prior: 60 s for Claude, 40 s for Codex (`basis: typical`). Those priors are
-  assumptions, not measurements. A reader shows it only when there is no real `percent`.
+  assumptions, not measurements. A reader shows it only when there is no real `percent`. A damaged history
+  file reads as none and is left as it is (Usage carries on, and records nothing until it is repaired or
+  removed). The v4 history is carried over by the v4→v5 converter; a 5.0 preview home's earlier history under
+  the ferrets' state folder is accepted as lost, so its estimates start from the typical durations again.
 - **Done** is read from the transcript's own boundary record (Claude `system/compact_boundary`, Codex
   `compacted`), so it survives a reload for as long as the record is in the tail the daemon reads.
   `tokensBefore` and `tokensAfter` are the harness's stated counts when it states them, else the context
