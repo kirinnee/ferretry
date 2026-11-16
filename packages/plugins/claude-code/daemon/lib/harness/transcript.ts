@@ -189,6 +189,17 @@ export function parseUsage(text: string): readonly TurnUsage[] {
 
 const TAIL_USER_ROLES = new Set(['user', 'assistant']);
 
+/** An error code is a short identifier (`overloaded_error`, `429`); anything else is text and is not carried. */
+const ERROR_CODE = /^[\w.:-]{1,64}$/u;
+
+/** The code of a Claude error record's `error` value (`code`, else `type`), when it is a bare identifier. */
+function errorCode(value: unknown): string | undefined {
+  const error = asObject(value);
+  const raw = error?.code ?? error?.type;
+  const code = typeof raw === 'number' ? String(raw) : raw;
+  return typeof code === 'string' && ERROR_CODE.test(code) ? code : undefined;
+}
+
 /**
  * The records of a window cut from the end of a file, with the turn marked as at work when the window cannot say where
  * the turn stands. A cut window drops its first line (the end of a record whose start is outside it), and what that cut
@@ -245,6 +256,12 @@ export function parseTail(text: string, partial: boolean): readonly HarnessTailR
         ...(before === undefined ? {} : { tokensBefore: before }),
         ...(after === undefined ? {} : { tokensAfter: after }),
       });
+      continue;
+    }
+    if (record.type === 'system' && (record.subtype === 'api_error' || record.subtype === 'error')) {
+      // The error's CODE only: its message is free text (and can echo a request), and the tail carries none.
+      const code = errorCode(record.error ?? record.message ?? record.content);
+      records.push({ kind: 'error', ...when, ...(code === undefined ? {} : { code }) });
       continue;
     }
     if (typeof record.type !== 'string' || !TAIL_USER_ROLES.has(record.type)) continue;

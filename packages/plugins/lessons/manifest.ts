@@ -139,6 +139,8 @@ export default definePlugin({
       route('GET /v1/lessons/directory', {
         minimum: 'operator',
         caller: 'any',
+        // c58-sec1: every ferret's id, name and folder, which is the fleet list's own demand.
+        capability: fleetUse,
         noStore: true,
         audit: READ,
         guard: { none: 'the ferrets a view names: id, name and folder' },
