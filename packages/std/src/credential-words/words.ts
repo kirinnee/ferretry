@@ -42,9 +42,10 @@
  * A JSON object or array inside a word (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are quoted) is read key by
  * key ({@link jsonCuts}): a string under a secret-named key that looks like a credential is cut, wherever in the
  * document it sits. A one-letter flag whose letter means "password" ({@link STUCK_FLAG_NAMES}: mysql's `-p<password>`)
- * is read under that name, so its stuck value is cut like any value under a secret name (a value under 8 characters is
- * no credential, as everywhere) unless a longer flag glued to a value makes the word (`-password=$X` is that flag's, not
- * `-p` and a value), so a value with a plain `=` or blank in it (`-pabc=def12345`) is still shown. A value
+ * is read under that name FIRST, so its stuck value is cut like any value under a secret name (a value under 8
+ * characters is no credential, as everywhere, except a quoted one: `-p'a b'`) even when a longer flag glued to a value
+ * also parses: `-pabc=def12345` is cut, and so is `-port=8080808080` (over-hiding, the safe side), while a longer flag
+ * that itself names a credential (`-password=$X`) is that flag's. A value
  * glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`, `prefix${secret:X}`,
  * `${secret:X}?model=short`) is NOT one: CFG-LEAK-R cuts the whole value ({@link gluedToPointer}), because the write
  * rule refuses it. The same holds for raw text in ANY piece of a credential's value that holds a pointer
@@ -760,10 +761,17 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
   // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
   // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
-  // A one-letter flag's letter names its value (`-p<password>`) only when nothing else makes the word a flag: a longer
-  // flag glued to its value (`-password=$X`, `-port 80`) is that flag's and is read as it always was.
-  const stuckName = glued === null || !PLAIN_FLAG.test(gluedFlag) ? (STUCK_FLAG_NAMES.get(stuckFlag) ?? '') : '';
-  const stuckHidden = stuck !== null && secretValue(stuckName, stuckValue, tests);
+  // A one-letter flag's letter names its value (`-p<password>`) whatever else the word could be read as: the stuck
+  // reading is judged first and hides on a letter with a known meaning, even when a longer flag glued to its value also
+  // parses (`-pabc=def12345`). That over-hides `-port=80`, which is the safe side. A longer flag that itself names a
+  // credential (`-password=$X`) is still that flag's and reads as it always did, as do `-port 80` (two words) and
+  // `--password=$X` (no one-letter flag in it).
+  const gluedFlagOwnsWord = glued !== null && PLAIN_FLAG.test(gluedFlag) && tests.namesSecret(gluedFlag);
+  const stuckName = gluedFlagOwnsWord ? '' : (STUCK_FLAG_NAMES.get(stuckFlag) ?? '');
+  // A quote right after the letter can only open a value (`-p'a b'`), so a letter with a known meaning hides it however
+  // short it is: no longer flag name has a quote in it.
+  const stuckHidden =
+    stuck !== null && (secretValue(stuckName, stuckValue, tests) || (stuckName !== '' && /^["']/u.test(stuckValue)));
   if (glued !== null && secretValue(gluedFlag, gluedValue, tests)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).
