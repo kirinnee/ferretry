@@ -3,6 +3,8 @@ import type { IJobProcess, IJobSignals, IJobTimers } from '../../lib/jobs/ports.
 
 /** This process, as the job verbs read it. */
 export class RealJobProcess implements IJobProcess {
+  constructor(private readonly readLink: (path: string) => string = readlinkSync) {}
+
   get pid(): number {
     return process.pid;
   }
@@ -14,7 +16,7 @@ export class RealJobProcess implements IJobProcess {
   /** Linux names a descriptor's target under /proc; macOS has no such file, so nothing is learned there. */
   stdoutFile(): string | undefined {
     try {
-      const target = readlinkSync('/proc/self/fd/1');
+      const target = this.readLink('/proc/self/fd/1');
       return target.startsWith('/') ? target : undefined;
     } catch {
       return undefined;
