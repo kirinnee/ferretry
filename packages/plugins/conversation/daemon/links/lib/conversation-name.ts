@@ -23,9 +23,14 @@ const cleaned = (value: unknown): string | undefined => {
   return name === '' ? undefined : truncateText(name, CONVERSATION_NAME_MAX);
 };
 
-const records = function* (text: string): Generator<Record<string, unknown>> {
+/**
+ * The JSON records of `text`, one per line. With `only`, a line that holds none of these strings is not parsed at all: a record
+ * that names a conversation spells its type in the line, so every other line (the bulk of a transcript) is skipped unread.
+ */
+const records = function* (text: string, only?: readonly string[]): Generator<Record<string, unknown>> {
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
+    if (only !== undefined && !only.some(needle => line.includes(needle))) continue;
     let value: unknown;
     try {
       value = JSON.parse(line);
@@ -35,6 +40,9 @@ const records = function* (text: string): Generator<Record<string, unknown>> {
     if (typeof value === 'object' && value !== null) yield value as Record<string, unknown>;
   }
 };
+
+const CODEX_NAME_MARKS = ['thread_name_updated'] as const;
+const CLAUDE_NAME_MARKS = ['custom-title', 'agent-name', 'ai-title', '"summary"'] as const;
 
 /** The names a transcript records, by who gave them: the owner (`chosen`), or the CLI (`generated`). */
 export interface TranscriptNames {
@@ -46,7 +54,7 @@ export interface TranscriptNames {
 export function transcriptNames(harness: Harness, text: string): TranscriptNames {
   let chosen: string | undefined;
   let generated: string | undefined;
-  for (const record of records(text)) {
+  for (const record of records(text, harness === 'codex' ? CODEX_NAME_MARKS : CLAUDE_NAME_MARKS)) {
     if (harness === 'codex') {
       const payload = record.payload;
       if (
