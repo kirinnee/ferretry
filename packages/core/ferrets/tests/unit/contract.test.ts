@@ -4,6 +4,7 @@ import {
   effectiveAgentControl,
   type FerretsApi,
   FerretRecordSchema,
+  FerretLiveReadSchema,
   FerretSummarySchema,
   limitsLoosen,
   LimitsFileSchema,
@@ -315,5 +316,28 @@ describe('what agents may control (limits.yaml agentControl)', () => {
     ferrets.setAgentControl(ferretId('f1'), { browsers: false });
     expect((await ferrets.agentControl(ferretId('f1'))).browsers).toBe(false);
     expect(await ferrets.agentControl(ferretId('nobody'))).toEqual(NO_AGENT_CONTROL);
+  });
+});
+
+describe('the live read (GET /v1/ferrets/:ferretId/live)', () => {
+  test('carries a turn count and a context reading, each of which may be unstated (null, never zero)', () => {
+    expect(FerretLiveReadSchema.parse({ turns: 7, contextPercent: 62.5, contextWindow: 200_000 })).toEqual({
+      turns: 7,
+      contextPercent: 62.5,
+      contextWindow: 200_000,
+    });
+    expect(FerretLiveReadSchema.parse({ turns: null, contextPercent: null, contextWindow: null })).toEqual({
+      turns: null,
+      contextPercent: null,
+      contextWindow: null,
+    });
+  });
+
+  test('is no wider than those three readings, and refuses a reading out of range', () => {
+    const live = { turns: 1, contextPercent: 10, contextWindow: 1000 };
+    expect(FerretLiveReadSchema.safeParse({ ...live, turnState: 'working' }).success).toBe(false);
+    expect(FerretLiveReadSchema.safeParse({ ...live, contextPercent: 101 }).success).toBe(false);
+    expect(FerretLiveReadSchema.safeParse({ ...live, turns: -1 }).success).toBe(false);
+    expect(FerretLiveReadSchema.safeParse({ ...live, contextWindow: 0 }).success).toBe(false);
   });
 });

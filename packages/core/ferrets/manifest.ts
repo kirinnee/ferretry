@@ -199,6 +199,15 @@ export default definePlugin({
         audit: { skip: 'a ferret read records nothing' },
         guard: { none: 'one ferret identity record' },
       }),
+      // The ferret's turns and context as its state document stands now (`FerretLiveReadSchema`): no wider than the
+      // ferret read above, which it sits beside, so it takes that read's caller and grant rule.
+      route('GET /v1/ferrets/:ferretId/live', {
+        minimum: 'operator',
+        caller: 'any',
+        noStore: true,
+        audit: { skip: 'a ferret read records nothing' },
+        guard: { none: 'a turn count and a context percentage; no text' },
+      }),
       // R-0332
       route('POST /v1/ferrets', {
         minimum: 'operator',

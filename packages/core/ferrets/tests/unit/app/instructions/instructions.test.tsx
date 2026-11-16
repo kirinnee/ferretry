@@ -171,6 +171,7 @@ describe('S-0075 an Instructions row also brings Files on screen (a phone shows 
         daemon={workspace.daemon}
         ferret={workspace.ferret}
         showPanel={id => asked.push(id)}
+        shows={() => true}
       >
         <Instructions subject="f1" />
       </FerretWorkspaceActionsProvider>,

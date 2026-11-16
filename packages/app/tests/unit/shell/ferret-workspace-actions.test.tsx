@@ -37,3 +37,13 @@ describe('the ferret workspace tells its panels whether this connection may cont
     run(() => page.unmount());
   });
 });
+
+describe('the ferret workspace tells its panels which sibling panels this page places', () => {
+  test('a layout that placed none shows none, and asking for one is harmless', () => {
+    const page = render(<FerretWorkspace chat={<Reader />} daemon="d1" subject="f1" />);
+    const workspace = seen.at(-1);
+    expect(workspace?.shows('insights')).toBe(false);
+    expect(() => workspace?.showPanel('insights')).not.toThrow();
+    run(() => page.unmount());
+  });
+});

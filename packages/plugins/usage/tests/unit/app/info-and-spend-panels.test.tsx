@@ -3,7 +3,8 @@ import type { UsageFeedView } from '../../../contract/index.ts';
 import { DaemonUsageStore, daemonUsagePort } from '../../../app/lib/usage-store.ts';
 import { FerretUsageInfoPanel } from '../../../app/shell/info-usage.tsx';
 import { SpendTodayPanel, spendDollars } from '../../../app/shell/spend-today.tsx';
-import { mount } from '@ferretry/app/testing';
+import { FerretWorkspaceActionsProvider } from '@ferretry/app';
+import { interact, mount } from '@ferretry/app/testing';
 import { rawResponse, rawRow } from './support/analytics-rows.ts';
 import { fakeClient, refusingClient } from './support/client.ts';
 
@@ -28,8 +29,13 @@ const panel = async (
   rows: Parameters<typeof rawResponse>[0],
   feed: UsageFeedView | null,
   subject: string | null = 'f1',
+  live?: unknown,
 ) => {
-  const client = fakeClient({ 'GET /v1/usage/insights': () => rawResponse(rows), 'GET /v1/usage': feed ?? {} });
+  const client = fakeClient({
+    'GET /v1/usage/insights': () => rawResponse(rows),
+    'GET /v1/usage': feed ?? {},
+    ...(live === undefined ? {} : { 'GET /v1/ferrets/:ferretId/live': live }),
+  });
   const store = new DaemonUsageStore(daemonUsagePort(client), { pollMs: 60_000, isHidden: () => true });
   return await mount(
     <FerretUsageInfoPanel client={client} store={store} now={() => NOW} {...(subject === null ? {} : { subject })} />,
@@ -68,6 +74,40 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     } finally {
       await view.unmount();
     }
+  });
+
+  describe('live turns and context (GET /v1/ferrets/:ferretId/live)', () => {
+    const shownFor = async (live: unknown) => {
+      const view = await panel([rawRow({ id: 'f1', contextEndPercent: 20, turns: 3 })], feedOf(), 'f1', live);
+      try {
+        await interact(async () => await new Promise(done => setTimeout(done, 20)));
+        return text(view.container);
+      } finally {
+        await view.unmount();
+      }
+    };
+
+    it('usage#0 draws the live context and turns, with the window, not the previous turn’s end-of-turn row', async () => {
+      const shown = await shownFor({ turns: 8, contextPercent: 74, contextWindow: 200_000 });
+      expect(shown).toContain('74%');
+      expect(shown).toContain('of 200K tokens');
+      expect(shown).toContain('8');
+      expect(shown).not.toContain('20%');
+    });
+
+    it('usage#0 falls back to the analytics row for what the daemon does not state, or does not answer, or answers oddly', async () => {
+      for (const live of [{ turns: null, contextPercent: null, contextWindow: null }, { turns: 'many' }, undefined]) {
+        const shown = await shownFor(live);
+        expect(shown).toContain('20%');
+        expect(shown).not.toContain('tokens');
+      }
+    });
+
+    it('usage#0 leaves the window out when the document states a percent but no window', async () => {
+      const shown = await shownFor({ turns: 4, contextPercent: 55, contextWindow: null });
+      expect(shown).toContain('55%');
+      expect(shown).not.toContain('of ');
+    });
   });
 
   it('says unknown rather than zero: no price, no tokens, no context, no turns, no quota reading', async () => {
@@ -121,6 +161,60 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     } finally {
       await view.unmount();
     }
+  });
+
+  describe('Open Insights inside the ferret’s own workspace', () => {
+    const open = async (workspace: { ferret: string; daemon: string; shows: boolean }, shown: string[]) => {
+      const client = fakeClient({
+        'GET /v1/usage/insights': () => rawResponse([rawRow({ id: 'f1' })]),
+        'GET /v1/usage': feedOf(),
+      });
+      const store = new DaemonUsageStore(daemonUsagePort(client), { pollMs: 60_000, isHidden: () => true });
+      return await mount(
+        <FerretWorkspaceActionsProvider
+          canControl
+          daemon={workspace.daemon}
+          ferret={workspace.ferret}
+          showPanel={id => shown.push(id)}
+          shows={() => workspace.shows}
+        >
+          <FerretUsageInfoPanel client={client} store={store} now={() => NOW} subject="f1" />
+        </FerretWorkspaceActionsProvider>,
+      );
+    };
+    const press = async (view: { container: HTMLElement }) => {
+      const link = view.container.querySelector<HTMLAnchorElement>('[data-info-open-insights]');
+      await interact(() => link?.click());
+      return link;
+    };
+
+    it('usage#0 brings THIS ferret’s Insights panel on screen instead of leaving for the machine’s page', async () => {
+      const shown: string[] = [];
+      const view = await open({ ferret: 'f1', daemon: 'this-daemon', shows: true }, shown);
+      try {
+        expect((await press(view))?.title).toBe('Show this ferret’s Insights panel');
+        expect(shown).toEqual(['insights']);
+      } finally {
+        await view.unmount();
+      }
+    });
+
+    it('usage#0 keeps the machine’s Insights link when the workspace is another ferret’s, another machine’s, or has no such panel', async () => {
+      for (const workspace of [
+        { ferret: 'f2', daemon: 'this-daemon', shows: true },
+        { ferret: 'f1', daemon: 'other-daemon', shows: true },
+        { ferret: 'f1', daemon: 'this-daemon', shows: false },
+      ]) {
+        const shown: string[] = [];
+        const view = await open(workspace, shown);
+        try {
+          expect((await press(view))?.title).toBe('Open the machine’s Insights');
+          expect(shown).toEqual([]);
+        } finally {
+          await view.unmount();
+        }
+      }
+    });
   });
 
   it('shows a credit login’s money line, and an at-limit state', async () => {
