@@ -59,7 +59,8 @@ const runnerPlugin = implementDaemon(
   { build: () => ({ hooks: { 'runners:tmux': new FakeRunner() } }) },
 );
 
-const record = (name: string): FerretRecord => ({
+const record = (name: string, parent?: string): FerretRecord => ({
+  ...(parent === undefined ? {} : { parent: ferretId(parent) }),
   format: 1,
   id: ferretId(name),
   name,
@@ -78,8 +79,9 @@ async function boot() {
     gate: new StandInAdmission(() => ownerStanding()),
     fakes: { gate: new FakeGate(), vault: new FakeVault(), asks: new FakeAsks() },
   });
-  for (const name of ['f1', 'f2'])
-    first.state('ferrets').plant(FerretFiles, JSON.stringify(record(name)), ferretId(name));
+  // f3 is f1's helper; f2 is nobody's.
+  for (const [name, parent] of [['f1'], ['f2'], ['f3', 'f1']] as const)
+    first.state('ferrets').plant(FerretFiles, JSON.stringify(record(name, parent)), ferretId(name));
   return await first.restart();
 }
 
@@ -90,7 +92,7 @@ test('the Ferrets port every needer is handed carries the runtime control', asyn
   await host.stop();
 });
 
-test('a ferret that is neither the target nor its lead or helper is refused 403 forbidden, by the real rule, on both calls', async () => {
+test('a ferret that is neither the target nor an ancestor of it is refused 403 forbidden, by the real rule, on both calls', async () => {
   const host = await boot();
   const control = host.provided(FerretsPort, 'runtimes').runtimeControl!;
   await expect(control.models(ferretId('f1'), 'f2')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
@@ -98,6 +100,17 @@ test('a ferret that is neither the target nor its lead or helper is refused 403 
     status: 403,
     code: 'forbidden',
   });
+  await host.stop();
+});
+
+test('a ferret reaches its helpers (its descendants) and never its lead', async () => {
+  const host = await boot();
+  const control = host.provided(FerretsPort, 'runtimes').runtimeControl!;
+  // The lead may reach its helper: past the authorization, this harness offers no switch, so it is unsupported.
+  const reached = await control.models(ferretId('f1'), 'f3').catch((error: unknown) => error);
+  expect((reached as RuntimeControlError).failure).toBe('unsupported');
+  // The helper may NOT reach its lead.
+  await expect(control.models(ferretId('f3'), 'f1')).rejects.toMatchObject({ status: 403, code: 'forbidden' });
   await host.stop();
 });
 

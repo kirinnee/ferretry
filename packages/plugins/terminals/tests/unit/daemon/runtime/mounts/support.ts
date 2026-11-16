@@ -74,13 +74,23 @@ export interface MountHalf {
 }
 
 export async function mountHalf(
-  options: { readonly ferrets?: readonly FerretSummary[]; readonly config?: Readonly<Record<string, unknown>> } = {},
+  options: {
+    readonly ferrets?: readonly FerretSummary[];
+    readonly config?: Readonly<Record<string, unknown>>;
+    readonly jobs?: NonNullable<Parameters<typeof buildTerminals>[1]>['jobs'];
+  } = {},
 ): Promise<MountHalf> {
   const runtime = new FailableRuntime();
   let caller: Caller = 'owner';
   const raised: { ferret: string; raise: InputRaise }[] = [];
   const plugin = implementDaemon(manifest, {
-    build: ctx => buildTerminals(ctx, { tmux: new ScriptedTmux(), socketPath: '/state/terminals/tmux.sock', runtime }),
+    build: ctx =>
+      buildTerminals(ctx, {
+        tmux: new ScriptedTmux(),
+        socketPath: '/state/terminals/tmux.sock',
+        runtime,
+        ...(options.jobs === undefined ? {} : { jobs: options.jobs }),
+      }),
   });
   const host = await testHost({
     hostFacts: unarmedHostFacts,

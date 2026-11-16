@@ -3,6 +3,7 @@ import type { Instant, Result } from '@ferretry/std';
 import type {
   DeliveryOutcome,
   FormKey,
+  PickerKey,
   RunnerFormCapture,
   PaneNotReadyReason,
   QueueOutcome,
@@ -81,6 +82,8 @@ export interface HarnessForm {
   capture(): Promise<Result<RunnerFormCapture, HarnessRefusal>>;
   key(key: FormKey): Promise<Result<void, HarnessDeliveryFailure>>;
   paste(text: string): Promise<Result<void, HarnessDeliveryFailure>>;
+  /** Additive (live model switch): a numbered picker's row digit, from its own closed set (never a {@link FormKey}). */
+  pickerKey?(key: PickerKey): Promise<Result<void, HarnessDeliveryFailure>>;
 }
 /**
  * The harness seam (decision #18): what Conversation needs to type into a ferret, interrupt it and read its transcript.
