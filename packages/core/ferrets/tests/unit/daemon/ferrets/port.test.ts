@@ -111,6 +111,7 @@ test('through the port, the service’s own members are not there: revokeToken, 
       'harness',
       'harnesses',
       'importConversation',
+      'historySources',
       'lastSnapshot',
       'list',
       'managedWorktrees',
@@ -143,4 +144,22 @@ test('resolve answers an id or a callsign (any case, with the composer’s colon
   expect(await port.resolve(name)).toEqual({ kind: 'ferret', id: f.id });
   expect(await port.resolve(`:${name.toUpperCase()}`)).toEqual({ kind: 'ferret', id: f.id });
   expect(await port.resolve('nobody-has-this-name')).toEqual({ kind: 'unknown' });
+});
+
+test('historySources offers each harness that has any, and a harness that throws or offers none is left out', async () => {
+  const f = additivesFixture();
+  const files = { entries: async () => [], stat: async () => undefined, read: async () => undefined };
+  const source = { kind: 'computer', label: 'owner', files } as const;
+  const harnesses: Record<string, unknown> = {
+    'claude-code': { historySources: async () => [source] },
+    codex: { historySources: async () => Promise.reject(new Error('gone')) },
+    plain: {},
+  };
+  (f.service as unknown as { ports: Record<string, unknown> }).ports = {
+    ...(f.service as unknown as { ports: Record<string, unknown> }).ports,
+    harnessKeys: () => Object.keys(harnesses),
+    harness: (key: string) => harnesses[key],
+  };
+  const port = ferretsPort(f.service, 'conversation');
+  expect(await port.historySources?.()).toEqual([{ harness: 'claude-code', sources: [source] }]);
 });

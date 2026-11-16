@@ -7,6 +7,7 @@ import type {
   FoundConversation,
   Harness,
   HarnessDialog as FerretDialog,
+  HarnessHistorySource,
   HarnessInstall,
   HarnessLaunchSettings,
   HarnessMissing,
@@ -27,6 +28,7 @@ import type {
   UsageReader,
 } from '@ferretry/core-ferrets/contract';
 import {
+  historyFilesOver,
   LaunchRefusal,
   materializeSkills,
   openTranscriptBytes,
@@ -453,6 +455,30 @@ export class ClaudeHarness implements Harness {
       return found.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1));
     },
   };
+
+  /**
+   * The past conversations Claude holds, as read-only trees for Conversation's index: the owner's own home (read in place
+   * through the `harness-history` root) and each ferret's home under this plugin's `agent-homes`. A link is never followed,
+   * so a home whose history is a link into a pool lists nothing here. Nothing is written.
+   */
+  async historySources(): Promise<readonly HarnessHistorySource[]> {
+    const sources: HarnessHistorySource[] = [];
+    const historyHome = await this.deps.historyHome().catch(() => '');
+    if (historyHome.startsWith('/'))
+      sources.push({
+        kind: 'computer',
+        label: 'owner',
+        files: historyFilesOver(this.deps.roots.root('harness-history', { subfolder: historyHome })),
+      });
+    const homes = this.deps.roots.root('agent-homes');
+    const top = homes.resolve('');
+    if (!top.ok) return sources;
+    for (const entry of await homes.entries(top.value).catch(() => [])) {
+      if (entry.kind !== 'directory') continue;
+      sources.push({ kind: 'ferret-home', label: entry.name, files: historyFilesOver(homes, entry.name) });
+    }
+    return sources;
+  }
 
   // ─── internals ──────────────────────────────────────────────────────────────────────────────────────────────
 

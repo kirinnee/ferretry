@@ -121,6 +121,7 @@ export function ferretsPort(service: FerretsService, consumer: string): FerretsA
       const { id, source } = input;
       return await service.importConversation(harness, { id, source });
     },
+    historySources: async () => await service.historySources(),
     start: async (asked, askedOrigin): Promise<Result<FerretId, StartFailure>> => {
       // Fail closed: a launch whose origin was not stated (a plugin's cast) is refused, never taken as a person's. The
       // origin is read ONCE into a fresh object, as the request is.

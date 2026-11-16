@@ -17,6 +17,7 @@ export * from './app-hooks.ts';
 export * from './agent-address.ts';
 export * from './file-reference.ts';
 export * from './instructions-report.ts';
+export * from './history.ts';
 export * from './hooks.ts';
 export * from './ids.ts';
 export * from './kinds.ts';

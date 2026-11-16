@@ -3,83 +3,66 @@ import type { FerretId } from '@ferretry/core-ferrets/contract';
 import type { ApiRequest } from '@ferretry/kernel/contract';
 import type { Instant } from '@ferretry/std';
 import { err, ok } from '@ferretry/std';
+import { conversationFiles } from '../../../daemon/links/adapters/conversation-files.ts';
 import { keepInSyncFrom } from '../../../daemon/links/index.ts';
 import { FileConversationDescriber } from '../../../daemon/links/lib/conversation-describer.ts';
-import type { ConversationFiles } from '../../../daemon/links/lib/conversation-describer.ts';
-import { type LinkHarness, LinkService } from '../../../daemon/links/lib/service.ts';
+import { ConversationIndex, type IndexSource } from '../../../daemon/links/lib/conversation-index.ts';
+import { LinkService } from '../../../daemon/links/lib/service.ts';
 import { linkRoutes } from '../../../daemon/links/routes.ts';
-import { ClaudeTranscriptParser } from '../../../daemon/reader/lib/transcript/claude.ts';
-import { CodexTranscriptParser } from '../../../daemon/reader/lib/transcript/codex.ts';
-import { PacedTranscriptParser } from '../../../daemon/reader/lib/transcript/sliced.ts';
+import { claudeRecord, codexRollout, MemoryHistory, memorySqlite, PARSERS } from '../../support/history-tree.ts';
 
 const ID = '3b1a4a52-0000-4000-8000-000000000001';
-const NO_WAIT = { now: () => 0, yieldToLoop: async (): Promise<void> => undefined };
-const record = (type: string, text: string, at: string) =>
-  JSON.stringify({ type, cwd: '/work/app', timestamp: at, message: { role: type, content: text } });
-const TRANSCRIPT = `${record('user', 'please add a login page', '2026-02-01T09:00:00.000Z')}\n${record('assistant', 'done, it is on /login', '2026-02-01T09:05:00.000Z')}\n`;
+const CODEX = '5c1e0e3a-0000-4000-8000-0000000000aa';
+const TRANSCRIPT = `${claudeRecord('user', 'please add a login page', '2026-02-01T09:00:00.000Z')}\n${claudeRecord('assistant', 'done, it is on /login', '2026-02-01T09:05:00.000Z')}\n`;
+const PATH = `projects/-work-app/${ID}.jsonl`;
 
-const files = (map: Record<string, string>): ConversationFiles => ({
-  entries: async directory => {
-    const prefix = `${directory}/`;
-    const names = new Map<string, 'file' | 'directory'>();
-    for (const path of Object.keys(map)) {
-      if (!path.startsWith(prefix)) continue;
-      const rest = path.slice(prefix.length);
-      names.set(rest.split('/')[0] as string, rest.includes('/') ? 'directory' : 'file');
-    }
-    return [...names].map(([name, kind]) => ({ name, kind }));
-  },
-  info: async file =>
-    map[file] === undefined ? undefined : { modifiedAtMs: 1_770_000_000_000, size: map[file].length },
-  head: async (file, max) => map[file]?.slice(0, max),
-  tail: async (file, max) => map[file]?.slice(-max),
-});
-
-const harness: LinkHarness = {
-  key: 'claude-code',
-  parser: 'claude',
-  home: '.claude',
-  list: async () => [
-    { id: ID, folder: '/work/app', title: 'login page', updatedAt: '2026-02-01T09:05:00.000Z' as Instant },
-  ],
-};
-
-const build = (
-  kept: Array<[string, string]> = [],
-  held: Record<string, string> = {},
-  copies: Array<{ id: string; source: string }> = [],
-  copyFails = false,
-  kept2: Array<{ copy: boolean }> = [],
-  keepInSync?: () => boolean,
+const build = async (
+  options: { held?: Record<string, string>; copyFails?: boolean; keepInSync?: () => boolean; never?: boolean } = {},
 ) => {
-  const fs = files({ [`.claude/projects/-work-app/${ID}.jsonl`]: TRANSCRIPT, ...held });
+  const owner = new MemoryHistory();
+  owner.set(PATH, TRANSCRIPT);
+  for (const [path, text] of Object.entries(options.held ?? {})) owner.set(path, text);
+  const sources: IndexSource[] = [
+    { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: owner },
+    ...(options.held === undefined ? [] : []),
+  ];
+  const index = new ConversationIndex({
+    sqlite: () => memorySqlite(),
+    sources: async () => sources,
+    ferretNames: async () => new Map(),
+    parsers: PARSERS,
+    nowMs: () => 0,
+  });
   const stored = {
     format: 1 as const,
-    links: [] as Array<{ id: string; harness: string; ferret: FerretId; linkedAt: Instant }>,
+    links: [] as Array<{ id: string; harness: string; ferret: FerretId; linkedAt: Instant; copied?: true }>,
   };
-  let cache: Record<string, Record<string, string>> = {};
-  const service = new LinkService({
-    harnesses: () => [harness],
-    files: fs,
-    describer: new FileConversationDescriber(fs, {
-      claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), NO_WAIT),
-      codex: new PacedTranscriptParser(new CodexTranscriptParser(), NO_WAIT),
-    }),
+  const kept: Array<[string, string]> = [];
+  const copies: Array<{ id: string; path: string }> = [];
+  const asked: Array<{ copy: boolean }> = [];
+  const needs: ConstructorParameters<typeof LinkService>[0] = {
+    index,
+    previewer: {
+      preview: async (conversation, count) =>
+        await new FileConversationDescriber(conversationFiles(owner), PARSERS).preview(
+          {
+            harness: conversation.parser,
+            source: conversation.path,
+            relativePath: conversation.path,
+            nameId: conversation.row.id,
+          },
+          count,
+        ),
+    },
     ledger: {
       read: async () => stored,
       add: async link => {
         stored.links.push(link);
       },
     },
-    finder: {
-      read: async () => cache,
-      write: async files => {
-        cache = files as typeof cache;
-      },
-    },
     keeper: {
       keep: async input => {
-        kept2.push({ copy: input.copy });
+        asked.push({ copy: input.copy });
         return ok({
           ferret: 'login-page' as FerretId,
           name: input.name,
@@ -88,24 +71,26 @@ const build = (
       },
     },
     copier: {
-      copy: async ({ id, source }) => {
-        if (copyFails) return err({ reason: 'the disk is full' });
-        copies.push({ id, source });
+      copy: async ({ id, location }) => {
+        if (options.copyFails === true) return err({ reason: 'the disk is full' });
+        copies.push({ id, path: location.path });
         return ok(undefined);
       },
     },
     now: () => '2026-02-02T00:00:00.000Z' as Instant,
     keptPublished: (ferret, link) => void kept.push([ferret, link]),
-    ...(keepInSync === undefined ? {} : { keepInSync }),
-  });
-  return { service, stored, cache: () => cache, kept };
+    ...(options.keepInSync === undefined ? {} : { keepInSync: options.keepInSync }),
+  };
+  await index.refresh();
+  return { service: new LinkService(needs), needs, stored, kept, copies, asked, owner, index };
 };
 
 describe('links', () => {
-  test('a listing describes each conversation from its own file, newest first, and remembers where the file is', async () => {
-    const { service, cache } = build();
+  test('a listing is the index’s answer: each conversation as its own file describes it, newest first', async () => {
+    const { service } = await build();
     const listing = await service.list({});
     expect(listing.matched).toBe(1);
+    expect(listing.indexing).toBeUndefined();
     expect(listing.conversations[0]).toMatchObject({
       id: ID,
       harness: 'claude-code',
@@ -113,13 +98,31 @@ describe('links', () => {
       preview: 'please add a login page',
       turns: 1,
       keptIn: 'computer',
+      name: 'please add a login page',
     });
-    expect(cache()['claude-code']?.[ID]).toBe(`projects/-work-app/${ID}.jsonl`);
+  });
+
+  test('a listing says the index is still being read when a first build is under way, and does not wait for it', async () => {
+    const { service, needs } = await build();
+    // A source that never answers: the build never finishes.
+    const stuck = new LinkService({
+      ...needs,
+      index: new ConversationIndex({
+        sqlite: () => memorySqlite(),
+        sources: () => new Promise(() => undefined),
+        ferretNames: async () => new Map(),
+        parsers: PARSERS,
+        nowMs: () => 0,
+      }),
+    });
+    const listing = await stuck.list({});
+    expect(listing).toMatchObject({ matched: 0, indexing: true });
+    expect((await service.list({})).indexing).toBeUndefined();
   });
 
   test('Keep in sync off hides the computer’s conversations and says so; on lists them; read fresh on every listing', async () => {
     let on = false;
-    const { service } = build([], {}, [], false, [], () => on);
+    const { service } = await build({ keepInSync: () => on });
     const hidden = await service.list({});
     expect(hidden.conversations).toEqual([]);
     expect(hidden.matched).toBe(0);
@@ -133,7 +136,7 @@ describe('links', () => {
   test('the daemon reads keepInSync from the conversation.yaml in effect on every listing: off hides, an edit shows again', async () => {
     let inEffect: { keepInSync: boolean } | undefined = { keepInSync: false };
     const config = { file: () => inEffect } as unknown as Parameters<typeof keepInSyncFrom>[0];
-    const { service } = build([], {}, [], false, [], keepInSyncFrom(config));
+    const { service } = await build({ keepInSync: keepInSyncFrom(config) });
     expect((await service.list({})).computerListed).toBe(false);
     inEffect = { keepInSync: true };
     expect((await service.list({})).matched).toBe(1);
@@ -145,29 +148,20 @@ describe('links', () => {
   });
 
   test('with no Keep in sync reader the computer’s conversations are listed, as on a machine whose file says nothing', async () => {
-    const { service } = build();
+    const { service } = await build();
     expect((await service.list({})).matched).toBe(1);
   });
 
-  test('a query narrows by every word, and a source of ferretry lists nothing (those are ferrets)', async () => {
-    const { service } = build();
+  test('a query narrows by every word, and a source of ferretry lists only Ferretry’s own copies', async () => {
+    const { service } = await build();
     expect((await service.list({ q: 'login nothing' })).matched).toBe(0);
     expect((await service.list({ q: 'LOGIN page' })).matched).toBe(1);
     expect((await service.list({ source: 'ferretry' })).conversations).toEqual([]);
-  });
-
-  test('a conversation whose file cannot be found is still listed from what its finder said, turns as a floor', async () => {
-    const { service } = build([], {});
-    const lone = new LinkService({
-      ...(service as unknown as { needs: ConstructorParameters<typeof LinkService>[0] }).needs,
-      files: files({}),
-    });
-    const listing = await lone.list({});
-    expect(listing.conversations[0]).toMatchObject({ id: ID, preview: 'login page', turns: 0, turnsAtLeast: true });
+    expect((await service.list({ source: 'computer' })).matched).toBe(1);
   });
 
   test('a preview is the last exchanges, cleaned; an unknown conversation is nothing', async () => {
-    const { service } = build();
+    const { service } = await build();
     expect(await service.preview('claude-code', ID)).toMatchObject({
       id: ID,
       harness: 'claude-code',
@@ -180,15 +174,15 @@ describe('links', () => {
   });
 
   test('Q19 keeping links the conversation: it is copied into the harness pool first, the ledger names the ferret and the original is only read', async () => {
-    const kept: Array<[string, string]> = [];
-    const copies: Array<{ id: string; source: string }> = [];
-    const { service, stored } = build(kept, {}, copies);
+    const { service, stored, kept, copies } = await build();
     const result = await service.keep({
       harness: 'claude-code',
       runtime: 'default',
       conversations: [{ id: ID, start: false }],
     });
-    expect(result.kept).toEqual([{ id: ID, ferret: 'login-page' as FerretId, name: 'login page', state: 'stopped' }]);
+    expect(result.kept).toEqual([
+      { id: ID, ferret: 'login-page' as FerretId, name: 'please add a login page', state: 'stopped' },
+    ]);
     expect(stored.links).toEqual([
       {
         id: ID,
@@ -199,7 +193,7 @@ describe('links', () => {
       },
     ] as unknown as typeof stored.links);
     // The copy is asked of the harness for the file the computer holds, whether or not the caller asked for one.
-    expect(copies).toEqual([{ id: ID, source: `.claude/projects/-work-app/${ID}.jsonl` }]);
+    expect(copies).toEqual([{ id: ID, path: PATH }]);
     expect(kept).toEqual([['login-page', ID]]);
     const again = await service.keep({
       harness: 'claude-code',
@@ -212,22 +206,20 @@ describe('links', () => {
   });
 
   test('Q19 a copy on request: Ferretry copies the file, then keeps it, and the ledger says it was copied', async () => {
-    const copies: Array<{ id: string; source: string }> = [];
-    const asked: Array<{ copy: boolean }> = [];
-    const { service, stored } = build([], {}, copies, false, asked);
+    const { service, stored, copies, asked } = await build();
     const result = await service.keep({
       harness: 'claude-code',
       runtime: 'default',
       conversations: [{ id: ID, start: false, copy: true }],
     });
     expect(result.kept).toHaveLength(1);
-    expect(copies).toEqual([{ id: ID, source: `.claude/projects/-work-app/${ID}.jsonl` }]);
+    expect(copies).toEqual([{ id: ID, path: PATH }]);
     expect(asked).toEqual([{ copy: true }]);
     expect(stored.links[0]).toMatchObject({ id: ID, copied: true });
   });
 
   test('a copy that fails keeps nothing and says why', async () => {
-    const { service, stored } = build([], {}, [], true);
+    const { service, stored } = await build({ copyFails: true });
     const result = await service.keep({
       harness: 'claude-code',
       runtime: 'default',
@@ -238,7 +230,7 @@ describe('links', () => {
   });
 
   test('keeping a conversation no history holds is not_found', async () => {
-    const { service } = build();
+    const { service } = await build();
     const result = await service.keep({
       harness: 'claude-code',
       runtime: 'default',
@@ -249,7 +241,7 @@ describe('links', () => {
   });
 
   test('the routes refuse a bad query with 400 and an unknown preview with 404', async () => {
-    const { service } = build();
+    const { service } = await build();
     const routes = linkRoutes(service);
     const call = (query: Record<string, string>, params: Record<string, string> = {}) =>
       ({
@@ -292,25 +284,17 @@ describe('links', () => {
   });
 
   /** The service of `build`, with some of its ports replaced. */
-  const variant = (replace: Partial<ConstructorParameters<typeof LinkService>[0]>) => {
-    const { service } = build();
-    return new LinkService({
-      ...(service as unknown as { needs: ConstructorParameters<typeof LinkService>[0] }).needs,
-      ...replace,
-    });
+  const variant = async (replace: Partial<ConstructorParameters<typeof LinkService>[0]>) => {
+    const { needs } = await build();
+    return new LinkService({ ...needs, ...replace });
   };
   const keepIt = (service: LinkService, copy = false) =>
     service.keep({ harness: 'claude-code', runtime: 'default', conversations: [{ id: ID, start: false, copy }] });
   const copier = (copy: () => Promise<never>) => ({ copy });
 
-  test('a copy asked for a conversation whose file cannot be found says so, and keeps nothing', async () => {
-    const result = await keepIt(variant({ files: files({}) }), true);
-    expect(result.refused).toEqual([{ id: ID, code: 'failed', reason: 'Its file could not be found to copy.' }]);
-  });
-
   test('a copier that throws is reported in its own words, or in ours when it gave none', async () => {
     const worded = await keepIt(
-      variant({
+      await variant({
         copier: copier(async () => {
           throw new Error('permission denied');
         }),
@@ -319,7 +303,7 @@ describe('links', () => {
     );
     expect(worded.refused[0]).toMatchObject({ code: 'failed', reason: 'permission denied' });
     const silent = await keepIt(
-      variant({
+      await variant({
         copier: copier(async () => {
           throw new Error('');
         }),
@@ -330,11 +314,11 @@ describe('links', () => {
   });
 
   test('a keeper that refuses, or throws, keeps nothing and says why', async () => {
-    const refuses = variant({
+    const refuses = await variant({
       keeper: { keep: async () => err({ code: 'unavailable', reason: 'No such runtime.' }) },
     });
     expect((await keepIt(refuses)).refused).toEqual([{ id: ID, code: 'unavailable', reason: 'No such runtime.' }]);
-    const worded = variant({
+    const worded = await variant({
       keeper: {
         keep: async () => {
           throw new Error('no room');
@@ -342,7 +326,7 @@ describe('links', () => {
       },
     });
     expect((await keepIt(worded)).refused).toEqual([{ id: ID, code: 'failed', reason: 'no room' }]);
-    const silent = variant({
+    const silent = await variant({
       keeper: {
         keep: async () => {
           throw new Error('');
@@ -355,44 +339,41 @@ describe('links', () => {
   });
 
   test('lists Codex conversations from their rollouts, named by Codex’s own index', async () => {
-    const CODEX = '5c1e0e3a-0000-4000-8000-0000000000aa';
-    const rollout = `.codex/sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX}.jsonl`;
-    const lines = [
-      JSON.stringify({
-        type: 'session_meta',
-        timestamp: '2026-10-10T09:00:00.000Z',
-        payload: { id: CODEX, cwd: '/work/notes' },
-      }),
-      JSON.stringify({
-        type: 'response_item',
-        timestamp: '2026-10-10T09:01:00.000Z',
-        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'take notes' }] },
-      }),
-    ].join('\n');
-    const held = {
-      [rollout]: lines,
-      '.codex/sessions/2026/10/10/notes.txt': 'not a rollout',
-      '.codex/sessions/2026/10/10/rollout-no-id.jsonl': 'x',
-      '.codex/session_index.jsonl': JSON.stringify({ id: CODEX, thread_name: 'Meeting notes' }),
-      '.codex/sessions/a/b/c/d/e/rollout-too-deep.jsonl': 'x',
-    };
-    const fs = files(held);
-    const codex: LinkHarness = {
-      key: 'codex',
-      parser: 'codex',
-      home: '.codex',
-      list: async () => [
-        { id: CODEX, folder: '/work/notes', title: 'notes', updatedAt: '2026-10-10T09:01:00.000Z' as Instant },
-      ],
-    };
-    const { service } = build();
-    const needs = (service as unknown as { needs: ConstructorParameters<typeof LinkService>[0] }).needs;
-    const listing = await new LinkService({ ...needs, files: fs, harnesses: () => [codex] }).list({});
+    const home = new MemoryHistory();
+    home.set(
+      `sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX}.jsonl`,
+      codexRollout(CODEX, '/work/notes', 'take notes'),
+    );
+    home.set('session_index.jsonl', JSON.stringify({ id: CODEX, thread_name: 'Meeting notes' }));
+    const { needs } = await build();
+    const index = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => [{ harness: 'codex', parser: 'codex', kind: 'computer', label: 'owner', files: home }],
+      ferretNames: async () => new Map(),
+      parsers: PARSERS,
+      nowMs: () => 0,
+    });
+    await index.refresh();
+    const listing = await new LinkService({ ...needs, index }).list({});
     expect(listing.conversations[0]).toMatchObject({ id: CODEX, harness: 'codex', name: 'Meeting notes' });
+  });
 
-    // Without an index Codex has named nothing, and the rollout's own record stands.
-    const { '.codex/session_index.jsonl': _index, ...bare } = held;
-    const unnamed = await new LinkService({ ...needs, files: files(bare), harnesses: () => [codex] }).list({});
-    expect(unnamed.conversations[0]?.id).toBe(CODEX);
+  test('a conversation a ferret runs shows the ferret’s name on every row, and is marked as that ferret’s', async () => {
+    const { needs } = await build();
+    const owner = new MemoryHistory();
+    owner.set(PATH, TRANSCRIPT);
+    const index = new ConversationIndex({
+      sqlite: () => memorySqlite(),
+      sources: async () => [
+        { harness: 'claude-code', parser: 'claude', kind: 'computer', label: 'owner', files: owner },
+      ],
+      ferretNames: async () => new Map([[`claude-code:${ID}`, { ferret: 'scout', name: 'Login scout' }]]),
+      parsers: PARSERS,
+      nowMs: () => 0,
+    });
+    await index.refresh();
+    const service = new LinkService({ ...needs, index });
+    const listing = await service.list({ q: 'scout' });
+    expect(listing.conversations[0]).toMatchObject({ name: 'Login scout', ferretName: 'Login scout', keptBy: 'scout' });
   });
 });
