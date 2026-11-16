@@ -1,0 +1,4 @@
+kind	path	limit	expires	reason
+composition	daemon/host.ts	-	-	buildConversationA: wires queue, turns, questions, drafts, channel and prompts
+composition	daemon/index.ts	-	-	implementDaemon shell and the per-route lists
+composition	manifest.ts	-	-	the manifest literal: routes, cli, tools, ui and hooks
