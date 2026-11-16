@@ -671,6 +671,12 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
    * a person who stopped, resumed or archived the ferret in the meantime wins (W2-a).
    */
   readonly expect?: (record: FerretRecord) => boolean;
+  /**
+   * Called once everything that can refuse WITHOUT launching has passed (the target, the start gate, the launch's own
+   * preconditions) and BEFORE the live pane is released or anything is written to the record: a move writes its own
+   * documents here, so a refusal leaves them as they were, byte for byte. A throw refuses the resume with the pane unchanged.
+   */
+  readonly committed?: () => Promise<void>;
 }
 
 /** Why a resume that found the ferret no longer in the state its caller expected was refused (W2-a). */
@@ -1473,6 +1479,7 @@ export class FerretsService implements FerretsApi {
       const ready = await this.launchable(retargeted);
       if (!ready.ok) return ready;
     }
+    await options.committed?.();
     const settled = replacing ? await this.releaseLive(found) : found;
     // The target is written with the record's `starting` state, then launched: one owner of the runtime, login and harness.
     const record =

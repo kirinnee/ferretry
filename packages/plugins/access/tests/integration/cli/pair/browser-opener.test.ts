@@ -6,23 +6,44 @@
  * opens a browser on a build machine. What is asserted is the argument vector. The launcher must be
  * given the PATH of a private page and never the link, because an argument is world-readable on a
  * shared host and the link's fragment is a live pairing code. The page itself is real, in a temporary
- * state home, so its mode, its directory and its removal are observed rather than assumed.
+ * state home, so its mode, its directory and its removal are observed rather than assumed. THE CLI NEVER WRITES IT:
+ * the page is made by the daemon's own writer (`stateRedirectWriter`), run here over a real directory, exactly as
+ * `POST /v1/pair/redirect` runs it, and the opener only finds and removes it.
  */
 
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import type { ChildProcess, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmdirSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fixedClock } from '@ferretry/kernel/testing';
 import should from 'should';
 
 import {
+  createPairingRedirectPage,
   DesktopBrowserOpener,
   desktopBrowserOpener,
   type ExitingProcess,
   holdProcessOpen,
   onProcessExit,
+  type PairingRedirectCliStatePort,
 } from '../../../../cli/adapters/pair/browser-opener.ts';
+import type { PairingRedirectStatePort } from '../../../../daemon/adapters/pairing/boot-redirect-sweep.ts';
+import {
+  type PairingRedirectWriteState,
+  stateRedirectWriter,
+} from '../../../../daemon/adapters/pairing/redirect-writer.ts';
 
 const CODE = '7F3K-Q2ND';
 const URL = `https://ferretry.example.invalid/pair#v1;u;f;code=${CODE}`;
@@ -53,7 +74,7 @@ const recordingSpawn = (launches: Launch[], failure?: Error, errors: ErrorListen
 
 let stateHome: string;
 let timers: { readonly run: () => void; readonly ms: number }[];
-let exits: (() => void)[];
+let exits: (() => Promise<void>)[];
 
 beforeEach(() => {
   stateHome = mkdtempSync(join(tmpdir(), 'fy-pair-opener-'));
@@ -65,11 +86,39 @@ afterEach(() => {
   rmSync(stateHome, { recursive: true, force: true });
 });
 
-const openerOn = (platform: string, launches: Launch[], failure?: Error, errors?: ErrorListener[]) =>
+/** A real directory standing in for the declared tree: the daemon's writer makes the page in it, the CLI only removes it. */
+const realState = (home: string) => {
+  const at = (name: string | undefined) => join(home, name ?? '');
+  const state: PairingRedirectWriteState & PairingRedirectStatePort & PairingRedirectCliStatePort = {
+    createPrivateDirectory: async (_file, name) => mkdirSync(at(name), { mode: 0o700 }),
+    write: async (_file, value, name) => writeFileSync(at(name), value as Uint8Array, { flag: 'wx', mode: 0o600 }),
+    remove: async (_file, name) => unlinkSync(at(name)),
+    removeEmptyDirectory: async (_file, name) => rmdirSync(at(name)),
+    list: async () => readdirSync(home),
+    stat: async () => undefined,
+    pathOf: (_file, name) => at(name),
+  };
+  return state;
+};
+
+/** The page made the way the daemon makes it, found and removed the way the shipped opener does. */
+const daemonMadePage = (home: string) => {
+  const state = realState(home);
+  const writer = stateRedirectWriter(state, fixedClock());
+  return (page: string) => createPairingRedirectPage({ state, make: made => writer.write(made) }, page);
+};
+
+const openerOn = (
+  platform: string,
+  launches: Launch[],
+  failure?: Error,
+  errors?: ErrorListener[],
+  home: string = stateHome,
+) =>
   new DesktopBrowserOpener({
     platform,
     spawn: recordingSpawn(launches, failure, errors),
-    stateHome,
+    createPage: daemonMadePage(home),
     retentionMs: 10_000,
     schedule: (run, ms) => {
       timers.push({ run, ms });
@@ -81,6 +130,9 @@ const openerOn = (platform: string, launches: Launch[], failure?: Error, errors?
 
 const openOn = async (platform: string, launches: Launch[] = [], failure?: Error): Promise<boolean> =>
   await openerOn(platform, launches, failure).open(URL);
+
+/** The page's removal goes through the (asynchronous) state, so a timer or an error is given a turn to finish it. */
+const settled = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
 /** What the state home holds right now — the proof a page is, or is no longer, on disk. */
 const leftovers = (): readonly string[] => readdirSync(stateHome);
@@ -138,6 +190,7 @@ describe('DesktopBrowserOpener', () => {
     timers[0]?.ms.should.equal(10_000);
     existsSync(file).should.be.true();
     timers[0]?.run();
+    await settled();
     existsSync(file).should.be.false();
     // The directory goes with it, so nothing of the page is left under the state home.
     leftovers().should.be.empty();
@@ -147,7 +200,7 @@ describe('DesktopBrowserOpener', () => {
     const launches: Launch[] = [];
     await openOn('linux', launches);
     exits.should.have.length(1);
-    exits[0]?.();
+    await exits[0]?.();
     existsSync(launches[0]?.args[0] ?? '').should.be.false();
     leftovers().should.be.empty();
     should(() => timers[0]?.run()).not.throw();
@@ -160,6 +213,7 @@ describe('DesktopBrowserOpener', () => {
     (await openerOn('linux', [], undefined, errors).open(URL)).should.be.true();
     leftovers().should.have.length(1);
     errors[0]?.();
+    await settled();
     leftovers().should.be.empty();
   });
 
@@ -206,14 +260,7 @@ describe('DesktopBrowserOpener', () => {
 
   it('answers false when the state home cannot hold a page, rather than falling back to a shared directory', async () => {
     const launches: Launch[] = [];
-    const missing = new DesktopBrowserOpener({
-      platform: 'linux',
-      spawn: recordingSpawn(launches),
-      stateHome: join(stateHome, 'does', 'not', 'exist'),
-      retentionMs: 10_000,
-      schedule: () => undefined,
-      onExit: () => undefined,
-    });
+    const missing = openerOn('linux', launches, undefined, undefined, join(stateHome, 'does', 'not', 'exist'));
     (await missing.open(URL)).should.be.false();
     launches.should.be.empty();
   });
@@ -224,8 +271,21 @@ describe('desktopBrowserOpener', () => {
     // The factory the composition root mounts. Constructing it must not spawn or write —
     // nothing happens until `open` is called, and this suite never calls it on
     // the real one, because a build machine has no business opening a browser.
-    should.exist(desktopBrowserOpener(stateHome));
+    should.exist(desktopBrowserOpener());
     leftovers().should.be.empty();
+  });
+
+  it('refuses --open outright when the state is not there to remove a page through, writing nothing', async () => {
+    (await desktopBrowserOpener().open(URL)).should.be.false();
+    leftovers().should.be.empty();
+  });
+
+  it('never writes the page itself: the opener holds no file-writing import, so the daemon is the only writer', () => {
+    const source = readFileSync(join(import.meta.dir, '../../../../cli/adapters/pair/browser-opener.ts'), 'utf8');
+    // The CLI-side page is made by POST /v1/pair/redirect and pinned before the write returns; a direct write here
+    // would be a live code on disk that the fence has not pinned yet.
+    source.should.not.match(/from 'node:fs/u);
+    source.should.not.match(/\b(mkdtempSync|writeFileSync|writeFile|mkdirSync)\b/u);
   });
 });
 

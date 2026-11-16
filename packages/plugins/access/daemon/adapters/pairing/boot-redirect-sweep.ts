@@ -20,8 +20,11 @@ export function pairingRedirectBoot(): {
   };
 }
 
-/** Today's sweep, inside Access's declared opaque tree: exact names, age, regular files, then plain rmdir. */
-async function sweepPairingRedirectState(state: PairingRedirectStatePort, nowMs: number): Promise<void> {
+/**
+ * The sweep, inside Access's declared opaque tree: exact names, age, regular files, then plain rmdir. Run at boot and
+ * again on the daemon's own timer after every page it makes (`stateRedirectWriter`), so no page outlives its code.
+ */
+export async function sweepPairingRedirectState(state: PairingRedirectStatePort, nowMs: number): Promise<void> {
   let entries: readonly string[];
   try {
     entries = await state.list(PairingRedirectsFile);

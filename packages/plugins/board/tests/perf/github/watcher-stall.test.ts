@@ -14,7 +14,7 @@ import { answer, prNode, prUrl } from '../../unit/github/support.ts';
  * daemon is one thread, so what matters is the longest stretch the tick runs WITHOUT giving the event loop back.
  * The cards are stored by the real `KernelCardStore` (its schema parse and per-card serial sections included) and every
  * stub below yields to the loop once per call, as the real file, `gh` and Asks calls do, so a gap the sampler sees is
- * one synchronous slice of the tick's own work.
+ * one synchronous slice of the tick's own work, measured as the CPU it burned (see the sampler).
  */
 const MAX_SLICE_MS = 100;
 const CARDS = 3_600;
@@ -22,6 +22,11 @@ const REPOSITORIES = 8;
 const HISTORY = 30;
 
 const file = (name: string) => manifest.data.state.find(candidate => candidate.name === name) as never;
+/** The CPU time this process has used so far (user + system), in ms: what a stretch of work cost, not how long a busy host took to run it. */
+const cpuMs = (): number => {
+  const { user, system } = process.cpuUsage();
+  return (user + system) / 1000;
+};
 const yieldToLoop = async (): Promise<void> => {
   await new Promise<void>(resolve => setImmediate(resolve));
 };
@@ -134,13 +139,25 @@ describe('the watcher tick on a 3,600-card board', () => {
       version: '4.114.0',
     });
 
+    // The perf tier runs every file in ONE bun process (the sibling `watcher-slices.test.ts` runs just before this one),
+    // so the heap holds what earlier files left. A major garbage collection is a stop-the-world pause proportional to
+    // that heap, and one that falls inside the tick is charged to the tick although the tick did not cause it (CI,
+    // run 43902827736: 150 ms against the 100 ms bound; here, a heap freshly grown by 2.5 M small objects: 179-426 ms
+    // for the same tick, 25-35 ms once collected first). Collect first, outside the measured window, so the window
+    // holds only the tick's own synchronous work. A tick that really holds the loop still fails: see the commit.
+    Bun.gc(true);
+
+    // A slice is measured in CPU time, not wall time: the tick's own work is what the code controls, and wall time also
+    // counts every moment a loaded shared runner took the CPU away (here, 96 busy processes on 32 cores stretched a
+    // ~30 ms slice to 136 ms with the same code). A slice that really holds the loop burns CPU for the whole gap, so it
+    // still fails; a preempted one does not.
     let longestSlice = 0;
     let sampling = true;
     const sampler = (async () => {
       while (sampling) {
-        const from = performance.now();
+        const from = cpuMs();
         await yieldToLoop();
-        longestSlice = Math.max(longestSlice, performance.now() - from);
+        longestSlice = Math.max(longestSlice, cpuMs() - from);
       }
     })();
     const report = await watcher.tick();

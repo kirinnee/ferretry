@@ -20,7 +20,12 @@ import { type ModelCatalogSourcesView, ModelCatalogSourcesSchema } from '@ferret
 import { LoginPaused, LoginResumed } from '@ferretry/plugin-usage/contract';
 import type { Instant } from '@ferretry/std';
 import type { KernelPorts } from '@ferretry/kernel/contract';
-import { PROFILE_ITEMS, RuntimeHomeUnreadable, RuntimesPort } from '../../../contract/index.ts';
+import {
+  type MachineBrowserPorts,
+  PROFILE_ITEMS,
+  RuntimeHomeUnreadable,
+  RuntimesPort,
+} from '../../../contract/index.ts';
 import { buildFleetManifest } from '../../../daemon/lib/manifest.ts';
 import { endedSeams, fileAssembly } from '../../../daemon/host-assembly.ts';
 import { hostAssembly, type RuntimesAssembler, runtimesDaemon, unavailableAssembly } from '../../../daemon/index.ts';
@@ -985,6 +990,44 @@ describe('the homes the composed daemon provides', () => {
     expect(await port.catalog()).toEqual(runtimes.json<{ runtimes: unknown[] }>().runtimes as never);
     expect(await port.tools()).toEqual(machine.json<{ tools: unknown[] }>().tools as never);
     expect((await port.tools()).length).toBeGreaterThan(0);
+  });
+
+  it('machineBrowserPorts() says it cannot say while the machine view holds only the schema default (no file of Runtimes carries the setting)', async () => {
+    const { host } = await compose();
+
+    // The machine read still shows the default; the port refuses to pass that default off as a setting somebody made.
+    const machine = (await host.request('GET', '/v1/runtimes/machine')).json<MachineBrowserPorts>();
+    expect(machine.browserPorts).toBe('random');
+
+    await expect(host.provided(RuntimesPort).machineBrowserPorts()).rejects.toThrow(
+      'Runtimes holds no browserPorts setting yet, so it cannot say which ports the agent browser binds',
+    );
+  });
+
+  it('machineBrowserPorts() carries the two settings the machine view holds and nothing else of it', async () => {
+    const { host } = await compose({
+      assemble: ctx => {
+        const base = hostAssembly(ctx);
+        return {
+          ...base,
+          catalog: {
+            ...base.catalog,
+            machine: async () =>
+              ({
+                browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
+                browserFirewallFailure: 'refuse',
+                agentPermissions: 'skip',
+                tools: [],
+              }) as never,
+          },
+        };
+      },
+    });
+
+    expect(await host.provided(RuntimesPort).machineBrowserPorts()).toStrictEqual({
+      browserPorts: { cdp: 9300, relay: 9301, vnc: 5901 },
+      browserFirewallFailure: 'refuse',
+    });
   });
 
   it('S1 the provided port lists and reads the fleet’s installed skills through assetSkills()', async () => {
