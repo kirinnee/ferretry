@@ -72,12 +72,12 @@ describe('what a merge can join', () => {
     const other = item('A2', { subject: 'Where do snoozed items go?' });
     expect(mergeWords(mergeChoice(viewed, other, false), 'A5')).toEqual({
       question: 'Merge ^A2 into this item?',
-      outcome: '^A2 closes; this item keeps its ask. Both conversations and all cards are kept.',
+      outcome: '^A2 closes; this item keeps its ask. Both conversations and all tasks are kept.',
       button: 'Merge',
     });
     expect(mergeWords(mergeChoice(viewed, other, true), 'A5')).toEqual({
       question: 'Merge this item into ^A2?',
-      outcome: 'This item closes; ^A2 keeps its ask. Both conversations and all cards are kept.',
+      outcome: 'This item closes; ^A2 keeps its ask. Both conversations and all tasks are kept.',
       button: 'Merge',
     });
   });

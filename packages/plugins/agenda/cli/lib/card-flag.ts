@@ -29,7 +29,7 @@ export function resolveCardFlag(words: readonly string[], flags: CardFlag): Reso
   if (flags.task === undefined) return { words, todo };
   const card = parseTaskRef(flags.task);
   if (!card.ok) {
-    throw new Error(`--task needs a card reference (F18 or &F18), not "${flags.task}"; for a to-do use --todo`);
+    throw new Error(`--task needs a task reference (F18 or &F18), not "${flags.task}"; for a to-do use --todo`);
   }
   return { words, todo, card: card.value };
 }

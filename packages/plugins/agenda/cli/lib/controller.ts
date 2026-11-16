@@ -56,7 +56,7 @@ const requireBrief = (request: Extract<AgendaActionRequest, { action: 'add' }>):
   if (missing.length === 0) return;
   const flags = missing.map(problem => (problem.startsWith('premise') ? '--premise' : '--context')).join(' and ');
   throw new Error(
-    `agenda add needs ${flags}: ${missing.join('; ')}. The owner reads the card cold, so say --premise "<what is going on>" --context "<the facts around it>"`,
+    `agenda add needs ${flags}: ${missing.join('; ')}. The owner reads the item cold, so say --premise "<what is going on>" --context "<the facts around it>"`,
   );
 };
 
@@ -343,7 +343,7 @@ export class AgendaController {
     if (typed === '') return {};
     if (options.new !== undefined) throw new Error('pass --new or --related <id>, not both');
     if (parseTaskRef(typed).ok) {
-      if (typeof options.task === 'string') throw new Error('pass --task <card> or --related <card>, not both');
+      if (typeof options.task === 'string') throw new Error('pass --task <task> or --related <task>, not both');
       return { card: typed };
     }
     return { item: parseAgendaReference(typed) };
@@ -517,7 +517,7 @@ export class AgendaController {
       .filter(each => each !== '')
       .map(each => {
         const card = parseTaskRef(each);
-        if (!card.ok) throw new Error(`--move-cards names cards like F12,F13, not "${each}"`);
+        if (!card.ok) throw new Error(`--move-tasks names tasks like F12,F13, not "${each}"`);
         return card.value;
       });
     const sessionId = this.#target(options);
@@ -704,7 +704,7 @@ const candidateJson = (candidate: AgendaCandidate) => ({
   id: candidate.id,
   title: candidate.title,
   state: candidate.state,
-  cards: candidate.cards,
+  tasks: candidate.cards,
 });
 
 /** The options minus `--by`, which is read separately into `neededBy`. */

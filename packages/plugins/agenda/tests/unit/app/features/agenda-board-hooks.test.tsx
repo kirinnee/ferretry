@@ -153,7 +153,7 @@ describe('agenda.card-answer: a notice’s Start and Close', () => {
     await settle();
 
     expect(calls).toEqual(['start:B1:key']);
-    expect(root().textContent).toContain('Started: a new ferret is working on this card.');
+    expect(root().textContent).toContain('Started: a new ferret is working on this task.');
   });
 
   test('closes through Board’s hook with the reason, and shows Board’s refusal in its words', async () => {

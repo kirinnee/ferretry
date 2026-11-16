@@ -217,7 +217,7 @@ describe('the verbs Agenda owns for the items on a board', () => {
         title: 'Cache',
         premise: ['A cache is needed'],
         context: ['It has its own rollout'],
-        'move-cards': 'F12,F13',
+        'move-tasks': 'F12,F13',
       }),
     ).toBe(0);
     expect(t.posted()[0]).toMatchObject({

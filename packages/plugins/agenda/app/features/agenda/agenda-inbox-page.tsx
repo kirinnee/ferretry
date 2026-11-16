@@ -291,7 +291,7 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
 }
 
 /** Where a touch item view swipes on its own: its card's top bar (↓ Skip) and its answer row (← ↑ → ↓). */
-const VIEW_GESTURES = '[data-agenda-card-top], [data-agenda-quick-replies]';
+const VIEW_GESTURES = ['[data-agenda-card-top]', '[data-agenda-quick-replies]'].join(', ');
 
 interface OpenItemPlace {
   readonly index: number;
@@ -515,7 +515,7 @@ function CardTools({
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would bring its border and min-width into a flex row of buttons
-    <div aria-label="Put this card aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
+    <div aria-label="Put this item aside" className="fy-inbox-tools" data-inbox-card-tools="" role="group">
       <button className="kt-btn kt-btn--sm" data-inbox-tool="skip" onClick={skip} type="button">
         Skip
       </button>
@@ -756,7 +756,7 @@ function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonl
         </span>
         <h2 className="fy-attn-end__title">All caught up for now</h2>
         <p className="fy-attn-end__text">
-          Skipped cards wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
+          Skipped items wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
         </p>
       </div>
     );

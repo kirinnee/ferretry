@@ -66,14 +66,14 @@ export const agendaCardsActions = (
       if (started.ok || started.error.status !== 0) pending.delete(id);
       return started.ok
         ? started.value.started
-          ? { ok: true, note: 'Started: a new ferret is working on this card.' }
-          : { ok: true, ferret: started.value.sessionId, note: 'A ferret is already working on this card.' }
+          ? { ok: true, note: 'Started: a new ferret is working on this task.' }
+          : { ok: true, ferret: started.value.sessionId, note: 'A ferret is already working on this task.' }
         : refused(started.error.message);
     },
     openChat: sessionId => onNavigate(links.chat(daemonId, sessionId)),
     close: async (id, reason) => {
       const dropped = await board.drop(target(id), reason);
-      return dropped.ok ? { ok: true, note: 'Closed. The card is off the board.' } : refused(dropped.error.message);
+      return dropped.ok ? { ok: true, note: 'Closed. The task is off the board.' } : refused(dropped.error.message);
     },
   };
 };

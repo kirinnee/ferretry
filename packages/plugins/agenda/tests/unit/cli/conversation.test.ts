@@ -81,7 +81,7 @@ describe('agenda split', () => {
         context: ['It has its own rollout.'],
         moveCards: 'not-a-card',
       }),
-    ).be.rejectedWith(/--move-cards/u);
+    ).be.rejectedWith(/--move-tasks/u);
     should(gateway.applied).have.length(0);
   });
 });

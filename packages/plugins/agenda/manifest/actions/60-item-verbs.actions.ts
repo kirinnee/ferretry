@@ -26,7 +26,7 @@ const DONE_OPTIONS: readonly VerbOptionDecl[] = [
   },
   { flag: '--approve | --reject', help: 'answer a permission ask' },
   { flag: '--choice <label>', help: 'answer a multiple-choice ask with one option label' },
-  { flag: '--yes | --no', help: 'answer a yes-or-no card' },
+  { flag: '--yes | --no', help: 'answer a yes-or-no item' },
   { flag: '--good | --clarify <text>', help: 'answer an answer-review ask' },
   { flag: '--answer <text>', help: 'answer an open question' },
   { flag: '--other <text>', help: 'answer with your own words instead of the options' },
@@ -59,9 +59,9 @@ const ADD_OPTIONS: readonly VerbOptionDecl[] = [
   { flag: '--tab-file <name=file>', help: 'a tab of your own, its words from a Markdown file; repeat' },
   { flag: '--blocking', help: 'you are stopped until the owner answers; --will-block names what it blocks' },
   { flag: '--by <time>', help: 'when it is needed: ISO, "in 3h" or a clock time like 17:00' },
-  { flag: '--task <card>', help: 'the board card this item belongs to (F18 or &F18)' },
-  { flag: '--offer-close', help: 'give the owner a "Done · closes <card>" button' },
-  { flag: '--related <id>', help: 'a card (F12) links the item there; an agenda item (A3) is edited, not duplicated' },
+  { flag: '--task <task>', help: 'the board task this item belongs to (F18 or &F18)' },
+  { flag: '--offer-close', help: 'give the owner a "Done · closes <task>" button' },
+  { flag: '--related <id>', help: 'a task (F12) links the item there; an agenda item (A3) is edited, not duplicated' },
   { flag: '--new <why>', help: 'open a new agenda although open ones are listed: say why none fits' },
   { flag: '--confirms <file>', help: 'a config file with a change held for the owner: their Allow applies it' },
   { flag: '--stage <stage>', help: 'what it needs from the owner now: explainer, question, plan, tracker or test' },
@@ -129,7 +129,7 @@ export default manifestFragment({
     }),
     verb('agenda merge <into> <from>', {
       summary:
-        'merge a duplicate into an item: both conversations, every card and link are kept; the duplicate closes as merged',
+        'merge a duplicate into an item: both conversations, every task and link are kept; the duplicate closes as merged',
       args: [
         { name: 'into', help: 'the agenda item to keep, like A3' },
         { name: 'from', help: 'the duplicate, which closes as merged' },
@@ -142,7 +142,7 @@ export default manifestFragment({
       options: [
         ...SESSION,
         { flag: '-t, --title <text>', help: 'REQUIRED: what the new item is about' },
-        { flag: '--move-cards <cards>', help: 'cards of the item that go to the new one, like F12,F13' },
+        { flag: '--move-tasks <tasks>', help: 'tasks of the item that go to the new one, like F12,F13' },
         { flag: '--premise <point>', help: 'the situation (repeat)' },
         { flag: '-c, --context <point>', help: 'the facts around it (repeat)' },
         { flag: '-k, --kind <kind>', help: 'what the owner does' },
