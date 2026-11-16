@@ -20,9 +20,32 @@ export const ADD_RUNTIME_LOGIN_SLOT = 'runtimes.add-runtime-login' as const;
 /** Under a picked login that needs sign-in: Logins' sign-in panel for that login (the panel's `subject`). */
 export const ADD_RUNTIME_SIGN_IN_SLOT = 'runtimes.add-runtime-sign-in' as const;
 
-/** Every slot the Add runtime page offers, in one list a test can pair against the panels other plugins contribute. */
-export const RUNTIMES_SLOTS = [ADD_RUNTIME_LOGIN_SLOT, ADD_RUNTIME_SIGN_IN_SLOT] as const;
+/** Every slot the Add runtime page offers, in one list a test can pair against the panels Logins contributes. */
+export const ADD_RUNTIME_SLOTS = [ADD_RUNTIME_LOGIN_SLOT, ADD_RUNTIME_SIGN_IN_SLOT] as const;
+
+/**
+ * Under an MCP server's row in the Profiles library: where that server stands on this machine. What a server's status
+ * is, how it is read and Check / Sign in are MCP's to draw; Runtimes only knows which component the row is (the panel's
+ * `subject`) and how many runtimes use it. Runtimes cannot import MCP's half and MCP writes no second copy of the name.
+ * Where no panel is placed the row is drawn without a footer.
+ */
+export const COMPONENT_MCP_SLOT = 'runtimes.component-mcp' as const;
+
+/** Every slot Runtimes' pages offer, in one list a test can pair against the panels other plugins contribute. */
+export const RUNTIMES_SLOTS = [...ADD_RUNTIME_SLOTS, COMPONENT_MCP_SLOT] as const;
 export type RuntimesSlot = (typeof RUNTIMES_SLOTS)[number];
+
+/** What the component slot hands its panels, besides the shell's `subject` (the MCP component's name). */
+export interface ComponentMcpSlotProps {
+  /** How many runtimes' profiles carry the component: none means no ferret starts it. */
+  readonly usedByRuntimes: number;
+}
+
+export function isComponentMcpSlotProps(props: unknown): props is ComponentMcpSlotProps {
+  if (typeof props !== 'object' || props === null) return false;
+  const count = (props as Record<string, unknown>).usedByRuntimes;
+  return typeof count === 'number' && Number.isInteger(count) && count >= 0;
+}
 
 /** What the add-login slot hands its panels. */
 export interface AddRuntimeLoginSlotProps {

@@ -34,6 +34,9 @@ export default implementApp(manifest, {
         'add-mcp-row': lazyComponent<PanelProps>(
           async () => (await surfacesOf()).panels['add-mcp-row'] as AppComponent<PanelProps>,
         ),
+        'component-status': lazyComponent<PanelProps>(
+          async () => (await surfacesOf()).panels['component-status'] as AppComponent<PanelProps>,
+        ),
       },
       settings: {
         mcp: lazyComponent<SettingsProps>(async () => (await surfacesOf()).settings.mcp as AppComponent<SettingsProps>),
