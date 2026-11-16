@@ -1,0 +1,7 @@
+{
+  "entry": ["worker/src/adapters/worker.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:worker/src/adapters/worker.ts": "the Cloudflare Worker entry named by `main` in wrangler.jsonc; deployed by path, imported by nothing."
+  }
+}

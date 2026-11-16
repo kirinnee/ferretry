@@ -310,7 +310,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Dead-code keep markers name an open fact";
       entry = validator "scripts/validate/pending-tags.sh";
-      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|knip(\\.production)?\\.json|(.*/)?ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports|pending-files)\\.ts)$";
+      files = "^((.*/)?package\\.json|packages/.*\\.(ts|tsx|mts)|(.*/)?knip(\\.production)?\\.(json|ts)|(.*/)?ports-pending\\.json|docs/rebuild/guarantees\\.tsv|scripts/validate/(pending-tags(\\.test)?\\.(sh|ts)|ports-pending\\.ts|guarantees\\.ts)|scripts/gen/lib/(workspace|imports|pending-files|knip-config)\\.ts)$";
       pass_filenames = false;
       language = "system";
     };
@@ -384,8 +384,8 @@ pre-commit-lib.run {
     a-deadcode = {
       enable = true;
       name = "Knip repository dead code";
-      entry = bun-tool "knip --config knip.json";
-      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.json$|\\.(ts|tsx)$)";
+      entry = bun-tool "knip --config knip.ts";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|(^|/)knip\\.json$|^knip\\.ts$|^scripts/gen/lib/knip-config\\.ts$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };
@@ -393,8 +393,8 @@ pre-commit-lib.run {
     a-deadcode-production = {
       enable = true;
       name = "Knip production dead code";
-      entry = bun-tool "knip --config knip.production.json";
-      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|^knip\\.production\\.json$|\\.(ts|tsx)$)";
+      entry = bun-tool "knip --config knip.production.ts";
+      files = "((^|/)package\\.json$|(^|/)tsconfig\\.json$|(^|/)knip\\.production\\.json$|^knip\\.production\\.ts$|^scripts/gen/lib/knip-config\\.ts$|\\.(ts|tsx)$)";
       pass_filenames = false;
       language = "system";
     };
