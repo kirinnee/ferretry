@@ -3,7 +3,7 @@
  * exit, and everything this service reports is DERIVED from those files and the tmux listing — so a fresh instance (a daemon
  * restart) reads exactly what the old one did.
  */
-import { instantFromEpochMs } from '@ferretry/std';
+import { instantFromEpochMs, isJobAttachCommand } from '@ferretry/std';
 import {
   JOB_MAX_COMMAND_LENGTH,
   JOB_MAX_RUNNING_GLOBAL,
@@ -20,6 +20,7 @@ import {
   type JobStartedBy,
   type JobView,
 } from '../../../contract/index.ts';
+import type { KeptJob } from '@ferretry/core-ferrets/contract';
 import type { TerminalClock, TerminalIdSource, TerminalSessionResolver } from '../../lib/terminal/contracts.ts';
 import {
   type AttachmentEntry,
@@ -27,6 +28,7 @@ import {
   withDetaching,
   withEntry,
   withoutEntry,
+  withOrphansDetaching,
   withoutStale,
 } from '../../lib/jobs/attachments.ts';
 import type {
@@ -60,6 +62,8 @@ export interface JobServiceOptions {
   /** Whether a folder exists (a job starts where the caller was; tmux would silently start elsewhere otherwise). */
   readonly isDirectory: (path: string) => Promise<boolean>;
   readonly sleep: (ms: number) => Promise<void>;
+  /** The CLI's binary name (`fy`), single-sourced by the composition root: what an attachment's command line must run. */
+  readonly binaryName: string;
   /** Told when a job started or was stopped (the daemon log line). */
   readonly onEvent?: (event: {
     readonly kind: 'started' | 'stopped' | 'removed';
@@ -218,12 +222,16 @@ export class JobService {
     const attachments = await this.liveAttachments(session.id);
     const mine =
       request.attachment === undefined ? undefined : attachments.find(entry => entry.id === request.attachment);
+    const ended = finished && next >= size;
+    // A live attachment was just served the end of the log: it prints the exit, so the ferret has been told.
+    if (ended && mine !== undefined && !mine.detaching)
+      await this.files.markReported(session.id, row.meta.id).catch(() => undefined);
     return {
       text: new TextDecoder().decode(bytes.subarray(0, end)),
       next,
       size,
       job: await this.view(session.id, row, attachments),
-      ended: finished && next >= size,
+      ended,
       detach: mine?.detaching === true,
     };
   }
@@ -418,13 +426,24 @@ export class JobService {
     const session = await this.session(reference);
     const job = await this.row(session.id, input.jobId);
     const start = await this.proof.startOf(input.pid).catch(() => 'unknown' as const);
+    const harness = await this.proof.harnessOf?.(input.pid).catch(() => undefined);
     if (start === undefined) throw new JobServiceError('bad_request', `pid ${input.pid} is not a running process`);
+    // ARGV IS NECESSARY, NEVER SUFFICIENT: the gate trusts this registry, so only an `fy job attach|run` process gets in. An
+    // argv that cannot be read refuses too (fail closed).
+    const argv = await this.proof.argvOf(input.pid).catch(() => 'unknown' as const);
+    if (argv === undefined) throw new JobServiceError('bad_request', `pid ${input.pid} is not a running process`);
+    if (argv === 'unknown' || !isJobAttachCommand(argv, this.options.binaryName))
+      throw new JobServiceError(
+        'bad_request',
+        `pid ${input.pid} is not a \`${this.options.binaryName} job attach\` process`,
+      );
     const entry: AttachmentEntry = {
       id: this.ids.next(),
       sessionId: session.id,
       jobId: job.meta.id,
       pid: input.pid,
       processStart: start === 'unknown' ? `unproved-${input.pid}` : start,
+      ...(harness === undefined ? {} : { harness }),
       ...(input.claudeTaskId === undefined ? {} : { claudeTaskId: input.claudeTaskId }),
       registeredAt: instantFromEpochMs(this.clock.now()),
       detaching: false,
@@ -443,6 +462,90 @@ export class JobService {
   async listAttachments(reference: string): Promise<JobAttachmentListView> {
     const session = await this.session(reference);
     return { sessionId: session.id, attachments: (await this.liveAttachments(session.id)).map(toView) };
+  }
+
+  /**
+   * Asks to detach every attachment whose harness was killed without a word (SIGKILL leaves the shell and the attachment
+   * running, reparented): such an orphan reports to nobody. Answers how many it newly asked. Read once per sweep tick.
+   */
+  async sweepOrphans(): Promise<number> {
+    const current = await this.prune();
+    const pids = [
+      ...new Set(current.entries.flatMap(entry => (entry.harness === undefined ? [] : [entry.harness.pid]))),
+    ];
+    if (pids.length === 0) return 0;
+    const now = new Map<number, string | undefined | 'unknown'>();
+    for (const pid of pids) now.set(pid, await this.proof.startOf(pid).catch(() => 'unknown' as const));
+    let marked = 0;
+    await this.attachments.update(state => {
+      const result = withOrphansDetaching(state, now);
+      marked = result.marked;
+      return result.state;
+    });
+    return marked;
+  }
+
+  // ─── what the moves read (the `jobs.keeper` hook's source) ─────────────────────────────────────────────────────
+
+  /** The proven live attachments of a ferret, with the name of each one's job. */
+  async keptAttachments(
+    reference: string,
+  ): Promise<readonly { pid: number; jobId: string; jobName: string; jobEnded?: boolean }[]> {
+    const session = await this.session(reference);
+    const [live, rows] = await Promise.all([this.liveAttachments(session.id), this.rows(session.id)]);
+    const found = new Map(rows.map(row => [row.meta.id, row]));
+    return live.flatMap(entry => {
+      const row = found.get(entry.jobId);
+      if (row === undefined) return [];
+      const ended = jobState(row.exit, row.running !== undefined) !== 'running';
+      return [{ pid: entry.pid, jobId: entry.jobId, jobName: row.meta.name, ...(ended ? { jobEnded: true } : {}) }];
+    });
+  }
+
+  private async keptJob(owner: string, row: Row): Promise<KeptJob> {
+    const state = jobState(row.exit, row.running !== undefined);
+    return {
+      id: row.meta.id,
+      name: row.meta.name,
+      state,
+      startedAt: row.meta.startedAt,
+      ...(row.exit === undefined ? {} : { endedAt: row.exit.endedAt, exitCode: row.exit.code }),
+      unreported: state !== 'running' && !(await this.files.isReported(owner, row.meta.id)),
+    };
+  }
+
+  /** A ferret's jobs, newest first: what the hand-over lists. */
+  async keptJobs(reference: string): Promise<readonly KeptJob[]> {
+    const session = await this.session(reference);
+    const rows = (await this.rows(session.id)).toSorted((a, b) => b.meta.startedAt.localeCompare(a.meta.startedAt));
+    return await Promise.all(rows.map(async row => await this.keptJob(session.id, row)));
+  }
+
+  async markJobsReported(reference: string, jobIds: readonly string[]): Promise<void> {
+    const session = await this.session(reference);
+    for (const id of jobIds) await this.files.markReported(session.id, id).catch(() => undefined);
+  }
+
+  /**
+   * Finished, unreported jobs with no live attachment, ended at least `graceMs` ago — an attachment that was live at the
+   * end reports it itself within a poll, so a job this young is left to it.
+   */
+  async endedUnattached(graceMs: number): Promise<readonly { ferret: string; job: KeptJob }[]> {
+    const [rows, live] = await Promise.all([this.rows(), this.liveAttachmentsAll()]);
+    const attached = new Set(live.map(entry => `${entry.sessionId}\n${entry.jobId}`));
+    const cutoff = this.clock.now() - graceMs;
+    const found: { ferret: string; job: KeptJob }[] = [];
+    for (const row of rows) {
+      if (row.exit === undefined || attached.has(`${row.owner}\n${row.meta.id}`)) continue;
+      if (Date.parse(row.exit.endedAt) > cutoff) continue;
+      const job = await this.keptJob(row.owner, row);
+      if (job.unreported) found.push({ ferret: row.owner, job });
+    }
+    return found;
+  }
+
+  private async liveAttachmentsAll(): Promise<readonly AttachmentEntry[]> {
+    return (await this.prune()).entries;
   }
 
   /** Asks every attachment of the ferret (or of one job) to detach: each exits on its next poll; no job is touched. */

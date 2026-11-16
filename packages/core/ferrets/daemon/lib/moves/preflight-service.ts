@@ -19,7 +19,7 @@ import type { MovePane, ProcessInventoryPort } from './process-inventory-port.ts
 import { type ReportMeta, renderInflightCli, renderInflightReport } from './report-render.ts';
 import { requesterCall } from './requester-call.ts';
 import { restartNotice } from './restart-notice.ts';
-import { joinOpenTools } from './tool-inventory.ts';
+import { COMMAND_NOT_FOUND, joinOpenTools } from './tool-inventory.ts';
 
 /** The session facts the preflight needs, projected out of whatever served them. */
 export interface MoveTargetView {
@@ -53,6 +53,38 @@ function withoutRequesterTool(tools: readonly OpenToolInfo[], call: readonly Pro
   return index === -1 ? tools : tools.filter((_, position) => position !== index);
 }
 
+/**
+ * Whether every open tool call is identified: its name is known and, for a Bash call, so is the command. Only then can
+ * "no open call matches this shell" be believed. On a base whose transcript tail is empty NO call is ever identified.
+ */
+const everyOpenToolIdentified = (tools: readonly OpenToolInfo[]): boolean =>
+  tools.every(
+    tool =>
+      tool.name !== '?' && tool.summary !== COMMAND_NOT_FOUND && !(tool.name === 'Bash' && tool.summary === tool.name),
+  );
+
+/**
+ * Words the Claude tool shells whose stdout is `…/tasks/<id>.output`. CLAUDE WRITES EVERY BASH CALL'S STDOUT THERE, so such a
+ * shell is a `run_in_background` job only when it outlived its call, and that is claimed ONLY when every open tool is
+ * identified and none matches the shell's command. A shell an open call matches is that call, still running (unchanged).
+ * Anything else — including every shell when the open calls cannot be identified — is neutrally "a command the agent is
+ * running" and stays out of the hand-over's list of stopped background jobs. Only wording changes; the verdict is untouched.
+ */
+export function withUnkeptJobs(processes: ProcessObservation, openTools: readonly OpenToolInfo[]): ProcessObservation {
+  if (processes.kind !== 'observed') return processes;
+  const open = new Set(openTools.filter(tool => tool.name === 'Bash').map(tool => tool.summary));
+  const certain = everyOpenToolIdentified(openTools);
+  return {
+    kind: 'observed',
+    processes: processes.processes.map(entry => {
+      if (entry.claudeTaskId === undefined || entry.toolShell !== entry.pid || entry.known !== undefined) return entry;
+      const command = commandLabel(entry.argv);
+      if (command !== undefined && open.has(command)) return entry;
+      return certain ? { ...entry, unkeptJob: true as const } : { ...entry, agentCommand: true as const };
+    }),
+  };
+}
+
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -74,7 +106,7 @@ export class MovePreflight {
     chatTail: readonly unknown[] = [],
     options: { readonly requesterPid?: number } = {},
   ): Promise<InflightReport> {
-    const collected = await this.inventory.collect(view.pane);
+    const collected = await this.inventory.collect(view.pane, view.sessionId);
     // The call that asked for the move is not work the move interrupts; see requesterCall for the proof it needs.
     const chain = collected.kind === 'observed' ? requesterCall(collected.processes, options.requesterPid) : [];
     const own = new Set(chain);
@@ -85,13 +117,14 @@ export class MovePreflight {
         : collected;
     const codex = await this.countBackgroundTerminals(view);
     const openTools = withoutRequesterTool(joinOpenTools(view.openTools, chatTail), call);
+    const processesMarked = withUnkeptJobs(processes, openTools);
     const report = assembleInflightReport({
       status: view.status,
       ...(view.turnState === undefined ? {} : { turnState: view.turnState }),
       ...(view.awaitingPermission === true ? { awaitingPermission: true } : {}),
       turn: view.turn,
       openTools,
-      processes,
+      processes: processesMarked,
       codexBackgroundTerminals: codex.count,
       subprocessSince: view.subprocessSince,
       blindSpots: codex.blindSpots,

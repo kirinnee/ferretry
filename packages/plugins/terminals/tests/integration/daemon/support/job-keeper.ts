@@ -38,6 +38,19 @@ export function folderState(root: string) {
 /** Process proof over a table the test controls: a pid is alive while the test says so. */
 class TableProof implements ProcessProof {
   readonly starts = new Map<number, string>();
+  /** The harness each attachment pid sits under, as the host would find it when the attachment registers. */
+  readonly harnesses = new Map<number, { readonly pid: number; readonly start: string }>();
+  async harnessOf(pid: number) {
+    return this.harnesses.get(pid);
+  }
+  /** What a pid runs; absent, a real proof reads the host's /proc and a table one answers a `fy job attach` line. */
+  readonly argvs = new Map<number, string>();
+  async argvOf(pid: number): Promise<string | undefined> {
+    if (this.argvs.has(pid)) return this.argvs.get(pid);
+    if (!this.real) return this.starts.has(pid) ? `fy job attach ${pid}` : undefined;
+    const raw = await readFile(`/proc/${pid}/cmdline`, 'utf8').catch(() => '');
+    return raw === '' ? undefined : raw.split('\0').join(' ').trim();
+  }
   constructor(private readonly real: boolean) {}
   async startOf(pid: number): Promise<string | undefined> {
     if (this.starts.has(pid) || !this.real) return this.starts.get(pid);
@@ -97,7 +110,11 @@ export async function keeper(
         sessions,
         { now: () => clock.now },
         { next: () => (++counter).toString(16).padStart(12, 'a') },
-        { isDirectory: async () => true, sleep: async ms => await new Promise(resolve => setTimeout(resolve, ms)) },
+        {
+          isDirectory: async () => true,
+          sleep: async ms => await new Promise(resolve => setTimeout(resolve, ms)),
+          binaryName: 'fy',
+        },
       ),
     dispose: async () => {
       await tmux.execute(['kill-server']).catch(() => undefined);

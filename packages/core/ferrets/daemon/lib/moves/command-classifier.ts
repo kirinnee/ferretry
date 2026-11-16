@@ -439,7 +439,11 @@ function shellProgram(argv: string): string | undefined {
  * `git stash && fy ferret move me && git stash pop` or a `while …; do …; fy ferret move me; done` loop is not.
  * A shell whose program cannot be read (a script file, a lossy text with a possible newline) is `unknown`.
  */
-export function classifyAroundMoveRequest(argv: string, reading: CommandReading = 'lossy'): InflightVerdict {
+export function classifyAroundMoveRequest(
+  argv: string,
+  reading: CommandReading = 'lossy',
+  isCall: (segment: string) => boolean = isMoveRequest,
+): InflightVerdict {
   const program = shellProgram(argv);
   if (program === undefined || program === '' || (reading === 'lossy' && program.includes(LOSSY_MARK)))
     return 'unknown';
@@ -449,7 +453,7 @@ export function classifyAroundMoveRequest(argv: string, reading: CommandReading 
     .replace(harmlessRedirect, '')
     .split(/\|\||&&|[;&\n]/)
     .map(segment => segment.trim())
-    .filter(segment => segment !== '' && !isMoveRequest(segment));
+    .filter(segment => segment !== '' && !isCall(segment));
   return rest.length === 0
     ? 'safe_to_kill'
     : worstVerdict(
@@ -457,7 +461,7 @@ export function classifyAroundMoveRequest(argv: string, reading: CommandReading 
           // A nested `sh -c "fy ferret move me"` is the same question one shell deeper.
           shellProgram(segment) === undefined
             ? classifySegment(segment, reading === 'lossy')
-            : classifyAroundMoveRequest(segment, reading),
+            : classifyAroundMoveRequest(segment, reading, isCall),
         ),
       );
 }

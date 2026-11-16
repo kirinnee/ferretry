@@ -1,7 +1,11 @@
 import type { Clock, HostFactsPort, SpawnPort } from '@ferretry/kernel/contract';
+import { claudeTaskId } from '@ferretry/std';
+import type { KeptAttachment } from '../../../contract/job-keeping.ts';
+import { bounded, KEEPER_TIMEOUT_MS } from '../../lib/moves/bounded.ts';
+import { markJobAttachments } from '../../lib/moves/job-attachments.ts';
 import { identifyAgentJobs } from '../../lib/moves/agent-jobs.ts';
 import { type ConfiguredServersPort, configuredServersOf } from '../../lib/moves/configured-servers.ts';
-import { identifyKnownProcesses } from '../../lib/moves/harness-provenance.ts';
+import { identifyKnownProcesses, isHarnessCommand } from '../../lib/moves/harness-provenance.ts';
 import type { ProcessObservation } from '../../lib/moves/inflight-report.ts';
 import type {
   MovePane,
@@ -230,6 +234,16 @@ export class KernelProcessProbe implements ProcessProbePort {
     }
   }
 
+  /** Where the process's stdout points, from procfs; undefined where that is unreadable (no procfs, another user's process). */
+  async stdoutPath(pid: number): Promise<string | undefined> {
+    if (!this.procfs) return undefined;
+    try {
+      return await this.host.procFdLink(pid, '1');
+    } catch {
+      return undefined;
+    }
+  }
+
   /** Reads `/proc`, so a platform without it degrades to an unknown directory rather than failing. */
   async workingDirectory(pid: number): Promise<string | undefined> {
     try {
@@ -265,10 +279,24 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       readonly toolsServerArguments: readonly string[];
       readonly statuslineSubcommand: string;
       readonly servers: ConfiguredServersPort;
+      /** The keeper's proven attachments of a ferret; absent, none is ever known (the classifier decides alone). */
+      readonly attachments?: (ferret: string) => Promise<readonly KeptAttachment[]>;
+      /** How long the keeper gets to answer on the gate path (default {@link KEEPER_TIMEOUT_MS}); a timeout proves no attachment. */
+      readonly keeperTimeoutMs?: number;
+      /** The clock's sleep, which the keeper's bound is measured on; without it the keeper's answer is awaited as it comes. */
+      readonly sleep?: (ms: number) => Promise<void>;
     },
   ) {}
 
-  async collect(pane: MovePane): Promise<ProcessObservation> {
+  /** The keeper's answer, bounded on the clock where one is given: a hang proves no attachment (fail closed). */
+  private async keeperAttachments(answer: Promise<readonly KeptAttachment[]>): Promise<readonly KeptAttachment[]> {
+    const sleep = this.provenance.sleep;
+    return sleep === undefined
+      ? await answer
+      : await bounded(answer, this.provenance.keeperTimeoutMs ?? KEEPER_TIMEOUT_MS, 'the job keeper', sleep);
+  }
+
+  async collect(pane: MovePane, ferret?: string): Promise<ProcessObservation> {
     try {
       // THREE ANSWERS, NOT TWO. A pane the runner PROVES gone ran nothing (an empty observation: a session whose account died
       // has no pane, and "I could not look" would block the very move the operator is trying to make). A runner that cannot
@@ -294,7 +322,7 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       // readable (no /proc) the servers stay unexplained and therefore unclassified, never assumed.
       const paneDirectory = await this.probe.workingDirectory(panePid);
       const configuredServers = paneDirectory === undefined ? [] : await this.provenance.servers.read(paneDirectory);
-      const known = identifyKnownProcesses(rows, {
+      const recognised = identifyKnownProcesses(rows, {
         rootPid: panePid,
         binaryName: this.provenance.binaryName,
         toolsServerArguments: this.provenance.toolsServerArguments,
@@ -302,14 +330,48 @@ export class PaneProcessInventory implements ProcessInventoryPort {
         configuredServers,
       });
       // Only what provenance left unexplained: the harness and its own helpers are never servers to keep.
+      const jobs = identifyAgentJobs(rows, panePid, recognised);
+      // The keeper's registry proves which processes are attachments; a keeper that cannot answer proves none, so nothing
+      // is ever wrongly called kept and the classifier decides alone, as it always did.
+      const kept =
+        ferret === undefined || this.provenance.attachments === undefined
+          ? []
+          : await this.keeperAttachments(this.provenance.attachments(ferret)).catch(() => []);
+      const known = markJobAttachments(rows, recognised, jobs, kept, this.provenance.binaryName);
       const unexplained = rows.filter(row => !known.has(row.pid)).map(row => row.pid);
       const listening = (await this.probe.listening?.(unexplained).catch(() => undefined)) ?? new Set();
-      const jobs = identifyAgentJobs(rows, panePid, known);
-      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known, listening, jobs) };
+      // A tool shell's stdout names its Claude task; Codex's unified-exec commands run under an app-server.
+      const taskIds = new Map<number, string>();
+      for (const [pid, shell] of jobs) {
+        if (pid !== shell || known.has(pid)) continue;
+        const path = await this.probe.stdoutPath?.(pid);
+        const task = path === undefined ? undefined : claudeTaskId(path);
+        if (task !== undefined) taskIds.set(pid, task);
+      }
+      return {
+        kind: 'observed',
+        processes: inventoryProcesses(rows, cwdByPid, known, listening, jobs, {
+          taskIds,
+          codexJobs: codexAppServerJobs(rows, known),
+        }),
+      };
     } catch (error) {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }
   }
+}
+
+/**
+ * The commands running under a Codex `app-server` that the pane's tree shows: Codex's unified-exec jobs, which live there
+ * and are killed a minute after the client leaves. Only the app-server's direct children count — what they spawn is theirs.
+ */
+export function codexAppServerJobs(rows: readonly ProcRow[], known: ReadonlyMap<number, unknown>): ReadonlySet<number> {
+  const servers = new Set(
+    rows.filter(row => /\bapp-server\b/u.test(row.argv) && isHarnessCommand(row.argv)).map(row => row.pid),
+  );
+  return new Set(
+    rows.filter(row => servers.has(row.ppid) && !servers.has(row.pid) && !known.has(row.pid)).map(row => row.pid),
+  );
 }
 
 function unobservable(reason: string): ProcessObservation {

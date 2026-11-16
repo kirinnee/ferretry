@@ -127,10 +127,12 @@ describe('the in-flight inventory, in plain words', () => {
     should(actual.items.map(item => item.title)).deepEqual([
       'The agent is in the middle of a Bash call that changes things',
       'The agent is in the middle of a Bash call Ferretry can’t classify',
-      'Codex has 1 background terminal Ferretry can’t see into',
+      'Codex has 1 background terminal Ferretry can’t see into — a background job Ferretry is not keeping; it stops when the ferret moves. Start long jobs with `fy job run` so they survive.',
       'The agent is in the middle of a Read call',
     ]);
-    should(plural.items[0]?.title).equal('Codex has 3 background terminals Ferretry can’t see into');
+    should(plural.items[0]?.title).equal(
+      'Codex has 3 background terminals Ferretry can’t see into — background jobs Ferretry is not keeping; they stop when the ferret moves. Start long jobs with `fy job run` so they survive.',
+    );
   });
 
   it('should say the blocker and how many more there are in one sentence', () => {

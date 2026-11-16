@@ -55,7 +55,7 @@ import {
   TerminalWaitInputSchema,
 } from '../contract/index.ts';
 import manifest, { JobAttachments, JobFiles } from '../manifest.ts';
-import { hostPlatform, hostUserId, signalProcess, stat } from './adapters/host/fs.ts';
+import { hostPlatform, hostUserId, readText, signalProcess, stat } from './adapters/host/fs.ts';
 import { ExecutableCodePrograms } from './adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from './adapters/system/kernel-program-proof.ts';
 import {
@@ -117,6 +117,8 @@ import { TerminalsReferenceMenu } from './lib/reference-menu.ts';
 import { snapshotRoute } from './lib/runtime/mounts/session-snapshot.ts';
 import { jobRouteHandlers, type JobSubsystem } from './lib/runtime/mounts/jobs.ts';
 import { JobService, JobServiceError } from './adapters/jobs/job-service.ts';
+import { harnessAncestor } from './adapters/jobs/harness-ancestry.ts';
+import type { JobKeeperSource } from '@ferretry/core-ferrets/contract';
 import { StateJobFiles } from './adapters/jobs/job-files.ts';
 import { JobRuntimeError, TmuxJobRuntime } from './adapters/jobs/tmux-job-runtime.ts';
 import { EMPTY_ATTACHMENTS } from './lib/jobs/attachments.ts';
@@ -130,6 +132,10 @@ const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
 const CLOSE_FINISHED_EVERY_MS = 5 * 60_000;
 /** How often finished jobs past the retention window are deleted. */
 const JOB_RETENTION_EVERY_MS = 10 * 60_000;
+/** How often attachments whose harness died are asked to detach. */
+const JOB_ORPHAN_EVERY_MS = 15_000;
+/** How long after a job ended its attachment is left to report it before the backstop treats it as unattended. */
+const JOB_BACKSTOP_GRACE_MS = 10_000;
 /** The CLI's binary name, as `packages/cli/package.json` declares it (the two-name model). */
 const BINARY_NAME = 'fy';
 
@@ -650,6 +656,21 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           return 'unknown';
         }
       },
+      harnessOf: async pid => (hostPlatform === 'linux' ? await harnessAncestor(pid) : undefined),
+      // The command line: /proc where there is one, else `ps` (macOS). `undefined` = no such process; 'unknown' = cannot say.
+      argvOf: async pid => {
+        try {
+          if (hostPlatform === 'linux') {
+            const words = (await readText(`/proc/${pid}/cmdline`)).split('\0').filter(word => word !== '');
+            return words.length === 0 ? 'unknown' : words.join(' ');
+          }
+          const ran = await kernel.spawn.run('ps', ['-o', 'args=', '-p', String(pid)]);
+          const text = ran.stdout.trim();
+          return ran.exitCode === 0 && text !== '' ? text : ran.exitCode === 1 ? undefined : 'unknown';
+        } catch (error) {
+          return (error as { code?: string }).code === 'ENOENT' ? undefined : 'unknown';
+        }
+      },
       kill: async pid => {
         try {
           signalProcess(pid, 'SIGKILL');
@@ -676,6 +697,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       },
       sleep: async ms => await kernel.clock.sleep(milliseconds(ms)),
       onEvent: event => log.info('job', event),
+      binaryName: BINARY_NAME,
     },
   );
   const jobError = (error: unknown): never => {
@@ -744,6 +766,22 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       await jobService.sweep();
     },
   });
+
+  kernel.jobs.add({
+    id: 'jobs-orphan-attachments',
+    schedule: { every: milliseconds(JOB_ORPHAN_EVERY_MS) },
+    run: async () => {
+      await jobService.sweepOrphans();
+    },
+  });
+  /** What the moves and the completion backstop ask of the keeper (the `jobs.keeper` hook, docs/jobs.md). */
+  const jobKeeper: JobKeeperSource = {
+    attachments: async ferret => await jobService.keptAttachments(ferret).catch(() => []),
+    detach: async ferret => await jobService.detachAll(ferret),
+    jobs: async ferret => await jobService.keptJobs(ferret).catch(() => []),
+    markReported: async (ferret, ids) => await jobService.markJobsReported(ferret, ids),
+    endedUnattached: async () => await jobService.endedUnattached(JOB_BACKSTOP_GRACE_MS).catch(() => []),
+  };
 
   // ─── jobs ───────────────────────────────────────────────────────────────────────────────────────────────────────
   kernel.jobs.add({
@@ -869,6 +907,7 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
       'runners:tmux': runner,
       // The composer's `%terminal` menu (reference.catalog): the ferret's terminals. Asked only while Conversation is on.
       'reference.catalog:%terminal': new TerminalsReferenceMenu(provided),
+      'jobs.keeper': () => [{ id: 'terminals', item: jobKeeper }],
     },
     subscribers: {
       'vault.holds-changed': (payload: {

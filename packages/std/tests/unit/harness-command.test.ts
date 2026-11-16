@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { claudeToolShellPayload, commandLabel } from '../../src/harness-command.ts';
+import { isJobAttachCommand } from '../../src/harness-process.ts';
 
 /** The wrapper strings are the REAL ones the two harnesses spawn (Claude Code 2.1.317, Codex `bash -lc`). */
 
@@ -127,5 +128,19 @@ describe('claudeToolShellPayload', () => {
       REAL_WRAPPER('   '),
     ];
     should(cases.map(claudeToolShellPayload)).deepEqual(cases.map(() => undefined));
+  });
+});
+
+describe('isJobAttachCommand', () => {
+  it('should match `<binary> job attach|run`, however the binary was spelled, and nothing else', () => {
+    should(isJobAttachCommand('fy job attach abc', 'fy')).be.true();
+    should(isJobAttachCommand('/nix/store/x/bin/fy job run -- make', 'fy')).be.true();
+    should(isJobAttachCommand('bun /w/fy.ts job attach abc', 'fy')).be.true();
+    should(isJobAttachCommand('sleep 299', 'fy')).be.false();
+    should(isJobAttachCommand('fy job list', 'fy')).be.false();
+    should(isJobAttachCommand('fy mcp serve', 'fy')).be.false();
+    should(isJobAttachCommand('./mystery job attach abc', 'fy')).be.false();
+    should(isJobAttachCommand('echo fy job attach abc', 'fy')).be.false();
+    should(isJobAttachCommand('fy job attach abc', 'fyx')).be.false();
   });
 });

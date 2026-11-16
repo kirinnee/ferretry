@@ -5,3 +5,4 @@ export * from './result.ts';
 export * from './schemas.ts';
 export * from './time.ts';
 export * from './harness-command.ts';
+export * from './harness-process.ts';

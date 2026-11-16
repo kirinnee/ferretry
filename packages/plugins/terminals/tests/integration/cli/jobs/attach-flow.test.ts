@@ -114,6 +114,65 @@ describe('fy job, end to end over the real keeper', () => {
     should(second.io.printed.join('')).equal('first\nsecond\n');
   });
 
+  it('should let the daemon detach a live attachment before a move: it exits 75, the job runs on, and nobody is told twice', async () => {
+    // Arrange — a long job with a live attachment, as a ferret's tool shell would hold.
+    const one = await keeper();
+    kept.push(one);
+    const flag = `${one.home}/go`;
+    const attached = verbs(one);
+    const running = attached.sut.run(
+      invocation([`echo up; while [ ! -e ${flag} ]; do sleep 0.1; done; exit 0`], { name: 'watch' }),
+    );
+    await waitFor(() => attached.io.printed.join('').includes('up'), 'the job to be up');
+    const service = one.service();
+    const before = await service.keptAttachments('ferret-a');
+
+    // Act — the move asks the keeper to detach every attachment of the ferret.
+    const asked = await service.detachAll('ferret-a');
+    const code = await running;
+    await waitFor(async () => (await service.keptAttachments('ferret-a')).length === 0, 'the attachment to unregister');
+
+    // Assert — it let go (75), said where to re-attach, and the job was not touched.
+    should(before.map(one => one.jobName)).deepEqual(['watch']);
+    should(asked).equal(1);
+    should(code).equal(75);
+    should(attached.io.errors.join('')).containEql('re-attach with: fy job attach');
+    should((await service.get('ferret-a', 'watch')).state).equal('running');
+
+    // Act 2 — the job ends while nobody is attached: it is unreported, and the backstop's source lists it exactly once.
+    await Bun.write(flag, '');
+    await waitFor(async () => (await service.get('ferret-a', 'watch')).state === 'exited', 'the job to end');
+    one.clock.now = Date.now() + 1_000;
+    const unattended = await service.endedUnattached(0);
+    await service.markJobsReported(
+      'ferret-a',
+      unattended.map(entry => entry.job.id),
+    );
+    const after = await service.endedUnattached(0);
+
+    // Assert
+    should(unattended.map(entry => [entry.ferret, entry.job.name, entry.job.exitCode])).deepEqual([
+      ['ferret-a', 'watch', 0],
+    ]);
+    should(after).deepEqual([]);
+  });
+
+  it('should count a job as told when a live attachment streamed its end, so the backstop stays quiet', async () => {
+    // Arrange
+    const one = await keeper();
+    kept.push(one);
+    const { sut } = verbs(one);
+
+    // Act — run attaches from the start and returns when the job ends: that attachment reported the exit itself.
+    const code = await sut.run(invocation(['echo done'], { name: 'quick' }));
+    const service = one.service();
+
+    // Assert
+    should(code).equal(0);
+    should(await service.endedUnattached(0)).deepEqual([]);
+    should((await service.keptJobs('ferret-a'))[0]?.unreported).be.false();
+  });
+
   it('should list the job with its exit code and wait for it', async () => {
     // Arrange
     const one = await keeper();

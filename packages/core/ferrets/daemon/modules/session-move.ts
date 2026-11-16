@@ -2,6 +2,8 @@ import { milliseconds } from '@ferretry/std';
 import type { Clock, Log, SpawnPort, StatePort } from '@ferretry/kernel/contract';
 import type { z } from 'zod';
 import type { AskToStopJobsResult, ConversionPreview } from '../../contract/move.ts';
+import type { JobKeeperSource } from '../../contract/job-keeping.ts';
+import type { JobsMovePorts } from '../lib/moves/jobs-move.ts';
 import { KernelProcessProbe, type ProcessHostFacts } from '../adapters/moves/process-inventory.ts';
 import { StateMoveReportStore } from '../adapters/moves/state-move-report.ts';
 import { KeyedSerialExecutor } from '../adapters/storage/keyed-serial-executor.ts';
@@ -71,6 +73,11 @@ export interface SessionMoveNeeds {
   readonly login: LoginMoveNeeds;
   /** Puts one Ferretry-authored message in the session's queue (a closure over the queue and its deliverer). */
   readonly askAgent: SessionMoveParts['askAgent'];
+  /**
+   * The job keeper (Terminals contributes it through the `jobs.keeper` hook), read at the moment of a move. Absent or
+   * answering nothing, no attachment is ever known and nothing is detached: the gate classifies as it always did.
+   */
+  readonly jobs?: SessionMoveParts['jobs'];
   // ─── other plugins' pieces (unbound until their owner lands) ───
   /** Conversation: the session's own transcript tail. */
   readonly transcripts: MoveTranscriptTail;
@@ -102,6 +109,8 @@ interface SessionMoveParts {
   readonly askAgent: (id: SessionId, message: { readonly id: string; readonly text: string }) => Promise<boolean>;
   readonly reports: MoveReportStore;
   readonly clock: Clock;
+  /** The job keeper, when one is contributed: told to detach attachments before the pane dies, asked what to hand over. */
+  readonly jobs?: () => JobKeeperSource | undefined;
   /**
    * The session's own transcript, which is what the preflight joins its open tool ids against.
    *
@@ -210,6 +219,14 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     };
   };
 
+  // The jobs half of every pane-killing relaunch (Restart and a move onto another login both run `relaunchInPlace`).
+  const jobsPorts: JobsMovePorts = {
+    keeper: () => parts.jobs?.(),
+    sleep: async ms => await parts.clock.sleep(milliseconds(ms)),
+    nowMs: () => Date.parse(parts.clock.now()),
+    log: parts.log,
+  };
+
   /** What a relaunch in place is run from, for a move onto `to` (a Restart's `to` is the runtime it is on). */
   const relaunching = (
     id: SessionId,
@@ -222,6 +239,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
     reports: parts.reports,
     preflight: parts.preflight,
     restart: parts.restart,
+    jobs: jobsPorts,
     paneIdentity: parts.paneIdentity,
     inspect: async () => await inspect(id, subjectOf, trustedRequesterPid(parts.log, id, request)),
     refused: async (report, decision) =>
@@ -348,6 +366,7 @@ export const sessionMoveModule: SessionMoveModule = {
       restart: needs.restart,
       login: needs.login,
       askAgent: needs.askAgent,
+      ...(needs.jobs === undefined ? {} : { jobs: needs.jobs }),
       reports: new StateMoveReportStore(state),
       clock,
       transcripts: needs.transcripts,

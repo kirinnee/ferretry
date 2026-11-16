@@ -1,5 +1,7 @@
 import { describe, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
 import {
   JobAttachmentListViewSchema,
@@ -107,18 +109,32 @@ describe('the job mount', () => {
     const { half } = await mount();
     const job = JobViewSchema.parse(jsonBody(await start(half)));
 
-    const bad = await half.call('POST', ATTACH, { jobId: job.id, pid: 2_000_000_000 });
-    const made = await half.call('POST', ATTACH, { jobId: job.id, pid: process.pid, claudeTaskId: 'task9' });
-    should(bad.status).equal(400);
-    should(made.status).equal(200);
-    const id = (jsonBody(made) as { id: string }).id;
-    should(JobAttachmentListViewSchema.parse(jsonBody(await half.call('GET', ATTACH))).attachments).have.length(1);
+    // A real process whose command line is `fy job attach …` (the keeper registers nothing else), and one that is not.
+    const folder = mkdtempSync(join(tmpdir(), 'fy-attach-'));
+    writeFileSync(join(folder, 'fy.ts'), 'setInterval(() => undefined, 1000);');
+    const attacher = Bun.spawn(['bun', join(folder, 'fy.ts'), 'job', 'attach', job.id]);
+    const stranger = Bun.spawn(['sleep', '30']);
+    let id = '';
+    try {
+      const bad = await half.call('POST', ATTACH, { jobId: job.id, pid: 2_000_000_000 });
+      const forged = await half.call('POST', ATTACH, { jobId: job.id, pid: stranger.pid });
+      const made = await half.call('POST', ATTACH, { jobId: job.id, pid: attacher.pid, claudeTaskId: 'task9' });
+      should(bad.status).equal(400);
+      should(forged.status).equal(400);
+      should(made.status).equal(200);
+      id = (jsonBody(made) as { id: string }).id;
+      should(JobAttachmentListViewSchema.parse(jsonBody(await half.call('GET', ATTACH))).attachments).have.length(1);
 
-    const detached = await half.call('POST', `${ATTACH}/detach`, { jobId: job.id });
-    should(jsonBody(detached)).deepEqual({ detached: 1 });
-    should(jsonBody(await half.call('POST', `${ATTACH}/detach`))).deepEqual({ detached: 0 });
+      const detached = await half.call('POST', `${ATTACH}/detach`, { jobId: job.id });
+      should(jsonBody(detached)).deepEqual({ detached: 1 });
+      should(jsonBody(await half.call('POST', `${ATTACH}/detach`))).deepEqual({ detached: 0 });
 
-    should((await half.call('DELETE', `${ATTACH}/${id}`)).status).equal(200);
-    should(JobAttachmentListViewSchema.parse(jsonBody(await half.call('GET', ATTACH))).attachments).have.length(0);
+      should((await half.call('DELETE', `${ATTACH}/${id}`)).status).equal(200);
+      should(JobAttachmentListViewSchema.parse(jsonBody(await half.call('GET', ATTACH))).attachments).have.length(0);
+    } finally {
+      attacher.kill();
+      stranger.kill();
+      rmSync(folder, { recursive: true, force: true });
+    }
   });
 });

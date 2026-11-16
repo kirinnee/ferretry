@@ -667,3 +667,27 @@ describe('KernelProcessProbe, looking up pids wherever they are', () => {
     await should(unreadable).be.rejectedWith('ps exited 1: cannot allocate memory');
   });
 });
+
+describe('PaneProcessInventory and the job keeper on the gate path', () => {
+  const rows = table('100 1 50 claude\n200 100 20 fy job attach build');
+  const collect = async (attachments: () => Promise<never[] | { pid: number; jobId: string; jobName: string }[]>) =>
+    await new PaneProcessInventory(new FakeProbe(rows), {
+      ...provenance,
+      attachments,
+      keeperTimeoutMs: 20,
+      sleep: async ms => await new Promise<void>(done => setTimeout(done, ms)),
+    }).collect(livePane(100), 'ferret-a');
+  const attach = (observed: Awaited<ReturnType<typeof collect>>) =>
+    observed.kind === 'observed' ? observed.processes.find(entry => entry.pid === 200) : undefined;
+
+  it('should know the attachment the keeper proves', async () => {
+    const found = attach(await collect(async () => [{ pid: 200, jobId: 'abc', jobName: 'build' }]));
+    should(found?.known?.kind).equal('job-attachment');
+  });
+
+  it('should fail closed when the keeper does not answer in time: no attachment is proven, the classifier decides', async () => {
+    const found = attach(await collect(async () => await new Promise<never>(() => undefined)));
+    should(found?.known).be.undefined();
+    should(found?.verdict).not.equal('safe_to_kill');
+  });
+});

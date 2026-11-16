@@ -3,6 +3,7 @@ import { jsonObject } from '@ferretry/std';
 import type { DaemonStorage } from '../adapters/storage/session-storage.ts';
 import type { GateDecision, InflightReport } from '../lib/moves/inflight-report.ts';
 import type { ObservedSession } from '../lib/moves/outcome-render.ts';
+import { handOffJobs, handoverMessage, type JobsMovePorts, markJobsTold } from '../lib/moves/jobs-move.ts';
 import type { MovePreflight } from '../lib/moves/preflight-service.ts';
 import type { MoveReportStore } from '../lib/moves/report-store.ts';
 import { SessionConfigSchema, type SessionView } from '../lib/protocol/session.ts';
@@ -90,6 +91,8 @@ export interface RestartContext {
   readonly reports: MoveReportStore;
   readonly preflight: MovePreflight;
   readonly restart: RestartNeeds;
+  /** The jobs half of a pane-killing move (see `handOffJobs`): the attachments let go before the kill, the new session hears of the jobs. */
+  readonly jobs: JobsMovePorts;
   readonly paneIdentity: (id: SessionId) => Promise<string | undefined>;
   /** The gate's look at the pane (the requesting call, when this is a self-restart, is already left out). */
   readonly inspect: () => Promise<InflightReport>;
@@ -283,13 +286,19 @@ export async function relaunchInPlace(
     if (before === undefined) return;
     await ctx.storage.updateConfig(id, current => restoreRestamped(before, jsonObject(current) ?? {}));
   };
-  const handoff = ctx.preflight.handoff(report, reportPath, config.mode);
+  // THE JOBS HALF, ONE FOR EVERY PANE-KILLING RELAUNCH (a Restart and a move onto another login both run here): the attachments
+  // let go just before the relaunch kills the pane, and the new session's first turn carries the "Your jobs" section.
+  const jobsHandOff = await handOffJobs(ctx.jobs, id, report);
   const outcome = await ctx.restart
     .relaunch({
       id,
       origin: request.origin,
       ...(request.actor === undefined ? {} : { actor: request.actor }),
-      message: request.note === undefined ? handoff : `${request.note}\n\n${handoff}`,
+      message: handoverMessage(
+        request.note,
+        ctx.preflight.handoff(report, reportPath, config.mode),
+        jobsHandOff.section,
+      ),
       // The pane the gate judged: if it was replaced (or stopped) between the gate and the kill, nothing is written.
       expectHandle: shape.handle,
       conversation,
@@ -318,6 +327,7 @@ export async function relaunchInPlace(
     await settle(false, detail);
     throw new SessionMoveError('failed', detail);
   }
+  await markJobsTold(ctx.jobs, id, jobsHandOff.told);
   await settle(true);
   // Read back through the SAME reader the list and the single read serve, so a Restart or a move answers with the view
   // those surfaces will show rather than a projection of its own writes.

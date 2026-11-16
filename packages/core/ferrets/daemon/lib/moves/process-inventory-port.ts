@@ -21,6 +21,8 @@ export interface ProcessProbePort {
    * and the full table must be read instead.
    */
   descendants?(rootPid: number): Promise<readonly ProcRow[] | undefined>;
+  /** Where this process's stdout points (`readlink /proc/<pid>/fd/1`), or undefined when it is not readable. */
+  stdoutPath?(pid: number): Promise<string | undefined>;
   /** The process working directory, or undefined when it is not readable. */
   workingDirectory(pid: number): Promise<string | undefined>;
   /**
@@ -43,5 +45,6 @@ export interface MovePane {
 }
 
 export interface ProcessInventoryPort {
-  collect(pane: MovePane): Promise<ProcessObservation>;
+  /** `ferret` is whose pane it is: the job keeper is asked which attachments that ferret holds. */
+  collect(pane: MovePane, ferret?: string): Promise<ProcessObservation>;
 }

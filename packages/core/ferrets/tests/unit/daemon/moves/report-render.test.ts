@@ -61,7 +61,7 @@ describe('renderInflightCli', () => {
       '  tool  [DESTRUCTIVE] Bash: git push origin main',
       '  proc  [safe] pid 900 (4m): rg TODO | wc -l',
       '  proc  [re-armable] pid 901 (?): vitest run',
-      '  codex 2 background terminal(s) [UNKNOWN — no argv, unaccountable]',
+      '  codex 2 background terminals [UNKNOWN — no argv, unaccountable]',
     ]);
   });
 

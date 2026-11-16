@@ -68,6 +68,26 @@ export function withoutStale(
   };
 }
 
+/**
+ * Marks as detaching every entry whose recorded harness is gone: `harnessNow` is what the host reports for a harness pid
+ * right now (`undefined` when no such process runs; `'unknown'` when it cannot say, which never condemns). An entry that
+ * recorded no harness (a person's own terminal) is never an orphan. Answers the new state and how many it newly marked.
+ */
+export function withOrphansDetaching(
+  state: AttachmentsState,
+  harnessNow: ReadonlyMap<number, string | undefined | 'unknown'>,
+): { readonly state: AttachmentsState; readonly marked: number } {
+  let marked = 0;
+  const entries = state.entries.map(entry => {
+    if (entry.harness === undefined || entry.detaching) return entry;
+    const now = harnessNow.get(entry.harness.pid);
+    if (now === 'unknown' || now === entry.harness.start) return entry;
+    marked += 1;
+    return { ...entry, detaching: true };
+  });
+  return { state: { ...state, entries }, marked };
+}
+
 /** Entries of one ferret, oldest first. */
 export const entriesOf = (state: AttachmentsState, sessionId: string): readonly AttachmentEntry[] =>
   state.entries

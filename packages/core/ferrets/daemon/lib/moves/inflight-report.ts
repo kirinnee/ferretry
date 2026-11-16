@@ -29,6 +29,20 @@ export interface ProcessInfo {
    * shell's pid. See `identifyAgentJobs`.
    */
   readonly toolShell?: number;
+  /** The Claude Code task id this tool shell's stdout names (`…/tasks/<id>.output`); read from the shell itself. */
+  readonly claudeTaskId?: string;
+  /**
+   * A background job the agent started that Ferretry is NOT keeping, so it stops when the ferret moves: a Claude tool
+   * shell that outlived its tool call, or a command under a Codex app-server. Wording only — whether it BLOCKS is still
+   * the classifier's verdict.
+   */
+  readonly unkeptJob?: true;
+  /**
+   * A Claude tool shell writing to `tasks/<id>.output` whose open tool call could NOT be ruled in or out. Claude writes the
+   * stdout of EVERY Bash call there, foreground ones included, so this proves nothing about backgrounding: it is worded as
+   * "a command the agent is running", never as a background job.
+   */
+  readonly agentCommand?: true;
 }
 
 /**

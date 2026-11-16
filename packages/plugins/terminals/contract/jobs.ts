@@ -158,6 +158,11 @@ export const AttachmentEntrySchema = z.strictObject({
   /** The process's start as the host reported it when the entry was made (opaque; equal means the same process). */
   processStart: z.string().min(1).max(64),
   claudeTaskId: z.string().optional(),
+  /**
+   * The harness CLI that held the attachment when it registered (pid + start), when one did. If it is gone later the
+   * attachment is an orphan — its harness was killed without a word — and the next sweep asks it to detach.
+   */
+  harness: z.strictObject({ pid: z.number().int().positive(), start: z.string().min(1).max(64) }).optional(),
   registeredAt: z.string(),
   detaching: z.boolean(),
 });
@@ -201,7 +206,8 @@ export type JobAttachmentListView = z.infer<typeof JobAttachmentListViewSchema>;
 
 export const JobDetachAllViewSchema = z.strictObject({ detached: NonNegativeIntegerSchema });
 
-/** The Claude Code task id a path names (`…/tasks/<id>.output`), or `undefined`. One rule for the CLI and the Processes view. */
-export function claudeTaskId(path: string): string | undefined {
-  return /\/tasks\/([A-Za-z0-9_-]{1,64})\.output$/u.exec(path)?.[1];
-}
+/**
+ * The Claude Code task id a path names (`…/tasks/<id>.output`), or `undefined`. The rule lives in `@ferretry/std` — one
+ * reading for the CLI, the Processes view and the move gate.
+ */
+export { claudeTaskId } from '@ferretry/std';
