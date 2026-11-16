@@ -8,8 +8,8 @@ import {
   type SitrepLineSource,
 } from '@ferretry/core-ferrets/contract';
 import type { HookInvoker } from '@ferretry/kernel/manifest';
-import { err, milliseconds, ok } from '@ferretry/std';
-import { type MailboxHost, QueueChanged, type QueuedMessage } from '@ferretry/core-mailbox/contract';
+import { err, type Instant, milliseconds, ok } from '@ferretry/std';
+import { harnessFamily, type MailboxHost, QueueChanged, type QueuedMessage } from '@ferretry/core-mailbox/contract';
 import {
   type ConversationApi,
   type ConversationCaller,
@@ -18,8 +18,13 @@ import {
   QUESTION_ANSWERED_STATE,
   QUESTION_STATE,
   type Question,
+  MessageBeforeSend,
+  QUEUE_STATE,
+  SENDS_STATE,
+  STUCK_FRAME_STATES,
+  TurnEnded,
 } from '../contract/index.ts';
-import { StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
+import { EntriesSendEvidence, StateSendChannel, StateSendLedger } from './delivery/adapters/index.ts';
 import { sendRecordFor, sendRecordView } from '@ferretry/core-mailbox/contract';
 import { sentDraftClearer, sharedDraftRoutes, sharedDraftSocketRoutes } from './drafts/lib/mounts/shared-drafts.ts';
 import { SessionSendError, sessionSendRoutes } from './delivery/lib/mounts/session-send.ts';
@@ -39,7 +44,7 @@ import { QUESTION_WATCH_MS, QuestionWatch } from './questions/lib/watch.ts';
 import { PromptAsks } from './prompts/adapters/prompt-asks.ts';
 import { StatePromptRecords } from './prompts/adapters/state-prompt-records.ts';
 import type { PromptRead } from './prompts/lib/prompt-wait.ts';
-import { OwnerWordsReader, type TurnPhase } from './turns/lib/index.ts';
+import { OwnerWordsReader, TurnBoundaries, type TurnPhase } from './turns/lib/index.ts';
 import { SessionOwnerChat } from './turns/lib/owner-chat.ts';
 import { SharedDraftPresence, SharedDraftService, sharedDraftOrigin } from './drafts/lib/index.ts';
 import { StateQueueStore } from './queue/adapters/index.ts';
@@ -254,20 +259,53 @@ export function buildConversationA(deps: {
     { after: (ms, run) => ({ cancel: kernel.clock.after(milliseconds(ms), run) }) },
     { next: () => String(kernel.ids.mint('draft')) },
   );
+  // The round that ends is announced to whoever takes `turn.ended`; Ferrets' own phase is what the daemon can see.
+  const boundaries = new TurnBoundaries(boundary => {
+    hooks.observe(TurnEnded, {
+      ferret: parseSessionId(boundary.ferret),
+      turn: boundary.turn,
+      outcome: boundary.outcome,
+      endedAt: boundary.endedAt as Instant,
+    });
+  });
   const send = buildSendHalf({
     kernel,
     ferrets,
     gate,
-    hooks,
     clock,
     queue,
     ledger,
     channel,
+    boundaries,
+    transformMessage: async input => await hooks.transform(MessageBeforeSend, input),
+    evidence: new EntriesSendEvidence(async ferret => {
+      const id = tryParseSessionId(ferret);
+      const summary = id === undefined ? undefined : await ferrets.get(id);
+      const harness = id === undefined ? undefined : await ferrets.harness?.(id);
+      const family = summary === undefined ? undefined : harnessFamily(summary.harness);
+      // A harness this build does not know has no transcript reading: unreadable, so nothing is typed again on a guess.
+      return family === undefined || harness === undefined
+        ? undefined
+        : { harness: family, reader: harness.transcript };
+    }),
+    keepFrame: async (ferret, frame) => {
+      const [newest, middle, oldest] = STUCK_FRAME_STATES;
+      for (const [from, to] of [
+        [middle, oldest],
+        [newest, middle],
+      ] as const) {
+        const kept = await kernel.state.read(from, ferret);
+        if (kept.ok && kept.value !== undefined) await kernel.state.write(to, kept.value, ferret);
+      }
+      await kernel.state.write(newest, new TextEncoder().encode(frame), ferret);
+      return kernel.state.pathOf(newest, ferret);
+    },
+    stamp: async (log, ferret) =>
+      (await kernel.state.version(log === 'sends' ? SENDS_STATE : QUEUE_STATE, ferret))?.etag ?? 'absent',
     askedQuestion: async ferret => await askedQuestion(ferret),
     ...(deps.attachments === undefined ? {} : { attachments: deps.attachments }),
   });
   const {
-    boundaries,
     prepared,
     turnStates,
     handoffOf,

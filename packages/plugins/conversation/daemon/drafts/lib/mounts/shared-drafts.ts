@@ -1,5 +1,6 @@
 import { type AgendaId, AgendaIdSchema } from '@ferretry/core-mailbox/contract';
 import { SHARED_DRAFT_ERROR_CODES, SharedDraftEditSchema } from '../../../seams/protocol.ts';
+import { DraftSentSchema } from '../../../../contract/index.ts';
 import { type ApiActor, parseActor } from '../../../seams/api.ts';
 import { parseBody } from '../../../seams/api.ts';
 import { ApiError } from '../../../seams/api.ts';
@@ -216,7 +217,10 @@ export function sharedDraftSocketRoutes(
  * route serves ferrets too, and a ferret must never touch the owner's draft.
  */
 export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): SentDraftClearer {
-  return async (sessionId, actor, requestId, sent) => {
+  return async (sessionId, actor, requestId, raw) => {
+    const parsed = DraftSentSchema.safeParse(raw);
+    if (!parsed.success) return 'invalid';
+    const sent = parsed.data;
     if (!isDraftOwner(actor) || actor === undefined) return;
     // A send only ever takes words out; one that would add any is not a clear, and is not applied unmetered.
     if (sent.text.some(part => typeof part === 'string')) return;
@@ -235,5 +239,6 @@ export function sentDraftClearer(drafts: Pick<SharedDraftService, 'edit'>): Sent
       // draft the send named, and no other: an item's reply never touches the chat draft, nor the reverse.
       { metered: false, ...(sent.slot === undefined ? {} : { slot: sent.slot }) },
     );
+    return undefined;
   };
 }

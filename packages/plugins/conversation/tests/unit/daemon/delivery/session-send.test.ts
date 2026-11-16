@@ -3,6 +3,7 @@ import { ferretActor } from '@ferretry/core-gate/contract';
 import { ferretStanding, ownerStanding, wardenStanding } from '@ferretry/core-gate/contract/testing';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
 import { COMPOSER_OCCUPIED_CODE, SEND_UNCONFIRMED_CODE } from '@ferretry/core-mailbox/contract';
+import { DraftSentSchema } from '../../../../contract/index.ts';
 import {
   type SentDraftClearer,
   SessionSendError,
@@ -146,8 +147,10 @@ describe('POST send', () => {
   it('clears the owner’s shared draft once the send is accepted, and never at the send’s expense', async () => {
     const { subsystem } = build();
     const cleared: unknown[][] = [];
+    // The real clearer (the drafts' mount) is the one that reads the position; a field that is none is `invalid`.
     const clear: SentDraftClearer = async (...args) => {
       cleared.push(args);
+      return DraftSentSchema.safeParse(args[3]).success ? undefined : 'invalid';
     };
     const position = { generation: 'g1', epoch: 0, base: 2, text: ['x'] };
     const routes = sessionSendRoutes(subsystem, clear);

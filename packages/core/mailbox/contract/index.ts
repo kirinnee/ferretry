@@ -74,3 +74,7 @@ export type {
   TranscriptWindow,
   TranscriptSource,
 } from './transcript.ts';
+export { harnessFamily } from './harness-family.ts';
+export type { ClockPort, SerialExecutor, YieldingSerialExecutor } from './serial-ports.ts';
+export { KeyedSerialExecutor } from './serial.ts';
+export { SessionSendError, type SessionSendFailure } from './send/errors.ts';

@@ -8,8 +8,6 @@ import {
   type LaunchOrigin,
   type QueueOutcome,
 } from '@ferretry/core-ferrets/contract';
-import type { HookInvoker } from '@ferretry/kernel/manifest';
-import type { Instant } from '@ferretry/std';
 import { milliseconds } from '@ferretry/std';
 import {
   parseMessageAttachments,
@@ -19,21 +17,8 @@ import {
   type SendRecord,
   type SendResult,
 } from '@ferretry/core-mailbox/contract';
-import {
-  type ConversationRefusal,
-  MessageBeforeSend,
-  QUEUE_STATE,
-  type Question,
-  SENDS_STATE,
-  STUCK_FRAME_STATES,
-  TurnEnded,
-} from '../contract/index.ts';
-import {
-  ClockSendScheduler,
-  EntriesSendEvidence,
-  StateSendChannel,
-  StateSendLedger,
-} from './delivery/adapters/index.ts';
+import type { MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '@ferretry/core-mailbox/contract';
+import { ClockSendScheduler } from './delivery/adapters/index.ts';
 import { type SendPath } from './seams/ledger-types.ts';
 import {
   defaultSendTrackerSettings,
@@ -70,7 +55,6 @@ import {
 } from './delivery/lib/index.ts';
 import type { SessionStatus } from '@ferretry/core-mailbox/contract';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
-import { TurnBoundaries } from './turns/lib/index.ts';
 import { answerOf } from '@ferretry/core-mailbox/contract';
 import { QueueRefused, SessionQueueService } from './queue/lib/index.ts';
 import {
@@ -135,7 +119,7 @@ export const refusalCode = (error: unknown): string => {
 };
 
 /** A refusal of one of the send path's acts, as the port answers it: the route's own code, and the words. */
-export const actRefusal = (error: unknown): ConversationRefusal => ({
+export const actRefusal = (error: unknown): MailboxRefusal => ({
   code: refusalCode(error),
   message: error instanceof Error ? error.message : String(error),
 });
@@ -226,14 +210,28 @@ export interface SendHalfDeps {
   readonly kernel: KernelPorts;
   readonly ferrets: FerretsApi;
   readonly gate: HarnessGate;
-  readonly hooks: Pick<HookInvoker, 'observe' | 'transform'>;
+  /** `message.before-send`: the one place text enters a send, which a taker may reword or refuse. */
+  readonly transformMessage: (input: {
+    readonly ferret: SessionId;
+    readonly text: string;
+  }) => Promise<
+    { readonly ok: true; readonly value: { readonly text: string } } | { readonly ok: false; readonly error: string }
+  >;
+  /** Where a stop marks the round it ended as interrupted (the turn boundaries, which Conversation keeps). */
+  readonly boundaries: { markInterrupted(ferret: string): void };
+  /** The transcript the tracker proves a send by, for the ferret named. */
+  readonly evidence: SendEvidenceSource;
+  /** One snapshot of the screen a stuck send met, written where the ferret's files are; the path it is kept at. */
+  readonly keepFrame: (ferret: SessionId, frame: string) => Promise<string>;
+  /** A cheap token for the log of `queue` or `sends` that moves with every line appended; `absent` when there is none. */
+  readonly stamp: (log: 'queue' | 'sends', ferret: SessionId) => Promise<string>;
   readonly clock: ClockPort;
   readonly queue: SessionQueueService;
-  readonly ledger: StateSendLedger;
-  readonly channel: StateSendChannel;
+  readonly ledger: SendLedger;
+  readonly channel: SendChannel;
   readonly attachments?: AttachmentSource;
   /** `question.json` as the question watch reads it: a send refuses while the ferret waits on one. */
-  readonly askedQuestion: (ferret: string) => Promise<Question | undefined>;
+  readonly askedQuestion: (ferret: string) => Promise<{ readonly toolUseId: string } | undefined>;
 }
 
 /**
@@ -242,23 +240,12 @@ export interface SendHalfDeps {
  * was written against, so the next move (into the Mailbox) is a file move.
  */
 export function buildSendHalf(deps: SendHalfDeps) {
-  const { kernel, ferrets, gate, hooks, clock, queue, ledger, channel, askedQuestion } = deps;
+  const { kernel, ferrets, gate, clock, queue, ledger, channel, askedQuestion, boundaries, keepFrame, stamp } = deps;
   const scheduler = new ClockSendScheduler(kernel.clock);
-
-  // The round that ends is announced to whoever takes `turn.ended`; Ferrets' own phase is what the daemon can see.
-  const boundaries = new TurnBoundaries(boundary => {
-    hooks.observe(TurnEnded, {
-      ferret: parseSessionId(boundary.ferret),
-      turn: boundary.turn,
-      outcome: boundary.outcome,
-      endedAt: boundary.endedAt as Instant,
-    });
-  });
-  // No poll: Ferrets says every change of a ferret's state (`ferret.changed`), and each is one look (see `index.ts`).
 
   /** The one place text enters a send: `message.before-send` may reword it, or refuse it. */
   const prepared = async (ferret: string, message: string): Promise<string> => {
-    const out = await hooks.transform(MessageBeforeSend, { ferret: parseSessionId(ferret), text: message });
+    const out = await deps.transformMessage({ ferret: parseSessionId(ferret), text: message });
     if (!out.ok) throw new ApiError(422, out.error, 'message_refused');
     return out.value.text;
   };
@@ -458,16 +445,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
         `blocking=${frame.blocking ?? 'none'} cursor=${frame.cursorX ?? '?'},${frame.cursorY ?? '?'} (zero-based, on the visible frame)`,
       '--- visible frame (masked) ---',
     ].join('\n');
-    const [newest, middle, oldest] = STUCK_FRAME_STATES;
-    for (const [from, to] of [
-      [middle, oldest],
-      [newest, middle],
-    ] as const) {
-      const kept = await kernel.state.read(from, ferret);
-      if (kept.ok && kept.value !== undefined) await kernel.state.write(to, kept.value, ferret);
-    }
-    await kernel.state.write(newest, new TextEncoder().encode(`${header}\n${frame.visible}\n`), ferret);
-    return kernel.state.pathOf(newest, ferret);
+    return await keepFrame(ferret, `${header}\n${frame.visible}\n`);
   };
   const failureNotifier = new AgentSendFailureNotifier(
     {
@@ -493,16 +471,7 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const tracker = new SendTracker(
     {
       ledger: trackedLedger,
-      evidence: new EntriesSendEvidence(async ferret => {
-        const id = tryParseSessionId(ferret);
-        const summary = id === undefined ? undefined : await ferrets.get(id);
-        const harness = id === undefined ? undefined : await ferrets.harness?.(id);
-        const family = summary === undefined ? undefined : harnessFamily(summary.harness);
-        // A harness this build does not know has no transcript reading: unreadable, so nothing is typed again on a guess.
-        return family === undefined || harness === undefined
-          ? undefined
-          : { harness: family, reader: harness.transcript };
-      }),
+      evidence: deps.evidence,
       terminal: trackedPane,
       repository: sendRepository,
       attempts: {
@@ -1071,21 +1040,19 @@ export function buildSendHalf(deps: SendHalfDeps) {
    * A cheap token for a log that moves with every line appended: the identity of its file (one `lstat`), `absent` when
    * there is none. The poll's `If-None-Match` is answered from this, so a chat nobody typed into costs a stat.
    */
-  const fileStamp = async (file: typeof SENDS_STATE | typeof QUEUE_STATE, id: SessionId): Promise<string> =>
-    (await kernel.state.version(file, id))?.etag ?? 'absent';
   const sendsStamp = async (id: string): Promise<string> => {
     const parsed = parseSessionId(id);
     // The same look a read takes first, so a send the pane has settled moves the stamp.
     await lookFirst(parsed);
-    return await fileStamp(SENDS_STATE, parsed);
+    return await stamp('sends', parsed);
   };
   const queueStamp = async (id: string): Promise<string> => {
     const ferret = parseSessionId(id);
-    const stamp = await fileStamp(QUEUE_STATE, ferret);
+    const queued = await stamp('queue', ferret);
     // As `queueMessages` answers: a queue nobody ever wrote to, of a ferret nobody knows, is not found, never "unchanged".
-    if (stamp === 'absent' && (await ferrets.get(ferret)) === undefined)
+    if (queued === 'absent' && (await ferrets.get(ferret)) === undefined)
       throw new SessionSendError('not_found', `session not found: ${id}`);
-    return stamp;
+    return queued;
   };
   const queueMessages = async (id: string): Promise<readonly QueuedMessage[]> => {
     const ferret = parseSessionId(id);
@@ -1195,7 +1162,6 @@ export function buildSendHalf(deps: SendHalfDeps) {
 
   return {
     scheduler,
-    boundaries,
     prepared,
     terminal,
     turnStates,

@@ -18,9 +18,11 @@ import {
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
+  SessionSendError,
+  type SessionSendFailure,
 } from '@ferretry/core-mailbox/contract';
-import { type SharedDraftSent } from '../../../seams/protocol.ts';
-import { DraftSentSchema } from '../../../../contract/index.ts';
+
+export { SessionSendError, type SessionSendFailure };
 import { callerIsAgent, ferretOf, isFerretCall, OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
 import { type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
 import { createHash } from 'node:crypto';
@@ -60,42 +62,6 @@ import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '
  * `x-ferretry-session-id` is the older honest-client form of the same (Gate stamps `ferret:<id>` for both). Being a ferret buys a SENDER
  * identity, never a different TARGET's: the path names where the message goes, as for every caller.
  */
-
-/** Why a send or an interrupt could not be acted on. */
-export type SessionSendFailure =
-  /** The id is not one the state-home layout would accept, or the request is otherwise unusable. */
-  | 'invalid'
-  /** No such session. */
-  | 'not_found'
-  /** The session's own condition refuses it: a quarantine, an unconfirmed kill, an open question. */
-  | 'refused'
-  /** A launch is still in flight. Pending rather than failed — the caller retries. */
-  | 'pending'
-  /**
-   * It was typed into the agent's composer and nothing proved it landed. Neither refused nor failed:
-   * answered as `send_unconfirmed` with the send's id, so the app can act on exactly that send.
-   */
-  | 'unconfirmed'
-  /** It was acted on, and the work it does — typing, reviving, journalling — failed. */
-  | 'failed';
-
-/** A refusal raised by the composition root's send handling, in a taxonomy `src/lib` may name. */
-export class SessionSendError extends Error {
-  constructor(
-    readonly failure: SessionSendFailure,
-    message: string,
-    /**
-     * The person's own text the agent's composer is holding, when that is why the send was refused:
-     * answered as `composer_occupied` with this draft, so the app can offer to send or clear it.
-     */
-    readonly draft?: string,
-    /** The send an `unconfirmed` answer is about. */
-    readonly sendId?: string,
-  ) {
-    super(message);
-    this.name = 'SessionSendError';
-  }
-}
 
 /** Talking to one running session. Both requests are the parsed wire shapes, unchanged. */
 export interface SessionSendSubsystem {
@@ -226,8 +192,8 @@ export type SentDraftClearer = (
   sessionId: string,
   actor: string | undefined,
   requestId: string,
-  sent: SharedDraftSent,
-) => Promise<void>;
+  sent: unknown,
+) => Promise<'invalid' | undefined>;
 
 async function send(
   subsystem: SessionSendSubsystem,
@@ -264,10 +230,9 @@ async function send(
   // Only once the send is accepted, and never at the send's expense: a draft that moved on, or a clearer
   // that refused, leaves the message exactly as sent.
   if (request.sharedDraft !== undefined && clearDraft !== undefined) {
-    const sent = DraftSentSchema.safeParse(request.sharedDraft);
-    if (!sent.success)
+    const outcome = await clearDraft(id, context.actor, requestId, request.sharedDraft).catch(() => undefined);
+    if (outcome === 'invalid')
       throw new ApiError(400, 'the shared draft a send carries is not a draft position', 'invalid_request');
-    await clearDraft(id, context.actor, requestId, sent.data).catch(() => undefined);
   }
   return jsonResponse(result);
 }
