@@ -15,7 +15,7 @@ import { transcriptEntriesFromLog } from '../../../../app/chat/chat-refresh.ts';
 import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
 import { Transcript } from '../../../../app/chat/transcript.tsx';
 import { daemonConnection } from '../../../../app/composer/seam.ts';
-import { peerEnvelopePreamble } from '../../../../contract/peer-messages.ts';
+import { peerEnvelopePreamble } from '@ferretry/core-mailbox/contract';
 import { ClaudeTranscriptParser } from '../../../../daemon/reader/lib/transcript/claude.ts';
 import { fleetAgentResolver } from '../../../support/app/agents.ts';
 

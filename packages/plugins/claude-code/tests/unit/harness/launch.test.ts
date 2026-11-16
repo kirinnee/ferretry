@@ -11,6 +11,7 @@ import {
   questionArguments,
   settingsDocument,
   settingsFlags,
+  channelsOn,
 } from '../../../daemon/lib/harness/launch.ts';
 import {
   API_KEY_SEED_NAME,
@@ -635,5 +636,80 @@ describe('the question tool (!A527: withheld from every ferret unless the questi
   it('keeps the PreToolUse hook on AskUserQuestion in the flag overlay, for a runtime that turns the tool back on', () => {
     should(fixedLayer('auto', '/f').overlay.hooks).eql({ ...CLAUDE_QUESTION_HOOKS, ...CLAUDE_COMPACTION_HOOKS });
     should(CLAUDE_QUESTION_HOOKS.PreToolUse[0]?.matcher).equal('AskUserQuestion');
+  });
+});
+
+describe('Ferretry’s message channel in a launch (the pure parts)', () => {
+  const FLAG = '--dangerously-load-development-channels=server:ferretry';
+  const account = (organizationType?: string): LaunchPart => ({
+    kind: 'account',
+    ...(organizationType === undefined ? {} : { organizationType }),
+  });
+  const inputs = {
+    folder: '/work',
+    permissionMode: 'auto' as const,
+    instructions: [],
+    settings: new Map(),
+    hooks: new Map(),
+  };
+
+  it('is on for a claude_max login unless the setting says otherwise, and off for every other type or none', () => {
+    should([
+      channelsOn(undefined, [account('claude_max')]),
+      channelsOn(undefined, [account('claude_enterprise')]),
+      channelsOn(undefined, [account('claude_team')]),
+      channelsOn(undefined, [account()]),
+      channelsOn(undefined, []),
+      channelsOn(false, [account('claude_max')]),
+      channelsOn(true, [account('claude_enterprise')]),
+      channelsOn(true, []),
+    ]).eql([true, false, false, false, false, false, true, true]);
+  });
+
+  it('adds the tools server (last, FY_TOKEN emptied, the launch marker set) and the instruction only when on', () => {
+    const on = homeText({
+      ...inputs,
+      channels: true,
+      fyCommand: '/opt/fy',
+      parts: [{ kind: 'mcp', name: 'ferretry', config: { command: 'someone-else' } }],
+    });
+    const server = (JSON.parse(on.mcp ?? '{}') as { mcpServers: Record<string, unknown> }).mcpServers.ferretry;
+
+    should(server).eql({
+      type: 'stdio',
+      command: '/opt/fy',
+      args: ['mcp', 'serve'],
+      env: { FY_TOKEN: '', FERRETRY_CHANNEL: '1' },
+    });
+    should(on.memory).containEql('<channel source="ferretry">');
+
+    const defaulted = homeText({ ...inputs, channels: true, parts: [] });
+    should(
+      (JSON.parse(defaulted.mcp ?? '{}') as { mcpServers: { ferretry: { command: string } } }).mcpServers.ferretry
+        .command,
+    ).equal('fy');
+
+    const off = homeText({ ...inputs, parts: [] });
+    should(off.mcp).be.undefined();
+    should(off.memory).not.containEql('<channel');
+  });
+
+  it('puts the channel flag in the argv once, names the MCP file even with no profile server, and is otherwise unchanged', () => {
+    const base = {
+      binary: '/opt/bin/claude',
+      home: '/h',
+      permissionMode: 'auto' as const,
+      hasMcp: false,
+      questionTool: true,
+      mode: 'interactive' as const,
+      conversation: { kind: 'new' as const, id: 'c-1' },
+    };
+    const on = launchCommand({ ...base, channels: true });
+
+    should(on.filter(word => word === FLAG)).have.length(1);
+    should(on[on.indexOf('--mcp-config') + 1]).equal('/h/mcp.json');
+    should(on.indexOf(FLAG)).be.below(on.indexOf('--session-id'));
+    should(launchCommand({ ...base, channels: false })).eql(launchCommand(base));
+    should(launchCommand(base)).not.containEql('--mcp-config');
   });
 });

@@ -281,6 +281,30 @@ const HARNESS_COMMANDS = ['claude', 'codex', 'npm', 'brew', 'apt-get'] as const;
 const PACKAGE_MANAGER_NOT_COMPOSED =
   'running a package manager is not available from the Runtimes plugin yet, so run the command yourself';
 
+/** A Claude account file is a few KiB; a larger one is not read. */
+const MAX_ACCOUNT_FILE_BYTES = 1024 * 1024;
+
+/**
+ * The text of the person's own Claude account file (`~/.claude.json`), read through the host mount Runtimes' setup already
+ * reads that file by (never a link, never larger than {@link MAX_ACCOUNT_FILE_BYTES}); nothing when it is absent or cannot
+ * be read. It is for the ONE non-secret field the Claude channel's default needs (`organizationTypeOfAccountDocument`).
+ */
+export function hostClaudeAccountText(
+  kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>,
+): () => Promise<string | undefined> {
+  return async () => {
+    try {
+      const { files } = fleetHost(kernel).host;
+      const path = `${kernel.paths.home()}/.claude.json`;
+      const info = await files.lstat(path);
+      if (info?.kind !== 'file' || info.size > MAX_ACCOUNT_FILE_BYTES) return undefined;
+      return await files.readText(path);
+    } catch {
+      return undefined;
+    }
+  };
+}
+
 /** The disk, the claim and the host the file adapters stand on, from the kernel's roots, clock and PATH lookup. */
 export function fleetHost(
   kernel: Pick<KernelPorts, 'roots' | 'paths' | 'clock'>,
