@@ -50,7 +50,7 @@ export class TidyService {
 
   async plan(ferret: FerretId): Promise<TidyPlanResult> {
     const board = this.ports.board();
-    if (board === undefined) return { ok: false, message: 'the board is not running, so there is no card to read' };
+    if (board === undefined) return { ok: false, message: 'the board is not running, so there is no task to read' };
     let own: readonly AskSummary[];
     let cards: Awaited<ReturnType<typeof board.cards>>;
     try {
