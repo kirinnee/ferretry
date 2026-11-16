@@ -128,3 +128,17 @@ test('stop and resume bodies parse strictly: an empty reason or message is refus
   expect(parseResumeBody({ message: 'continue' })).toEqual({ message: 'continue' });
   expect(refused(() => parseResumeBody({ extra: 1 })).status).toBe(400);
 });
+
+test('a start names the task it takes over as `task`, or by its former key, and files it under the stored option', () => {
+  expect(parseStartBody({ folder: '/work', task: 'F21' }).options).toEqual({ card: 'F21' });
+  expect(parseStartBody({ folder: '/work', card: 'F21' }).options).toEqual({ card: 'F21' });
+  expect(parseStartBody({ folder: '/work', task: 'F21', card: 'F21' }).options).toEqual({ card: 'F21' });
+});
+
+test('two different tasks in one start are refused naming the task key', () => {
+  const error = refused(() => parseStartBody({ folder: '/work', task: 'F1', card: 'F2' }));
+  expect(error.status).toBe(400);
+  expect(error.validationIssues).toEqual([
+    { path: ['task'], message: 'name one task: `task` and its former key differ' },
+  ]);
+});
