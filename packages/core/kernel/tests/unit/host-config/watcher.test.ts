@@ -305,15 +305,19 @@ class FakeTree implements ConfigTreeEvents {
   failure: Error | undefined;
   readonly listeners = new Map<string, () => void>();
   readonly closed: string[] = [];
+  readonly rechecked: string[] = [];
 
   async directories(): Promise<readonly string[]> {
     if (this.failure !== undefined) throw this.failure;
     return this.directoriesNow;
   }
 
-  subscribeDirectory(path: string, listener: () => void): { close(): void } {
+  subscribeDirectory(path: string, listener: () => void): { close(): void; recheck(): void } {
     this.listeners.set(path, listener);
     return {
+      recheck: () => {
+        this.rechecked.push(path);
+      },
       close: () => {
         this.listeners.delete(path);
         this.closed.push(path);
@@ -408,6 +412,22 @@ describe('watchConfigFiles, driven by file events', () => {
     // Assert
     should(told).equal(1);
     should(changes).equal(0);
+  });
+
+  it('should ask every watched directory to re-check itself on each backstop read, so a replaced folder is re-armed', async () => {
+    // Arrange
+    const tree = new FakeTree();
+    tree.directoriesNow = ['/config', '/config/logins'];
+    const { timers } = watchEvents(tree, async () => 'a');
+    await flush();
+    should(tree.rechecked).eql([]);
+
+    // Act
+    timers.tick();
+    await flush();
+
+    // Assert: both were already watched, so both are re-checked; a directory subscribed just now is not.
+    should(tree.rechecked).eql(['/config', '/config/logins']);
   });
 
   it('should stop watching a directory that is gone', async () => {
