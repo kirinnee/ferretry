@@ -363,6 +363,86 @@ suite('composition.tsv', () => {
     expect(text).toContain("declare it in that package's composition.tsv");
   });
 
+  test('one path may carry two kinds (a seam that is also oversize), never the same kind twice', () => {
+    const both = file(
+      line('composition', 'host.ts', '-', '-', 'a seam'),
+      line('oversize', 'host.ts', '700', '2026-11-30', 'wiring, being split'),
+    );
+    const read = (text: string) =>
+      readDeclared(['packages/a'], path => (path === 'packages/a/composition.tsv' ? text : undefined));
+    const declared = read(both);
+    expect(declared.problems).toEqual([]);
+    expect(declared.entries.map(item => item.kind)).toEqual(['composition', 'oversize']);
+    // The guard watches the seam half only; the size check reads the oversize half.
+    expect([...guarded(declared.entries).values()].map(item => item.kind)).toEqual(['composition']);
+    const twice = read(
+      file(
+        line('oversize', 'host.ts', '700', '2026-11-30', 'wiring, being split'),
+        line('oversize', 'host.ts', '800', '2026-12-30', 'again'),
+      ),
+    );
+    expect(twice.problems.map(problem => problem.message).join()).toContain('already declared as oversize');
+  });
+
+  test('a path is a composition or a registry, never both; oversize may sit beside either', () => {
+    const read = (text: string) =>
+      readDeclared(['packages/a'], path => (path === 'packages/a/composition.tsv' ? text : undefined));
+    const mixed = read(
+      file(line('composition', 'host.ts', '-', '-', 'a seam'), line('registry', 'host.ts', '-', '-', 'a list')),
+    );
+    expect(mixed.problems.map(problem => problem.message).join()).toContain('declared as both composition');
+    expect(mixed.problems[0]?.where).toBe('packages/a/composition.tsv:3');
+    // The guard job prints readDeclared problems, so a PR adding the registry row is refused there too.
+    expect(checkPaths(mixed, ['packages/a'], () => true).length).toBeGreaterThan(0);
+    // Whatever the order, a protected seam keeps its composition kind.
+    const rows = mixed.entries;
+    expect([...guarded(rows).values()].map(item => item.kind)).toEqual(['composition']);
+    expect([...guarded([...rows].reverse()).values()].map(item => item.kind)).toEqual(['composition']);
+
+    const seamBig = read(
+      file(
+        line('composition', 'host.ts', '-', '-', 'a seam'),
+        line('oversize', 'host.ts', '700', '2026-11-30', 'wiring, being split'),
+      ),
+    );
+    expect(seamBig.problems).toEqual([]);
+    expect([...guarded(seamBig.entries).values()].map(item => item.kind)).toEqual(['composition']);
+
+    const listBig = read(
+      file(
+        line('oversize', 'host.ts', '700', '2026-11-30', 'a long list'),
+        line('registry', 'host.ts', '-', '-', 'a list'),
+      ),
+    );
+    expect(listBig.problems).toEqual([]);
+    expect([...guarded(listBig.entries).values()].map(item => item.kind)).toEqual(['registry']);
+  });
+
+  test('an oversize expiry more than 45 days after today is a problem; 45 days exactly is fine', () => {
+    const oversizeRow = (expires: string) =>
+      readDeclared(['packages/a'], path =>
+        path === 'packages/a/composition.tsv'
+          ? file(line('oversize', 'host.ts', '700', expires, 'wiring, being split'))
+          : undefined,
+      );
+    const check = (expires: string) => checkPaths(oversizeRow(expires), ['packages/a'], () => true, '2026-11-16');
+    expect(check('2026-12-31')).toEqual([]);
+    expect(check('2026-11-30')).toEqual([]);
+    const far = check('2999-01-01');
+    expect(far.map(problem => problem.message).join()).toContain('more than 45 days after 2026-11-16');
+    expect(far[0]?.where).toBe('packages/a/composition.tsv:2');
+    expect(check('2027-01-01')).toHaveLength(1);
+    // Composition and registry rows carry no expiry and are never judged by it.
+    expect(
+      checkPaths(
+        readDeclared(['packages/a'], () => file(line('composition', 'host.ts', '-', '-', 'a seam'))),
+        ['packages/a'],
+        () => true,
+        '2026-11-16',
+      ),
+    ).toEqual([]);
+  });
+
   test('two independent declarations added in the same gap merge cleanly under the repository .gitattributes', () => {
     const attributes = readFileSync(join(import.meta.dir, '..', '..', '.gitattributes'), 'utf8')
       .split('\n')

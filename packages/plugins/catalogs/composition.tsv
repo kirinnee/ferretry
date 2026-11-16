@@ -1,0 +1,2 @@
+kind	path	limit	expires	reason
+oversize	daemon/lib/shared-catalogs/service.ts	1659	2026-12-16	one shared-catalogs service; split by concern when next touched
