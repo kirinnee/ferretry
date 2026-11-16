@@ -1,0 +1,138 @@
+import { describe, it } from 'bun:test';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import should from 'should';
+import type { Harness } from '@ferretry/core-ferrets/contract';
+import { ClaudeHarness } from '../../../daemon/adapters/claude-harness.ts';
+import { composeClaudeHarness } from '../../../daemon/harness/parts/compose.ts';
+import type { ClaudeCore } from '../../../daemon/harness/parts/core.ts';
+import { CLAUDE_PARTS } from '../../../daemon/harness/parts/index.ts';
+
+/**
+ * Every member of `Harness` the Claude Code harness serves, and the ONE part that serves it. A member in two parts, a
+ * member in none, or a part that grows one this table does not name fails here; the members `Harness` offers that Claude
+ * Code deliberately does not (`fork`, `inject`, ...) are listed so a new one is a decision, not an accident.
+ */
+const SERVED = {
+  deliverPart: ['deliver'],
+  dialogsPart: ['dialogs'],
+  historyPart: ['conversations', 'hasConversation', 'historySources', 'importConversation'],
+  homePart: ['homeFor', 'prepareHome'],
+  identityPart: ['accepts', 'key', 'turnStop'],
+  launchSettingsPart: ['launchSettings'],
+  lifecyclePart: ['discover', 'resume', 'start', 'stop', 'update'],
+  runtimeSwitchPart: ['runtimeSwitch'],
+  transcriptPart: ['transcript', 'transcriptBytes', 'transcriptStamp', 'transcriptTail'],
+  usagePart: ['usage'],
+} as const satisfies Record<string, readonly (keyof Harness)[]>;
+
+/** What `Harness` declares and Claude Code does not serve (its own conversation naming, no protocol send, no move). */
+const NOT_SERVED = [
+  'adoptConversation',
+  'exportConversation',
+  'fork',
+  'inject',
+  'provedConversation',
+  'startFailure',
+] as const satisfies readonly (keyof Harness)[];
+
+const core = { deps: {} as never, delivered: new Set<string>() } satisfies ClaudeCore;
+
+describe('the Claude harness parts', () => {
+  it('serves each member from exactly one part', () => {
+    const owner = new Map<string, string>();
+    for (const part of CLAUDE_PARTS) {
+      for (const member of Object.keys(part(core))) {
+        should(owner.get(member)).equal(undefined, `${member} is served by ${owner.get(member)} and ${part.name}`);
+        owner.set(member, part.name);
+      }
+    }
+    const expected = new Map<string, string>();
+    for (const [part, members] of Object.entries(SERVED)) for (const member of members) expected.set(member, part);
+    should([...owner].sort()).deepEqual([...expected].sort());
+  });
+
+  it('names every part in the table and every part in the registry once', () => {
+    const registered = CLAUDE_PARTS.map(part => part.name);
+    should([...registered].sort()).deepEqual(Object.keys(SERVED).sort());
+    should(new Set(registered).size).equal(registered.length);
+    should(registered).deepEqual([...registered].sort());
+  });
+
+  it('keeps every member of Harness either served or deliberately left out', () => {
+    const served = new Set<string>(Object.values(SERVED).flat());
+    const ABSENT: Record<keyof Harness, true> = {
+      accepts: true,
+      adoptConversation: true,
+      conversations: true,
+      deliver: true,
+      dialogs: true,
+      discover: true,
+      exportConversation: true,
+      fork: true,
+      hasConversation: true,
+      historySources: true,
+      homeFor: true,
+      importConversation: true,
+      inject: true,
+      key: true,
+      launchSettings: true,
+      prepareHome: true,
+      provedConversation: true,
+      resume: true,
+      runtimeSwitch: true,
+      start: true,
+      startFailure: true,
+      stop: true,
+      transcript: true,
+      transcriptBytes: true,
+      transcriptStamp: true,
+      transcriptTail: true,
+      turnStop: true,
+      update: true,
+      usage: true,
+    };
+    const unsaid = Object.keys(ABSENT).filter(
+      member => !served.has(member) && !(NOT_SERVED as readonly string[]).includes(member),
+    );
+    should(unsaid).deepEqual([]);
+  });
+
+  it('composes the harness from them and refuses a member served twice', () => {
+    const harness = new ClaudeHarness({ newConversationId: () => 'x' } as never);
+    should(Object.keys(harness).sort()).deepEqual(Object.values(SERVED).flat().sort());
+    should(harness.key).equal('claude-code');
+    should(() => composeClaudeHarness(core)).not.throw();
+  });
+});
+
+describe('the parts registry takes two independent additions without a conflict', () => {
+  it('merges two one-line adds in different places (3-way) with no conflict', async () => {
+    const registry = join(import.meta.dir, '../../../daemon/harness/parts/index.ts');
+    const base = await readFile(registry, 'utf8');
+    const add = (text: string, name: string, file: string, before: string): string =>
+      text
+        .replace(`import { ${before}Part }`, `import { ${name}Part } from './${file}.ts';\nimport { ${before}Part }`)
+        .replace(`  ${before}Part,\n`, `  ${name}Part,\n  ${before}Part,\n`);
+    const dir = await mkdtemp(join(tmpdir(), 'claude-parts-merge-'));
+    try {
+      await writeFile(join(dir, 'base.ts'), base);
+      await writeFile(join(dir, 'a.ts'), add(base, 'cache', 'cache', 'deliver'));
+      await writeFile(join(dir, 'b.ts'), add(base, 'memory', 'memory', 'runtimeSwitch'));
+      const merged = Bun.spawn(
+        ['git', 'merge-file', '-p', join(dir, 'a.ts'), join(dir, 'base.ts'), join(dir, 'b.ts')],
+        {
+          stdout: 'pipe',
+          stderr: 'pipe',
+        },
+      );
+      const text = await new Response(merged.stdout).text();
+      should(await merged.exited).equal(0);
+      should(text).containEql('  cachePart,\n  deliverPart,\n');
+      should(text).containEql('  memoryPart,\n  runtimeSwitchPart,\n');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

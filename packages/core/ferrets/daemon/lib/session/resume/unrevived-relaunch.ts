@@ -25,7 +25,15 @@ export const RESTAMPED_RECORD_KEYS = [
   'updatedAt',
 ] as const;
 
-/** `current` with only the restamped keys put back to what `before` held (a key `before` lacked is dropped). */
+/**
+ * The key a move writes into config.json in the SAME write that restamps it: where the ferret was going, when, and the
+ * restamped keys as they stood. config.json and ferret.json (the record) cannot be written together, so a crash between
+ * the two leaves config.json naming the target while the record and the live pane are still on the source. This key is
+ * what lets the next boot tell (the record is the pane's truth) and put config.json back from it.
+ */
+export const MOVE_INTENT_KEY = 'pendingMove';
+
+/** `current` with only the restamped keys put back to what `before` held (a key `before` lacked is dropped), and no intent left. */
 export function restoreRestamped(
   before: Readonly<Record<string, unknown>>,
   current: Readonly<Record<string, unknown>>,
@@ -35,7 +43,72 @@ export function restoreRestamped(
     if (key in before) restored[key] = before[key];
     else delete restored[key];
   }
+  delete restored[MOVE_INTENT_KEY];
   return restored;
+}
+
+/** The intent a move writes beside its restamp: the restamped keys of `retained`, as they stood before it. */
+export function moveIntentOf(
+  retained: Readonly<Record<string, unknown>>,
+  move: { readonly from: string; readonly to: string; readonly at: string },
+): Record<string, unknown> {
+  const before: Record<string, unknown> = {};
+  for (const key of RESTAMPED_RECORD_KEYS) if (key in retained) before[key] = retained[key];
+  return { from: move.from, to: move.to, at: move.at, before };
+}
+
+/** What a boot does with one config.json that carries a move intent. */
+export type InterruptedMove =
+  | { readonly kind: 'none' }
+  /** The record agrees with the target (or with neither): config.json is right, only the intent is dropped. */
+  | { readonly kind: 'cleared'; readonly document: Record<string, unknown> }
+  /** The record is still on the source: config.json is put back to the source, the pane's truth. */
+  | {
+      readonly kind: 'rolled_back';
+      readonly document: Record<string, unknown>;
+      readonly from: string;
+      readonly to: string;
+    };
+
+function textOf(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
+/**
+ * Decides one config.json's move intent against the runtime the ferret's RECORD serves (`serving`, which is what its pane
+ * was launched from). An intent made at or after `bootedAtMs` is this process's own move in flight and is left alone, as
+ * is a ferret whose record cannot be read (`serving` undefined): nothing is changed on a doubt.
+ */
+export function settleInterruptedMove(
+  config: Readonly<Record<string, unknown>>,
+  serving: string | undefined,
+  bootedAtMs: number,
+): InterruptedMove {
+  if (!(MOVE_INTENT_KEY in config)) return { kind: 'none' };
+  const dropped = (): Record<string, unknown> => {
+    const rest: Record<string, unknown> = { ...config };
+    delete rest[MOVE_INTENT_KEY];
+    return rest;
+  };
+  const intent = config[MOVE_INTENT_KEY];
+  const fields = typeof intent === 'object' && intent !== null && !Array.isArray(intent) ? intent : undefined;
+  const from = textOf((fields as Record<string, unknown> | undefined)?.['from']);
+  const to = textOf((fields as Record<string, unknown> | undefined)?.['to']);
+  const at = textOf((fields as Record<string, unknown> | undefined)?.['at']);
+  const before = (fields as Record<string, unknown> | undefined)?.['before'];
+  const snapshot = typeof before === 'object' && before !== null && !Array.isArray(before) ? before : undefined;
+  // An intent this code did not write cannot be acted on; it is dropped so it cannot mislead a later boot.
+  if (from === undefined || to === undefined || at === undefined || snapshot === undefined)
+    return { kind: 'cleared', document: dropped() };
+  if (serving === undefined || Date.parse(at) >= bootedAtMs) return { kind: 'none' };
+  if (serving === from && from !== to)
+    return {
+      kind: 'rolled_back',
+      document: restoreRestamped(snapshot as Record<string, unknown>, config),
+      from,
+      to,
+    };
+  return { kind: 'cleared', document: dropped() };
 }
 
 /**

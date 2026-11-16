@@ -10,6 +10,8 @@ import { SessionMoveError, type SessionMoveSubsystem } from '../lib/runtime/moun
 import { ResumeRefused } from '../lib/session/resume/index.ts';
 import type { ResumeOutcome, ResumeRequest } from '../lib/session/resume/service.ts';
 import {
+  MOVE_INTENT_KEY,
+  moveIntentOf,
   restoreRestamped,
   settleRejectedRelaunch,
   settleUnrevivedRelaunch,
@@ -113,9 +115,13 @@ function blockersOf(described: {
     .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) }));
 }
 
+/** What a relaunch that threw something other than a refusal answers: the cause is in the move report, not in the answer. */
+const RELAUNCH_FAILED = 'the relaunch failed before it could be completed; the move report and the journal say why';
+
 function relaunchRefusal(error: unknown): never {
+  // A refusal's sentence is written to be shown. Anything else is a fault whose message can carry paths and internals.
   if (error instanceof ResumeRefused) throw new SessionMoveError('refused', error.message);
-  throw new SessionMoveError('failed', error instanceof Error ? error.message : String(error));
+  throw new SessionMoveError('failed', RELAUNCH_FAILED);
 }
 
 /** Restarts ferret `id` on the runtime it is on. The caller has already proved the request names that runtime. */
@@ -228,6 +234,9 @@ export async function relaunchInPlace(
       recordBefore = retained;
       return {
         ...shape.restamp(retained),
+        // THE INTENT RIDES IN THIS SAME WRITE: config.json and the record are two files, so a crash after this write and
+        // before the record is retargeted leaves them disagreeing. The next boot reads this and puts config.json back.
+        [MOVE_INTENT_KEY]: moveIntentOf(retained, { from, to: agent, at }),
         incarnation: `${id}-${generation}`,
         runtimeGeneration: generation,
         move: { from, to: agent, at },
