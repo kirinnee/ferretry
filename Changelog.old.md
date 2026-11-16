@@ -1,3 +1,9 @@
+## [4.291.18](https://github.com/kirinnee/ferretry/compare/v4.291.17...v4.291.18) (2026-11-14)
+
+### Fixes
+
+* **browser:** scope the pairing guard to pages that can reach each other ([#1598](https://github.com/kirinnee/ferretry/issues/1598)) ([46f12ed](https://github.com/kirinnee/ferretry/commit/46f12ed571a1f4a3fc98bf4c1f18b87587ec9a74))
+
 ## [4.291.17](https://github.com/kirinnee/ferretry/compare/v4.291.16...v4.291.17) (2026-11-14)
 
 ### Fixes
