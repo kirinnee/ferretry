@@ -475,6 +475,11 @@ export interface TerminalIo {
   out(text: string): void;
   err(text: string): void;
   readonly isTty: boolean;
+  /**
+   * Asks one question and returns the typed line. Present ONLY when stdin and stdout are both a terminal, so a script
+   * is never asked anything. The answer is echoed as it is typed: NEVER use it for a password or any secret.
+   */
+  ask?(message: string): Promise<string>;
 }
 
 /** A word the shell read as an option's value, and how many positional words came before it. */
