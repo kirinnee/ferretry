@@ -100,9 +100,9 @@ describe('the conditional fleet list names the daemon build', () => {
   test('the same fleet under another build is a 200 with the body; under the same build a 304', () => {
     const registry = new FerretRegistry([record('a')]);
     const list = new ConditionalFleetList();
-    const held = list.answer(registry.list(), undefined, '5.0.0').headers.get('etag');
-    expect(list.answer(registry.list(), held, '5.0.0').status).toBe(304);
-    const upgraded = list.answer(registry.list(), held, '5.0.1');
+    const held = list.answer(registry.list(), undefined, '5.0.0+aaa').headers.get('etag');
+    expect(list.answer(registry.list(), held, '5.0.0+aaa').status).toBe(304);
+    const upgraded = list.answer(registry.list(), held, '5.0.0+bbb');
     expect(upgraded.status).toBe(200);
     expect(upgraded.body).not.toBe('');
     expect(upgraded.headers.get('etag')).not.toBe(held);

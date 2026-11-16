@@ -191,6 +191,17 @@ export function tagForBuild(tag: string, build: string | undefined): string {
 }
 
 /**
+ * The tag a route serves and the verdict on the request's `If-None-Match`, for a route that answers conditionally
+ * without {@link answerWhenChanged} (its tag comes with the body, or its 304 keeps headers of its own): the build is
+ * folded in here, in the one place, so no route names it itself.
+ */
+export function conditionalTag(request: ApiRequest, tag: string): { readonly etag: string; readonly held: boolean } {
+  const etag = tagForBuild(tag, request.build);
+  const asked = headerValue(request, 'if-none-match');
+  return { etag, held: asked !== undefined && namesTag(asked, etag) };
+}
+
+/**
  * A CONDITIONAL GET WHOSE TAG IS KNOWN BEFORE THE BODY EXISTS. `tag` is the strong, quoted validator the caller derived
  * from a version the store already holds (a file identity, a ledger revision) — never from the body — so a request that
  * names it is answered `304` with no body and `build` is never called: an unchanged poll costs a stat, not a read, a
@@ -209,12 +220,11 @@ export async function answerWhenChanged(
   tag: string,
   build: () => Promise<ApiResponse>,
 ): Promise<ApiResponse> {
-  tag = tagForBuild(tag, request.build);
-  const held = headerValue(request, 'if-none-match');
-  if (held !== undefined && namesTag(held, tag)) return { status: 304, headers: new Map([['etag', tag]]), body: '' };
+  const { etag, held } = conditionalTag(request, tag);
+  if (held) return { status: 304, headers: new Map([['etag', etag]]), body: '' };
   const built = await build();
   if (built.status !== 200) return built;
   const headers = new Map(built.headers);
-  headers.set('etag', tag);
+  headers.set('etag', etag);
   return { ...built, headers };
 }

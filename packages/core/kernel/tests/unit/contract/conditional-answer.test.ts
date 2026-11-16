@@ -9,9 +9,9 @@ const requestOf = (ifNoneMatch?: string, build?: string): ApiRequest =>
 
 describe('tagForBuild', () => {
   it('folds the build into a strong tag, and leaves a tag alone when no build is named', () => {
-    expect(tagForBuild('"t"', '5.0.1')).toBe('"5.0.1.t"');
+    expect(tagForBuild('"t"', '5.0.0+bbb')).toBe('"5.0.0+bbb.t"');
     expect(tagForBuild('"t"', undefined)).toBe('"t"');
-    expect(tagForBuild('bare', '5.0.1')).toBe('"5.0.1.bare"');
+    expect(tagForBuild('bare', '5.0.0+bbb')).toBe('"5.0.0+bbb.bare"');
   });
 });
 
@@ -55,16 +55,18 @@ describe('answerWhenChanged', () => {
   });
 
   it('names the daemon build: the same tag under another build is a 200 with the body, under the same build a 304', async () => {
-    const oldBuild = await answerWhenChanged(requestOf(undefined, '5.0.0'), '"t"', async () => jsonResponse({ a: 1 }));
+    const oldBuild = await answerWhenChanged(requestOf(undefined, '5.0.0+aaa'), '"t"', async () =>
+      jsonResponse({ a: 1 }),
+    );
     const held = oldBuild.headers.get('etag') as string;
-    expect(held).toBe('"5.0.0.t"');
+    expect(held).toBe('"5.0.0+aaa.t"');
 
-    const sameBuild = await answerWhenChanged(requestOf(held, '5.0.0'), '"t"', async () => jsonResponse({}));
+    const sameBuild = await answerWhenChanged(requestOf(held, '5.0.0+aaa'), '"t"', async () => jsonResponse({}));
     expect(sameBuild.status).toBe(304);
 
-    const upgraded = await answerWhenChanged(requestOf(held, '5.0.1'), '"t"', async () => jsonResponse({ a: 2 }));
+    const upgraded = await answerWhenChanged(requestOf(held, '5.0.0+bbb'), '"t"', async () => jsonResponse({ a: 2 }));
     expect(upgraded.status).toBe(200);
-    expect(upgraded.headers.get('etag')).toBe('"5.0.1.t"');
+    expect(upgraded.headers.get('etag')).toBe('"5.0.0+bbb.t"');
     expect(JSON.parse(upgraded.body)).toEqual({ a: 2 });
   });
 });

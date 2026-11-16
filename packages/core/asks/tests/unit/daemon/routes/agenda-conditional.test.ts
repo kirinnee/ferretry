@@ -121,9 +121,9 @@ describe('GET /v1/ferrets/:ferretId/agenda is a conditional read for its owner',
 
   it('names the daemon build: the same board under another build is a 200, under the same build a 304', async () => {
     const { read } = fixture();
-    const held = tagOf(await read({ ...human }, PATH, '5.0.0'));
-    expect((await read({ ...human, 'if-none-match': held }, PATH, '5.0.0')).status).toBe(304);
-    const upgraded = await read({ ...human, 'if-none-match': held }, PATH, '5.0.1');
+    const held = tagOf(await read({ ...human }, PATH, '5.0.0+aaa'));
+    expect((await read({ ...human, 'if-none-match': held }, PATH, '5.0.0+aaa')).status).toBe(304);
+    const upgraded = await read({ ...human, 'if-none-match': held }, PATH, '5.0.0+bbb');
     expect(upgraded.status).toBe(200);
     expect(upgraded.body).not.toBe('');
     expect(tagOf(upgraded)).not.toBe(held);

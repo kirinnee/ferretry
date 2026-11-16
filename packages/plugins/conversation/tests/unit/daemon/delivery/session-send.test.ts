@@ -449,9 +449,9 @@ describe('the ledger and the queue are conditional reads', () => {
 
       it('names the daemon build: the same log under another build is a 200 with the body, under the same build a 304', async () => {
         const { routes } = stamped();
-        const held = (await get(routes, path, {}, {}, '5.0.0')).headers.get('etag') as string;
-        expect((await get(routes, path, { 'if-none-match': held }, {}, '5.0.0')).status).toBe(304);
-        const upgraded = await get(routes, path, { 'if-none-match': held }, {}, '5.0.1');
+        const held = (await get(routes, path, {}, {}, '5.0.0+aaa')).headers.get('etag') as string;
+        expect((await get(routes, path, { 'if-none-match': held }, {}, '5.0.0+aaa')).status).toBe(304);
+        const upgraded = await get(routes, path, { 'if-none-match': held }, {}, '5.0.0+bbb');
         expect(upgraded.status).toBe(200);
         expect(upgraded.body).not.toBe('');
         expect(upgraded.headers.get('etag')).not.toBe(held);

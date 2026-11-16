@@ -71,6 +71,8 @@ export interface DispatchBindings {
   /** Undefined, a throw or a damaged Vault: a `guard: 'secrets'` body is withheld. */
   outputGuard(): OutputGuard | undefined;
   readonly version: string;
+  /** The build named in every conditional tag (version and executable identity); default: the version. */
+  readonly build?: string;
   /** Gzips an opted-in answer (`compress: true`); absent, every answer is plain. */
   readonly compressor?: ResponseCompressor;
 }
@@ -325,7 +327,7 @@ export class Dispatcher {
 
   /** The call with the serving build named on it; a caller cannot supply one. */
   private stamped(request: ApiRequest): ApiRequest {
-    return { ...request, build: this.bindings.version };
+    return { ...request, build: this.bindings.build ?? this.bindings.version };
   }
 
   private async dispatchMember(incoming: ApiRequest): Promise<ApiResponse> {
