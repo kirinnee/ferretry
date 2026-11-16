@@ -10,10 +10,11 @@ import usage from '../../../daemon/index.ts';
 
 export async function usageHost(options: { readonly config?: Readonly<Record<string, unknown>> } = {}) {
   const scheduled: JobSpec[] = [];
+  const built: { hooks?: Record<string, (input: unknown) => unknown> } = {};
   const recording = {
     ...usage,
-    build: (ctx: Parameters<NonNullable<typeof usage.build>>[0]) =>
-      usage.build?.({
+    build: (ctx: Parameters<NonNullable<typeof usage.build>>[0]) => {
+      const half = usage.build?.({
         ...ctx,
         kernel: {
           ...ctx.kernel,
@@ -25,7 +26,10 @@ export async function usageHost(options: { readonly config?: Readonly<Record<str
             },
           },
         },
-      } as typeof ctx) as never,
+      } as typeof ctx);
+      built.hooks = (half as { hooks?: typeof built.hooks } | undefined)?.hooks;
+      return half as never;
+    },
   } as unknown as DaemonImplementation<Manifest>;
   const ferrets = new FakeFerrets();
   const host = await testHost({
@@ -38,5 +42,5 @@ export async function usageHost(options: { readonly config?: Readonly<Record<str
     },
     ...(options.config === undefined ? {} : { config: options.config }),
   });
-  return { host, scheduled, ferrets };
+  return { host, scheduled, ferrets, hooks: built.hooks ?? {} };
 }
