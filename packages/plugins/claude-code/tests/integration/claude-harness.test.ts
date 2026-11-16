@@ -473,6 +473,37 @@ describe('ClaudeHarness', () => {
     expect(roots.root('harness-history').resolve('projects').ok).toBe(false);
   });
 
+  test('historySources offers the owner’s home and each ferret home as read-only trees, a linked home as nothing', async () => {
+    const { harness } = build();
+    await mkdir(join(HISTORY, 'projects/p'), { recursive: true });
+    await Bun.write(join(HISTORY, 'projects/p/c-1.jsonl'), '0123456789');
+    await mkdir(join(AGENT_HOMES(), 'scout', 'projects/q'), { recursive: true });
+    await Bun.write(join(AGENT_HOMES(), 'scout', 'projects/q/c-2.jsonl'), 'abcdef');
+    await mkdir(join(fixture, 'pool'), { recursive: true });
+    await mkdir(join(AGENT_HOMES(), 'pooled'), { recursive: true });
+    await symlink(join(fixture, 'pool'), join(AGENT_HOMES(), 'pooled', 'projects'));
+
+    const sources = await harness.historySources();
+
+    expect(sources.map(source => [source.kind, source.label])).toEqual(
+      expect.arrayContaining([
+        ['computer', 'owner'],
+        ['ferret-home', 'scout'],
+      ]),
+    );
+    const owner = sources.find(source => source.kind === 'computer');
+    const scout = sources.find(source => source.label === 'scout');
+    const pooled = sources.find(source => source.label === 'pooled');
+    expect((await owner?.files.entries('projects/p'))?.map(entry => [entry.name, entry.kind, entry.size])).toEqual([
+      ['c-1.jsonl', 'file', 10],
+    ]);
+    expect(new TextDecoder().decode(await owner?.files.read('projects/p/c-1.jsonl', 2, 4))).toBe('2345');
+    expect(await scout?.files.stat('projects/q/c-2.jsonl')).toMatchObject({ size: 6 });
+    // A home whose history is a link lists nothing here (a pool lists it once), and the seam has no way to write.
+    expect(await pooled?.files.entries('projects')).toEqual([]);
+    expect(Object.keys(owner?.files ?? {}).sort()).toEqual(['entries', 'read', 'stat']);
+  });
+
   test('S41 conversation discovery refuses a history symlink that leaves its root', async () => {
     const { harness } = build();
     await mkdir(join(fixture, 'outside'), { recursive: true });
@@ -654,7 +685,10 @@ describe('ClaudeHarness', () => {
       const now = await document();
       expect(now.userID).toBe('fake-user-id');
       expect(now.hasCompletedOnboarding).toBe(true);
-      expect(now.projects['/work']).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true });
+      expect(now.projects['/work']).toEqual({
+        allowedTools: ['Bash'],
+        hasTrustDialogAccepted: true,
+      });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
       expect(plan.files as readonly string[]).toContain(claudeJson());
     });
@@ -702,9 +736,13 @@ describe('ClaudeHarness', () => {
 
     expect(result.ok && result.value.harnessConversation).toBe('conv-1');
     expect(started.cwd).toBe('/work');
-    expect(started.command?.slice(0, 7)).toEqual([
+    expect(started.command?.slice(0, 11)).toEqual([
       'env',
+      '-u',
+      'CLAUDE_CODE_CHILD_SESSION',
       `CLAUDE_CONFIG_DIR=${HOME}`,
+      'DISABLE_AUTOUPDATER=1',
+      'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -1806,6 +1844,53 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
         kind: 'drifted',
         sections: ['permission-mode', 'fixed-layer'],
       });
+    });
+  });
+
+  describe('O11b: the prompt keys a real start asserts', () => {
+    const WAIVER = 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS=1';
+    const config = (permissionMode: 'auto' | 'skip', dangerousRmWaiver: boolean) => ({
+      file: () => ({ searchPaths: [], permissionMode, questionTool: false, dangerousRmWaiver }),
+      collection: () => new Map(),
+    });
+    const command = async (options: Parameters<typeof build>[0]): Promise<readonly string[]> => {
+      const started: { command?: readonly string[] } = {};
+      expect((await build(options).harness.start(spec(), runner(started), {} as never)).ok).toBe(true);
+      return started.command ?? [];
+    };
+
+    test('the full rm waiver is set only by the setting on in bypass mode, and a start never sets it by default', async () => {
+      expect(await command({})).not.toContain(WAIVER);
+      expect(await command({ config: config('skip', false) })).not.toContain(WAIVER);
+      expect(await command({ config: config('auto', true) })).not.toContain(WAIVER);
+      expect(await command({ config: config('skip', true) })).toContain(WAIVER);
+    });
+
+    test('a start seeds the installed version as the last release notes seen, replacing an older one', async () => {
+      const { harness } = build();
+      await harness.prepareHome(spec());
+      const older = JSON.parse(await readFile(join(HOME, '.claude.json'), 'utf8')) as Record<string, unknown>;
+      await writeFile(join(HOME, '.claude.json'), JSON.stringify({ ...older, lastReleaseNotesSeen: '2.1.100' }));
+
+      await harness.start(spec(), runner({}), {} as never);
+
+      const now = JSON.parse(await readFile(join(HOME, '.claude.json'), 'utf8')) as Record<string, unknown>;
+      expect(now.lastReleaseNotesSeen).toBe('2.1.220');
+      expect(now.lspRecommendationDisabled).toBe(true);
+      expect(now.claudeCodeHints).toEqual({ disabled: true });
+    });
+
+    test('turning the waiver on never marks a running ferret outdated (outside the recorded launch settings)', async () => {
+      const state = new MemoryStateFolder().port([CLAUDE_CODE_LAUNCH_SETTINGS]);
+      let waiver = false;
+      const live = {
+        file: () => ({ searchPaths: [], permissionMode: 'skip', questionTool: false, dangerousRmWaiver: waiver }),
+        collection: () => new Map(),
+      };
+      const { harness } = build({ state, config: live });
+      await harness.start(spec(), runner({}), {} as never);
+      waiver = true;
+      expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
     });
   });
 

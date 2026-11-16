@@ -4,7 +4,7 @@ import type { SessionId } from '../../seams/ferret-id.ts';
 import type { SendScheduler } from '../../delivery/lib/tracker.ts';
 import type { SendFate } from '../../delivery/lib/types.ts';
 import { type DeliveryView, type HandOver, movesFrom, type OwnDraft, reasonForWaiting } from './delivery.ts';
-import { foldQueue, type QueueEvent } from './model.ts';
+import type { QueueEvent } from './model.ts';
 import { deliveryOrder, planDelivery } from './policy.ts';
 import type { SessionQueueStore } from './ports.ts';
 import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from './settings.ts';
@@ -125,6 +125,13 @@ export class QueueDeliverer {
     SessionId,
     { readonly at: number; readonly reason: QueueWaitReason; staleReady: boolean }
   >();
+  /**
+   * Sessions whose hand-overs the screen keeps refusing as unreadable: when the last refusal was and how many in a
+   * row (&F4319). Each refused hand-over writes four lines (wait cleared, typing, queued, unreadable again), and one
+   * session retried every `lookMs` for a day: 83,000 lines, read back on every look after. The first refusal is
+   * tried again as soon as before; from the second in a row each wait is `lookMs`, doubling, up to `recheckMs`.
+   */
+  private readonly unreadable = new Map<SessionId, { readonly at: number; readonly refusals: number }>();
   private stopped = false;
 
   constructor(
@@ -292,7 +299,16 @@ export class QueueDeliverer {
     // passed (&B153). Each hand-over holds both locks through a readiness wait of about half a minute, and the
     // queue looked again every `lookMs`: a pane that drew neither a prompt nor work looped for as long.
     if (reason === undefined) reason = this.awaitingPrompt(id, view);
-    await this.waiting(id, deliveryOrder(messages, view.target.mode), reason, behind);
+    if (reason === undefined) reason = this.awaitingReadable(id);
+    // A member about to be marked `typing` loses its wait with that move, so clearing it first is a line that
+    // says nothing — and on a pane that keeps refusing, one more line every try.
+    const handing = new Set(reason === undefined ? members.map(member => member.id) : []);
+    await this.waiting(
+      id,
+      deliveryOrder(messages, view.target.mode).filter(message => !handing.has(message.id)),
+      reason,
+      behind,
+    );
     if (reason !== undefined) return false;
     // Every member is `typing` under the delivery's id BEFORE anything is handed over, so a daemon that
     // dies in between leaves them all to be settled from the one ledger record — or, with none, all back.
@@ -311,6 +327,12 @@ export class QueueDeliverer {
         staleReady: view.target.promptReady === true,
       });
     else this.promptless.delete(id);
+    if (outcome.kind === 'refused' && outcome.reason === 'unreadable')
+      this.unreadable.set(id, {
+        at: Date.parse(this.ports.clock.now()),
+        refusals: (this.unreadable.get(id)?.refusals ?? 0) + 1,
+      });
+    else this.unreadable.delete(id);
     switch (outcome.kind) {
       case 'landed':
         for (const member of members) await this.move(id, member.id, 'delivered');
@@ -348,6 +370,15 @@ export class QueueDeliverer {
       return undefined;
     }
     return last.reason;
+  }
+
+  /** `unreadable` while a session whose screen refused its last hand-overs is still backing off, else `undefined`. */
+  private awaitingReadable(id: SessionId): QueueWaitReason | undefined {
+    const last = this.unreadable.get(id);
+    if (last === undefined) return undefined;
+    if (last.refusals < 2) return undefined;
+    const backoff = Math.min(this.settings.lookMs * 2 ** (last.refusals - 2), this.settings.recheckMs);
+    return Date.parse(this.ports.clock.now()) - last.at < backoff ? 'unreadable' : undefined;
   }
 
   /** Says why each waiting message is waiting, writing only what changed. */
@@ -401,6 +432,6 @@ export class QueueDeliverer {
   }
 
   private async messages(id: SessionId): Promise<readonly QueuedMessage[]> {
-    return foldQueue(await this.ports.store.read(id));
+    return await this.ports.store.messages(id);
   }
 }

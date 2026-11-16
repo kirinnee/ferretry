@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { FakeAsks, entryId, sourceKey } from '@ferretry/core-asks/contract/testing';
 import type { AskSummary } from '@ferretry/core-asks/contract';
-import type { TranscriptEntry, TranscriptReader } from '@ferretry/core-ferrets/contract';
-import type { Redaction, RootHandle } from '@ferretry/kernel/contract';
+import { historyFilesOver, type TranscriptEntry, type TranscriptReader } from '@ferretry/core-ferrets/contract';
+import type { Redaction } from '@ferretry/kernel/contract';
 import { diskRoot } from '@ferretry/kernel/testing';
 import type { Instant } from '@ferretry/std';
 import { EntriesTranscriptSource } from '../../../daemon/reader/adapters/entries-source.ts';
@@ -35,7 +35,7 @@ async function history() {
 describe('the harness history root read in place for conversations', () => {
   test('a folder lists its files and folders by kind, and a folder that is missing or outside the root lists nothing', async () => {
     const { root } = await history();
-    const files = conversationFiles(root);
+    const files = conversationFiles(historyFilesOver(root));
 
     const entries = await files.entries('proj');
 
@@ -44,29 +44,15 @@ describe('the harness history root read in place for conversations', () => {
       { name: 'sub', kind: 'directory' },
       { name: 'two.jsonl', kind: 'file' },
     ]);
-    expect(entries.some(entry => entry.name === 'link.jsonl')).toBe(true);
+    // A link is listed as other, never followed.
+    expect(entries.find(entry => entry.name === 'link.jsonl')?.kind).toBe('other');
     expect(await files.entries('absent')).toEqual([]);
     expect(await files.entries('../../outside')).toEqual([]);
   });
 
-  test('an entry whose status cannot be read is listed as other', async () => {
-    const { root } = await history();
-    const failing = { ...root, stat: async () => Promise.reject(new Error('gone')) } as unknown as RootHandle;
-
-    const entries = await conversationFiles(failing).entries('proj');
-
-    expect(entries.every(entry => entry.kind === 'other')).toBe(true);
-    expect(entries.length).toBeGreaterThan(0);
-    const unresolvable = {
-      ...root,
-      resolve: (path: string) => (path === 'proj' ? root.resolve(path) : ({ ok: false } as never)),
-    } as unknown as RootHandle;
-    expect((await conversationFiles(unresolvable).entries('proj')).every(entry => entry.kind === 'other')).toBe(true);
-  });
-
   test('a file’s size and time are told, a folder, a missing file or a path outside the root has none', async () => {
     const { root } = await history();
-    const files = conversationFiles(root);
+    const files = conversationFiles(historyFilesOver(root));
 
     const info = await files.info('proj/one.jsonl');
 
@@ -79,7 +65,7 @@ describe('the harness history root read in place for conversations', () => {
 
   test('the head is the first bytes and the tail the last, and anything unreadable is nothing', async () => {
     const { root } = await history();
-    const files = conversationFiles(root);
+    const files = conversationFiles(historyFilesOver(root));
 
     expect(await files.head('proj/two.jsonl', 4)).toBe('abcd');
     expect(await files.tail('proj/two.jsonl', 4)).toBe('ghij');
@@ -88,8 +74,10 @@ describe('the harness history root read in place for conversations', () => {
     expect(await files.head('../../outside', 4)).toBeUndefined();
     expect(await files.tail('proj/absent.jsonl', 4)).toBeUndefined();
     expect(await files.tail('../../outside', 4)).toBeUndefined();
-    const unreadable = { ...root, readBytes: async () => Promise.reject(new Error('io')) } as unknown as RootHandle;
-    expect(await conversationFiles(unreadable).tail('proj/two.jsonl', 4)).toBeUndefined();
+    const unreadable = { ...root, readBytes: async () => Promise.reject(new Error('io')) } as unknown as typeof root;
+    expect(await conversationFiles(historyFilesOver(unreadable)).tail('proj/two.jsonl', 4)).toBeUndefined();
+    // A window is a ranged read of the one file.
+    expect(await historyFilesOver(root).read('proj/two.jsonl', 2, 3)).toEqual(new TextEncoder().encode('cde'));
   });
 });
 

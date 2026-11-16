@@ -17,7 +17,7 @@
  * today's jq run fails and discards its temporary file: nothing in it is dropped, and the launch goes on. MCP's
  * approvals read then answers `unreadable` for a document that is not JSON, and binds no project server (fail closed).
  */
-import { CLAUDE_JSON_DEFAULTS } from './fixed-layer.ts';
+import { CLAUDE_JSON_DEFAULTS, RELEASE_NOTES_KEY } from './fixed-layer.ts';
 
 /**
  * Larger than any real one: a busy `.claude.json` runs to a few hundred kilobytes. The one limit for reading a home
@@ -56,24 +56,40 @@ function mergeInto(target: JsonObject, seed: JsonObject): boolean {
   return true;
 }
 
-/** Today's `if .x == null then .x = <default> else . end`, for each default: absent or `null` only. */
-function applyDefaults(target: JsonObject): void {
-  for (const [key, value] of Object.entries(CLAUDE_JSON_DEFAULTS))
-    if (!Object.hasOwn(target, key) || target[key] === null) target[key] = value;
+/**
+ * Today's `if .x == null then .x = <default> else . end`, for each default: absent or `null` only. An object default is
+ * walked into, so a leaf the person already set (even to another value) stays and only the missing ones are filled.
+ */
+function fillAbsent(target: JsonObject, defaults: { readonly [key: string]: Json }): void {
+  for (const [key, value] of Object.entries(defaults)) {
+    const current = Object.hasOwn(target, key) ? target[key] : undefined;
+    if (isObject(value) && isObject(current)) fillAbsent(current, value);
+    else if (current === undefined || current === null) target[key] = value;
+  }
+}
+
+function applyDefaults(target: JsonObject, version: string | undefined): void {
+  fillAbsent(target, CLAUDE_JSON_DEFAULTS);
+  // Not a choice anybody makes: the installed version, so an upgrade shows no "what's new" summary (re-seeded each launch).
+  if (version !== undefined) target[RELEASE_NOTES_KEY] = version;
 }
 
 /**
  * The text to write for `.claude.json`, or `undefined` when nothing is to be written: the document already holds
  * every fixed key, or it cannot be merged (see the header). `existing` is the document on disk (`undefined` when there
  * is none); `fresh` is the fixed layer's whole document, which (with the defaults) is what a home with none, or an
- * empty one, gets.
+ * empty one, gets. `version` is the installed Claude's, for `lastReleaseNotesSeen` (absent: that key is not asserted).
  */
-export function mergeClaudeJson(existing: string | undefined, fresh: string): string | undefined {
+export function mergeClaudeJson(
+  existing: string | undefined,
+  fresh: string,
+  version?: string | undefined,
+): string | undefined {
   const seed: unknown = JSON.parse(fresh);
   if (!isObject(seed)) throw new Error('the fixed .claude.json layer is not an object');
   if (existing === undefined || existing.trim() === '') {
     const document: JsonObject = { ...seed };
-    applyDefaults(document);
+    applyDefaults(document, version);
     return `${JSON.stringify(document, null, 2)}\n`;
   }
   let document: unknown;
@@ -87,7 +103,7 @@ export function mergeClaudeJson(existing: string | undefined, fresh: string): st
   const target: JsonObject | undefined = document === null ? {} : isObject(document) ? document : undefined;
   if (target === undefined) return undefined;
   if (!mergeInto(target, seed)) return undefined;
-  applyDefaults(target);
+  applyDefaults(target, version);
   const text = `${JSON.stringify(target, null, 2)}\n`;
   // Already seeded: an ordinary launch writes nothing (today's `SEEDED_ALREADY` check).
   return document !== null && JSON.stringify(target) === JSON.stringify(JSON.parse(existing)) ? undefined : text;

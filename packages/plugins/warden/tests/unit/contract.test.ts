@@ -20,6 +20,19 @@ describe('warden wire schemas', () => {
     expect(DEFAULT_WARDEN_CONFIG.layers).toEqual({ jev: false, llm: false });
     expect(DEFAULT_WARDEN_CONFIG.mayActAlone.stop).toBe(false);
   });
+  test('moving a ferret that ran out of tokens is ON by default, and an explicit false is kept as written', () => {
+    expect(DEFAULT_WARDEN_CONFIG.autoMove.enabled).toBe(true);
+    expect(effectiveWardenConfig({}).autoMove.enabled).toBe(true);
+    expect(effectiveWardenConfig({ autoMove: { targets: ['personal-a'] } }).autoMove).toMatchObject({
+      enabled: true,
+      targets: ['personal-a'],
+    });
+    expect(effectiveWardenConfig({ autoMove: { enabled: false } }).autoMove.enabled).toBe(false);
+  });
+  test('moves ON by default is no loosening, but turning an explicit false back on is held', () => {
+    expect(wardenLoosens({}, { autoMove: { when: ['rate_limited'] } })).toEqual([]);
+    expect(wardenLoosens({ autoMove: { enabled: false } }, {})).toEqual(['the warden may move ferrets between logins']);
+  });
   test('the file refuses the old single `triage` key and any unknown key', () => {
     expect(WardenFileSchema.safeParse({ triage: 'jev' }).success).toBe(false);
     expect(WardenFileSchema.safeParse({ caps: { jevUsdPerDay: 1 } }).success).toBe(true);
@@ -124,7 +137,11 @@ describe('warden loosening (§7.2)', () => {
     ['a longer spawn gap', {}, { minSpawnGapMinutes: 30 }],
     ['switching force-stop off', moving({ enabled: true, forceStopBackground: true }), moving({ enabled: true })],
     // Force-stop acts only while moves are on: switching it on while they are off moves nothing (switching moves on later is held).
-    ['switching force-stop on while moves are off', {}, moving({ forceStopBackground: true })],
+    [
+      'switching force-stop on while moves are off',
+      moving({ enabled: false }),
+      moving({ enabled: false, forceStopBackground: true }),
+    ],
     ['dropping a trigger', moving({ enabled: true }), moving({ enabled: true, when: ['rate_limited'] })],
     [
       'dropping a named login',
@@ -140,7 +157,10 @@ describe('warden loosening (§7.2)', () => {
 
   test('T-0034 force-stop already on is held with moves when moves are switched on', () => {
     expect(
-      wardenLoosens(moving({ forceStopBackground: true }), moving({ enabled: true, forceStopBackground: true })),
+      wardenLoosens(
+        moving({ enabled: false, forceStopBackground: true }),
+        moving({ enabled: true, forceStopBackground: true }),
+      ),
     ).toEqual([
       'the warden may move ferrets between logins',
       "the Warden may now stop a ferret's own background jobs to move it",

@@ -244,10 +244,12 @@ export default definePlugin({
         audit: { skip: 'a start recovery read records nothing, as today' },
         guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
       }),
-      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act.
+      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act. It answers
+      // the ferret's whole identity record and takes any ferret by name, so a device narrowed off fleet use is refused (c58-sec2).
       route('POST /v1/ferrets/:ferretId/pin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar pin records nothing, as today' },
         guard: { none: 'one ferret identity record with its pin instant' },
@@ -255,6 +257,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/unpin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar unpin records nothing, as today' },
         guard: { none: 'one ferret identity record' },
@@ -267,9 +270,14 @@ export default definePlugin({
         audit: { skip: 'a pin board read records nothing, as today' },
         guard: { none: 'the notes and message references a person or the ferret pinned' },
       }),
+      // The write side of the board the read above guards (c58-sec2): add, edit and remove are one `fleet.use`
+      // demand like the read, so a device narrowed off fleet use can neither read nor change a ferret's pinned notes.
+      // `use`, not `configure`: a note pin changes no host behaviour, and `configure` would put a passkey step-up on the app's
+      // ordinary pin button. A ferret's own credential is never grant-governed, so it keeps its own board.
       route('POST /v1/ferrets/:ferretId/pins', {
         minimum: 'operator',
         caller: 'any',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a pin board change records nothing, as today' },
         guard: { none: 'answers the pin board' },

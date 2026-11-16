@@ -3,7 +3,8 @@ import { describe, it } from 'bun:test';
 import { QUEUE_CHANGED_EVENT, type QueueChangedEventData } from '../../../../daemon/seams/protocol.ts';
 import should from 'should';
 import { NotifyingSessionQueueStore, type QueueChangePublisher } from '../../../../daemon/queue/lib/notifying-store.ts';
-import { type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import { foldQueue, type QueueEvent } from '../../../../daemon/queue/lib/model.ts';
+import type { QueuedMessage } from '../../../../daemon/seams/protocol.ts';
 import { SessionQueueService } from '../../../../daemon/queue/lib/service.ts';
 import { type SessionQueueStore } from '../../../../daemon/queue/lib/ports.ts';
 import { parseSessionId, type SessionId } from '../../../../daemon/seams/ferret-id.ts';
@@ -15,8 +16,8 @@ const AT = at('2026-10-30T13:05:37.000Z');
 /** The durable log as a list per session. */
 class MemoryQueueStore implements SessionQueueStore {
   readonly logs = new Map<string, QueueEvent[]>();
-  async read(id: SessionId): Promise<readonly QueueEvent[]> {
-    return [...(this.logs.get(id) ?? [])];
+  async messages(id: SessionId): Promise<readonly QueuedMessage[]> {
+    return foldQueue(this.logs.get(id) ?? []);
   }
   async append(id: SessionId, event: QueueEvent): Promise<void> {
     this.logs.set(id, [...(this.logs.get(id) ?? []), event]);
@@ -96,7 +97,7 @@ describe('announcing a queue change', () => {
     const { store, service } = subject();
     await service.enqueue(ID, { id: 'm1', sender: 'human', text: 'hi' });
 
-    should(await store.read(ID)).have.length(1);
+    should(await store.messages(ID)).have.length(1);
   });
 
   it('should never fail a change that is on disk because the announcement failed', async () => {
