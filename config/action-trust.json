@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "actions": {
+    "AtomiCloud/actions.setup-nix": "non-trusted",
     "actions/checkout": "trusted",
     "actions/download-artifact": "trusted",
     "actions/upload-artifact": "trusted",
-    "cachix/install-nix-action": "trusted",
     "namespacelabs/nscloud-cache-action": "trusted"
   }
 }

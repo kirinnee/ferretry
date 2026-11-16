@@ -92,12 +92,11 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
+      - name: Mount the tsc cache
         id: cache
         if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
-          cache: nix
           path: ~/.cache/ferretry-tsc
       - uses: ./.github/actions/install-nix
       # The only-down checks (ports-pending, after-merge) need the commit they may not grow from; a one-commit
@@ -194,11 +193,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run every integration group and its ledger
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/integration.sh
@@ -250,11 +244,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       # A report the earlier jobs failed to upload is a missing artifact here, not a reason to stop: the count then
       # says "no JUnit report found" rather than guessing.
@@ -302,11 +291,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run the full-only static gates
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/full-gates.sh
@@ -333,11 +317,6 @@ jobs:
       - name: Say that the macOS smoke was skipped
         if: ${{ vars.MACOS_SMOKE == 'skip' }}
         run: ./scripts/ci/macos-smoke-skipped.sh
-      - name: Mount the Nix store cache
-        if: runner.environment == 'self-hosted'
-        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
-        with:
-          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
         run: ./scripts/ci/in-devshell.sh ./scripts/release/compile.sh

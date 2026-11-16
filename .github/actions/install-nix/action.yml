@@ -1,8 +1,9 @@
 # The one way a job installs Nix (docs/standards/ci-cd/index.md#installing-nix). Every workflow calls
-# this instead of `cachix/install-nix-action` so the network settings and the retries below are written
-# once. A job on Namespace still mounts its `/nix` cache volume BEFORE calling it.
+# this instead of an installer action directly so the Nix setup, the network settings and the retries
+# below are written once. On Namespace the action also mounts the `/nix` cache volume itself, so a job
+# no longer mounts it first.
 name: Install Nix
-description: Install Nix with patient downloads, then realise the job's dev shell, retrying network failures.
+description: Set up Nix with AtomiCloud/actions.setup-nix, then realise the job's dev shell, retrying network failures.
 inputs:
   shell:
     description: The flake dev shell the job enters, realised here so a failed download is retried before the job's real step.
@@ -10,26 +11,40 @@ inputs:
 runs:
   using: composite
   steps:
-    # The installer's own download tries five times one second apart, which a DNS blip outlasts
-    # ("Could not resolve host: releases.nixos.org" on `main`). It fails before anything is installed,
-    # so a second install a minute later is safe; there is no third.
+    # `runner.environment == 'self-hosted'` is how every workflow already tells a Namespace runner from a
+    # GitHub-hosted one. checkout is the job's own step before this action (it owns `persist-credentials`),
+    # and nothing here reads the GITHUB_*_SLUG variables.
+    #
+    # THE RETRY. The installer's download (`releases.nixos.org` / `install.determinate.systems`) fails before
+    # anything is installed, so a second attempt a minute later is safe; there is no third. On Namespace the
+    # first attempt has already created and mounted `/nix` (a second `namespacelabs: 'true'` run would stop at
+    # `mkdir /nix`), so the second attempt runs as `namespacelabs: 'false'`: the plain installer over the
+    # mounted volume. A warm Namespace job never downloads an installer at all.
     - id: first
       continue-on-error: true
-      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      uses: AtomiCloud/actions.setup-nix@6d7c1e0710ce2fbda572edd6c3a473ea8210b4c0 # v4.0.0
       with:
-        extra_nix_config: |
-          download-attempts = 10
-          connect-timeout = 15
+        namespacelabs: ${{ runner.environment == 'self-hosted' && 'true' || 'false' }}
+        checkout: 'false'
+        github-slug: 'false'
     - if: steps.first.outcome == 'failure'
       shell: bash
       run: echo "::warning::installing Nix failed once; trying again in 60s" && sleep 60
     - if: steps.first.outcome == 'failure'
-      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      uses: AtomiCloud/actions.setup-nix@6d7c1e0710ce2fbda572edd6c3a473ea8210b4c0 # v4.0.0
       with:
-        # The same settings as the first attempt.
-        extra_nix_config: |
-          download-attempts = 10
-          connect-timeout = 15
+        namespacelabs: 'false'
+        checkout: 'false'
+        github-slug: 'false'
+    # Patient downloads for every Nix client call after this step (flake inputs fetched by the client).
+    - shell: bash
+      run: |
+        {
+          echo "NIX_CONFIG<<__FY_NIX_CONFIG__"
+          echo "download-attempts = 10"
+          echo "connect-timeout = 15"
+          echo "__FY_NIX_CONFIG__"
+        } >>"${GITHUB_ENV}"
     - shell: bash
       env:
         SHELL_REF: ${{ inputs.shell }}
