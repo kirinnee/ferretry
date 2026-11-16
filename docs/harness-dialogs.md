@@ -4,7 +4,7 @@ Claude Code and Codex stop on screens of their own as well as on tool permission
 ([permission-prompts.md](permission-prompts.md)): Codex's "Hooks need review", its update prompt and its
 sign-in screen; Claude's "New MCP server found in this project" and "Settings Error". Nothing moves until
 somebody answers, and before this nothing outside the Console said so — an agent session just sat there.
-Ferretry now reads such a dialog off the agent's pane, shows it as a card in Chat with the harness's own
+Ferretry now reads such a dialog off the agent's pane, shows it as a box in Chat with the harness's own
 choices, marks the session as needing you, and types the person's answer back into the pane.
 
 ## Why Codex asked "Hooks need review"
@@ -31,12 +31,12 @@ runtime it is "new". Codex writes the answer into the runtime's `config.toml`, w
 (`preserveExisting`), so it is asked once per runtime and again only when the hook changes.
 
 So there is nothing of Ferretry's own to pre-trust, and imported hooks are **not** trusted for the person:
-the dialog is shown to them as a card instead. Not used, on purpose:
+the dialog is shown to them as a box instead. Not used, on purpose:
 
 - **`codex --bypass-hook-trust`** runs every enabled hook untrusted — it would silently trust the person's
   hooks for every agent.
 - **Copying the person's `hooks.state`** into the runtime under the new path would be the same thing done
-  quietly; the card asks instead. If Ferretry ever adds a hook of its own, it must write its own
+  quietly; the box asks instead. If Ferretry ever adds a hook of its own, it must write its own
   `hooks.state` entry beside it, recomputed whenever the hook changes.
 
 ## What is recognised
@@ -63,7 +63,7 @@ Any other screen of the same shape — a header, a list with a cursor on one row
 names Enter or Esc ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to
 cancel") as the last line of the frame — is read as `other`, so an unknown dialog is still surfaced rather
 than left silent. A row is marked `grantsTrust` when it says it trusts and not that it does not. A tool
-permission prompt is never read as a dialog: it has its own card.
+permission prompt is never read as a dialog: it has its own box.
 
 The dialog (`HarnessDialog` in `packages/protocol/src/lib/session-dialog.ts`) carries every row in the
 harness's own words, the description under a row when there is one, the row the cursor is on, and the
@@ -203,7 +203,7 @@ planner at the moment of pressing. A screen whose only way out grants something 
 **What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
 on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows
 move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. (3) ONE
-journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda card, no pane text. The same
+journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda item, no pane text. The same
 dialog on the same ferret is never keyed twice; if the next look still sees it on screen the keys failed (or a hold refused
 them) and the owner is told once, as before (`fleet.warden_dialog_clear_failed`). The look runs every 10 s.
 
@@ -234,9 +234,9 @@ terminal), and names no row. What the screen says is read in the terminal.
 
 ## Declared gaps
 
-- **Which hooks.** The hook review says how many hooks are new, not which; the card shows what the pane
-  shows. "Review hooks" opens Codex's own list, which the card can only close (Esc).
-- **Signing in** from the card picks a sign-in method; finishing it (a browser, a device code) happens in
+- **Which hooks.** The hook review says how many hooks are new, not which; the box shows what the pane
+  shows. "Review hooks" opens Codex's own list, which the box can only close (Esc).
+- **Signing in** from the box picks a sign-in method; finishing it (a browser, a device code) happens in
   the Console or on the machine.
 - **Model-migration notices** could not be raised offline (they depend on the remote model list), so there
   is no fixture. The fixed layer hides the ones Codex 0.156.1 names (`[notice]`), and any other one is read

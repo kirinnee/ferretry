@@ -159,7 +159,7 @@ it is about cannot be done reliably, so a ferret receives none of it in any form
   carry; it is not run by that test.
 - **A flag's detail is the owner's.** The detector writes a flag's `detail` as a sentence about the flag and some name
   ANOTHER session (`peer_wait_unanswerable` the peer and its state; the stuck inbox and input kinds who sent; an orphaned
-  card the card and its ferret). A ferret reads, in `status` and `run`, the one fixed sentence for the flag's kind
+  task the task and its ferret). A ferret reads, in `status` and `run`, the one fixed sentence for the flag's kind
   instead. The owner and a device keep the detail.
 - A report is read for a ferret only to find which of the caller's own ferrets a row is about: a fleet report contributes
   the rows whose target is in the lineage, a report whose file name puts it outside the lineage is not opened, and one
@@ -198,7 +198,7 @@ keeps byte for byte (`warden:…`, `warden-…`, `warden.…`, the hashed entry)
 it. **A daemon-raised item whose shape the table does not list is the Warden's too** (fail closed), so a producer added
 later, or a v4 grammar nobody classified, is withheld until somebody decides otherwise. The daemon-raised shapes that are
 **not** the Warden's, and read as they always did, are another plugin's Asks source (`ask:<source>:…`, `standing:<source>:…`),
-a gate item and its follow-up (`gate:`, `gate-followup:`), a card's agenda (`card-agenda:`), and v4's `lanes:`,
+a gate item and its follow-up (`gate:`, `gate-followup:`), a task's agenda (`card-agenda:`), and v4's `lanes:`,
 `handover:`, `budget:`, `prompt:` and `question:`. **Warden provenance is sticky**: an item counts as the Warden's when
 any item merged into it, or the item it was split from (to the end of the chain), is; a relative the store cannot produce
 counts as the Warden's. Its target is the ferret its entry names, else the board it stands on. A lineage that cannot be read
@@ -217,9 +217,9 @@ changing automatic install are `configure`, and a governed device also gives a p
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
 
 **A lead's table of its sub-ferrets is `fleet.use`.** `GET /v1/ferrets/:ferretId/subtree` (`fy status --subtree`,
-[pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's cards and PR
+[pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's tasks and PR
 cache and each descendant's outbox, so a remote caller whose `fleet.use` is narrowed is refused with
-`grant_not_granted` before anything is read. It surfaces card notes, PR state and messages for a whole subtree in one
+`grant_not_granted` before anything is read. It surfaces task notes, PR state and messages for a whole subtree in one
 answer rather than one session's own record. Its excerpts pass the same fail-closed secret redactor as an operator transcript read (before the cut to one line; `[excerpt withheld]` if it cannot run), and its per-table outbox work is bounded ([pack-mode.md](pack-mode.md)).
 It writes nothing and takes no lineage from the request: the descendants are the registry's `parent` links.
 Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
@@ -330,11 +330,11 @@ restart ferrets, and a device narrowed off fleet use could still send to one. Th
 - **One act, every path.** Where an act is reached by more than one route the same demand is on all of them: the send path
   is the send, an interrupt, a retry, an Enter and a cancel on the send ledger, and an edit or a cancel in the queue (its
   reads were `fleet.use` already); a move's preview and its ask-to-stop-jobs ask what the move asks. **Every route that
-  STARTS a ferret asks what `POST /v1/ferrets` asks, wherever it lives:** a board card's Start
-  (`POST /v1/board/cards/:cardId/start`, which starts a ferret with the card text as its prompt), `POST /v1/lessons/run`
+  STARTS a ferret asks what `POST /v1/ferrets` asks, wherever it lives:** a board task's Start
+  (`POST /v1/board/tasks/:taskId/start`, which starts a ferret with the task text as its prompt), `POST /v1/lessons/run`
   (with `spawn`) and `POST /v1/lessons/scan` (a miner ferret per batch), `POST /v1/pack/routing/clean-up`, and the runtime
   switch `POST /v1/ferrets/:id/runtime` are all `fleet.configure`, so a `--limited` device is refused at each (before r1 the
-  card Start asked only `fleet.use` and was a second door: `POST /v1/ferrets` answered 403 and the card Start admitted).
+  task Start asked only `fleet.use` and was a second door: `POST /v1/ferrets` answered 403 and the task Start admitted).
   The CLI verbs call these same routes, so there is no second door there either.
 - **Who is not governed.** The host's admin token over loopback is ungoverned and is never refused; a ferret's own
   credential is never grant-governed, so an agent keeps what it had (a `caller: 'person'` route still refuses it). A
@@ -353,7 +353,7 @@ restart ferrets, and a device narrowed off fleet use could still send to one. Th
   manifest owns, declares a capability or is on a commented allowlist with a reason; adding a write without either fails it,
   and so does removing one declaration the ruling names. The same file holds the explicit list of **ferret writes outside
   `/v1/ferrets`** (every route whose handler reaches `ferrets.start`, `fork`, `move`, `handover`, `send` or `stop`: board
-  card start, card act and skip, lessons run and scan, pack clean-up, the runtime switch, the Warden's run and investigate,
+  task start, task act and skip, lessons run and scan, pack clean-up, the runtime switch, the Warden's run and investigate,
   each with the capability it declares) and a source scan that fails any plugin daemon file calling
   `ferrets.start|fork|move|handover` that the list does not name, so a new alias of a start fails RED until it is decided. `packages/core/gate/tests/unit/daemon/ferret-writes-fleet-limit.test.ts`
   asks the real admission of each route: an axis-off device is refused (`grant_device_not_granted`) before the body is read,
@@ -370,7 +370,7 @@ strictly less than a send, and a device that may send a message may draft one �
 do neither (c58-sec3; before it the draft routes were ungoverned on the reasoning that a draft is less than a send, which
 left a device that could not send able to read and write what its owner was about to). The rule only narrows: every
 default device and every `--limited` one holds `fleet.use`. Who acts still guards them as well — `caller: 'person'`
-refuses every ferret, and the route admits only the owner's shell and paired devices. An Inbox card's own draft rides the same
+refuses every ferret, and the route admits only the owner's shell and paired devices. An Inbox item's own draft rides the same
 routes with `?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. The conversation
 plugin's own tests pin the person-only half; `ferret-writes-fleet-limit.test.ts` pins the capability.
 
@@ -388,7 +388,7 @@ now ask the same `fleet.use` as those reads, and a test pins it
 
 **Saved pictures are content a ferret put into a conversation.** `GET /v1/renders/:id` and
 `GET /v1/renders/:id/meta` ([renders.md](renders.md)) are `operator` with **no capability**, like the
-transcript image route: a picture is shown in a conversation, a card or an agenda, all of which a device that may
+transcript image route: a picture is shown in a conversation, a task or an agenda, all of which a device that may
 read them already reads, so a second gate would be a second copy of the first. `POST /v1/renders` is also
 `operator` with no capability, and is narrower than its credential: the handler admits only a ferret's own session
 credential or the host's admin token **over a loopback carrier** (`arrivedOnHost`) and refuses everyone else —
@@ -669,9 +669,9 @@ confirming a selection demand `terminal.configure` (plus `browser.use` for a pag
 demand `terminal.use`; revoking never asks for a passkey. Every one that answers a plan or a stage's summary also
 needs `secrets.use`, as `GET /v1/accounts` does, because a plan names the owner's accounts.
 
-**Input-request cards** (`/v1/input-requests`, [input-requests.md](input-requests.md#saved-logins)) are `terminal.use`
-routes, but a card's `saved` names accounts and people (offers, the account Update would write, the new account's
-name, who the page is signing in). A caller without `secrets.use` gets every card **without `saved`**; it still answers
+**Input requests** (`/v1/input-requests`, [input-requests.md](input-requests.md#saved-logins)) are `terminal.use`
+routes, but an input's `saved` names accounts and people (offers, the account Update would write, the new account's
+name, who the page is signing in). A caller without `secrets.use` gets every input **without `saved`**; it still answers
 by typing. On the deliver route, typing a saved account (`entry`) also needs `secrets.use`, and keeping a typed value
 ("Save to Accounts", `save`) needs `secrets.configure` (and spends the step-up), as every other account write does.
 The **phone-approval** routes (`/v1/phone-approvals`, `terminal.use`) answer a caller without `secrets.use` each

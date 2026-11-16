@@ -3,7 +3,7 @@
 When Claude Code or Codex wants to run a tool it has not been allowed to, it stops and draws a numbered
 choice list in its terminal — "Do you want to proceed? 1. Yes 2. Yes, and don't ask again for … 3. No".
 Nothing moves until somebody picks one. Ferretry reads that prompt off the agent's pane, shows it as an
-approval card in Chat, and types the person's choice back into the pane.
+approval box in Chat, and types the person's choice back into the pane.
 
 ## What is recognised
 
@@ -27,7 +27,7 @@ Any other dialog with the same shape — a "Do you want to …?" / "Would you li
 above a choice list numbered 1..n, at the bottom of the frame, with no composer below it — is read as a
 generic request with the harness's own title as `tool`. The one-time dialogs Ferretry already knows
 (auto-mode nudge, trust, API key) keep their own reading (`turnPrompt`) and are never shown as approval
-cards. The harness's own dialogs — hook review, MCP-server approval, sign-in, update — have their own card:
+boxes. The harness's own dialogs — hook review, MCP-server approval, sign-in, update — have their own box:
 see [harness-dialogs.md](harness-dialogs.md).
 
 The request (`PermissionRequest` in `packages/protocol/src/lib/session-permission.ts`) carries every option
@@ -41,7 +41,7 @@ on. Its `id` is a digest of everything a person decides on, so a prompt that cha
   journal (`turn.state` for a new boundary, `turn.prompt` for a new request on the same one), so open
   pages see it at once.
 - The PWA raises one notification per request ("<agent> wants to read … — Allow?"), marks the session as
-  needing approval in the session list, and shows the approval card at the bottom of Chat.
+  needing approval in the session list, and shows the approval box at the bottom of Chat.
 
 ## Answering
 
@@ -49,7 +49,7 @@ on. Its `id` is a digest of everything a person decides on, so a prompt that cha
 `{ kind: 'deny', requestId }`:
 
 1. The pane is captured and parsed again. If it no longer shows `requestId`, nothing is typed and the
-   answer is `409 permission_prompt_gone` — the card says "this prompt is gone" and re-reads.
+   answer is `409 permission_prompt_gone` — the box says "this prompt is gone" and re-reads.
 2. One key is typed: the option's digit, or Escape for deny. **No Enter follows the digit**: both
    harnesses act on the digit the moment it is pressed (measured on every version above), so an Enter
    would land on whatever the harness drew next — and if that is the next permission prompt, it would
