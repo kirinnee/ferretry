@@ -9,7 +9,7 @@
  */
 
 /** What the tools server says when an agent connects: Runtimes' contract owns the line (`fy mcp serve` reads it there). */
-export { CHANNEL_LAUNCH_ENV, TOOLS_SERVER_INSTRUCTIONS } from '../../../contract/tools-server.ts';
+export { TOOLS_SERVER_INSTRUCTIONS } from '../../../contract/tools-server.ts';
 
 /** The launch variable naming a ferret's mode (`interactive` or `auto`). */
 export const SESSION_MODE_ENV = 'FY_SESSION_MODE';

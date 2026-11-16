@@ -52,6 +52,8 @@ import {
   RepairOwner,
   repairRequester,
 } from './host-assembly.ts';
+import { hostOrganizationType } from './adapters/host-organization-type.ts';
+import { loginOrganizationType } from './lib/login-organization-type.ts';
 import { LaunchGate, type RuntimeLaunchFactsSource } from './lib/launch-gate.ts';
 import { FleetPublication } from './lib/service/publication.ts';
 import { assembleServices, unavailableCatalogDeps, unavailableSetupDeps } from './lib/service/assembly.ts';
@@ -518,7 +520,15 @@ export function runtimesDaemon(assemble: RuntimesAssembler = hostAssembly) {
       };
 
       // ONE gate: its `start.decide` keeps the facts it read and its `launch.parts` contributes from exactly those.
-      const launchGate = new LaunchGate({ source: launchFacts });
+      // The login's organisation type, for the Claude harness's channel default: Logins names it for a login it keeps (its
+      // own account file), and for a host-kept one the person's `~/.claude.json` says. One non-secret field, never a token.
+      const organizationType = async (login: string): Promise<string | undefined> =>
+        await loginOrganizationType(
+          ctx.needs.logins,
+          async () => await hostOrganizationType(ctx.kernel.roots, ctx.kernel.paths.home()),
+          login,
+        );
+      const launchGate = new LaunchGate({ source: launchFacts, organizationType });
 
       return {
         routes: {

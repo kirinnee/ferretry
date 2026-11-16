@@ -2802,7 +2802,15 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
 
     const sent = await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
 
-    expect(sent).toMatchObject({ ok: true, value: { disposition: 'sent', fate: 'accepted', sendId: 'lead-1' } });
+    // The answer names the channel (so the sender is never told something was typed), and so does a repeat of the same send.
+    expect(sent).toMatchObject({
+      ok: true,
+      value: { disposition: 'sent', fate: 'accepted', sendId: 'lead-1', path: 'channel' },
+    });
+    expect(await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' })).toMatchObject({
+      ok: true,
+      value: { sendId: 'lead-1', path: 'channel' },
+    });
     expect(ferrets.delivered).toEqual([]);
     expect(ferrets.queued).toEqual([]);
     expect(await row(api, 'lead-1')).toMatchObject({ path: 'channel', senderKind: 'agent', from: 'lead' });

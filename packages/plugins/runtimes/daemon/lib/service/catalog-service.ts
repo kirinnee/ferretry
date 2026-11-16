@@ -868,7 +868,6 @@ export class FleetCatalogService {
       userHome: this.deps.layout.userHome,
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
-      organizationTypes: await this.#organizationTypes(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
       lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
       now: this.deps.now(),
@@ -893,22 +892,6 @@ export class FleetCatalogService {
   async #runtimeIds(): Promise<Readonly<Record<string, string>>> {
     const ids = await this.deps.ids();
     return Object.fromEntries(Object.entries(ids?.runtimes ?? {}).map(([name, entry]) => [name, entry.id]));
-  }
-
-  /**
-   * Each login's organisation type, by id, from what Logins names for a launch; none on a machine wired without it. A READ
-   * never fails over it (unlike a publish, which needs the stores): Logins unable to name them shows the channel as off.
-   */
-  async #organizationTypes(): Promise<Readonly<Record<string, string>>> {
-    let stores: readonly LoginLaunchStore[];
-    try {
-      stores = (await this.#loginStores()).loginStores ?? [];
-    } catch {
-      return {};
-    }
-    return Object.fromEntries(
-      stores.flatMap(store => (store.organizationType === undefined ? [] : [[store.id, store.organizationType]])),
-    );
   }
 
   /** Each credential's status word, from the credentials surface. A list that fails shows no words. */

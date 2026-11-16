@@ -106,7 +106,7 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
   terminal still sees it. "Update now" would run a package manager on the owner's machine and "Skip until
   next version" would record a choice, so neither is picked.
 - **Claude "WARNING: Loading development channels" → "I am using this for local development".** Every launch with
-  `--dangerously-load-development-channels` shows it, and the fixed layer adds that flag for Ferretry's own channel
+  `--dangerously-load-development-channels` shows it, and the Claude Code launch adds that flag for Ferretry's own channel
   (see [launch-settings.md](launch-settings.md#the-claude-channel)). Only the ACTIVE bottom dialog is answered: the exact
   title line "WARNING: Loading development channels" inside the bottom window, exactly the two rows `1. I am using this for
 local development` and `2. Exit` with nothing else numbered, and the selection on row 1 alone — a quoted copy above

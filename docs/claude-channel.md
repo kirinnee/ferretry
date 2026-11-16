@@ -36,7 +36,7 @@ A meta key named `source` would collide with the tag's own attribute, so none is
 **The MCP server polls — only when the launch gave Claude the flag.** The same launch that passes
 `--dangerously-load-development-channels` sets `FERRETRY_CHANNEL=1` in the tools server's own `--mcp-config` environment, and
 **in no other case**. Without it `fy mcp serve` is a plain tools server: it declares no channel capability and **never
-polls**, so a launch that dropped the flag (`claudeChannels: false`, or an Enterprise login) can never look like a listening
+polls**, so a launch that dropped the flag (`channels: false` in `harness-claude-code.yaml`, or an Enterprise login) can never look like a listening
 channel. With it, after `initialized` the server holds `channel_poll` open (an agent tool served by Conversation, called as
 the session; it names the server's **generation**, a fresh id per process) and gets **candidates**. For each one it calls
 `channel_claim` **right before writing** the notification — `content` is the exact text that would have been typed, banner

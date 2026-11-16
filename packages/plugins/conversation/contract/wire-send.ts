@@ -172,6 +172,8 @@ export const SendResultSchema = z.strictObject({
   waitBehind: z.string().min(1).optional(),
   label: MessageLabelSchema.optional(),
   heldUntil: InstantSchema.optional(),
+  /** How the message travelled, when that changes what the sender is told: `channel` (handed to the ferret's Ferretry channel, nothing typed). */
+  path: SendPathSchema.optional(),
 });
 export type SendResult = z.infer<typeof SendResultSchema>;
 

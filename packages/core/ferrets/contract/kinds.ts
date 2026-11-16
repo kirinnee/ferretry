@@ -107,7 +107,13 @@ export type LaunchPart =
    * Where the harness squeezes its own conversation, in tokens (a login's `compactAt`, once it is a number: `auto` adds
    * nothing). The Claude harness writes it into its private settings file as `autoCompactWindow`.
    */
-  | { readonly kind: 'compact'; readonly at: number };
+  | { readonly kind: 'compact'; readonly at: number }
+  /**
+   * What the login this ferret spends says about itself, as the login's own non-secret account file records it: the
+   * organisation type (`claude_max`, `claude_team`, `claude_enterprise`, …), absent when it names none or cannot be read.
+   * The Claude harness decides from it whether to give the ferret Ferretry's message channel by default. Never a token.
+   */
+  | { readonly kind: 'account'; readonly organizationType?: string };
 
 /** What a `launch.parts` taker contributes: a source asked per launch (a contribute item is static; the parts are not). */
 export interface LaunchPartSource {

@@ -206,15 +206,6 @@ const MACHINE_SHAPE = {
    */
   autoResume: z.boolean().default(true),
   /**
-   * "Claude channel" (docs/launch-settings.md#the-channel): whether a Claude ferret is launched with Ferretry's own tools
-   * server loaded as a development channel (`--dangerously-load-development-channels server:ferretry`), so a message
-   * from another ferret or from Ferretry reaches it through the channel instead of being typed into its composer.
-   * UNSET (the default), it follows the login each runtime spends: ON for a `claude_max` login, OFF for Team, Enterprise or
-   * anything else (an organisation's policy blocks channels, and a login whose type is not known is not assumed to allow
-   * them). Written `true` or `false` it wins for every login. Read when a runtime is published; not a loosening.
-   */
-  claudeChannels: z.boolean().optional(),
-  /**
    * "Agenda check" (docs/agenda.md): when a top-level ferret's turn ends on a
    * reply that asks the owner to act and the turn raised no agenda item or notice for it, the daemon sends the
    * ferret one short reminder to raise each one. On by default. Not a loosening either way: it changes

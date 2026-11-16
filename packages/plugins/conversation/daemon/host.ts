@@ -1247,7 +1247,7 @@ export function buildConversationA(deps: {
       if (!sentThrough.created) return (await keptSend(ferret, request.sendId)) ?? { ferret, disposition: 'sent' };
       const from = channelSenderName(request, fromName);
       channelOutbox.push(ferret, { sendId: request.sendId, text, ...(from === undefined ? {} : { from }) });
-      return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted' };
+      return { ferret, disposition: 'sent', sendId: request.sendId, fate: 'accepted', path: 'channel' };
     }
     // The turn document first (today's order): a message that goes by file has its pointer, which the row must name.
     const sent = await turnDocument(
@@ -1374,6 +1374,7 @@ export function buildConversationA(deps: {
       ...(answer.waitBehind === undefined ? {} : { waitBehind: answer.waitBehind }),
       ...(waiting?.label === undefined ? {} : { label: waiting.label }),
       ...(waiting?.holdUntil === undefined ? {} : { heldUntil: waiting.holdUntil }),
+      ...(row?.path === 'channel' ? { path: 'channel' as const } : {}),
     };
   };
   /** What the owner said to a ferret: the queue, the send ledger and its turn documents (Ferrets reads them back). */

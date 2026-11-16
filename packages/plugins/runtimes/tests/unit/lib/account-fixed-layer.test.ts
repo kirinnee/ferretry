@@ -15,7 +15,6 @@ import {
   CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
-  claudeChannelsFor,
   claudeToolsConfig,
   codexNoticeOverride,
   codexToolsServer,
@@ -58,8 +57,7 @@ const FY = '/opt/fy/bin/fy';
 const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
-  `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":"","FERRETRY_CHANNEL":"1"}}}}`,
-  '--dangerously-load-development-channels=server:ferretry',
+  `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
   `--append-system-prompt=${INSTRUCTION}`,
 ];
 /** Every one-shot dialog a Claude agent's `.claude.json` records as seen, as locked entries. */
@@ -130,7 +128,6 @@ describe('fixedLayerFor — Claude', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: true,
-      channels: true,
     });
 
     // Assert
@@ -189,22 +186,8 @@ describe('fixedLayerFor — Claude', () => {
             path: ['--mcp-config'],
             key: '--mcp-config',
             value: {
-              mcpServers: {
-                ferretry: {
-                  type: 'stdio',
-                  command: FY,
-                  args: ['mcp', 'serve'],
-                  env: { FY_TOKEN: '', FERRETRY_CHANNEL: '1' },
-                },
-              },
+              mcpServers: { ferretry: { type: 'stdio', command: FY, args: ['mcp', 'serve'], env: { FY_TOKEN: '' } } },
             },
-          },
-          {
-            purpose: 'channels',
-            target: 'launch',
-            path: ['--dangerously-load-development-channels'],
-            key: '--dangerously-load-development-channels',
-            value: 'server:ferretry',
           },
           {
             purpose: 'instructions',
@@ -238,7 +221,6 @@ describe('fixedLayerFor — Claude', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: false,
-      channels: true,
     });
 
     // Assert — Skip needs no Auto support
@@ -373,7 +355,6 @@ describe('applyFixedLayer', () => {
     cwd: CWD,
     fyCommand: FY,
     acceptsAutoPermissionMode: true,
-    channels: true,
   });
   const codexSkip = layerOf({ harness: 'codex', agentPermissions: 'skip', cwd: CWD, fyCommand: FY });
 
@@ -549,7 +530,7 @@ describe('applyFixedLayer', () => {
 
 describe('the Ferretry tools in the fixed layer', () => {
   it('should hand Claude the tools server as a JSON string, so no file has to exist', () => {
-    should(JSON.parse(CLAUDE_TOOL_ARGS[0]?.slice('--mcp-config='.length) ?? '')).deepEqual(claudeToolsConfig(FY, true));
+    should(JSON.parse(CLAUDE_TOOL_ARGS[0]?.slice('--mcp-config='.length) ?? '')).deepEqual(claudeToolsConfig(FY));
   });
 
   it('should never hand the tools server the host admin token', () => {
@@ -579,7 +560,6 @@ describe('the Ferretry tools in the fixed layer', () => {
       cwd: CWD,
       fyCommand: FY,
       acceptsAutoPermissionMode: true,
-      channels: true,
     });
     const spaced = profileWith('claude', { flags: ['--append-system-prompt', 'be terse', '--mcp-config=extra.json'] });
     const joined = profileWith('claude', { flags: ['--append-system-prompt=always test'] });
@@ -776,10 +756,10 @@ describe('NOTIFY_INSTRUCTION', () => {
     const text = NOTIFY_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Notify: the owner reads the Inbox, not your replies.');
+    should(text).startWith('Notify: the owner reads their notices, not your replies.');
     should(text).containEql('`zz notify "<summary>" [--body "<detail>"]`');
-    should(text).containEql('a quiet Inbox notice');
-    should(text).containEql('Add `--ping` only when it must reach their phone now.');
+    should(text).containEql('a quiet notice');
+    should(text).containEql('Add `--buzz` only when it must reach their phone now.');
     should(text).containEql('Never notify progress or chatter.');
     // The agenda is its own switchable section: the always-on rule never teaches it, and never says Attention.
     should(text).not.containEql('agenda');
@@ -923,9 +903,9 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the daemon's opt-in refusal says how to ask for the Yes (`board/opt-in.ts`).
-    should(text).startWith('Board: opt-in, enforced; overrides other task rules.');
+    should(text).startWith('Board: opt-in, enforced; overrides other card rules.');
     should(text).containEql(
-      "Card only if `zz board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`).",
+      "Card only if the project's board is on (`zz board`), under your card (`--parent`), or on the owner's Yes (`--approval <ask>`).",
     );
     should(text).not.containEql('all work is a card');
     should(text).not.containEql('make one)');
@@ -936,7 +916,9 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "TASK no longer have user interactivity anymore! agenda tracks all those".
-    should(text).containEql('Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it.');
+    should(text).containEql(
+      "Cards (&F<n>) never ask: answers, tests, Done ride the card's ask on the agenda, which moves it.",
+    );
     should(text).containEql('One outcome, no umbrellas; add to a related card.');
   });
 
@@ -945,10 +927,10 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — the owner (&C48): "planning can be a phase!", "reading the title should directly reflect what is doing".
-    should(text).containEql('Planning is a phase.');
+    should(text).containEql('Planning is a lane.');
     should(text).containEql("Title+summary=what it's doing (sitrep).");
     should(text).containEql(
-      'Each step: `zz task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz task patch <id> --file f`.',
+      'Each step: `zz card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `zz card patch <id> --file f`.',
     );
     should(text).not.containEql('no cards for planning');
   });
@@ -959,7 +941,7 @@ describe('BOARD_INSTRUCTION', () => {
 
     // Assert — the board answers "status of all I asked?"; a sub-card or a private card is hidden from it.
     should(text).containEql(
-      'Public=the owner\'s asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards.',
+      'Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards.',
     );
     // The gate words are gone: the ask of a card lives in its agenda, and nothing says the owner closes it.
     should(text).not.containEql('Gate?');
@@ -974,10 +956,10 @@ describe('BOARD_INSTRUCTION', () => {
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
     should(text).not.containEql('#F');
     should(text).containEql('howToTest (where/do/see) before try');
-    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql('`zz card move <id> <lane> --reason "<why>"`');
     should(text).containEql('Blocked:');
-    should(text).containEql('Blocked: `zz task depend`/`block`.');
-    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<words>"`');
+    should(text).containEql('Blocked: `zz card depend`/`block`.');
+    should(text).containEql('`zz card reopen <id> --to <lane> --ask "<words>"`');
     should(text).containEql("Owner's bug:");
     should(text).endWith('PRs, merges, `zz signal done` self-move.');
     should(text).not.containEql('`fy ');
@@ -989,7 +971,8 @@ describe('BOARD_INSTRUCTION', () => {
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
     // 757 → 814 for the owner's board rules (&C48): never ask, public/private, planning, sitrep titles, read → edit and
     // the three-part status (cap 760 → 820).
-    should(BOARD_INSTRUCTION('fy').length).be.below(820);
+    // → 852 once it said the same words as the board plugin's own file (cap 820 → 860).
+    should(BOARD_INSTRUCTION('fy').length).be.below(860);
   });
 });
 
@@ -1223,22 +1206,23 @@ describe('SUB_FERRET_INSTRUCTION', () => {
     );
     should(text).containEql('batched a minute');
     should(text).containEql('Only a password, code or approval the daemon asks for reaches the owner from you.');
-    should(text).containEql('Link your PR `zz task link <id> --pr <url>` (or `--branch`)');
-    should(text).containEql('`zz task note`');
+    should(text).containEql('Link your PR `zz card link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('`zz card note`');
     should(text).containEql(
       'message your lead (`zz send <lead-callsign> "<message>"`) only for a result, a blocker or a decision it must make.',
     );
     // The owner (&C48): "sub-ferrets and ferrets should update them!" — the one card edit a sub-ferret may make.
     should(text).containEql(
-      'With a card: each step, `zz task show <id> --yaml`, rewrite its status (now/doneSoFar/next, PR links) and howToTest, then `zz task patch <id> --file f`; `zz task note` adds history.',
+      'With a card: each step, `zz card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `zz card patch <id> --file f`; `zz card note` adds history.',
     );
     // The holder writes its own How to test now, so its report no longer carries the steps.
     should(text).not.containEql('Your final report says how the owner tests it.');
     should(text).containEql(
-      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz task claim <id>`, don't ask. No card? Make none.",
+      "it moves itself (start, PR, merge, `zz signal done`). Lead's card? `zz card claim <id>`, don't ask. No card? Make none.",
     );
     should(text).not.containEql('agenda add');
-    should(text).not.containEql('task move');
+    should(text).not.containEql('card move');
+    should(text).not.containEql('task ');
   });
 
   it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
@@ -1280,87 +1264,22 @@ describe('SUB_FERRET_INSTRUCTION', () => {
   });
 });
 
-describe('the Claude channel flag in the fixed layer', () => {
-  it('should decide the channel from the explicit setting first, then from claude_max alone', () => {
-    should([
-      claudeChannelsFor(undefined, 'claude_max'),
-      claudeChannelsFor(undefined, 'claude_enterprise'),
-      claudeChannelsFor(undefined, 'claude_team'),
-      claudeChannelsFor(undefined, undefined),
-      claudeChannelsFor(false, 'claude_max'),
-      claudeChannelsFor(true, 'claude_enterprise'),
-    ]).eql([true, false, false, false, false, true]);
-  });
-
-  it('should launch with no channel flag when the caller did not turn it on', () => {
-    should(claude().args.some(arg => arg.includes('development-channels'))).be.false();
-  });
-
-  const claude = (channels?: boolean): FixedLayer =>
-    layerOf({
-      harness: 'claude',
-      agentPermissions: 'auto',
-      cwd: CWD,
-      fyCommand: FY,
-      acceptsAutoPermissionMode: true,
-      ...(channels === undefined ? {} : { channels }),
-    });
-
-  it('should load the tools server as a development channel when the caller turns it on, in the = spelling, before the instruction', () => {
-    const args = claude(true).args;
-    should(args).containEql('--dangerously-load-development-channels=server:ferretry');
-    // `=` so the variadic flag cannot swallow the arguments after it, the prompt included.
-    should(args.indexOf('--dangerously-load-development-channels=server:ferretry')).be.below(
-      args.findIndex(arg => arg.startsWith('--append-system-prompt=')),
+describe('the exact words of the Notify, Board and Sub-ferret rules (snapshots)', () => {
+  it('should say exactly this for Notify', () => {
+    should(NOTIFY_INSTRUCTION('fy')).equal(
+      'Notify: the owner reads their notices, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.',
     );
-    should(claude().args.some(arg => arg.includes('development-channels'))).be.false();
-    should(claude(true).entries.find(entry => entry.purpose === 'channels')).eql({
-      purpose: 'channels',
-      target: 'launch',
-      path: ['--dangerously-load-development-channels'],
-      key: '--dangerously-load-development-channels',
-      value: 'server:ferretry',
-    });
   });
 
-  it('should leave the flag, and its entry, out when the machine switched the channel off', () => {
-    const off = claude(false);
-    should(off.args.some(arg => arg.includes('development-channels'))).be.false();
-    should(off.entries.some(entry => entry.purpose === 'channels')).be.false();
+  it('should say exactly this for Board', () => {
+    should(BOARD_INSTRUCTION('fy')).equal(
+      'Board: opt-in, enforced; overrides other card rules. Card only if the project\'s board is on (`fy board`), under your card (`--parent`), or on the owner\'s Yes (`--approval <ask>`). Public=the owner\'s asks ("everything I asked?"): top-level, never `--private`; private=your helper cards. Cards (&F<n>) never ask: answers, tests, Done ride the card\'s ask on the agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a lane. Title+summary=what it\'s doing (sitrep). Each step: `fy card show <id> --yaml`, rewrite stale title, summary, progress (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy card patch <id> --file f`. `fy card move <id> <lane> --reason "<why>"`. Blocked: `fy card depend`/`block`. Owner\'s bug: `fy card reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.',
+    );
   });
 
-  it('should set FERRETRY_CHANNEL in the tools server environment ONLY when the same argv carries the channel flag', () => {
-    // Arrange
-    const serverEnv = (layer: FixedLayer): Record<string, unknown> => {
-      const arg = layer.args.find(candidate => candidate.startsWith('--mcp-config='));
-      const config = JSON.parse(arg?.slice('--mcp-config='.length) ?? '{}') as {
-        mcpServers: { ferretry: { env: Record<string, unknown> } };
-      };
-      return config.mcpServers.ferretry.env;
-    };
-    const flagged = (layer: FixedLayer): boolean =>
-      layer.args.some(arg => arg.startsWith('--dangerously-load-development-channels'));
-
-    // Act
-    const [on, off] = [claude(true), claude(false)];
-
-    // Assert: the variable and the flag travel together, in the argv AND in the locked entry
-    should([flagged(on), serverEnv(on).FERRETRY_CHANNEL]).eql([true, '1']);
-    should([flagged(off), 'FERRETRY_CHANNEL' in serverEnv(off)]).eql([false, false]);
-    should(claudeToolsConfig(FY)).eql(claudeToolsConfig(FY, false));
-    const toolsEntry = (layer: FixedLayer) => layer.entries.find(entry => entry.purpose === 'tools')?.value;
-    should(toolsEntry(on)).eql(claudeToolsConfig(FY, true));
-    should(toolsEntry(off)).eql(claudeToolsConfig(FY, false));
-  });
-
-  it('should never put the flag on a Codex launch', () => {
-    const codex = layerOf({ harness: 'codex', agentPermissions: 'auto', cwd: CWD, fyCommand: FY });
-    should(codex.args.some(arg => arg.includes('development-channels'))).be.false();
-  });
-
-  it('should leave the machine setting unset by default (the login decides), and take it from machine.yaml', () => {
-    should(parseAccountModel({ version: 1 }).machine.claudeChannels).be.undefined();
-    should(parseAccountModel({ version: 1, machine: { claudeChannels: true } }).machine.claudeChannels).be.true();
-    should(parseAccountModel({ version: 1, machine: { claudeChannels: false } }).machine.claudeChannels).be.false();
+  it('should say exactly this for the Sub-ferret card line', () => {
+    should(SUB_FERRET_INSTRUCTION('fy').split('\n')[1]).equal(
+      "With a card: each step, `fy card show <id> --yaml`, rewrite its progress (now/doneSoFar/next, PR links) and howToTest, then `fy card patch <id> --file f`; `fy card note` adds history. Link your PR `fy card link <id> --pr <url>` (or `--branch`); it moves itself (start, PR, merge, `fy signal done`). Lead's card? `fy card claim <id>`, don't ask. No card? Make none.",
+    );
   });
 });

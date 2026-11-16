@@ -80,7 +80,7 @@ import {
   resolveCredentialStore,
 } from './credentials.ts';
 import { type BudgetHolds, binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
-import { applyFixedLayer, claudeChannelsFor, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
+import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
 import type { AccountModel } from './schema.ts';
@@ -368,10 +368,6 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
               agentPermissions: model.machine.agentPermissions,
               cwd: LAUNCH_FOLDER_PLACEHOLDER,
               acceptsAutoPermissionMode: input.acceptsAutoPermissionMode,
-              channels: claudeChannelsFor(
-                model.machine.claudeChannels,
-                loginStores.get(runtime.credential)?.organizationType,
-              ),
               fyCommand: input.fyCommand,
             })
           : fixedLayerFor({

@@ -59,7 +59,7 @@ import {
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
-import { HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
+import { channelsOn, HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
 import {
   compareLaunchSettings,
   type LaunchSettingsInputs,
@@ -96,6 +96,8 @@ export interface ClaudeHarnessDeps {
   readonly newConversationId: () => string;
   /** The user's documented Claude history home; only its projects subtree is read. */
   readonly historyHome: () => Promise<string>;
+  /** The `fy` the Ferretry tools server runs as when a ferret gets the channel (default `fy`, found on the ferret's PATH). */
+  readonly fyCommand?: string;
 }
 
 const TMUX_TIMEOUT_MS = 5_000;
@@ -173,7 +175,10 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The home written from ONE read of this plugin's configuration, the same read the argv and the record are built from. */
-  private async prepareHomeFrom(spec: LaunchSpec, inputs: LaunchSettingsInputs): Promise<HomePlan> {
+  private async prepareHomeFrom(
+    spec: LaunchSpec,
+    inputs: LaunchSettingsInputs & { readonly channels?: boolean },
+  ): Promise<HomePlan> {
     const home = await this.ensureHome(spec);
     // Nothing is written into a home under a folder chain another user could rewrite (v4's checked directory chain, now the
     // kernel's rule).
@@ -189,6 +194,8 @@ export class ClaudeHarness implements Harness {
       hooks: inputs.hooks as never,
       effort: spec.effort,
       fast: spec.options?.fast,
+      channels: channelsOn(inputs.channels, spec.parts),
+      fyCommand: this.deps.fyCommand ?? 'fy',
     });
     const files: FencedPath[] = [];
     const write = async (name: string, content: string): Promise<void> => {
@@ -432,6 +439,7 @@ export class ClaudeHarness implements Harness {
       permissionMode: inputs.permissionMode,
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
+      channels: channelsOn(inputs.channels, spec.parts),
       mode: spec.mode,
       questionTool: inputs.questionTool,
       conversation,
@@ -589,7 +597,7 @@ export class ClaudeHarness implements Harness {
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
   private async launchInputs(
     runtime: string | undefined,
-  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean }> {
+  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean; readonly channels?: boolean }> {
     const selected = await this.deps.selected(runtime);
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
@@ -598,6 +606,8 @@ export class ClaudeHarness implements Harness {
       permissionMode: file?.permissionMode ?? 'skip',
       // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
       questionTool: file?.questionTool ?? false,
+      // Outside the recorded launch settings too: the channel is decided per launch (setting, else the login's type).
+      ...(file?.channels === undefined ? {} : { channels: file.channels }),
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),

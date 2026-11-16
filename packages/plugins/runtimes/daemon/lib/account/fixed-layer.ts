@@ -76,15 +76,9 @@ import {
   sameSettingsValue,
   settingsKey,
 } from './layering.ts';
+import { FERRETRY_MCP_ARGS, FERRETRY_MCP_SERVER } from '../../../contract/tools-server.ts';
 import type { AgentPermissions } from './schema.ts';
-import {
-  AGENDA_ENV,
-  CHANNEL_LAUNCH_ENV,
-  HYPERMEDIA_ENV,
-  PACK_ENV,
-  PASSIVE_LEARNING_ENV,
-  SESSION_MODE_ENV,
-} from './pane-contract.ts';
+import { AGENDA_ENV, HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV, SESSION_MODE_ENV } from './pane-contract.ts';
 
 /** What one fixed-layer entry is for, as the read-only lock shows it. */
 type FixedEntryPurpose =
@@ -95,7 +89,6 @@ type FixedEntryPurpose =
   | 'remote-control'
   | 'one-time-prompts'
   | 'no-questions'
-  | 'channels'
   | 'no-alt-screen'
   | 'tools'
   | 'instructions';
@@ -150,8 +143,6 @@ export type FixedLayerInput =
       readonly acceptsAutoPermissionMode: boolean;
       /** The `fy` executable the tools server runs as. */
       readonly fyCommand: string;
-      /** Whether Claude loads the tools server as a development channel (see {@link claudeChannelsFor}; default off). */
-      readonly channels?: boolean;
     }
   | {
       readonly harness: 'codex';
@@ -261,12 +252,6 @@ export { SESSION_MODE_ENV };
 export const CODEX_NO_ALT_SCREEN_FLAG = '--no-alt-screen';
 
 const CARRIED_FLAGS: ReadonlySet<string> = new Set([CLAUDE_NO_QUESTIONS_FLAG, CODEX_NO_ALT_SCREEN_FLAG]);
-
-/** The name the Ferretry tools server is registered under, in both harnesses. */
-const FERRETRY_MCP_SERVER = 'ferretry';
-
-/** How the harness starts the tools server: the `fy` the wrapper already uses, as `fy mcp serve`. */
-const FERRETRY_MCP_ARGS: readonly string[] = ['mcp', 'serve'];
 
 /**
  * The variables the tools server needs from the agent's environment: where the daemon is, and the
@@ -398,25 +383,8 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 export const AGENT_TOOLS_INSTRUCTION =
   "Ferretry tools: you drive terminals and browser pages the person watches (MCP terminal_*, browser_*). Name each lowercase (dev, app); write %terminal:dev or %browser:app. When a job needs a login, sudo or a website step, do it yourself first, filling every non-secret field. account_hint before sign-in. At a password prompt, and ALWAYS for sudo, call terminal_request_input with sensitivity secret; for a web form, browser_request_input, one field per input. Then input_wait: the owner types each value on a card; you never receive it, type it or ask in chat; terminal_send is blocked until answered (not for a code) and the surface unreadable ~2 min after. The card flags any risk; still ask. Use plain for a username, email, y/N, code for a 2FA/email code: you see both. Or read it from an inbox you have; type it only on its sign-in page. Phone prompt (tap Yes, a number): request_input push: true. Call terminal_ask_owner or browser_ask_owner (or askOwner on open) only for a person's hands (captcha, passkey or hardware-key tap, consent, payment), saying exactly what to do; wait. Never solve captchas, create passkeys, spoof a browser or identity, or spend money unattended. Never put a secret in chat or a tool call. If a person took a tab, wait or ask.";
 
-/**
- * The flag that loads the tools server as a development channel. Claude's plain `--channels` refuses a server that is not
- * on its approved list, so the development spelling is the only one that works; it shows a one-time warning on every
- * launch, which the daemon answers (claude-code's startup dialogs). Written with `=`: the option takes several servers, and
- * a bare one would swallow the arguments after it, the prompt included.
- */
-export const CLAUDE_CHANNELS_FLAG = '--dangerously-load-development-channels';
-const claudeChannelsArg = `${CLAUDE_CHANNELS_FLAG}=server:${FERRETRY_MCP_SERVER}`;
-
-/**
- * Whether a Claude launch is given the channel flag: the machine's explicit `claudeChannels` wins when it is written;
- * otherwise only a login whose account file says `claude_max` gets it. Team, Enterprise, any other type and an unknown
- * one are OFF: a refused channel would only cost every message a receipt window before it was typed.
- */
-export const claudeChannelsFor = (explicit: boolean | undefined, organizationType: string | undefined): boolean =>
-  explicit ?? organizationType === 'claude_max';
-
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
-export const claudeToolsConfig = (fyCommand: string, channels = false): SettingsObject => ({
+export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
   mcpServers: {
     [FERRETRY_MCP_SERVER]: {
       type: 'stdio',
@@ -425,8 +393,6 @@ export const claudeToolsConfig = (fyCommand: string, channels = false): Settings
       // Claude passes a stdio server the agent's whole environment; the admin token must not be in it.
       env: {
         FY_TOKEN: '',
-        // Set ONLY on a launch whose argv carries the channel flag: the server pumps the channel only when it is set.
-        ...(channels ? { [CHANNEL_LAUNCH_ENV]: '1' } : {}),
       },
     },
   },
@@ -641,7 +607,6 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
     }
     const mode = CLAUDE_PERMISSION_MODES[agentPermissions];
     const skip = agentPermissions === 'skip';
-    const channels = input.channels === true;
     const entries = [
       entry('permission-mode', 'settings', ['permissions', 'defaultMode'], mode),
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
@@ -653,8 +618,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ),
       ...(skip ? [] : [entry('skip-prompt', 'settings', ['skipAutoPermissionPrompt'], true)]),
       entry('no-questions', 'launch', [CLAUDE_NO_QUESTIONS_FLAG], true),
-      entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand, channels)),
-      ...(channels ? [entry('channels', 'launch', [CLAUDE_CHANNELS_FLAG], `server:${FERRETRY_MCP_SERVER}`)] : []),
+      entry('tools', 'launch', ['--mcp-config'], claudeToolsConfig(fyCommand)),
       entry('instructions', 'launch', ['--append-system-prompt'], instruction),
     ];
     return {
@@ -669,8 +633,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           '--permission-mode',
           mode,
           CLAUDE_NO_QUESTIONS_FLAG,
-          `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand, channels))}`,
-          ...(channels ? [claudeChannelsArg] : []),
+          `--mcp-config=${JSON.stringify(claudeToolsConfig(fyCommand))}`,
           `--append-system-prompt=${instruction}`,
         ],
         // The mode is named HERE too: the overlay is the flag settings source, and a mode named by one

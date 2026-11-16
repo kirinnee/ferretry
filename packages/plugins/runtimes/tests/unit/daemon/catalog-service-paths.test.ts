@@ -194,43 +194,6 @@ describe('the reads, over a machine whose components are real files', () => {
     should(runtimes.runtimes.map(runtime => runtime.name).toSorted()).eql(['claude-default', 'second']);
   });
 
-  it('should show the Claude channel by each login’s organisation type, and still answer when Logins cannot name its stores', async () => {
-    // Arrange
-    const channelsOf = async (loginStores: FleetCatalogServiceDeps['loginStores']): Promise<boolean[]> => {
-      const { service } = world({ overrides: { loginStores } });
-      const { runtimes } = await service.runtimes();
-      return ['claude-default', 'second'].map(name =>
-        JSON.stringify(runtimes.find(runtime => runtime.name === name)?.fixedLayer ?? {}).includes(
-          'Ferretry messages through Claude’s channel',
-        ),
-      );
-    };
-
-    // Act
-    const [max, enterprise, none, broken] = [
-      await channelsOf(async () => [
-        { id: 'claude-you', variables: {}, organizationType: 'claude_max' },
-        { id: 'claude-two', variables: {}, organizationType: 'claude_max' },
-      ]),
-      await channelsOf(async () => [
-        { id: 'claude-you', variables: {}, organizationType: 'claude_enterprise' },
-        { id: 'claude-two', variables: {} },
-      ]),
-      await channelsOf(undefined),
-      await channelsOf(async () => {
-        throw new Error('Logins could not say where its logins are kept');
-      }),
-    ];
-
-    // Assert
-    should([max, enterprise, none, broken]).eql([
-      [true, true],
-      [false, false],
-      [false, false],
-      [false, false],
-    ]);
-  });
-
   it('should read a component that is not a file at all as missing, and an unparseable one as nothing', async () => {
     const reads: string[] = [];
     const { service } = world({
