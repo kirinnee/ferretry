@@ -769,12 +769,12 @@ test('changedFiles + decide: a test that reads source by path, directly, by glob
 
 test('a declared bounded reader runs only when its input changes; `all` always runs; `self` adds nothing', async () => {
   const { fx } = readerFixture();
-  const declare = (id: string, line: string): void => {
+  const addDeclaration = (id: string, line: string): void => {
     const file = `packages/plugins/${id}/tests/unit/${id === 'conn' ? 'manifest' : 'opt-in'}.test.ts`;
     fx.write(file, `${line}\n${readFileSync(join(fx.root, file), 'utf8')}`);
   };
-  declare('conn', '// scope-deps: packages/plugins/ob/app');
-  declare('scan', '// scope-deps: all');
+  addDeclaration('conn', '// scope-deps: packages/plugins/ob/app');
+  addDeclaration('scan', '// scope-deps: all');
   const graph = await readGraph(fx.root);
   expect(edgesOf(graph, 'conn')).toEqual(['@ferretry/plugin-ob']);
   expect([...graph.readers.keys()]).toContain('packages/plugins/scan/tests/unit/opt-in.test.ts');
@@ -791,7 +791,7 @@ test('a declared bounded reader runs only when its input changes; `all` always r
     ]),
   ).toEqual(['./packages/plugins/scan/tests/unit/opt-in.test.ts']);
   // `self` is a claim about the own package: no edge, not kept.
-  declare('conn', '// scope-deps: self');
+  addDeclaration('conn', '// scope-deps: self');
   const self = await readGraph(fx.root);
   expect([...self.readers.keys()]).not.toContain('packages/plugins/conn/tests/unit/manifest.test.ts');
 });
