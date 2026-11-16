@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 
@@ -54,7 +54,6 @@ afterAll(async () => {
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
-const FAMILIES = ['studio', 'neo'] as const;
 const VIEWPORTS = [
   { name: 'phone', viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 },
   { name: 'desktop', viewport: { width: 1_440, height: 900 }, deviceScaleFactor: 1 },
@@ -62,11 +61,6 @@ const VIEWPORTS = [
 const SCENES = [
   { scene: 'item', head: '.fy-item-view__head [data-card-head]', ready: '.fy-item-view__head [data-agenda-title]' },
 ] as const;
-
-/** The cards whose head draws the clock itself; the open agenda item's Snooze is behind its ⋯. */
-
-/** One row's tallest control is 44px on touch; the head's own padding is under 20px more. */
-const ONE_ROW = 72;
 
 const open = async (
   name: string,
@@ -97,44 +91,6 @@ const open = async (
 const shot = async (tab: Page, name: string, tag: string, label: string): Promise<void> => {
   if (shotsDir !== '') await tab.screenshot({ path: join(shotsDir, `${name}-${tag}-${label}.png`) });
 };
-
-interface Rect {
-  readonly top: number;
-  readonly bottom: number;
-  readonly left: number;
-  readonly right: number;
-  readonly width: number;
-  readonly height: number;
-}
-
-/** Every box is read in ONE evaluate, so they are one frame's layout. */
-const headGeometry = async (tab: Page, head: string) =>
-  await tab.evaluate((query: string) => {
-    const rect = (element: Element | null): Rect | null => {
-      if (element === null) return null;
-      const { top, bottom, left, right, width, height } = element.getBoundingClientRect();
-      return { top, bottom, left, right, width, height };
-    };
-    const bar = document.querySelector(query);
-    if (bar === null) throw new Error(`nothing matches ${query}`);
-    const title = bar.querySelector('[data-agenda-title]') as HTMLElement;
-    const context = document.createElement('canvas').getContext('2d') as CanvasRenderingContext2D;
-    const style = getComputedStyle(title);
-    context.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    return {
-      bar: rect(bar),
-      title: rect(title),
-      titleBox: title.clientWidth,
-      sixteen: context.measureText('Which day works ').width,
-      info: rect(bar.querySelector('[data-agenda-info-toggle]')),
-      clock: rect(bar.querySelector('[data-agenda-snooze]')),
-      close: rect(bar.querySelector('[data-agenda-close]')),
-      clocksInCard: document.querySelectorAll('[data-agenda-snooze]').length,
-      clocksOutsideHead: [...document.querySelectorAll('[data-agenda-snooze]')].filter(
-        clock => clock.closest(query) === null,
-      ).length,
-    };
-  }, head);
 
 describe('snooze in the card’s head', () => {
   for (const { name } of VIEWPORTS)

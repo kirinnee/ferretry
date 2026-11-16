@@ -7,7 +7,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import { sceneBuilder, sharedChromium } from '@ferretry/app/testing/browser';
 

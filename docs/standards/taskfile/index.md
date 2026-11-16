@@ -29,6 +29,7 @@ assumes it is running inside the nix devshell — see [Nix](../nix/index.md).
 | `task test`              | unit + integration + SIT, no coverage                     |
 | `task test:unit`         | unit suite only                                           |
 | `task test:int`          | integration suite only                                    |
+| `task test:app`          | the real-Chromium app tests only (shell + plugin halves)  |
 | `task test:sit`          | black-box journeys through the freshly compiled binary    |
 | `task test:realworld`    | non-blocking machine-dependent suite (not in `task test`) |
 | `task test:e2e`          | isolated end-to-end journeys (`scripts/test/run-e2e.sh`)  |
