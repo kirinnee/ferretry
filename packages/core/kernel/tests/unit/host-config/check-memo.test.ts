@@ -8,16 +8,16 @@
  * - a plugin's patch of a hand-written broken file parses it once, not twice.
  */
 import { describe, expect, test } from 'bun:test';
-import { createHash } from 'node:crypto';
 import { CHECKS_KEPT, createConfigCheckMemo } from '../../../host/config/check-memo.ts';
 import { CONFIG_FILE_MAX_BYTES, editConfigText, readConfigText, readConfigTextToEdit } from '@ferretry/std/yaml';
 import type { HostFs } from '../../../host/state/host-fs.ts';
 import { createMemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { PRIVATE_WORD } from './adversarial-texts.ts';
 import { type Checked, brokenTexts, refuseWrites, VOICE, voiceDef, world } from './check-memo-support.ts';
-import { HOME, loginsDef } from './support.ts';
+import { HOME, loginsDef, testEtag } from './support.ts';
 
-const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
+/** The key a service keeps a check under is its etag of the text; `world` gives the service `TEST_ETAG_KEY`. */
+const digest = testEtag;
 
 /** A fake key of a shape the raw-secret scan knows, built at run time (never a real one). */
 const fakeKey = (): string => `sk-ant-api03-${'Q7xR2m'.repeat(8)}`;

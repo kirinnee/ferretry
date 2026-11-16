@@ -7,6 +7,7 @@
  * the capability the descriptor names; a route that says `caller: 'person'` refuses a ferret's credential.
  */
 import { afterAll, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
@@ -120,9 +121,9 @@ function stoodInGate(grants: Set<string>, asked: Asked[]): Admission {
   };
 }
 
-async function boot() {
-  const root = await mkdtemp(`${tmpdir()}/config-routes-host-`);
-  roots.push(root);
+async function boot(existing?: string) {
+  const root = existing ?? (await mkdtemp(`${tmpdir()}/config-routes-host-`));
+  if (existing === undefined) roots.push(root);
   const home = `${root}/home`;
   const grants = new Set<string>();
   const asked: Asked[] = [];
@@ -139,7 +140,7 @@ async function boot() {
     ],
   });
   if (outcome.kind !== 'running') throw new Error(outcome.sentence);
-  return { host: outcome.host, grants, asked, file: `${home}/config/voice.yaml` };
+  return { host: outcome.host, grants, asked, file: `${home}/config/voice.yaml`, root };
 }
 
 type Where = 'host' | 'relay';
@@ -366,5 +367,38 @@ test('R-0274 POST /v1/config/confirm through the host: a RELAYED caller needs fl
     ).toBe(401);
   } finally {
     await host.stop();
+  }
+});
+
+test('KEYED-ETAG GET /v1/config/file through the host: the etag is keyed by this daemon (no sha256 of the text), the same after a restart of it, another on another daemon', async () => {
+  const text = 'limit: 5\n';
+  const sha256 = createHash('sha256').update(text, 'utf8').digest('hex');
+  const first = await boot();
+  const etagOf = async (host: Awaited<ReturnType<typeof boot>>['host']): Promise<string> =>
+    String(json(await host.dispatch(view())).etag);
+  let before: string;
+  try {
+    expect(json(await first.host.dispatch(put(text, 'host', 'owner', 'absent'))).outcome).toBe('applied');
+    before = await etagOf(first.host);
+  } finally {
+    await first.host.stop();
+  }
+  expect(before).toMatch(/^[0-9a-f]{64}$/);
+  expect(before).not.toBe(sha256);
+  // The same home again: the same identity, so the same key, so the etag an editor holds still pins the file.
+  const restarted = await boot(first.root);
+  try {
+    expect(await etagOf(restarted.host)).toBe(before);
+    expect(json(await restarted.host.dispatch(put('limit: 4\n', 'host', 'owner', before))).outcome).toBe('applied');
+  } finally {
+    await restarted.host.stop();
+  }
+  // Another daemon holding the very same text gives another etag: the key is the daemon's own.
+  const other = await boot();
+  try {
+    expect(json(await other.host.dispatch(put(text, 'host', 'owner', 'absent'))).outcome).toBe('applied');
+    expect(await etagOf(other.host)).not.toBe(before);
+  } finally {
+    await other.host.stop();
   }
 });

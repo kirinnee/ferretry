@@ -716,11 +716,13 @@ per-document plan (one refused document writes nothing of the set).
   (E3) and the whole value of a word that glues text to a pointer. A word of blanks that does not start with a flag
   (`srv --token v`) is no gap: the read splits it into words and cuts `v`.
 
-- **GAP: the etag is a digest oracle.** A file's etag is the sha256 of its disk text and goes to every `fleet.use`
-  reader (`GET /v1/config/file`, the `kernel.config-changed` frame, `GET /v1/config/status`). A hidden value that is
-  long and high-entropy cannot be recovered from it; a short or low-entropy one (an 8-14 character password) can be
-  guessed offline when the rest of the file is known. Remedy, after merge: a keyed etag (an HMAC with a daemon-local
-  key), kernel-wide.
+- **The etag is keyed, not a digest oracle.** A file's etag goes to every `fleet.use` reader (`GET /v1/config/file`, the
+  `kernel.config-changed` frame, `GET /v1/config/status`). It is an HMAC-SHA256 of the disk text under a key derived
+  from the daemon's identity (an Ed25519 signature of a fixed purpose label, hashed: the same after every restart,
+  held by no file of its own), so a reader cannot test a guess at a short hidden value offline, as a plain sha256 let
+  them when the rest of the file was known. The stored accepted record's etag is recomputed on read, never trusted.
+  What stays: two etags still show that a file changed, and a reader who holds the identity's private key (the host
+  owner) can compute any etag, which gives them nothing the file does not.
 - **GAP: the route descriptor sentence.** The descriptor of `GET /v1/config/file` says a configuration file never
   holds a raw value. That stays partly false for a file written before the flag rule: it can hold a secret under a
   flag name, shown masked on every read. The descriptor is hashed (contract 9.6), so the sentence is corrected when the
