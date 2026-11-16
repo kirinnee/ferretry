@@ -59,7 +59,7 @@ const open = async (
 };
 
 const footers = (root: ParentNode): string[] =>
-  [...root.querySelectorAll('[data-library-mcp-status]')].map(
+  [...root.querySelectorAll('[data-library-item] [data-library-mcp-status]')].map(
     node => node.getAttribute('data-library-mcp-status') ?? '',
   );
 
@@ -125,5 +125,34 @@ describe('the Profiles library’s MCP rows', () => {
     const root = await open(PLACED);
     expect(root.querySelector('[data-library-item="mcp/github"]')).not.toBeNull();
     expect(footers(root)).toEqual([]);
+  });
+});
+
+describe('the profile contents list’s MCP rows', () => {
+  const inContents = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('[data-profile-contents] [data-library-mcp-status]')].map(
+      node => node.getAttribute('data-library-mcp-status') ?? '',
+    );
+
+  it('draws the same slot under each MCP server the profile holds, with its name and how many runtimes use it', async () => {
+    const root = await open(PLACED);
+    expect(inContents(root)).toEqual(['github']);
+    const github = root.querySelector('[data-profile-item="mcp/github"] [data-library-mcp-status]');
+    expect(
+      github?.querySelector(`[data-slot="${COMPONENT_MCP_SLOT}"] [data-fake-status="github:2"]`)?.textContent,
+    ).toBe('true');
+  });
+
+  it('draws nothing under a row that is not an MCP server’s', async () => {
+    const root = await open(PLACED);
+    expect(root.querySelector('[data-profile-item="settings/Claude settings"] [data-library-mcp-status]')).toBeNull();
+  });
+
+  it('with MCP off on this daemon, draws nothing in the contents and never mounts the panel', async () => {
+    const root = await open(PLACED, { mcp: 'MCP servers is off on this daemon.' });
+    expect(root.querySelector('[data-profile-item="mcp/github"]')).not.toBeNull();
+    expect(inContents(root)).toEqual([]);
+    expect(root.querySelector('[data-profile-contents] [data-fake-status]')).toBeNull();
+    expect(root.textContent).not.toContain('is off on this daemon');
   });
 });
