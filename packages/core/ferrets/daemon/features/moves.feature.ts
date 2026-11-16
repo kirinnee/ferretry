@@ -1,6 +1,5 @@
 import type { CallContext } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import type { FencedPath } from '@ferretry/kernel/contract';
 import { type FerretId, type RunnerHandle, Harnesses, Runners } from '../../contract/index.ts';
 import type { SessionId } from '../lib/session-id.ts';
 import { ferretsMoveResume, ferretsRestartResume, movedTarget } from '../lib/ferrets/move-resume.ts';
@@ -84,16 +83,6 @@ function register(f: FerretsContext): FeatureContribution | undefined {
             return record?.runtime === undefined ? undefined : { runtime: record.runtime, handle: record.handle };
           },
           relaunch: ferretsRestartResume(service, ferret => registry.get(ferret)),
-          earlierConversation: async id => {
-            const record = registry.get(id as unknown as FerretId);
-            if (record === undefined) return undefined;
-            const harness = hooks.provider(Harnesses, record.harness);
-            if (harness === 'unavailable') return undefined;
-            const found = await harness.conversations.list(record.folder as FencedPath).catch(() => []);
-            return [...found]
-              .filter(each => each.id !== record.harnessConversation)
-              .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0]?.id;
-          },
         },
       },
       environment: sessionFiles.environment,

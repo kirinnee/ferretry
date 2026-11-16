@@ -42,11 +42,8 @@ interface RestartRecord {
   readonly handle: string | undefined;
 }
 
-/** Which conversation the relaunch opens: the one the ferret is bound to, a new one, or an earlier one of its harness. */
-type RestartConversation =
-  | { readonly kind: 'resume' }
-  | { readonly kind: 'fresh' }
-  | { readonly kind: 'earlier'; readonly id: string };
+/** Which conversation the relaunch opens: the one the ferret is bound to, or a new one. */
+type RestartConversation = { readonly kind: 'resume' } | { readonly kind: 'fresh' };
 
 export interface RestartRelaunch {
   readonly id: SessionId;
@@ -63,8 +60,6 @@ export interface RestartNeeds {
   readonly record: (id: SessionId) => RestartRecord | undefined;
   /** The relaunch itself: refuses (`ResumeRefused`) with a sentence, or answers how it ended. */
   readonly relaunch: (request: RestartRelaunch) => Promise<ResumeOutcome>;
-  /** The newest conversation of the ferret's harness in its folder other than the one it is on, or none. */
-  readonly earlierConversation: (id: SessionId) => Promise<string | undefined>;
 }
 
 /** What a Restart is run from: the move's own closures, handed in so this file imports nothing from the module that calls it. */
@@ -125,15 +120,15 @@ export async function restartInPlace(
       'unavailable',
       `a Restart keeps the model this ferret is on; moving it to ${request.model} is a move to another runtime, which is not built yet`,
     );
-  // Decided from reads alone, before the gate: a conversation that is not there is refused, and nothing was touched.
-  let conversation: RestartConversation = { kind: 'resume' };
-  if (request.conversation === 'fresh') conversation = { kind: 'fresh' };
-  if (request.conversation === 'previous') {
-    const earlier = await ctx.restart.earlierConversation(id);
-    if (earlier === undefined)
-      throw new SessionMoveError('unresumable', 'this ferret has no earlier conversation in its folder to go back to');
-    conversation = { kind: 'earlier', id: earlier };
-  }
+  // REFUSED BEFORE ANY WRITE OR KILL, as `convert` is: the harness's finder for "the earlier conversation" lists the OWNER'S
+  // own history, never the ferret's home, so answering it would unbind the ferret's real conversation for one of the
+  // person's. It waits for a reader the harness scopes to the ferret's home.
+  if (request.conversation === 'previous')
+    throw new SessionMoveError(
+      'unavailable',
+      'going back to an earlier conversation is not built yet, so a Restart cannot do it',
+    );
+  const conversation: RestartConversation = request.conversation === 'fresh' ? { kind: 'fresh' } : { kind: 'resume' };
 
   const report = await ctx.inspect();
   const decision = ctx.preflight.gate(report, { force: request.forceInflight });
@@ -182,7 +177,7 @@ export async function restartInPlace(
     to: agent,
     by,
     ...(config.model === undefined ? {} : { model: config.model }),
-    conversation: conversation.kind === 'resume' ? 'resumed' : conversation.kind === 'fresh' ? 'fresh' : 'earlier',
+    conversation: conversation.kind === 'resume' ? 'resumed' : 'fresh',
     report: reportPath,
     verdict: report.worstVerdict,
   });

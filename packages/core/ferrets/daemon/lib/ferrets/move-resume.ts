@@ -121,11 +121,7 @@ export function ferretsRestartResume(
     if (request.conversation.kind !== 'resume') {
       if (record.runtime === undefined)
         throw new ResumeRefused('this ferret has no runtime recorded, so it cannot open another conversation on it');
-      target = {
-        runtime: record.runtime,
-        harness: record.harness,
-        ...(request.conversation.kind === 'earlier' ? { conversation: request.conversation.id } : {}),
-      };
+      target = { runtime: record.runtime, harness: record.harness };
     }
     const resumed = await service.resume(ferret, request.message, {
       origin: stated.data,

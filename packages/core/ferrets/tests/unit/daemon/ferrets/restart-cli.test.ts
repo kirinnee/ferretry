@@ -142,6 +142,34 @@ describe('Restart CLI on a 5.0 ferret', () => {
     await h.stop();
   });
 
+  test('going back to the earlier conversation is refused (not built yet) before any write or kill: documents byte-identical, pane untouched', async () => {
+    const { h, runner, harness, id, handle, launches } = await boot();
+    // The owner's own history holds a newer conversation: the finder this must never read (it lists the owner's ~/.claude).
+    let listed = 0;
+    harness.conversations.list = async () => {
+      listed += 1;
+      return [{ id: 'owner-newest', updatedAt: '2099-01-01T00:00:00.000Z' }] as never;
+    };
+    const documents = async () => [
+      h.state('ferrets').raw(FerretConfigFile, id),
+      h.state('ferrets').raw(FerretStateFile, id),
+    ];
+    const before = await documents();
+
+    const answer = await restart(h, id, { conversation: 'previous' });
+
+    // `unavailable`, as `convert` is refused: 503 agent_unavailable, never the 409 that offers "Start fresh".
+    expect(answer.status).toBe(503);
+    expect(answer.json<{ code: string }>().code).toBe('agent_unavailable');
+    expect(answer.json<{ error: string }>().error).toContain('not built yet');
+    expect(await documents()).toEqual(before);
+    expect(await runner.alive(handle)).toBe(true);
+    expect(runner.starts).toBe(0);
+    expect(harness.launched).toHaveLength(launches);
+    expect(listed).toBe(0);
+    await h.stop();
+  });
+
   test('another runtime still answers that it is not built yet', async () => {
     const { h } = await boot();
 
