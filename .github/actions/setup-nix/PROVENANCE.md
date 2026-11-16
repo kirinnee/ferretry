@@ -2,7 +2,7 @@
 
 This directory is a copy of a third-party composite action, vendored so every action it runs is pinned to a full
 commit SHA (`docs/standards/ci-cd/index.md#installing-nix`). The copy is mechanical: read the diff against the
-upstream commit, not the files, to review it. Nothing here is edited by hand except the nine `uses:` lines below.
+upstream commit, not the files, to review it. Nothing here is edited by hand except the nine `uses:` lines below, and one file is ADDED (`package.json`).
 
 - **Source:** https://github.com/AtomiCloud/actions.setup-nix
 - **Tag and commit:** `v4.0.0` = `6d7c1e0710ce2fbda572edd6c3a473ea8210b4c0`
@@ -12,6 +12,14 @@ upstream commit, not the files, to review it. Nothing here is edited by hand exc
   `bin/durian-shell`, `scripts/cache-shell.sh`, `scripts/linux-warm-nix.sh`, `scripts/store-guard.sh`,
   `post-cache-push/{action.yml,file-cache-push.sh,noop.js,push.js}`, `store-guard/{action.yml,noop.js,post.js}`.
   Not copied: the upstream repo's own flake (`flake.nix`, `nix/`), release files, tests, README.
+
+## The one added file: `package.json`
+
+`{"private": true, "type": "commonjs"}`. Upstream's JS hooks (`store-guard/post.js`, `post-cache-push/push.js`) are
+CommonJS, but this repository's root `package.json` says `"type": "module"`, which Node applies to every `.js` below it
+(measured on the first full CI run: `ReferenceError: require is not defined in ES module scope` in the store-guard post
+step, which failed every job that installs Nix). A `package.json` here scopes these files back to CommonJS without
+editing them. Keep it when re-vendoring.
 
 ## The edited lines (all in `action.yml`)
 
