@@ -1365,6 +1365,12 @@ invocation, SKILL.md path and scope. Catalogs contributes there the "from Ines �
 Uninstall (`CatalogItemRow` in its `controls` form; `app/views/skills-row.tsx`). Every row of one daemon shares one read
 of the installs and catalogs (`catalog-rows-store.ts`), so a Skills tab asks the daemon twice, not twice per skill.
 
+MCP's servers panel offers two slots the same way (`@ferretry/plugin-mcp/contract`, `contract/slots.ts`): `mcp.row` at the
+end of each server's status line (after Check and Sign in), with the server's inventory id, name and scope, and
+`mcp.install` beside **Add…** in the header, shown only to a caller who may control the ferret. Catalogs contributes the same
+"from Ines · v2" chip and **⋯** to the first (`app/views/mcp-row.tsx`, `kind="mcp"`, Publish pointing at the server's id) and
+**More ▾ › Install from a file…** to the second.
+
 The Skills tab has one **+ Add skills** button by its "N active in this session" line. It goes to a page of its own,
 **Add skills** at `/d/<daemon>/session/<id>/skills` (`features/context-rail/add-skills-page.tsx`), with **Back to the
 session** and **Refresh** at the top; the install review stays a sheet over it. The page:

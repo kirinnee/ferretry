@@ -6,10 +6,19 @@
  * `useMcpServerActions`: Check asks the daemon to connect AS THIS FERRET would, and Sign in is the server's flow under its
  * own subject — which is what lets a project's `.mcp.json` server sign in at all. The panel reads one ferret's servers
  * through the half's own client; no secret value, token or program argument ever reaches it.
+ * It offers two slots (contract/slots.ts): `mcp.row` after each row's Check and Sign in, and `mcp.install` beside "Add…"
+ * — where Catalogs draws "from Ines · v2", Share / Uninstall, and "Install from a file…".
  */
+import { daemonOfClient, PanelSlot } from '@ferretry/app';
 import { ContextFailure, ContextFilterBar, contextEmptyCopy, ContextNote, useContextRead } from '@ferretry/app/ui';
 import { Plus } from 'lucide-react';
 import { useCallback, useState } from 'react';
+import {
+  MCP_INSTALL_SLOT,
+  MCP_ROW_SLOT,
+  type McpInstallSlotProps,
+  type McpRowSlotProps,
+} from '../../contract/index.ts';
 import { type McpClient, readFerretMcpServers } from '../lib/client.ts';
 import {
   type McpChip,
@@ -51,6 +60,7 @@ export function McpServersPanel({
   const read = useContextRead(loader, true);
   const { load, reload } = read;
   const actions = useMcpServerActions({ client, machineName: MACHINE_NAME, ferretId, now }, reload);
+  const daemon = daemonOfClient(client);
   const [query, setQuery] = useState('');
   const [chip, setChip] = useState<McpChip>('all');
   const [adding, setAdding] = useState(false);
@@ -96,17 +106,27 @@ export function McpServersPanel({
         <span>
           {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
         </span>
-        {canControl ? (
-          <button
-            className="fy-mcp-link inline-flex items-center gap-1 text-meta"
-            data-mcp-add=""
-            onClick={() => setAdding(true)}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={13} />
-            Add…
-          </button>
-        ) : null}
+        <span className="flex flex-wrap items-center gap-sm">
+          {daemon !== undefined && canControl ? (
+            <PanelSlot
+              daemon={daemon}
+              slot={MCP_INSTALL_SLOT}
+              subject={ferretId}
+              props={{ ferret: ferretId } satisfies McpInstallSlotProps}
+            />
+          ) : null}
+          {canControl ? (
+            <button
+              className="fy-mcp-link inline-flex items-center gap-1 text-meta"
+              data-mcp-add=""
+              onClick={() => setAdding(true)}
+              type="button"
+            >
+              <Plus aria-hidden="true" size={13} />
+              Add…
+            </button>
+          ) : null}
+        </span>
       </div>
       {inventory.problems.map(problem => (
         <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
@@ -119,7 +139,28 @@ export function McpServersPanel({
         <ul className="m-0 flex list-none flex-col p-0" data-context-list="mcp">
           {visible.map(server => (
             <li key={server.id} className="border-b border-border-soft" data-context-mcp={server.name}>
-              <McpServerRow server={server} actions={actions} nowMs={nowMs} />
+              <McpServerRow
+                server={server}
+                actions={actions}
+                nowMs={nowMs}
+                rowSlot={
+                  daemon === undefined ? undefined : (
+                    <PanelSlot
+                      daemon={daemon}
+                      slot={MCP_ROW_SLOT}
+                      subject={ferretId}
+                      props={
+                        {
+                          ferret: ferretId,
+                          id: server.id,
+                          name: server.name,
+                          scope: server.scope,
+                        } satisfies McpRowSlotProps
+                      }
+                    />
+                  )
+                }
+              />
               <button
                 aria-expanded={shown.has(server.id)}
                 className="fy-mcp-link text-meta"
