@@ -165,10 +165,66 @@ ferret launched in a folder with a new MCP server stops at that screen, and the 
 `enableAllProjectMcpServers` the owner (or Claude, on their answer) already put in the home is never touched.
 
 What no key answers is **told to the owner once** (`packages/plugins/warden/daemon/lib/dialog-watch.ts`): the Warden
-reads each ferret's recorded `harnessDialog` or `permissionRequest` every 30 s and raises ONE plain notice on that
+reads each ferret's recorded `harnessDialog` or `permissionRequest` every 10 s and raises ONE plain notice on that
 ferret's agenda per dialog **episode** — the same dialog on the same ferret is one episode, however many looks see it
 and however often the owner closes the notice; a look that misses it twice in a row ends the episode, and a different
-dialog starts a new one. The usage-limit dialog is the auto-move's, not this notice's. The Warden never picks a row.
+dialog starts a new one. The usage-limit dialog is the auto-move's, not this notice's. The Warden picks a row only through
+a rule, below, and a rule never picks a row that trusts, approves or allows anything.
+
+## Cleared at once by a rule (5.0, O14)
+
+A screen a key can **dismiss or decline** should not wait for a person (a dangerous `rm` sat on its prompt for 1.5 minutes
+before anyone noticed). In the same look that reads a ferret's dialog, the Warden checks it against a table of rules and,
+for a match, presses the way out through the ferret's own terminal (Ferrets' form seam: the runner masks every read and
+holds every key under `kernel.act(<pane>, 'keys')`, so a Vault hold presses nothing). A rule is
+(harness, dialog kind, a FIXED title pattern, and for a harness phrase printed only on the frame, one fixed line) → **Esc**
+or **the row whose label is exactly this**. Free pane text never picks a rule.
+
+| Harness | Screen (`kind`)                                  | Rule id                     | Keys                                                        |
+| ------- | ------------------------------------------------ | --------------------------- | ----------------------------------------------------------- |
+| Claude  | "Dangerous rm operation detected" (`permission`) | `claude-dangerous-rm`       | Esc (the deny; see below)                                   |
+| Claude  | New MCP server found (`mcp-servers`)             | `claude-mcp-servers`        | ↓/↑ to "Continue without using this MCP server", Enter      |
+| Claude  | Settings Error (`settings-error`)                | `claude-settings-error`     | ↓/↑ to "Continue without these settings", Enter             |
+| Claude  | LSP plugin recommendation (`other`)              | `claude-lsp-recommendation` | ↓/↑ to "No, not now", Enter                                 |
+| Codex   | Hooks need review (`hooks-review`)               | `codex-hooks-review`        | ↓/↑ to "Continue without trusting (hooks won't run)", Enter |
+| Codex   | The hook list (`hooks-list`)                     | `codex-hooks-list`          | Esc                                                         |
+| Codex   | Update available (`update`)                      | `codex-update`              | ↓/↑ to "Skip", Enter                                        |
+| Codex   | "Meet GPT-6 Sol" model successor (`other`)       | `codex-model-successor`     | ↓/↑ to "Use existing model", Enter                          |
+
+What has **no** rule, and stays a notice: folder trust (its only ways out trust the folder or exit the ferret), the
+sign-in screen, Codex's folder-access screens, the usage-limit screen (the auto-move's), a tool prompt that is not a
+dangerous `rm`, and any screen this build has no name for.
+
+**Never a grant.** A `choose` row must not read as granting (`yes`, `allow`, `always`, `approve`, `trust`, `use this…`, `don't ask
+again`, `install`, `update now`…, unless it says _without_ / _not_), and the planner also refuses any row the harness marked
+`grantsTrust`. That is checked three times: the rules file's schema, the table's own test (over every known screen), and the
+planner at the moment of pressing. A screen whose only way out grants something has no plan and stays a notice.
+
+**What a press looks like.** (1) The live frame is read and must still show the screen — the recorded dialog can lag, and Esc
+on a pane that moved on would interrupt a turn — and the runner's own reader must say the KIND the rule presses on blocks it (a dialog for a row to choose, a permission prompt for Esc on one). (2) Arrows
+move the cursor; the frame is read again and Enter is pressed only when the cursor is positively on the chosen row. (3) ONE
+journal line: `fleet.warden_dialog_autocleared` (ferret, harness, kind, rule id) — no agenda card, no pane text. The same
+dialog on the same ferret is never keyed twice; if the next look still sees it on screen the keys failed (or a hold refused
+them) and the owner is told once, as before (`fleet.warden_dialog_clear_failed`). The look runs every 10 s.
+
+**Dangerous `rm`: Esc, then a nudge — no hook.** Claude 2.1.317's prompt comes from a shell _parser_ inside the binary with
+a dozen branches (an `rm` on a possibly-empty variable path, on a command substitution's output, in a `bash -c` script, an
+`eval` trap, a parse it could not finish) — read off its strings, never by running it — so nothing here tries to predict it.
+The Esc rule above declines it at once. Right after that Esc the Warden types ONE fixed message to the ferret (its own next
+message; a queue if the pane is busy — never a hook, and never pane text) saying why the `rm` was denied: _use explicit
+absolute rm paths; never "$VAR", a $(cmd) variable or rm inside bash -c_, so it retries with a path. The nudge is fire and
+forget: a failed one changes nothing. The launch instruction `claude-code/instructions/rm.md` says the same up front.
+`dangerousRmWaiver` stays off.
+
+**Teaching Ferretry an unknown screen.** The notice for a screen no rule knows says how: leave the ferret on it, then
+`fy warden dialog learn <ferret>` (or Settings › Warden › Screens Ferretry clears › "Look at its screen"). That reads the
+ferret's current frame, MASKS it (the secret masker plus a shape pass) and keeps it in the Warden's own `0600` state
+(`dialog-frames/<ferret>`, declared private) — never in the agenda, a log or a notice — and PROPOSES a rule from the screen's
+own title and its decline or dismiss row (`--row N` picks another; a row that grants is held and can never be saved). Nothing is
+saved until the owner says yes: `fy warden dialog learn <ferret> --confirm` or the app's "Save this rule". The rule is
+written to `config/warden-dialogs.yaml` (`personOnly`, so no agent edits it; every added rule is a loosening, so an edit by
+anyone but the owner is held for the owner, as every held config edit is) and the next appearance is cleared. A tool
+permission prompt and the usage-limit screen are never taught.
 
 **The notice carries no pane text.** A dialog's title, body and row labels, and a tool prompt's command, path or URL
 (a `curl` with a bearer token, say), are served only to a caller holding `terminal.use`; the agenda carries no
