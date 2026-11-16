@@ -2,29 +2,13 @@
  * A file whose YAML aliases cannot be read — an alias to an anchor that is not set, or an alias inside its own anchor —
  * is a broken file like any other (docs/config-files.md, "Last good wins"): it is refused with a located issue, its last
  * good version stays in effect, boot continues and a reload never throws. No issue or log line names the alias.
+ * The SPEED of reading such a file at the size limit is `tests/perf/host/config-alias-boot.test.ts`'s.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { z } from 'zod';
-import { AGENT_CONFIG_TEXT_MAX_BYTES } from '../../../contract/agent-config.ts';
-import { AdmissionPort } from '../../../contract/bound.ts';
-import { defineConfig } from '../../../contract/index.ts';
-import type { ConfigPort } from '../../../contract/ports.ts';
 import { CONFIG_FILE_MAX_BYTES } from '@ferretry/std/yaml';
-import { bootHost, type HostConfig, type RunningHost } from '../../../host/host.ts';
-import type { LogRecord } from '../../../host/log.ts';
-import { realAdapters } from '../../../host/wiring.ts';
-import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
-import { fixedClock } from '../../../testing/clock.ts';
 import { adversarialTexts, PRIVATE_WORD } from '../host-config/adversarial-texts.ts';
-import { recordingAdmission } from './fixtures.ts';
+import { aliasesAt, boot, bootOnce, cleanup, FAKE_NAME, home, namesNothing, writeVoice } from './config-alias-world.ts';
 
-/**
- * An alias NAME only the file holds, so a message that repeated the name would be caught. Not key-shaped: a name that
- * looks like a key is refused as a raw secret before anything else is said (the last test here).
- */
-const FAKE_NAME = 'private-anchor-zebraquartz';
 /** Fake only: an alias name shaped like a key. */
 const KEY_NAME = 'sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 const UNRESOLVED = `limit: 3\nnote: *${FAKE_NAME}\n`;
@@ -38,103 +22,8 @@ const BOMB = `limit: 3\n${Array.from(
   (_, level) =>
     `l${level}: &l${level} [${Array.from({ length: 9 }, () => (level === 0 ? FAKE_NAME : `*l${level - 1}`)).join(', ')}]\n`,
 ).join('')}`;
-/** A file at the agent door's size limit, every line an alias, the last one unresolved. */
-const AT_THE_LIMIT = `limit: 3\nnote: &${FAKE_NAME} x\nmore:\n${`  - *${FAKE_NAME}\n`.repeat(
-  Math.floor((AGENT_CONFIG_TEXT_MAX_BYTES - 256) / (FAKE_NAME.length + 6)),
-)}  - *nope\n`;
-/** A hard bound, far above one linear read; the quadratic read this guards took minutes on a file this size. */
-const BOUND_MS = 1500;
 
-const voiceDef = defineConfig({
-  file: 'voice.yaml',
-  schema: z.strictObject({ limit: z.number().int().default(10), note: z.unknown().optional() }),
-  axis: 'configure',
-  loosens: (before, after) =>
-    after.limit > (before?.limit ?? 10) ? [`raises the limit from ${before?.limit ?? 10} to ${after.limit}`] : [],
-});
-
-const base = { version: '5.0.0', api: 5, kinds: [] } as const;
-const gate = definePlugin({ ...base, id: 'gate', title: 'Gate', core: true, provides: { admission: AdmissionPort } });
-const voice = definePlugin({ ...base, id: 'voice', title: 'Voice', core: false, data: { config: [voiceDef] } });
-
-const roots: string[] = [];
-const hosts: RunningHost[] = [];
-afterEach(async () => {
-  for (const host of hosts.splice(0)) await host.stop();
-  for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
-});
-
-/** A fresh home, not yet claimed: the first boot claims it (a home that is not empty and unclaimed is refused). */
-async function home(): Promise<string> {
-  const root = await mkdtemp(`${tmpdir()}/config-alias-`);
-  roots.push(root);
-  return `${root}/home`;
-}
-
-const writeVoice = async (at: string, text: string): Promise<void> => {
-  await mkdir(`${at}/config`, { recursive: true });
-  await writeFile(`${at}/config/voice.yaml`, text);
-};
-
-/** Boots a home, lets `prepare` write into it while it runs (the last good version is accepted by a reload), stops. */
-async function bootOnce(
-  at: string,
-  prepare: (world: Awaited<ReturnType<typeof boot>>) => Promise<void>,
-): Promise<void> {
-  const world = await boot(at);
-  await prepare(world);
-  await world.host.stop();
-  hosts.splice(hosts.indexOf(world.host), 1);
-}
-
-async function boot(at: string) {
-  const logs: LogRecord[] = [];
-  let service: HostConfig | undefined;
-  let port: ConfigPort | undefined;
-  const real = realAdapters(at, record => logs.push(record), { binary: 'fy' });
-  const outcome = await bootHost({
-    home: at,
-    version: '5.0.0',
-    adapters: {
-      ...real,
-      clock: fixedClock(),
-      homeLock: async () => ({ release: async () => {} }),
-      config: (declarations, judge) => {
-        service = real.config(declarations, judge);
-        return service;
-      },
-    },
-    implementations: [
-      implementDaemon(gate, { build: () => ({ provides: { admission: recordingAdmission() } }) }),
-      implementDaemon(voice, {
-        build: ctx => {
-          port = ctx.kernel.config;
-          return {};
-        },
-      }),
-    ],
-  });
-  if (outcome.kind !== 'running') throw new Error(outcome.sentence);
-  hosts.push(outcome.host);
-  if (service === undefined || port === undefined) throw new Error('the fixture was not built');
-  const config = service;
-  const reader = port;
-  return {
-    home: at,
-    host: outcome.host,
-    logs,
-    reload: () => config.reload(),
-    limit: () => reader.file(voiceDef)?.limit,
-    voiceIssues: () => (config.status?.().issues ?? []).filter(issue => issue.path === 'voice.yaml'),
-    voiceState: () => config.status?.().files.find(file => file.path === 'voice.yaml')?.state,
-  };
-}
-
-/** Nothing the daemon says about the file — an issue, a log line — repeats the alias's name. */
-function namesNothing(world: Awaited<ReturnType<typeof boot>>, name: string = FAKE_NAME): void {
-  expect(JSON.stringify(world.voiceIssues())).not.toContain(name);
-  expect(JSON.stringify(world.logs)).not.toContain(name);
-}
+afterEach(cleanup);
 
 describe('an alias that cannot be read is a broken file, not a crash', () => {
   for (const [label, text, message, line] of [
@@ -193,33 +82,28 @@ describe('an alias that cannot be read is a broken file, not a crash', () => {
   }
 });
 
-describe('a file at the size limit is read in one pass at boot and on reload', () => {
-  test('a 256 KiB file of aliases, the last unresolved: boot and the reload each read it in under the bound', async () => {
+describe('a file of aliases, the last unresolved, is read in one pass at boot and on reload', () => {
+  test('a small file of aliases, the last unresolved: boot and the reload each refuse it and keep the last good version', async () => {
     const at = await home();
     await bootOnce(at, async first => {
       await writeVoice(at, 'limit: 7\n');
       await first.reload();
     });
-    await writeVoice(at, AT_THE_LIMIT);
+    await writeVoice(at, aliasesAt(4096));
 
-    const booting = performance.now();
     const world = await boot(at);
-    // Boot does more than read one file; the read itself is what the bound is about, so it is given the bound twice.
-    expect(performance.now() - booting).toBeLessThan(BOUND_MS * 2);
     expect(world.limit()).toBe(7);
     expect(world.voiceIssues()[0]?.message).toContain('not set before it');
 
-    const reloading = performance.now();
     await world.reload();
-    expect(performance.now() - reloading).toBeLessThan(BOUND_MS);
     expect(world.limit()).toBe(7);
     namesNothing(world);
   });
 });
 
-describe('every hostile shape at the size cap: boot reads it within the bound and never fails', () => {
-  for (const [label, text] of adversarialTexts(CONFIG_FILE_MAX_BYTES)) {
-    test(`${label}: boot answers in under ${BOUND_MS} ms, and the last good version stays unless the file checks`, async () => {
+describe('every hostile shape, small: boot never fails', () => {
+  for (const [label, text] of adversarialTexts(8192)) {
+    test(`${label}: boot answers, and the last good version stays unless the file checks`, async () => {
       const at = await home();
       await bootOnce(at, async first => {
         await writeVoice(at, 'limit: 7\n');
@@ -227,9 +111,7 @@ describe('every hostile shape at the size cap: boot reads it within the bound an
       });
       await writeVoice(at, text);
 
-      const booting = performance.now();
       const world = await boot(at);
-      expect(performance.now() - booting).toBeLessThan(BOUND_MS);
       if (world.voiceState() !== 'ok') expect(world.limit()).toBe(7);
       namesNothing(world, PRIVATE_WORD);
     });

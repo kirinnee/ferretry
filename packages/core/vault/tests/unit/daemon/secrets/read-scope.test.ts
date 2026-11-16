@@ -18,30 +18,17 @@ import should from 'should';
 import { CloneableSecretNameSchema, SecretNameSchema } from '../../../../contract/index.ts';
 import { ChildEnvironments } from '../../../../daemon/lib/secrets/child-environments.ts';
 import { HoldRegistry } from '../../../../daemon/lib/secrets/output-guard.ts';
-import { coverageOf, type TextRange } from '../../../../daemon/lib/secrets/policy.ts';
 import { maskGrid, maskLines, VaultRedaction } from '../../../../daemon/lib/secrets/read-scope.ts';
 import { SecretDirectory } from '../../../../daemon/lib/secrets/vault.ts';
 import { SecretStoreError } from '../../../../daemon/lib/secrets/types.ts';
 
+import { dense, PIN, source } from './read-scope-fixtures.ts';
 /**
  * The parts vault-a added around today's code: the kernel-bound `Redaction` (today's `SecretRedactor.batch` as one
  * read-scoped redactor), the `ChildEnvironment` handle table (lead decision 9) and the `OutputGuard` registry.
  */
 
 const TOKEN = 'sk-live-0123456789';
-
-/** A value source that counts its opens, or fails. */
-function source(entries: Record<string, string> | Error) {
-  let opens = 0;
-  return {
-    opens: () => opens,
-    values: async () => {
-      opens += 1;
-      if (entries instanceof Error) throw entries;
-      return new Map(Object.entries(entries));
-    },
-  };
-}
 
 describe('the read-scoped redaction', () => {
   it('S15 S18 an operator read is masked: a known value reads as [redacted:NAME]', async () => {
@@ -133,74 +120,23 @@ describe('the read-scoped redaction', () => {
   });
 });
 
-/** `ranges` behind a proxy that counts every element read, so a test can tell one pass from a pass per character. */
-function counted(ranges: readonly TextRange[]): {
-  readonly ranges: readonly TextRange[];
-  readonly reads: () => number;
-} {
-  let reads = 0;
-  const proxy = new Proxy([...ranges], {
-    get(target, key, receiver) {
-      if (typeof key === 'string' && /^\d+$/u.test(key)) reads += 1;
-      return Reflect.get(target, key, receiver);
-    },
-  });
-  return { ranges: proxy, reads: () => reads };
-}
-
-describe('F-0326 #U4 the cost of masking a busy screen', () => {
-  // A 4-character value printed densely: one match range every 5 characters.
-  const PIN = '1234';
-  const dense = (width: number) => `${PIN} `.repeat(width / 5);
-
-  it('F-0326 #U4 lines read each match range a bounded number of times, never once per character', () => {
-    // Arrange — 50 rows of 200: 2,000 ranges over 10,000 characters.
-    const lines = Array.from({ length: 50 }, () => dense(200));
-    let probe: ReturnType<typeof counted> | undefined;
-    const cover = (text: string) => {
-      probe = counted(coverageOf(text, [PIN]));
-      return probe.ranges;
-    };
-
-    // Act
-    const masked = maskLines(lines, [PIN], cover);
-
-    // Assert — the same mask, at a cost in range reads of the ranges themselves, not of ranges × characters.
-    should(masked).deepEqual(lines.map(() => '**** '.repeat(40)));
-    should(probe?.ranges.length).equal(2000);
-    should(probe?.reads()).be.belowOrEqual(2 * 2000);
+describe('F-0326 #U4 masking a busy screen', () => {
+  // The cost of masking a dense 200×2000 screen is `tests/perf/daemon/secrets/read-scope.test.ts`'s; here a small one.
+  it('F-0326 #U4 lines mask every dense match', () => {
+    const lines = Array.from({ length: 5 }, () => dense(50));
+    should(maskLines(lines, [PIN])).deepEqual(lines.map(() => '**** '.repeat(10)));
   });
 
-  it('F-0326 #U4 cells read each match range a bounded number of times, never once per cell', () => {
-    // Arrange — 50 rows of 200 one-character cells.
-    const grid = { columns: 200, rows: Array.from({ length: 50 }, () => [...dense(200)]) };
-    let probe: ReturnType<typeof counted> | undefined;
-    const cover = (text: string) => {
-      probe = counted(coverageOf(text, [PIN]));
-      return probe.ranges;
-    };
-
-    // Act
-    const masked = maskGrid(grid, [PIN], cover);
-
-    // Assert
-    should(masked.rows.map(row => row.join(''))).deepEqual(grid.rows.map(() => '**** '.repeat(40)));
-    should(probe?.reads()).be.belowOrEqual(2 * 2000);
+  it('F-0326 #U4 cells mask every dense match', () => {
+    const grid = { columns: 50, rows: Array.from({ length: 5 }, () => [...dense(50)]) };
+    should(maskGrid(grid, [PIN]).rows.map(row => row.join(''))).deepEqual(grid.rows.map(() => '**** '.repeat(10)));
   });
 
-  it('F-0326 #U4 a 200×2000 screen dense with a 4-character value masks inside the 2 s stop bound', async () => {
-    // Arrange — 80,000 matches over 400,000 characters, the size of a pane an attached client stretched.
+  it('F-0326 #U4 a small screen dense with a 4-character value is masked whole through a read', async () => {
     const redaction = new VaultRedaction(source({ PIN }));
-    const rows = Array.from({ length: 200 }, () => dense(2000));
-
-    // Act
-    const started = performance.now();
+    const rows = Array.from({ length: 5 }, () => dense(100));
     const masked = await redaction.read(scope => scope.lines(rows));
-    const took = performance.now() - started;
-
-    // Assert — synchronous masking inside a read must leave the stop's 2 s bound able to fire.
-    should(masked.every(row => row === '**** '.repeat(400))).be.true();
-    should(took).be.below(2000);
+    should(masked.every(row => row === '**** '.repeat(20))).be.true();
   });
 });
 
