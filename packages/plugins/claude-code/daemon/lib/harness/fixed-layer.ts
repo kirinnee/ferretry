@@ -12,7 +12,7 @@ export const CLAUDE_PROMPTS_SEEN = {
 
 const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
 export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
-const CLAUDE_QUESTION_HOOKS = {
+export const CLAUDE_QUESTION_HOOKS = {
   PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
 };
 
