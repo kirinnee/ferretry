@@ -98,7 +98,12 @@ function closedDisk(l: Layout, devices: Devices, count: () => number = () => 65_
     identity: async path => {
       if (path === l.sessions) {
         const found = await REAL.identity(path);
-        return found === undefined ? undefined : { ...found, device: devices.folder };
+        // A folder that gains sessions is a folder that changed (its size and link count move with its entries). The
+        // index trusts an unchanged folder once it is older than its racy window, so a fake that grew the listing
+        // alone would be seen or missed by how long the run took to get here: the identity carries the count.
+        return found === undefined
+          ? undefined
+          : { ...found, device: devices.folder, size: found.size + count(), links: found.links + count() };
       }
       if (path.startsWith(`${l.sessions}/`)) {
         const [name, file] = path.slice(l.sessions.length + 1).split('/') as [string, string | undefined];

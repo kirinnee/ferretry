@@ -194,6 +194,7 @@ const SWEEP: readonly Entry[] = [
   ['browsers', 'x11', true],
   ['terminals', 'tmux.sock', false],
   ['logins', 'credentials', true],
+  ['warden', 'dialog-frames', true],
 ].map(([plugin, path, folder]) => ({ plugin: plugin as string, path: path as string, folder: folder as boolean }));
 
 const declared = (list: readonly Entry[]): string[] => list.map(entry => `${entry.plugin}/${entry.path}`).sort();

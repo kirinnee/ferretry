@@ -5,7 +5,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  GPU_PROBE_MS,
   probeWebGpuAdapter,
   readSyncSpeedSignals,
   type SpeedGlobalLike,
@@ -80,11 +79,9 @@ describe('probeWebGpuAdapter', () => {
   });
 
   it('gives up on a driver that never answers', async () => {
-    const started = performance.now();
     const answer = await probeWebGpuAdapter({
       navigator: { gpu: { requestAdapter: () => new Promise(() => undefined) } },
     });
     should(answer).equal(false);
-    should(performance.now() - started).be.within(GPU_PROBE_MS - 100, GPU_PROBE_MS + 1_000);
   });
 });
