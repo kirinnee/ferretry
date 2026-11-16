@@ -1,7 +1,7 @@
 import type { FerretId } from '@ferretry/kernel/contract';
 import type { LaunchSpec, Runner, RunnerHandle, RunSpec, Started, StartRefusal } from '@ferretry/core-ferrets/contract';
 import { err, ok, type Result } from '@ferretry/std';
-import { buildCodexLaunchArgv } from '../../lib/index.ts';
+import { buildCodexLaunchArgv, CODEX_COMPACT_PROMPT } from '../../lib/index.ts';
 import { settingsFlags } from '../../lib/settings.ts';
 import { CODEX_LAUNCH_SETTINGS, type HarnessConfig } from '../../../contract/index.ts';
 import { codexFixedArguments, codexPermissionArguments, codexQuestionArguments } from '../../lib/fixed-layer.ts';
@@ -43,6 +43,7 @@ export const lifecyclePart: HarnessPart<'start' | 'resume' | 'stop'> = ({
       ...buildCodexLaunchArgv({
         executable,
         settingsFlags: settingsFlags(items),
+        compactPrompt: CODEX_COMPACT_PROMPT,
         harnessFlags: [
           ...codexPermissionArguments(permissionMode),
           ...codexFixedArguments(permissionMode, spec.folder),

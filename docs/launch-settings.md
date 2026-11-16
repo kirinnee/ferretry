@@ -347,9 +347,10 @@ items and the messages it still owes a reply to. The **fixed layer** puts two mo
   `FY_SESSION_ID`; it prints no credential and always exits 0.
 
 Both are in the `fixed-layer` fingerprint, so a ferret launched before them reads as **Restart needed**. A Codex ferret
-has no equivalent yet: no compact-prompt setting is documented in this repo, and a hook of Ferretry's own would need its
-own `hooks.state` trust entry (`harness-dialogs.md`); the declared gap is `GAP(codex-compaction)` in the Codex
-plugin's `ports-pending.json`.
+gets the same two texts (written once, in `compaction-text.ts` of the Ferrets contract) through Codex's own
+`-c compact_prompt=...`, which replaces Codex's summary prompt: it asks for the summary, asks it to keep the same things
+and ends it with the same re-read instructions. No hook is involved, so no `hooks.state` trust entry is needed. It is on
+the launch argv (`daemon/lib/compact-prompt.ts` in the Codex plugin), never in a settings entry.
 
 The model a relaunch asks for is the one the ferret is on: the CLI's own report when it is newer than the
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;

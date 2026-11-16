@@ -6,7 +6,7 @@ import should from 'should';
 import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
-import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
+import { CODEX_COMPACT_PROMPT, tomlString, tomlTables } from '../../daemon/lib/index.ts';
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
 import {
   CODEX_QUESTIONS_FEATURE,
@@ -193,6 +193,16 @@ describe('the Codex harness', () => {
     should(command).not.containEql('hello');
     should(seen[0]?.spec.cwd).equal(FOLDER);
     should(seen[0]?.call).equal('start');
+  });
+
+  it('hands Codex the compaction prompt on every start, so a compacted ferret re-reads its task and agenda', async () => {
+    const { harness } = harnessOver(LOCATED);
+    const { runner, seen } = fakeRunner();
+    await harness.start(specOf({}), runner, ENV);
+    const command = seen[0]?.spec.command ?? [];
+    const at = command.indexOf(`compact_prompt=${tomlString(CODEX_COMPACT_PROMPT)}`);
+    should(at).be.greaterThan(0);
+    should(command[at - 1]).equal('-c');
   });
 
   it('launch-argv parity: a Codex start carries no read allowance for its hand-off folders, as today', async () => {
