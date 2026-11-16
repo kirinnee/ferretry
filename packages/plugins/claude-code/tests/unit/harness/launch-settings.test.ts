@@ -97,3 +97,45 @@ describe('compareLaunchSettings', () => {
     expect(compareLaunchSettings(record, launchSettingsRecord(BASE))).toEqual({ kind: 'current' });
   });
 });
+
+describe('the dangerous-rm waiver (c58-o11c): its EFFECT is in the fixed-layer fingerprint, a missing value reads as off', () => {
+  const skip = { ...BASE, permissionMode: 'skip' as const };
+  const FIXED_ONLY = { kind: 'drifted', sections: ['fixed-layer'] } as const;
+
+  it('a record written before the field existed (no waiver input) and the waiver off is current: no ferret is flagged', () => {
+    const before = launchSettingsRecord(skip);
+
+    expect(compareLaunchSettings(before, launchSettingsRecord({ ...skip, dangerousRmWaiver: false }))).toEqual({
+      kind: 'current',
+    });
+    expect(launchSettingsRecord({ ...skip, dangerousRmWaiver: false })).toEqual(before);
+  });
+
+  it('a ferret launched with the waiver on whose setting is now off is outdated, in the fixed layer', () => {
+    const launched = launchSettingsRecord({ ...skip, dangerousRmWaiver: true });
+
+    expect(compareLaunchSettings(launched, launchSettingsRecord({ ...skip, dangerousRmWaiver: false }))).toEqual(
+      FIXED_ONLY,
+    );
+    expect(compareLaunchSettings(launched, launchSettingsRecord(skip))).toEqual(FIXED_ONLY);
+  });
+
+  it('turning the waiver off to on is outdated too, and on to on is current', () => {
+    const off = launchSettingsRecord({ ...skip, dangerousRmWaiver: false });
+    const on = launchSettingsRecord({ ...skip, dangerousRmWaiver: true });
+
+    expect(compareLaunchSettings(off, on)).toEqual(FIXED_ONLY);
+    expect(compareLaunchSettings(on, launchSettingsRecord({ ...skip, dangerousRmWaiver: true }))).toEqual({
+      kind: 'current',
+    });
+  });
+
+  it('compares the EFFECT, not the setting: on in a non-bypass mode changes nothing the process runs on', () => {
+    const auto = launchSettingsRecord({ ...BASE, dangerousRmWaiver: false });
+
+    expect(launchSettingsRecord({ ...BASE, dangerousRmWaiver: true })).toEqual(auto);
+    expect(compareLaunchSettings(auto, launchSettingsRecord({ ...BASE, dangerousRmWaiver: true }))).toEqual({
+      kind: 'current',
+    });
+  });
+});
