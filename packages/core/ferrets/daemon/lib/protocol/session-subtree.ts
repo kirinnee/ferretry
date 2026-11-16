@@ -139,7 +139,7 @@ export function displayModel(
  */
 export function ingestEvidence(
   config: Pick<SessionConfig, 'model'>,
-  state: Pick<SessionState, 'turn' | 'startedAt' | 'contextWindow' | 'contextPercent'>,
+  state: Pick<SessionState, 'turn' | 'startedAt' | 'contextWindow' | 'contextPercent' | 'contextTokens'>,
 ): FerretIngestEvidence {
   return {
     selectedModel: config.model ?? null,
@@ -147,6 +147,7 @@ export function ingestEvidence(
     startedAt: state.startedAt ?? null,
     contextWindow: state.contextWindow ?? null,
     contextEndPercent: state.contextPercent ?? null,
+    contextTokens: state.contextTokens ?? null,
   };
 }
 
@@ -159,5 +160,6 @@ export function liveRead(evidence: FerretIngestEvidence | undefined): FerretLive
     turns: evidence?.turns ?? null,
     contextPercent: evidence?.contextEndPercent ?? null,
     contextWindow: evidence?.contextWindow ?? null,
+    contextTokens: evidence?.contextTokens ?? null,
   };
 }

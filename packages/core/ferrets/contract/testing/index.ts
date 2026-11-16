@@ -991,6 +991,7 @@ export class FakeFerrets implements FerretsApi {
       startedAt: null,
       contextWindow: null,
       contextEndPercent: null,
+      contextTokens: null,
       ...evidence,
     });
   }

@@ -98,6 +98,7 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
         return {
           text: text(view.container),
           context: cellOf(view.container, 'Context'),
+          contextHint: view.container.querySelector('[data-info-row="Context"]')?.getAttribute('title') ?? null,
           turns: cellOf(view.container, 'Turns'),
           tokens: cellOf(view.container, 'Tokens'),
           link: view.container.querySelector('[data-info-open-insights]') !== null,
@@ -113,10 +114,11 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
         turns: 8,
         contextPercent: 74,
         contextWindow: 200_000,
+        contextTokens: 148_000,
       });
       expect(shown.turns).toBe('8');
       expect(shown.context).toContain('74%');
-      expect(shown.context).toContain('of 200K tokens');
+      expect(shown.context).toContain('148K of 200K tokens');
       expect(shown.text).not.toContain('20%');
       expect(shown.tokens).toContain('in 800');
     });
@@ -126,6 +128,7 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
         turns: null,
         contextPercent: null,
         contextWindow: null,
+        contextTokens: null,
       });
       expect(shown.turns).toBe('unknown');
       expect(shown.context).toBe('Not reported yet');
@@ -151,7 +154,7 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     });
 
     it('usage#0 draws the live context, turns and the Open Insights action for a ferret with no indexed analytics row', async () => {
-      const shown = await rowsFor([], { turns: 8, contextPercent: 74, contextWindow: 200_000 });
+      const shown = await rowsFor([], { turns: 8, contextPercent: 74, contextWindow: 200_000, contextTokens: null });
       expect(shown.turns).toBe('8');
       expect(shown.context).toContain('74%');
       expect(shown.link).toBe(true);
@@ -162,7 +165,7 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
     });
 
     it('usage#0 says there are no turns when neither the row nor the live read has any', async () => {
-      const shown = await rowsFor([], { turns: 0, contextPercent: null, contextWindow: null });
+      const shown = await rowsFor([], { turns: 0, contextPercent: null, contextWindow: null, contextTokens: null });
       expect(shown.text).toContain('No turns recorded yet');
       expect(shown.turns).toBe('0');
     });
@@ -183,15 +186,32 @@ describe('usage#0 Info › Usage panel (ferret.side)', () => {
         expect(cellOf(view.container, 'Turns')).toBe('Reading…');
         expect(cellOf(view.container, 'Context')).toBe('Reading…');
         expect(text(view.container)).not.toContain('20%');
-        await interact(() => release?.({ turns: 8, contextPercent: 74, contextWindow: null }));
+        await interact(() => release?.({ turns: 8, contextPercent: 74, contextWindow: null, contextTokens: null }));
         expect(cellOf(view.container, 'Turns')).toBe('8');
       } finally {
         await view.unmount();
       }
     });
 
+    it('usage#0 says “of 200K tokens” alone when the window is stated but the used count is not, and never a zero count', async () => {
+      const shown = await rowsFor([], { turns: 4, contextPercent: 55, contextWindow: 200_000, contextTokens: null });
+      expect(shown.context).toContain('of 200K tokens');
+      expect(shown.context).not.toContain('0 of');
+      expect(shown.context).not.toMatch(/\dK? of 200K/);
+    });
+
+    it('usage#0 hints the exact counts on the Context row, and says the used tokens only beside a window', async () => {
+      const full = await rowsFor([], { turns: 4, contextPercent: 62, contextWindow: 200_000, contextTokens: 124_000 });
+      expect(full.context).toContain('124K of 200K tokens');
+      expect(full.contextHint).toBe('124,000 of 200,000 tokens used in the context window');
+      const bare = await rowsFor([], { turns: 4, contextPercent: 55, contextWindow: null, contextTokens: 110_000 });
+      expect(bare.context).toContain('55%');
+      expect(bare.context).not.toContain('110K');
+      expect(bare.contextHint).toBeNull();
+    });
+
     it('usage#0 leaves the window out when the document states a percent but no window', async () => {
-      const shown = await shownFor({ turns: 4, contextPercent: 55, contextWindow: null });
+      const shown = await shownFor({ turns: 4, contextPercent: 55, contextWindow: null, contextTokens: null });
       expect(shown).toContain('55%');
       expect(shown).not.toContain('of ');
     });

@@ -3,9 +3,7 @@
   "pending": ["usage"],
   "pendingReasons": {
     "usage": [
-      "[cross: warden] GAP(usage): app/lib/move-triggers.ts is not reached by Warden failover triggers (nothing reads them yet) (owner: usage port)",
-      "[tests] eight usage parity rows stay `[ ]` in docs/design/rebuild-parity.tsv, each with its own skip or reason: F-0254 and F-0255 (the kernel sqlite store owns the -shm and -wal files), J-0028 (no Logins change event to invalidate the feed on), J-0115 (the kernel hands Usage no event-loop reading), J-0163 (the host's live-activity timers, not Usage's), R-0037 and R-0038 (`available: publicFeed` became a handler answer, so descriptor-parity records `available` dropped, which it does not count as a tightening), V-0235 (`--out` and `--trace-syscalls` need CLI shell facilities)",
-      "[cross: ferrets] GAP(ferrets): Info › Usage draws today's context readout without its used-token words (“124K of 200K tokens”) and without the row hints: the live read (`GET /v1/ferrets/:ferretId/live`) carries the percent and the window but no used-token count. MISSING SEAM: Ferrets' live read has no used-token count for Usage's readout."
+      "[tests] eight usage parity rows stay `[ ]` in docs/design/rebuild-parity.tsv, each with its own skip or reason: F-0254 and F-0255 (the kernel sqlite store owns the -shm and -wal files), J-0028 (no Logins change event to invalidate the feed on), J-0115 (the kernel hands Usage no event-loop reading), J-0163 (the host's live-activity timers, not Usage's), R-0037 and R-0038 (`available: publicFeed` became a handler answer, so descriptor-parity records `available` dropped, which it does not count as a tightening), V-0235 (`--out` and `--trace-syscalls` need CLI shell facilities)"
     ]
   }
 }
