@@ -449,6 +449,20 @@ function mergedRun(
  * An agent has nobody watching a Retry button, so the daemon tells it directly — in its own session —
  * and leaves the decision with it: resend, choose another route, or give up.
  */
+/**
+ * What an agent is told when its message has been STUCK past the limit: nothing could be typed for it, because
+ * `recipient`'s input box could not be proven empty. Not a failure — the message is kept and still tried — so the
+ * sentence says not to send it again: a second copy would land beside the first the moment the box reads clear.
+ */
+export function sendStuckNotice(recipient: string, record: SendRecord, waitedMs: number): string {
+  return (
+    `Your message to ${recipient} (send ${record.sendId}) has not been delivered yet: for ${Math.round(waitedMs / 60_000)} min ` +
+    `Ferretry could not read ${recipient}’s input box to prove it empty, so nothing was typed. It is kept and tried ` +
+    `again every few seconds, and you will be told if it is finally given up on. Do not send it again. If it is urgent, ` +
+    'tell the owner: whatever is on that ferret’s screen instead of an empty input box is what holds it.'
+  );
+}
+
 export function sendFailureNotice(recipient: string, record: SendRecord, clientName: string): string {
   // Its own sentence, because the generic one is wrong twice over here: the keys DID reach the
   // recipient's terminal, and "decide whether to send it again" invites the duplicate. What is
