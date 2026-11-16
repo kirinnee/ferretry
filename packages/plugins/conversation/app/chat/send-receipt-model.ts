@@ -142,6 +142,8 @@ const receiptOf = (record: LedgerSendRecord, answered: boolean): SendReceipt => 
     default:
       if (record.unread !== undefined)
         return { kind: 'unconfirmed', name: 'Status unknown', detail, chip: 'status unknown' };
+      if (record.stuckAt !== undefined)
+        return { kind: 'sending', name: 'Not delivered yet', detail, chip: 'not delivered yet' };
       if (record.typedNotSent === true)
         return { kind: 'typed', name: 'Typed, not sent', detail, chip: 'typed, not sent' };
       if (record.held === true) return { kind: 'held', name: 'Held', detail };

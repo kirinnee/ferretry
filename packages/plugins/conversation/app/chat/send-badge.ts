@@ -180,6 +180,14 @@ const badgeOf = (record: LedgerSendRecord): SendBadge => {
       tone: QUIET_TONE,
       detail: `Ferretry has not been able to read where this message went since ${readAt(record.unread.since)} (${record.unread.reason}); it may still have arrived`,
     };
+  // STUCK, SAID TO THE SENDER (the daemon's `stuckAt`): nothing could be typed for minutes, and the reason is on the
+  // agent's screen, not in the network. v4 retried such a message silently for six and a half hours.
+  if (record.stuckAt !== undefined)
+    return {
+      label: 'not delivered yet',
+      tone: WAITING_TONE,
+      detail: `not typed since ${readAt(record.acceptedAt)}: the agent’s input box could not be read, so nothing was typed. Ferretry keeps trying; the agent’s terminal shows what is in the way`,
+    };
   if (record.typedNotSent === true)
     return {
       label: 'typed, not sent',

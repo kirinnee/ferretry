@@ -442,6 +442,18 @@ describe('a message the durable queue holds', () => {
   });
 });
 
+describe('a send the daemon said is stuck', () => {
+  test('reads not delivered yet, says the agent’s box could not be read, and is never red', () => {
+    const stuck = record({ stuckAt: STATE_AT });
+    expect(sendReceipt(stuck)).toMatchObject({ kind: 'sending', name: 'Not delivered yet', chip: 'not delivered yet' });
+    expect(sendBadge(stuck).label).toBe('not delivered yet');
+    expect(sendBadge(stuck).detail).toContain('input box could not be read');
+    expect(sendBadge(stuck).tone).not.toContain('err');
+    // Delivered after all: the fate speaks, not the old mark.
+    expect(sendReceipt(record({ fate: 'delivered', stuckAt: STATE_AT })).kind).toBe('delivered');
+  });
+});
+
 describe('a session that ended is never "not delivered"', () => {
   test('a ledger timeout with session_ended reads unconfirmed, quietly and without the red mark', () => {
     const ended = record({ fate: 'timed_out', unaccountedReason: 'ferret_ended', retryable: true });
