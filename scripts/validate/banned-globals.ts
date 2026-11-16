@@ -219,8 +219,9 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
     },
     // `fy history claim` (c58-36): the wrapper's claim before it `exec`s a resumed harness runs in the person's own
     // terminal with no daemon, so the kernel's ports (which a CLI half does not get for these) cannot be the way to
-    // the files, the lock or the process table. PROPOSED, awaiting the lead's ruling: each file is one entry, and the
-    // reach is only Ferrets' own `conversation-leases` state tree (never a pool an agent writes).
+    // the files, the lock or the process table. Ruled by the lead (britnee, c58-36b): each file is one entry, and the
+    // reach is only Ferrets' own `conversation-leases` state tree (never a pool an agent writes). The daemon's twin
+    // (daemon/adapters/session/lifecycle/conversation-lease-*.ts) shares the on-disk protocol and only the contract.
     {
       pkg: 'ferrets',
       folder: 'cli/adapters/history/file-lock.ts',
@@ -243,6 +244,12 @@ export const OUTSIDE_THE_KERNEL: readonly { readonly pkg: string; readonly folde
       pkg: 'ferrets',
       folder: 'cli/adapters/history/host-lease-store.ts',
       reason: 'binds the lease store to the real process table and wall clock for `fy history claim`',
+    },
+    {
+      pkg: 'ferrets',
+      folder: 'daemon/adapters/session/lifecycle/conversation-lease-disk.ts',
+      reason:
+        'the daemon half of the same lease files as `fy history claim`: reads a lease and opens the pool lock without following a link (the state port reads no capped, link-refusing lease and has no lock); writes, removes and lists go through the state port, and the clock, platform and process table are the kernel ports handed in',
     },
     {
       pkg: 'terminals',

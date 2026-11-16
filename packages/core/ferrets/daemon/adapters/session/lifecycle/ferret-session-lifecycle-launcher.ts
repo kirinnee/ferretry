@@ -17,6 +17,8 @@ export interface FerretLaunchPorts {
   launch(ferret: FerretId): Promise<Result<FerretId, { readonly reason: string }>>;
   /** `FerretsService.stopHeld`. */
   stop(ferret: FerretId, how: 'now', reason: string | undefined, cause: FerretEndCause): Promise<void>;
+  /** `FerretsService.heldLaunchRefusal`: why a launch must be refused before it changes anything, or `undefined`. */
+  refusal(ferret: FerretId): Promise<string | undefined>;
   /** The runner handle the registry holds for the ferret's live pane, if it holds one. */
   handleOf(ferret: FerretId): RunnerHandle | undefined;
   /** The runner that owns the pane; `undefined` while its plugin is off. */
@@ -40,6 +42,10 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     const runner = this.ports.runner();
     if (handle === undefined || runner === undefined) return false;
     return await runner.alive(handle);
+  }
+
+  async refuseLaunch(record: SessionLifecycleRecord): Promise<string | undefined> {
+    return await this.ports.refusal(this.ferret(record));
   }
 
   async launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined> {
@@ -97,4 +103,32 @@ export class FerretSessionLifecycleLauncher implements SessionLifecycleLauncher 
     if (runner === undefined) throw new Error('no runner plugin is on');
     return { handle, runner };
   }
+}
+
+/**
+ * The part of Ferrets' service a lifecycle's pane launcher may reach, and nothing more: the HELD variants, which a
+ * lifecycle that already holds the ferret's key on the shared queue must call (the queued `resume` and `stop` would wait
+ * on that very key forever), and the check ahead of them. Naming the type narrows the composition root: wiring another
+ * method into the launcher does not typecheck, and {@link heldLifecycleLauncher} is the one place that maps them.
+ */
+export interface HeldLaunchService {
+  launchHeld: FerretLaunchPorts['launch'];
+  stopHeld: FerretLaunchPorts['stop'];
+  heldLaunchRefusal: FerretLaunchPorts['refusal'];
+}
+
+/**
+ * The lifecycle's pane launcher over Ferrets' held launch and stop, with the daemon's own handle, runner and clock reads.
+ * The service is asked for at each call, not now: the root builds the launcher before the service it launches through.
+ */
+export function heldLifecycleLauncher(
+  service: () => HeldLaunchService,
+  reads: Omit<FerretLaunchPorts, 'launch' | 'stop' | 'refusal'>,
+): FerretSessionLifecycleLauncher {
+  return new FerretSessionLifecycleLauncher({
+    ...reads,
+    launch: async ferret => await service().launchHeld(ferret),
+    stop: async (ferret, how, reason, cause) => await service().stopHeld(ferret, how, reason, cause),
+    refusal: async ferret => await service().heldLaunchRefusal(ferret),
+  });
 }

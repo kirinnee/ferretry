@@ -5,9 +5,14 @@ import {
   newTabChoices,
   nextTab,
   panelKey,
+  panelPlaced,
   phoneTabs,
+  revealPanel,
   tabOrChat,
 } from '../../../src/shell/ferret-workspace-model.ts';
+import { ensureDom } from '../../../src/testing/index.ts';
+
+ensureDom();
 
 const OWNER: Readonly<Record<string, string>> = {
   'ferret-agenda': 'agenda',
@@ -99,5 +104,48 @@ describe('the chip row’s keys', () => {
     expect(nextTab(tabs, 'usage.insights', 'ArrowRight')).toBeNull();
     expect(nextTab(tabs, CHAT_TAB, 'a')).toBeNull();
     expect(nextTab(tabs, 'nope', 'ArrowRight')).toBeNull();
+  });
+});
+
+describe('asking for another panel of the page (a panel that links to a sibling)', () => {
+  test('says whether the layout placed the panel, by its id', () => {
+    expect(panelPlaced(DEFAULT, 'insights')).toBe(true);
+    expect(panelPlaced(placed(['files']), 'insights')).toBe(false);
+    expect(panelPlaced([], 'insights')).toBe(false);
+  });
+
+  test('beside the chat it scrolls the side column to the panel, and ignores one nobody placed', () => {
+    const column = document.createElement('div');
+    column.dataset.slot = 'ferret.side';
+    const panel = document.createElement('div');
+    panel.dataset.panel = 'usage.insights';
+    const scrolled: unknown[] = [];
+    panel.scrollIntoView = (options?: boolean | ScrollIntoViewOptions) => void scrolled.push(options);
+    column.append(panel);
+    document.body.append(column);
+    try {
+      revealPanel(DEFAULT, 'insights');
+      expect(scrolled).toEqual([{ block: 'nearest' }]);
+      revealPanel(placed(['files']), 'insights');
+      revealPanel(DEFAULT, 'files');
+      expect(scrolled).toHaveLength(1);
+    } finally {
+      column.remove();
+    }
+  });
+
+  test('a browser without scrollIntoView still answers', () => {
+    const column = document.createElement('div');
+    column.dataset.slot = 'ferret.side';
+    const panel = document.createElement('div');
+    panel.dataset.panel = 'usage.insights';
+    (panel as { scrollIntoView?: unknown }).scrollIntoView = undefined;
+    column.append(panel);
+    document.body.append(column);
+    try {
+      expect(() => revealPanel(DEFAULT, 'insights')).not.toThrow();
+    } finally {
+      column.remove();
+    }
   });
 });

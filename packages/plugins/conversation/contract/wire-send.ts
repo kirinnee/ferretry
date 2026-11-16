@@ -108,6 +108,11 @@ export const SendRecordSchema = z.strictObject({
   deadlineAt: InstantSchema.optional(),
   retryable: z.boolean().optional(),
   typedNotSent: z.boolean().optional(),
+  /**
+   * Set while a send is STUCK: nothing could be typed for it for longer than the daemon's stuck limit, because the
+   * agent's input box could not be proven empty. The daemon keeps trying; a redraw of the agent's screen lets it go.
+   */
+  stuckAt: InstantSchema.optional(),
   cancelEffect: SendCancelEffectSchema.optional(),
   opportunityAt: InstantSchema.optional(),
   unaccountedDeadline: InstantSchema.optional(),

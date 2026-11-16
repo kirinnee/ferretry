@@ -6,6 +6,7 @@ import { FakeRunner, ferretId } from '../../../../../contract/testing/index.ts';
 import {
   FerretSessionLifecycleLauncher,
   type FerretLaunchPorts,
+  heldLifecycleLauncher,
   READY_BOUND_MS,
   READY_POLL_MS,
 } from '../../../../../daemon/adapters/session/lifecycle/ferret-session-lifecycle-launcher.ts';
@@ -30,12 +31,17 @@ function fixture(options: { readonly runner?: Runner | undefined; readonly handl
   const stops: { ferret: FerretId; how: string; reason: string | undefined; cause: FerretEndCause }[] = [];
   let clock = 0;
   let outcome: Awaited<ReturnType<FerretLaunchPorts['launch']>> = ok(ferretId(ID));
+  let refused: string | undefined;
   const ports: FerretLaunchPorts = {
     launch: async ferret => {
       calls.push(`launch ${ferret}`);
       return outcome;
     },
     stop: async (ferret, how, reason, cause) => void stops.push({ ferret, how, reason, cause }),
+    refusal: async ferret => {
+      calls.push(`refusal ${ferret}`);
+      return refused;
+    },
     handleOf: () => ('handle' in options ? options.handle : ('%1' as RunnerHandle)),
     runner: () => runner,
     sleep: async ms => {
@@ -51,6 +57,9 @@ function fixture(options: { readonly runner?: Runner | undefined; readonly handl
     failLaunchWith: (reason: string) => {
       outcome = err({ reason });
     },
+    refuseWith: (reason: string | undefined) => {
+      refused = reason;
+    },
   };
 }
 
@@ -63,6 +72,7 @@ describe('FerretSessionLifecycleLauncher', () => {
       const subject = new FerretSessionLifecycleLauncher({
         launch: async () => ok(ferretId(ID)),
         stop: async () => undefined,
+        refusal: async () => undefined,
         handleOf: () => (started.ok ? started.value.handle : undefined),
         runner: () => f.runner,
         sleep: async () => undefined,
@@ -116,6 +126,104 @@ describe('FerretSessionLifecycleLauncher', () => {
 
       // Assert
       await should(launching).rejectedWith('the owner cut off this ferret; a confirmed owner resume is required');
+    });
+  });
+
+  describe('refuseLaunch', () => {
+    it('should ask Ferrets, for this ferret, why a launch must be refused, and answer its sentence', async () => {
+      // Arrange
+      const f = fixture();
+      f.refuseWith('this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it');
+
+      // Act
+      const refusal = await f.subject.refuseLaunch(record);
+
+      // Assert
+      should(f.calls).deepEqual([`refusal ${ID}`]);
+      should(refusal).equal(
+        'this ferret was stopped on purpose or finished its work, so only a deliberate resume revives it',
+      );
+    });
+
+    it('should answer nothing when Ferrets would open a pane', async () => {
+      // Arrange
+      const f = fixture();
+
+      // Act
+      const refusal = await f.subject.refuseLaunch(record);
+
+      // Assert
+      should(refusal).equal(undefined);
+    });
+  });
+
+  describe('heldLifecycleLauncher', () => {
+    /** A service whose every method but the held ones fails the test: the queued variants would wait on the lifecycle's own key. */
+    function service() {
+      const calls: string[] = [];
+      const wrong = (name: string) => async (): Promise<never> => {
+        throw new Error(`the queued ${name} was reached`);
+      };
+      return {
+        calls,
+        held: {
+          launchHeld: async (ferret: FerretId) => {
+            calls.push(`launchHeld ${ferret}`);
+            return ok(ferret);
+          },
+          stopHeld: async (ferret: FerretId, how: 'polite' | 'now', reason: string | undefined) => {
+            calls.push(`stopHeld ${ferret} ${how} ${String(reason)}`);
+          },
+          heldLaunchRefusal: async (ferret: FerretId) => {
+            calls.push(`heldLaunchRefusal ${ferret}`);
+            return 'refused ahead';
+          },
+          resume: wrong('resume'),
+          start: wrong('start'),
+          // The queued stop shares the held one's name prefix and its signature.
+          stop: wrong('stop'),
+        },
+      };
+    }
+
+    const reads = {
+      handleOf: () => undefined,
+      runner: () => undefined,
+      sleep: async () => undefined,
+      nowMs: () => 0,
+    };
+
+    it('should launch, stop and ask ahead through the held variants, never the queued resume or stop', async () => {
+      // Arrange
+      const s = service();
+      const subject = heldLifecycleLauncher(() => s.held, reads);
+
+      // Act
+      await subject.launch(record);
+      await subject.stop(record);
+      const refusal = await subject.refuseLaunch(record);
+
+      // Assert
+      should(s.calls).deepEqual([`launchHeld ${ID}`, `stopHeld ${ID} now undefined`, `heldLaunchRefusal ${ID}`]);
+      should(refusal).equal('refused ahead');
+    });
+
+    it('should not read the service until a call is made, so the root can build the launcher before the service', async () => {
+      // Arrange
+      let asked = 0;
+      const s = service();
+
+      // Act
+      const subject = heldLifecycleLauncher(() => {
+        asked += 1;
+        return s.held;
+      }, reads);
+      const before = asked;
+      await subject.refuseLaunch(record);
+
+      // Assert
+      should(before).equal(0);
+      should(asked).equal(1);
     });
   });
 
@@ -223,6 +331,7 @@ describe('FerretSessionLifecycleLauncher', () => {
       const subject = new FerretSessionLifecycleLauncher({
         launch: async () => ok(ferretId(ID)),
         stop: async () => undefined,
+        refusal: async () => undefined,
         handleOf: () => handle,
         runner: () => f.runner,
         sleep: async () => undefined,

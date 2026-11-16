@@ -5,6 +5,7 @@ import { ChatScreen } from '../../../../app/chat/chat-screen.tsx';
 import { ConversationClientProvider } from '../../../../app/client.ts';
 import { FerretsChanged } from '@ferretry/core-ferrets/contract';
 import { QueueChanged } from '../../../../contract/index.ts';
+import { TurnPanel } from '../../../../app/toolbar/turn-panel.tsx';
 import { type FakeClient, fakeClient } from '../../../support/app/fake-client.ts';
 import { ferretSummary } from '../../../support/app/ferret-view.ts';
 
@@ -251,5 +252,129 @@ describe('the slot above the composer, as the screen feeds it', () => {
     expect((last['rows'] as { text: string }[]).map(row => row.text)).toContain('The daemon answered.');
     expect((last['turn'] as { live: boolean }).live).toBe(true);
     expect(JSON.stringify(seen)).not.toContain(SECRET);
+  });
+});
+
+describe('the toolbar turn word, as the screen feeds it', () => {
+  const PROMPT = 'GET /v1/ferrets/:ferretId/prompt';
+
+  /** The chat screen with Conversation's turn panel placed in `ferret.toolbar`, as the shell lays it out. */
+  const openWithTurnPanel = async (client: FakeClient, placed = true) => {
+    const view = await mount(
+      <ConversationClientProvider client={client}>
+        <WithSlotPanels
+          slots={{
+            'ferret.toolbar': placed
+              ? [
+                  {
+                    plugin: 'probe',
+                    id: 'turn',
+                    view: props => <TurnPanel subject={props['subject'] as string | undefined} />,
+                  },
+                ]
+              : [],
+          }}
+        >
+          <ChatScreen params={{ ferret: 'shared' }} />
+        </WithSlotPanels>
+      </ConversationClientProvider>,
+    );
+    views.push(view);
+    return view;
+  };
+  const word = (view: Mounted): string | null =>
+    view.container.querySelector<HTMLElement>('[data-ferret-turn]')?.textContent ?? null;
+
+  /** Moves the turn needs-input <-> your-turn while the lifecycle stays idle; says the words, and how many reads it took. */
+  const idleTurnChanges = async (placed: boolean): Promise<number> => {
+    let turnState = 'your-turn';
+    const client = daemon(() => '');
+    // Idle throughout: the registry writes no change for a turn that moves inside `idle`.
+    client.on(VIEW, call => ferretSummary(call.params['ferretId'] ?? '', { state: 'idle' }));
+    client.on(PROMPT, () => ({ turnState }));
+    const emit = withEvents(client);
+    const view = await openWithTurnPanel(client, placed);
+    await waitFor(() => client.callsTo(PROMPT).length >= 1, 'the first read');
+    const said = async (expected: string, why: string) => {
+      if (placed)
+        await waitFor(
+          () => word(view) === expected,
+          why,
+          () => view.container.textContent ?? '',
+        );
+    };
+    await said('Your turn', 'Your turn');
+
+    turnState = 'needs-input';
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    await waitFor(() => client.callsTo(PROMPT).length >= 2, 'the second read');
+    await said('Needs you', 'Needs you');
+
+    turnState = 'your-turn';
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    await waitFor(() => client.callsTo(PROMPT).length >= 3, 'the third read');
+    await said('Your turn', 'Your turn again');
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 30)));
+    return client.callsTo(PROMPT).length;
+  };
+
+  test('follows needs-input <-> your-turn while the lifecycle stays idle, with no read of its own', async () => {
+    // The same reads happen with the panel in the toolbar as without it: the panel is no second poll.
+    const without = await idleTurnChanges(false);
+    const withPanel = await idleTurnChanges(true);
+    expect(withPanel).toBe(without);
+  });
+
+  test('a stopped ferret never shows Working because an older read landed late', async () => {
+    let state: 'working' | 'stopped' = 'working';
+    let hold = false;
+    const held: ((answer: unknown) => void)[] = [];
+    const client = daemon(() => '');
+    client.on(VIEW, call => ferretSummary(call.params['ferretId'] ?? '', { state }));
+    client.on(PROMPT, () =>
+      hold
+        ? new Promise(resolve => {
+            held.push(resolve);
+          })
+        : state === 'working'
+          ? { turnState: 'working' }
+          : {},
+    );
+    const emit = withEvents(client);
+    const view = await openWithTurnPanel(client);
+    await waitFor(
+      () => word(view) === 'Working',
+      'Working',
+      () => view.container.textContent ?? '',
+    );
+
+    // A read begun while it works is held; the ferret then stops and a newer read is asked for.
+    hold = true;
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    await waitFor(() => held.length >= 1, 'the held read');
+    hold = false;
+    state = 'stopped';
+    emit(FerretsChanged.name, { ferret: 'shared', change: 'state' });
+    const reads = client.callsTo(VIEW).length;
+    await runAsync(async () => {
+      for (const release of held) release({ turnState: 'working' });
+    });
+    await waitFor(
+      () => client.callsTo(VIEW).length > reads,
+      'the newer read',
+      () => view.container.textContent ?? '',
+    );
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 50)));
+    expect(word(view)).toBeNull();
+  });
+
+  test('says nothing for a stopped ferret, whatever the observer last said', async () => {
+    const client = daemon(() => '');
+    client.on(VIEW, call => ferretSummary(call.params['ferretId'] ?? '', { state: 'stopped' }));
+    client.on(PROMPT, () => ({ turnState: 'working' }));
+    const view = await openWithTurnPanel(client);
+    await waitFor(() => client.callsTo(PROMPT).length > 0, 'the read');
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 20)));
+    expect(word(view)).toBeNull();
   });
 });
