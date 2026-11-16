@@ -1,6 +1,7 @@
 import { definePort } from '@ferretry/kernel/contract';
 import type { Result } from '@ferretry/std';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
+import type { MailboxApi, MailboxCaller, MailboxRefusal } from '@ferretry/core-mailbox/contract';
 import type { AnswerRequest, Question } from './wire-question.ts';
 import type {
   AttachmentDownload,
@@ -27,101 +28,22 @@ import type {
   TranscriptPage,
 } from './wire-read.ts';
 import type { WorkRelatedRequest, WorkRelatedResponse, WorkSearchQuery, WorkSearchResponse } from './wire-search.ts';
-import type {
-  ComposerResult,
-  FerretQueue,
-  InterruptRequest,
-  QueueEditRequest,
-  QueuedMessage,
-  SendListResponse,
-  SendRecord,
-  SendRequest,
-  SendResult,
-} from './wire-send.ts';
 import type { CompactAtPatch, CompactAtPatchResult, FerretCompactAt } from './wire-compact.ts';
 
 /** Why Conversation refused (the code is the route's `code`; `status` is its HTTP status). */
-export interface ConversationRefusal {
-  readonly code: string;
-  readonly message: string;
-}
+export type ConversationRefusal = MailboxRefusal;
 
-/**
- * Who is calling a write: the owner, a ferret (named), or the Warden. Gate stamps the caller of a ROUTE; a caller of
- * THIS port is bound by the kernel instead: Conversation provides through `perNeeder`, so each consumer holds a facade
- * built from its own manifest id ({@link conversationFor}), and `warden` is accepted only from the Warden's plugin (`agenda`, only from Agenda's). Any
- * other consumer naming it is refused `forbidden` before anything is read or typed.
- * `warden` (additive, D2 #19) is Ferretry's own watchdog speaking: its words are typed bare, recorded as the DAEMON's
- * (`senderKind: 'daemon'`, `by` Ferretry's Warden), never as the owner's own message and never as a ferret's:
- * a notice is not kept, retried or counted as the owner's.
- * `agenda` is the same for Agenda's turn-end check (its nudge words, built inside Agenda from fixed text): accepted only
- * from the Agenda's plugin, typed bare and recorded as the DAEMON's (`senderKind: 'daemon'`, by Ferretry's Agenda).
- */
-export type ConversationCaller =
-  | { readonly kind: 'owner' }
-  | { readonly kind: 'ferret'; readonly ferret: FerretId }
-  | { readonly kind: 'warden' }
-  | { readonly kind: 'agenda' };
+/** Who is calling a write; the Mailbox's, because the send and the queue are its (see {@link MailboxCaller}). */
+export type ConversationCaller = MailboxCaller;
 
 /**
  * What other plugins and the app read and ask of Conversation (§2.3): messages, the queue, turns, questions,
- * attachments, renders, drafts, search and links. Warden, Usage and Lessons need only `currentTurn`.
+ * attachments, renders, drafts, search and links. Warden, Usage and Lessons need only `currentTurn`. The send, the
+ * queue, the send ledger and the composer draft are the Mailbox's ({@link MailboxApi}), carried here unchanged.
  */
-export interface ConversationApi {
+export interface ConversationApi extends MailboxApi {
   /** The id of the turn a ferret is in the middle of, if any. */
   currentTurn(ferret: FerretId): Promise<string | undefined>;
-
-  // messages and the queue
-  send(
-    ferret: FerretId,
-    caller: ConversationCaller,
-    request: SendRequest,
-  ): Promise<Result<SendResult, ConversationRefusal>>;
-  interrupt(ferret: FerretId, request: InterruptRequest): Promise<Result<void, ConversationRefusal>>;
-  queue(ferret: FerretId): Promise<FerretQueue>;
-  editQueued(
-    ferret: FerretId,
-    message: string,
-    request: QueueEditRequest,
-  ): Promise<Result<QueuedMessage, ConversationRefusal>>;
-  cancelQueued(ferret: FerretId, message: string): Promise<Result<QueuedMessage, ConversationRefusal>>;
-  sends(ferret: FerretId, cursor?: string): Promise<SendListResponse>;
-  sendRecord(ferret: FerretId, sendId: string): Promise<SendRecord | undefined>;
-  retrySend(ferret: FerretId, sendId: string, force?: boolean): Promise<Result<SendRecord, ConversationRefusal>>;
-  /**
-   * Cancels a send's leftover typing (the route's `POST …/sends/:sendId/cancel`). The Warden's alone: any other consumer
-   * is refused `forbidden` (see {@link ConversationCaller}).
-   */
-  cancelSend(ferret: FerretId, sendId: string): Promise<Result<SendRecord, ConversationRefusal>>;
-  /** One Enter for a send's own text (the route's `…/enter`), with the rules of {@link cancelSend}. */
-  enterSend(ferret: FerretId, sendId: string): Promise<Result<SendRecord, ConversationRefusal>>;
-  /**
-   * Acts on the person's composer draft (the route's `POST …/composer`). The route is person-only and gated by
-   * `terminal.use`; a port consumer carries no such call, so the port serves the Warden alone and refuses any other
-   * consumer `forbidden`.
-   */
-  composer(
-    ferret: FerretId,
-    action: 'submit' | 'clear',
-    draft: string,
-  ): Promise<Result<ComposerResult, ConversationRefusal>>;
-  /**
-   * Additive (send path, today's `SessionSendService.resubmitStuck`): the Warden's ONE verified Enter on a send's own text
-   * left typed in a ferret's composer. It presses only when the composer holds exactly that send's text at an idle,
-   * undialogued pane, and no more than one Enter past the send path's own bound. `submitted` / `holding` say what the
-   * Enter did, `absent` that the box is empty (the message is not sitting there), `refused` that nothing was pressed.
-   * Only the `warden` caller may ask: any other is refused `forbidden` before a pane is read.
-   */
-  resubmitStuck?(
-    ferret: FerretId,
-    caller: ConversationCaller,
-    sendId: string,
-  ): Promise<Result<'submitted' | 'holding' | 'absent' | 'refused', ConversationRefusal>>;
-  /**
-   * Additive (send path, &B153): the id of the delivered pointer the harness took back into the ferret's box, when an idle,
-   * undialogued pane shows exactly it. Reads the pane and presses nothing; `undefined` when none (or the pane cannot be read).
-   */
-  retractedDraft?(ferret: FerretId): Promise<string | undefined>;
 
   // reading
   transcript(

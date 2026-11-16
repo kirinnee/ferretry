@@ -1,4 +1,4 @@
-import type { QueueSegmentHeader } from '../../../contract/index.ts';
+import type { QueueSegmentHeader } from '@ferretry/core-mailbox/contract';
 import { type HeldMessage, isFinal, type SegmentFold } from './model.ts';
 
 /**
