@@ -1,7 +1,7 @@
 import { provideToShell } from '@ferretry/app';
 import { implementApp } from '@ferretry/kernel/manifest';
 import manifest from '../manifest.ts';
-import { accessClaims } from './connect.ts';
+import { accessClaims, accessForget } from './connect.ts';
 import { agendaItemOpenedHook, pageRegistration } from './lib/item-opened-hook.ts';
 import { accessPasskey } from './step-up-shell.tsx';
 import { daemonlessPlaceholder, PAIR_SCREEN_ID, pairPage } from './pair-page.tsx';
@@ -45,6 +45,8 @@ export default provideToShell(
   }),
   {
     claims: ports => accessClaims(ports),
+    // Unpairing a machine also drops this browser's push device id for it (S12).
+    forget: accessForget(),
     passkey: ports => accessPasskey(ports),
     commands: pairPhoneCommands,
     // A pairing link's fragment on `/pair` is a live credential: the shell takes it off the address bar and the history

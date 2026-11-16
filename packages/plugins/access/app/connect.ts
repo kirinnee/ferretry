@@ -18,6 +18,9 @@ import {
 } from './lib/device-keys.ts';
 import { browserDeviceName } from './lib/device-name.ts';
 import { KeyRotation } from './lib/key-rotation.ts';
+import { browserPushHost } from './lib/push-host.ts';
+import type { DaemonPushDevices } from './lib/push-enrolment.ts';
+import { daemonId } from './shell-pairing.ts';
 
 export interface AccessClaimsOptions {
   /** Where the keys live. The page's IndexedDB by default. */
@@ -49,6 +52,19 @@ const APP_SESSION_BYTES = 16;
  */
 function pageLoadSession(): string {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(APP_SESSION_BYTES)));
+}
+
+/**
+ * WHAT ACCESS DROPS WHEN THIS BROWSER STOPS BEING PAIRED TO A MACHINE (`ShellProvides.forget`, S12): the push device id
+ * this browser answered to for that machine. The shell has already deleted the device key and the paired record; the
+ * ids live in this page's storage under Access's own key, so only Access can drop them. Other machines' ids stay.
+ */
+export function accessForget(
+  devices: () => Pick<DaemonPushDevices, 'clearDaemon'> = () => browserPushHost().devices,
+): (daemon: string) => void {
+  return daemon => {
+    devices().clearDaemon(daemonId(daemon));
+  };
 }
 
 export function accessClaims(ports: ClaimPorts, options: AccessClaimsOptions = {}): DeviceClaims {
