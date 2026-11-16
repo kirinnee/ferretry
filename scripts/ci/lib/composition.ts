@@ -139,14 +139,16 @@ export function readDeclared(packageRoots: readonly string[], read: (path: strin
     entries.push(...parsed.entries);
     problems.push(...parsed.problems);
   }
+  // One path may carry two kinds (a seam that is also `oversize`), never the same kind twice, and never from two packages.
   const seen = new Map<string, CompositionEntry>();
   for (const entry of entries) {
-    const first = seen.get(entry.path);
-    if (first === undefined) seen.set(entry.path, entry);
+    const key = `${entry.kind}\0${entry.path}`;
+    const first = seen.get(key);
+    if (first === undefined) seen.set(key, entry);
     else
       problems.push({
         where: `${compositionFileOf(entry.owner)}:${entry.line}`,
-        message: `"${entry.path}" is already declared in ${compositionFileOf(first.owner)}:${first.line}`,
+        message: `"${entry.path}" is already declared as ${entry.kind} in ${compositionFileOf(first.owner)}:${first.line}`,
       });
   }
   return { entries, problems };

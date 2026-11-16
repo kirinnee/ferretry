@@ -1,0 +1,4 @@
+kind	path	limit	expires	reason
+oversize	contract/index.ts	110	2026-11-30	the mailbox contract barrel; new package, 6 of 80 merges edit it
+oversize	daemon/lib/delivery/service.ts	1671	2026-12-16	one delivery service; split by delivery way when M3 lands
+oversize	daemon/send-half.ts	1514	2026-12-16	the send half wiring; split by delivery way when M3 lands

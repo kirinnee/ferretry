@@ -3,3 +3,9 @@ composition	daemon/features/compose.ts	-	-	composes the features' sections: tool
 composition	daemon/features/types.ts	-	-	the feature context, late bindings and contribution: a new field is a plugin contract change
 composition	daemon/index.ts	-	-	implementDaemon shell over composeConversation: callsign addressing, the secret mask and the 503 fallback
 composition	manifest.ts	-	-	the Conversation manifest shell: identity, needs, provides, privacy, data config; spreads the generated fragments
+oversize	app/composer/composer.tsx	1766	2026-12-16	the composer component; split by feature when next touched
+composition	daemon/host.ts	-	-	buildConversationA: wires queue, turns, questions, drafts, channel and prompts
+oversize	daemon/host.ts	740	2026-11-30	buildConversationA wires every feature; P1a moves each wiring to a feature file
+composition	daemon/index.ts	-	-	implementDaemon shell and the per-route lists
+composition	manifest.ts	-	-	the manifest literal: routes, cli, tools, ui and hooks
+oversize	manifest.ts	600	2026-11-30	the manifest literal; P1b moves actions to manifest fragments

@@ -363,6 +363,27 @@ suite('composition.tsv', () => {
     expect(text).toContain("declare it in that package's composition.tsv");
   });
 
+  test('one path may carry two kinds (a seam that is also oversize), never the same kind twice', () => {
+    const both = file(
+      line('composition', 'host.ts', '-', '-', 'a seam'),
+      line('oversize', 'host.ts', '700', '2026-11-30', 'wiring, being split'),
+    );
+    const read = (text: string) =>
+      readDeclared(['packages/a'], path => (path === 'packages/a/composition.tsv' ? text : undefined));
+    const declared = read(both);
+    expect(declared.problems).toEqual([]);
+    expect(declared.entries.map(item => item.kind)).toEqual(['composition', 'oversize']);
+    // The guard watches the seam half only; the size check reads the oversize half.
+    expect([...guarded(declared.entries).values()].map(item => item.kind)).toEqual(['composition']);
+    const twice = read(
+      file(
+        line('oversize', 'host.ts', '700', '2026-11-30', 'wiring, being split'),
+        line('oversize', 'host.ts', '800', '2026-12-30', 'again'),
+      ),
+    );
+    expect(twice.problems.map(problem => problem.message).join()).toContain('already declared as oversize');
+  });
+
   test('two independent declarations added in the same gap merge cleanly under the repository .gitattributes', () => {
     const attributes = readFileSync(join(import.meta.dir, '..', '..', '.gitattributes'), 'utf8')
       .split('\n')
