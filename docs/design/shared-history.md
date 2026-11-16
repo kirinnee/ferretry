@@ -135,7 +135,7 @@ Each PR: Sonnet builder, one gpt-6.1-sol high review, at most 2 fix rounds.
 
 ## 5. Open points
 
-- Two-way default-home sharing (3.2) needs an owner ruling.
+- Two-way default-home sharing (3.2): owner ruled ONE WAY (!A530, 2026-11-16). Ferretry never writes into `~/.claude` or `~/.codex`; no two-way PR.
 - The migrator copies 19 GB; a hard-link or rename import would be faster and use no extra disk. Separate card.
 - Codex `resume <id>` of a copied rollout that its SQLite does not list yet must be proven against the real binary in
   PR 3 (pooled SQLite should index it; if not, the copy also inserts nothing and the PR says so).
