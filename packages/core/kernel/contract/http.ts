@@ -162,3 +162,39 @@ export function decodeParameter(raw: string): string | undefined {
   if (decoded === '.' || decoded === '..') return undefined;
   return decoded;
 }
+
+/**
+ * Whether an `If-None-Match` names this tag. A GET compares weakly (RFC 9110 §13.1.2), so a `W/` prefix is ignored,
+ * and `*` names any tag.
+ */
+export function namesTag(ifNoneMatch: string, etag: string): boolean {
+  return ifNoneMatch
+    .split(',')
+    .map(candidate => candidate.trim())
+    .some(candidate => candidate === '*' || candidate.replace(/^W\//u, '') === etag);
+}
+
+/**
+ * A CONDITIONAL GET WHOSE TAG IS KNOWN BEFORE THE BODY EXISTS. `tag` is the strong, quoted validator the caller derived
+ * from a version the store already holds (a file identity, a ledger revision) — never from the body — so a request that
+ * names it is answered `304` with no body and `build` is never called: an unchanged poll costs a stat, not a read, a
+ * serialisation and an encryption. Anything else is the built answer with the tag on it.
+ *
+ * The tag must be read BEFORE the body is built: a change in between then leaves the body newer than its tag, and the
+ * next poll is one needless full answer, never a stale `304`.
+ *
+ * Only a `200` carries the tag; a built refusal is returned as it came.
+ */
+export async function answerWhenChanged(
+  request: ApiRequest,
+  tag: string,
+  build: () => Promise<ApiResponse>,
+): Promise<ApiResponse> {
+  const held = headerValue(request, 'if-none-match');
+  if (held !== undefined && namesTag(held, tag)) return { status: 304, headers: new Map([['etag', tag]]), body: '' };
+  const built = await build();
+  if (built.status !== 200) return built;
+  const headers = new Map(built.headers);
+  headers.set('etag', tag);
+  return { ...built, headers };
+}
