@@ -80,7 +80,7 @@ line, and before this a launch brief was typed into the hook review.
 
 ## Answering
 
-`POST /v1/sessions/:sessionId/dialog` with `{ kind: 'choice', dialogId, number }` or
+`POST /v1/ferrets/:ferretId/dialog` with `{ kind: 'choice', dialogId, number }` or
 `{ kind: 'escape', dialogId }`:
 
 1. The pane is captured and parsed again. If it no longer shows `dialogId`, nothing is typed: `409

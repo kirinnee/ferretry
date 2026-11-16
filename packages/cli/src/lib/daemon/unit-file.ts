@@ -5,7 +5,7 @@ import { parsePlist, plistString } from './plist.ts';
  * published part of the daemon's boot contract; the CLI mirrors the constant rather than importing
  * the daemon package, because the CLI depends on the protocol and nothing else in this workspace.
  */
-export const EXIT_ALREADY_RUNNING = 78;
+const EXIT_ALREADY_RUNNING = 78;
 
 /**
  * The exit code for an address held by a responder that is NOT one of these daemons, mirrored from
@@ -30,7 +30,7 @@ const DAEMON_CPU_WEIGHT = 200;
 /** Memory the kernel should leave the daemon alone for; see the comment in the rendered unit. */
 const DAEMON_MEMORY_LOW = '4G';
 
-export class InvalidUnitValueError extends Error {
+class InvalidUnitValueError extends Error {
   constructor(
     readonly field: string,
     reason: string,
@@ -53,13 +53,13 @@ export class InvalidUnitValueError extends Error {
  * So: no quoting. `%` is doubled because systemd expands specifiers like `%h` in this value, and a
  * newline is refused outright rather than written out to fail confusingly at unit load.
  */
-export function systemdFileSpecifier(value: string, field: string): string {
+function systemdFileSpecifier(value: string, field: string): string {
   if (/[\n\r]/u.test(value)) throw new InvalidUnitValueError(field, 'may not contain a newline');
   return value.replaceAll('%', '%%');
 }
 
 /** A double-quoted systemd value: backslash-escaped, with `%` doubled so no specifier expands. */
-export function systemdQuote(value: string): string {
+function systemdQuote(value: string): string {
   return `"${value
     .replaceAll('\\', '\\\\')
     .replaceAll('"', '\\"')
@@ -169,7 +169,7 @@ function hasForbiddenControlCharacter(value: string): boolean {
  * so a control byte anywhere in `PATH` or the state home produced a plist that `launchctl` rejected
  * with a parse error naming a byte offset, not a cause. Refuse it here instead, where we can say why.
  */
-export function xmlText(value: string, field: string): string {
+function xmlText(value: string, field: string): string {
   if (hasForbiddenControlCharacter(value)) {
     throw new InvalidUnitValueError(field, 'may not contain a control character');
   }

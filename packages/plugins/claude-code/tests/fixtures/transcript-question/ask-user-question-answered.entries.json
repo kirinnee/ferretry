@@ -1,0 +1,20 @@
+[
+  {
+    "id": "call-1",
+    "at": "2026-10-30T04:36:02.000Z",
+    "role": "tool",
+    "tools": { "calls": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
+  },
+  {
+    "id": "result-1",
+    "at": "2026-10-30T04:36:02.100Z",
+    "role": "tool",
+    "tools": { "results": ["toolu_01T4KnfY1in2GTL7P9wUmRtt"] }
+  },
+  {
+    "id": "text-1",
+    "at": "2026-10-30T04:36:05.000Z",
+    "role": "assistant",
+    "text": "Thanks, going with reports.example.dev."
+  }
+]

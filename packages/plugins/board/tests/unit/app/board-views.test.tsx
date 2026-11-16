@@ -1,0 +1,382 @@
+import { afterEach, describe, expect, it } from 'bun:test';
+import {
+  ArchiveView,
+  type BoardCardEnv,
+  DependenciesView,
+  KanbanView,
+  TreeView,
+} from '../../../app/views/board-views.tsx';
+import { TableView } from '../../../app/views/board-table.tsx';
+import { type BoardModel, NO_BOARD_FILTERS } from '../../../app/lib/board-model.ts';
+import { ferretNamer } from '../../../app/lib/board-present.ts';
+import { cardPlaces } from '../../../app/lib/board-view.ts';
+import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { boardModelOf, card, OTHER_PROJECT, originCard } from './board-support.ts';
+
+const NOW = Date.parse('2026-08-01T10:04:00.000Z');
+
+let view: Mounted | null = null;
+afterEach(async () => {
+  await view?.unmount();
+  view = null;
+});
+
+const envOf = (model: BoardModel, extra: Partial<BoardCardEnv> = {}): BoardCardEnv => ({
+  names: ferretNamer(new Map()),
+  now: NOW,
+  showMachine: false,
+  hrefFor: entry => `/d/laptop/board/${entry.task.id}`,
+  onNavigate: () => undefined,
+  places: cardPlaces(model),
+  ...extra,
+});
+
+const ids = (root: HTMLElement, selector = '.fy-board-card, .fy-board-table__row') =>
+  [...root.querySelectorAll<HTMLElement>(selector)].map(node => node.dataset.task);
+
+describe('S-0124 KanbanView', () => {
+  const cards = [
+    card('F1', { laneId: 'todo' }),
+    card('F2', { laneId: 'implement' }),
+    card('F3', { laneId: 'implement' }),
+    card('F9', { laneId: 'ghost' }),
+  ];
+
+  it('draws a lane per lane of the set, with its cards, "Nothing here" when empty and an Unplaced lane', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(
+      <KanbanView env={envOf(model)} hideClosed={false} model={model} projectName={() => 'ferretry'} />,
+    );
+    const root = view.container;
+    expect([...root.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).toEqual([
+      'Todo',
+      'Plan/Design',
+      'Implement',
+      'Review/CI',
+      'Merged',
+      'Released',
+      'To test',
+      'Closed',
+      'Unplaced',
+    ]);
+    expect(root.querySelectorAll('.fy-board-lane__empty').length).toBe(6);
+    expect(root.querySelector('.fy-board-project__head')).toBeNull();
+    expect(ids(root)).toEqual(['F1', 'F2', 'F3', 'F9']);
+  });
+
+  it('hides the Closed lane when closed work is hidden', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'ferretry'} />);
+    expect([...view.container.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain(
+      'Closed',
+    );
+  });
+
+  it('gives each project its own row of lanes under a heading, with the machine when several', async () => {
+    const model = await boardModelOf([card('F1'), card('F2', { projectId: OTHER_PROJECT })]);
+    view = await mount(
+      <KanbanView
+        env={envOf(model)}
+        hideClosed
+        model={{ ...model, multiMachine: true }}
+        projectName={group => (group.projectId === OTHER_PROJECT ? 'other' : 'ferretry')}
+      />,
+    );
+    expect([...view.container.querySelectorAll('.fy-board-project__head')].map(node => node.textContent)).toEqual([
+      'ferretrylaptop',
+      'otherlaptop',
+    ]);
+  });
+
+  it('is read-only: no card is draggable, no lane takes a drop, no Done target, no Lanes editor link', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
+    const root = view.container;
+    expect(root.querySelectorAll('[draggable="true"]')).toHaveLength(0);
+    expect(root.querySelectorAll('[data-drop], [data-variant="target"]')).toHaveLength(0);
+    expect(root.querySelector('.fy-board-card__more, [role="menu"], [data-board-lanes]')).toBeNull();
+    const over = new Event('dragover', { bubbles: true, cancelable: true });
+    await interact(() => must(root.querySelector('.fy-board-lane'), 'a lane').dispatchEvent(over));
+    expect(over.defaultPrevented).toBe(false);
+  });
+
+  it('draws no Lanes editor link beside a project heading when several are on the board', async () => {
+    const model = await boardModelOf([card('F1'), card('F2', { projectId: OTHER_PROJECT })]);
+    view = await mount(<KanbanView env={envOf(model)} hideClosed model={model} projectName={() => 'p'} />);
+    expect(view.container.querySelector('.fy-board-project__head')).not.toBeNull();
+    expect(view.container.querySelector('.fy-board-project__lanes, [data-board-lanes]')).toBeNull();
+  });
+});
+
+describe('S-0266 TableView, S-0263 SummaryRowView', () => {
+  const SHIPPED = { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' };
+  const OLD_RELEASE = { version: '4.109.0', tag: 'v4.109.0', at: '2026-07-30T09:00:00.000Z' };
+  const cards = [
+    card('F1', { laneId: 'tested', shippedIn: SHIPPED, title: 'Title that must wrap whole', summary: 'Short summary' }),
+    card('F2', { laneId: 'implement', activity: 'active' }),
+    card('F3', { laneId: 'review', activity: 'idle', lastTouchedAt: '2026-08-01T07:00:00.000Z' }),
+    card('F4', { laneId: 'merged', lastTouchedAt: '2026-08-01T09:30:00.000Z' }),
+    card('F5', { laneId: 'merged', lastTouchedAt: '2026-07-01T09:30:00.000Z' }),
+    card('F6', { laneId: 'released', shippedIn: OLD_RELEASE }),
+    card('F7', { laneId: 'todo' }),
+  ];
+  const table = (model: BoardModel, props: Partial<Parameters<typeof TableView>[0]> = {}) => (
+    <TableView env={envOf(model)} model={model} onWindow={() => undefined} window="7d" {...props} />
+  );
+  const rowIds = (root: HTMLElement, section?: string) =>
+    ids(root, section === undefined ? '.fy-board-summary__row' : `[data-section="${section}"] .fy-board-summary__row`);
+
+  it('leads with what waits on the owner, then what is worked on, then merged and released', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(table(model));
+    const root = view.container;
+    expect([...root.querySelectorAll('.fy-board-summary__head')].map(node => node.firstChild?.textContent)).toEqual([
+      'To test',
+      'Working now',
+      'Merged, not released',
+      'Released recently',
+    ]);
+    expect(rowIds(root)).toEqual(['F1', 'F2', 'F3', 'F4', 'F6']);
+    expect(rowIds(root, 'working')).toEqual(['F2', 'F3']);
+  });
+
+  it('shows the title, summary, lane pill and when, and no who or PR columns', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(table(model));
+    const root = view.container;
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__title')?.textContent).toContain(
+      'Title that must wrap whole',
+    );
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__summary-text')?.textContent).toBe('Short summary');
+    expect(root.querySelector('[data-task="F2"] .fy-board-table__summary')).toBeNull();
+    expect(root.querySelector('[data-task="F1"] .fy-board-pill')).toBeNull();
+    expect(root.querySelector('[data-task="F4"] .fy-board-pill')?.textContent).toBe('Merged');
+    expect(root.querySelector('[data-task="F1"] .fy-board-summary__when')?.textContent).toBe(
+      'released in 4.110.0 \u00B7 1h ago',
+    );
+    expect(root.querySelector('[data-task="F4"] .fy-board-summary__when')?.textContent).toBe('merged 34m ago');
+    expect(root.querySelector('[data-task="F2"] .fy-board-summary__when')?.textContent).toBe('working now');
+    expect(root.querySelector('[data-col="people"], [data-col="pr"]')).toBeNull();
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__title')?.getAttribute('href')).toBe(
+      '/d/laptop/board/F1',
+    );
+  });
+
+  it('draws no owner button on any row: no Done, no Not good, no Reopen, and no Done column', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(table(model));
+    const root = view.container;
+    expect(root.querySelector('.fy-board-done, .fy-board-card__verdict, [data-verdict]')).toBeNull();
+    expect(root.querySelector('.fy-board-summary__act, [data-col="done"]')).toBeNull();
+    expect(root.textContent).not.toMatch(/Not good|Reopen/u);
+    expect([...root.querySelectorAll('button')].map(button => button.textContent)).not.toContain('Done');
+  });
+
+  it('draws the information rows lighter than the action rows', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(table(model));
+    const root = view.container;
+    expect(root.querySelector('[data-task="F1"]')?.hasAttribute('data-action')).toBe(true);
+    expect(root.querySelector('[data-task="F4"]')?.hasAttribute('data-action')).toBe(false);
+  });
+
+  it('narrows merged and released to the window, but never to-test or working now', async () => {
+    const model = await boardModelOf(cards);
+    const windows: string[] = [];
+    view = await mount(table(model, { window: 'today', onWindow: next => void windows.push(next) }));
+    const root = view.container;
+    expect(rowIds(root)).toEqual(['F1', 'F2', 'F3', 'F4']);
+    expect(root.querySelector('[data-window="today"]')?.getAttribute('aria-pressed')).toBe('true');
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-window="7d"]'), '7 days').click());
+    expect(windows).toEqual(['7d']);
+  });
+
+  it('lists a closed card that shipped inside the window under released recently', async () => {
+    const open = await boardModelOf(cards);
+    const closed = await boardModelOf([card('F8', { laneId: 'closed', shippedIn: SHIPPED })]);
+    view = await mount(table(open, { closed }));
+    expect(rowIds(view.container, 'released')).toEqual(['F8', 'F6']);
+  });
+
+  it('draws an agent card right under the human card it serves', async () => {
+    const model = await boardModelOf(
+      [originCard('F2', 'human'), originCard('F9', 'human'), originCard('F10', 'agent', { id: 'F2' })],
+      { ...NO_BOARD_FILTERS, agents: true },
+    );
+    view = await mount(table(model, { env: envOf(model) }));
+    const root = view.container;
+    expect(rowIds(root, 'working')).toEqual(['F2', 'F10', 'F9']);
+    expect(root.querySelector('[data-task="F10"]')?.hasAttribute('data-under')).toBe(true);
+    expect(root.querySelector('[data-task="F10"] .fy-board-summary__under')).not.toBeNull();
+  });
+
+  it('shows the blocked and sub-task marks beside the title', async () => {
+    const model = await boardModelOf([
+      card('F3', {
+        blockedBy: [{ id: 'F9' }],
+        rollup: {
+          children: 2,
+          byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 1 },
+          active: 1,
+          lastTouchedAt: null,
+        },
+        shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+      }),
+    ]);
+    view = await mount(table(model));
+    const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
+    expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs']);
+  });
+
+  it('offers "more" only when the summary is really cut', async () => {
+    const heights = { scroll: 80, client: 40 };
+    const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => heights.scroll });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => heights.client });
+    try {
+      const model = await boardModelOf([card('F4', { summary: 'A summary that runs past two lines' })]);
+      view = await mount(table(model));
+      const more = view.container.querySelector('[data-task="F4"] .fy-board-table__more');
+      expect(more?.textContent).toBe('more');
+      expect(more?.getAttribute('href')).toBe('/d/laptop/board/F4');
+    } finally {
+      if (scroll !== undefined) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      if (client !== undefined) Object.defineProperty(HTMLElement.prototype, 'clientHeight', client);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    }
+  });
+
+  it('says so when nothing is to show', async () => {
+    const model = await boardModelOf([]);
+    view = await mount(table(model));
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Nothing to show for this window.');
+  });
+});
+
+describe('S-0273 TreeView', () => {
+  it('indents a lead’s children under it', async () => {
+    const model = await boardModelOf([card('F10'), card('F11', { parent: { id: 'F10' } })]);
+    view = await mount(<TreeView env={envOf(model)} model={model} />);
+    expect(ids(view.container)).toEqual(['F10', 'F11']);
+    expect(view.container.querySelector('[data-task="F11"]')?.getAttribute('data-depth')).toBe('1');
+  });
+
+  it('names the lane id when a card’s lane is unknown, and says so when empty', async () => {
+    const unplaced = await boardModelOf([card('F1', { laneId: 'ghost' })]);
+    view = await mount(<TreeView env={envOf(unplaced, { places: new Map() })} model={unplaced} />);
+    expect(view.container.querySelector('[data-seg="lane"]')?.textContent).toBe('ghost');
+    await view.unmount();
+    const empty = await boardModelOf([]);
+    view = await mount(<TreeView env={envOf(empty)} model={empty} />);
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No cards match.');
+  });
+});
+
+describe('S-0088 DependenciesView', () => {
+  it('lists the cards that wait on, or are waited on by, another', async () => {
+    const model = await boardModelOf([
+      card('F1', { blockedBy: [{ id: 'F2' }, { id: 'F3' }] }),
+      card('F2', { blocks: [{ id: 'F1' }] }),
+      card('F4'),
+    ]);
+    view = await mount(<DependenciesView env={envOf(model)} model={model} />);
+    expect(ids(view.container)).toEqual(['F1', 'F2']);
+    expect(view.container.querySelector('[data-dep="blocked-by"]')?.textContent).toBe(' waits on &F2, &F3');
+    expect(view.container.querySelector('[data-dep="blocks"]')?.textContent).toBe('unblocks &F1');
+  });
+
+  it('names the lane id for a card with no place, and says so when nothing depends on anything', async () => {
+    const model = await boardModelOf([card('F1', { blockedBy: [{ id: 'F2' }], laneId: 'ghost' })]);
+    view = await mount(<DependenciesView env={envOf(model, { places: new Map() })} model={model} />);
+    expect(view.container.querySelector('[data-seg="lane"]')?.textContent).toBe('ghost');
+    await view.unmount();
+    const none = await boardModelOf([card('F9')]);
+    view = await mount(<DependenciesView env={envOf(none)} model={none} />);
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No card depends on another.');
+  });
+});
+
+describe('S-0032 ArchiveView', () => {
+  const props = async (extra: Partial<Parameters<typeof ArchiveView>[0]> = {}) => {
+    const model = await boardModelOf([card('F1'), card('F2')]);
+    return {
+      shown: model.cards,
+      remaining: 0,
+      total: 2,
+      query: '',
+      onQuery: () => undefined,
+      onMore: () => undefined,
+      loading: false,
+      env: envOf(model),
+      ...extra,
+    };
+  };
+
+  it('lists closed cards and offers no "more" when everything is shown', async () => {
+    view = await mount(<ArchiveView {...(await props())} />);
+    expect(ids(view.container)).toEqual(['F1', 'F2']);
+    expect(view.container.querySelector('.fy-board-archive__more')).toBeNull();
+  });
+
+  it('shows the blocked, sub-task and released marks beside a closed card’s title', async () => {
+    const model = await boardModelOf([
+      card('F3', {
+        blockedBy: [{ id: 'F9' }],
+        rollup: {
+          children: 2,
+          byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 1 },
+          active: 1,
+          lastTouchedAt: null,
+        },
+        shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+      }),
+    ]);
+    view = await mount(<ArchiveView {...(await props({ shown: model.cards, total: 1, env: envOf(model) }))} />);
+    const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
+    expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs', 'shipped']);
+  });
+
+  it('searches, and pages with the number left', async () => {
+    const seen: string[] = [];
+    let more = 0;
+    view = await mount(
+      <ArchiveView
+        {...(await props({
+          remaining: 40,
+          total: 65,
+          onQuery: query => void seen.push(query),
+          onMore: () => {
+            more += 1;
+          },
+        }))}
+      />,
+    );
+    const search = must(
+      view.container.querySelector<HTMLInputElement>('input[aria-label="Search the archive"]'),
+      'the search',
+    );
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(search, 'widget');
+    await interact(() => search.dispatchEvent(new Event('input', { bubbles: true })));
+    expect(seen).toEqual(['widget']);
+    const button = must(view.container.querySelector<HTMLButtonElement>('.fy-board-archive__more'), 'Show more');
+    expect(button.textContent).toBe('Show 25 more · 40 left of 65');
+    await interact(() => button.click());
+    expect(more).toBe(1);
+  });
+
+  it('says why it is empty', async () => {
+    view = await mount(<ArchiveView {...(await props({ shown: [], total: 0, loading: true }))} />);
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Reading the archive…');
+    await view.render(<ArchiveView {...(await props({ shown: [], total: 0 }))} />);
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('Nothing closed yet.');
+    await view.render(<ArchiveView {...(await props({ shown: [], total: 0, query: 'zzz' }))} />);
+    expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No archived card matches.');
+  });
+
+  it('shows the last page’s remainder, not a full page', async () => {
+    view = await mount(<ArchiveView {...(await props({ remaining: 3, total: 28 }))} />);
+    expect(view.container.querySelector('.fy-board-archive__more')?.textContent).toBe('Show 3 more · 3 left of 28');
+  });
+});

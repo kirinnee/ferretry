@@ -1,14 +1,13 @@
 import {
   CLONE_REVIEW_STALE,
+  CLONE_RUNNABLE_KINDS,
+  type CloneBundle,
   type CloneDecisions,
-  cloneRunnables,
-  type FleetCloneBundle,
-  type FleetCloneReview,
-} from '@ferretry/protocol';
-import { requireMayApply } from '../fleet/account-authority.ts';
-import { runChange } from '../fleet/account-change.ts';
-import { writeFlags } from '../fleet/account-commands.ts';
-import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
+  type CloneReview,
+} from '@ferretry/plugin-runtimes/contract';
+import { requireMayApply, runChange } from './change.ts';
+
+import { type MachineDeps, MachineCommandError, type MachineWriteOptions } from './ports.ts';
 import {
   type CloneChoiceFlags,
   cloneNeedsYes,
@@ -39,6 +38,19 @@ export interface CloneOptions {
 /** How many wrong answers one question takes before the copy stops rather than ask for ever. */
 const ANSWER_ATTEMPTS = 3;
 
+/**
+ * Whether the bundle carries anything a copy would make this machine RUN that the person has not left out: a component
+ * of a kind that can run something, or a login configured from the environment. The daemon's review lists exactly what
+ * each would run; this only decides whether to ask first, so it errs to the safe side and asks for any component of
+ * those kinds (`mcp/notes`, `hooks/guard`), a carried `--skip` aside.
+ */
+function bringsRunnables(bundle: CloneBundle, skip: readonly string[]): boolean {
+  const components = CLONE_RUNNABLE_KINDS.some(kind =>
+    Object.keys(bundle.components[kind] ?? {}).some(name => !skip.includes(`${kind}/${name}`)),
+  );
+  return components || bundle.credentials.some(credential => credential.store === 'environment');
+}
+
 const list = (values: readonly string[] | undefined): readonly string[] => values ?? [];
 
 /** The choice flags an update takes and a first copy, an alongside copy or a replace has no use for. */
@@ -66,9 +78,9 @@ function updateOnlyFlags(options: CloneOptions): string[] {
  * back with the person's choices. `--forget` drops the record of one source and nothing else.
  */
 export async function runClone(
-  deps: AccountCommandDeps,
+  deps: MachineDeps,
   file: string | undefined,
-  bundle: FleetCloneBundle | undefined,
+  bundle: CloneBundle | undefined,
   options: CloneOptions,
 ): Promise<void> {
   const bin = deps.binaryName;
@@ -77,17 +89,17 @@ export async function runClone(
     return;
   }
   if (file === undefined || bundle === undefined) {
-    throw new AccountCommandError(
+    throw new MachineCommandError(
       `Name the setup to copy: ${bin} machine clone <file> (the output of \`${bin} machine export\` on the other machine).`,
     );
   }
   if (options.replace === true && options.alongside === true) {
-    throw new AccountCommandError('--replace starts over and --alongside adds beside what is here. Pick one.');
+    throw new MachineCommandError('--replace starts over and --alongside adds beside what is here. Pick one.');
   }
   if (options.replace === true || options.alongside === true) {
     const strays = updateOnlyFlags(options);
     if (strays.length > 0) {
-      throw new AccountCommandError(
+      throw new MachineCommandError(
         `${strays.join(', ')} choose between two versions of an item, which only an update has. ${options.replace === true ? '--replace' : '--alongside'} copies everything.`,
       );
     }
@@ -101,7 +113,7 @@ export async function runClone(
 }
 
 /** `--forget <source>`: the record of one source, and nothing else. */
-async function forgetSource(deps: AccountCommandDeps, file: string | undefined, options: CloneOptions): Promise<void> {
+async function forgetSource(deps: MachineDeps, file: string | undefined, options: CloneOptions): Promise<void> {
   const source = options.forget ?? '';
   const others = [
     ...(file === undefined ? [] : [file]),
@@ -111,7 +123,7 @@ async function forgetSource(deps: AccountCommandDeps, file: string | undefined, 
     ...updateOnlyFlags(options),
   ];
   if (others.length > 0) {
-    throw new AccountCommandError(
+    throw new MachineCommandError(
       `--forget stands alone: it only drops the record of ${source}. Remove ${others.join(', ')}.`,
     );
   }
@@ -132,15 +144,15 @@ async function forgetSource(deps: AccountCommandDeps, file: string | undefined, 
 
 /** Today's copy: everything arrives, and a name already taken becomes `-2`. `--replace` asks first. */
 async function copyWhole(
-  deps: AccountCommandDeps,
-  bundle: FleetCloneBundle,
+  deps: MachineDeps,
+  bundle: CloneBundle,
   options: CloneOptions,
   mode: 'alongside' | 'replace',
 ): Promise<void> {
   const skip = list(options.skip);
   // A copy that brings commands to run here always asks first, like a replace: the preview above the
   // question is the only place a person sees them.
-  const runs = cloneRunnables(bundle).some(runnable => !skip.includes(runnable.reference));
+  const runs = bringsRunnables(bundle, skip);
   const outcome = await runChange(deps, {
     change: {
       kind: 'clone.import',
@@ -149,21 +161,21 @@ async function copyWhole(
       ...(skip.length === 0 ? {} : { skip: [...skip] }),
     },
     destructive: mode === 'replace' || runs,
-    options: writeFlags({ ...options }),
+    options: writeOf(options),
   });
   if (outcome !== undefined && options.json !== true) reportSlots(deps);
 }
 
 /** The first copy from a source: as today, alongside, now with a login this machine already has reused. */
 async function firstCopy(
-  deps: AccountCommandDeps,
-  bundle: FleetCloneBundle,
-  review: FleetCloneReview,
+  deps: MachineDeps,
+  bundle: CloneBundle,
+  review: CloneReview,
   options: CloneOptions,
 ): Promise<void> {
   const strays = updateOnlyFlags(options);
   if (strays.length > 0) {
-    throw new AccountCommandError(
+    throw new MachineCommandError(
       `${strays.join(', ')} choose between two versions of an item, and ${review.source.name} has not been copied here before, so there is only one version. Leave an item out with --skip <item>.`,
     );
   }
@@ -176,13 +188,13 @@ async function firstCopy(
 }
 
 /** Say where the sign-ins to do are, after a copy that may have added empty slots. */
-function reportSlots(deps: AccountCommandDeps): void {
-  deps.out.report(`Sign in to any copied login that is new here: \`${deps.binaryName} credentials\` lists each one.`);
+function reportSlots(deps: MachineDeps): void {
+  deps.out.report(`Sign in to any copied login that is new here: \`${deps.binaryName} login ls\` lists each one.`);
 }
 
 /** Ask one question until it has a usable answer, or give up after a few so a script never hangs. */
 async function askUntil<T>(
-  deps: AccountCommandDeps,
+  deps: MachineDeps,
   question: string,
   read: (answer: string) => T | undefined,
 ): Promise<T | undefined> {
@@ -195,9 +207,9 @@ async function askUntil<T>(
 
 /** A repeat copy: show what differs, settle every choice, and apply exactly the review that was shown. */
 async function updateFrom(
-  deps: AccountCommandDeps,
-  bundle: FleetCloneBundle,
-  review: FleetCloneReview,
+  deps: MachineDeps,
+  bundle: CloneBundle,
+  review: CloneReview,
   options: CloneOptions,
 ): Promise<void> {
   const flags: CloneChoiceFlags = {
@@ -209,7 +221,7 @@ async function updateFrom(
   const logins = parseLoginFlags(list(options.login));
   const resolved = resolveCloneChoices(review, flags);
   const problems = [...resolved.problems, ...loginProblems(review, logins)];
-  if (problems.length > 0) throw new AccountCommandError(`${problems.join('\n')}\nNothing was changed.`);
+  if (problems.length > 0) throw new MachineCommandError(`${problems.join('\n')}\nNothing was changed.`);
   const decisions: Record<string, CloneDecisions[string]> = { ...resolved.decisions };
   const binaryName = deps.binaryName;
   const show = (): string => renderCloneDiff(review, { decisions, logins, binaryName });
@@ -245,13 +257,13 @@ async function updateFrom(
         reviewed: review.fingerprint,
       },
       destructive: cloneNeedsYes(review, decisions, logins),
-      options: writeFlags({ ...options }),
+      options: writeOf(options),
     });
     const addsSlot = review.logins.some(login => login.outcome === 'slot' || logins[login.sourceId] === 'slot');
     if (outcome !== undefined && options.json !== true && addsSlot) reportSlots(deps);
   } catch (error) {
     if (error instanceof Error && error.message.includes(CLONE_REVIEW_STALE)) {
-      throw new AccountCommandError(
+      throw new MachineCommandError(
         `${CLONE_REVIEW_STALE} Nothing was changed. Run \`${binaryName} machine clone <file> --dry-run\` to see the new review.`,
       );
     }
@@ -261,8 +273,8 @@ async function updateFrom(
 
 /** Every both-changed item needs a choice: ask on a terminal, refuse naming each otherwise. Nothing is pre-selected. */
 async function settleBoth(
-  deps: AccountCommandDeps,
-  review: FleetCloneReview,
+  deps: MachineDeps,
+  review: CloneReview,
   decisions: Record<string, CloneDecisions[string]>,
   options: CloneOptions,
 ): Promise<void> {
@@ -270,7 +282,7 @@ async function settleBoth(
   if (pending.length === 0) return;
   const canAsk = deps.interactive && options.yes !== true && options.json !== true;
   if (!canAsk) {
-    throw new AccountCommandError(
+    throw new MachineCommandError(
       [
         `Both machines changed ${pending.length === 1 ? 'this' : 'these'}, and nothing is chosen for you:`,
         ...pending.map(item => `  ${item.ref}`),
@@ -292,15 +304,15 @@ async function settleBoth(
       if (answer === 'show') deps.out.report(renderItemDetail(item, review.source.name));
       else chosen = answer;
     }
-    if (chosen === undefined) throw new AccountCommandError(`No choice was made for ${item.ref}. Nothing was changed.`);
+    if (chosen === undefined) throw new MachineCommandError(`No choice was made for ${item.ref}. Nothing was changed.`);
     decisions[item.ref] = chosen;
   }
 }
 
 /** A sign-in the daemon cannot match to one login here: the person says which, or asks for an empty slot. */
 async function settleLogins(
-  deps: AccountCommandDeps,
-  review: FleetCloneReview,
+  deps: MachineDeps,
+  review: CloneReview,
   logins: Record<string, string>,
   options: CloneOptions,
 ): Promise<void> {
@@ -308,7 +320,7 @@ async function settleLogins(
   if (pending.length === 0) return;
   const canAsk = deps.interactive && options.yes !== true && options.json !== true;
   if (!canAsk) {
-    throw new AccountCommandError(
+    throw new MachineCommandError(
       [
         'These logins could be more than one login here, and nothing picks one for you:',
         ...pending.map(login => `  ${login.sourceId}: ${(login.candidates ?? []).join(', ')}`),
@@ -324,8 +336,15 @@ async function settleLogins(
       text => (text === 'slot' || candidates.includes(text) ? text : undefined),
     );
     if (picked === undefined) {
-      throw new AccountCommandError(`No login was chosen for ${login.sourceId}. Nothing was changed.`);
+      throw new MachineCommandError(`No login was chosen for ${login.sourceId}. Nothing was changed.`);
     }
     logins[login.sourceId] = picked;
   }
 }
+
+/** The write flags of a copy, apart from the choices that are only its own. */
+const writeOf = (options: CloneOptions): MachineWriteOptions => ({
+  ...(options.dryRun === true ? { dryRun: true } : {}),
+  ...(options.yes === true ? { yes: true } : {}),
+  ...(options.json === true ? { json: true } : {}),
+});

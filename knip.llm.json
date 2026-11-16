@@ -1,29 +1,33 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "workspaces": {
+    ".": {
+      "entry": ["scripts/test/*.ts"],
+      "project": ["scripts/test/*.ts"]
+    },
+    "packages/std": {
+      "entry": ["tests/**/*.test.ts"],
+      "project": ["**/*.ts"]
+    },
+    "packages/core/kernel": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/core/*": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
+    "packages/plugins/*": {
+      "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+      "project": ["**/*.{ts,tsx}"]
+    },
     "packages/cli": {
-      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
+      "entry": ["bin/*.ts", "src/index.ts", "tests/**/*.test.ts"],
+      "project": ["**/*.ts"]
     },
-    "packages/daemon": {
-      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/fleet": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/protocol": {
-      "entry": ["src/lib/index.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/pwa": {
-      "entry": ["src/main.tsx", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
-    },
-    "packages/relay": {
-      "entry": ["src/lib/index.ts", "src/adapters/index.ts", "tests/**/*.test.ts"],
-      "project": ["src/**/*.ts", "tests/**/*.ts"]
+    "packages/app": {
+      "entry": ["src/index.ts", "src/main.tsx", "tests/**/*.test.{ts,tsx}"],
+      "project": ["**/*.{ts,tsx}"]
     }
   },
   "includeEntryExports": true

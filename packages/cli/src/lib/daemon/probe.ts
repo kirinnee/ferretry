@@ -1,4 +1,4 @@
-import type { HealthView } from '@ferretry/protocol';
+import type { LocalUpdateHealth as HealthView } from './ports.ts';
 import type { DaemonSupervisorReport } from './ports.ts';
 import type { DaemonLiveness } from './readiness.ts';
 import { LAUNCHD_PROCESS_TYPE } from './unit-file.ts';

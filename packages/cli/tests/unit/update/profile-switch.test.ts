@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { isYes, lastLine, NixProfileSwitch } from '../../../src/lib/update/profile-switch';
-import { CapturedOutput, FakePrompt } from '../daemon/fixtures';
-import { FakeFacts, FakeHost, FakePackages, PROFILE_DAEMON, STORE, USER_HOME } from './fixtures';
+import { isYes, lastLine, NixProfileSwitch } from '../../../src/lib/update/profile-switch.ts';
+import { CapturedOutput, FakePrompt } from './support.ts';
+import { FakeFacts, FakeHost, FakePackages, PROFILE_DAEMON, STORE, USER_HOME } from './fixtures.ts';
 
 const STORE_DAEMON = `${STORE}/bin/fyd`;
 

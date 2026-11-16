@@ -1,7 +1,7 @@
-import { ProtocolVersionSchema } from '@ferretry/protocol';
+import { VersionSchema } from '@ferretry/plugin-updates/contract';
 import { z } from 'zod';
-import type { CommandOutcome } from '../../lib/daemon/ports.ts';
-import { plainLine } from '../../lib/progress/index.ts';
+import type { CommandOutcome } from '../../lib/update/machine.ts';
+import { plainLine } from '../../lib/update/progress.ts';
 import type { UpdateObserver, UpdatePhase } from '../../lib/update/activity.ts';
 import { NixProgressTracker } from '../../lib/update/nix-progress.ts';
 import type { IPackageManagerPort, LockedNixTarget, PackageVersion } from '../../lib/update/ports.ts';
@@ -43,7 +43,7 @@ export class CommandPackageManagers implements IPackageManagerPort {
     const answer = await this.run(['env', 'HOMEBREW_NO_AUTO_UPDATE=1', 'brew', 'info', '--cask', '--json=v2', cask]);
     try {
       const data = z
-        .object({ casks: z.array(z.object({ full_token: z.string(), version: ProtocolVersionSchema })).length(1) })
+        .object({ casks: z.array(z.object({ full_token: z.string(), version: VersionSchema })).length(1) })
         .parse(JSON.parse(answer.stdout));
       const found = data.casks[0];
       if (answer.code === 0 && found?.full_token === cask) return { version: found.version };
@@ -106,7 +106,7 @@ export class CommandPackageManagers implements IPackageManagerPort {
         '--expr',
         `builtins.readFile ((builtins.getFlake "${reference}").outPath + "/VERSION")`,
       ]);
-      const parsed = ProtocolVersionSchema.safeParse(version.stdout.trim());
+      const parsed = VersionSchema.safeParse(version.stdout.trim());
       if (version.code !== 0 || !parsed.success)
         return { failure: 'could not learn VERSION at the locked Nix revision' };
       return {

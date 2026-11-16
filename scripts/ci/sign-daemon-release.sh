@@ -6,12 +6,12 @@
 #
 #   printf '%s\n' "${KEY}" | scripts/ci/sign-daemon-release.sh <dist>
 #
-# THE CONTEXT LINE IS READ FROM THE PROTOCOL PACKAGE, never retyped here: `fy` verifies against
+# THE CONTEXT LINE IS READ FROM ITS SOURCE MODULE, never retyped here: `fy` verifies against
 # DAEMON_RELEASE_SIGNATURE_CONTEXT, and a signer that drifted from it would publish signatures no
 # shipped `fy` accepts.
 #
-# IT REFUSES A KEY NO SHIPPED `fy` TRUSTS. The trusted keys are the list in
-# packages/cli/src/lib/update/release-keys.ts; a key whose public half is not in it would sign
+# IT REFUSES A KEY NO SHIPPED `fy` TRUSTS. The trusted keys are the list DAEMON_RELEASE_KEYS
+# (the Updates plugin); a key whose public half is not in it would sign
 # releases that every standalone install refuses, so it fails here instead of at somebody's update.
 #
 # The private key (PKCS#8 PEM) arrives on STDIN, never through the environment or an argument. It is
@@ -21,8 +21,6 @@ set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${script_dir}/../.."
-keys_file="${repo}/packages/cli/src/lib/update/release-keys.ts"
-protocol_file="${repo}/packages/protocol/src/lib/daemon-update.ts"
 dist="${1:-}"
 
 fail() {
@@ -33,6 +31,18 @@ fail() {
 [[ -n ${dist} ]] || fail "usage: sign-daemon-release.sh <dist>  (key on stdin)"
 checksums="${dist}/checksums.txt"
 [[ -f ${checksums} ]] || fail "no ${checksums} to sign"
+
+# Ferretry 5.0: both facts are the Updates plugin's (docs/rebuild/ports/updates.md). Each is FOUND by its
+# exported name rather than by a path, so the port places them where its layout wants; a fact with no owner
+# or two owners refuses to sign.
+owner_of() {
+  local found
+  mapfile -t found < <(grep -rlE --include='*.ts' --exclude-dir=node_modules --exclude-dir=tests "^export const $1\b" "${repo}/packages" || true)
+  [[ ${#found[@]} -eq 1 ]] || fail "exactly one module under packages/ must export $1; found ${#found[@]}"
+  printf '%s\n' "${found[0]}"
+}
+keys_file="$(owner_of DAEMON_RELEASE_KEYS)"
+protocol_file="$(owner_of DAEMON_RELEASE_SIGNATURE_CONTEXT)"
 
 context="$(sed -n "s/^export const DAEMON_RELEASE_SIGNATURE_CONTEXT = '\(.*\)\\\\n';$/\1/p" "${protocol_file}")"
 [[ -n ${context} ]] || fail "cannot read DAEMON_RELEASE_SIGNATURE_CONTEXT from ${protocol_file}"
@@ -49,7 +59,9 @@ b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
 
 openssl pkey -in "${key_file}" -pubout -out "${key_dir}/public.pem" 2>/dev/null ||
   fail "the signing key is not a PKCS#8 private key"
-openssl pkey -pubin -in "${key_dir}/public.pem" -noout -text 2>/dev/null | grep -q '^ED25519 Public-Key' ||
+# Capture first, then match: `openssl | grep -q` under pipefail fails with SIGPIPE when grep exits on its first match.
+public_key_text="$(openssl pkey -pubin -in "${key_dir}/public.pem" -noout -text 2>/dev/null)" || public_key_text=''
+grep -q '^ED25519 Public-Key' <<<"${public_key_text}" ||
   fail "the signing key is not an Ed25519 key"
 public="$(openssl pkey -pubin -in "${key_dir}/public.pem" -outform DER | b64url)"
 grep -qF "'${public}'" "${keys_file}" ||

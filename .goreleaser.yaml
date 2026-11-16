@@ -31,8 +31,9 @@ builds:
     hooks:
       post:
         - cmd: ./scripts/release/goreleaser-shim.sh "{{ .Path }}" "{{ .Os }}" "{{ .Arch }}"
-  # The daemon's browser worker: a second bin entry of the daemon package, run from beside the
-  # daemon. Every channel below ships it, or the browser pane and the agents' browser tools cannot start.
+  # The daemon's browser worker: the Browsers package's bin entry (the kernel never points into a plugin),
+  # run from beside the daemon. Every channel below ships it, or the browser pane and the agents' browser
+  # tools cannot start.
   - id: bun-browser-worker
     main: ./goreleaser.go
     binary: fyd-browser-worker

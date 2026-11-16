@@ -1,0 +1,146 @@
+@import './theme-fonts.css';
+@import './themes.css';
+@import './highlight.css';
+@import './shell.css';
+/* Every plugin app half's own stylesheets (GENERATED from each `app/styles.css`), before Tailwind's layers exactly as today's
+   PWA imported every feature stylesheet here. The shared component classes are `ui/design-system.css`, loaded after. */
+@import '../generated/plugin-styles.css';
+
+/* Tailwind's layers, before the base elements below, as in today's PWA. The component classes are
+   `ui/design-system.css`, loaded after this file. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   The app shell's base elements — token-driven only (copied from today's PWA `styles/index.css`, base section).
+   THEME TOKENS LIVE IN `themes.css`; the frame's own rules are in `shell.css`. Plugin stylesheets come with their
+   app halves. Nothing here hardcodes a colour.
+   ============================================================================ */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  background-color: var(--bg);
+  background-image: var(--body-wash);
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--font-size-base);
+  line-height: var(--leading-base);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* The screen overlay (Mission Control's scanlines; `none` everywhere else).
+   Fixed and inert, and deliberately BELOW the app's modal/drawer layers
+   (FolderSidebar drawer z-30, WardenVerdicts z-50) so it can never sit on top
+   of a dialog's own scrim. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  pointer-events: none;
+  background-image: var(--overlay);
+  opacity: var(--overlay-opacity);
+  mix-blend-mode: var(--overlay-blend);
+}
+
+::selection {
+  background: var(--selection-bg);
+  color: var(--selection-fg);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+textarea {
+  background: var(--surface);
+  color: var(--fg);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+}
+/* NO `outline: none` HERE.
+   It used to be, and it made the translucent `--ring` glow the ONLY focus
+   indicator on every text field in the app — measured at 1.5-2.9:1 against the
+   surface in all ten themes, under a 3:1 floor (a11y audit, WCAG 2.4.11/1.4.11).
+   That silently voided the Neo-AA and Contrast-AAA claims for anyone navigating
+   by keyboard. The `:focus-visible` rule below already draws a real, tokenised,
+   ≥3:1 outline in every theme; the ring and the accent border stay as the
+   decorative half. */
+input:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 var(--focus-width) var(--ring);
+}
+
+/* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast. */
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: 'liga' 0;
+}
+
+/* Themes with an overlay or a glow are the ones that lean on effects; a reader
+   who asked for less motion/effect gets the flat version. */
+/* `:root[data-theme]` (not bare `:root`) on purpose: the per-theme blocks above
+   are attribute-qualified, so a bare `:root` override here would lose on
+   specificity and silently leave Mission Control's scanlines running. Equal
+   specificity + later source order wins. */
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  :root[data-theme] {
+    --overlay-opacity: 0;
+    --glow-alpha: 0;
+  }
+}
+
+/* Settings › Appearance › Motion › Reduced: the same flat version, whatever the OS says, and every
+   animation and transition stilled — spinners included. `<html data-motion="reduced">` is set by
+   the shell. */
+:root[data-motion='reduced'],
+:root[data-motion='reduced'][data-theme] {
+  --overlay-opacity: 0;
+  --glow-alpha: 0;
+}
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  animation: none !important;
+  scroll-behavior: auto !important;
+  transition: none !important;
+}

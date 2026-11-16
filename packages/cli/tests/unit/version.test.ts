@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { assertSemver } from '../../src/lib/version';
+import { assertSemver } from '../../src/lib/version.ts';
 
 describe('semver guard', () => {
   it('should accept plain release versions', () => {

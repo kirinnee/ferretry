@@ -7,8 +7,8 @@ model is involved: the conversion is a pure rewrite, checked by the target CLI b
 - **PWA:** Actions › **Move to Codex…** (or **Move to Claude…**). The sheet shows a preview first.
 - **CLI:** `fy migrate <id> --agent <codex-or-claude runtime> --convert`. Add `--preview` to see the
   preview and change nothing.
-- **API:** `POST /v1/sessions/:id/conversion-preview` `{agent, model?}` for the preview; the move is the
-  ordinary `POST /v1/sessions/:id/migrate` with `conversation: "convert"`
+- **API:** `POST /v1/ferrets/:ferretId/conversion-preview` `{agent, model?}` for the preview; the move is the
+  ordinary `POST /v1/ferrets/:ferretId/move` with `conversation: "convert"`
   (`packages/protocol/src/lib/session.ts`).
 
 A same-harness move or Restart never converts: it resumes the transcript as it is

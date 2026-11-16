@@ -109,7 +109,9 @@ summary is [security.md](security.md).
 ## 4. Push notifications
 
 - **4a. A notification can only open this site — tested.** `notificationUrl` in
-  `src/lib/push-scope.ts`; `tests/unit/push-scope.test.ts`.
+  `packages/app/src/worker/notifications.ts`; `packages/app/tests/unit/worker/notifications.test.ts`. A push's `url` is not
+  trusted: only the machine's own chat, Agenda or home opens, anything else opens `/app/`
+  ([notifications.md § Where a tap goes](notifications.md#where-a-tap-goes)).
 - **4b. One subscription per machine — closed.** A browser holds one push subscription per
   service-worker registration, bound to the VAPID key of the daemon that made it. Each paired machine
   now has its OWN registration of the same signed `sw.verified.js`, at `/push/<daemonId>/`, so each

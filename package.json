@@ -1,12 +1,17 @@
 {
   "name": "ferretry",
   "private": true,
-  "version": "0.0.0",
+  "version": "5.0.0",
   "description": "Bun workspaces monorepo — this name field is the product name; the CLI package's bin key is the binary name",
   "type": "module",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "packages/core/*",
+    "packages/plugins/*"
   ],
+  "scripts": {
+    "postinstall": "./scripts/local/gen.sh"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.5.6",
     "@semantic-release/changelog": "^7.0.0",
@@ -24,7 +29,7 @@
   },
   "overrides": {
     "onnxruntime-web": "1.24.1",
-    "onnxruntime-node": "file:./packages/pwa/vendor/onnxruntime-node",
-    "sharp": "file:./packages/pwa/vendor/sharp"
+    "onnxruntime-node": "file:./packages/plugins/voice/vendor/onnxruntime-node",
+    "sharp": "file:./packages/plugins/voice/vendor/sharp"
   }
 }

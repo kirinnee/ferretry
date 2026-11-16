@@ -1,12 +1,14 @@
+import { instantFromEpochMs } from '@ferretry/std';
 import {
+  serializeUpdateReport,
   classifyInstallMethod,
-  compareProtocolVersions,
+  compareVersions,
   describeInstallMethod,
   type InstallMethod,
   isNewerMajorVersion,
   isUpdateAvailable,
   type LatestRelease,
-  ProtocolVersionSchema,
+  VersionSchema,
   planUpdate,
   RELEASE_OWNER,
   releaseFlakeReference,
@@ -16,11 +18,11 @@ import {
   type UpdateOutcome,
   type UpdatePlan,
   type UpdateReport,
-} from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../daemon/binary.ts';
-import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from '../daemon/ports.ts';
-import { formatElapsed, type IProgress, NO_PROGRESS } from '../progress/index.ts';
-import { passMidTurn } from './mid-turn.ts';
+} from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from './machine.ts';
+import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from './machine.ts';
+import { formatElapsed, type IProgress, NO_PROGRESS } from './progress.ts';
+import { MidTurnUnreadableError, passMidTurn } from './mid-turn.ts';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -33,7 +35,7 @@ import type {
 import { isYes, lastLine, lastLines, type NixProfileSwitch } from './profile-switch.ts';
 import { stepObserver } from './step-observer.ts';
 
-/** Flags `fy daemon update` accepts. */
+/** Flags `fy update` accepts. */
 export interface DaemonUpdateOptions {
   /** Report only: what is installed, what is latest, and what updating would take. */
   readonly check?: boolean;
@@ -107,7 +109,7 @@ type Applied =
   | { readonly kind: 'failed'; readonly message: string };
 
 /**
- * `fy daemon update`: one transaction per install method — check, wait for idle, upgrade with the
+ * `fy update`: one transaction per install method — check, wait for idle, upgrade with the
  * method's own tool, restart, prove the new version serves, and roll back when it does not.
  *
  * The contract and its reasons are `docs/updating.md`. Two rules shape every branch here:
@@ -135,7 +137,7 @@ export class DaemonUpdater {
   async update(options: DaemonUpdateOptions): Promise<void> {
     const startedAt = this.deps.clock.now();
     let from = '0.0.0';
-    let target = options.to !== undefined && ProtocolVersionSchema.safeParse(options.to).success ? options.to : '0.0.0';
+    let target = options.to !== undefined && VersionSchema.safeParse(options.to).success ? options.to : '0.0.0';
     try {
       const daemon = this.deps.lifecycle.installed();
       this.progress.start('Checking for an update');
@@ -175,7 +177,7 @@ export class DaemonUpdater {
       // Refuse a known newer major immediately. The @4 cask may still have a v4 patch to offer.
       if (options.to !== undefined || method.kind !== 'homebrew' || !method.cask.endsWith('@4'))
         this.#guardTarget(intent, options);
-      if (this.#cannotPin(method) && compareProtocolVersions(target, current) === 1) {
+      if (this.#cannotPin(method) && compareVersions(target, current) === 1) {
         intent = await this.#prepareManager(intent, options);
         target = intent.target;
       }
@@ -189,7 +191,7 @@ export class DaemonUpdater {
 
   async #latest(to: string | undefined): Promise<{ readonly release: LatestRelease } | { readonly failure: string }> {
     if (to !== undefined) {
-      if (!ProtocolVersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
+      if (!VersionSchema.safeParse(to).success) return { failure: `${to} is not a version` };
       return {
         release: { version: to, url: `https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${to}` },
       };
@@ -240,7 +242,7 @@ export class DaemonUpdater {
         throw new DaemonUpdateRefusedError(this.#managerRefusal(method, intent.current, intent.target, found.failure));
       artifact = { version: found.version, nix: found };
     }
-    if (!ProtocolVersionSchema.safeParse(artifact.version).success)
+    if (!VersionSchema.safeParse(artifact.version).success)
       throw new DaemonUpdateRefusedError(
         this.#managerRefusal(method, intent.current, intent.target, 'could not parse the package source version'),
       );
@@ -291,8 +293,7 @@ export class DaemonUpdater {
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
     this.#guardTarget(intent, options);
-    if (compareProtocolVersions(intent.target, intent.current) !== 1)
-      return await this.#refreshDefinition(intent, options);
+    if (compareVersions(intent.target, intent.current) !== 1) return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
       throw new DaemonUpdateRefusedError(
         [`${intent.plan.explanation}`, ...renderPlan(intent.plan, this.deps.clientName)].join('\n'),
@@ -303,7 +304,7 @@ export class DaemonUpdater {
         [
           intent.plan.explanation,
           ...renderPlan(intent.plan, this.deps.clientName),
-          `or run ${this.deps.clientName} daemon update --switch-to-profile`,
+          `or run ${this.deps.clientName} update --switch-to-profile`,
         ].join('\n'),
       );
     }
@@ -321,19 +322,21 @@ export class DaemonUpdater {
   #managerRefusal(method: InstallMethod, current: string, target: string, reason: string): string {
     const major = current.split('.')[0];
     const safeTarget = isNewerMajorVersion(current, target) ? current : target;
+    // Only v4 has a pinned cask (`${product}@4`); a later major has none, so Homebrew names no way back.
     const route =
       method.kind === 'homebrew'
-        ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${major}`
+        ? major === '4'
+          ? `brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@4`
+          : undefined
         : `nix profile install github:${RELEASE_OWNER}/${this.deps.product}/v${safeTarget}`;
     const stays = reason.includes(`Your daemon stays on ${current}.`) ? '' : ` Your daemon stays on ${current}.`;
-    return `${reason}${reason.endsWith('.') ? '' : '.'}${stays} To stay on v${major}, run: ${route}`;
+    const tail = route === undefined ? '' : ` To stay on v${major}, run: ${route}`;
+    return `${reason}${reason.endsWith('.') ? '' : '.'}${stays}${tail}`;
   }
 
   #majorUpdateMessage(current: string, target: string): string {
-    const from = current.split('.')[0];
-    const to = target.split('.')[0];
-    const migration = `https://github.com/${RELEASE_OWNER}/${this.deps.product}/blob/main/docs/migration/v${from}-to-v${to}-prompt.md`;
-    return `${target.split('.').slice(0, 2).join('.')} is a new major version. A v${from} machine moves to it only through the migration: ${migration}. Your daemon stays on ${current}. The migration uses --major to allow this move.`;
+    const notes = `https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${target}`;
+    return `${target} is the next major version, not a plain update: it comes with its own steps. Read that release's notes first: ${notes}. Your daemon stays on ${current}. --major allows the move.`;
   }
 
   async #consentToSwitch(explanation: string, options: DaemonUpdateOptions): Promise<boolean> {
@@ -347,7 +350,12 @@ export class DaemonUpdater {
   async #passMidTurn(options: DaemonUpdateOptions): Promise<void> {
     await passMidTurn(
       {
-        midTurn: () => this.#midTurn(),
+        midTurn: async () => {
+          // Only asked while the daemon is up: a view that is not there is a count that could not be read.
+          const view = await this.deps.updateView.view();
+          if (view === undefined) throw new MidTurnUnreadableError();
+          return view.midTurn;
+        },
         sleep: ms => this.deps.clock.sleep(ms),
         warn: line => this.deps.out.warn(line),
       },
@@ -514,7 +522,7 @@ export class DaemonUpdater {
 
   #guardRestart(intent: UpdateIntent, path: string, options: DaemonUpdateOptions): void {
     const installed = this.#guardInstalled(intent, path, options);
-    if (installed === undefined || !ProtocolVersionSchema.safeParse(installed).success)
+    if (installed === undefined || !VersionSchema.safeParse(installed).success)
       throw new DaemonUpdateRefusedError(`cannot read the installed version at ${path}; refusing to restart`);
   }
 
@@ -522,14 +530,18 @@ export class DaemonUpdater {
   #guardInstalled(intent: UpdateIntent, path: string, options: DaemonUpdateOptions): string | undefined {
     const installed = this.deps.lifecycle.versionOf(path);
     if (installed !== undefined && options.major !== true && isNewerMajorVersion(intent.current, installed)) {
+      // Only v4 has a pinned cask (`${product}@4`); for a later major Homebrew keeps no way back, so name the release.
+      const pinned = intent.current.split('.')[0] === '4';
       const recovery =
         intent.method.kind === 'homebrew'
-          ? `brew uninstall --cask ${this.deps.product} && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@${intent.current.split('.')[0]} && ${this.deps.clientName} daemon restart`
+          ? pinned
+            ? `brew uninstall --cask ${this.deps.product} && brew install --cask ${releaseTapName(this.deps.product)}/${this.deps.product}@4 && ${this.deps.clientName} daemon restart`
+            : `brew uninstall --cask ${this.deps.product}, then install ${intent.current} again from https://github.com/${RELEASE_OWNER}/${this.deps.product}/releases/tag/v${intent.current} and run ${this.deps.clientName} daemon restart`
           : intent.method.kind === 'nix-profile' || intent.method.kind === 'nix-shell'
             ? 'nix profile rollback'
             : 'restore the previous binaries';
       throw new DaemonUpdateRefusedError(
-        `The installed ${this.deps.daemonName} is ${installed}, a newer major than ${intent.current}. No restart ran; ${intent.running ? 'the running daemon was left up' : 'the daemon remains stopped'}. Recover with: ${recovery}. The migration uses --major to allow this move.`,
+        `The installed ${this.deps.daemonName} is ${installed}, a newer major than ${intent.current}. No restart ran; ${intent.running ? 'the running daemon was left up' : 'the daemon remains stopped'}. Recover with: ${recovery}. --major allows this move.`,
       );
     }
     return installed;
@@ -544,7 +556,7 @@ export class DaemonUpdater {
     const name = this.deps.daemonName;
     const installed = this.#guardInstalled(intent, applied.daemonPath, options);
     // Managers must deliver the judged version; standalone releases retain the same-major >= target rule.
-    const order = installed === undefined ? undefined : compareProtocolVersions(installed, intent.target);
+    const order = installed === undefined ? undefined : compareVersions(installed, intent.target);
     if (
       installed === undefined ||
       order === undefined ||
@@ -658,10 +670,10 @@ export class DaemonUpdater {
       readonly message: string;
     },
   ): Promise<void> {
-    const report: UpdateReport = { ...result, finishedAt: new Date(this.deps.clock.now()).toISOString() };
+    const report: UpdateReport = { ...result, finishedAt: instantFromEpochMs(this.deps.clock.now()) };
     if (options.report !== undefined) {
       try {
-        await this.deps.reports.writePrivate(options.report, `${JSON.stringify(report, null, 2)}\n`);
+        await this.deps.reports.writePrivate(options.report, serializeUpdateReport(report));
       } catch (error: unknown) {
         this.deps.out.warn(`could not write the update report to ${options.report}: ${errorText(error)}`);
       }
@@ -677,7 +689,7 @@ export class DaemonUpdater {
 
 /** A plan's steps, one line each, for a terminal. */
 export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
-  if (plan.kind === 'self') return [`to update: ${clientName} daemon update`];
+  if (plan.kind === 'self') return [`to update: ${clientName} update`];
   if (plan.steps.length === 0) return [];
   return [
     'steps:',

@@ -1,11 +1,12 @@
+import { decodeJson } from '../../../../core/kernel/host/state/format.ts';
 import { describe, it } from 'bun:test';
-import { UpdateReportSchema } from '@ferretry/protocol';
+import { UPDATES_REPORT } from '@ferretry/plugin-updates/contract';
 import should from 'should';
-import type { IDaemonPrompt } from '../../../src/lib/daemon/ports';
-import { NixProfileSwitch } from '../../../src/lib/update/profile-switch';
-import { DaemonUpdater } from '../../../src/lib/update/updater';
-import { CapturedOutput, SteppingClock } from '../daemon/fixtures';
-import { RecordingProgress } from '../progress/fixtures';
+import type { IDaemonPrompt } from '../../../src/lib/update/machine.ts';
+import { NixProfileSwitch } from '../../../src/lib/update/profile-switch.ts';
+import { DaemonUpdater } from '../../../src/lib/update/updater.ts';
+import { CapturedOutput, SteppingClock } from './support.ts';
+import { RecordingProgress } from './support.ts';
 import {
   FakeFacts,
   FakeHost,
@@ -16,7 +17,7 @@ import {
   FakeStandalone,
   FakeUpdateView,
   USER_HOME,
-} from './fixtures';
+} from './fixtures.ts';
 
 class NeverAsked implements IDaemonPrompt {
   ask(): Promise<string> {
@@ -67,7 +68,12 @@ function harness() {
     pollMs: 500,
     progress,
   });
-  const report = () => UpdateReportSchema.parse(JSON.parse(reports.written.get('/r.json') ?? 'null'));
+  const report = () =>
+    (() => {
+      const decoded = decodeJson(UPDATES_REPORT, 'report', reports.written.get('/r.json') ?? 'null');
+      if (!decoded.ok) throw new Error(decoded.error.sentence);
+      return decoded.value;
+    })();
   return {
     host,
     packages,

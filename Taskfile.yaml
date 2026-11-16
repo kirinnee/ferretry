@@ -3,13 +3,14 @@ version: '3'
 vars:
   # The CLI package's bin key is the ONLY place the product name is written; everything derives it.
   CLI_PKG: packages/cli
-  # The PWA is a browser bundle, not a Bun program: it builds through its own package script
-  # (Vite) rather than through scripts/local/build.sh. The separately owned Pages deployment will
-  # publish this package's documented output once its configuration lands.
-  PWA_PKG: packages/pwa
-  # The relay is a Cloudflare Worker, not a Bun program and not part of any release artifact. It is
-  # deployed by its operator into their own account, so it has a deploy task and no build task.
-  RELAY_PKG: packages/relay
+  # The app is a browser bundle, not a Bun program: it builds through its own package script rather
+  # than through scripts/local/build.sh, and the Pages deployment publishes that same output.
+  APP_PKG: packages/app
+  # The relay is a Cloudflare Worker, not a Bun program and not part of any release artifact. It is the
+  # Connections plugin's, deployed by its operator into their own account, so it has a deploy task and no
+  # build task. The link store is the Catalogs plugin's Worker.
+  RELAY_DIR: packages/plugins/connections/worker
+  LINK_STORE_DIR: packages/plugins/catalogs/worker
   ARTIFACT_PREFIX:
     sh: jq -r '.bin | to_entries[0].key' {{.CLI_PKG}}/package.json
   ARTIFACT: '{{.ARTIFACT_PREFIX}}-{{OS}}-{{if eq ARCH "arm64"}}arm64{{else}}x64-baseline{{end}}'
@@ -56,7 +57,7 @@ tasks:
   clean:
     desc: Remove Bun build, dependency, and coverage artifacts
     cmds:
-      - rm -rf dist prebuilt coverage {{.PWA_PKG}}/dist
+      - rm -rf dist prebuilt coverage {{.APP_PKG}}/dist
       - '[ -d node_modules ] && find node_modules -mindepth 1 -maxdepth 1 -exec rm -rf {} + || true'
 
   build:
@@ -65,8 +66,8 @@ tasks:
       - ./scripts/local/build.sh
 
   build:pwa:
-    desc: Build the PWA static bundle to packages/pwa/dist
-    dir: '{{.PWA_PKG}}'
+    desc: Build the app's static bundle to packages/app/dist
+    dir: '{{.APP_PKG}}'
     cmds:
       # `bun run build`, not `vite build`: the package script is the one build command the pending
       # Pages workflow must invoke too. Two spellings of the same build are how a local bundle and
@@ -75,7 +76,7 @@ tasks:
 
   relay:check:
     desc: 'Expert: compile the relay Worker and print its bindings without deploying anything'
-    dir: '{{.RELAY_PKG}}'
+    dir: '{{.RELAY_DIR}}'
     cmds:
       # The rehearsal for relay:deploy. `--dry-run` compiles and resolves bindings and migrations
       # against your wrangler.jsonc and needs no Cloudflare credentials: it publishes nothing and
@@ -86,7 +87,7 @@ tasks:
 
   relay:deploy:
     desc: 'Expert: deploy the rendezvous relay to your own Cloudflare account'
-    dir: '{{.RELAY_PKG}}'
+    dir: '{{.RELAY_DIR}}'
     cmds:
       # Running a relay is an opt-in expert path, not product setup: nothing in onboarding asks for
       # it, and the hosted default carries everyone who does not want to operate infrastructure.
@@ -99,7 +100,7 @@ tasks:
 
   link-store:check:
     desc: 'Expert: compile the link-store Worker (both shapes) and print its bindings without deploying anything'
-    dir: '{{.RELAY_PKG}}'
+    dir: '{{.LINK_STORE_DIR}}'
     cmds:
       # The rehearsal for link-store:deploy. `--dry-run` publishes nothing, needs no Cloudflare
       # credentials, and compiles your wrangler.link-store.jsonc plus the hosted configuration.
@@ -146,12 +147,6 @@ tasks:
     desc: Run the non-blocking realworld suite (machine-dependent timing, memory and rate claims)
     cmds:
       - ./scripts/test/swept.sh bun test --config=bunfig.realworld.toml --timeout 120000
-
-  test:e2e:
-    desc: Run isolated end-to-end journeys through the freshly compiled binary
-    deps: [compile]
-    cmds:
-      - task: unit:e2e
 
   test:coverage:
     desc: Run every coverage-capable suite with coverage

@@ -46,5 +46,5 @@ plugins:
         - packages/cli/package.json
         # The daemon stamps its own manifest version into what it reports over HTTP, so a release
         # that did not carry it shipped a daemon that could not say what it was.
-        - packages/daemon/package.json
+        - packages/core/kernel/package.json
         - VERSION

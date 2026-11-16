@@ -36,6 +36,13 @@ gates)
   ./scripts/ci/pre-commit.sh "${part}"
   ;;
 build) ./scripts/ci/build-checks.sh ;;
+# The repository tooling's own tests: the registry generator and the 5.0 checks' planted-violation tests
+# (scripts/gen/tests, scripts/gen/today). They live outside packages/, so no unit group collects them.
+scripts)
+  # The JUnit report is where `bun scripts/gen/check.ts guarantees` reads whether a guarantee test in scripts/ passed.
+  mkdir -p coverage/scripts
+  ./scripts/test/swept.sh bun test ./scripts/ --reporter=junit --reporter-outfile=coverage/scripts/junit.xml
+  ;;
 unit-*) ./scripts/ci/test.sh unit "${part#unit-}" ;;
 *) echo "❌ Unknown quick part: ${part}" >&2 && exit 2 ;;
 esac

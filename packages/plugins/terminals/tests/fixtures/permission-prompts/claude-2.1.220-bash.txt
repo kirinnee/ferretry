@@ -1,0 +1,32 @@
+╭─── Claude Code v2.1.220 ────────────────────────────────────────────────────────────────────────────────────────╮
+│                                             │ Tips for getting started                                          │
+│                Welcome back!                │ Run /init to create a CLAUDE.md file with instructions for Claude │
+│                                             │ ───────────────────────────────────────────────────────────────── │
+│                   ▐▛███▜▌                   │ What's new                                                        │
+│                  ▝▜█████▛▘                  │ Check the Claude Code changelog for updates                       │
+│                    ▘▘ ▝▝                    │                                                                   │
+│                                             │                                                                   │
+│   Opus 5 (1M context) · API Usage Billing   │                                                                   │
+│          /home/dev/project           │                                                                   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ GO please
+
+● Bash(curl -s https://example.com | head)
+  ⎿  Waiting…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bash command
+
+   curl -s https://example.com | head
+   Fetch example
+
+ This command requires approval
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don’t ask again for: curl -s https://example.com
+   3. No
+
+ Esc to cancel · Tab to amend · ctrl+e to explain

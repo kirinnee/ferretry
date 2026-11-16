@@ -1,26 +1,14 @@
-import inquirer from 'inquirer';
+import { createInterface } from 'node:readline/promises';
+import type { IDaemonPrompt } from '../../lib/update/machine.ts';
 
-/** Interactive-input port for the CLI controllers (never used off a TTY). */
-export interface IPrompt {
-  ask(message: string): Promise<string>;
-  /**
-   * Like {@link ask}, but nothing typed is ever echoed to the screen — for a secret value (a provider
-   * key) that must never land in a terminal's scrollback or a screen a person is sharing.
-   */
-  askHidden(message: string): Promise<string>;
-}
-
-export class InquirerPrompt implements IPrompt {
-  constructor(private readonly client: Pick<typeof inquirer, 'prompt'> = inquirer) {}
-
-  async ask(message: string): Promise<string> {
-    const { answer } = await this.client.prompt<{ answer: string }>([{ type: 'input', name: 'answer', message }]);
-    return answer;
-  }
-
-  async askHidden(message: string): Promise<string> {
-    // No `mask`: inquirer's password prompt then echoes nothing at all while typing, not even `*`.
-    const { answer } = await this.client.prompt<{ answer: string }>([{ type: 'password', name: 'answer', message }]);
-    return answer;
-  }
-}
+/** Asks on stderr and reads one line from stdin, so stdout stays whole for a script reading the answer of the verb. */
+export const terminalPrompt: IDaemonPrompt = {
+  ask: async question => {
+    const terminal = createInterface({ input: process.stdin, output: process.stderr });
+    try {
+      return await terminal.question(`${question} `);
+    } finally {
+      terminal.close();
+    }
+  },
+};

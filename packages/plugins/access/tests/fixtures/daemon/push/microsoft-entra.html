@@ -1,0 +1,44 @@
+<!-- PROVENANCE: reconstructed, NOT a live capture. Microsoft Entra converged sign-in, "Approve sign in request" number-match view. Element ids idDiv_SAOTCAS_Title, idDiv_SAOTCAS_Description, idRichContext_DisplaySign (class displaySign) and idChkBx_SAOTCAS_TD from public descriptions of the live page (e.g. https://github.com/RohanMuppa/brightspace-mcp-server/issues/79 and /205, which name #idRichContext_DisplaySign and #idChkBx_SAOTCAS_TD); the English sentences are the page's usual wording, NOT verified against a capture. The real page is a Knockout bundle; only the view's own nodes are kept. Scrubbed: a@example.com, no tenant id, no flow token. Replace with a scrubbed live capture. URL: https://login.microsoftonline.com/common/SAS/ProcessAuth -->
+<!doctype html>
+<html dir="ltr" lang="en">
+  <head>
+    <title>Sign in to your account</title>
+  </head>
+  <body class="cb">
+    <form name="f1" id="i0281" method="post" action="/common/SAS/ProcessAuth" autocomplete="off">
+      <div class="login-paginated-page">
+        <div id="lightbox" class="sign-in-box ext-sign-in-box fade-in-lightbox">
+          <div class="identityBanner">
+            <div id="displayName" class="identity" title="a@example.com">a@example.com</div>
+          </div>
+          <div class="pagination-view has-identity-banner">
+            <div id="idDiv_SAOTCAS_Title" class="row text-title" role="heading" aria-level="1">
+              Approve sign in request
+            </div>
+            <div class="row">
+              <div id="idDiv_SAOTCAS_Description" class="text-block-body">
+                Open your Authenticator app, and enter the number shown to sign in.
+              </div>
+            </div>
+            <div class="row">
+              <div id="idRichContext_DisplaySign" class="displaySign">58</div>
+            </div>
+            <div class="row">
+              <div class="text-block-body">No numbers in your app? Make sure to upgrade to the latest version.</div>
+            </div>
+            <div class="row">
+              <label id="idLbl_SAOTCAS_TD_Cb"
+                ><input name="rememberMFA" type="checkbox" id="idChkBx_SAOTCAS_TD" value="true" /><span
+                  >Don't ask again for 90 days</span
+                ></label
+              >
+            </div>
+            <div class="row">
+              <a id="signInAnotherWay" href="#">I can't use my Microsoft Authenticator app right now</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+  </body>
+</html>

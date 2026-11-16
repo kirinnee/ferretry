@@ -1,0 +1,26 @@
+
+ ▐▛███▛█   Claude Code v2.1.281
+▝▜██████▀  Opus 5.5 (1M context) · API Usage Billing
+  ▝▝ ▝▝    /home/dev/project
+
+
+❯ GO please
+
+  Calling deploy…
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Tool use
+
+   deploy — Release Tool: (MCP)
+
+   version: "1.2.3"
+
+   About the deploy — Release Tool:
+   │ Ship a release
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for deploy — Release commands in /home/dev/project
+   3. No
+
+ Esc to cancel · Tab to amend

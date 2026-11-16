@@ -74,6 +74,7 @@ const STAGED_PREFIX = '.fy-daemon-lifecycle.';
 const DEFAULT_POLL_MS = 50;
 
 const ClaimSchema = z.strictObject({
+  format: z.literal(1),
   /** The invocation holding it, reported so a person can see whether it is still running. */
   owner: z.number().int().positive(),
   /** Unguessable per-claim value: a holder's only proof that the claim is still the one it took. */
@@ -85,8 +86,8 @@ const ClaimSchema = z.strictObject({
   /**
    * WHICH PROCESS `owner` IS: the scope its number was issued in, and when that process started.
    *
-   * Optional, because a host that offers neither source writes none and an older release wrote none,
-   * and either claim is still a claim. Without it a holder that died can only ever be reported, never
+   * Optional, because a host that offers neither source writes none.
+   * Without it a holder that died can only ever be reported, never
    * recognised; with it, an observer in the same scope can prove the holder exited.
    */
   holder: z
@@ -105,7 +106,7 @@ type Claim = z.output<typeof ClaimSchema>;
  */
 type HolderVerdict = 'running' | 'gone' | 'elsewhere' | 'unknown';
 
-export class DaemonLifecycleBusyError extends Error {
+class DaemonLifecycleBusyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'DaemonLifecycleBusyError';
@@ -181,6 +182,7 @@ export class FileDaemonLifecycleLock implements IDaemonLifecycleLockPort {
     const staged = join(directory, `${STAGED_PREFIX}${randomUUID()}`);
     const holder = await this.#self();
     const claim: Claim = {
+      format: 1,
       owner: globalThis.process.pid,
       token,
       verb: request.verb,

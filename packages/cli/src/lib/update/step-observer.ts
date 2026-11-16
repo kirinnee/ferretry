@@ -1,4 +1,4 @@
-import type { IProgress } from '../progress/index.ts';
+import type { IProgress } from './progress.ts';
 import { describeActivity, type UpdateObserver, type UpdatePhase } from './activity.ts';
 
 /** Phases in the order an update moves through them; a step never goes back to an earlier one. */

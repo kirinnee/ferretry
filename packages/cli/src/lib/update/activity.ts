@@ -1,4 +1,4 @@
-import { formatByteProgress, plainLine } from '../progress/index.ts';
+import { formatByteProgress, plainLine } from './progress.ts';
 
 /** The phase of an update a person is told about; the order is roughly the order they happen in. */
 export type UpdatePhase =

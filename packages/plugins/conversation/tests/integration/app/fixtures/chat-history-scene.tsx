@@ -1,0 +1,177 @@
+/**
+ * The browser entry for "I can't scroll up further": the REAL `Transcript` and the REAL chat refresh
+ * (`startChatRefresh`), over a daemon that pages a long conversation exactly as `log-page`
+ * does — whole records, the newest `limit` before a byte, a `start` to ask before next time.
+ *
+ * The conversation is `TOTAL` records: questions, answers, and runs of tool calls that collapse into one
+ * row, so many pages add only a few rows to see. Every older page takes `DELAY_MS`, as a relay would.
+ * `window.__holdOlder()` holds the next older page until `window.__releaseOlder()`, so the loading state
+ * can be seen; `window.__appendMessages(n)` lands `n` new records at the tail while older ones are held.
+ *
+ * `?search=1` puts the chat's search bar over it, searching the same conversation the way `log-search`
+ * does: every record, oldest first, by the byte its record begins at.
+ *
+ *   ?theme=<family>-<mode>
+ */
+
+import type { FerretView } from '@ferretry/core-ferrets/contract';
+import type { LogPageOptions, LogPage, SessionLogSearch } from '../../../../contract/index.ts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ChatSearch, type ChatSearchPort } from '../../../../app/search/chat-search.tsx';
+import { createRoot } from 'react-dom/client';
+import { startChatRefresh } from '../../../../app/chat/chat-refresh.ts';
+import { Transcript } from '../../../../app/chat/transcript.tsx';
+import type { TranscriptHistoryControl } from '../../../../app/chat/transcript-history-row.tsx';
+import type { TranscriptEntry } from '../../../../app/chat/transcript-entries.ts';
+import type { TranscriptHistoryStatus } from '../../../../app/chat/transcript-history.ts';
+
+const params = new URLSearchParams(window.location.search);
+document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+
+declare global {
+  interface Window {
+    __holdOlder: () => void;
+    __releaseOlder: () => void;
+    __appendMessages: (count: number) => void;
+    __historyStatus: TranscriptHistoryStatus;
+    __pagesRead: number;
+  }
+}
+
+const TOTAL = 1_500;
+const STRIDE = 100;
+const DELAY_MS = 60;
+let count = TOTAL;
+
+const clock = (index: number): string =>
+  new Date(Date.UTC(2026, 9, 18, 0, 0, 0) + index * 7_000).toISOString().slice(11, 19);
+
+/** Record `index`: a question, an answer, or one of a run of tool calls and their results. */
+const record = (index: number): string => {
+  const at = `[${clock(index)}]`;
+  const turn = index % 10;
+  if (turn === 0) return `${at} user/message: Question ${String(index)}: what does step ${String(index)} change?`;
+  if (turn < 7)
+    return turn % 2 === 1
+      ? `${at} assistant/tool-call: Bash({"command":"rg -n step${String(index)} packages"})`
+      : `${at} tool/tool-result: ok`;
+  return `${at} assistant/message: Answer ${String(index)}. Step ${String(index)} changes the parser, and here is why it matters for the page it sits on.`;
+};
+
+let hold: { promise: Promise<void>; release: () => void } | undefined;
+/** The release of the last hold, kept after the page has taken the hold itself. */
+let release: () => void = () => undefined;
+window.__holdOlder = () => {
+  const promise = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  hold = { promise, release };
+};
+window.__releaseOlder = () => release();
+window.__pagesRead = 0;
+
+const logPage = async (_id: string, options: LogPageOptions = {}): Promise<LogPage> => {
+  if (options.before !== undefined) {
+    window.__pagesRead += 1;
+    await new Promise(resolve => setTimeout(resolve, DELAY_MS));
+    if (options.from === undefined && hold !== undefined) {
+      const held = hold;
+      hold = undefined;
+      await held.promise;
+    }
+  }
+  const limit = options.limit ?? 200;
+  const size = count * STRIDE;
+  const before = Math.min(options.before ?? size, size);
+  const from = options.from ?? 0;
+  const first = Math.ceil(from / STRIDE);
+  const end = Math.ceil(before / STRIDE);
+  const kept = Math.max(first, end - limit);
+  const lines: string[] = [];
+  for (let index = kept; index < end; index += 1) lines.push(record(index));
+  return {
+    v: 1,
+    sessionId: 's',
+    log: lines.join('\n'),
+    offsets: Array.from({ length: end - kept }, (_, index) => (kept + index) * STRIDE),
+    start: options.before === undefined || kept > first ? kept * STRIDE : from,
+    file: 'f1',
+  };
+};
+
+/** Every record that says `query`, as `log-search` answers: oldest first, by its record's byte. */
+const searchRecords = async (query: string, options: { readonly who: string; readonly tools: boolean }) => {
+  const needle = query.toLowerCase();
+  const matches: SessionLogSearch['matches'][number][] = [];
+  for (let index = 0; index < count; index += 1) {
+    const text = record(index);
+    const role = text.includes(' user/') ? 'user' : text.includes(' tool/') ? 'tool' : 'assistant';
+    const tool = text.includes('/tool-');
+    if (tool && !options.tools) continue;
+    if (options.who === 'me' && role !== 'user') continue;
+    if (options.who === 'agent' && role !== 'assistant') continue;
+    const body = text.slice(text.indexOf(': ') + 2);
+    const at = body.toLowerCase().indexOf(needle);
+    if (at >= 0) matches.push({ offset: index * STRIDE, role, kind: 'message', snippet: body });
+  }
+  return { v: 1 as const, sessionId: 's', query, file: 'f1', matches, truncated: false };
+};
+
+function Scene() {
+  const [entries, setEntries] = useState<readonly TranscriptEntry[]>([]);
+  const [status, setStatus] = useState<TranscriptHistoryStatus>('unavailable');
+  const [control, setControl] = useState<ReturnType<typeof startChatRefresh> | null>(null);
+  useEffect(() => {
+    const refresh = startChatRefresh({
+      api: {
+        logPage,
+        get: async () => ({ config: { id: 's' } }) as FerretView,
+      },
+      ferretId: 's',
+      environment: {
+        visible: () => true,
+        setInterval: () => 0,
+        clearInterval: () => undefined,
+        onVisibility: () => () => undefined,
+      },
+      onTranscript: setEntries,
+      onHistory: next => {
+        window.__historyStatus = next;
+        setStatus(next);
+      },
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+    setControl(refresh);
+    window.__appendMessages = added => {
+      count += added;
+      void refresh.refresh(true);
+    };
+    return () => refresh.stop();
+  }, []);
+  const transcript = useRef<HTMLDivElement | null>(null);
+  const search = useMemo<ChatSearchPort | undefined>(
+    () =>
+      control === null
+        ? undefined
+        : { search: searchRecords, reach: async (offset, file) => await control.loadUntil(offset, file) },
+    [control],
+  );
+  const history = useMemo<TranscriptHistoryControl>(
+    () => ({ status, loadOlder: () => void control?.loadOlder() }),
+    [control, status],
+  );
+  return (
+    <div className="kt-chat-surface scene-chat">
+      {params.get('search') === '1' && search !== undefined ? (
+        <ChatSearch agentName="Lizzette" onClose={() => undefined} port={search} transcript={transcript} />
+      ) : null}
+      <div className="scene-messages" ref={transcript}>
+        <Transcript agentName="Lizzette" daemonId="d" entries={entries} history={history} sessionId="s" />
+      </div>
+    </div>
+  );
+}
+
+const root = document.getElementById('root');
+if (root !== null) createRoot(root).render(<Scene />);

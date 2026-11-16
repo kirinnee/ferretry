@@ -1,0 +1,207 @@
+import { TerminalResizeFrameSchema, type TerminalSize } from '../../../contract/index.ts';
+
+/**
+ * The session layer's data-record budget (the kernel's `relayDataByteBudget(MAX_PLAINTEXT_BYTES)`, R82/R545): a
+ * 65,492-byte sealed plaintext less the `{"t":"data","bytes":""}` envelope, three bytes per four base64 characters.
+ * Restated here because the kernel's wire constants are not a contract export; the kernel test pins the same number.
+ */
+const MAX_TUNNEL_DATA_BYTES = Math.floor(((65_492 - '{"t":"data","bytes":""}'.length) * 3) / 4);
+
+/**
+ * Pure policy for one attached terminal stream.
+ *
+ * A viewer socket carries pane bytes downstream and two kinds of client frame upstream: binary
+ * frames are raw terminal input, text frames are bounded resize JSON. Everything in this module is
+ * a decision about those frames — framing limits, operation parsing, the input queue budget, and
+ * the backpressure limits for a viewer that falls behind, and the capture cadence. There is no IO, no timer, and no
+ * socket here: the caller owns the socket, the clock, and the terminal service, and applies the
+ * decisions this module returns.
+ */
+
+/** Client frame as delivered by the socket: text control JSON, or binary terminal input. */
+export type TerminalStreamFrame = string | ArrayBuffer | ArrayBufferView;
+
+/** Text control frames are small; anything larger is a protocol abuse rather than a resize. */
+export const TERMINAL_MAX_CONTROL_FRAME_BYTES = 16 * 1024;
+
+/** A single paste is the largest legitimate input frame. */
+export const TERMINAL_MAX_INPUT_FRAME_BYTES = 64 * 1024;
+
+/** Total unwritten client input tolerated while writes drain into the pane. */
+export const TERMINAL_MAX_QUEUED_INPUT_BYTES = 1024 * 1024;
+
+/** Downstream buffer above which a viewer counts as behind and stops receiving raw deltas. */
+export const TERMINAL_MAX_BUFFERED_OUTPUT_BYTES = 1024 * 1024;
+
+/** The ordinary interval between pane captures, and between re-tests of a behind viewer's socket. */
+export const TERMINAL_REDRAW_POLL_MS = 100;
+
+/**
+ * How soon after a keystroke reaches the pane its echo is captured: one delay per capture, in order,
+ * after which the ordinary {@link TERMINAL_REDRAW_POLL_MS} tick resumes.
+ *
+ * The poll alone made every keystroke wait for the next tick — about 100 ms, on any carrier, before
+ * the network was even involved — and a single capture pulled forward to 15 ms still spent those 15 ms
+ * waiting for an echo that a shell writes within a millisecond of its input. Input is the one moment a
+ * redraw is known to be wanted, so the first capture follows the write at once, and a program slower
+ * than a shell (an editor repainting, a completion menu) is caught by the next rungs rather than by the
+ * ordinary tick. Measured by `packages/pwa/harness/relay-terminal-bench.ts`; see
+ * `docs/relay-protocol.md` §14, "What a keystroke costs".
+ */
+export const TERMINAL_INPUT_REDRAW_LADDER_MS: readonly number[] = [0, 5, 15, 40];
+
+/**
+ * How much history a poll reads: enough to recognise what scrolled since the last frame, and no more.
+ *
+ * A poll used to read the pane's whole capture limit — two thousand lines — ten times a second, and
+ * after every keystroke, to find the one row that changed: on a used terminal that was most of the
+ * time between a keystroke and its echo. A delta needs only the newest lines it shares with the last
+ * frame, so a poll reads this many; output that scrolls further than this between two polls is
+ * redrawn completely, from a second capture of the whole limit (`TERMINAL_REATTACH_LINES`).
+ */
+export const TERMINAL_POLL_HISTORY_LINES = 200;
+
+/**
+ * The most bytes one redraw may be, so that one record can carry it.
+ *
+ * It is the §14 record budget itself, imported from the tunnel that owns it rather than restated: a
+ * redraw over it is one no carrier can deliver, and a carrier drops it — so a full redraw trims its
+ * history to fit instead (see `redraw.ts`).
+ */
+export const TERMINAL_MAX_REDRAW_BYTES = MAX_TUNNEL_DATA_BYTES;
+
+/** WebSocket close reasons this stream can produce, paired with their close codes. */
+export const TERMINAL_STREAM_CLOSES = {
+  viewerDisconnected: { code: 1000, reason: 'terminal viewer disconnected' },
+  invalidFrame: { code: 1008, reason: 'invalid terminal input' },
+  queueOverflow: { code: 1009, reason: 'terminal input queue exceeded' },
+  operationFailed: { code: 1011, reason: 'terminal operation failed' },
+  sendFailed: { code: 1011, reason: 'terminal output send failed' },
+  redrawFailed: { code: 1011, reason: 'terminal redraw failed' },
+  viewerUnavailable: { code: 1013, reason: 'terminal viewer unavailable' },
+} as const;
+
+export type TerminalStreamClose = (typeof TERMINAL_STREAM_CLOSES)[keyof typeof TERMINAL_STREAM_CLOSES];
+
+/** A client frame reduced to the operation the terminal service must perform. */
+export type TerminalOperation =
+  | { readonly kind: 'input'; readonly bytes: Uint8Array }
+  | { readonly kind: 'resize'; readonly size: TerminalSize };
+
+/** An operation plus the byte weight charged against the input queue budget until it completes. */
+export interface TerminalChargedOperation {
+  readonly operation: TerminalOperation;
+  readonly bytes: number;
+}
+
+export type TerminalFrameDecision =
+  | { readonly outcome: 'accepted'; readonly charged: TerminalChargedOperation }
+  | { readonly outcome: 'rejected'; readonly close: TerminalStreamClose };
+
+export type TerminalQueueDecision =
+  | { readonly outcome: 'queued'; readonly queuedBytes: number }
+  | { readonly outcome: 'rejected'; readonly close: TerminalStreamClose };
+
+export type TerminalSendDecision =
+  | { readonly outcome: 'sent' }
+  | { readonly outcome: 'rejected'; readonly close: TerminalStreamClose };
+
+/**
+ * UTF-8 size of `value`, counted without allocating an encoded copy.
+ *
+ * Framing limits must be cheap to enforce: the size of a frame is the reason to reject it, so
+ * encoding it first would let an oversized frame cost memory before it is refused.
+ */
+export function utf8ByteLength(value: string): number {
+  let total = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const unit = value.charCodeAt(index);
+    if (unit < 0x80) {
+      total += 1;
+    } else if (unit < 0x800) {
+      total += 2;
+    } else if (unit >= 0xd800 && unit <= 0xdbff && index + 1 < value.length) {
+      const low = value.charCodeAt(index + 1);
+      if (low >= 0xdc00 && low <= 0xdfff) {
+        total += 4;
+        index += 1;
+      } else {
+        total += 3;
+      }
+    } else {
+      total += 3;
+    }
+  }
+  return total;
+}
+
+function rejected(close: TerminalStreamClose): { readonly outcome: 'rejected'; readonly close: TerminalStreamClose } {
+  return { outcome: 'rejected', close };
+}
+
+function view(frame: Exclude<TerminalStreamFrame, string>): Uint8Array {
+  if (ArrayBuffer.isView(frame)) return new Uint8Array(frame.buffer, frame.byteOffset, frame.byteLength);
+  return new Uint8Array(frame);
+}
+
+function parseInputFrame(frame: Exclude<TerminalStreamFrame, string>): TerminalFrameDecision {
+  const bytes = view(frame);
+  if (bytes.byteLength > TERMINAL_MAX_INPUT_FRAME_BYTES) return rejected(TERMINAL_STREAM_CLOSES.invalidFrame);
+  // Copy: the socket owns the delivered buffer and may reuse it before the write is serialised.
+  return {
+    outcome: 'accepted',
+    charged: { operation: { kind: 'input', bytes: bytes.slice() }, bytes: bytes.byteLength },
+  };
+}
+
+function parseControlFrame(frame: string): TerminalFrameDecision {
+  const bytes = utf8ByteLength(frame);
+  if (bytes > TERMINAL_MAX_CONTROL_FRAME_BYTES) return rejected(TERMINAL_STREAM_CLOSES.invalidFrame);
+  let json: unknown;
+  try {
+    json = JSON.parse(frame);
+  } catch {
+    return rejected(TERMINAL_STREAM_CLOSES.invalidFrame);
+  }
+  const parsed = TerminalResizeFrameSchema.safeParse(json);
+  if (!parsed.success) return rejected(TERMINAL_STREAM_CLOSES.invalidFrame);
+  const { cols, rows } = parsed.data;
+  return { outcome: 'accepted', charged: { operation: { kind: 'resize', size: { cols, rows } }, bytes } };
+}
+
+/**
+ * Reduce one client frame to the operation it requests.
+ *
+ * Binary frames are raw input, bounded by {@link TERMINAL_MAX_INPUT_FRAME_BYTES}. Text frames are
+ * resize control JSON, bounded by {@link TERMINAL_MAX_CONTROL_FRAME_BYTES} and validated against
+ * the wire schema, so a resize outside the supported geometry is refused here rather than reaching
+ * the pane. Every rejection closes the stream: a client that cannot frame correctly cannot be
+ * trusted to keep driving a terminal.
+ */
+export function parseTerminalFrame(frame: TerminalStreamFrame): TerminalFrameDecision {
+  return typeof frame === 'string' ? parseControlFrame(frame) : parseInputFrame(frame);
+}
+
+/**
+ * Admit a parsed frame into the write queue, or refuse it when the client is producing input
+ * faster than the pane can consume it.
+ */
+export function admitTerminalFrame(queuedBytes: number, frameBytes: number): TerminalQueueDecision {
+  const queued = queuedBytes + frameBytes;
+  if (queued > TERMINAL_MAX_QUEUED_INPUT_BYTES) return rejected(TERMINAL_STREAM_CLOSES.queueOverflow);
+  return { outcome: 'queued', queuedBytes: queued };
+}
+
+/** Return the queue budget a completed (or failed) operation was holding. */
+export function releaseTerminalFrame(queuedBytes: number, frameBytes: number): number {
+  return Math.max(0, queuedBytes - frameBytes);
+}
+
+/**
+ * Interpret a downstream send result. Sockets that report a negative written count have gone away
+ * even though no error was thrown.
+ */
+export function decideTerminalSend(sent: number | undefined): TerminalSendDecision {
+  if (typeof sent === 'number' && sent < 0) return rejected(TERMINAL_STREAM_CLOSES.viewerUnavailable);
+  return { outcome: 'sent' };
+}

@@ -8,8 +8,8 @@ set -euo pipefail
 # synchronous `fsync` there had measured 38 s before. Async calls run on the runtime's I/O threads, so the
 # loop keeps answering while the disk is slow.
 #
-# HOW. `no-sync-io.ts` parses every tracked TypeScript file under `packages/daemon/src`, `packages/daemon/bin`
-# and `packages/fleet/src` (the fleet library runs inside the daemon) and counts each use of a blocking
+# HOW. `no-sync-io.ts` parses every tracked TypeScript file of a daemon half (`packages/core/*/daemon`,
+# `packages/plugins/*/daemon`) and of the kernel host (`packages/core/kernel/host`), and counts each use of a blocking
 # function as a value — nested calls, `fs.x()`, `x.native()` and references handed on included — and refuses
 # any import or destructuring that binds one to another name. Its header says exactly what counts and why a
 # regular expression was not enough.

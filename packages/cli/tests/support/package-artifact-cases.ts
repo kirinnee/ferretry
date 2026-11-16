@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { CommandPackageManagers } from '../../src/adapters/update/package-managers';
-import type { CommandOutcome } from '../../src/lib/daemon/ports';
+import { CommandPackageManagers } from '../../src/adapters/update/package-managers.ts';
+import type { CommandOutcome } from '../../src/lib/update/machine.ts';
 
 const SOURCE = 'github:kirinnee/ferretry';
 const REV = 'a'.repeat(40);

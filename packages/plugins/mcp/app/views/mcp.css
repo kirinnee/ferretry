@@ -1,0 +1,28 @@
+/* MCP's own small controls: the scope chip on a server row and the inline link a list header offers. */
+.fy-mcp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 7px;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-meta, 12px);
+  line-height: 18px;
+}
+.fy-mcp-chip[data-tone='accent'] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-mcp-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}

@@ -1,0 +1,286 @@
+[
+  {
+    "today": "machine",
+    "words": "agents may now control terminals"
+  },
+  {
+    "today": "machine",
+    "words": "agents may now control browsers"
+  },
+  {
+    "today": "machine",
+    "words": "agents may now control project files"
+  },
+  {
+    "today": "machine",
+    "words": "agents may now control Ferretry settings"
+  },
+  {
+    "today": "machine",
+    "words": "agents may now control page scripts"
+  },
+  {
+    "today": "machine",
+    "words": "agents now skip every permission prompt"
+  },
+  {
+    "today": "machine",
+    "words": "budgets now reset in ${after.machine.timeZone ?? \"the host's time zone\"} instead of ${before.machine.timeZone ?? \"the host's time zone\"}"
+  },
+  {
+    "today": "machine",
+    "words": "any process on this host can now read quota percentages and account labels without a credential"
+  },
+  {
+    "today": "machine",
+    "words": "the agent browser now sends its traffic through the proxy at ${after.url}"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now spend on Jev decisions"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now spend on AI investigations"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now nudge a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now resume a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now restart a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now move a ferret to another login on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now stop a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now close a browser a finished ferret left running on its own"
+  },
+  {
+    "today": "warden",
+    "words": "how sure Jev must be to nudge a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "how sure Jev must be to resume a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "how sure Jev must be to restart a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "how sure Jev must be to stop a ferret on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the daily Jev cap in dollars"
+  },
+  {
+    "today": "warden",
+    "words": "the daily investigation cap in dollars"
+  },
+  {
+    "today": "warden",
+    "words": "the investigations allowed per hour"
+  },
+  {
+    "today": "warden",
+    "words": "the Jev price the cap counts with"
+  },
+  {
+    "today": "warden",
+    "words": "the number of wardens that may run at once"
+  },
+  {
+    "today": "warden",
+    "words": "the minutes between Warden sweeps"
+  },
+  {
+    "today": "warden",
+    "words": "the minutes between two Warden investigations"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden now also moves a ferret whose login hit a usage limit"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden now also moves a ferret whose login passed its hard spend budget"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now move a ferret that hit a limit to another login on its own"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now stop a ferret's own background jobs to move it"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now move ferrets onto ${target}"
+  },
+  {
+    "today": "warden",
+    "words": "the Warden may now move ferrets onto any ready login of the same harness and provider"
+  },
+  {
+    "today": "warden",
+    "words": "the moves one ferret may get in an hour"
+  },
+  {
+    "today": "warden",
+    "words": "the share a login must have left to be moved onto"
+  },
+  {
+    "today": "learning",
+    "words": "lesson mining may now spend on agent sessions"
+  },
+  {
+    "today": "learning",
+    "words": "the lesson miners one run may start"
+  },
+  {
+    "today": "learning",
+    "words": "the sessions one lesson run may read"
+  },
+  {
+    "today": "learning",
+    "words": "the sessions one lesson miner reads"
+  },
+  {
+    "today": "learning",
+    "words": "the minutes between lesson runs"
+  },
+  {
+    "today": "learning",
+    "words": "the minutes between two lesson miners"
+  },
+  {
+    "today": "pack",
+    "words": "ferrets may now start sub-ferrets (Pack mode)"
+  },
+  {
+    "today": "pack",
+    "words": "Jev may now spend on choosing sub-ferret models"
+  },
+  {
+    "today": "pack",
+    "words": "the sub-ferrets an interactive ferret may run at once"
+  },
+  {
+    "today": "pack",
+    "words": "the sub-ferrets an unattended ferret may run at once"
+  },
+  {
+    "today": "pack",
+    "words": "how deep sub-ferrets may nest"
+  },
+  {
+    "today": "pack",
+    "words": "Jev's daily cap in dollars for choosing models"
+  },
+  {
+    "today": "voice",
+    "words": "the login ${to.login ?? ''}"
+  },
+  {
+    "today": "voice",
+    "words": "dictated text now goes to ${destination} to be cleaned up"
+  },
+  {
+    "today": "voice",
+    "words": "recent conversation messages may now go to the cleanup provider to help clean up dictation"
+  },
+  {
+    "today": "accountDefaults",
+    "words": "changes which account a card offers first for ${line.key} in ${accountDefaultScopeWords(line)}"
+  },
+  {
+    "today": "login",
+    "words": "login \"${id}\"'s ${period} ${level === 'hard' ? 'hard limit' : 'trigger'} in dollars"
+  },
+  {
+    "today": "login",
+    "words": "${what} is removed (was ${String(was)})"
+  },
+  {
+    "today": "runtime",
+    "words": "runtime \"${name}\" is removed from login \"${before.credential}\", whose budget counts and stops it"
+  },
+  {
+    "today": "runtime",
+    "words": "runtime \"${name}\" moves off login \"${before.credential}\", whose budget counts and stops it, to \"${after.credential}\""
+  },
+  {
+    "today": "limits",
+    "words": "ferret limits are switched off, so ferrets may take all of the machine"
+  },
+  {
+    "today": "limits",
+    "words": "ferrets no longer run at a lower disk priority"
+  },
+  {
+    "today": "limits",
+    "words": "${words} was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the CPU weight of all ferrets together was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the soft memory limit for all ferrets together was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the hard memory limit for all ferrets together was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the swap all ferrets together may use was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the processes all ferrets together may run was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the CPU share all ferrets together may use was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the CPU weight of each ferret was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the CPU weight of a ferret you started was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the soft memory limit of each ferret was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the hard memory limit of each ferret was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the processes each ferret may run was raised"
+  },
+  {
+    "today": "limits",
+    "words": "the CPU share each ferret may use was raised"
+  }
+]

@@ -1,0 +1,52 @@
+{
+  "name": "@ferretry/app",
+  "version": "5.0.0",
+  "private": true,
+  "description": "The app shell: router, layout engine, slots, theme tokens, sealed session client, reference grammar. Holds no feature.",
+  "type": "module",
+  "compositionRoots": [
+    "src/main.tsx",
+    "src/worker/service-worker.ts"
+  ],
+  "exports": {
+    ".": "./src/index.ts",
+    "./ui": "./src/ui/index.ts",
+    "./testing": "./src/testing/index.ts",
+    "./testing/router": "./src/testing/router.tsx",
+    "./worker-facts": "./src/worker/facts.ts",
+    "./testing/browser": "./tests/support/browser/index.ts"
+  },
+  "scripts": {
+    "dev": "bun run build:fy-render-shell && vite",
+    "build:fy-render-shell": "bun run scripts/build-fy-render-libs.ts",
+    "build": "bun run build:fy-render-shell && vite build && bun run --cwd ../plugins/logins publish:model-catalog ../../app/dist && bun run scripts/build-release.ts",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ferretry/kernel": "workspace:*",
+    "@ferretry/plugin-conversation": "workspace:*",
+    "@ferretry/plugin-layouts": "workspace:*",
+    "highlight.js": "^11.11.1",
+    "lucide-react": "^0.468.0",
+    "qrcode-generator": "^2.0.4",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "autoprefixer": "^10.4.20",
+    "lottie-web": "5.13.0",
+    "mermaid": "11.16.1",
+    "playwright-core": "1.62.1",
+    "postcss": "^8.4.49",
+    "react-test-renderer": "^19.0.0",
+    "tailwindcss": "^3.4.16",
+    "vite": "^8.2.0"
+  }
+}

@@ -1,0 +1,15 @@
+
+  Done. The queue now delivers in order.
+
+✻ Worked for 4m 2s · done 10:03 AM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ [message · from :ireland · peer · 520e638b]
+  Please keep the queue ordering as v4, like this:
+  > keep the queue ordering as v4
+  and tell me when the change is in.
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry
+  ⏱ 12m │ 📊 22% (220k/1M) │ 💰 $3.10
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+

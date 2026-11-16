@@ -1,0 +1,47 @@
+{
+  "name": "@ferretry/kernel",
+  "version": "5.0.0",
+  "private": true,
+  "description": "The core host and the plugin SDK: the contract leaf, the manifest SDK, the test host and the daemon host",
+  "type": "module",
+  "bin": {
+    "fyd": "host/fyd.ts"
+  },
+  "ferretry": {
+    "id": "kernel",
+    "manifest": "./plugin.ts"
+  },
+  "exports": {
+    "./contract": "./contract/index.ts",
+    "./contract/home-port": "./contract/home-port.ts",
+    "./contract/push-envelope": "./contract/push-envelope.ts",
+    "./contract/hosted-app": "./contract/hosted-app.ts",
+    "./contract/notification-filter": "./contract/notification-filter.ts",
+    "./manifest": "./manifest/index.ts",
+    "./testing": "./testing/index.ts",
+    "./host": "./host/index.ts",
+    "./plugin": "./plugin.ts",
+    "./wire": "./wire.ts",
+    "./session": "./session.ts",
+    "./worker": "./worker.ts",
+    "./app": "./app/index.ts"
+  },
+  "dependencies": {
+    "@ferretry/std": "workspace:*",
+    "zod": "4.4.3",
+    "react": "^19.0.0",
+    "lucide-react": "^0.468.0"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@ferretry/app": "workspace:*",
+    "@happy-dom/global-registrator": "^20.11.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-test-renderer": "^19.0.0",
+    "@types/react-test-renderer": "^19.0.0",
+    "happy-dom": "20.14.6",
+    "playwright-core": "1.62.1"
+  }
+}

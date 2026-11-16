@@ -6,9 +6,9 @@ import {
   type SystemPackageManager,
   storePathHops,
   symlinkHops,
-} from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../../lib/daemon/binary.ts';
-import type { CommandOutcome } from '../../lib/daemon/ports.ts';
+} from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from '../../lib/update/machine.ts';
+import type { CommandOutcome } from '../../lib/update/machine.ts';
 import type { IInstallFactsPort } from '../../lib/update/ports.ts';
 
 /** Run a command, give it `timeoutMs`, and answer what it said. A missing command is exit 127. */

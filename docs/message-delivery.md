@@ -56,7 +56,7 @@ this page, which is still how a message reaches the pane.
   tracker (`QueueTransport.recheck` → `SendTracker.check`), at most once per `recheckMs` per session, so a
   hand-over nothing else is watching cannot hold the queue ([below](#b153-a-send-that-gave-up-before-its-first-key)).
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
-  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
+  start). On, `POST /v1/ferrets/:ferretId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
   path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
   into the text, and nothing else is: no board news rides on it, on top or as a message of its own. The route then waits, up to
@@ -178,8 +178,8 @@ this page, which is still how a message reaches the pane.
   or delivered. A message that needs the person (failed, refused, unconfirmed, typed but not sent) is not
   waiting and stays in the chat.
 
-- **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
-- **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
+- **Read it** — `GET /v1/ferrets/:ferretId/queue` (operator), `fy queue <ferret> [--json]`.
+- **Edit or cancel** — only while `queued`: `PATCH /v1/ferrets/:ferretId/queue/:messageId` `{ "text" }` and
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
 <ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
   the agent's, and either answers `409`.
@@ -662,7 +662,7 @@ turn bookkeeping) is started then, so the next send does not claim the same turn
 **Anything else is the person's, and is refused.** The send answers `409 composer_occupied` with the
 draft quoted in the message ("Press Enter on it or clear it first") and the whole draft in the body's
 `draft` field. The app shows that as a notice under its composer with **Send it** and **Clear it**; each
-calls `POST /v1/sessions/:id/composer` with `{ action: 'submit' | 'clear', draft }`, which acts only while
+calls `POST /v1/ferrets/:ferretId/composer` with `{ action: 'submit' | 'clear', draft }`, which acts only while
 the composer still holds exactly that draft (`changed` otherwise), and the app then re-sends the person's
 own message. The terminal makes the same occupied check again immediately before its first keystroke; a
 refusal there withdraws the just-accepted record, which is honest because nothing was typed.
@@ -806,8 +806,8 @@ ended. Every later message to either waited, the Warden called both `healthy`, a
 four fixes:
 
 1. **The tracker never looked at an unconfirmed send's composer.** It skipped every send that was not open, so
-   a `landing_unconfirmed` send whose keys arrived late got no Enter. Now, for up to `strandedWatchMs`
-   (10 min) after its typing, such a send's composer is looked at (every `busyExtensionMs` while the text is not
+   a `landing_unconfirmed` send whose keys arrived late got no Enter. Now, from its typing on (every `busyExtensionMs` for `strandedWatchMs`, then on the B187 back-off below)
+   such a send's composer is looked at (while the text is not
    there), and its own text found there gets the same bounded, verified nudges. An Enter that takes re-opens it
    (`entered`) and starts the turn it carried; the transcript then proves it. A message typed as itself is now
    nudged too (above), which is braelynn's.
@@ -856,6 +856,34 @@ Jev, an investigation or the spawn fingerprint.
 `stuckInput` list (`WardenStuckInputFlagSchema`), never in `anomalies`: an app or CLI built before the kind
 existed parses `anomalies` against a closed list, and one unknown kind there rejected the whole status. A
 newer reader shows both (`wardenFlags`). For the same reason the kind is never put on a blessing.
+
+## B187: a stranded direct send that nobody looked at again
+
+nelly was blocked for two days with the daemon's own two-line direct send typed in its box, unsubmitted: the fill
+had settled it `unaccounted` (`landing_unconfirmed`), the pane drew it after the 10-minute look (`strandedWatchMs`)
+had ended, so nothing ever pressed Enter; later Claude wrote its idle-compaction summary, which with text in the box
+pinned `turnState` at `working`, so no Warden check could fire either. Fixes (one change per link of the chain):
+
+- **No blind spot (A3).** `strandedWatchMs` ends the FAST look cadence (`busyExtensionMs`), not the watch: past it an
+  unconfirmed send never seen in the box is looked at on a back-off that doubles from 60 s to
+  `strandedBackoffMaxMs` (10 min) for as long as the send is watched at all (`holdLimitMs`). A turn boundary also
+  asks for a look (`turns.look`), so an idle your-turn is looked at at once.
+- **One Enter, then raise (A4).** An unconfirmed send first seen in the box past its whole Enter schedule gets
+  exactly ONE verified `resubmit`, not the three that are all overdue. If its text is still there `typedStableMs`
+  after that Enter, it is RAISED: it keeps `typedNotSent`, its reason becomes **`typed_not_submitted`** (a new value of
+  the unaccounted reason on the wire; the app names it "it is typed into the agent’s box but was not sent: the Enter
+  did not take"), and the journal gets `control.send_stranded {sendId}`. Raised once, never pressed again by the tracker.
+- **Compaction is not turn work (B1).** A Claude `isCompactSummary` user record is skipped by `parseTail`, like
+  `compact_boundary`.
+- **An idle prompt with a draft is an idle prompt (B2).** The turn look's `atPrompt` is "an idle composer is drawn,
+  with no working line, dialog or permission" whatever the box holds (`idlePromptShown`); `promptReady` — "a send
+  would be accepted" — is unchanged.
+- **The reader (A1).** In a ruled Claude composer the prompt line is the row under the upper flush-left rule; a
+  prompt-shaped row indented under it (a quoted `> …` body line) is a continuation, and only a flush-left rule
+  closes the draft, so a body line starting `└` or `───` no longer cuts it short.
+- **The Warden (C1–C3).** `input_stuck` and `inbox_stuck` run in the sweep; a queue behind a `working` turn whose frame
+  has been quiet past the urgency limit is `turn_never_ends`; `input_stuck` accepts a `working` ferret whose
+  `typedNotSent` is fresh (its press is the verified `resubmit`, which already refuses a busy pane).
 
 ## B148: a ferret whose inbox is stuck
 
@@ -957,7 +985,7 @@ acceptance order, written after the first was accepted.
 
 ### A row only moves when the ledger is read
 
-The app learns a fate from one thing: a successful `GET /v1/sessions/:id/sends`, polled every 3 s. So
+The app learns a fate from one thing: a successful `GET /v1/ferrets/:ferretId/sends`, polled every 3 s. So
 everything between the person and that answer must end, and must say so when it fails:
 
 - **The page is read by the app, not by the typed client.** `IFyApiClient.sends` validates the page
@@ -985,7 +1013,7 @@ everything between the person and that answer must end, and must say so when it 
 
 Every undelivered row (sending, queued, typed-not-sent, unconfirmed, not delivered) offers:
 
-- **Cancel** — `POST /v1/sessions/:id/sends/:sendId/cancel`. The record becomes `cancelled` and is never
+- **Cancel** — `POST /v1/ferrets/:ferretId/sends/:sendId/cancel`. The record becomes `cancelled` and is never
   retyped or settled again. If the composer holds exactly that message it is erased with `C-u`, one key
   per verified read (two per line; `BSpace` is never sent, because after a join it deletes a real
   character); if the composer holds anything else as well, it is left alone (`left_in_composer`). A
@@ -1012,7 +1040,7 @@ are governed exactly as the send and its retry are. Each is journalled (`control
 text.
 
 When a send is refused because the composer holds the person's OWN text, the notice under the app's
-composer offers **Send it** and **Clear it** — `POST /v1/sessions/:id/composer` with the quoted draft.
+composer offers **Send it** and **Clear it** — `POST /v1/ferrets/:ferretId/composer` with the quoted draft.
 That route is not a send: no ledger row is behind it and the text is not Ferretry's, so it is governed
 as every other key into the agent's pane is, `terminal` / `use` ([grants.md](grants.md)), journalled
 `control.composer_submitted` / `control.composer_cleared` with the outcome only, and audited as

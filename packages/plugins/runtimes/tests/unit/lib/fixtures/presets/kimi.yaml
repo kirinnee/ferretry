@@ -1,0 +1,39 @@
+# Kimi (Moonshot AI) for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
+label: Kimi / Moonshot
+summary: Claude Code and Codex on Kimi models with one Moonshot platform key (platform.kimi.ai; keys from platform.kimi.com are a separate system).
+group: popular
+docs: https://platform.kimi.ai/docs/guide/claude-code-kimi
+verified: '2026-10-16'
+catalog: kimi
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://api.moonshot.ai/anthropic
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: MOONSHOT_API_KEY
+    CLAUDE_CODE_AUTO_COMPACT_WINDOW:
+      value: '1000000'
+      required: false
+codex:
+  docs: https://platform.kimi.ai/docs/guide/codex-kimi
+  env:
+    KIMI_API_KEY:
+      secretName: MOONSHOT_API_KEY
+  codexProvider:
+    id: kimi
+    name: Kimi
+    baseUrl: https://api.moonshot.ai/v1
+    keyVariable: KIMI_API_KEY
+    model: kimi-k3
+test:
+  kind: request
+  url: https://api.moonshot.ai/v1/models
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Lists the models the key can use. Spends nothing.
+quota:
+  source: moonshot-balance
+  note: Your Moonshot account balance, in US dollars.
+pricing: moonshot
+detect:
+  hosts: [api.moonshot.ai, api.moonshot.cn]
+  variables: [MOONSHOT_*, KIMI_*]

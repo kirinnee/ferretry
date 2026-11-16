@@ -5,15 +5,15 @@ import {
   type InstallMethod,
   knownLatestRelease,
   type UpdatePlan,
-} from '@ferretry/protocol';
-import type { InstalledDaemonBinary } from '../daemon/binary.ts';
+} from '@ferretry/plugin-updates/contract';
+import type { InstalledDaemonBinary } from './machine.ts';
 import type { IDaemonUpdateViewPort, IInstallFactsPort } from './ports.ts';
 
 /** What `fy daemon status` adds about installing and updating. */
 export interface DaemonUpdateStatus {
   /** How the installed daemon got here; absent when there is no installed daemon to ask about. */
   readonly install: InstallMethod | undefined;
-  /** The serving daemon's update view; absent when nothing serves, or it is too old to have one. */
+  /** The serving daemon's update view; absent when nothing serves. */
   readonly update: DaemonUpdateView | undefined;
 }
 
@@ -52,6 +52,6 @@ export function renderUpdateStatus(status: DaemonUpdateStatus, clientName: strin
 
 /** The one command a person runs next for this plan. */
 export function nextStep(plan: UpdatePlan, clientName: string): string {
-  if (plan.kind === 'self') return `${clientName} daemon update`;
+  if (plan.kind === 'self') return `${clientName} update`;
   return plan.steps[0]?.command ?? plan.explanation;
 }

@@ -11,7 +11,7 @@ runtime on a third-party provider is given the catalog as the list its own `/mod
 
 ## What a catalog says
 
-One YAML file per provider, `packages/fleet/models/<id>.yaml`:
+One YAML file per provider, `packages/plugins/logins/daemon/data/models/<id>.yaml`:
 
 ```yaml
 label: GLM / Z.ai
@@ -153,7 +153,7 @@ Codex, run both:
 
 ## Changing the list
 
-**For everyone:** edit `packages/fleet/models/<id>.yaml`, check it against the provider's documentation,
+**For everyone:** edit `packages/plugins/logins/daemon/data/models/<id>.yaml`, check it against the provider's documentation,
 update `verified:` and `unverified:`, and merge. Every paired daemon follows it within hours, without a release (§ Live updates).
 
 **On one machine:** write `$FY_HOME/config/models/<id>.yaml` with the same shape (start from the
@@ -166,14 +166,14 @@ a new id is a catalog for a preset of the machine's own (`catalog: <id>` in its 
 A model list changes without a release: Ferretry publishes the catalogs with the hosted app, and every
 paired daemon follows them.
 
-**Publishing.** The hosted app's build (`packages/pwa/scripts/build-model-catalog.ts`, run by
+**Publishing.** The hosted app's build (Logins' `packages/plugins/logins/scripts/publish-model-catalog.ts`, chained by `packages/app`'s `bun run build` and run by
 `pwa-pages.yaml` on every push to `main`) writes two files beside the app:
 
 - `https://ferretry.pages.dev/catalog/version.json` — `{ "version": N }`;
 - `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … }, "prices": { … } }`,
-  every `packages/fleet/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices).
+  every `packages/plugins/logins/daemon/data/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices).
 
-`N` is the number of commits that changed `packages/fleet/models/`, so it moves exactly when a catalog
+`N` is the number of commits that changed `packages/plugins/logins/daemon/data/models/`, so it moves exactly when a catalog
 does (the Pages build checks out the full history for it, and fails rather than publish from a shallow
 one). Both files are listed in the app's **signed release list** ([pwa-release-signing.md](pwa-release-signing.md)),
 so `catalog/models.json` carries the same Ed25519 signature the app's own files do — no second key.
@@ -206,7 +206,7 @@ preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferret
 
 ### How to update the model list
 
-1. Edit `packages/fleet/models/<id>.yaml`: check each id against the provider's documentation, update
+1. Edit `packages/plugins/logins/daemon/data/models/<id>.yaml`: check each id against the provider's documentation, update
    `verified:`, and say what you could not confirm in `unverified:`.
 2. `bun test packages/fleet/tests/unit/models.test.ts` — every preset must still have a catalog with
    models, exactly one default per CLI, and tier pins that name its models.
@@ -386,3 +386,11 @@ changes nothing.
   `modelCatalogRates`; the hosted app deploys before any release does, so this is a stale tab — reload it.
 - **Bedrock ids are the US inference profiles** (`us.anthropic.…`). A login whose `AWS_REGION` is outside
   the US needs the `eu.`, `au.`, `jp.` or `global.` ids, in `config/models/amazon-bedrock.yaml`.
+
+## Third-party ids in a model set
+
+A model id that neither Claude Code nor Codex claims (`kimi-k3`, `glm-5.3`, `deepseek-…`) fits whichever
+harness the login drives, so a model set holding it applies on that runtime and, as the later layer, wins over
+an earlier Claude set (the profile shows the override as a conflict). Only ids a harness claims
+(`claude-…`/aliases, `gpt-…`/`codex-…`/`o<n>`) are filtered by harness. One owner: `modelFitsHarness` in
+`layering.ts`.

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const config = Bun.YAML.parse(readFileSync('.pre-commit-config.yaml', 'utf8')) as {
   repos: { hooks: { id: string; stages?: string[] }[] }[];
 };
-const deferred = new Set(['a-deadcode', 'a-deadcode-production', 'a-route-agreement']);
+const deferred = new Set(['a-deadcode', 'a-deadcode-production']);
 const mode = Bun.argv[2];
 if (mode !== 'quick' && mode !== 'full') throw new Error('usage: gate-hooks.ts quick|full');
 for (const repo of config.repos) {

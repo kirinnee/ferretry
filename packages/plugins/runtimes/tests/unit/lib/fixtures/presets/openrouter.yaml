@@ -1,0 +1,41 @@
+# OpenRouter for Claude Code (its Anthropic-compatible endpoint) and Codex (its Responses endpoint): one key, both CLIs.
+label: OpenRouter
+summary: Claude Code and Codex through OpenRouter with one key, on Anthropic and OpenAI models or any other it routes to.
+group: popular
+docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
+verified: '2026-10-16'
+catalog: openrouter
+claude:
+  env:
+    ANTHROPIC_BASE_URL:
+      value: https://openrouter.ai/api
+    ANTHROPIC_AUTH_TOKEN:
+      secretName: OPENROUTER_API_KEY
+    ANTHROPIC_API_KEY:
+      value: ''
+      allowEmpty: true
+      description: deliberately empty, so the OpenRouter key is the one sent
+codex:
+  docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
+  env:
+    OPENROUTER_API_KEY:
+      secretName: OPENROUTER_API_KEY
+  codexProvider:
+    id: openrouter
+    name: OpenRouter
+    baseUrl: https://openrouter.ai/api/v1
+    keyVariable: OPENROUTER_API_KEY
+    model: ~openai/gpt-sol-latest
+test:
+  kind: request
+  url: https://openrouter.ai/api/v1/key
+  keyVariable: ANTHROPIC_AUTH_TOKEN
+  note: Reads the key's limit and what it has used. Spends nothing.
+quota:
+  source: openrouter-key
+  note: The key's credit limit and what it has used.
+pricing: openrouter
+detect:
+  hosts: [openrouter.ai]
+  variables: [OPENROUTER_*]
+  keyPrefixes: [sk-or-]

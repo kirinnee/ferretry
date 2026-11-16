@@ -1,0 +1,14 @@
+{
+  "name": "@ferretry/connections-worker",
+  "version": "5.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone Cloudflare rendezvous and tunnel control, owned by Connections",
+  "exports": {
+    ".": "./src/lib/index.ts",
+    "./adapters": "./src/adapters/index.ts"
+  },
+  "dependencies": {
+    "zod": "4.4.3"
+  }
+}

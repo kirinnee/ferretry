@@ -1,0 +1,382 @@
+/**
+ * SOLE OWNER of the `fy:voice:stt-settings` browser-storage key.
+ *
+ * Ported from kteam `ui/src/lib/stt/stt-settings.ts`, which kept the same rules
+ * around a module-level singleton and a `kteam-stt-v1` key.
+ *
+ * Kept from kteam, deliberately:
+ *   - VERSIONED. The record carries `format: 1`. A payload of any other format
+ *     is discarded rather than half-read, which is a clean slate
+ *     instead of a crash on a shape it has never seen. There is no older format
+ *     to read: a different format resets to the defaults (clean slate), and a missing
+ *     or malformed field inside format 1 takes its default, field by field.
+ *   - DEFENSIVE AND CAPPED. Any malformed, wrong-version, oversized or hostile
+ *     payload degrades to the defaults, field by field. Parsing never throws.
+ *   - STORAGE DENIAL IS NORMAL. Private windows, disabled storage and quota
+ *     exhaustion all throw from `localStorage`. Every access here is wrapped; a
+ *     refused write leaves `persisted` false and the app carries on with
+ *     in-memory settings rather than losing the reader's session to a settings
+ *     save.
+ *   - NORMALISE ON THE WAY IN. A caller cannot persist an out-of-range shape
+ *     that only the parser would have caught on the way back out.
+ *
+ * WHAT CHANGED — these settings are DEVICE-lifetime, not daemon-scoped, and
+ * that is a decision rather than an oversight. Nothing in the record is
+ * daemon-derived: the microphone, the push-to-talk chord, the reader's
+ * dictionary and their jargon belong to the person and the machine, and would
+ * be wrong to reset when a second daemon is paired. `enhancementProvider` names
+ * a KIND of enhancer, not a daemon; when it is `groq` the request goes to
+ * whichever daemon owns the live session, resolved from that session's
+ * `DaemonConnection` at call time (see `remote-enhancement.ts`), never from
+ * anything stored here. No provider credential is stored here or anywhere else
+ * in the browser.
+ *
+ * Nothing reads kteam's key or its v1–v4 payloads: no
+ * Ferretry bundle ever wrote them, so a kteam-shaped blob is a clean reset.
+ *
+ * The store is an ordinary object with injected storage rather than a module
+ * singleton, so a test never touches a real `localStorage` and two suites
+ * cannot see each other's writes.
+ */
+
+import {
+  DEFAULT_DICTATION_SHORTCUT,
+  type DictationShortcutBinding,
+} from '../../features/settings/dictation-shortcut.ts';
+import { type DictionaryParse, MAX_USER_CONTEXT_CHARS, parseDictionary } from './enhancement.ts';
+import { ON_DEVICE_MODEL_IDS, type OnDeviceModelId } from './model-catalog.ts';
+import { STT_SETTINGS_STORAGE_KEY } from '../storage-names.ts';
+
+export const STT_SETTINGS_KEY = STT_SETTINGS_STORAGE_KEY;
+export const STT_SETTINGS_FORMAT = 1;
+
+/**
+ * Dictionary caps, mirrored from `enhancement.ts` so a textarea can refuse
+ * before the parser has to.
+ */
+export const MAX_DICTIONARY_LINES = 200;
+export const MAX_DICTIONARY_LINE_LENGTH = 160;
+export const MAX_ENHANCEMENT_MODEL_CHARS = 120;
+
+export const ENHANCEMENT_PROVIDERS = [
+  { id: 'local', label: 'On-device word correction' },
+  { id: 'groq', label: 'Groq clean-up' },
+  { id: 'cerebras', label: 'Cerebras clean-up' },
+] as const;
+
+export type EnhancementProviderId = (typeof ENHANCEMENT_PROVIDERS)[number]['id'];
+
+/** The providers that clean up through the paired daemon, spending a key only it holds. */
+export type RemoteEnhancementProviderId = Exclude<EnhancementProviderId, 'local'>;
+
+export const DEFAULT_GROQ_ENHANCEMENT_MODEL = 'openai/gpt-oss-120b';
+/** The smaller, faster Groq model offered beside the default. */
+export const GROQ_FASTER_ENHANCEMENT_MODEL = 'openai/gpt-oss-20b';
+const DEFAULT_CEREBRAS_ENHANCEMENT_MODEL = 'gpt-oss-120b';
+
+/** Each hosted provider's default model — the daemon's own default, restated so the picker can show it. */
+export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProviderId, string>> = {
+  groq: DEFAULT_GROQ_ENHANCEMENT_MODEL,
+  cerebras: DEFAULT_CEREBRAS_ENHANCEMENT_MODEL,
+};
+
+/**
+ * The ways to turn speech into text. None is a fallback for another: the person picks one per device,
+ * knowing what each costs.
+ *
+ * - Every on-device model in the catalog (`model-catalog.ts`) — `parakeet` first — runs in this
+ *   browser after a one-time download, and the audio never leaves the device.
+ * - `browser` is the browser's or phone's own speech recognition (`browser-recognition.ts`): nothing
+ *   to download, but Chrome, Android and Safari send the audio to their vendor's servers.
+ */
+const DICTATION_ENGINES = [...ON_DEVICE_MODEL_IDS, 'browser'] as const;
+export type DictationEngineId = (typeof DICTATION_ENGINES)[number];
+
+/** Whether an engine runs a model on this device (so the audio never leaves it). */
+export const isOnDeviceEngine = (engine: DictationEngineId | null | undefined): engine is OnDeviceModelId =>
+  engine !== null && engine !== undefined && engine !== 'browser';
+
+export const isRemoteEnhancementProvider = (id: EnhancementProviderId): id is RemoteEnhancementProviderId =>
+  id !== 'local';
+
+/**
+ * What happens to the cleaned-up text when dictation finishes. `review` parks it in the panel for the
+ * person to read and press Insert; `insert` puts it at the caret straight away and offers Undo. Either
+ * way nothing is ever sent for the person.
+ */
+export const AFTER_DICTATION_OPTIONS = [
+  { id: 'review', label: 'Review first', description: 'Read the text in the panel, then press Insert.' },
+  {
+    id: 'insert',
+    label: 'Insert straight away',
+    description: 'The text goes into your draft at the caret as soon as it is ready, with Undo.',
+  },
+] as const;
+
+type AfterDictationId = (typeof AFTER_DICTATION_OPTIONS)[number]['id'];
+
+/**
+ * The free-text context cap, re-exported so the settings textarea can carry
+ * the same `maxLength` the parser enforces on the way back in.
+ */
+export { MAX_USER_CONTEXT_CHARS };
+
+export interface SttSettings {
+  readonly format: typeof STT_SETTINGS_FORMAT;
+  /**
+   * Master resource switch. False means browser speech recognition cannot
+   * start. The browser owns and releases its recognition service.
+   */
+  readonly enabled: boolean;
+  /**
+   * Word-only enhancement. On by default: it only ever swaps whole words, and
+   * a verifier throws the whole result away if it did anything else.
+   */
+  readonly enhancement: boolean;
+  /**
+   * One term per line, exactly as the reader typed it. Parsed on use, not on
+   * save, so a half-typed line is never destroyed by a round trip.
+   */
+  readonly dictionary: readonly string[];
+  /**
+   * Free text mined for extra vocabulary — project jargon, names, a pasted
+   * glossary. Stored verbatim; extraction happens on use.
+   */
+  readonly userContext: string;
+  /**
+   * Post-dictation correction provider. `local` is the deterministic enhancer;
+   * `groq` and `cerebras` call the session's daemon, whose secret store holds
+   * the API key (Settings › This machine › Speed-ups).
+   */
+  readonly enhancementProvider: EnhancementProviderId;
+  /** Non-secret provider model id. No provider key is ever stored in the browser. */
+  readonly enhancementModel: string;
+  /**
+   * Browser-local push-to-talk binding. Alt (either side) is the default, but
+   * it is data, never a hardcoded event-handler special case.
+   */
+  readonly shortcut: DictationShortcutBinding;
+  /**
+   * Which engine turns speech into text on this device, or `null` until the person has chosen.
+   * Unchosen dictation asks them to choose rather than picking an engine that would either upload
+   * their audio or need a download they did not ask for.
+   */
+  readonly engine: DictationEngineId | null;
+  /**
+   * Near-live words while dictating with Parakeet (`near-live.ts`): a rolling window is
+   * re-transcribed about once a second and shown greyed until two passes agree. EXPERIMENTAL and
+   * OFF by default; batch transcription after Stop is the default. Persisted as `liveWordsOptIn`,
+   * a name no earlier build wrote, so a `liveWords: true` an older default left behind is ignored
+   * and only a choice made after this shipped can turn it on. Browser voice is always live.
+   */
+  readonly liveWordsOptIn: boolean;
+  /** Review the finished text first, or insert it straight away. Push-to-talk follows it too. */
+  readonly afterDictation: AfterDictationId;
+}
+
+export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
+  format: STT_SETTINGS_FORMAT,
+  enabled: true,
+  enhancement: true,
+  dictionary: Object.freeze([]) as readonly string[],
+  userContext: '',
+  enhancementProvider: 'local',
+  enhancementModel: DEFAULT_GROQ_ENHANCEMENT_MODEL,
+  shortcut: DEFAULT_DICTATION_SHORTCUT,
+  engine: null,
+  liveWordsOptIn: false,
+  afterDictation: 'review',
+});
+
+const SHORTCUT_MODIFIERS = ['Meta', 'Control', 'Alt', 'Shift'] as const;
+type ShortcutModifier = (typeof SHORTCUT_MODIFIERS)[number];
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Decode a persisted push-to-talk chord.
+ *
+ * The parse lives with persistence rather than beside the chord policy: the
+ * policy answers "may a reader bind this?", which is a question about a live
+ * keyboard event, while this answers "what did the last release write?", which
+ * is a question about a byte string that may be anything at all.
+ */
+export const parseDictationShortcut = (value: unknown): DictationShortcutBinding => {
+  if (!isRecord(value)) return DEFAULT_DICTATION_SHORTCUT;
+  const code = typeof value.code === 'string' ? value.code.slice(0, 48) : '';
+  const key = typeof value.key === 'string' ? value.key.slice(0, 24) : '';
+  if (code === '' || key === '') return DEFAULT_DICTATION_SHORTCUT;
+  const raw = Array.isArray(value.modifiers) ? value.modifiers : [];
+  // Rebuilt in canonical order from a fixed vocabulary, so a hand-edited
+  // payload can neither reorder the chord nor smuggle an unknown modifier in.
+  const modifiers = SHORTCUT_MODIFIERS.filter((modifier: ShortcutModifier) => raw.includes(modifier));
+  return { code, key, modifiers };
+};
+
+const parseDictionaryLines = (value: unknown): readonly string[] => {
+  if (!Array.isArray(value)) return [];
+  const lines: string[] = [];
+  for (const line of value) {
+    if (typeof line !== 'string') continue;
+    if (lines.length >= MAX_DICTIONARY_LINES) break;
+    lines.push(line.slice(0, MAX_DICTIONARY_LINE_LENGTH));
+  }
+  return lines;
+};
+
+const parseProvider = (value: unknown): EnhancementProviderId =>
+  ENHANCEMENT_PROVIDERS.some(provider => provider.id === value)
+    ? (value as EnhancementProviderId)
+    : DEFAULT_STT_SETTINGS.enhancementProvider;
+
+const parseEngine = (value: unknown): DictationEngineId | null =>
+  DICTATION_ENGINES.find(engine => engine === value) ?? null;
+
+const parseAfterDictation = (value: unknown): AfterDictationId =>
+  AFTER_DICTATION_OPTIONS.find(option => option.id === value)?.id ?? DEFAULT_STT_SETTINGS.afterDictation;
+
+const parseModel = (value: unknown): string => {
+  if (typeof value !== 'string') return DEFAULT_STT_SETTINGS.enhancementModel;
+  const model = value.trim().slice(0, MAX_ENHANCEMENT_MODEL_CHARS);
+  return model === '' ? DEFAULT_STT_SETTINGS.enhancementModel : model;
+};
+
+/** Defensive parse. Never throws, always returns a usable record. */
+export const parseSttSettings = (raw: string | null): SttSettings => {
+  if (raw === null) return DEFAULT_STT_SETTINGS;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return DEFAULT_STT_SETTINGS;
+  }
+  if (!isRecord(parsed) || parsed.format !== STT_SETTINGS_FORMAT) return DEFAULT_STT_SETTINGS;
+  return {
+    format: STT_SETTINGS_FORMAT,
+    enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_STT_SETTINGS.enabled,
+    enhancement: typeof parsed.enhancement === 'boolean' ? parsed.enhancement : DEFAULT_STT_SETTINGS.enhancement,
+    dictionary: parseDictionaryLines(parsed.dictionary),
+    userContext: typeof parsed.userContext === 'string' ? parsed.userContext.slice(0, MAX_USER_CONTEXT_CHARS) : '',
+    enhancementProvider: parseProvider(parsed.enhancementProvider),
+    enhancementModel: parseModel(parsed.enhancementModel),
+    shortcut: parseDictationShortcut(parsed.shortcut),
+    engine: parseEngine(parsed.engine),
+    liveWordsOptIn:
+      typeof parsed.liveWordsOptIn === 'boolean' ? parsed.liveWordsOptIn : DEFAULT_STT_SETTINGS.liveWordsOptIn,
+    afterDictation: parseAfterDictation(parsed.afterDictation),
+  };
+};
+
+export type SttSettingsPatch = Readonly<Partial<Omit<SttSettings, 'format'>>>;
+
+/**
+ * Normalise before writing, so a caller cannot persist an out-of-range shape
+ * that only the parser would have caught on the way back in.
+ */
+export const normaliseSttSettings = (next: SttSettings): SttSettings => parseSttSettings(JSON.stringify(next));
+
+/**
+ * The storage surface actually used. Injectable so tests never touch a real
+ * `localStorage` and so a denied or absent one is an ordinary code path.
+ */
+export interface SttSettingsStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/**
+ * A synchronously readable external store holding one immutable snapshot.
+ *
+ * The snapshot is IDENTITY-STABLE between real changes, which is what
+ * `useSyncExternalStore` requires: returning a freshly parsed object on every
+ * render would spin React forever.
+ */
+export class SttSettingsStore {
+  readonly #storage: SttSettingsStorage | null;
+  readonly #listeners = new Set<() => void>();
+  #snapshot: SttSettings;
+  #persisted = true;
+
+  constructor(storage: SttSettingsStorage | null = null) {
+    this.#storage = storage;
+    let raw: string | null = null;
+    try {
+      raw = storage?.getItem(STT_SETTINGS_KEY) ?? null;
+    } catch {
+      // Accessing storage at all throws when the browser has blocked it.
+    }
+    this.#snapshot = parseSttSettings(raw);
+  }
+
+  /** Bound so it can be handed straight to `useSyncExternalStore`. */
+  readonly get = (): SttSettings => this.#snapshot;
+
+  /**
+   * `false` once a write has been refused by storage, so the settings screen
+   * can say so instead of pretending the choice was saved.
+   */
+  get persisted(): boolean {
+    return this.#persisted;
+  }
+
+  /** Partial update; unspecified fields keep their current value. */
+  update(patch: SttSettingsPatch): SttSettings {
+    const next = normaliseSttSettings({ ...this.#snapshot, ...patch, format: STT_SETTINGS_FORMAT });
+    this.#snapshot = next;
+    this.#persisted = this.#persist(next);
+    for (const listener of [...this.#listeners]) listener();
+    return next;
+  }
+
+  /**
+   * Subscribe to changes. The returned function unsubscribes.
+   *
+   * Bound, because `useSyncExternalStore` re-subscribes whenever the function
+   * identity changes and a method reference would change on every render.
+   */
+  readonly subscribe = (listener: () => void): (() => void) => {
+    this.#listeners.add(listener);
+    return () => {
+      this.#listeners.delete(listener);
+    };
+  };
+
+  /**
+   * Re-read storage and publish the result.
+   *
+   * The browser's `storage` event fires in OTHER tabs only, so a settings
+   * screen and a composer in the SAME tab would not see each other's changes
+   * without the notification `update` already sends. This is the other half:
+   * the cross-tab listener calls it, and `key === null` (a whole-storage
+   * clear) counts as a change to us too.
+   */
+  reload(): SttSettings {
+    let raw: string | null = null;
+    try {
+      raw = this.#storage?.getItem(STT_SETTINGS_KEY) ?? null;
+    } catch {
+      // A storage that has started refusing reads leaves the snapshot alone.
+      return this.#snapshot;
+    }
+    this.#snapshot = parseSttSettings(raw);
+    for (const listener of [...this.#listeners]) listener();
+    return this.#snapshot;
+  }
+
+  #persist(value: SttSettings): boolean {
+    if (this.#storage === null) return false;
+    try {
+      this.#storage.setItem(STT_SETTINGS_KEY, JSON.stringify(value));
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
+ * Parse the reader's dictionary lines into enhancer entries. Here so callers
+ * need only this module to go from storage to a usable dictionary.
+ */
+export const sttDictionary = (settings: SttSettings): DictionaryParse => parseDictionary(settings.dictionary);

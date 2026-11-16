@@ -16,8 +16,7 @@ on:
   push:
     branches: [main]
     paths:
-      - packages/relay/**
-      - packages/protocol/**
+      - packages/plugins/connections/**
       - bun.lock
       - package.json
       - flake.nix
@@ -119,7 +118,7 @@ jobs:
           # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
           nix develop .#ci -c bash -c '
             set -euo pipefail
-            cd packages/relay
+            cd packages/plugins/connections/worker
             bun install --frozen-lockfile
             ../../scripts/ci/relay-bundle-fingerprint.sh >"$RUNNER_TEMP/relay-built"
             ../../scripts/ci/relay-bundle-fingerprint.sh --deployed >"$RUNNER_TEMP/relay-deployed"
@@ -166,7 +165,7 @@ jobs:
             # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
             RELAY_BUNDLE="$built" RELAY_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
               set -euo pipefail
-              cd packages/relay
+              cd packages/plugins/connections/worker
               wrangler deploy --config wrangler.hosted.json --tag "$RELAY_BUNDLE" \
                 --message "hosted relay $RELAY_BUNDLE" --secrets-file "$RELAY_SECRETS_FILE"
             '
@@ -448,7 +447,7 @@ jobs:
           # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
           nix develop .#ci -c bash -c '
             set -euo pipefail
-            cd packages/relay
+            cd packages/plugins/connections/worker
             printf "%s" "$HOSTED_TUNNEL_ACCOUNTS" | wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json
           '
           echo "installed TUNNEL_ACCOUNTS; run this workflow with operation: tunnels to read what the Worker made of it"

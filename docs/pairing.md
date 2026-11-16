@@ -225,6 +225,42 @@ and the mint response carries that answer rather than making each renderer infer
   invariant, enforced by the schema, is that **a disclosed rendezvous only ever rides beside a link**:
   there is no address to disclose one beside, and no link to draw.
 
+### The code leaves the address bar before anything else loads
+
+A pairing or share link's fragment must not sit in the tab's address while the app downloads, because anything that reads
+the address (an agent's browser tool, an extension, a shared screen) would see a live one-time code. The shell's
+`AddressTaker` strips it, but it is built only when the app's module graph has loaded: measured on a local 5.0 build, the
+fragment stayed ~0.5-0.7 s, through the first paint (the v4 app: ~0.8 s). So `packages/app/public/arrival.js`, a classic
+same-origin script (it satisfies `script-src 'self'`), is **the first script of every HTML document the build emits**: the
+app (`app/index.html`, ahead of the theme script), the landing page, `get-started/` and the OAuth callback page. The build
+refuses any emitted page that does not start with it, or that has a stylesheet before it (`scripts/get-started-page.ts`;
+the only exemptions are the generated `fy-render` shells, which `_headers` serves sandboxed with an opaque origin, where
+`replaceState` is refused and no link is ever aimed). With `history.replaceState` it strips every fragment on a declared
+`path` screen (`/pair`, `/join`; also under `/app/`) and every pairing-shaped fragment (`#v1;…`) on ANY path, while the
+document is still parsing (~20-45 ms on the same build, before first paint). It keeps listening for the life of the page:
+a fragment navigation (`hashchange`) or a history traversal (`popstate`) into a code is the same case as the first
+arrival. The router's own `pushState` is covered by `AddressTaker.read`, which the router calls after every write and which
+also drops a pairing-shaped fragment on an undeclared path.
+
+**What it keeps, and for whom.** Only a value that arrived on exactly a declared screen is held, in the script's own closure
+and on no property of `window`; a path beneath a screen, an undeclared path and a page with no taker (`data-drop`) are stripped
+and dropped at once. The hand-off is one non-enumerable function, `window.__fyArrival`, which `AddressTaker` calls once when
+it is built: it returns the value with **what is left of its two minutes, counted from the arrival**, and removes itself. A
+second call finds nothing; an unclaimed value is removed at its deadline whether or not the module ever boots; and a late boot
+holds it only for the time that remains. Once the taker has called it the taker owns the page: a later arrival on a declared
+screen is left for its own `hashchange` listener, and only the credential-shaped strays are still dropped by the script.
+
+**The guarantee, said narrowly.** The function is take-once; it is not secret from a script already running on this origin.
+`script-src 'self'` (plus the build's hashes) and Trusted Types allow only first-party code to run, so the one intended caller
+is the shell, which calls it before any plugin has a chance to; a script injected into the origin could call it first, but the
+same script could read the address earlier, so this is the boundary the whole app already has. **And the strip cannot be
+earlier than the file's download:** a classic external script must arrive before it runs, so the address holds the link from
+the moment the navigation commits until `arrival.js` has run (an inline strip would run sooner but would need a hashed CSP
+entry, and still cannot precede the commit). A tool that reads the address at commit, or echoes the URL its caller typed,
+has to redact it on its own side; nothing in the page can do that for it. The script's path list and credential pattern are
+second statements of the plugins' declarations and the access contract's `PAIRING_FRAGMENT_PATTERN`;
+`tests/unit/arrival-script.test.ts` fails if they drift.
+
 ### The link names no rendezvous; the device finds one itself
 
 The fragment is one form, `#v1;url=…;code=…;fp=…`, byte-identical to every link a daemon has ever
@@ -270,34 +306,48 @@ together.
 than one for all of them — `localOnlyNotice` and `refusalNotice` in `@ferretry/protocol` own every
 sentence, and `fy pair`, the Add-a-device panel and `fyd --check` all render those and never their own.
 
-Each remedy below answers **the direct address**, which is the only thing these reasons describe. A
-`local-only` daemon that also dials a discoverable rendezvous is already redeemable from another
-device, so its remedy is the upgrade to a connection with no third party on the path rather than the
-remedy it reads as here — `localOnlyNotice` says so itself when a discovered address is present, and
-this table is the no-rendezvous wording:
+**The advertisement is decided at each mint, from the listener the kernel really bound.** The kernel binds after
+every plugin is built, so Access asks Connections for the advertisement on every `POST /v1/pair/code` (never once at
+build), and Connections takes the host and port from `kernel.bind` — whichever of `--host`, `--port`, `FY_PORT`, the home's `direct.port` or the
+default decided them — and falls back to `direct` in `config/connections.yaml` only while nothing is bound. A loopback
+bind with a relay source is therefore `local-only` with a link on its own port, and needs no `direct` block. Only the
+advertisement and the reachability check follow the bound listener. Connections' browser-origin allowlist remains
+configuration-based, independent of the bound listener; production Access passkeys remain restricted to the hosted app
+origin.
 
-| reason          | what actually fixes it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `local-only`    | **bind first, then advertise**: `"host": "0.0.0.0"` on the `bind` entry in `carriers` (or the top-level `host` if the document has no bind entry) _and_ `"publicUrl"` set to the address other devices reach this machine at, then restart. `publicUrl` alone changes nothing about the interface the daemon listens on, so on its own it turns an honest "only this machine can redeem it" into a QR a phone scans and then cannot connect to. The sentence names the exposure the wildcard opens — it accepts connections from other devices on the network — because that widening is the fix, not a side effect. The wildcard keeps loopback available, so commands on the machine are unaffected. |
-| `wildcard-bind` | `"publicUrl"` alone, then restart — the daemon is already listening everywhere and needs only a single address to hand out.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `no-port`       | start the daemon once so it records the port it takes, or write the `port` of the `bind` entry in `carriers` (or the top-level `port` if the document has no bind entry). `publicUrl` cannot supply an address nothing has bound.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+Each remedy below answers **the direct address**, which is the only thing these reasons describe. **The supported way
+to pair a phone is a loopback listener plus the discovered relay**: the link names the daemon's own loopback address,
+the phone finds the rendezvous in the same hosted directory the daemon read, and redeems through it. A `local-only`
+daemon that already holds a discovered relay therefore needs no change at all — `localOnlyNotice` says so itself.
+5.0 has **no separate public-address setting yet**, and the listener refuses a peer that is not on this machine, so no
+configuration turns the direct address into one another device can dial. The wording is the same at the terminal and in
+the browser:
 
-The example address in each sentence carries **this daemon's** port, taken from the address the reader
-was just shown — a first boot whose preferred port was taken is serving on another one, and an example
-naming the compiled-in default is advice to type the wrong number.
+| reason          | what actually fixes it                                                                                                                                                                                                                                       |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `local-only`    | keep the daemon on a loopback listener and let it use a discovered relay. Until a relay is discovered, pair from a browser on this machine. There is nothing to widen: a wider listener does not give another device a direct route.                         |
+| `wildcard-bind` | start the daemon on a loopback listener (`fyd --host 127.0.0.1`) and let it use a discovered relay. A wildcard listener stays refused: there is no single address to hand out, and no public-address setting to say which one.                               |
+| `no-port`       | start the daemon so it binds a port (`--port` or `FY_PORT` chooses it), or write `port` under `direct` in `config/connections.yaml` (a new `direct` block also needs `host`). `direct` answers only while nothing is bound, and the listener you start wins. |
 
-Because the wildcard-plus-`publicUrl` pair is the documented answer rather than a suspicious one,
-`advertisesForeignAddress` reports nothing for a wildcard bind: the boot notice that offers to remove a
-`publicUrl` which "is not deliberate" must never fire at the operator who just deliberately added it.
+`config/connections.yaml` has exactly one block for the direct carrier, `direct`, with a `host` and an optional `port`
+and nothing else. The listener's HOST is chosen by `fyd --host`. Its PORT is chosen by `fyd --port`, then `FY_PORT`, then
+the home's own `direct.port` in this file, then 7457 — `fyd --print-config` says which one won (`home config
+(config/connections.yaml direct.port)`). **The home's port is the version in effect, never the text on disk**: a changed `direct` block
+is a loosening, so an edit to it is held on disk until the owner confirms it and the accepted port keeps binding across
+restarts. The daemon asks the configuration service's own read-only decision before it binds; `fy`, which must not run the
+service, reads the service's record of it (`state/kernel/accepted-config/connections.yaml.json`) while no run record exists,
+so neither ever adopts a held edit. A home whose `direct` block was never accepted binds 7457 until the owner confirms it.
+A port that is not a whole number from 0 to 65535, with nothing in effect, refuses the start with one fixed sentence that
+names the key and the range and never the value (a run that names `--port` or `FY_PORT` does not read the file). That one
+key has one reader (`homePortOf` in `@ferretry/kernel/contract/home-port`), so a migrated home's own port is never traded
+for 7457 — which a still-running v4 daemon may hold.
 
-Where a client on the machine **dials** the daemon is a different fact and is read from the recorded
-bind (`recordedBindAddress`), never from `publicUrl`. "The recorded bind" is the one `declaredBind` names —
-the `carriers` bind entry when there is one, the top-level `host`/`port` otherwise — and the daemon
-asks the same function, so the two ends cannot disagree about which port a `carriers` document means.
-A wildcard bind resolves to loopback at the recorded port. Reading the advertisement there made an operator who followed the remedy unable to run
-`fy pair` at all — the local client classified the daemon on its own desk as remote and refused to send
-the owner-only token, which is the rule working correctly on the wrong input. `FY_URL` still wins
-outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.
+Where a client on the machine **dials** the daemon is a different fact. The listener writes a run record,
+`run/daemon.json` (`DaemonRunSchema`: the Unix socket, the loopback bind's `host` and `port`, the pid and version), when
+it starts to listen. The CLI reads it through `daemonAddressing`, `parseDaemonRun` and `resolveDaemonUrl`, and both ends
+turn it into an address with the kernel's one `recordedBindAddress`, so they cannot disagree about the port. A wildcard
+bind resolves to loopback at the recorded port, so a daemon on `0.0.0.0` is still reachable by `fy pair` on its own
+desk. `FY_URL` still wins outright, and a genuinely remote daemon still requires its own `FY_TOKEN`.
 
 The requester's own carrier never changes this answer. `ApiRequest.loopback` says who is **minting**,
 not who will **redeem**; the normal phone journey is minted locally and redeemed elsewhere.
@@ -360,23 +410,79 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `fy pair` that may be showing it to a browser right now.
 - **Never screenshot a real one.** Committed captures use a fixed fake code (`HARNESS_INVITE`). A QR is a
   machine-readable label, not obfuscation, so a PNG of a real code in a repository is a leaked credential.
-- **Never show it to an agent.** Every browser result an agent can read passes one function, `hidePairingFragments`
-  (`hidePairingFragmentsIn` for a whole JSON body) in `@ferretry/protocol`, which turns a `#v1;…` fragment into
-  `#<pairing code hidden>`. That is the MCP `browser_*` tools (`AgentToolService`: address headers, page and tab lists,
-  navigation and wait echoes, network and console entries, errors) **and** `fy browser` — its status, read and navigation
-  answer from `GET`/`POST /v1/sessions/:sessionId/browser` (and the stream route's refusals), which hide the fragment
-  from an agent caller (`callerIsAgent`) and show a person their own browser whole. **The whole fragment goes once it
-  starts** — through the next whitespace, in a raw link and in one percent-encoded into another address — because the
-  fields come in any order and an ignored one may hold any punctuation, so no field is parsed to find the code. Any
-  other fragment (`#section`) is left as it is, and the page and its navigation are untouched: only what is printed
-  changes. **The pairing screens themselves are refused whole.** While the app shows a live code or its QR (the Add-a-device panel, the pair screen holding a link) it puts `<meta name="ferretry-pairing-screen">` in the document head (`usePairingScreenMarker`), and the daemon's browser looks for it with DOM queries (`readPairingGroup`, fails closed) before an agent's `browser_read`, `screenshot`, `pdf`, `eval`, `console`, `network` or a `browser_wait_for` on text or an element (a yes or no about the page's content is a read) — or `fy browser read`/`screenshot` — answers: the agent gets `hidden: this page shows a pairing code` and no content, an owner's view is unchanged, and navigating, closing and a wait on a time, an address or a load still work. Four properties hold it shut:
-  - **Never late.** The marker goes up in a layout effect, inside the commit that puts the code on the page, so no query or picture can see a code without it; it comes down only after the code's DOM is gone.
-  - **Never only before.** A check before the operation is not enough, because the code can arrive while a read, picture, PDF or script is running. `<meta name="ferretry-pairing-epoch">` counts the codes this document has shown and is never removed; the daemon compares it, and the marker, before and after (`underGuard`), and a result — or an error, which is page content too — is discarded and refused when a code was shown at any point in between, even one already gone again. Each slice of a wait is checked the same way.
-  - **Never only this window.** A script on a page reaches the documents of its opener and popups, so the check covers the page asked about and every page of its **opener group** — transitive both ways, within the one browser context, whatever each member's origin (`PairingOpenerGraph`). Another agent's tab and the browser's own startup blank page are not in the group, so a pairing screen one agent leaves open never hides a page another agent is reading. **The graph outlives the windows in it**: an opener that closed still bridges the windows it opened (a -> b -> c with b closed still groups c with a and a's other popups), and its edges are forgotten only when every page of the component is gone. **A lookup that fails is unknown, never "no opener"**: a page whose opener could not be found out (rejected, timed out) is treated as reachable from every page of its context, and stays so until a later lookup finds its opener.
-  - **Fail closed.** A query that errors, a closed related page, a counter that is not a count or an answer that does not say, is read as showing a code.
-  - **The evidence lives outside the page.** The marker and the counter are the app's own DOM, which page script (an agent's own `browser_eval` included) can write and a navigation resets, so they are only a hint. What decides is kept where no page reaches. The daemon holds a **live window** (`PairingLiveWindow`, told by the pairing service as it mints, redeems, cancels, replaces and expires): whether a code is live now, and a count of every code ever minted that moves before the mint answers. The browser worker holds a **navigation ledger** (`PairingNavigationLedger`, fed by DevTools frame events, never by page script): every address any frame committed that carried a pairing fragment, counted by origin and never kept as an address, plus whether a page's current document was entered that way. While a code is live, an agent's read, picture, PDF, script, console, network, highlight, toolbar read or content wait on a page of a Ferretry app origin (the hosted app, the daemon's own origins and their loopback spellings; `appOriginSet`) is refused, and so is every operation whose start-to-end overlapped a mint or a pairing-link commit — its answer **and** its error text are discarded. A document entered by a pairing link is refused too, **on any origin**: the daemon cannot know every deployment's app origin, and a link-entered page is a pairing screen wherever it is served. An operation is also discarded when a link-entered document came in between its start and its end on ANY origin, even one a later document replaced (a counter of link commits per page, kept for the opener group including its closed members). **An operation is judged by where it has been, not where it ended:** a pairing link committed on an app origin, or a navigation the ledger lost track of, at any point between its start and its end discards its answer and its error even when it began and ended on other origins (the ledger's two counts only go up). A ledger that has lost a navigation is **blind** for good: it reads every app page as possibly entered by a link until the browser restarts with a fresh one (blind is its own signal, gated on app pages, apart from "linked"). **App origins** are the hosted app, every configured and advertised origin, and the daemon's own loopback spellings (`127.0.0.1`, `localhost`, `[::1]` on its port) whatever it is bound to, `0.0.0.0` and `[::]` included. **`browser_eval` is ALWAYS refused on a Ferretry app origin** ("eval is not available on Ferretry's own app pages"): a script shares the document's DOM with the app, a code can also be shown by a daemon this daemon's window knows nothing of (the app can talk to several), and no state of the page makes agent script safe there. Reads, pictures and the other content tools keep the rules above and the marker hint; blank or opaque pages that merely might be the app's keep the older rule (a script is refused there once a link has opened on an app origin). Pages on other origins are unaffected. Every look has a time limit and a failure of any kind reads as a pairing screen.
-
-  The mint route (`POST /v1/pair/code`) is `caller: 'person'`, so no agent route returns a mint, its response body is never shown by `browser_network`, and the viewer stream refuses an agent caller.
+- **Never show it to an agent.** What decides is the daemon's own record, in its own memory, **outside any page**:
+  a pairing code is **live** from the instant `mint` runs — before its answer can leave — until it is redeemed, revoked,
+  replaced, past its two minutes (with no one asking) or out of direct guesses (a spent relay budget alone does not end
+  it), and Catalogs keeps the same record for a **share invite** (its link and QR let a browser join without an existing
+  member passkey, so it is a credential too: live from the mint until it is ended, used up or expired, and read back from
+  disk at start; an ending closes the interval only once its write has **committed**, because a write that is pending or fails
+  puts the share back to joinable, so the interval stays open through it and until the share's own deadline). Each is a `LiveWindowLedger` (`@ferretry/std/live-window`) that remembers every interval, offered through
+  a Browsers-facing contract port (`PairingWindowPort` from Access, `ShareWindowPort` from Catalogs) that answers only
+  **yes or no** to "was a credential live at any instant since T" — never a code, an id or a boundary. A ledger that
+  overflows its history, or a catalogs list not yet read, answers yes for what it can no longer prove; a provider that is
+  missing, throws or cannot say counts as live.
+  Browsers declares those ports (and Connections') as dependencies. While a credential is live, or was at any instant
+  during an agent's call, the agent gets exactly the one sentence (`PAIRING_SCREEN_REFUSAL`, byte for byte v4 PR 1597's: it
+  begins `hidden: this page shows a pairing code` and is pinned by equality) and no content, **for any page on a Ferretry app
+  origin** — the hosted app (always), the app and browser origins Connections advertises, the address of the daemon's own
+  listener, **and the daemon's own loopback app on every spelling** (`127.0.0.1`, `localhost`, `[::1]`) at the port it listens
+  on, whatever it is bound to (`0.0.0.0`, `[::]`, a public address) — read live and never a single hard-coded address (every
+  page, when Connections cannot say); an unrelated port or host is not in the set — and for any window that can
+  reach one: the page's opener group **and every same-origin window**, opener or not (any window nobody can place counts too).
+  The check runs inside the page's queue before anything reaches the page, and again when the call ends, **success or failure**:
+  a call that overlapped a live interval at any point has its answer **and its error text** discarded.
+  What an agent asks for is classified by what the answer depends on, not by tool name: a read, screenshot, highlight, pdf,
+  console, network, `eval`, a wait on text, text gone or an element, `fill_form`, and **any act that finds its element by
+  a selector, a ref or the text it shows** (click, hover, drag, select, check, type, press, upload, scroll-to-text) are reads — "found"
+  against "not found", and the error that says why, is a boolean about hidden content. Coordinate acts, scrolling by distance,
+  waits on a time, an address or a load, navigating, opening and closing read nothing and still work. The same classification
+  holds for `POST /v1/sessions/:id/browser`. A person's own calls, and the owner's view, are unchanged; the picture stream
+  refuses a ferret.
+  **The browser keeps its own history of where each page has been.** The worker records every committed address per target
+  from DevTools' frame events (`Page.frameNavigated`, `navigatedWithinDocument`, `frameAttached`, `frameDetached`, and
+  Playwright's mirror of them for frames in other processes), including frames that are gone by the time anyone asks, and the
+  daemon compares two answers (the strictly parsed `NavigationEvidence`): a navigation or a swapped frame during a call that
+  touched an app origin is treated as the call having read it. A committed address carrying the pairing-fragment grammar
+  **taints the target for life** (the app screen it arrived on is refused outright, and `eval` on it, wherever it goes after).
+  **The worker also keeps totals across every page it has ever watched** (`NavigationTotals`, in the worker, not on any page):
+  how many addresses carrying the pairing grammar were committed under each origin, and how many navigations it **lost** track
+  of. Every answer carries them, they only go up, and a page that closes or leaves the group takes none of it away. A call
+  during which **any** link was committed on an app origin (or one that cannot be told apart from it: an opaque or unreadable
+  origin, the overflow bucket) or any navigation was lost has its answer **and its error** discarded **whatever its endpoints
+  were** — it may begin away from the app, take the app's page in on the way and finish away from it. A lost navigation makes
+  the worker **blind for good**: while the count is above zero the app's own pages are not answered (a page elsewhere still is),
+  even with no code live and whichever pages the call touched, and only a fresh worker — a fresh, complete ledger — clears it.
+  **`eval` is never run on a Ferretry app origin.** A script shares the document's DOM with the app, where the codes and the
+  app's own hints sit, and discarding a result does not undo what a running script did, what it sent elsewhere or the callback
+  it leaves behind — so no state of the page makes it safe. `browser_eval` (the one tool that runs page script) through the agent
+  tools and `POST /v1/sessions/:id/browser` — the browsers CLI half is still a skeleton, so `fy browser eval` is not built yet and the rule is
+  not claimed for it — on a page of any Ferretry app origin, or on one with a window that can reach one, is **always**
+  refused with the sentence `eval is not available on Ferretry's own app pages` (`APP_EVAL_REFUSAL`) — with no code live, no
+  history and no marker — and the script never reaches the browser; a script that ends on the app has its answer and error
+  discarded the same way. There is no hint-based path: nothing the page says is asked. On a page that is only possibly the app's
+  (blank, opaque) the older lifetime rule stays: refused once a credential was live since it first showed the app, and for a
+  page that ever committed a pairing link. **What still works** on an app page: reading it (once nothing is live), screenshots,
+  waits, navigating away, clicking by coordinates, and every page on another origin keeps its scripts. A person's own calls are
+  unchanged.
+  The app's marker — `<meta name="ferretry-pairing-screen" content="shown">`, with the `-seen` counter beside it — is now
+  **only a hint** the browser also looks for with a DevTools DOM search (no page script runs; every same-process frame is
+  covered). It can ADD a refusal and can never remove one, so a page script that deletes or forges it changes nothing. A search
+  that cannot be answered, a node that cannot be inspected, a malformed attribute reply or a count that is not plain digits
+  counts as marked (**fail closed**). The marker lands in the same synchronous commit as the code (a layout effect) and is
+  released **after** the code's nodes are gone (the hook defers its removal past the commit; React runs a deleted component's
+  cleanup before removing its host nodes).
+  A mint's response is never shown either: `POST /v1/pair/code` is a person's route, Access has no agent tool, and
+  `browser_network` prints `(body not shown: a pairing code)` for that address, and for `/v1/catalog-shares` and what is under
+  it (a share mint's answer carries the invite's code, link and QR text), on any page, live or not.
+  Declared GAPs: the window cannot know a code that was minted by ANOTHER machine and pasted or scanned here (the pair screen
+  holding a pasted link): for that the arriving fragment's taint and the app's own marker are all there is, and a page script
+  can forge the marker only to lose its own reads, but it can also delete it; a window opened before the worker began watching
+  it has only what its frame tree said then; Catalogs' join screen holding a pasted invite link is covered the same way
+  (the fragment taint and `/join`'s own screen) and has no marker of its own; the share sheet itself sets no marker, so for it
+  the ledger is the whole protection; the history of an overflowed target (more than 64 distinct origins) counts as having
+  touched the app; a switched-off Catalogs plugin makes every app-origin read refuse while it is off (an absent provider is
+  unknown, and unknown is live); the text of a JavaScript dialog an app page has open (`browser_dialog`: the page is frozen
+  while it is open, so nothing can be asked of it first); and a marker inside a shadow root or a cross-site frame is not searched for.
 
 ## Revoking
 

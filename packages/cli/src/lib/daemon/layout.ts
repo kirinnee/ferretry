@@ -1,5 +1,10 @@
 import { basename, dirname, isAbsolute, join, normalize, parse } from 'node:path';
-import { DAEMON_LOCK_FILENAME, SESSION_TERMINAL_SOCKET_FILENAME } from '../state-home/claim.ts';
+const DAEMON_LOCK_FILENAME = 'run/daemon.lock';
+/**
+ * The opaque `tmux.sock` that the Terminals manifest declares as its state, inside that plugin's state folder. The
+ * kernel offers no port that names a state file's path, so the one verb that ends the server spells it here.
+ */
+const SESSION_TERMINAL_SOCKET_FILE = 'state/terminals/tmux.sock';
 import { type CallerLocale, daemonLocale } from './locale.ts';
 
 /** The service managers this CLI knows how to drive, plus the no-manager fallback. */
@@ -72,12 +77,9 @@ export interface DaemonLayout {
    */
   readonly daemonLockFile: string;
   /**
-   * The socket of the daemon's private tmux server, which every session's agent runs under.
-   *
-   * The CLI never talks to it except to END it, and only on `reset`. The server is not the daemon:
-   * it outlives a stop by design, so a session survives a restart — and that is exactly why a reset
-   * that only stopped the daemon left every agent running, writing back into the home it had just
-   * removed. Mirrored from the daemon's composition, as the lock above is.
+   * The socket of the private tmux server every ferret's agent runs under. The CLI never talks to it except to END
+   * it, and only on `reset`: the server is not the daemon and outlives a stop, so a reset that only stopped the daemon
+   * would leave every agent running and writing into the home it had just removed.
    */
   readonly sessionTerminalSocket: string;
   /**
@@ -145,7 +147,7 @@ export interface DaemonLayout {
   readonly lifecycleLocks: readonly [string, ...string[]];
 }
 
-export class InvalidDaemonEnvironmentError extends Error {
+class InvalidDaemonEnvironmentError extends Error {
   constructor(
     readonly field: string,
     reason: string,
@@ -183,7 +185,7 @@ function requireDirectory(value: string, field: string): string {
  * the split harder to see rather than easier — the CLI would claim one directory and provision into
  * another. Pinning `FY_HOME` masks it entirely, which is why it survived.
  */
-export function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined, product: string): string {
+function resolveDaemonStateHome(homeDirectory: string, stateHome: string | undefined, product: string): string {
   const home = requireDirectory(homeDirectory, 'home directory');
   return stateHome === undefined || stateHome.trim().length === 0
     ? join(home, `.${requireName(product, 'product name')}`)
@@ -210,7 +212,7 @@ function requireUserId(value: number, field: string): number {
 }
 
 /** The manager a platform implies. Anything else gets the direct-spawn fallback, never a guess. */
-export function managerForPlatform(platform: string): DaemonManagerKind {
+function managerForPlatform(platform: string): DaemonManagerKind {
   if (platform === 'linux') return 'systemd';
   if (platform === 'darwin') return 'launchd';
   return 'direct';
@@ -246,9 +248,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
   const launchdLabel = `com.${product}.${daemonName}`;
   const launchdDomain = `gui/${String(userId)}`;
   const stateArtifactRoot = join(stateDirectory, product);
-  // The path the artifact claim sits BESIDE, not a directory anything uses. It and the qualifier below
-  // are the ones the retired snapshot store used, so an older `fy` still contends on the same claim.
-  const artifactClaimAnchor = join(stateArtifactRoot, 'daemon-snapshots', daemonName);
+  const artifactClaimAnchor = join(stateArtifactRoot, 'updates', daemonName);
   const manager = managerForPlatform(input.platform);
   const systemdUnitName = `${daemonName}.service`;
   const systemdUnitFile = join(configHome, 'systemd', 'user', systemdUnitName);
@@ -261,7 +261,7 @@ export function resolveDaemonLayout(input: DaemonEnvironmentInput): DaemonLayout
     homeDirectory,
     stateHome,
     daemonLockFile: join(stateHome, DAEMON_LOCK_FILENAME),
-    sessionTerminalSocket: join(stateHome, SESSION_TERMINAL_SOCKET_FILENAME),
+    sessionTerminalSocket: join(stateHome, SESSION_TERMINAL_SOCKET_FILE),
     stateArtifactRoot,
     logDirectory,
     logFile: join(logDirectory, `${daemonName}.log`),
@@ -302,53 +302,11 @@ interface LifecycleArtifacts {
   readonly runtimeDirectory: string | undefined;
 }
 
-/**
- * Where the claims live, decided by everything the mutating verbs may own on this host.
- *
- * The shared manager target covers commands sent to one systemd unit or launchd label even when two
- * environments resolve different definition paths. It lives in the user's PRIVATE runtime directory
- * (`$XDG_RUNTIME_DIR`, `/run/user/<uid>`, `0700`) whenever the composition root proved one exists, so
- * no other local user can pre-create the name. Only when there is none — macOS, a login that has no
- * runtime directory, or one that is not owned by this user and closed to group and other — does it
- * fall back to the fixed name in `/tmp`, where the uid keeps users independent and the sticky bit
- * means another user can at worst occupy the predictable name and make the lifecycle fail closed
- * (a limit only where no private runtime directory exists). The definition claim covers the actual
- * file, the direct claim covers the state home used when that file is absent, and the artifact claim
- * covers everything derived from the same `XDG_STATE_HOME`, such as the Nix garbage-collection root.
- *
- * **The manager-target claim is per user, not per state home, and that is deliberate.** A temporary
- * `FY_HOME` does not get a service of its own: there is one `fyd.service` per user manager (one
- * `com.ferretry.fyd` per launchd domain), and whichever state home a mutating verb runs under, it may
- * install, start or stop THAT unit. Keying the claim on the state home would let a test home and the
- * real one interleave writes to the same unit. What made a scratch home block the owner's real daemon
- * for 140 seconds was not this scope but a killed command's claim that could never be recognised as
- * abandoned; a claim now records which process holds it, so a holder that provably exited is removed
- * by the next command instead of waited out (`adapters/daemon/lifecycle-lock.ts`). A LIVE command
- * under any home still holds the unit for as long as it runs, which is the exclusion working.
- *
- * **The target claim's location is decided HERE and nowhere else.** Every lifecycle command, from any
- * shell of this user, resolves it through this one function from the same input, so they agree on
- * which claim is the manager target. Two environments that disagree on `XDG_RUNTIME_DIR` (one with it,
- * one without) would take different target claims; the definition, state-artifact and direct claims
- * below stay shared, so the daemon's unit file and state home are still excluded, and only two
- * environments that resolve different definition paths AND differ in this variable lose the shared
- * manager-target exclusion. During an upgrade an older `fy` still takes the `/tmp` name, so it and
- * this release do not exclude each other on the target claim alone; they still contend on the other
- * three, which cover everything either writes, and that overlap ends once the older one is replaced.
- *
- * **The artifact claim keeps the path and qualifier the snapshot store gave it**, which is deliberate
- * rather than leftover. During an upgrade an older `fy` is still on this host and still takes that
- * exact claim. Renaming the claim to match the new vocabulary would make the two versions contend for
- * nothing at the one moment exclusion actually matters.
- *
- * Checking which owner is active before acquiring would merely move the race. The fixed role order
- * below is therefore load-bearing: unresolved aliases can spell the same directories in opposite
- * lexical orders, but they cannot move a physical claim from one semantic position to another.
- */
+/** Claims cover the manager target, definition, artifacts and direct daemon, in that order. */
 function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtifacts): readonly [string, ...string[]] {
-  const snapshots = claimBeside(artifacts.artifactClaimAnchor, 'snapshot-store');
+  const updateArtifacts = claimBeside(artifacts.artifactClaimAnchor, 'updates');
   const direct = claimBeside(artifacts.stateHome, `${artifacts.daemonName}.direct`);
-  if (manager === 'direct') return [snapshots, direct];
+  if (manager === 'direct') return [updateArtifacts, direct];
   const definition = claimBeside(
     manager === 'systemd' ? artifacts.systemdUnitFile : artifacts.launchAgentFile,
     'definition',
@@ -359,7 +317,7 @@ function lifecycleLocksFor(manager: DaemonManagerKind, artifacts: LifecycleArtif
       manager === 'systemd' ? artifacts.systemdUnitName : artifacts.launchdLabel
     }.target.lifecycle.lock`,
   );
-  return [target, snapshots, definition, direct];
+  return [target, updateArtifacts, definition, direct];
 }
 
 /**

@@ -5,11 +5,12 @@ set -euo pipefail
 dest="$1"
 
 # Match GoReleaser's destination to a package .bin key so the release never hardcodes any
-# executable name outside the manifest/configuration boundary. EVERY bin key is a candidate: the
-# daemon package also ships its browser worker. The first key of each package is still checked to
-# exist, because it is the package's own executable name (the two-name model).
+# executable name outside the manifest/configuration boundary. EVERY bin key is a candidate: a
+# package may ship a helper beside its own executable. The first key of each package is still checked to
+# exist, because it is the package's own executable name (the two-name model). The Browsers package ships
+# the daemon's browser worker (compile.sh's BROWSERS_PKG): the kernel never points into a plugin.
 prefix=""
-for package in packages/cli packages/daemon; do
+for package in packages/cli packages/core/kernel packages/plugins/browsers; do
   own="$(jq -r '.bin | to_entries[0].key' "${package}/package.json")"
   [ -z "${own}" ] || [ "${own}" = "null" ] && echo "❌ no .bin entry in ${package}/package.json" >&2 && exit 1
   while IFS= read -r candidate; do

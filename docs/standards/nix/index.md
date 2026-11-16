@@ -111,6 +111,22 @@ passed on every warm CI cache volume and failed only on a cold one: an intermitt
 When the build reports a mismatch, take the `got:` hash into `outputHash`. Never rerun it away: the
 `got:` hash is the same on every builder, so a rerun that passes only found a stale cache.
 
+**A stale hash is caught in seconds, not in the build.** The digest in that name is also exposed as
+`ferretry-bun-deps`'s `installDigest`, and `nix/bun-deps.inputs` holds the digest `outputHash` was last
+taken at. `scripts/validate/bun-deps-hash.sh` (the `a-bun-deps-hash` hook, so pre-commit and the
+`gates` part of Quick Checks, which starts beside the Nix build and ends long before it) asks Nix for
+the digest of the inputs as they are now and fails when it differs from the pin. It never lists the
+inputs itself: it evaluates the one list in `nix/ferretry.nix`, so the check and the build cannot
+disagree about what counts. Change `bun.lock`, a manifest (other than `version`), a vendored file,
+the Bun version or the install command, and the hook fails with the steps to take:
+
+1. `nix build .#default --no-link`; it fails with `got: sha256-…`;
+2. put that hash in `outputHash` in `nix/ferretry.nix`;
+3. put the new digest (the hook prints it) in `nix/bun-deps.inputs`;
+4. build again, which must pass, and commit all of it together.
+
+A change that leaves the hash alone (a test-only dependency) still needs step 3.
+
 ### nix/bun.nix — the pinned Bun
 
 **Purpose**: own the one Bun version every shell, every CI job, the release build and the flake's

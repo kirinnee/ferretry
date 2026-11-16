@@ -1,0 +1,19 @@
+{
+  "name": "ferretry-v4-to-v5",
+  "version": "0.0.0",
+  "private": true,
+  "description": "One-time v4 -> v5 home converter. Outside the product: not a workspace member, never imported, bundled or released. Deleted once every machine is on v5.",
+  "type": "module",
+  "scripts": {
+    "convert": "bun src/main.ts",
+    "test": "bun test tests",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.4"
+  }
+}

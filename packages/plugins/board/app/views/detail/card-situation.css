@@ -1,0 +1,144 @@
+/* The card's situation block and its term tips: the part of the agenda card's look the card detail reads with. */
+.fy-card__label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: 0.06em;
+  line-height: 1.6;
+  text-transform: uppercase;
+}
+
+/* Premise and context: two soft tinted blocks, each with its label ABOVE its points so the text gets the full width.
+   The tints come from the theme's own accent and warn tokens, so both light and dark keep their contrast. No accent bar. */
+.fy-card__situation {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fy-card__sit-row {
+  --fy-sit-bg: var(--surface-2, var(--bg));
+  --fy-sit-ink: var(--muted);
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--fy-sit-bg);
+}
+/* The card's Status: the neutral surface, so it reads as the sitrep and the two tinted blocks below it stay the reasons. */
+.fy-card__sit-row[data-card-section='progress'] {
+  --fy-sit-bg: var(--surface-2, var(--bg));
+  --fy-sit-ink: var(--fg);
+}
+.fy-card__sit-row[data-card-section='premise'] {
+  --fy-sit-bg: var(--accent-soft);
+  --fy-sit-ink: var(--accent-strong);
+}
+.fy-card__sit-row[data-card-section='context'] {
+  --fy-sit-bg: var(--warn-bg);
+  --fy-sit-ink: var(--warn);
+}
+/* A board card's detail draws the same two blocks (`Situation`), so the rules name both hosts. */
+:is(.fy-card, .fy-board-detail) .fy-card__sit-label {
+  color: var(--fy-sit-ink);
+}
+:is(.fy-card, .fy-board-detail) .fy-card__points {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+:is(.fy-card, .fy-board-detail) .fy-card__points > li {
+  padding: 0;
+}
+:is(.fy-card, .fy-board-detail) .fy-card__points > li::before {
+  content: none;
+}
+.fy-board-detail .fy-card__sit-row :is(p, ul, ol) {
+  margin: 0;
+}
+/* A status is three parts (Now / Done so far / Next), each a small label over Markdown: paragraphs and lists. */
+.fy-board-detail .fy-card__status {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+  --md-font-size: var(--text-md);
+}
+.fy-board-detail .fy-card__status-part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-board-detail .fy-card__status-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  line-height: 1.5;
+}
+.fy-board-detail .fy-card__status .md {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.fy-board-detail .fy-card__status :is(ul, ol) {
+  padding-left: 20px;
+}
+
+/* The ferret's answer to a question the owner asked about this item: above the options, which stay live. */
+.fy-card__answered {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--ok-bg, var(--accent-soft));
+}
+
+/* A term: a dotted underline; a tap shows what it means just under it. */
+.fy-terms-layer {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 14px;
+}
+:is(.fy-card, .fy-board-detail) a[href^='#fy-term-'] {
+  border-bottom: var(--border-width) dotted var(--muted);
+  color: inherit;
+  cursor: help;
+  text-decoration: none;
+}
+:is(.fy-card, .fy-board-detail) a[href^='#fy-term-']:focus-visible {
+  border-radius: var(--radius-badge);
+  outline: 2px solid var(--accent);
+}
+.fy-term-tip {
+  position: absolute;
+  z-index: 5;
+  width: 240px;
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  padding: 7px 9px;
+  background: var(--fg);
+  color: var(--bg);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+.fy-term-tip :is(p, .md) {
+  display: inline;
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+}

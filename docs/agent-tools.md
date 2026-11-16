@@ -31,7 +31,14 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.hover` · `browser.drag` · `browser.mouse` · `browser.press` · `browser.scroll` · `browser.select` · `browser.check` ·
 `browser.fill_form` · `browser.highlight` (see [Pointer and keys](#pointer-and-keys)) ·
 `browser.eval(name, function, target?, timeoutMs?)` (owner-gated: [Page scripts](#page-scripts-owner-gated)) ·
-`browser.close(name)` · `browser.ask_owner(name, message?)` · `task.plan(lines, expiresInSeconds?)` (see [Task plan](#task-plan-ask-once-before-a-task)).
+`browser.close(name)` · `browser.ask_owner(name, message?)`.
+
+> **Not available on 5.0 yet — these come AFTER MERGE (M2, tracked in
+> [`rebuild/after-merge.json`](rebuild/after-merge.json)).** The Accounts plugin declares only `account_hint`. These
+> six are NOT declared, so the CLI builds no MCP tool for them and an agent cannot call them until each is built and
+> declared again: `account_propose`, `task_plan` (`task.plan`), `secure_copy`, `secure_list`, `secure_discard` and
+> `secure_paste`. Every section below that describes one of them is the design it will be built to, not a thing a
+> ferret can use today.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -43,7 +50,7 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 
 A single value at a prompt (a password, passphrase, one-time or 2FA code) is `terminal.request_input`, not `terminal.ask_owner`: the owner types it on a card (or `fy input answer`), and the agent never receives it ([input-requests.md](input-requests.md)). A one-time code is sensitivity `code`: the ferret may see it, and may instead read it from an inbox it has and type it itself, only on the page of the sign-in it is for ([one-time codes](input-requests.md#one-time-codes-code)). `fy input ls|answer|cancel` is the owner's command and refuses to run inside a ferret.
 
-A value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
+**After merge (M2), not callable on 5.0 yet:** a value the agent must move but not see (a token it just minted, a key a command prints) is `secure.copy`: the daemon captures it as `sealed:<name>`, masks it everywhere it scrubs text, and the agent learns only its source, length and expiry. `secure.list` shows the session's copies and `secure.discard` lets go of one. Pasting a copy is an owner-approved input request ([secure-copy.md](secure-copy.md)).
 
 The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 
@@ -190,15 +197,15 @@ redactor like every other page text. `fy browser page eval <name> <function> [--
 
 ## Routes
 
-| Route                                                     | Who                       | Session from                                                              |
-| --------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
-| `POST /v1/agent/tools`                                    | an agent, on this machine | its session credential ONLY                                               |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
-| `POST /v1/sessions/:sessionId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
-| `POST /v1/sessions/:sessionId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
-| `POST /v1/sessions/:sessionId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
-| `GET /v1/sessions/:sessionId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
-| `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
+| Route                                                   | Who                       | Session from                                                              |
+| ------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------- |
+| `POST /v1/agent/tools`                                  | an agent, on this machine | its session credential ONLY                                               |
+| `POST /v1/ferrets/:ferretId/surfaces/terminals/tools`   | a person (CLI, app)       | the path; `terminal` grant                                                |
+| `POST /v1/ferrets/:ferretId/surfaces/browser/tools`     | a person                  | the path; `browser` grant, plus `filesystem` for the [file tools](#files) |
+| `POST /v1/ferrets/:ferretId/surfaces/terminals/control` | a person: control         | the path; `terminal` grant                                                |
+| `POST /v1/ferrets/:ferretId/surfaces/browser/control`   | a person: control         | the path; `browser` grant                                                 |
+| `GET /v1/ferrets/:ferretId/surfaces/terminals/control`  | a person: who drives what | the path; `terminal` grant                                                |
+| `GET /v1/ferrets/:ferretId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant                                                 |
 
 A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
 `SurfaceControlView { sessionId, driving[], takeovers[], handed[], opened[], asked[] }` for that kind.
@@ -206,7 +213,7 @@ A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and
 
 Control changes are published on the session's journal, so `/v1/events` streams them:
 `surface.driving` (`SurfaceDrivingSchema`, carrying `until` — show the marker while `now < until`, and
-`incognito` for an incognito page), `surface.takeover`, `surface.handback`, `surface.handed`,
+`incognito` for an incognito page), `surface.takeover`, `surface.handback` (with `closed: true` when the page itself closed, which ends every mark on it), `surface.handed`,
 `surface.opened` (`SurfaceOpenedSchema`) and `surface.asked` (`SurfaceAskedSchema`). The daemon replays its
 journal on start, so a takeover, a hand-over, an open or an ask outlives a restart.
 
@@ -303,6 +310,10 @@ a staged path the daemon alone saves.
 
 ## Task plan: ask once before a task
 
+> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).** `task_plan`
+> is not declared by the Accounts plugin, so no ferret has this tool today; this section is the design it will be built
+> to. Until then a sign-in or paste simply asks the owner each time.
+
 `task.plan(lines, expiresInSeconds?)` (MCP `task_plan`) is how a ferret asks the owner, once, to pre-approve the
 sign-ins and pastes a task will need. One call raises ONE card on the owner's agenda, up to 10 lines, for
 `expiresInSeconds` (300 to 86,400: five minutes to a day; two hours when it is left out):
@@ -350,6 +361,10 @@ reads Ferretry's own files." Every ferret can read Ferretry's own state-home fil
 [secure-copy.md](secure-copy.md#task-plans).
 
 ## Suggesting a standing rule
+
+> **Not available on 5.0 yet: after merge (M2, [`rebuild/after-merge.json`](rebuild/after-merge.json)).**
+> `account_propose` is not declared by the Accounts plugin, so a ferret cannot call it today; the owner makes standing
+> rules from the app or `fy`. This section is the design it will be built to.
 
 `account_propose` takes `preapprove: true` (and `recipe` is then optional) to ask the owner to consider a
 [standing sign-in rule](secrets.md#standing-sign-in-rules) for one sign-in. It is a **suggestion and nothing more**:
@@ -484,7 +499,7 @@ call.
    store, read per call). The same switches also wrap every ordinary terminal, browser and filesystem
    route — HTTP and sockets — for an agent caller, so `files` is enforced on the session filesystem
    routes. A person is never asked. **The three [file tools](#files) need the `files` switch AS WELL AS
-   `browser`**; on a person's route `POST /v1/sessions/:id/surfaces/browser/tools` they additionally need the
+   `browser`**; on a person's route `POST /v1/ferrets/:ferretId/surfaces/browser/tools` they additionally need the
    `filesystem` grant on `use` ([grants.md](grants.md)), so a paired phone granted the browser cannot reach the host's
    disk through it. A caller whose grants cannot be read is refused; the owner at the machine is not governed.
 6. **Take over / hand back, per tab and per terminal.** While a person holds a surface, every agent tool
@@ -513,7 +528,7 @@ call.
 ## The ferret session credential
 
 Every agent pane holds its own credential: 32 random bytes the daemon mints at each pane launch, keeps
-only the SHA-256 of (`sessionCapabilityHash` in the session's `config.json`), and writes into the pane as
+only the SHA-256 of (`capabilityHash` in the session's `config.json`), and writes into the pane as
 `FY_SESSION_TOKEN` — the documented name — and `FY_SESSION_BOARD_CAPABILITY`, the older name, kept for one
 release. It is also a **bearer class** of its own, `session`, beside the admin and warden tokens:
 
@@ -575,10 +590,10 @@ its own).
   warden's settings and "leave it alone", resource limits, the lessons settings, a session's Pack switch and a
   board's switch; answering a harness's own prompts (`permission`, `dialog`, `answer`, console keys, `attach`) and typing the owner's own composer draft into a pane;
   the agent browser's sign-in window, whose status is a credential; and the security log and grant history.
-  A person's own agent-tool routes (`/v1/sessions/:id/surfaces/*`) are person routes too: an agent uses
+  A person's own agent-tool routes (`/v1/ferrets/:ferretId/surfaces/*`) are person routes too: an agent uses
   `POST /v1/agent/tools`.
-- **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/sessions` (`fy start`,
-  interactive included) and `POST /v1/pack/new` (`fy new`) take the parent from the credential: a body `parent`
+- **Every session a ferret starts is its own child.** On its own credential or the admin token naming its session, `POST /v1/ferrets` (`fy start`,
+  interactive included, and `fy new`) takes the parent from the credential: a body `parent`
   naming another session is `403 parent_mismatch`, and an absent one is filled in. So a ferret can never start a
   top-level session, and its sub-ferret limits and depth (and, for `fy new`, the Pack switch) always apply to
   what it starts ([pack-mode.md](pack-mode.md#limits)). A ferret may not give its start the Warden's own label
@@ -593,8 +608,9 @@ its own).
 - **`any` routes take a session credential as that session, always.** Its actor is `peer:<its session>`
   — never the owner, on the board and the agenda too — whatever any header says. That covers everything a
   ferret's `fy` and MCP tools need: `fy send` and `fy notify`, its board card and notes, its own agenda
-  items, signals, starting a sub-ferret, config reads and (held) writes, input requests and secure copy
-  through the agent tools, `account_hint`/`account_propose`, and session and fleet reads.
+  items, signals, starting a sub-ferret, config reads and (held) writes, input requests through the agent
+  tools, `account_hint`, and session and fleet reads. (Secure copy and `account_propose` join this list after merge,
+  M2: they are not declared on 5.0 yet.)
 - **A handler keeps a second line**, keyed on the same predicate, for the PARTS of an `any` route that are
   the owner's: another session's agenda item, an unheld config loosening, confirming a lane set, widening
   what ferrets may drive through a fleet proposal, revealing a quarantined terminal.
@@ -604,14 +620,14 @@ its own).
   call on the admin token cannot be told from the owner at the machine. The board and the lane sets record
   it as `admin-token` — "the admin token (the owner at this machine, or a ferret without its own
   credential)" — and never plainly as the owner; only a paired device's act is the owner's. It keeps the
-  owner's authority. The label travels BESIDE the actor (`actorVia`, `createdByVia`, `byVia`, `confirmedVia`),
-  never as a new actor kind, so an older app, CLI or a downgraded daemon drops it and reads the owner, as it
-  always did, instead of refusing the board. **Declared gap:** the agenda still records such a call's
+  owner's authority. On a card the label is the owner actor's own `via` (`{ kind: "owner", via: "admin-token" }`,
+  history, clarifications and `createdBy` alike), never a new actor kind; a lane set's confirmation keeps
+  `confirmedVia` beside it. **Declared gap:** the agenda still records such a call's
   answers and closes as the owner's ("done by you") — [agenda.md](agenda.md).
 
 ### Cutting a ferret off
 
-`fy session revoke-credential <session>` (`POST /v1/sessions/:sessionId/revoke-credential`, a **person** route)
+`fy session revoke-credential <session>` (`POST /v1/ferrets/:ferretId/revoke-credential`, a **person** route)
 revokes one session's credential at once. Its stored hash is erased on the session's own queue, so the value
 its pane holds names nobody from that moment: where its `fy`, its MCP server and its agent tools present their
 own credential (`fys_…`), they are refused as an unknown one (`401`; `fy` reports it and does not fall back to
@@ -655,7 +671,7 @@ names the home and never the file's contents; the rule is the same everywhere (`
 
 ### Reading a session's files
 
-`/v1/sessions/:id/fs`, `/fs/file`, `/fs/index`, `/fs/changes` and `/fs/diff` serve any caller, and an **agent** (its
+`/v1/ferrets/:ferretId/fs`, `/fs/file`, `/fs/index`, `/fs/changes` and `/fs/diff` serve any caller, and an **agent** (its
 own session credential, the admin token naming its session, a warden) is held to two rules a person is not:
 
 - **Its own tree.** A ferret reads its own session and the sub-ferrets it started, however deep (the lead reviews
@@ -680,7 +696,7 @@ session's files, a Warden session's included. A daemon that cannot resolve its s
 
 ### Starting a session
 
-A ferret's `POST /v1/sessions` and `fy new --cwd` (`POST /v1/pack/new`) are refused `403 state_home` when the
+A ferret's `POST /v1/ferrets` and `fy new --cwd` (the same route) are refused `403 state_home` when the
 working folder is inside the home, named there or reached through a link — a session's folder is what its agent
 reads freely, so a child started in `~/.ferretry` would hold the tokens. This is asked before the terminal gate,
 which a caller on loopback skips, and asked AGAIN of the canonical folder the start records and spawns in — by
@@ -835,7 +851,15 @@ agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
 whose credential is in its environment, and nothing else: it talks only to the daemon on this machine. The
 agent routes get the credential on their own header; its other calls (`search_work`) present it as the
 bearer, exactly as a ferret's `fy` does, and use the admin token only against a daemon that does not take it
-([secrets.md](secrets.md#what-a-ferrets-fy-presents)). The fleet's fixed layer adds it to every
+([secrets.md](secrets.md#what-a-ferrets-fy-presents)). **It is a slim process.** Every runtime keeps one for the life
+of its pane, so a machine with thirty ferrets runs thirty; loading the whole command registry made each about 170 MiB.
+Every `fy mcp serve` is routed by `bin/fy.ts` to `bin/mcp-serve.ts` (only `--help` and a refused option are answered by
+the full program, since they never connect). It acts **only as the ferret whose pane credential it holds**
+(`FY_SESSION_TOKEN`, or its documented alias `FY_SESSION_BOARD_CAPABILITY`, starting `fys_`): it never reads `FY_TOKEN`
+or the admin token file, refuses `--as-owner`, and a missing, empty or unprefixed pane credential ends it at once with a
+sentence and sends nothing — no fallback to the owner (`tests/sit/mcp-serve-credential.sit.test.ts`). It loads the ferret's connection, the guard with the tool facts and contract hashes the
+generator wrote into `src/generated/slim.ts`, and the serve module — no plugin's CLI half and no manifest. It is
+about 46–48 MiB idle after `initialize` (budget 60, asserted by `tests/sit/mcp-serve-memory.sit.test.ts`); the bun runtime alone is about 16. Tools, guard and errors are the full program's. Every other command (`mcp ls`, `mcp check`, …) takes the full path, `bin/program.ts`. The fleet's fixed layer adds it to every
 agent runtime as a locked entry, with a short built-in instruction (the tools, the rules for changing
 Ferretry's own settings, then how to notify the owner and, in agenda mode, raise agenda items) in the system prompt:
 
@@ -852,7 +876,7 @@ The wrapper appends each ferret's own sections to that same value at launch — 
 the lessons teaching, each when its switch is on ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 
 The server's own `initialize` instructions are one line; `lessons_suggest` files a lesson through
-`POST /v1/agent/lessons` ([learning.md](learning.md)); `instructions` answers, from the environment the
+`POST /v1/agent/lessons` ([lessons.md](lessons.md)); `instructions` answers, from the environment the
 server inherited, which of those sections this ferret launched with — the `fy instructions` report
 ([hypermedia.md](hypermedia.md#delivered-as-system-instructions-per-ferret)).
 

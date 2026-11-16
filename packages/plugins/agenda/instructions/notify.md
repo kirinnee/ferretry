@@ -1,0 +1,1 @@
+Notify: the owner reads the agenda, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run `fy notify "<summary>" [--body "<detail>"]`: a quiet agenda notice. Add `--buzz` only when it must reach their phone now. Never notify progress or chatter.

@@ -1,0 +1,29 @@
+╭─── Claude Code v2.1.220 ────────────────────────────────────────────────────────────────────────────────────────╮
+│                                             │ Tips for getting started                                          │
+│                Welcome back!                │ Run /init to create a CLAUDE.md file with instructions for Claude │
+│                                             │ ───────────────────────────────────────────────────────────────── │
+│                   ▐▛███▜▌                   │ What's new                                                        │
+│                  ▝▜█████▛▘                  │ Check the Claude Code changelog for updates                       │
+│                    ▘▘ ▝▝                    │                                                                   │
+│                                             │                                                                   │
+│   Opus 5 (1M context) · API Usage Billing   │                                                                   │
+│          /home/dev/project           │                                                                   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ GO please
+
+  Reading 1 file… (ctrl+o to expand)
+  ⎿  /etc/hostname
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Read file
+
+  Read(/etc/hostname)
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, allow reading from etc/ during this session
+   3. No
+
+ Esc to cancel · Tab to amend

@@ -1,0 +1,206 @@
+import { afterEach, beforeEach, describe, it } from 'bun:test';
+import should from 'should';
+import { Composer } from '../../../../app/composer/composer.tsx';
+import { daemonConnection } from '../../../../app/composer/seam.ts';
+import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
+import { writeMdComposePref } from '@ferretry/app';
+import { quoteSelectionIntoComposer } from '@ferretry/app';
+import { interact, mount, must } from '@ferretry/app/testing';
+
+// The general composer behaviour is one key arbitration for every editor style; these suites drive it
+// through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
+beforeEach(() => writeMdComposePref('off'));
+afterEach(() => writeMdComposePref('on'));
+
+/**
+ * The composer grows to its draft, in a real DOM.
+ *
+ * This is not a renderable-tree fact: the height is measured from `scrollHeight`
+ * and written to `style.height` in a layout effect, so only a mounted DOM can
+ * say whether a two-line draft is visible or sliced. The shipped box was one
+ * 44px row with the textarea scrolling internally, which is exactly how line two
+ * of a draft disappeared behind the actions row at both viewports (measured
+ * 2026-08-04, 390x844 and 1440x900).
+ *
+ * happy-dom reports `scrollHeight` as 0 for every element, so each case states
+ * the measurement it is about by defining that property. What is under test is
+ * the clamp and the overflow decision, and both are asserted. The draft is
+ * changed through `quoteSelectionIntoComposer` — a real production path into the
+ * composer's own `replaceDraft` — rather than by poking the DOM value, so the
+ * React state change that drives the effect is a real one.
+ */
+
+const daemon = daemonConnection('daemon-a');
+
+/** Drafts must not leak between cases through a shared browser store. */
+const memoryStorage = (): DraftStorage => {
+  const entries = new Map<string, string>();
+  return {
+    getItem: key => entries.get(key) ?? null,
+    setItem: (key, value) => {
+      entries.set(key, value);
+    },
+  };
+};
+
+const api = { send: async () => ({}) as never };
+
+const textareaOf = (container: HTMLElement): HTMLTextAreaElement =>
+  must(container.querySelector('textarea'), 'the composer textarea');
+
+/**
+ * Pin what the browser would have measured. The effect sets `height: auto`
+ * first and then reads this, so a fixed number models a draft that renders at
+ * exactly that height.
+ */
+const measure = (input: HTMLTextAreaElement, contentHeight: number): void => {
+  Object.defineProperty(input, 'scrollHeight', { configurable: true, get: () => contentHeight });
+};
+
+/** Mount a composer, pin its measured height, then put a draft in it. */
+const grown = async (options: {
+  readonly compact?: boolean;
+  readonly contentHeight: number;
+  readonly ferretId: string;
+}): Promise<{ readonly input: HTMLTextAreaElement; readonly unmount: () => Promise<void> }> => {
+  const drafts = new DaemonDraftStore(memoryStorage());
+  const view = await mount(
+    <Composer
+      api={api}
+      {...(options.compact === undefined ? {} : { compact: options.compact })}
+      daemon={daemon}
+      draftStore={drafts}
+      ferretId={options.ferretId}
+    />,
+  );
+  const input = textareaOf(view.container);
+  measure(input, options.contentHeight);
+  await interact(() =>
+    quoteSelectionIntoComposer('a drafted line', { daemonId: daemon.daemonId, ferretId: options.ferretId }),
+  );
+  return { input, unmount: view.unmount };
+};
+
+describe('composer auto-grow', () => {
+  it('grows to a multi-line draft instead of scrolling it out of sight', async () => {
+    const { input, unmount } = await grown({ contentHeight: 96, ferretId: 'grow' });
+    try {
+      // The box is the content's height, so every line the reader typed is on
+      // screen — and no scrollbar, because nothing is hidden.
+      should(input.style.height).equal('96px');
+      should(input.style.overflowY).equal('hidden');
+    } finally {
+      await unmount();
+    }
+  });
+
+  it('never shrinks below one 22px line', async () => {
+    const { input, unmount } = await grown({ contentHeight: 12, ferretId: 'floor' });
+    try {
+      // The floor is one line, the same 22px the stylesheet declares; the row
+      // around it is what carries the touch target.
+      should(input.style.height).equal('22px');
+    } finally {
+      await unmount();
+    }
+  });
+
+  it('caps a pasted essay and only then hands the textarea its own scrollbar', async () => {
+    const { input, unmount } = await grown({ contentHeight: 4_000, ferretId: 'cap' });
+    try {
+      // Growth stops at the desktop ceiling so the conversation is not swallowed,
+      // and the scrollbar appears only at the cap — where content genuinely is
+      // hidden and the reader needs a way to reach it.
+      should(input.style.height).equal('148px');
+      should(input.style.overflowY).equal('auto');
+    } finally {
+      await unmount();
+    }
+  });
+
+  it('gives a phone a writing surface: ten lines before the field scrolls, not a desktop chat line', async () => {
+    const { input, unmount } = await grown({ compact: true, contentHeight: 4_000, ferretId: 'phone' });
+    try {
+      should(input.style.height).equal('240px');
+      should(input.style.overflowY).equal('auto');
+    } finally {
+      await unmount();
+    }
+  });
+
+  it('drops the phone ceiling while the software keyboard is up', async () => {
+    document.documentElement.setAttribute('data-keyboard', 'open');
+    const { input, unmount } = await grown({ compact: true, contentHeight: 4_000, ferretId: 'keyboard' });
+    try {
+      // With ~430px of visible viewport the reader still needs the turn above the box, so the
+      // ceiling comes down with the keyboard to six lines — the height the stacked controls
+      // already give the row — and the dependency on it is what brings it back up.
+      should(input.style.height).equal('144px');
+    } finally {
+      await unmount();
+      document.documentElement.removeAttribute('data-keyboard');
+    }
+  });
+
+  it("lays the phone row out like kteam's: attach and mic left, Interrupt's slot over Send right", async () => {
+    const phone = await mount(
+      <Composer
+        api={api}
+        compact
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        ferretId="dock-phone"
+      />,
+    );
+    const busy = await mount(
+      <Composer
+        api={api}
+        busy
+        compact
+        daemon={daemon}
+        draftStore={new DaemonDraftStore(memoryStorage())}
+        ferretId="dock-busy"
+      />,
+    );
+    const desktop = await mount(
+      <Composer api={api} daemon={daemon} draftStore={new DaemonDraftStore(memoryStorage())} ferretId="dock-desktop" />,
+    );
+    try {
+      const phoneForm = must(phone.container.querySelector('form'), 'the phone composer');
+      should(phoneForm.getAttribute('data-composer-layout')).equal('phone');
+      const phoneRow = must(phone.container.querySelector('.fy-composer-row'), 'the phone row');
+      const start = must(phone.container.querySelector('[data-composer-dock="start"]'), 'the left column');
+      const end = must(phone.container.querySelector('[data-composer-dock=""]'), 'the right column');
+      // Left column first, right column last, the field between them and in neither.
+      should(phoneRow.firstElementChild).equal(start);
+      should(phoneRow.lastElementChild).equal(end);
+      should(start.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
+      should(start.querySelector('textarea')).be.null();
+      should(end.querySelector('textarea')).be.null();
+      // Idle: Interrupt's place is held by an empty, hidden slot, so Send never moves.
+      should(end.children.length).equal(2);
+      should(end.firstElementChild?.getAttribute('aria-hidden')).equal('true');
+      should(end.firstElementChild?.hasAttribute('data-composer-interrupt-slot')).be.true();
+      should(end.lastElementChild?.hasAttribute('data-composer-send')).be.true();
+
+      // Working: the same two slots, Interrupt & send in the first.
+      const busyEnd = must(busy.container.querySelector('[data-composer-dock=""]'), 'the busy right column');
+      should(busyEnd.children.length).equal(2);
+      should(busyEnd.firstElementChild?.hasAttribute('data-composer-interrupt')).be.true();
+      should(busyEnd.lastElementChild?.hasAttribute('data-composer-send')).be.true();
+      should(busy.container.querySelector('[data-composer-interrupt-slot]')).be.null();
+
+      const desktopForm = must(desktop.container.querySelector('form'), 'the desktop composer');
+      const desktopRow = must(desktop.container.querySelector('.fy-composer-row'), 'the desktop row');
+      should(desktopForm.hasAttribute('data-composer-layout')).be.false();
+      should(desktopRow.firstElementChild?.hasAttribute('data-composer-attach')).be.true();
+      should(desktop.container.querySelector('[data-composer-dock] [data-composer-attach]')).be.null();
+      // A desktop holds no slot: its row simply gains Interrupt & send when a turn runs.
+      should(desktop.container.querySelector('[data-composer-interrupt-slot]')).be.null();
+    } finally {
+      await phone.unmount();
+      await busy.unmount();
+      await desktop.unmount();
+    }
+  });
+});

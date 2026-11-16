@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { DaemonUpdateStatusReader, nextStep, renderUpdateStatus } from '../../../src/lib/update/status';
-import { FakeFacts, FakeUpdateView } from './fixtures';
+import { DaemonUpdateStatusReader, nextStep, renderUpdateStatus } from '../../../src/lib/update/status.ts';
+import { FakeFacts, FakeUpdateView } from './fixtures.ts';
 
 const daemon = { path: '/opt/homebrew/bin/fyd', source: 'PATH' as const, version: '1.2.3' };
 
@@ -27,7 +27,7 @@ describe('renderUpdateStatus', () => {
     should(renderUpdateStatus({ install: { kind: 'homebrew', cask: 'ferretry' }, update }, 'fy')).deepEqual([
       '  installed via Homebrew cask ferretry',
       '  update available 1.2.3 → 1.3.0 (https://github.com/kirinnee/ferretry/releases/tag/v1.3.0)',
-      '  to update: fy daemon update',
+      '  to update: fy update',
     ]);
   });
 

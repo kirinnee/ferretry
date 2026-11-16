@@ -107,10 +107,13 @@ itself (`ferret`), never the owner. That is why the migration counts only Not go
 `fy tidy` is the one-shot clean-up for a ferret that made cards and work-tracking agenda items nobody asked for
 (the owner's one-line prompt to such a ferret is "run `fy tidy`"). It acts on **the calling ferret's own work
 only**, and it is a **dry run unless `--yes`**: it prints what it would drop, close and keep, each with the reason.
-`fy tidy --yes [--reason "<why>"]` applies it; `--json` prints the plan (and, with `--yes`, the result).
+`fy tidy --yes [--reason "<why>"]` applies it; `--json` prints the plan (and, with `--yes`, the result). The OWNER, who
+has no ferret of their own, names one with `fy tidy --ferret <id>` (a dry run, or `--yes` with `--reason`; v4's
+`--session`, for the owner only): the daemon takes that target only from a caller that is not a ferret, and a ferret
+credential naming any ferret but itself is refused (exit 2). `--session` stays refused and points at `--ferret`.
 
 The daemon decides (`planTidy`, `packages/daemon/src/lib/tidy/plan.ts`, behind the read-only
-`POST /v1/tidy/plan`; the session is the caller's own credential and is never a parameter). The CLI acts: it
+`POST /v1/tidy/plan`; a ferret's plan is for its own credential's ferret; only a non-ferret caller may name one, in the optional body `{ "ferret": "<id>" }`). The CLI acts: it
 applies the plan with the same card drop and agenda "done" the ferret could type itself, one by one, so every
 change keeps its history and its authority check, and it names each failure without stopping. A failure makes
 the command exit non-zero.
@@ -399,10 +402,10 @@ lane its workflow works in (In progress / Doing; Plan for `design-first`). A car
 where it is, and a failed move only warns: the session still starts. A card the lead makes with `fy task create`
 has no session yet, so it stays in Todo until the lead passes `--lane` or moves it.
 
-**Which lane, by what the work is.** `fy task move --help` and `fy board lanes show` give the rule by lane category,
+**Which lane, by what the work is.** `fy board lanes show`, and the refusal of `fy card move` to a lane the board lacks, give the rule by lane category,
 and `lanes show` adds a "use when" per lane (`laneUse`, single-sourced in `@ferretry/protocol`): planning or designing
 in the planning lane, building in the active lane, a PR, a merge, a release and
-`fy signal done` move a card by themselves, and blocked is not a lane (`fy task block`, `depend`).
+`fy signal done` move a card by themselves, and blocked is not a lane (`fy card block`, `depend`).
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
@@ -563,7 +566,7 @@ read from GitHub, never taken on a caller's word. The owner, the card's owner fe
 report one, and so may a sub-ferret on the card it is doing, since it is the one that saw the deploy; anyone else is
 `403 forbidden`. The move is the daemon's, through the same `triggerMove` every fact uses: into the first lane of
 the card's variant that enters on the trigger, recorded `auto` with the trigger and with `reportedBy` naming who
-reported it (and `reportedVia: "admin-token"` beside it, as `actorVia` is beside an actor). It never goes back: a
+reported it (an owner on the admin token is `{ kind: "owner", via: "admin-token" }`). It never goes back: a
 card already there or past it is unchanged, and the answer is the card as it is. A dependency holds it as it holds a
 move: a blocked card is not moved on to a later category (`409 blocked-by`, naming the blockers); sideways it moves,
 and says what blocked it, and the owner's report moves it on as a fact would. A sub-ferret reports only on the card it
@@ -1520,7 +1523,7 @@ Every `fy task` verb takes `--session <id>` (act as that session instead of the 
 | Verb                                              | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fy task create`                                  | make a card: `-k/--kind`, `-t/--title`, `--summary`, `--ask`, `--ask-source`, `--premise`, `--context` (each repeatable, one bullet each), `--term`, `--brief`, `--brief-file`, `--how-to-test`, `--how-to-test-file`, `--workflow`, `--depends-on`, `--parent`, `--assignee`, `--project`, `--lane`, `--file`, `--pr`, `--branch`, `--doc`, `--private` or `--public`; asks the daemon first and refuses a strong duplicate unless `--new` (or `--related <id>` notes that card instead), lists weaker related cards, and refuses an umbrella card unless `--broad "<why>"` ([One card, one outcome](#one-card-one-outcome)) |
-| `fy tidy`                                         | drop your own unwanted cards and close your own work-tracking agenda items; a dry run unless `--yes`; `--reason`, `--session`, `--json` ([Tidy](#tidy-dropping-what-nobody-asked-for))                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `fy tidy`                                         | drop your own unwanted cards and close your own work-tracking agenda items; a dry run unless `--yes`; `--reason`, `--ferret <id>` (owner), `--json` ([Tidy](#tidy-dropping-what-nobody-asked-for))                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `fy search <words>`                               | find cards and agenda items by what they say; `--kind`, `--open`, `--all`, `--project`, `--limit`, `--json`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `fy task show <id>`                               | print one card                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `fy task show <id> --yaml`                        | the editable document `fy task patch` takes back                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -1612,5 +1615,4 @@ wherever it appears ([reference-standard.md](reference-standard.md)). It is **re
   session links to that card, shown as the old text; a card on the slice with the same id wins. It does not call
   `GET /v1/board/tasks?legacyRef=` per reference. The limit is the slice: an imported card this ferret no longer
   owns or is assigned stays plain text ([reference-standard.md](reference-standard.md)).
-- **Per-session task routes.** `/v1/sessions/:sid/tasks` and `/v1/tasks` survive as empty compatibility answers for
-  one release and then go. Nothing in the PWA requests them any more; a unit test scans its source for the spelling.
+- **Per-session task routes.** `/v1/sessions/:id/tasks` and `/v1/tasks` are deleted, not kept as compatibility answers: the board plugin declares no route for either (`packages/plugins/board/manifest.ts`). Nothing in the PWA requests them any more; a unit test scans its source for the spelling.

@@ -1,0 +1,513 @@
+import {
+  COMPOSER_OCCUPIED_CODE,
+  type ComposerDraftRequest,
+  ComposerDraftRequestSchema,
+  type ComposerDraftResult,
+  FY_REQUEST_ID_HEADER,
+  InterruptSessionRequestSchema,
+  type PeerMessageLabel,
+  type QueuedMessage,
+  QueueEditRequestSchema,
+  SEND_UNCONFIRMED_CODE,
+  SendCancelRequestSchema,
+  type SendRecord,
+  SendRequestSchema,
+  type SendResult,
+  SendRetryRequestSchema,
+  SendEnterRequestSchema,
+  type SessionHandoff,
+  SessionHandoffNameSchema,
+  type SessionView,
+  type SharedDraftSent,
+} from '../../../seams/protocol.ts';
+import { DraftSentSchema } from '../../../../contract/index.ts';
+import { callerIsAgent, ferretOf, isFerretCall, OWNER_ONLY_CODE, ownerOnlyWords } from '@ferretry/core-gate/contract';
+import { type FerretId, type LaunchOrigin, PERSON_ORIGIN } from '@ferretry/core-ferrets/contract';
+import { isUpdateUnconfirmed } from '../types.ts';
+import { parseBody } from '../../../seams/api.ts';
+import { ApiError } from '../../../seams/api.ts';
+import { type ApiResponse, decodeParameter, headerValue } from '../../../seams/api.ts';
+import { jsonResponse } from '../../../seams/api.ts';
+import type { MountRoute, RouteContext } from '../../../seams/api.ts';
+import { queuePage } from '../../../queue/lib/page.ts';
+import { DEFAULT_SEND_PAGE, MAX_SEND_PAGE, type SendPageQuery, sendPage } from '../page.ts';
+
+/**
+ * Talking to a session that is already running: `POST /v1/ferrets/:ferretId/send` and
+ * `POST /v1/ferrets/:ferretId/interrupt`.
+ *
+ * THE DAEMON COULD NOT BE TOLD ANYTHING AFTER TURN ONE. The lifecycle delivers the first turn and the
+ * revive replaces a dead pane; between them there was no verb at all, so `IFyApiClient.send` posted
+ * here and got `unknown_route`. The consequences were not confined to a missing feature:
+ *
+ *   * A DECLARED WAIT ON A PEER COULD NEVER END. `SessionSignalService.park` resolves the session
+ *     whose reply ends the wait, and that reply is a send. Every `--peer` park ran to its deadline no
+ *     matter how promptly the peer answered, which made request/response between teammates a pattern
+ *     the product declared and could not perform.
+ *   * THREE CLI CONTROLLERS SHIPPED AGAINST A 404 — `send-controller.ts`, its `--ask` park, and
+ *     `answer-controller.ts` — complete, tested, and calling nothing.
+ *
+ * WHAT IS STILL NOT HERE. `POST /v1/sessions/:id/answer` is NOT mounted, and that is a decision rather
+ * than an omission: answering a structured question means driving the harness's own rendered form and
+ * confirming the keys took, and nothing in this daemon ever writes a pending question in the first
+ * place (the monitor loop that would is survey section F). A mounted `answer` would be a route that
+ * could only ever refuse. The same reasoning bounds the interrupt below: it stops a turn, and it
+ * declines to ABANDON a rendered question.
+ *
+ * WHO SENDS. The SENDER is the server-derived actor, never the body: a ferret's own session credential
+ * makes it that ferret whatever any header says (`caller: 'any'`), and the admin token plus
+ * `x-ferretry-session-id` is the older honest-client form of the same (Gate stamps `ferret:<id>` for both). Being a ferret buys a SENDER
+ * identity, never a different TARGET's: the path names where the message goes, as for every caller.
+ */
+
+/** Why a send or an interrupt could not be acted on. */
+export type SessionSendFailure =
+  /** The id is not one the state-home layout would accept, or the request is otherwise unusable. */
+  | 'invalid'
+  /** No such session. */
+  | 'not_found'
+  /** The session's own condition refuses it: a quarantine, an unconfirmed kill, an open question. */
+  | 'refused'
+  /** A launch is still in flight. Pending rather than failed — the caller retries. */
+  | 'pending'
+  /**
+   * It was typed into the agent's composer and nothing proved it landed. Neither refused nor failed:
+   * answered as `send_unconfirmed` with the send's id, so the app can act on exactly that send.
+   */
+  | 'unconfirmed'
+  /** It was acted on, and the work it does — typing, reviving, journalling — failed. */
+  | 'failed';
+
+/** A refusal raised by the composition root's send handling, in a taxonomy `src/lib` may name. */
+export class SessionSendError extends Error {
+  constructor(
+    readonly failure: SessionSendFailure,
+    message: string,
+    /**
+     * The person's own text the agent's composer is holding, when that is why the send was refused:
+     * answered as `composer_occupied` with this draft, so the app can offer to send or clear it.
+     */
+    readonly draft?: string,
+    /** The send an `unconfirmed` answer is about. */
+    readonly sendId?: string,
+  ) {
+    super(message);
+    this.name = 'SessionSendError';
+  }
+}
+
+/** Talking to one running session. Both requests are the parsed wire shapes, unchanged. */
+export interface SessionSendSubsystem {
+  send(sessionId: string, request: SendInput): Promise<SendResult>;
+  interrupt(sessionId: string): Promise<SessionView>;
+  /** Every send this session's ledger holds, newest first, each with the fate proven so far. */
+  sends(sessionId: string): Promise<readonly SendRecord[]>;
+  /** One send by its id — how a sender learns where its message settled. */
+  sendStatus(sessionId: string, sendId: string, options?: SendStatusWait): Promise<SendRecord>;
+  /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
+  queue(sessionId: string): Promise<readonly QueuedMessage[]>;
+  /** New words for a queued message that is still waiting; refused once a key has gone to the pane. */
+  editQueued(sessionId: string, messageId: string, text: string): Promise<QueuedMessage>;
+  /** Takes back a queued message that is still waiting; nothing of it was ever typed. */
+  cancelQueued(sessionId: string, messageId: string): Promise<QueuedMessage>;
+  /** Re-attempts one send under its original id, as a person asked. */
+  retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
+  /** Takes back one send not proven delivered, erasing it from the composer when it is typed there. */
+  cancel(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Presses Enter once for a send sitting typed, and not sent, in the agent's composer. */
+  submit(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Presses Enter on, or erases, the person's own draft — only while the composer holds exactly it. */
+  composer(sessionId: string, request: ComposerDraftRequest): Promise<ComposerDraftResult>;
+  /** What the person sent in one hand-off document (`turn-008`, `queued-<send id>`). */
+  handoff(sessionId: string, name: string): Promise<SessionHandoff>;
+}
+
+/** A send as the route hands it over: the client's body, plus the two facts only the route knows. */
+interface SendInput {
+  readonly message: string;
+  readonly attachmentIds?: readonly string[] | undefined;
+  readonly now?: boolean | undefined;
+  readonly replyExpected?: boolean | undefined;
+  /** A ferret's label for the message (`fy send --kind`); set only when a ferret made the call. */
+  readonly label?: PeerMessageLabel | undefined;
+  /** The caller's own idempotency key, from the request-id header. */
+  readonly sendId: string;
+  /** The SESSION that made this call, derived from the credential — never from the body. */
+  readonly senderSessionId?: string | undefined;
+  /** Who the send is FOR, from the admitted credential (never the body): a revive it causes launches as this origin. */
+  readonly origin: LaunchOrigin;
+}
+
+/** The HTTP status and code each refusal answers with. */
+const REFUSALS: Readonly<Record<SessionSendFailure, { readonly status: number; readonly code: string }>> = {
+  invalid: { status: 400, code: 'invalid_request' },
+  not_found: { status: 404, code: 'not-found' },
+  refused: { status: 409, code: 'send_refused' },
+  // `503`, not `409`: the session is not refusing, it is not ready yet, and the difference is exactly
+  // what tells a caller to retry rather than to change what they asked for.
+  pending: { status: 503, code: 'session_launching' },
+  // `409` like a refusal, because the caller's next move is a decision about THIS send — press Enter on
+  // it, clear it, retry it — and never a blind re-post, which is what a `5xx` invites.
+  unconfirmed: { status: 409, code: SEND_UNCONFIRMED_CODE },
+  failed: { status: 500, code: 'session_send_failed' },
+};
+
+/** Restates a send refusal in the HTTP vocabulary. */
+function refuse(error: unknown): never {
+  if (error instanceof SessionSendError) {
+    // The person's draft rides in the body so the app can act on exactly that text; the message alone
+    // quotes only its start.
+    if (error.failure === 'refused' && error.draft !== undefined)
+      throw new ApiError(409, error.message, COMPOSER_OCCUPIED_CODE, undefined, { draft: error.draft });
+    if (error.failure === 'unconfirmed' && error.sendId !== undefined)
+      throw new ApiError(409, error.message, SEND_UNCONFIRMED_CODE, undefined, { sendId: error.sendId });
+    const refusal = REFUSALS[error.failure];
+    throw new ApiError(refusal.status, error.message, refusal.code);
+  }
+  throw error;
+}
+
+/** The raw path parameter, decoded. A parameter that regains a separator never reaches the service. */
+function pathSessionId(context: RouteContext): string {
+  const raw = context.params.get('ferretId') ?? '';
+  const decoded = decodeParameter(raw);
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the session id in the path is not usable', 'invalid_session_id');
+  return decoded;
+}
+
+/**
+ * The idempotency key, REQUIRED rather than generated.
+ *
+ * A send the daemon keyed by an id it invented itself would be idempotent against nothing: the whole
+ * protection is that the CLIENT sends the same key on a retry, so a request whose answer was lost in
+ * transit does not become a second message the agent reads and acts on twice. The client already
+ * sends this header on every request.
+ */
+function sendId(context: RouteContext): string {
+  const value = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
+  if (value === '')
+    throw new ApiError(
+      400,
+      `a send must carry ${FY_REQUEST_ID_HEADER}: without it a retried request becomes a second message`,
+      'missing_request_id',
+    );
+  return value;
+}
+
+/**
+ * The session that made this call, when a teammate did rather than a person.
+ *
+ * Taken from Gate's own reading of the standing (`ferretOf`, as Agenda and Tidy do), never from the body
+ * and never parsed here: a ferret's own credential names the ferret first, and only an agent admin call
+ * falls back to the `ferret:<id>` actor Gate stamped. A warden or a person is no sender. `from` decides
+ * two things that matter — how the message is attributed to the receiver, and whose declared wait it
+ * ends — and a caller able to name itself could end any other session's park.
+ */
+function senderSessionId(context: RouteContext): string | undefined {
+  return ferretOf(context);
+}
+
+/** Hands a running session its next turn. */
+/**
+ * Takes what a send carried out of the owner's shared draft (`SharedDraftSentSchema`). Optional: a table
+ * built without drafts simply ignores the field.
+ */
+export type SentDraftClearer = (
+  sessionId: string,
+  actor: string | undefined,
+  requestId: string,
+  sent: SharedDraftSent,
+) => Promise<void>;
+
+async function send(
+  subsystem: SessionSendSubsystem,
+  context: RouteContext,
+  clearDraft: SentDraftClearer | undefined,
+): Promise<ApiResponse> {
+  const id = pathSessionId(context);
+  const request = await parseBody(context.request, SendRequestSchema);
+  const sender = senderSessionId(context);
+  const requestId = sendId(context);
+  // The key lives in the header; a body that names a different one is two requests in one, so neither is honoured.
+  if (request.sendId !== undefined && request.sendId !== requestId)
+    throw new ApiError(
+      400,
+      `the body's sendId and ${FY_REQUEST_ID_HEADER} name two different sends; send one`,
+      'invalid_request',
+    );
+  const result = await subsystem
+    .send(id, {
+      message: request.message,
+      sendId: requestId,
+      ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+      ...(request.now === undefined ? {} : { now: request.now }),
+      ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+      // A label is a ferret's: the owner's and the daemon's messages are never held, so one is not honoured.
+      ...(sender === undefined || request.label === undefined ? {} : { label: request.label }),
+      ...(sender === undefined ? {} : { senderSessionId: sender }),
+      // The credential decides whether a revive this send causes is an agent's: a Warden token has no sender yet is one.
+      origin: isFerretCall(context)
+        ? { kind: 'agent', ...(sender === undefined ? {} : { ferret: sender as FerretId }) }
+        : PERSON_ORIGIN,
+    })
+    .catch(refuse);
+  // Only once the send is accepted, and never at the send's expense: a draft that moved on, or a clearer
+  // that refused, leaves the message exactly as sent.
+  if (request.sharedDraft !== undefined && clearDraft !== undefined) {
+    const sent = DraftSentSchema.safeParse(request.sharedDraft);
+    if (!sent.success)
+      throw new ApiError(400, 'the shared draft a send carries is not a draft position', 'invalid_request');
+    await clearDraft(id, context.actor, requestId, sent.data).catch(() => undefined);
+  }
+  return jsonResponse(result);
+}
+
+/**
+ * Stops the current turn.
+ *
+ * The body is parsed even though every field in it is optional, because `toolUseId` is not: a client
+ * that names the question it means to abandon is asking for the bound-abandon path, and answering it
+ * with a plain turn-stop would report success for an operation that never happened. It is refused
+ * with the reason, which the header explains.
+ */
+async function interrupt(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const id = pathSessionId(context);
+  const request = await parseBody(context.request, InterruptSessionRequestSchema);
+  if (request.toolUseId !== undefined)
+    throw new ApiError(
+      501,
+      `abandoning structured question ${request.toolUseId} is not served: cancelling a rendered ` +
+        'question means positively re-binding THAT question on the terminal before releasing it, and ' +
+        'this daemon has no pane matchers, so it cannot tell the question you named from one that ' +
+        'appeared afterwards — releasing the wrong overlay is worse than refusing',
+      'question_abandon_unsupported',
+    );
+  const view = await subsystem.interrupt(id).catch(refuse);
+  return jsonResponse(view);
+}
+
+/**
+ * `admin` scope — see the header for why a session cannot yet sign for itself.
+ *
+ * `noStore` because both answers are a live session view whose status is exactly what the call
+ * changed; a cached one shows the session as it was before the turn started or stopped.
+ */
+export function sessionSendRoutes(
+  subsystem: SessionSendSubsystem,
+  clearDraft?: SentDraftClearer,
+): readonly MountRoute[] {
+  return [
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/send',
+      handle: async context => await send(subsystem, context, clearDraft),
+    },
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/interrupt',
+      handle: async context => await interrupt(subsystem, context),
+    },
+    ...sendLedgerRoutes(subsystem),
+  ];
+}
+
+/** The send id in the path, decoded. */
+function pathSendId(context: RouteContext): string {
+  const decoded = decodeParameter(context.params.get('sendId') ?? '');
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the send id in the path is not usable', 'invalid_send_id');
+  return decoded;
+}
+
+/** The queued message id in the path, decoded. */
+function pathMessageId(context: RouteContext): string {
+  const decoded = decodeParameter(context.params.get('messageId') ?? '');
+  if (decoded === undefined || decoded === '')
+    throw new ApiError(400, 'the message id in the path is not usable', 'invalid_message_id');
+  return decoded;
+}
+
+/** The longest a `GET …/sends/:sendId` is held open for its fate (`fy send --wait` asks again, ten rounds at most). */
+const MAX_STATUS_WAIT_MS = 30_000;
+
+/** A send-status read that waits for the send's fate to settle: for how long, and who is waiting. */
+interface SendStatusWait {
+  readonly waitMs: number;
+  /** The waiter: the calling ferret, or the kind of caller. One waiter per caller and send. */
+  readonly caller: string;
+}
+
+/** `?waitMs=` of a send-status read: a whole number from 1 to {@link MAX_STATUS_WAIT_MS}, or none. */
+function statusWait(context: RouteContext): number | undefined {
+  const { query } = context.request;
+  for (const [name] of query) {
+    if (name !== 'waitMs') throw new ApiError(400, `unknown send parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = query.get('waitMs')?.[0];
+  if (raw === undefined) return undefined;
+  const waitMs = Number(raw);
+  if (!Number.isSafeInteger(waitMs) || waitMs < 1 || waitMs > MAX_STATUS_WAIT_MS)
+    throw new ApiError(400, `waitMs must be a whole number from 1 to ${MAX_STATUS_WAIT_MS}`, 'invalid_wait');
+  return waitMs;
+}
+
+/** The page a sends or queue read asks for: `limit` (1 to {@link MAX_SEND_PAGE}) and `before`, the cursor a previous page named. */
+function pageQuery(context: RouteContext, noun: string): SendPageQuery {
+  const { query } = context.request;
+  for (const [name] of query) {
+    if (name !== 'limit' && name !== 'before')
+      throw new ApiError(400, `unknown ${noun} parameter ${name}`, 'unknown_parameter');
+  }
+  const raw = query.get('limit')?.[0];
+  const limit = raw === undefined ? DEFAULT_SEND_PAGE : Number(raw);
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_SEND_PAGE)
+    throw new ApiError(400, `a ${noun} limit must be a whole number from 1 to ${MAX_SEND_PAGE}`, 'invalid_limit');
+  const before = query.get('before')?.[0];
+  if (before === '') throw new ApiError(400, `a ${noun} cursor must not be empty`, 'invalid_cursor');
+  return before === undefined ? { limit } : { limit, before };
+}
+
+/** One page of a session's sends, or the refusal of a cursor that names none of them. */
+async function sendsPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const query = pageQuery(context, 'sends');
+  const page = sendPage(await subsystem.sends(pathSessionId(context)).catch(refuse), query);
+  if (page === undefined) throw new ApiError(400, `no send ${query.before ?? ''} to page from`, 'invalid_cursor');
+  return jsonResponse(page);
+}
+
+/** One page of a session's durable queue, or the refusal of a cursor that names none of its messages. */
+async function queueMessagesPage(subsystem: SessionSendSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const query = pageQuery(context, 'queue');
+  const sessionId = pathSessionId(context);
+  const page = queuePage(await subsystem.queue(sessionId).catch(refuse), query, sessionId);
+  if (page === undefined)
+    throw new ApiError(400, `no queued message ${query.before ?? ''} to page from`, 'invalid_cursor');
+  return jsonResponse(page);
+}
+
+/**
+ * `operator` minimum on the three ledger routes, for the reason the send itself carries it: a send
+ * row is the message text, and a retry types it into a live terminal again.
+ *
+ * `noStore` because every answer is a fate that may change on the next look.
+ */
+function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly MountRoute[] {
+  return [
+    {
+      method: 'GET',
+      path: '/v1/ferrets/:ferretId/sends',
+      // A page, not the whole ledger (`session/send/page.ts`): the newest sends and every open one.
+      handle: async context => await sendsPage(subsystem, context),
+    },
+    // The durable queue every message will go through. Read-only until delivery moves onto it, and the
+    // same words as the ledger rows above, so the same minimum.
+    {
+      method: 'GET',
+      path: '/v1/ferrets/:ferretId/queue',
+      // A page, not the whole log (`session/queue/page.ts`): the same window the sends above answer.
+      handle: async context => await queueMessagesPage(subsystem, context),
+    },
+    // Editing or taking back a message only while it waits: the words are the sender's until a key goes
+    // to the pane, and the agent's after. Governed as the send itself is.
+    {
+      method: 'PATCH',
+      path: '/v1/ferrets/:ferretId/queue/:messageId',
+      handle: async context => {
+        const id = pathSessionId(context);
+        const messageId = pathMessageId(context);
+        const request = await parseBody(context.request, QueueEditRequestSchema);
+        return jsonResponse(await subsystem.editQueued(id, messageId, request.text).catch(refuse));
+      },
+    },
+    {
+      method: 'DELETE',
+      path: '/v1/ferrets/:ferretId/queue/:messageId',
+      handle: async context =>
+        jsonResponse(await subsystem.cancelQueued(pathSessionId(context), pathMessageId(context)).catch(refuse)),
+    },
+    {
+      method: 'GET',
+      path: '/v1/ferrets/:ferretId/sends/:sendId',
+      handle: async context => {
+        const waitMs = statusWait(context);
+        // One waiter per caller and send: a ferret is named by the credential it came with, anyone else by its kind.
+        const caller = senderSessionId(context) ?? context.actor ?? 'caller';
+        return jsonResponse(
+          await subsystem
+            .sendStatus(
+              pathSessionId(context),
+              pathSendId(context),
+              waitMs === undefined ? undefined : { waitMs, caller },
+            )
+            .catch(refuse),
+        );
+      },
+    },
+    // The message behind a pointer the transcript records. It is the same words the send row above
+    // carries — the turn document is where a send writes them — so it takes the same minimum.
+    {
+      method: 'GET',
+      path: '/v1/ferrets/:ferretId/handoffs/:name',
+      handle: async context => {
+        const name = SessionHandoffNameSchema.safeParse(decodeParameter(context.params.get('name') ?? ''));
+        if (!name.success) throw new ApiError(400, 'the hand-off name in the path is not usable', 'invalid_handoff');
+        return jsonResponse(await subsystem.handoff(pathSessionId(context), name.data).catch(refuse));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/sends/:sendId/retry',
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        const request = await parseBody(context.request, SendRetryRequestSchema);
+        return jsonResponse(await subsystem.retry(id, sendId, request.force === true).catch(refuse));
+      },
+    },
+    // Cancel and Enter finish or take back a send, so they are governed exactly as the send and its
+    // retry are: `operator`, no capability of their own. Each touches only the composer, and only
+    // when it holds exactly that send's text — the service refuses anything else.
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/sends/:sendId/cancel',
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        await parseBody(context.request, SendCancelRequestSchema);
+        return jsonResponse(await subsystem.cancel(id, sendId).catch(refuse));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/sends/:sendId/enter',
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        await parseBody(context.request, SendEnterRequestSchema);
+        // An Enter for a send the update left unconfirmed has Retry's caller policy: a person's alone, so an agent is
+        // refused here (`owner_only`) exactly as Retry's route refuses it. The service refuses every caller's Enter for
+        // it as well (`SessionSendService.submit`); this says WHO may ask instead.
+        if (callerIsAgent(context.credential, context.actor)) {
+          const row = (await subsystem.sends(id).catch(refuse)).find(record => record.sendId === sendId);
+          if (isUpdateUnconfirmed(row))
+            throw new ApiError(403, ownerOnlyWords(`may press Enter for send ${sendId}`), OWNER_ONLY_CODE);
+        }
+        return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
+      },
+    },
+    // The person's own draft is not a send: no ledger row is behind it, and Enter or an erase is a key
+    // into the agent's pane on text Ferretry did not type. So it is governed as every other key into
+    // that pane is — `terminal.use` (docs/grants.md) — and audited as `terminal.input`, never with
+    // the text. The service acts only while the composer still holds exactly `draft`.
+    {
+      method: 'POST',
+      path: '/v1/ferrets/:ferretId/composer',
+      handle: async context => {
+        const id = pathSessionId(context);
+        const request = await parseBody(context.request, ComposerDraftRequestSchema);
+        return jsonResponse(await subsystem.composer(id, request).catch(refuse));
+      },
+    },
+  ];
+}

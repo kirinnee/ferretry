@@ -1,51 +1,16 @@
-import chalk from 'chalk';
+import type { TerminalIo } from '@ferretry/kernel/manifest';
 
-/** Presentation port for the CLI controllers — success/warn to stdout, error to stderr. */
-export interface ICliIo {
-  success(message: string): void;
-  /**
-   * stdout exactly as given, for a rendering that already carries its own colour.
-   *
-   * `success` paints its whole message green, which is right for "that worked" and wrong for a
-   * REPORT: a green wrap over a status listing made a rejected row and a healthy one the same
-   * colour, so colour carried nothing and every row had to be read to be triaged. A renderer that
-   * decides severity per line has to be the last thing that paints it.
-   */
-  report(message: string): void;
-  warn(message: string): void;
-  error(message: string): void;
-  /** Machine-readable diagnostic on stderr, deliberately without presentation colour. */
-  diagnostic(message: string): void;
-  setExitCode(code: number): void;
-  interactive(): boolean;
-}
-
-export class ConsoleIo implements ICliIo {
-  success(message: string): void {
-    console.log(chalk.green(message));
+/** The terminal port: stdout is a command's answer, stderr is everything else. No colour: scripts and agents read it too. */
+export class ConsoleIo implements TerminalIo {
+  out(text: string): void {
+    process.stdout.write(text);
   }
 
-  report(message: string): void {
-    console.log(message);
+  err(text: string): void {
+    process.stderr.write(text);
   }
 
-  warn(message: string): void {
-    console.log(chalk.yellow(message));
-  }
-
-  error(message: string): void {
-    console.error(chalk.red(message));
-  }
-
-  diagnostic(message: string): void {
-    console.error(message);
-  }
-
-  setExitCode(code: number): void {
-    process.exitCode = code;
-  }
-
-  interactive(): boolean {
+  get isTty(): boolean {
     return Boolean(process.stdin.isTTY && process.stdout.isTTY);
   }
 }

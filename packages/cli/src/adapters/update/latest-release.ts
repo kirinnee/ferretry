@@ -3,7 +3,7 @@ import {
   parseGitHubLatestRelease,
   parseGitHubNewestTag,
   releaseTagsApiUrl,
-} from '@ferretry/protocol';
+} from '@ferretry/plugin-updates/contract';
 import type { ILatestReleasePort, LatestReleaseAnswer } from '../../lib/update/ports.ts';
 
 /** The narrow slice of `fetch` a release read needs, injected so no suite dials out. */

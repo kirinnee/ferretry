@@ -1,0 +1,15 @@
+
+  Done. The queue now delivers in order.
+
+✻ Compacted while idle, before the prompt cache expired · done 10:56 AM
+
+────────────────────────────────────────────────────────────────────────────────
+❯ [message · from :ireland · peer · 520e638b]
+  Please keep the queue ordering as v4, like this:
+  > keep the queue ordering as v4
+  and tell me when the change is in.
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry
+  ⏱ 1h | 📊 4% (40k/1M) │ 💰 $3.10
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+

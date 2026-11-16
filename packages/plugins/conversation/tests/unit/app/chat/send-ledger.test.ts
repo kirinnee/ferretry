@@ -1,0 +1,263 @@
+import { describe, expect, it } from 'bun:test';
+import {
+  foldLedgerSendRecords,
+  type LedgerSendRecord,
+  parseLedgerSendRecord,
+  parseLedgerSendsResponse,
+  RECORD_CLOCK_SLACK_MS,
+} from '../../../../app/chat/send-ledger.ts';
+
+const NOW = Date.parse('2026-07-31T12:00:00.000Z');
+const at = (offsetMs: number): string => new Date(NOW + offsetMs).toISOString();
+const ATTACHMENT = `att_${'a'.repeat(64)}`;
+
+const record = (over: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
+  sendId: 'send-1',
+  acceptedAt: at(-60_000),
+  message: 'continue',
+  attachmentIds: [],
+  fate: 'accepted',
+  ...over,
+});
+
+describe('send ledger read model', () => {
+  it('keeps a row visible when the daemon reports a fate this build has never heard of', () => {
+    const parsed = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), fate: 'teleported' });
+    expect(parsed?.fate).toBe('accepted');
+  });
+
+  it('drops a row only when it has no usable identity', () => {
+    expect(parseLedgerSendRecord({ acceptedAt: at(0) })).toBeNull();
+    expect(parseLedgerSendRecord({ sendId: 's' })).toBeNull();
+    expect(parseLedgerSendRecord(null)).toBeNull();
+    expect(parseLedgerSendRecord(['s'])).toBeNull();
+    expect(parseLedgerSendRecord('s')).toBeNull();
+    expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0) })?.message).toBe('');
+  });
+
+  it('carries every known field through and omits the ones the daemon left out', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 'send-9',
+      acceptedAt: at(-1_000),
+      message: 'ship it',
+      attachmentIds: [ATTACHMENT, 'not-an-attachment', 7],
+      fate: 'delivered',
+      v: 1,
+      acceptedTurn: 4,
+      path: 'native-inline',
+      matchText: 'ship it',
+      turn: 5,
+      from: 'sess-a',
+      fromName: 'armani',
+      replyExpected: true,
+      held: true,
+      withdrawn: true,
+      fateAt: at(-500),
+      unaccountedReason: 'timeout',
+      opportunityAt: at(-800),
+      unaccountedDeadline: at(600),
+      hardDeadline: at(9_000),
+      timeoutFrozenAt: at(-400),
+    });
+    expect(parsed).toEqual({
+      sendId: 'send-9',
+      acceptedAt: at(-1_000),
+      message: 'ship it',
+      attachmentIds: [ATTACHMENT],
+      fate: 'delivered',
+      v: 1,
+      acceptedTurn: 4,
+      path: 'native-inline',
+      matchText: 'ship it',
+      turn: 5,
+      from: 'sess-a',
+      fromName: 'armani',
+      replyExpected: true,
+      held: true,
+      withdrawn: true,
+      fateAt: at(-500),
+      unaccountedReason: 'timeout',
+      opportunityAt: at(-800),
+      unaccountedDeadline: at(600),
+      hardDeadline: at(9_000),
+      timeoutFrozenAt: at(-400),
+    });
+    const sparse = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), path: 'carrier-pigeon', turn: Number.NaN });
+    expect(Object.hasOwn(sparse ?? {}, 'path')).toBe(false);
+    expect(Object.hasOwn(sparse ?? {}, 'turn')).toBe(false);
+    expect(sparse?.replyExpected).toBeUndefined();
+  });
+
+  it('keeps a send blocked by a dialog on screen, and drops a reason it does not know', () => {
+    const blocked = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      fate: 'unaccounted',
+      unaccountedReason: 'blocked_by_prompt',
+    });
+    const unknown = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), unaccountedReason: 'gremlins' });
+    expect(blocked?.unaccountedReason).toBe('blocked_by_prompt');
+    const revived = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), unaccountedReason: 'revive_unconfirmed' });
+    expect(revived?.unaccountedReason).toBe('revive_unconfirmed');
+    expect(Object.hasOwn(unknown ?? {}, 'unaccountedReason')).toBe(false);
+  });
+
+  it('drops a citation with no key but keeps the fate the daemon decided', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      fate: 'delivered',
+      evidence: { harness: 'claude', tier: 'exact-text' },
+    });
+    expect(parsed?.evidence).toBeUndefined();
+    expect(parsed?.fate).toBe('delivered');
+    expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), evidence: 'nope' })?.evidence).toBeUndefined();
+    expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), evidence: null })?.evidence).toBeUndefined();
+  });
+
+  it('keeps a usable citation while dropping only the enum values it cannot read', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      evidence: {
+        key: 'record-1',
+        kind: 'chat.user',
+        tier: 'from-the-future',
+        harness: 'codex',
+        proof: 'native-queue-drain',
+        observedAt: at(-10),
+        originatedAt: at(-20),
+        matchedTurn: 3,
+        shapeVersion: 2,
+      },
+    });
+    expect(parsed?.evidence).toEqual({
+      key: 'record-1',
+      kind: 'chat.user',
+      harness: 'codex',
+      proof: 'native-queue-drain',
+      observedAt: at(-10),
+      originatedAt: at(-20),
+      matchedTurn: 3,
+      shapeVersion: 2,
+    });
+  });
+
+  it('reads both the envelope and a bare array, dropping unusable rows individually', () => {
+    const rows = [{ sendId: 'a', acceptedAt: at(0) }, { acceptedAt: at(0) }, { sendId: 'b', acceptedAt: at(-1) }];
+    expect(parseLedgerSendsResponse({ sends: rows }).map(row => row.sendId)).toEqual(['a', 'b']);
+    expect(parseLedgerSendsResponse(rows).map(row => row.sendId)).toEqual(['a', 'b']);
+    expect(parseLedgerSendsResponse({ sends: 'nope' })).toEqual([]);
+    expect(parseLedgerSendsResponse(null)).toEqual([]);
+  });
+
+  it('reads the tracker fields, and lets a re-attempt move a settled send back to sending', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 'a',
+      acceptedAt: '2026-07-31T10:00:00.000Z',
+      fate: 'timed_out',
+      senderKind: 'agent',
+      queuedAt: '2026-07-31T10:00:01.000Z',
+      attempt: 2,
+      attemptAt: '2026-07-31T10:01:00.000Z',
+      retryable: true,
+      unaccountedReason: 'not_delivered',
+    });
+    expect(parsed).toMatchObject({
+      fate: 'timed_out',
+      senderKind: 'agent',
+      attempt: 2,
+      retryable: true,
+      unaccountedReason: 'not_delivered',
+    });
+    const lost = record({ fate: 'timed_out', attempt: 2 });
+    const again = record({ fate: 'accepted', attempt: 3 });
+    expect(foldLedgerSendRecords([again], [lost])[0]?.fate).toBe('accepted');
+    expect(foldLedgerSendRecords([lost], [again])[0]?.fate).toBe('accepted');
+    expect(foldLedgerSendRecords([record({ fate: 'queued' })], [record({ fate: 'accepted' })])[0]?.fate).toBe('queued');
+  });
+
+  it('folds out-of-order snapshots without ever walking a fate back down', () => {
+    const accepted = record({ fate: 'accepted' });
+    const delivered = record({ fate: 'delivered' });
+    expect(foldLedgerSendRecords([delivered], [accepted])[0]?.fate).toBe('delivered');
+    expect(foldLedgerSendRecords([accepted], [delivered])[0]?.fate).toBe('delivered');
+    const unaccounted = record({ fate: 'unaccounted' });
+    expect(foldLedgerSendRecords([unaccounted], [accepted])[0]?.fate).toBe('unaccounted');
+    // Equal rank still replaces, so refreshed deadlines land.
+    const refreshed = record({ opportunityAt: at(-10) });
+    expect(foldLedgerSendRecords([accepted], [refreshed])[0]?.opportunityAt).toBe(at(-10));
+  });
+
+  it('lets a genuine retry under the same id revive a tombstoned send', () => {
+    const withdrawn = record({ withdrawn: true, acceptedAt: at(-60_000) });
+    const retried = record({ acceptedAt: at(-1_000) });
+    expect(foldLedgerSendRecords([withdrawn], [retried])).toHaveLength(1);
+    expect(foldLedgerSendRecords([retried], [withdrawn])).toHaveLength(1);
+    // A stale snapshot of the same attempt may not undo the tombstone.
+    expect(foldLedgerSendRecords([withdrawn], [record({ acceptedAt: at(-60_000) })])).toHaveLength(0);
+  });
+
+  it('drops tombstones from the result only after they have superseded their row', () => {
+    const open = record({ fate: 'accepted' });
+    const tombstone = record({ withdrawn: true });
+    expect(foldLedgerSendRecords([open], [tombstone])).toEqual([]);
+    expect(foldLedgerSendRecords([tombstone], [open])).toEqual([]);
+  });
+
+  it('returns rows newest first and tolerates an unparseable accepted instant', () => {
+    const rows = foldLedgerSendRecords([
+      record({ sendId: 'old', acceptedAt: at(-90_000) }),
+      record({ sendId: 'new', acceptedAt: at(-1_000) }),
+      record({ sendId: 'broken', acceptedAt: 'whenever' }),
+    ]);
+    expect(rows.map(row => row.sendId)).toEqual(['new', 'old', 'broken']);
+    expect(foldLedgerSendRecords()).toEqual([]);
+  });
+
+  it('publishes the clock slack the local join is allowed to use', () => {
+    expect(RECORD_CLOCK_SLACK_MS).toBe(5_000);
+  });
+});
+
+describe('a cancelled send, and one typed but never submitted', () => {
+  it('reads the cancel effect, the typed flag and the merged-text citation, and drops what it does not know', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      fate: 'cancelled',
+      cancelEffect: 'left_in_queue',
+      typedNotSent: true,
+      evidence: { key: 'k', tier: 'merged-text' },
+    });
+    expect(parsed).toMatchObject({
+      fate: 'cancelled',
+      cancelEffect: 'left_in_queue',
+      typedNotSent: true,
+      evidence: { key: 'k', tier: 'merged-text' },
+    });
+    for (const effect of ['cleared', 'not_in_pane', 'left_in_composer'] as const)
+      expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), cancelEffect: effect })?.cancelEffect).toBe(
+        effect,
+      );
+    const unknown = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      cancelEffect: 'teleported',
+      typedNotSent: 'yes',
+    });
+    expect(unknown).not.toHaveProperty('cancelEffect');
+    expect(unknown).not.toHaveProperty('typedNotSent');
+  });
+
+  it('lets a cancel supersede anything unproven in the same attempt, but never a delivered proof', () => {
+    const sent = record({ fate: 'queued' });
+    const cancelled = record({ fate: 'cancelled', cancelEffect: 'cleared' });
+    const delivered = record({ fate: 'delivered' });
+    expect(foldLedgerSendRecords([sent], [cancelled])[0]?.fate).toBe('cancelled');
+    // A snapshot taken before the cancel, landing after it, cannot bring the row back.
+    expect(foldLedgerSendRecords([cancelled], [sent])[0]?.fate).toBe('cancelled');
+    expect(foldLedgerSendRecords([delivered], [cancelled])[0]?.fate).toBe('delivered');
+    expect(foldLedgerSendRecords([cancelled], [delivered])[0]?.fate).toBe('delivered');
+  });
+});

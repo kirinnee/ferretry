@@ -1,0 +1,72 @@
+import { describe, expect, it } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
+import type { WardenReportDialogRequest } from '../../../app/features/warden/warden-report-dialog.tsx';
+import { WardenReportDialog } from '../../../app/features/warden/warden-report-dialog.tsx';
+import { daemonConnection } from '../../../app/lib/machine.ts';
+import { interact, mount } from '@ferretry/app/testing';
+
+const connection = daemonConnection({
+  daemonId: 'daemon-a',
+});
+
+const request: WardenReportDialogRequest = {
+  connection,
+  verdict: {
+    at: '2026-07-31T11:58:00.000Z',
+    target: 'ferret-a',
+    verdict: 'needs_human',
+    reportPath: '/state/warden/reports/2026-07-31-ferret-a.md',
+  },
+};
+
+describe('WardenReportDialog', () => {
+  it('keeps the full report reachable in a labelled dialog', () => {
+    const tree = renderToStaticMarkup(
+      <WardenReportDialog request={request} read={async () => '# Evidence'} onClose={() => {}} />,
+    );
+
+    expect(tree).toContain('2026-07-31-ferret-a.md');
+    expect(tree).toContain('Loading report evidence');
+    expect(tree).toContain('role="dialog"');
+    expect(tree).not.toContain('device-token-a');
+  });
+
+  it('renders loaded and unreadable evidence states instead of turning either into an empty report', async () => {
+    const loaded = await mount(
+      <WardenReportDialog request={request} read={async () => '# Evidence'} onClose={() => {}} />,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(loaded.container.textContent).toContain('Evidence');
+    await loaded.unmount();
+
+    const unreadable = await mount(
+      <WardenReportDialog
+        request={request}
+        read={async () => await Promise.reject(new Error('unreadable'))}
+        onClose={() => {}}
+      />,
+    );
+    await interact(async () => await Promise.resolve());
+    expect(unreadable.container.textContent).toContain('Report evidence unavailable');
+    expect(unreadable.container.textContent).toContain('not being treated as an empty or healthy verdict');
+    await unreadable.unmount();
+  });
+});
+
+describe('WardenReportDialog and Jev', () => {
+  it('says what Jev did before the investigation when the opener knows it, and nothing otherwise', () => {
+    const withJev = renderToStaticMarkup(
+      <WardenReportDialog
+        request={{ ...request, jev: 'Jev: not sure (21%) · $0.0041 → investigated' }}
+        read={async () => '# Evidence'}
+        onClose={() => {}}
+      />,
+    );
+    const without = renderToStaticMarkup(
+      <WardenReportDialog request={request} read={async () => '# Evidence'} onClose={() => {}} />,
+    );
+
+    expect(withJev).toContain('Jev: not sure (21%) · $0.0041 → investigated');
+    expect(without).not.toContain('data-warden-jev');
+  });
+});

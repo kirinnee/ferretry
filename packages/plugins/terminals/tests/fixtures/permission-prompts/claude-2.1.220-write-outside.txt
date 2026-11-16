@@ -1,0 +1,29 @@
+╭─── Claude Code v2.1.220 ────────────────────────────────────────────────────────────────────────────────────────╮
+│                                             │ Tips for getting started                                          │
+│                Welcome back!                │ Run /init to create a CLAUDE.md file with instructions for Claude │
+│                                             │ ───────────────────────────────────────────────────────────────── │
+│                   ▐▛███▜▌                   │ What's new                                                        │
+│                  ▝▜█████▛▘                  │ Check the Claude Code changelog for updates                       │
+│                    ▘▘ ▝▝                    │                                                                   │
+│                                             │                                                                   │
+│   Opus 5 (1M context) · API Usage Billing   │                                                                   │
+│          /home/dev/project           │                                                                   │
+╰─────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+❯ GO please
+
+● Write(/tmp/fy-perm-out.txt)
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Create file
+ ../../fy-perm-out.txt
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+  1 x
+╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+ Do you want to create fy-perm-out.txt?
+ ❯ 1. Yes
+   2. Yes, allow all edits in tmp/ during this session (shift+tab)
+   3. No
+
+ Esc to cancel · Tab to amend

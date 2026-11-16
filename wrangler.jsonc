@@ -1,4 +1,4 @@
 {
   "name": "ferretry",
-  "pages_build_output_dir": "./packages/pwa/dist"
+  "pages_build_output_dir": "./packages/app/dist"
 }

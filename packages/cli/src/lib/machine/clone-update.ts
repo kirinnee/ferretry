@@ -5,9 +5,9 @@ import {
   type CloneOutcome,
   type CloneReviewItem,
   type CloneReviewLogin,
-  type FleetCloneReview,
-} from '@ferretry/protocol';
-import { AccountCommandError } from '../fleet/account-ports.ts';
+  type CloneReview,
+} from '@ferretry/plugin-runtimes/contract';
+import { MachineCommandError } from './ports.ts';
 
 /**
  * What a repeat `fy machine clone` shows and asks (docs/design/account-model.md §3.8, docs/cross-daemon.md §3).
@@ -53,7 +53,7 @@ function flagsFor(outcome: CloneOutcome): CloneFlagName[] {
 }
 
 /** The review item a person's word names: its `ref` here, or else its `sourceRef` when that is unambiguous. */
-function itemNamed(review: FleetCloneReview, word: string): CloneReviewItem | undefined {
+function itemNamed(review: CloneReview, word: string): CloneReviewItem | undefined {
   const here = review.items.find(item => item.ref === word);
   if (here !== undefined) return here;
   const there = review.items.filter(item => item.sourceRef === word);
@@ -71,7 +71,7 @@ export interface ResolvedChoices {
  * The flags as decisions, checked against the review. Nothing is guessed: an item that is not in the review,
  * named twice, or given a choice its outcome does not allow is a problem, and the caller writes nothing.
  */
-export function resolveCloneChoices(review: FleetCloneReview, flags: CloneChoiceFlags): ResolvedChoices {
+export function resolveCloneChoices(review: CloneReview, flags: CloneChoiceFlags): ResolvedChoices {
   const decisions: Record<string, CloneChoice> = {};
   const given = new Map<string, CloneFlagName>();
   const problems: string[] = [];
@@ -121,7 +121,7 @@ function choiceOf(item: CloneReviewItem, decisions: CloneDecisions): CloneChoice
 }
 
 /** The both-changed items with no decision. Owner decision §14.1: nothing is chosen for them. */
-export function pendingBoth(review: FleetCloneReview, decisions: CloneDecisions): CloneReviewItem[] {
+export function pendingBoth(review: CloneReview, decisions: CloneDecisions): CloneReviewItem[] {
   return review.items.filter(item => item.outcome === 'both' && decisions[item.ref] === undefined);
 }
 
@@ -133,18 +133,18 @@ export function parseLoginFlags(values: readonly string[]): Record<string, strin
     const sourceId = at < 0 ? '' : value.slice(0, at).trim();
     const target = at < 0 ? '' : value.slice(at + 1).trim();
     if (sourceId === '' || target === '') {
-      throw new AccountCommandError(
+      throw new MachineCommandError(
         `--login takes <source login>=<login here>, or <source login>=slot for a new empty one. Got "${value}".`,
       );
     }
-    if (Object.hasOwn(answers, sourceId)) throw new AccountCommandError(`--login names ${sourceId} twice.`);
+    if (Object.hasOwn(answers, sourceId)) throw new MachineCommandError(`--login names ${sourceId} twice.`);
     answers[sourceId] = target;
   }
   return answers;
 }
 
 /** The logins the daemon could not settle and the person has not answered yet. */
-export function pendingLogins(review: FleetCloneReview, answers: Readonly<Record<string, string>>): CloneReviewLogin[] {
+export function pendingLogins(review: CloneReview, answers: Readonly<Record<string, string>>): CloneReviewLogin[] {
   return review.logins.filter(login => login.outcome === 'ask' && answers[login.sourceId] === undefined);
 }
 
@@ -153,7 +153,7 @@ export function pendingLogins(review: FleetCloneReview, answers: Readonly<Record
  * its candidates. An answer only ever picks WHICH existing login a copied runtime uses (or an empty slot);
  * it never changes a login, so there is no answer that could touch a sign-in.
  */
-export function loginProblems(review: FleetCloneReview, answers: Readonly<Record<string, string>>): string[] {
+export function loginProblems(review: CloneReview, answers: Readonly<Record<string, string>>): string[] {
   const problems: string[] = [];
   for (const [sourceId, target] of Object.entries(answers)) {
     const login = review.logins.find(candidate => candidate.sourceId === sourceId);
@@ -193,7 +193,7 @@ function addedLoginEntries(login: CloneReviewLogin, answers: Readonly<Record<str
  * uses which login, so any written runtime counts: asking too often is the safe side.
  */
 export function cloneNeedsYes(
-  review: FleetCloneReview,
+  review: CloneReview,
   decisions: CloneDecisions,
   logins: Readonly<Record<string, string>>,
 ): boolean {
@@ -292,7 +292,7 @@ function loginLine(login: CloneReviewLogin, answers: Readonly<Record<string, str
   const added = entryLines(addedLoginEntries(login, answers));
   const fresh =
     login.runnable === undefined
-      ? `new empty slot, needs sign-in (${binaryName} credentials)`
+      ? `new empty slot, needs sign-in (${binaryName} login ls)`
       : 'new login, configured to run the following';
   if (login.outcome === 'matched') {
     return [`  ${login.sourceId} → already here as ${login.target ?? 'a login here'}, no new sign-in`];
@@ -310,7 +310,7 @@ function loginLine(login: CloneReviewLogin, answers: Readonly<Record<string, str
  * The review as the terminal prints it (docs/design/account-model.md §7): only what differs, in groups that
  * each say what will happen, then how many things are already the same. `--dry-run` prints exactly this.
  */
-export function renderCloneDiff(review: FleetCloneReview, options: RenderOptions): string {
+export function renderCloneDiff(review: CloneReview, options: RenderOptions): string {
   const source = review.source.name;
   const lines: string[] = [];
   const heading =

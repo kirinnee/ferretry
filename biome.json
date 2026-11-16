@@ -45,12 +45,7 @@
   },
   "linter": {
     "enabled": true,
-    "includes": [
-      "packages/*/bin/**/*.ts",
-      "packages/*/src/**/*.{ts,tsx}",
-      "packages/*/tests/**/*.{ts,tsx}",
-      "packages/*/harness/**/*.{ts,tsx}"
-    ],
+    "includes": ["packages/**/*.{ts,tsx}"],
     "rules": {
       "recommended": true
     }

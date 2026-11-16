@@ -9,20 +9,20 @@ pending) ;;
 verdict | judge)
   state=failure
   description='one or more checks in the full set did not succeed'
-  # Only the documented optional skips pass. In particular, failed relevance cannot turn skipped
-  # downstream jobs into a green gate. The reusable darwin verdict already owns PR advisory policy.
-  if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" '
+  # Only the documented optional skips pass: Full CI Pending on a non-PR run, and the darwin smoke under
+  # the owner's MACOS_SMOKE=skip switch. The reusable darwin verdict already owns PR advisory policy.
+  # The strict-guarantee report (ci.yaml `FY_STRICT_GUARANTEES_BLOCKING`, the workflow env this script inherits) is
+  # report-only while the switch is 'false': whatever that job ends as (a failed setup step, the timeout) cannot turn
+  # Full CI red. Once the switch is 'true' it must succeed like every other job.
+  if jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |
-    ["quick", "int", "full-gates", "compile", "smoke", "pwa-relevance", "relevance", "summary"]
+    ["quick", "int", "full-gates", "compile", "smoke"]
       | all(.[]; $needs[.].result == "success")
+    and ($strict == "false" or $needs["strict-guarantees"].result == "success")
     and ($needs["full-pending"].result == "success" or
       ($event != "pull_request" and $needs["full-pending"].result == "skipped"))
-    and ($needs["pwa-screenshot"].result == "success" or
-      ($needs["pwa-relevance"].outputs.run == "false" and $needs["pwa-screenshot"].result == "skipped"))
     and ($needs["smoke-darwin"].result == "success" or
       (($macos | ascii_downcase) == "skip" and $needs["smoke-darwin"].result == "skipped"))
-    and ($needs.journeys.result == "success" or
-      ($needs.relevance.result == "success" and $needs.relevance.outputs.run == "false" and $needs.journeys.result == "skipped"))
   ' <<<"${NEEDS:?job results required}" >/dev/null; then
     state=success
     description='quick checks and the full set passed on this commit'

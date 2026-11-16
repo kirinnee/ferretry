@@ -20,5 +20,5 @@ if [[ -z ${LINK_STORE_DEPLOY_UNATTENDED:-} ]]; then
   fi
 fi
 
-cd "${root_dir}/packages/relay"
+cd "${root_dir}/packages/plugins/catalogs/worker"
 wrangler deploy --config wrangler.link-store.jsonc

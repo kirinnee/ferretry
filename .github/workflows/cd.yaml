@@ -6,6 +6,29 @@ on:
       - 'v*.*.*'
 
 jobs:
+  # A tag is not a branch: `v*.*.*` fires for a tag on ANY commit, so a tag on a commit of `rebuild/5.0` (or a feature
+  # branch) would run this whole workflow, publish a GitHub release and commit the cask. Every other job therefore waits
+  # for this one, which proves the tagged commit is reachable from `main`'s history — what semantic-release tags — and
+  # stops here for anything else (scripts/validate/release-guards.sh holds the dependency).
+  main-only:
+    timeout-minutes: 5
+    name: Tag is on main
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Refuse a tag that is not on main
+        run: |
+          set -euo pipefail
+          # fetch-depth 0 brought every branch head, main included, so no credentialed fetch is needed here.
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" refs/remotes/origin/main; then
+            echo "❌ ${GITHUB_REF_NAME} tags ${GITHUB_SHA}, which is not on main; a release is only ever cut from main" >&2
+            exit 1
+          fi
   # The release proves darwin works before it publishes. GoReleaser cross-compiles the darwin binary on
   # Linux, and nothing else runs it: `compile` builds the same binaries once more so `smoke-darwin` can
   # start the shipped darwin-arm64 binary on a real Mac. REQUIRED here (`advisory: false`): when GitHub's
@@ -14,6 +37,7 @@ jobs:
   compile:
     timeout-minutes: 15
     name: Compile Binaries
+    needs: main-only
     permissions:
       contents: read
     runs-on: ubuntu-latest

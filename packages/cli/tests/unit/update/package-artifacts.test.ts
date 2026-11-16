@@ -1,3 +1,3 @@
-import { packageArtifactCases } from '../../support/package-artifact-cases';
+import { packageArtifactCases } from '../../support/package-artifact-cases.ts';
 
 packageArtifactCases();

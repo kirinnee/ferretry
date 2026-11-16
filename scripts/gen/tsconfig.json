@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": { "types": ["bun"], "typeRoots": ["../../node_modules/@types"] },
+  "include": [
+    "./**/*.ts",
+    "../validate/act-runner.ts",
+    "../validate/app-hooks.ts",
+    "../validate/banned-globals.ts",
+    "../validate/context-imports.ts",
+    "../validate/contract-consumes.ts",
+    "../validate/contract-graph.ts",
+    "../validate/core-closed.ts",
+    "../validate/descriptor-parity.ts",
+    "../validate/glossary.ts",
+    "../validate/guarantees.ts",
+    "../validate/host-files.ts",
+    "../validate/manifest-match.ts",
+    "../validate/no-compat.ts",
+    "../validate/one-format.ts",
+    "../validate/pins.ts",
+    "../validate/plugin-graph.ts",
+    "../validate/ports-pending.ts",
+    "../validate/read-scoped.ts",
+    "../validate/registries-fresh.ts",
+    "../validate/unwired-seams.ts",
+    "../validate/words.ts"
+  ],
+  "exclude": ["./tests/.tmp/**", "./today/**"]
+}

@@ -1,41 +1,45 @@
 /**
- * Which part of the CLI one invocation loads.
+ * Which part of the CLI an invocation needs, decided from its words alone, before anything heavy is loaded. Pure: the
+ * binary's entry (`bin/fy.ts`) asks this first and then loads exactly one composition root.
  *
- * Every `fy` process used to evaluate the whole program — every command group, every protocol schema —
- * before it read its arguments, and the commands that LIVE LONGEST are the ones that use the least of
- * it: `fy mcp serve` runs for the life of every agent pane and `fy wait` for as long as a lead waits on a
- * sub-ferret. On one box that was ~50 processes at ~140 MB each, almost all of it code nobody ran. So
- * `bin/fy.ts` asks this function first and loads a SLICE — one command group on the same skeleton —
- * when the first argument names a command that slice owns, and the full program otherwise.
+ * One invocation is narrowed: `fy mcp serve`. Every agent runtime starts one and keeps it for the life of its pane, so a
+ * machine running thirty ferrets runs thirty of them; each used to hold the whole command registry to forward tool calls.
+ * It is also the one command that must NEVER act as the owner: it is a ferret's tools server, so the slim root
+ * (`bin/mcp-serve.ts`) authenticates with the pane credential and nothing else, whatever else is in the environment or
+ * on the line. That is why the route does not depend on the environment: an owner credential (`FY_TOKEN`) or a missing
+ * pane credential must reach the slim root and be refused there, not fall through to a path that would use it.
  *
- * THE RULE IS DELIBERATELY NARROW. Only a first argument that is exactly a sliced command name routes;
- * anything else — a global option before the command (`fy --as-owner wait …`), `fy help wait`, a
- * mistyped name, no arguments — loads the full program, which is the behaviour every command had
- * before slices existed. A wrong answer here can only cost memory, never change what a command does,
- * because each slice registers its group through the very function the full program calls.
- *
- * Pure: no IO, no globals.
+ * What stays on the full path is only what never connects: help, version and an option the router refuses by name.
  */
 
-/** The slices `bin/fy.ts` can load instead of the full program. */
-export type EntrySlice = 'reads' | 'mcp';
+export type EntrySlice = 'mcp-serve' | 'full';
 
-/**
- * The top-level commands each slice registers. Must equal what the slice's group puts on the program —
- * `tests/integration/entry/slices.test.ts` builds each slice and compares — so a command added to a
- * group without being listed here simply keeps loading the full program.
- */
-export const SLICE_COMMANDS: Readonly<Record<EntrySlice, readonly string[]>> = {
-  reads: ['attach', 'snapshot', 'logs', 'events', 'stream', 'wait'],
-  mcp: ['mcp'],
-};
+/** What `mcp serve` was asked with, for the slim root to refuse what it must. */
+export interface ServeInvocation {
+  /** `--as-owner` before the verb: refused by the slim root, which acts as the pane's ferret only. */
+  readonly asOwner: boolean;
+}
 
-/** The slice that owns this invocation, or `undefined` for the full program. `args` excludes argv[0..1]. */
-export function entrySlice(args: readonly string[]): EntrySlice | undefined {
-  const command = args[0];
-  if (command === undefined) return undefined;
-  for (const slice of Object.keys(SLICE_COMMANDS) as EntrySlice[]) {
-    if (SLICE_COMMANDS[slice].includes(command)) return slice;
+/** The `mcp serve` invocation `args` (without the runtime and script) spell, or undefined when they spell another. */
+export function mcpServeInvocation(args: readonly string[]): ServeInvocation | undefined {
+  let asOwner = false;
+  let index = 0;
+  for (; index < args.length; index += 1) {
+    const token = args[index] as string;
+    if (!token.startsWith('-')) break;
+    // Any other leading flag (`--help`, `--version`, an unknown one) is answered or refused by the router before it connects.
+    if (token === '--as-owner') asOwner = true;
+    else return undefined;
   }
-  return undefined;
+  if (args[index] !== 'mcp' || args[index + 1] !== 'serve') return undefined;
+  // `--help` or `-h` anywhere after the verb (before `--`) is answered by the router before it connects.
+  for (const token of args.slice(index + 2)) {
+    if (token === '--') break;
+    if (token === '--help' || token === '-h') return undefined;
+  }
+  return { asOwner };
+}
+
+export function entrySlice(args: readonly string[]): EntrySlice {
+  return mcpServeInvocation(args) === undefined ? 'full' : 'mcp-serve';
 }

@@ -1,0 +1,46 @@
+<!-- PROVENANCE: reconstructed, NOT a live capture. Built from okta/okta-signin-widget@25feb4d9 (release okta-signin-widget-7.51.0): the rendered DOM in src/v3/test/integration/__snapshots__/authenticator-verification-okta-verify-push-code.test.tsx.snap ("should render form 1"), produced by src/v3/src/transformer/oktaVerify/transformOktaVerifyCustomAppChallengePoll.ts and src/v3/src/components/ImageWithText/ImageWithText.tsx. Kept: the element ids, data-se attributes, tags and English text; dropped: emotion/MUI class hashes, SVG paths, the autoChallenge checkbox. The mock's number 52 is changed to 37. Scrubbed: example tenant, a@example.com. Replace with a scrubbed live capture of a real Okta Gen3 number challenge. URL: https://example.okta.com/oauth2/v1/authorize -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <title>Example - Sign In</title>
+  </head>
+  <body>
+    <div>
+      <main id="okta-sign-in" class="MuiBox-root" data-se="auth-container main-container" dir="ltr" lang="en">
+        <div data-se="okta-sign-in-header auth-header authCoinSpacing">
+          <h1 class="MuiTypography-root MuiTypography-h1" role="presentation" tabindex="-1"></h1>
+        </div>
+        <form aria-live="polite" class="o-form MuiBox-root" data-se="o-form" novalidate="">
+          <div data-se="identifier-container" title="a@example.com">
+            <div data-se="identifier" translate="no"><span class="MuiChip-label">a@example.com</span></div>
+          </div>
+          <h1 class="MuiTypography-root MuiTypography-h4" data-se="o-form-head" tabindex="-1">
+            Push notification sent
+          </h1>
+          <div aria-atomic="true" aria-live="polite"></div>
+          <p class="MuiTypography-root MuiTypography-body1" data-se="numberchallenge-instr-value" tabindex="-1">
+            On your mobile device, open the Okta Verify prompt, then tap
+            <span class="strong">37</span>
+            in Okta Verify to continue.
+          </p>
+          <div class="MuiBox-root" id="code">
+            <div class="MuiBox-root" data-se="icon-code">
+              <svg aria-hidden="true" role="img" viewBox="0 0 64 64"><title>Mobile Device</title></svg>
+            </div>
+            <div class="MuiBox-root">
+              <span class="MuiTypography-root MuiTypography-h1" data-se="text-code" tabindex="-1" translate="no"
+                >37</span
+              >
+            </div>
+          </div>
+          <button class="MuiLink-root MuiLink-button" data-se="switchAuthenticator" role="link" type="button">
+            Verify with something else
+          </button>
+          <button class="MuiLink-root MuiLink-button" data-se="cancel" role="link" type="button">
+            Back to sign in
+          </button>
+        </form>
+      </main>
+    </div>
+  </body>
+</html>

@@ -1,0 +1,543 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import { BrowserPageSnapshotSchema, BrowserScreencastFrameSchema } from '../../../contract/wire/browser.ts';
+import {
+  BLANK_PAGE_URL,
+  BrowserTransportError,
+  MAX_WORKER_PAGES,
+  WorkerLineAssembler,
+  boundedReadText,
+  boundedScreenshot,
+  coarseWorkerError,
+  encodeWorkerRequest,
+  normalizeLifecycleReply,
+  normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
+  normalizeWorkerDownloads,
+  normalizeWorkerStaged,
+  normalizeWorkerSnapshot,
+  parseWorkerLine,
+} from '../../../daemon/worker/protocol.ts';
+
+const page = (id: string, url = `https://example.test/${id}`) => ({ id, url, title: `title ${id}` });
+
+const snapshotReply = (overrides: Record<string, unknown> = {}) => ({
+  activePageId: 'p1',
+  pages: [page('p1')],
+  pageState: 'ready',
+  canGoBack: true,
+  canGoForward: false,
+  ...overrides,
+});
+
+describe('browser worker snapshots', () => {
+  it('should derive top-level identity from the active tab and satisfy the wire schema', () => {
+    // Arrange
+    const reply = snapshotReply({ pages: [page('p0'), page('p1')] });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok).be.true();
+    if (!normalized.ok) return;
+    should(normalized.value.url).equal('https://example.test/p1');
+    should(normalized.value.title).equal('title p1');
+    should(normalized.value.canGoBack).be.true();
+    should(normalized.value.pageState).equal('ready');
+    should(BrowserPageSnapshotSchema.safeParse(normalized.value).success).be.true();
+  });
+
+  it('should keep a page’s incognito mark and its opener, and nothing that only resembles them', () => {
+    // Arrange
+    const reply = snapshotReply({
+      pages: [
+        { ...page('p0'), incognito: true, openerId: 'p1' },
+        { ...page('p1'), incognito: 'yes', openerId: '' },
+      ],
+    });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).deepEqual([
+      { id: 'p0', url: 'https://example.test/p0', title: 'title p0', incognito: true, openerId: 'p1' },
+      { id: 'p1', url: 'https://example.test/p1', title: 'title p1' },
+    ]);
+  });
+
+  it('should keep a challenge hint only when it names a provider the wire knows', () => {
+    // Arrange
+    const reply = snapshotReply({
+      pages: [
+        { ...page('p0'), challenge: { provider: 'cloudflare' } },
+        { ...page('p1'), challenge: { provider: 'solver-service' } },
+      ],
+    });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).deepEqual([
+      { id: 'p0', url: 'https://example.test/p0', title: 'title p0', challenge: { provider: 'cloudflare' } },
+      { id: 'p1', url: 'https://example.test/p1', title: 'title p1' },
+    ]);
+  });
+
+  it('should substitute a blank URL for a tab the worker described without one', () => {
+    // Arrange: kteam emitted an empty string here, which the wire schema rejects outright.
+    const reply = snapshotReply({ pages: [{ id: 'p1', title: 'new tab' }] });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.url).equal(BLANK_PAGE_URL);
+    should(normalized.ok && BrowserPageSnapshotSchema.safeParse(normalized.value).success).be.true();
+  });
+
+  it('should keep the error state paired with an error string in both directions', () => {
+    // Act
+    const withoutMessage = normalizeWorkerSnapshot(snapshotReply({ pageState: 'error' }));
+    const withMessage = normalizeWorkerSnapshot(
+      snapshotReply({ pageState: 'error', pageError: 'net::ERR_FAILED\nstack line' }),
+    );
+    const ignoredMessage = normalizeWorkerSnapshot(snapshotReply({ pageError: 'ignored' }));
+
+    // Assert
+    should(withoutMessage.ok && withoutMessage.value.pageError).equal('unknown error');
+    should(withMessage.ok && withMessage.value.pageError).equal('net::ERR_FAILED');
+    should(ignoredMessage.ok && ignoredMessage.value.pageError).be.undefined();
+    for (const candidate of [withoutMessage, withMessage, ignoredMessage]) {
+      should(candidate.ok && BrowserPageSnapshotSchema.safeParse(candidate.value).success).be.true();
+    }
+  });
+
+  it('should treat an unknown page state as ready', () => {
+    // Act
+    const loading = normalizeWorkerSnapshot(snapshotReply({ pageState: 'loading' }));
+    const nonsense = normalizeWorkerSnapshot(snapshotReply({ pageState: 'melted' }));
+
+    // Assert
+    should(loading.ok && loading.value.pageState).equal('loading');
+    should(nonsense.ok && nonsense.value.pageState).equal('ready');
+  });
+
+  it('should bound long URLs and titles and skip tabs with no usable identity', () => {
+    // Arrange
+    const reply = snapshotReply({
+      pages: [
+        { id: '', url: 'https://example.test/nameless' },
+        { id: 'x'.repeat(129), url: 'https://example.test/overlong' },
+        'not a page',
+        { id: 'p1', url: `https://example.test/${'q'.repeat(5_000)}`, title: 't'.repeat(600) },
+      ],
+    });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).have.length(1);
+    should(normalized.ok && normalized.value.url.length).equal(4_096);
+    should(normalized.ok && normalized.value.title.length).equal(500);
+  });
+
+  it('should spend the last tab slot on the active page when the list overflows the cap', () => {
+    // Arrange
+    const pages = Array.from({ length: MAX_WORKER_PAGES + 5 }, (_unused, index) => page(`p${index}`));
+    const activePageId = `p${MAX_WORKER_PAGES + 3}`;
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(snapshotReply({ pages, activePageId }));
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).have.length(MAX_WORKER_PAGES);
+    should(normalized.ok && normalized.value.pages.at(-1)?.id).equal(activePageId);
+    should(normalized.ok && normalized.value.activePageId).equal(activePageId);
+  });
+
+  it('should refuse a snapshot the wire schema rejects rather than emit one that fails later', () => {
+    // Arrange: bounding a string is not the same as knowing it is a URL.
+    const notAUrl = snapshotReply({ pages: [{ id: 'p1', url: 'not a url' }] });
+    const relative = snapshotReply({ pages: [{ id: 'p1', url: '/index.html' }] });
+    const blank = snapshotReply({ pages: [{ id: 'p1', url: '   ' }] });
+
+    // Act & Assert: a worker fault must surface as an upstream failure, never as an invalid snapshot.
+    for (const reply of [notAUrl, relative, blank]) {
+      should(normalizeWorkerSnapshot(reply)).deepEqual({
+        ok: false,
+        message: 'browser worker returned a snapshot the protocol rejects',
+      });
+      should(normalizeWorkerActionSnapshot({ ...reply, actedPageId: 'p1' })).deepEqual({
+        ok: false,
+        message: 'browser worker returned a snapshot the protocol rejects',
+      });
+    }
+  });
+
+  it('should refuse an acted page the action schema cannot accept', () => {
+    // Arrange: provenance is bounded on its own, so only the schema can reject this shape.
+    const reply = { ...snapshotReply(), actedPageId: 'p1' };
+
+    // Act
+    const accepted = normalizeWorkerActionSnapshot(reply);
+
+    // Assert
+    should(accepted.ok).be.true();
+    should(accepted.ok && accepted.value.actedPageId).equal('p1');
+  });
+
+  it('should carry the password-field flag only when the worker says exactly true', () => {
+    // Act
+    const flagged = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: true });
+    const stringy = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', passwordField: 'true' });
+    const absent = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1' });
+
+    // Assert
+    should(flagged.ok && flagged.value.passwordField).equal(true);
+    should(stringy.ok && 'passwordField' in stringy.value).be.false();
+    should(absent.ok && 'passwordField' in absent.value).be.false();
+  });
+
+  it('should carry an identifier field’s host only when it is a host, and never beside a password field', () => {
+    // Act
+    const typed = (identifierHost: unknown, passwordField?: true) =>
+      normalizeWorkerActionSnapshot({
+        ...snapshotReply(),
+        actedPageId: 'p1',
+        identifierHost,
+        ...(passwordField ? { passwordField } : {}),
+      });
+
+    // Assert
+    const kept = typed('accounts.google.com');
+    should(kept.ok && kept.value.identifierHost).equal('accounts.google.com');
+    for (const bad of ['ACCOUNTS.google.com', 'a b', 'x/y', 42, '']) {
+      const dropped = typed(bad);
+      should(dropped.ok && 'identifierHost' in dropped.value).be.false();
+    }
+    const both = typed('accounts.google.com', true);
+    should(both.ok && 'identifierHost' in both.value).be.false();
+
+    // A fill's identifier boxes and a click's chosen tile: kept when well formed, dropped (never the act) otherwise.
+    const act = (extra: Record<string, unknown>) =>
+      normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', ...extra });
+    const filled = act({ identifierFields: [{ index: 1, host: 'login.example.com' }] });
+    const badFill = act({ identifierFields: [{ index: -1, host: 'login.example.com' }] });
+    const fillWithPassword = act({ identifierFields: [{ index: 0, host: 'x.com' }], passwordField: true });
+    const tile = act({ clickedIdentity: { host: 'accounts.google.com', username: 'e@x.com' } });
+    const badTile = act({ clickedIdentity: { host: 'Accounts.google.com', username: 'e@x.com' } });
+    should(filled.ok && filled.value.identifierFields).deepEqual([{ index: 1, host: 'login.example.com' }]);
+    should(badFill.ok && 'identifierFields' in badFill.value).be.false();
+    should(fillWithPassword.ok && 'identifierFields' in fillWithPassword.value).be.false();
+    should(tile.ok && tile.value.clickedIdentity).deepEqual({ host: 'accounts.google.com', username: 'e@x.com' });
+    should(badTile.ok && 'clickedIdentity' in badTile.value).be.false();
+  });
+
+  it('should refuse a snapshot with no usable or no matching active page', () => {
+    // Act & Assert
+    should(normalizeWorkerSnapshot(undefined)).deepEqual({
+      ok: false,
+      message: 'browser worker returned an invalid active page',
+    });
+    should(normalizeWorkerSnapshot(snapshotReply({ activePageId: 'p9' }))).deepEqual({
+      ok: false,
+      message: 'browser worker returned an unknown active page',
+    });
+  });
+
+  it('should require action provenance and pass a snapshot failure through', () => {
+    // Act
+    const acted = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p0' });
+    const missing = normalizeWorkerActionSnapshot(snapshotReply());
+    const broken = normalizeWorkerActionSnapshot({ actedPageId: 'p0' });
+
+    // Assert: acted pages are checked for shape only — a closed tab is no longer in the list.
+    should(acted.ok && acted.value.actedPageId).equal('p0');
+    should(missing).deepEqual({ ok: false, message: 'browser worker returned no acted page' });
+    should(broken).deepEqual({ ok: false, message: 'browser worker returned an invalid active page' });
+  });
+
+  it('should bound read text and screenshot payloads', () => {
+    // Act & Assert
+    should(boundedReadText({ text: 'hello' })).equal('hello');
+    should(boundedReadText({ text: 'x'.repeat(200_001) })).have.length(200_000);
+    should(boundedReadText({})).equal('');
+    should(boundedScreenshot({ screenshotBase64: 'AAAA' })).equal('AAAA');
+    should(boundedScreenshot(undefined)).equal('');
+  });
+
+  it('should reduce a multi-line worker error to its first bounded line', () => {
+    // Act & Assert
+    should(coarseWorkerError('first\r\nsecond')).equal('first');
+    should(coarseWorkerError('x'.repeat(500))).have.length(200);
+    should(coarseWorkerError(7)).equal('');
+  });
+});
+
+describe('browser worker lines', () => {
+  it('should recognize lifecycle records', () => {
+    // Act & Assert
+    should(parseWorkerLine('{"type":"ready"}')).deepEqual({ kind: 'ready' });
+    should(parseWorkerLine('{"type":"fatal","error":"chromium missing\\nstack"}')).deepEqual({
+      kind: 'fatal',
+      message: 'chromium missing',
+    });
+    should(parseWorkerLine('{"type":"fatal"}')).deepEqual({ kind: 'fatal', message: 'unknown error' });
+  });
+
+  it('should accept a screencast frame and round its dimensions up to a visible pixel', () => {
+    // Act
+    const event = parseWorkerLine(
+      JSON.stringify({ type: 'screencast-frame', dataBase64: 'AAAA', width: 800.4, height: 0.2, pageId: 'p1' }),
+    );
+
+    // Assert
+    should(event.kind).equal('frame');
+    if (event.kind !== 'frame') return;
+    should(event.frame).deepEqual({ dataBase64: 'AAAA', width: 800, height: 1, pageId: 'p1' });
+    should(BrowserScreencastFrameSchema.safeParse(event.frame).success).be.true();
+  });
+
+  it('should carry a usable acknowledgement id and drop an unusable one', () => {
+    // Arrange
+    const base = { type: 'screencast-frame', dataBase64: 'AAAA', width: 10, height: 10, pageId: 'p1' };
+
+    // Act
+    const withAck = parseWorkerLine(JSON.stringify({ ...base, ackId: 7 }));
+    const fractional = parseWorkerLine(JSON.stringify({ ...base, ackId: 1.5 }));
+    const textual = parseWorkerLine(JSON.stringify({ ...base, ackId: '7' }));
+    const absent = parseWorkerLine(JSON.stringify(base));
+
+    // Assert: acknowledging the wrong frame would release a window the browser is still holding.
+    should(withAck.kind === 'frame' && withAck.ackId).equal(7);
+    should(fractional.kind === 'frame' && fractional.ackId).be.undefined();
+    should(textual.kind === 'frame' && textual.ackId).be.undefined();
+    should(absent.kind === 'frame' && absent.ackId).be.undefined();
+  });
+
+  it('should ignore frames that are unattributable, empty, oversized, or unmeasured', () => {
+    // Arrange
+    const base = { type: 'screencast-frame', dataBase64: 'AAAA', width: 10, height: 10, pageId: 'p1' };
+
+    // Act & Assert: kteam forwarded identity-free frames and discarded them further downstream.
+    for (const override of [
+      { pageId: undefined },
+      { pageId: 'x'.repeat(129) },
+      { dataBase64: '' },
+      { dataBase64: 'A'.repeat(16 * 1024 * 1024 + 1) },
+      { dataBase64: 42 },
+      { width: 'wide' },
+      { height: Number.POSITIVE_INFINITY },
+    ]) {
+      should(parseWorkerLine(JSON.stringify({ ...base, ...override }))).deepEqual({ kind: 'ignored' });
+    }
+  });
+
+  it('should pair replies with their request id and coarsen their errors', () => {
+    // Act & Assert
+    should(parseWorkerLine('{"id":4,"ok":true,"result":{"value":1}}')).deepEqual({
+      kind: 'result',
+      id: 4,
+      result: { value: 1 },
+    });
+    should(parseWorkerLine('{"id":4,"ok":false,"error":"click failed\\nat locator"}')).deepEqual({
+      kind: 'failure',
+      id: 4,
+      message: 'click failed',
+    });
+    should(parseWorkerLine('{"id":4}')).deepEqual({ kind: 'failure', id: 4, message: 'unknown error' });
+  });
+
+  it('should ignore malformed, unidentified, and unknown records', () => {
+    // Act & Assert
+    for (const line of ['', 'not json', '[]', '{"ok":true}', '{"id":"4","ok":true}', '{"id":1.5,"ok":true}']) {
+      should(parseWorkerLine(line)).deepEqual({ kind: 'ignored' });
+    }
+  });
+
+  it('should encode one request per line', () => {
+    // Act & Assert
+    should(encodeWorkerRequest(3, 'navigate', { url: 'https://example.test/' })).equal(
+      '{"id":3,"method":"navigate","params":{"url":"https://example.test/"}}\n',
+    );
+  });
+});
+
+describe('worker line assembler', () => {
+  it('should emit whole lines and retain a partial tail', () => {
+    // Arrange
+    const assembler = new WorkerLineAssembler(1_000);
+
+    // Act
+    const first = assembler.push('{"a":1}\n{"b":2}\n{"c"');
+    const second = assembler.push(':3}\n');
+
+    // Assert
+    should(first).deepEqual({ lines: ['{"a":1}', '{"b":2}'], overflowed: false });
+    should(second).deepEqual({ lines: ['{"c":3}'], overflowed: false });
+  });
+
+  it('should report an overflow for a record with no newline in sight', () => {
+    // Arrange
+    const assembler = new WorkerLineAssembler(8);
+
+    // Act
+    const batch = assembler.push('123456789');
+
+    // Assert
+    should(batch).deepEqual({ lines: [], overflowed: true });
+
+    // Act: the buffer is dropped, so a later well-formed line still parses.
+    const recovered = assembler.push('{"a":1}\n');
+
+    // Assert
+    should(recovered).deepEqual({ lines: ['{"a":1}'], overflowed: false });
+  });
+
+  it('should report an overflow for an oversized line that does end in a newline', () => {
+    // Arrange
+    const assembler = new WorkerLineAssembler(4);
+
+    // Act
+    const batch = assembler.push('{"a":1}\n{"b":2}\n');
+
+    // Assert
+    should(batch).deepEqual({ lines: [], overflowed: true });
+  });
+
+  it('should forget its buffer when reset', () => {
+    // Arrange
+    const assembler = new WorkerLineAssembler(1_000);
+    assembler.push('{"partial"');
+
+    // Act
+    assembler.reset();
+    const batch = assembler.push('{"a":1}\n');
+
+    // Assert
+    should(batch).deepEqual({ lines: ['{"a":1}'], overflowed: false });
+  });
+});
+
+describe('browser transport errors', () => {
+  it('should carry the wire error code and status the API surface reports', () => {
+    // Act
+    const error = new BrowserTransportError('launch_failed', 'browser worker did not become ready', 503);
+
+    // Assert
+    should(error).be.instanceof(Error);
+    should(error.name).equal('BrowserTransportError');
+    should(error.code).equal('launch_failed');
+    should(error.status).equal(503);
+    should(error.message).equal('browser worker did not become ready');
+  });
+});
+
+describe('lifecycle replies from a worker', () => {
+  it('should read a dialog the wire knows, bounded, and ignore one it does not', () => {
+    // Act
+    const known = normalizeWorkerDialog({ dialog: { type: 'prompt', message: 'x'.repeat(5_000) } });
+    const unknown = normalizeWorkerDialog({ dialog: { type: 'modal', message: 'hi' } });
+    const absent = normalizeWorkerDialog({});
+
+    // Assert
+    should(known?.type).equal('prompt');
+    should(known?.message.length).equal(1_024);
+    should(unknown).be.undefined();
+    should(absent).be.undefined();
+  });
+
+  it('should read the text, whether a wait matched, and which dialog was answered', () => {
+    // Act
+    const reply = normalizeLifecycleReply({
+      lifecycle: { text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' },
+    });
+    const bare = normalizeLifecycleReply({ lifecycle: { text: 'hi', matched: 'yes', dialogType: 'modal' } });
+    const empty = normalizeLifecycleReply({});
+
+    // Assert
+    should(reply).deepEqual({ text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' });
+    should(bare).deepEqual({ text: 'hi' });
+    should(empty).deepEqual({ text: '' });
+  });
+
+  it('should bound a lifecycle text so a page cannot grow the daemon without limit', () => {
+    // Act
+    const reply = normalizeLifecycleReply({ lifecycle: { text: 'q'.repeat(5_000_000) } });
+
+    // Assert
+    should(reply.text.length).be.below(5_000_000);
+  });
+});
+
+describe('worker downloads and staged files', () => {
+  it('should keep the notices that satisfy the wire schema and drop the rest', () => {
+    // Arrange
+    const reply = [
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 12 },
+      { id: 'dl-2', name: 'b.zip', state: 'downloading' },
+      { id: '../etc', name: 'evil', state: 'ready' },
+      { id: 'dl-3', name: 'c', state: 'saved' },
+      { id: 'dl-4', name: '', state: 'failed', size: -1 },
+      'junk',
+    ];
+
+    // Act
+    const notices = normalizeWorkerDownloads(reply);
+
+    // Assert
+    should(notices).deepEqual([
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 12 },
+      { id: 'dl-2', name: 'b.zip', state: 'downloading' },
+      { id: 'dl-4', name: 'download', state: 'failed' },
+    ]);
+  });
+
+  it('should read nothing from a reply with no list, and at most the notice cap from a long one', () => {
+    should(normalizeWorkerDownloads(undefined)).deepEqual([]);
+    should(normalizeWorkerDownloads({ id: 'dl-1' })).deepEqual([]);
+    should(
+      normalizeWorkerDownloads(
+        Array.from({ length: 60 }, (_, index) => ({ id: `dl-${String(index)}`, name: 'x', state: 'ready' })),
+      ).length,
+    ).equal(20);
+  });
+
+  it('should carry downloads on an act snapshot only when there are some', () => {
+    const withDownloads = normalizeWorkerActionSnapshot({
+      ...snapshotReply(),
+      actedPageId: 'p1',
+      downloads: [{ id: 'dl-1', name: 'a.csv', state: 'ready', size: 1 }],
+    });
+    const without = normalizeWorkerActionSnapshot({ ...snapshotReply(), actedPageId: 'p1', downloads: [] });
+
+    should(withDownloads.ok && withDownloads.value.downloads).deepEqual([
+      { id: 'dl-1', name: 'a.csv', state: 'ready', size: 1 },
+    ]);
+    should(without.ok && without.value.downloads).be.undefined();
+  });
+
+  it('should read a staged file only with a path and a whole-number size', () => {
+    should(normalizeWorkerStaged({ staged: { path: '/stage/dl-1-a.csv', name: 'a.csv', size: 5 } })).deepEqual({
+      path: '/stage/dl-1-a.csv',
+      name: 'a.csv',
+      size: 5,
+    });
+    should(normalizeWorkerStaged({ staged: { path: '/stage/x', size: 0 } })?.name).equal('download');
+    for (const staged of [
+      undefined,
+      {},
+      { path: '', size: 1 },
+      { path: '/x'.repeat(3000), size: 1 },
+      { path: '/x', size: -1 },
+      { path: '/x', size: 1.5 },
+      { path: '/x', size: '5' },
+      { path: 5, size: 1 },
+    ])
+      should(normalizeWorkerStaged({ staged })).be.undefined();
+  });
+});

@@ -1,0 +1,906 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  planWardenEscalations,
+  planWardenRemedy,
+  remedyPermitsEscalation,
+  wardenEscalationSourceRef,
+  type WardenAnomaly,
+  type WardenEscalationBoard,
+  type WardenEscalationInput,
+  type WardenEscalationNode,
+  type WardenEscalationVerdict,
+  type WardenRemedyOutcome,
+} from '../../daemon/lib/index.ts';
+
+const NOW = Date.parse('2026-08-06T12:00:00.000Z');
+const at = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
+
+const node = (
+  overrides: {
+    readonly id?: string;
+    readonly teammate?: string;
+    readonly agent?: string;
+    readonly model?: string;
+    readonly modelHint?: string;
+    readonly status?: WardenEscalationNode['state']['status'];
+  } = {},
+): WardenEscalationNode => ({
+  config: {
+    id: overrides.id ?? 's1',
+    ...(overrides.teammate === undefined ? {} : { teammate: overrides.teammate }),
+    ...(overrides.agent === undefined ? {} : { agent: overrides.agent }),
+    ...(overrides.model === undefined ? {} : { model: overrides.model }),
+    ...(overrides.modelHint === undefined ? {} : { modelHint: overrides.modelHint }),
+  },
+  state: { status: overrides.status ?? 'thinking' },
+});
+
+const anomaly = (overrides: Partial<WardenAnomaly> = {}): WardenAnomaly => ({
+  kind: 'sus_thinking',
+  sessionId: 's1',
+  status: 'thinking',
+  detail: 'the transcript has not grown for 40m while counters advanced',
+  since: at(-40),
+  ...overrides,
+});
+
+const verdict = (overrides: Partial<WardenEscalationVerdict> = {}): WardenEscalationVerdict => ({
+  at: at(-5),
+  targetSession: 's1',
+  anomalyKind: 'sus_thinking',
+  verdict: 'needs_human',
+  explicitNeedsHuman: true,
+  reason: 'Stopping might destroy an hour of uncommitted work.',
+  reportPath: '/state/warden/reports/r1.md',
+  ...overrides,
+});
+
+const board = (
+  sessionId: string,
+  overrides: Partial<Omit<WardenEscalationBoard, 'sessionId'>> = {},
+): WardenEscalationBoard => ({
+  sessionId,
+  items: overrides.items ?? [],
+});
+
+const FORBIDDEN: WardenRemedyOutcome = { disposition: 'forbidden', why: 'no remedy is permitted here' };
+
+const plan = (overrides: Partial<WardenEscalationInput> = {}) =>
+  planWardenEscalations({
+    anomalies: [anomaly()],
+    nodes: [node({ teammate: 'atlas', agent: 'claude-auto-a', model: 'sample-model-2' })],
+    verdicts: [verdict()],
+    boards: [board('s1')],
+    remedy: FORBIDDEN,
+    clientName: 'fy',
+    ...overrides,
+  });
+
+describe('what a warden may do before waking a person', () => {
+  it('should name the credential it does not hold when it may not act', () => {
+    // Arrange / Act
+    const outcome = planWardenRemedy({ mayAct: false });
+
+    // Assert
+    should(outcome.disposition).eql('forbidden');
+    should(outcome.why).match(/holds no credential/u);
+  });
+
+  it('should name the missing policy when it could act but nothing authorises a remedy', () => {
+    // Arrange / Act
+    const outcome = planWardenRemedy({ mayAct: true });
+
+    // Assert
+    should(outcome.disposition).eql('forbidden');
+    should(outcome.why).match(/no configured warden recovery policy/u);
+  });
+
+  it('should never claim a repair that was not attempted', () => {
+    // Arrange / Act / Assert
+    for (const mayAct of [true, false]) should(planWardenRemedy({ mayAct }).why).match(/No automatic repair/u);
+  });
+
+  it.each([
+    { disposition: 'forbidden' as const, escalates: true },
+    { disposition: 'failed' as const, escalates: true },
+    { disposition: 'applied' as const, escalates: false },
+  ])('should decide a $disposition remedy escalates: $escalates', ({ disposition, escalates }) => {
+    // Arrange / Act / Assert
+    should(remedyPermitsEscalation({ disposition, why: 'x' })).eql(escalates);
+  });
+});
+
+describe('the stable identity of a node escalation', () => {
+  it('should key on the anomaly class alone, so a later sweep refreshes one row', () => {
+    // Arrange / Act / Assert
+    should(wardenEscalationSourceRef('sus_thinking')).eql('warden:ask:sus_thinking');
+  });
+});
+
+describe('raising an escalation', () => {
+  it('should raise for a suspicious node with an explicit needs-human verdict', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.raise[0]).match({
+      sessionId: 's1',
+      anomalyKind: 'sus_thinking',
+      source: 'agent-raised',
+      sourceRef: 'warden:ask:sus_thinking',
+      reportPath: '/state/warden/reports/r1.md',
+    });
+  });
+
+  it('should carry the warden’s own reason as the why', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.why).eql('Stopping might destroy an hour of uncommitted work.');
+  });
+
+  it('should stand in for a verdict that recorded no reason at all', () => {
+    // Arrange / Act
+    const result = plan({ verdicts: [verdict({ reason: undefined })] });
+
+    // Assert
+    should(result.raise[0]?.why).match(/asked for a human/u);
+  });
+
+  it.each([
+    { label: 'prose that only sounds worried', patch: { explicitNeedsHuman: undefined } },
+    { label: 'a verdict of another kind', patch: { verdict: 'nudged' as const, explicitNeedsHuman: undefined } },
+    { label: 'a report naming no session', patch: { targetSession: undefined } },
+    { label: 'a report naming no anomaly class', patch: { anomalyKind: undefined } },
+  ])('should refuse to escalate from $label', ({ patch }) => {
+    // Arrange / Act
+    const result = plan({ verdicts: [verdict(patch)] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should refuse to escalate a class the warden judged on a different node', () => {
+    // Arrange / Act
+    const result = plan({ verdicts: [verdict({ targetSession: 's2' })] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should refuse to escalate a class no longer in this sweep’s anomaly set', () => {
+    // Arrange / Act — the report landed after the node recovered.
+    const result = plan({ anomalies: [] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should refuse a verdict written before the current episode began', () => {
+    // Arrange — the node recovered, was flagged again, and nobody has re-judged the new episode.
+    const recurrence = anomaly({ since: at(-10) });
+
+    // Act
+    const result = plan({ anomalies: [recurrence], verdicts: [verdict({ at: at(-90) })] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should raise from a verdict written after the current episode began', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ since: at(-10) })], verdicts: [verdict({ at: at(-2) })] });
+
+    // Assert
+    should(result.raise).have.length(1);
+  });
+
+  it('should accept a verdict written in the very instant the episode began', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ since: at(-10) })], verdicts: [verdict({ at: at(-10) })] });
+
+    // Assert
+    should(result.raise).have.length(1);
+  });
+
+  it('should refuse the whole class when even the newest verdict predates the episode', () => {
+    // Arrange / Act — the newest is still older than the episode, so no older one can cover it.
+    const result = plan({
+      anomalies: [anomaly({ since: at(-10) })],
+      verdicts: [verdict({ at: at(-90) }), verdict({ at: at(-40) })],
+    });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should fail closed when the episode anchor cannot be read', () => {
+    // Arrange / Act — an anchor we cannot parse is not permission to assume the verdict is current.
+    const result = plan({ anomalies: [anomaly({ since: 'not an instant' })] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should fail closed when the verdict instant cannot be read', () => {
+    // Arrange / Act
+    const result = plan({ verdicts: [verdict({ at: 'not an instant' })] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should still raise for a class that has no episode anchor to be stale against', () => {
+    // Arrange — dead_monitor is a state, not an episode, so the detector anchors it to nothing.
+    const unanchored = anomaly({ kind: 'dead_monitor', since: undefined, status: 'running' });
+
+    // Act
+    const result = plan({
+      anomalies: [unanchored],
+      verdicts: [verdict({ anomalyKind: 'dead_monitor', at: at(-90) })],
+    });
+
+    // Assert
+    should(result.raise).have.length(1);
+  });
+
+  it('should refuse to escalate a different class from the one that was judged', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ kind: 'sus_subprocess' })] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should never escalate merely because a session already has Attention', () => {
+    // Arrange — a full board of ordinary rows, and no verdict anywhere.
+    const busy = board('s1', {
+      items: [
+        { source: 'task', sourceRef: 'task:T7', raisedBy: 'agent' },
+        { source: 'question', sourceRef: null, raisedBy: 'agent' },
+        { source: 'agent-raised', sourceRef: null, raisedBy: 'human' },
+      ],
+    });
+
+    // Act
+    const result = plan({ verdicts: [], boards: [busy] });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.resolve).be.empty();
+  });
+
+  it.each(['completed', 'failed', 'stalled', 'stopped', 'kill_failed'] as const)(
+    'should never raise against a %s node',
+    status => {
+      // Arrange / Act
+      const result = plan({ nodes: [node({ status })] });
+
+      // Assert
+      should(result.raise).be.empty();
+    },
+  );
+
+  it('should never raise against a node this daemon cannot see', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [] });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should withhold the escalation when an allowed repair already fixed the node', () => {
+    // Arrange / Act
+    const result = plan({ remedy: { disposition: 'applied', why: 'the daemon resumed it and it continued' } });
+
+    // Assert
+    should(result.raise).be.empty();
+  });
+
+  it('should escalate when an allowed repair was attempted and failed', () => {
+    // Arrange / Act
+    const result = plan({ remedy: { disposition: 'failed', why: 'the resume was rejected by the harness' } });
+
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.raise[0]?.context).containEql('the resume was rejected by the harness');
+  });
+
+  it('should keep one node’s classes as separate items', () => {
+    // Arrange / Act
+    const result = plan({
+      anomalies: [anomaly(), anomaly({ kind: 'sus_subprocess' })],
+      verdicts: [verdict(), verdict({ anomalyKind: 'sus_subprocess' })],
+    });
+
+    // Assert
+    should(result.raise.map(entry => entry.sourceRef)).eql(['warden:ask:sus_subprocess', 'warden:ask:sus_thinking']);
+  });
+
+  it('should keep two nodes’ escalations on their own boards', () => {
+    // Arrange / Act
+    const result = plan({
+      anomalies: [anomaly(), anomaly({ sessionId: 's2' })],
+      nodes: [node({ teammate: 'atlas' }), node({ id: 's2', teammate: 'boreas' })],
+      verdicts: [verdict(), verdict({ targetSession: 's2' })],
+      boards: [board('s1'), board('s2')],
+    });
+
+    // Assert
+    should(result.raise.map(entry => entry.sessionId)).eql(['s1', 's2']);
+    should(result.raise[1]?.subject).containEql(':boreas');
+  });
+
+  it('should give a fleet-wide anomaly ONE item, on the first node it names', () => {
+    // Arrange
+    const outage = anomaly({ kind: 'provider_unavailable', sessionId: 's1', affectedSessionIds: ['s1', 's2'] });
+
+    // Act
+    const result = plan({
+      anomalies: [outage],
+      nodes: [node(), node({ id: 's2' })],
+      verdicts: [
+        verdict({ anomalyKind: 'provider_unavailable' }),
+        verdict({ targetSession: 's2', anomalyKind: 'provider_unavailable' }),
+      ],
+      boards: [board('s1'), board('s2')],
+    });
+
+    // Assert
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef, entry.notice, entry.ping])).eql([
+      ['s1', 'warden:ask:fleet:provider_unavailable:s1', true, true],
+    ]);
+  });
+
+  it('should read the newest of two verdicts for the same class', () => {
+    // Arrange / Act
+    const result = plan({
+      verdicts: [verdict({ at: at(-50), reason: 'older' }), verdict({ at: at(-2), reason: 'newer' })],
+    });
+
+    // Assert
+    should(result.raise[0]?.why).eql('newer');
+  });
+
+  it('should keep the newest verdict whatever order the reports arrive in', () => {
+    // Arrange / Act
+    const result = plan({
+      verdicts: [verdict({ at: at(-2), reason: 'newer' }), verdict({ at: at(-50), reason: 'older' })],
+    });
+
+    // Assert
+    should(result.raise[0]?.why).eql('newer');
+  });
+
+  it('should anchor the wait to the verdict when the anomaly carries no instant', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ since: undefined })] });
+
+    // Assert
+    should(result.raise[0]?.waitingSince).eql(at(-5));
+  });
+});
+
+describe('the evidence an escalation carries', () => {
+  it('should name the node by its teammate callsign, so a reader can link it', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.subject).containEql(':atlas');
+    should(result.raise[0]?.premise).containEql(':atlas');
+  });
+
+  it('should fall back to the bare session id when the node has no callsign', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [node({ teammate: undefined })] });
+
+    // Assert
+    should(result.raise[0]?.subject).containEql('s1');
+    should(result.raise[0]?.subject).not.containEql(':');
+  });
+
+  it('should title the item in plain words for its class', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.title).equal('atlas may be stuck thinking');
+  });
+
+  it('should carry the detector’s own evidence, not a paraphrase', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.premise).containEql('the transcript has not grown for 40m while counters advanced');
+    should(result.raise[0]?.premise).containEql(at(-40));
+  });
+
+  it('should carry how long the node has been idle when the detector measured it', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ idleMinutes: 40 })] });
+
+    // Assert
+    should(result.raise[0]?.premise).containEql('Idle 40m');
+  });
+
+  it('should say which report the verdict came from', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.context).containEql('/state/warden/reports/r1.md');
+    should(result.raise[0]?.context).containEql('explicit NEEDS_HUMAN');
+  });
+
+  it('should name the account and model that ran the check, from the daemon’s sidecar', () => {
+    // Arrange
+    const spawn = {
+      v: 1 as const,
+      at: at(-6),
+      wardenSessionId: 'wd-1',
+      agent: 'claude-auto-b',
+      model: 'sample-model-9',
+      modelSource: 'configured' as const,
+      harness: 'claude' as const,
+      policy: 'fallback' as const,
+      selection: 'preferred' as const,
+      configuredFirst: 'claude-auto-b',
+      skipped: {},
+      failedOver: false,
+    };
+
+    // Act
+    const result = plan({ verdicts: [verdict({ spawn })] });
+
+    // Assert
+    should(result.raise[0]?.context).containEql('Judged by: claude-auto-b running sample-model-9');
+    should(result.raise[0]?.context).containEql('wd-1');
+  });
+
+  it('should leave the judge unnamed when no sidecar was recorded', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.context).not.containEql('Judged by:');
+  });
+
+  it('should derive the node’s CLI and model from session metadata', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.premise).containEql('CLI claude-auto-a, model sample-model-2');
+  });
+
+  it('should fall back to the model the start resolved when the account pinned none', () => {
+    // Arrange / Act
+    const result = plan({
+      nodes: [node({ teammate: 'atlas', agent: 'claude-auto-a', model: undefined, modelHint: 'resolved-model-7' })],
+    });
+
+    // Assert
+    should(result.raise[0]?.premise).containEql('model resolved-model-7');
+  });
+
+  it('should say plainly when neither the CLI nor the model was recorded', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [node({ teammate: 'atlas' })] });
+
+    // Assert
+    should(result.raise[0]?.premise).containEql('CLI not recorded, model not recorded');
+  });
+
+  it('should state the prohibition rather than pretend a repair ran', () => {
+    // Arrange / Act
+    const result = plan({ remedy: planWardenRemedy({ mayAct: false }) });
+
+    // Assert
+    should(result.raise[0]?.context).containEql('holds no credential over any session');
+  });
+
+  it('should name a concrete human action in the client the person actually types', () => {
+    // Arrange / Act
+    const result = plan({ clientName: 'fy' });
+
+    // Assert
+    should(result.raise[0]?.howToResolve).containEql('`fy send s1 <message>`');
+    should(result.raise[0]?.howToResolve).containEql('`fy resume s1`');
+    should(result.raise[0]?.howToResolve).containEql('`fy stop s1`');
+  });
+
+  it('should pass on the step the warden recommended', () => {
+    // Arrange
+    const recommendation = { action: 'move' as const, reason: 'the account is out of quota', agent: 'claude-b' };
+
+    // Act
+    const result = plan({ verdicts: [verdict({ recommendation })] });
+
+    // Assert
+    should(result.raise[0]?.howToResolve).containEql('MOVE (claude-b): the account is out of quota');
+  });
+
+  it('should admit when the warden named no single next step', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.howToResolve).containEql('named no single next step');
+  });
+
+  it('should produce byte-identical text for the same evidence twice', () => {
+    // Arrange / Act
+    const first = plan();
+    const second = plan();
+
+    // Assert
+    should(JSON.stringify(first)).eql(JSON.stringify(second));
+  });
+
+  it('should keep the subject inside one line, whatever the class name is', () => {
+    // Arrange / Act
+    const result = plan();
+
+    // Assert
+    should(result.raise[0]?.subject).not.match(/[\r\n]/u);
+  });
+
+  it('should trim a subject too long for the board rather than have the write refused', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [node({ teammate: 'x'.repeat(400), agent: 'a' })] });
+
+    // Assert
+    should((result.raise[0]?.subject ?? '').length).be.belowOrEqual(240);
+    should(result.raise[0]?.subject).endWith('…');
+  });
+
+  it('should trim an over-long context rather than have the write refused', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [anomaly({ detail: 'd'.repeat(4_000) })] });
+
+    // Assert
+    should((result.raise[0]?.context ?? '').length).be.belowOrEqual(2_048);
+  });
+});
+
+describe('telling a person once per episode', () => {
+  it('should not notify again about a subject already told, while it stands', () => {
+    // Arrange / Act
+    const result = plan({ notified: new Set(['s1|warden:ask:sus_thinking']) });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.standing).eql(['s1|warden:ask:sus_thinking']);
+  });
+
+  it('should keep refreshing a notification still open, even once told', () => {
+    // Arrange / Act
+    const result = plan({
+      notified: new Set(['s1|warden:ask:sus_thinking']),
+      boards: [
+        board('s1', { items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }] }),
+      ],
+    });
+
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.resolve).be.empty();
+  });
+
+  it('should notify about another class on the same ferret that was not told', () => {
+    // Arrange / Act
+    const result = plan({ notified: new Set(['s1|warden:ask:sus_subprocess']) });
+
+    // Assert
+    should(result.raise).have.length(1);
+  });
+
+  it('should report no standing subject when nothing has a reason', () => {
+    // Arrange / Act
+    const result = plan({ verdicts: [] });
+
+    // Assert
+    should(result.standing).eql([]);
+  });
+});
+
+describe('clearing an escalation whose reason has gone', () => {
+  const live = board('s1', {
+    items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }],
+  });
+
+  it('should clear it when the node stops being flagged for that class', () => {
+    // Arrange / Act
+    const result = plan({ anomalies: [], boards: [live] });
+
+    // Assert
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]).match({
+      sessionId: 's1',
+      sourceRef: 'warden:ask:sus_thinking',
+      anomalyKind: 'sus_thinking',
+    });
+    should(result.resolve[0]?.note).match(/recovered/u);
+  });
+
+  it('should keep it while the node is still flagged for that class', () => {
+    // Arrange / Act
+    const result = plan({ boards: [live] });
+
+    // Assert
+    should(result.resolve).be.empty();
+  });
+
+  it('should clear it when the node reaches a terminal status', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [node({ status: 'stopped' })], boards: [live] });
+
+    // Assert
+    should(result.resolve[0]?.note).match(/is stopped and is no longer running/u);
+  });
+
+  // A PLANNER CONTRACT, NOT A PRODUCTION JOURNEY. `reconcileEscalations` adds a board and its
+  // node together or neither, so the sweep can never supply this input; `sweep.test.ts` proves a
+  // removed node is simply not read. What is pinned here is that a caller who DOES supply an
+  // orphan board — the delete route that has yet to exist — gets the row cleared rather than
+  // silently retained.
+  it('should clear an orphan board a caller supplies, which the sweep never does', () => {
+    // Arrange / Act
+    const result = plan({ nodes: [], boards: [live] });
+
+    // Assert
+    should(result.resolve[0]?.note).match(/no longer in the fleet/u);
+  });
+
+  it.each([
+    { label: 'a row somebody else raised', patch: { raisedBy: 'agent' as const } },
+    { label: 'a row on another source', patch: { source: 'task' as const } },
+    { label: 'a row with no source reference', patch: { sourceRef: null } },
+    { label: 'a reference that is not a warden one', patch: { sourceRef: 'task:T3' } },
+    { label: 'a reference naming one exact report block', patch: { sourceRef: 'warden:/r/a.md#sus_thinking' } },
+    { label: 'a reference naming a report and no class', patch: { sourceRef: 'warden:/r/a.md' } },
+    { label: 'a reference naming no known class', patch: { sourceRef: 'warden:ask:not_a_kind' } },
+  ])('should leave $label alone', ({ patch }) => {
+    // Arrange
+    const foreign = board('s1', {
+      items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon', ...patch }],
+    });
+
+    // Act
+    const result = plan({ anomalies: [], boards: [foreign] });
+
+    // Assert
+    should(result.resolve).be.empty();
+  });
+
+  it('should clear one class while another on the same node is raised', () => {
+    // Arrange
+    const both = board('s1', {
+      items: [
+        { source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' },
+        { source: 'agent-raised', sourceRef: 'warden:ask:sus_subprocess', raisedBy: 'daemon' },
+      ],
+    });
+
+    // Act
+    const result = plan({ boards: [both] });
+
+    // Assert
+    should(result.resolve.map(entry => entry.anomalyKind)).eql(['sus_subprocess']);
+    should(result.raise.map(entry => entry.anomalyKind)).eql(['sus_thinking']);
+  });
+
+  it('should clear in a deterministic order across nodes and classes', () => {
+    // Arrange
+    const boards = [
+      board('s2', { items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }] }),
+      board('s1', {
+        items: [
+          { source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' },
+          { source: 'agent-raised', sourceRef: 'warden:ask:dead_monitor', raisedBy: 'daemon' },
+        ],
+      }),
+    ];
+
+    // Act
+    const result = plan({ anomalies: [], nodes: [node(), node({ id: 's2' })], boards });
+
+    // Assert
+    should(result.resolve.map(entry => `${entry.sessionId}/${entry.anomalyKind}`)).eql([
+      's1/dead_monitor',
+      's1/sus_thinking',
+      's2/sus_thinking',
+    ]);
+  });
+});
+
+describe('a sub-ferret’s escalation, kept on its agenda home', () => {
+  const HOMES = new Map([
+    ['kid1', 'lead'],
+    ['kid2', 'lead'],
+  ]);
+  const KIND = 'sus_thinking';
+  const scoped = (sessionId: string): string => wardenEscalationSourceRef(KIND, sessionId);
+  const row = (sourceRef: string) => ({ source: 'agent-raised' as const, sourceRef, raisedBy: 'daemon' as const });
+  const nodes = [node({ id: 'lead' }), node({ id: 'kid1' }), node({ id: 'kid2' })];
+  const flagged = (...ids: string[]) => ({
+    anomalies: ids.map(id => anomaly({ sessionId: id })),
+    verdicts: ids.map(id => verdict({ targetSession: id })),
+  });
+
+  it('should name the ferret in the reference it raises, which the service moves to the home', () => {
+    // Arrange / Act
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1')],
+    });
+
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.raise[0]).match({ sessionId: 'kid1', sourceRef: scoped('kid1') });
+  });
+
+  it('should keep the ferret’s own reference when it is its own agenda home', () => {
+    // Arrange / Act
+    const result = plan({ ...flagged('lead'), nodes, homes: HOMES, boards: [board('lead')] });
+
+    // Assert
+    should(result.raise[0]).match({ sessionId: 'lead', sourceRef: wardenEscalationSourceRef(KIND) });
+  });
+
+  it('should never clear as recovered a standing escalation that sits on the home', () => {
+    // Arrange — sweep 2: the item the service moved to the lead is still there, and the kid is still flagged.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.resolve).be.empty();
+    should(result.raise).have.length(1);
+    should(result.raise[0]).match({ sessionId: 'kid1', sourceRef: scoped('kid1') });
+  });
+
+  it('should not raise a second row for a standing escalation, nor re-tell a person who was told', () => {
+    // Arrange — the lead's item was read (resolved) so the board has nothing; the subject was already told.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.resolve).be.empty();
+  });
+
+  it('should keep two sub-ferrets and the lead itself on separate rows', () => {
+    // Arrange / Act
+    const result = plan({
+      ...flagged('kid1', 'kid2', 'lead'),
+      nodes,
+      homes: HOMES,
+      boards: [board('lead'), board('kid1'), board('kid2')],
+    });
+
+    // Assert
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef])).eql([
+      ['kid1', scoped('kid1')],
+      ['kid2', scoped('kid2')],
+      ['lead', wardenEscalationSourceRef(KIND)],
+    ]);
+  });
+
+  it('should clear only the row of the ferret that recovered', () => {
+    // Arrange — both kids and the lead have a row on the lead; only kid1 has recovered.
+    const result = plan({
+      ...flagged('kid2', 'lead'),
+      nodes,
+      homes: HOMES,
+      boards: [
+        board('lead', {
+          items: [row(scoped('kid1')), row(scoped('kid2')), row(wardenEscalationSourceRef(KIND))],
+        }),
+      ],
+    });
+
+    // Assert
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]).match({ sessionId: 'lead', sourceRef: scoped('kid1'), anomalyKind: KIND });
+    should(result.resolve[0]?.note).match(/recovered/u);
+  });
+
+  it('should clear the row of a ferret that is stopped, and of one that is gone', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes: [node({ id: 'lead' }), node({ id: 'kid1', status: 'stopped' })],
+      homes: HOMES,
+      boards: [board('lead', { items: [row(scoped('kid1')), row(scoped('kid3'))] })],
+    });
+
+    // Assert
+    should(result.resolve.map(entry => entry.note)).eql([
+      'Cleared by the daemon: this node is stopped and is no longer running.',
+      'Cleared by the daemon: this node is no longer in the fleet.',
+    ]);
+  });
+
+  it('should neither judge nor clear a row about a ferret whose board could not be read', () => {
+    // Arrange — kid1's board is unreadable, so whether its home has the row says nothing about kid1.
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes,
+      homes: HOMES,
+      unreadable: new Set(['kid1']),
+      boards: [board('lead', { items: [row(scoped('kid1'))] })],
+    });
+
+    // Assert
+    should(result.resolve).be.empty();
+  });
+
+  it('should carry a standing escalation to the new home when its ferret’s home changes, not clear it', () => {
+    // Arrange — sweep 1 told lead1; sweep 2 has the kid's home at lead2. The person was told: nothing may re-tell
+    // them, and the row must not simply vanish for sitting on a board the kid no longer belongs to.
+    const result = plan({
+      ...flagged('kid1'),
+      nodes: [...nodes, node({ id: 'lead2' })],
+      homes: new Map([['kid1', 'lead2']]),
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('lead2'), board('kid1')],
+      notified: new Set([`kid1|${wardenEscalationSourceRef(KIND)}`]),
+    });
+
+    // Assert
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef])).eql([['kid1', scoped('kid1')]]);
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]).match({ sessionId: 'lead', sourceRef: scoped('kid1') });
+    should(result.resolve[0]?.note).match(/Moved by the daemon: this now waits on lead2's agenda/u);
+    should(result.resolve[0]?.note).not.match(/no longer waits on you/u);
+  });
+
+  it('should still clear a row on a board that is not the kid’s home once the kid has recovered', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes: [...nodes, node({ id: 'lead2' })],
+      homes: new Map([['kid1', 'lead2']]),
+      boards: [board('lead', { items: [row(scoped('kid1'))] }), board('lead2'), board('kid1')],
+    });
+
+    // Assert
+    should(result.raise).be.empty();
+    should(result.resolve).have.length(1);
+    should(result.resolve[0]?.note).match(/recovered/u);
+  });
+
+  it('should clear a row about a ferret whose board could be read', () => {
+    // Arrange
+    const result = plan({
+      anomalies: [],
+      verdicts: [],
+      nodes,
+      homes: HOMES,
+      unreadable: new Set(['kid2']),
+      boards: [board('lead', { items: [row(scoped('kid1'))] })],
+    });
+
+    // Assert
+    should(result.resolve).have.length(1);
+  });
+});

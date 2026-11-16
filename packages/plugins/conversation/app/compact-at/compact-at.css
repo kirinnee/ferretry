@@ -1,0 +1,140 @@
+/* The Compact memory at form (today's `session-actions.css`: the form and segmented-choice rules it uses), and the
+   toolbar panels' own small layout. */
+.fy-action-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  padding: 12px 14px 14px;
+}
+.fy-action-form__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  text-transform: var(--display-transform, none);
+}
+.fy-action-form__body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.fy-action-form__field,
+.fy-action-form__fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.fy-action-form__label {
+  padding: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-action-form__help,
+.fy-action-form__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-action-form__error,
+.fy-action-form__failure {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-xs);
+}
+.fy-action-form__failure {
+  padding: 6px 8px;
+  border: var(--stroke) solid var(--err-border);
+  border-radius: var(--radius-control);
+  background: var(--err-bg);
+}
+.fy-action-form__ok {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 8px 10px;
+  border: var(--stroke) solid var(--ok-border);
+  border-radius: var(--radius-control);
+  background: var(--ok-bg);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-action-form__ok > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ok);
+}
+.fy-action-form__check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-action-form__check > input {
+  margin-top: 3px;
+}
+.fy-action-form__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.fy-action-form__foot {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  padding-top: 4px;
+}
+.fy-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fy-segmented__option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--control-h-sm);
+  padding: 0 10px;
+  border: var(--stroke) solid var(--border);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-segmented__option:has(input:checked) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-toolbar-panel {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fy-toolbar-panel > .fy-action-form {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  width: min(400px, calc(100vw - 32px));
+  max-height: calc(100dvh - 80px);
+  overflow-y: auto;
+  padding: 12px;
+}
+.fy-toolbar-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+}

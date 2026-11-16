@@ -1,0 +1,133 @@
+/**
+ * Conversation-width chooser with an immediate visual preview.
+ *
+ * Three measures for the conversation's TEXT COLUMN — the transcript's messages
+ * and the composer under them, which always share one width and one pair of
+ * edges: Compact (720px), 1200px, and Full (the pane). The pane, its tab strip
+ * and the scroller never narrow. All three are maximums, so in a pane narrower
+ * than a measure they look the same; the preview beside the radios still moves,
+ * which is what stops a mode chosen on a phone looking like a dead control.
+ *
+ * The persisted ids are `readable`, `balanced` and `full` (the device controls' `chatWidth`).
+ */
+
+import { useId } from 'react';
+import { type ChatWidthPreference as ChatWidth, cn, useDeviceControls } from '@ferretry/app';
+
+export interface ChatWidthOption {
+  readonly id: ChatWidth;
+  readonly label: string;
+  readonly description: string;
+}
+
+export const CHAT_WIDTH_OPTIONS: readonly ChatWidthOption[] = [
+  {
+    id: 'readable',
+    label: 'Compact',
+    description: 'Default. A 720px column, centred — easiest to read.',
+  },
+  {
+    id: 'balanced',
+    label: '1200px',
+    description: 'A 1200px column, with room for code and wide tables.',
+  },
+  {
+    id: 'full',
+    label: 'Full',
+    description: 'The whole width of the conversation pane.',
+  },
+];
+
+const PREVIEW_LABEL: Readonly<Record<ChatWidth, string>> = {
+  readable: 'Compact · 720px · default',
+  balanced: '1200px · room for code',
+  full: 'Full · the whole pane',
+};
+
+const PREVIEW_WIDTH_CLASS: Readonly<Record<ChatWidth, string>> = {
+  full: 'w-full',
+  balanced: 'w-3/4',
+  readable: 'w-5/12',
+};
+
+const ACTIVE_EXPLANATION: Readonly<Record<ChatWidth, string>> = {
+  full: 'Full is active: messages and the composer use the whole pane.',
+  balanced: '1200px is active: messages and the composer stay within a 1200px column.',
+  readable: 'Compact is active: messages and the composer stay within a 720px column.',
+};
+
+export interface ChatWidthControlProps {
+  readonly value: ChatWidth;
+  readonly onChange: (value: ChatWidth) => void;
+}
+
+export function ChatWidthControl({ value, onChange }: ChatWidthControlProps) {
+  const explanationId = useId();
+
+  return (
+    <>
+      <fieldset aria-describedby={explanationId} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <legend className="sr-only">Conversation width</legend>
+        {CHAT_WIDTH_OPTIONS.map(option => {
+          const checked = value === option.id;
+          return (
+            <label
+              key={option.id}
+              className={cn(
+                'flex min-h-control min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+                'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
+                checked
+                  ? 'border-accent bg-accent-soft text-accent'
+                  : 'border-border bg-surface-2 text-fg hover:border-accent',
+              )}
+            >
+              <input
+                type="radio"
+                name="chat-width"
+                value={option.id}
+                checked={checked}
+                onChange={() => onChange(option.id)}
+                className="sr-only"
+              />
+              <span className="text-ui font-semibold">{option.label}</span>
+              <span className="text-meta leading-tight text-muted">{option.description}</span>
+            </label>
+          );
+        })}
+      </fieldset>
+
+      <div className="mt-3 rounded-control border border-border-soft bg-surface-2 p-2.5">
+        <div className="flex items-center justify-between gap-2 text-meta text-muted">
+          <span>Conversation preview</span>
+          <span>{PREVIEW_LABEL[value]}</span>
+        </div>
+        <div
+          aria-hidden="true"
+          className="mt-2 flex h-10 w-full items-center justify-center rounded-control bg-surface px-2"
+        >
+          <div
+            data-chat-width-preview={value}
+            className={cn(
+              'flex h-6 flex-col justify-center gap-1 rounded-sm border border-accent/50 bg-accent-soft px-2 transition-[width] duration-150',
+              PREVIEW_WIDTH_CLASS[value],
+            )}
+          >
+            <span className="block h-px w-4/5 bg-accent/50" />
+            <span className="block h-px w-3/5 bg-accent/30" />
+          </div>
+        </div>
+      </div>
+
+      <p id={explanationId} aria-live="polite" className="mt-2 text-meta leading-base text-faint">
+        {ACTIVE_EXPLANATION[value]} In a pane narrower than the column — a phone, or beside a split pane — the choices
+        look the same.
+      </p>
+    </>
+  );
+}
+
+/** The `device.settings` panel: this device's conversation width, read from and written to the one controls store. */
+export function ChatWidthPanel() {
+  const { device, set } = useDeviceControls();
+  return <ChatWidthControl value={device.chatWidth} onChange={chatWidth => set({ chatWidth })} />;
+}

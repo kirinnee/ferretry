@@ -1,0 +1,326 @@
+import { describe, expect, it } from 'bun:test';
+import { epochMs, instantFromEpochMs, type Instant } from '@ferretry/std';
+import type { FerretId, FerretRecord, SitrepLine } from '../../../../../contract/index.ts';
+import { FerretRegistry } from '../../../../../daemon/lib/registry/registry.ts';
+import {
+  EXCERPT_WITHHELD,
+  oneLine,
+  SUBTREE_ENDED_WINDOW_MS,
+  SUBTREE_LAST_LINE_MAX,
+  type SubtreePorts,
+  SubtreeService,
+  subtreeMembers,
+} from '../../../../../daemon/lib/session/pack/subtree.ts';
+import { mapBounded } from '../../../../../daemon/lib/session/pack/bounded.ts';
+
+const NOW = epochMs('2026-11-07T12:00:00.000Z' as Instant);
+const at = (minutesAgo: number): Instant => instantFromEpochMs(NOW - minutesAgo * 60_000);
+
+const ferret = (
+  id: string,
+  options: {
+    readonly parent?: string;
+    readonly name?: string;
+    readonly state?: FerretRecord['state'];
+    readonly stateAt?: Instant;
+  } = {},
+): FerretRecord => ({
+  format: 1,
+  id: id as FerretId,
+  name: options.name ?? id,
+  ...(options.parent === undefined ? {} : { parent: options.parent as FerretId }),
+  role: options.parent === undefined ? 'lead' : 'helper',
+  harness: 'claude-code',
+  runner: 'tmux',
+  folder: `/work/${id}`,
+  state: options.state ?? 'working',
+  createdAt: at(600),
+  stateAt: options.stateAt ?? at(1),
+});
+
+const line = (text: string, minutesAgo: number, kind: SitrepLine['kind'] = 'note'): SitrepLine => ({
+  kind,
+  text,
+  at: at(minutesAgo),
+});
+
+function ports(
+  lines: Readonly<Record<string, readonly SitrepLine[]>>,
+  overrides: Partial<SubtreePorts> = {},
+): SubtreePorts & { readonly redactCalls: (readonly string[])[]; readonly reads: string[] } {
+  const redactCalls: (readonly string[])[] = [];
+  const reads: string[] = [];
+  return {
+    redactCalls,
+    reads,
+    lines: async id => {
+      reads.push(id);
+      return lines[id] ?? [];
+    },
+    redact: async texts => {
+      redactCalls.push(texts);
+      return texts.map(text => text.replaceAll('hunter2', '*******'));
+    },
+    model: async () => undefined,
+    nowMs: () => NOW,
+    ...overrides,
+  };
+}
+
+describe('subtree members', () => {
+  it('should list descendants nested by depth, a ferret directly before its own helpers, siblings by name', () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('b', { parent: 'root', name: 'bravo' }),
+      ferret('a', { parent: 'root', name: 'alpha' }),
+      ferret('a1', { parent: 'a', name: 'zulu' }),
+    ]);
+    const members = subtreeMembers(registry, 'root' as FerretId, NOW);
+    expect(members.map(member => [String(member.ferret.id), member.depth])).toEqual([
+      ['a', 1],
+      ['a1', 2],
+      ['b', 1],
+    ]);
+  });
+
+  it('should keep a ferret stopped inside the window and drop one stopped before it', () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('recent', { parent: 'root', state: 'stopped', stateAt: at(30) }),
+      ferret('old', {
+        parent: 'root',
+        state: 'stopped',
+        stateAt: instantFromEpochMs(NOW - SUBTREE_ENDED_WINDOW_MS - 1),
+      }),
+    ]);
+    expect(subtreeMembers(registry, 'root' as FerretId, NOW).map(member => String(member.ferret.id))).toEqual([
+      'recent',
+    ]);
+  });
+
+  it('G24 lineage comes from the registry’s parent links: a cycle terminates and the root is not a row', () => {
+    const registry = new FerretRegistry([ferret('x', { parent: 'y' }), ferret('y', { parent: 'x' })]);
+    expect(subtreeMembers(registry, 'x' as FerretId, NOW).map(member => String(member.ferret.id))).toEqual(['y']);
+  });
+});
+
+describe('one line', () => {
+  it('should take the first non-blank line, collapse whitespace and cut a long one with an ellipsis', () => {
+    expect(oneLine('\n\n  hello   there \nsecond')).toBe('hello there');
+    const long = oneLine('x'.repeat(SUBTREE_LAST_LINE_MAX + 20));
+    expect([...long].length).toBe(SUBTREE_LAST_LINE_MAX);
+    expect(long.endsWith('…')).toBe(true);
+  });
+});
+
+describe('the subtree table', () => {
+  it('should build one row per descendant with its newest dated line', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const view = await new SubtreeService(
+      registry,
+      ports({ a: [line('older', 10), line('newest\nmore', 2, 'card'), { kind: 'doing', text: 'undated' }] }),
+    ).view('root' as FerretId);
+    expect(view?.rows).toEqual([
+      expect.objectContaining({
+        id: 'a',
+        depth: 1,
+        state: 'running',
+        last: { at: at(2), kind: 'card', text: 'newest' },
+      }),
+    ]);
+  });
+
+  it('should show the model it runs, and the card, lane and PR its card line carries', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+    ]);
+    const pr = {
+      number: 42,
+      url: 'https://github.com/o/r/pull/42',
+      state: 'open',
+      draft: false,
+      checks: 'pending',
+    } as const;
+    const view = await new SubtreeService(
+      registry,
+      ports({ a: [{ kind: 'card', text: 'Fix it', ref: '&F7', lane: 'Implement', pr }] }),
+    ).view('root' as FerretId);
+    const [a, b] = view?.rows ?? [];
+    // A ferret that named no model runs the default; a card line adds its reference, its lane and its PR (and no excerpt).
+    expect(a).toMatchObject({ id: 'a', model: 'default', card: { ref: '&F7', lane: 'Implement' }, pr });
+    expect(a?.last).toBeUndefined();
+    expect(b?.card).toBeUndefined();
+    expect(b?.pr).toBeUndefined();
+  });
+
+  it('should show the model each ferret is actually running: observed over requested, and an observed one for a default launch', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+      ferret('c', { parent: 'root' }),
+    ]);
+    const observed: Record<string, string> = { a: 'sonnet-5.5', b: 'haiku-5.5' };
+    const view = await new SubtreeService(registry, ports({}, { model: async id => observed[id] })).view(
+      'root' as FerretId,
+    );
+    // c has no report: the model it was started with (none here) reads `default`, never its runtime or harness.
+    expect(view?.rows.map(row => [row.id, row.model])).toEqual([
+      ['a', 'sonnet-5.5'],
+      ['b', 'haiku-5.5'],
+      ['c', 'default'],
+    ]);
+  });
+
+  it('P2-1 the excerpt budget gates only the LAST text: a row past it, or a recently ended one, keeps its card, lane and PR', async () => {
+    const helpers = Array.from({ length: 4 }, (_, index) => ferret(`h${String(index)}`, { parent: 'root' }));
+    const ended = ferret('done', { parent: 'root', state: 'stopped', stateAt: at(5) });
+    const registry = new FerretRegistry([ferret('root'), ...helpers, ended]);
+    const pr = {
+      number: 9,
+      url: 'https://github.com/o/r/pull/9',
+      state: 'merged',
+      draft: false,
+      checks: 'passing',
+    } as const;
+    const card = (id: string): SitrepLine => ({ kind: 'card', text: id, ref: `&F${id.length}`, lane: 'Review', pr });
+    const view = await new SubtreeService(
+      registry,
+      ports({
+        h0: [card('h0'), line('hi', 1)],
+        h1: [card('h1'), line('hi', 1)],
+        h2: [card('h2'), line('hi', 1)],
+        h3: [card('h3'), line('hi', 1)],
+        done: [card('done'), line('bye', 4)],
+      }),
+      { concurrency: 2, excerptRows: 2, endedRows: 0 },
+    ).view('root' as FerretId);
+    const rows = view?.rows ?? [];
+    // Only two rows have a last line (the budget) ...
+    expect(rows.filter(row => row.last !== undefined)).toHaveLength(2);
+    // ... yet EVERY row keeps its card, its lane and its PR, the ended one and the live ones past the budget included.
+    expect(rows).toHaveLength(5);
+    for (const row of rows) {
+      expect(row.card).toMatchObject({ lane: 'Review' });
+      expect(row.pr).toEqual(pr);
+    }
+    expect(rows.find(row => row.id === 'done')?.last).toBeUndefined();
+  });
+
+  it('should answer undefined for a ferret the registry does not hold', async () => {
+    expect(await new SubtreeService(new FerretRegistry(), ports({})).view('nobody' as FerretId)).toBeUndefined();
+  });
+
+  it('G24 an excerpt is masked by the secret redactor before it is cut', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const subject = ports({ a: [line('the password is hunter2', 1)] });
+    const view = await new SubtreeService(registry, subject).view('root' as FerretId);
+    expect(view?.rows[0]?.last?.text).toBe('the password is *******');
+    expect(subject.redactCalls).toEqual([['the password is hunter2']]);
+  });
+
+  it('G24 a secret straddling the cut-off is masked whole, because redaction runs on the full text first', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const text = `${'x'.repeat(SUBTREE_LAST_LINE_MAX - 4)}hunter2`;
+    const view = await new SubtreeService(registry, ports({ a: [line(text, 1)] })).view('root' as FerretId);
+    expect(view?.rows[0]?.last?.text).not.toContain('hunt');
+  });
+
+  it('G24 the redactor runs once for the whole table', async () => {
+    const registry = new FerretRegistry([
+      ferret('root'),
+      ferret('a', { parent: 'root' }),
+      ferret('b', { parent: 'root' }),
+    ]);
+    const subject = ports({ a: [line('one', 1)], b: [line('two', 1)] });
+    await new SubtreeService(registry, subject).view('root' as FerretId);
+    expect(subject.redactCalls).toHaveLength(1);
+  });
+
+  it('G24 shows [excerpt withheld], never the raw text, when the redactor cannot run', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const view = await new SubtreeService(
+      registry,
+      ports(
+        { a: [line('the password is hunter2', 1)] },
+        {
+          redact: async () => {
+            throw new Error('vault will not open');
+          },
+        },
+      ),
+    ).view('root' as FerretId);
+    expect(view?.rows[0]?.last?.text).toBe(EXCERPT_WITHHELD);
+    expect(JSON.stringify(view)).not.toContain('hunter2');
+  });
+
+  it('G24 withholds when the redactor answers the wrong number of texts', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const view = await new SubtreeService(registry, ports({ a: [line('secret', 1)] }, { redact: async () => [] })).view(
+      'root' as FerretId,
+    );
+    expect(view?.rows[0]?.last?.text).toBe(EXCERPT_WITHHELD);
+  });
+
+  it('G24 the line lookups are bounded: never more in flight than the limit, and rows past the budget get none', async () => {
+    const helpers = Array.from({ length: 12 }, (_, index) =>
+      ferret(`h${String(index).padStart(2, '0')}`, { parent: 'root' }),
+    );
+    const registry = new FerretRegistry([ferret('root'), ...helpers]);
+    let inFlight = 0;
+    let peak = 0;
+    const subject = ports(
+      {},
+      {
+        lines: async () => {
+          inFlight += 1;
+          peak = Math.max(peak, inFlight);
+          await Promise.resolve();
+          inFlight -= 1;
+          return [line('hi', 1)];
+        },
+      },
+    );
+    const view = await new SubtreeService(registry, subject, { concurrency: 3, excerptRows: 5, endedRows: 1 }).view(
+      'root' as FerretId,
+    );
+    expect(peak).toBeLessThanOrEqual(3);
+    expect(view?.rows.filter(row => row.last !== undefined)).toHaveLength(5);
+    expect(view?.rows).toHaveLength(12);
+  });
+
+  it('should list a row whose lookup fails, without an excerpt, rather than fail the table', async () => {
+    const registry = new FerretRegistry([ferret('root'), ferret('a', { parent: 'root' })]);
+    const view = await new SubtreeService(
+      registry,
+      ports(
+        {},
+        {
+          lines: async () => {
+            throw new Error('gone');
+          },
+        },
+      ),
+    ).view('root' as FerretId);
+    expect(view?.rows).toEqual([expect.objectContaining({ id: 'a' })]);
+    expect(view?.rows[0]?.last).toBeUndefined();
+  });
+});
+
+describe('bounded map', () => {
+  it('should keep results in item order and never exceed the limit', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const results = await mapBounded([1, 2, 3, 4, 5], 2, async value => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await Promise.resolve();
+      inFlight -= 1;
+      return value * 10;
+    });
+    expect(results).toEqual([10, 20, 30, 40, 50]);
+    expect(peak).toBeLessThanOrEqual(2);
+  });
+});
