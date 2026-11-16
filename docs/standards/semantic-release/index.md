@@ -98,20 +98,26 @@ is passed, and is for the owner to run because it edits public releases.
 
 ## Scripts
 
-| Script                                | Role                                                                    |
-| ------------------------------------- | ----------------------------------------------------------------------- |
-| `scripts/release/backup-changelog.sh` | snapshots `Changelog.md` → `Changelog.old.md` (or creates it empty)     |
-| `scripts/release/bump.sh <version>`   | stamps `packages/cli/package.json` and `VERSION`                        |
-| `scripts/ci/release.sh`               | the workflow entry point: setup, drop local hooks, run semantic-release |
-| `scripts/release/publish.sh`          | GoReleaser side: compile, package, publish, release notes               |
+| Script                                | Role                                                                     |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `scripts/release/backup-changelog.sh` | snapshots `Changelog.md` → `Changelog.old.md` (or creates it empty)      |
+| `scripts/release/bump.sh <version>`   | stamps `packages/cli/package.json` and `VERSION`                         |
+| `scripts/ci/release.sh`               | the workflow entry point: setup, disable git hooks, run semantic-release |
+| `scripts/release/publish.sh`          | GoReleaser side: compile, package, publish, release notes                |
+| `scripts/release/fury.sh [dist]`      | Gemfury push of the deb/rpm packages, in parallel (CD's `fury` job)      |
 
 `bump.sh` restores both version-bearing files from `HEAD` before writing, so a re-run or a
 partly dirty tree cannot compound a version. It strips a leading `v`, so the file contents are
 plain semver while the tag keeps its `v` prefix.
 
-`scripts/ci/release.sh` deletes `.git/hooks/*` before running semantic-release: the automated
+`scripts/ci/release.sh` runs semantic-release with **no git hooks at all**: the automated
 `release: x.y.z` commit must not be blocked by, or reformatted by, the local hooks
-([Linting](../linting/index.md)).
+([Linting](../linting/index.md)). It deletes `.git/hooks/*` and, because `scripts/ci/setup.sh` has already
+pointed `core.hooksPath` at the repo's hooks (so deleting alone left the full pre-commit gate set running on a
+commit that touches only generated assets: **100 s**, measured 2026-11-16), exports
+`GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_n=core.hooksPath`/`GIT_CONFIG_VALUE_n=/dev/null`. That is command-scope
+config, which outranks repo, worktree and global files; an inherited `GIT_CONFIG_COUNT` is extended.
+`packages/cli/tests/integration/release-script.test.ts` proves a hook in the configured hooks path does not run.
 
 ## Pipeline
 
@@ -122,11 +128,13 @@ plain semver while the tag keeps its `v` prefix.
    version, rewrites the changelog, stamps the version files, commits, and pushes the `vX.Y.Z`
    tag.
 4. The tag fires `cd.yaml`, which first proves the darwin-arm64 binary on a macOS runner (required, re-queued
-   up to 3 times if GitHub has no runner; see [CI/CD](../ci-cd/index.md#macos-runner-shortage)), then runs
-   `nix develop .#releaser -c ./scripts/release/publish.sh`.
+   up to 3 times if GitHub has no runner; see [CI/CD](../ci-cd/index.md#macos-runner-shortage); with the
+   owner's `MACOS_SMOKE=skip` switch both the smoke and the `compile` that feeds it are skipped), then runs
+   `nix develop .#releaser -c ./scripts/release/publish.sh`. After it, `sign` and `fury` (Gemfury) run as
+   separate jobs; neither blocks the other nor the GitHub release.
 5. `publish.sh` compiles the standalone binaries into `prebuilt/` (it survives GoReleaser's
    `--clean`), diffs `Changelog.md` against `Changelog.old.md` into `IncrementalChangelog.md`,
-   and hands that to `goreleaser release --release-notes`.
+   and hands that to `goreleaser release --release-notes`. It does not push to Gemfury.
 
 A no-release cycle simply stops after step 3 with no tag, and CD never runs.
 

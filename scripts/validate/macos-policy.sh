@@ -104,14 +104,22 @@ workflow_job_has "${ci_workflow}" compile "if: [\$][{][{] vars[.]MACOS_SMOKE == 
 workflow_job_has "${ci_workflow}" compile 'scripts/ci/macos-smoke-skipped[.]sh' 'must say, in a job that runs, that the smoke was skipped by the switch'
 
 # cd.yaml: a release tag requires the darwin smoke, with its retries, before anything is published.
+# The owner's switch skips `compile` too: it exists only to feed the smoke, and `goreleaser` must not wait for it.
+workflow_job_has "${cd_workflow}" compile "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must not run when vars.MACOS_SMOKE is 'skip': it only feeds the smoke"
 workflow_job_has "${cd_workflow}" smoke-darwin '^    uses: [.]/[.]github/workflows/smoke-darwin[.]yaml$' 'must call smoke-darwin.yaml'
 workflow_job_has "${cd_workflow}" smoke-darwin '^      advisory: false$' 'must be required (advisory: false) on a release tag'
 workflow_job_has "${cd_workflow}" smoke-darwin "^    if: [\$][{][{] vars[.]MACOS_SMOKE != 'skip' [}][}]\$" "must run unless vars.MACOS_SMOKE is 'skip'"
-workflow_job_has "${cd_workflow}" goreleaser '^    needs: \[compile, smoke-darwin\]$' 'must wait for the compile and the darwin smoke'
-# A skipped smoke publishes only through the owner's switch, and never past a failed compile or smoke.
-workflow_job_has "${cd_workflow}" goreleaser "^    if: [\$][{][{] !cancelled[(][)] && needs[.]compile[.]result == 'success' && [(]needs[.]smoke-darwin[.]result == 'success' [|][|] [(]vars[.]MACOS_SMOKE == 'skip' && needs[.]smoke-darwin[.]result == 'skipped'[)][)] [}][}]\$" 'must publish only after a green smoke, or a smoke skipped by vars.MACOS_SMOKE=skip, and a green compile'
+workflow_job_has "${cd_workflow}" goreleaser '^    needs: \[main-only, compile, smoke-darwin\]$' 'must wait for main-only, the compile and the darwin smoke'
+# A skipped smoke (and the compile that only feeds it) publishes only through the owner's switch, and never past a failed compile or smoke.
+workflow_job_has "${cd_workflow}" goreleaser "^    if: [\$][{][{] !cancelled[(][)] && needs[.]main-only[.]result == 'success' && [(][(]vars[.]MACOS_SMOKE != 'skip' && needs[.]compile[.]result == 'success' && needs[.]smoke-darwin[.]result == 'success'[)] [|][|] [(]vars[.]MACOS_SMOKE == 'skip' && needs[.]compile[.]result == 'skipped' && needs[.]smoke-darwin[.]result == 'skipped'[)][)] [}][}]\$" 'must publish only on a main tag, after a green compile AND smoke, or when vars.MACOS_SMOKE=skip skipped both, and never past a failed compile or smoke'
 workflow_job_has "${cd_workflow}" goreleaser 'scripts/ci/macos-smoke-skipped[.]sh' 'must say, in a job that runs, that the smoke was skipped by the switch'
 workflow_job_has "${cd_workflow}" sign '^    needs: goreleaser$' 'must wait for goreleaser, so nothing is signed past a skipped publish'
+# The Gemfury push is its own job after goreleaser: nothing waits for it, and it alone holds the token.
+workflow_job_has "${cd_workflow}" fury '^    needs: goreleaser$' 'must wait for goreleaser, so it pushes the packages of a release that exists'
+workflow_job_has "${cd_workflow}" fury "^    if: [\$][{][{] !cancelled[(][)] && needs[.]goreleaser[.]result == 'success' [}][}]\$" 'must run after a goreleaser that published past a skipped smoke, and only then'
+workflow_job_has "${cd_workflow}" fury 'FURY_PUSH_TOKEN: [\$][{][{] secrets[.]FURY_PUSH_TOKEN [}][}]' 'must hold FURY_PUSH_TOKEN'
+[ "$(rg -c 'FURY_PUSH_TOKEN: ' "${cd_workflow}")" = 1 ] || fail "${cd_workflow}: FURY_PUSH_TOKEN may be in the environment of the fury job only"
+if rg -qi '^[^#]*fury' scripts/release/publish.sh; then fail 'scripts/release/publish.sh must not push to Gemfury: that is the fury job, after goreleaser'; fi
 # ... and must run when goreleaser published past a smoke skipped by the switch: an implicit success() would
 # skip it through the skipped ancestor, leaving the release unsigned.
 workflow_job_has "${cd_workflow}" sign "^    if: [\$][{][{] !cancelled[(][)] && needs[.]goreleaser[.]result == 'success' [}][}]\$" 'must run after a goreleaser that published past a smoke skipped by vars.MACOS_SMOKE, and only then'
