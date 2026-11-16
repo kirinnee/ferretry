@@ -24,6 +24,13 @@ type Workflow = {
 };
 const load = (name: string) => Bun.YAML.parse(readFileSync(`.github/workflows/${name}.yaml`, 'utf8')) as Workflow;
 const ci = load('ci');
+// check-base.sh's anchor override exists for its own test only: a workflow that sets it moves the only-down baseline.
+for (const file of new Bun.Glob('.github/workflows/*.y{a,}ml').scanSync('.')) {
+  assert.ok(
+    !readFileSync(file, 'utf8').includes('FY_CHECK_BASE_TEST_ANCHOR'),
+    `${file} must not set FY_CHECK_BASE_TEST_ANCHOR`,
+  );
+}
 // The root typecheck covers this file under noUncheckedIndexedAccess. A job or field a fixture names must exist:
 // a missing one fails the fixture here, saying which, instead of being asserted away.
 const need = <T>(value: T | undefined, what: string): T => {
@@ -102,13 +109,21 @@ const event = (eventName: string, action = '', labels: string[] = [], label = ''
   },
 });
 // `proof` runs on the events that run anything (quick's guard) and answers "no" off main (scripts/ci/proof-reuse.sh).
-const fullJobs = Object.keys(ci.jobs).filter(name => !['quick', 'full-pending', 'full', 'proof'].includes(name));
+const fullJobs = Object.keys(ci.jobs).filter(
+  name => !['quick', 'static', 'perf', 'full-pending', 'full', 'proof'].includes(name),
+);
+// Static Checks is half of the quick set (`quick.sh --static`) and the perf tier is blocking: both run on EXACTLY
+// Quick's events, never scoped, and are skipped by a sealed proof exactly when Quick is.
+assert.equal(conditionOf(ci, 'static'), conditionOf(ci, 'quick'), 'Static Checks must run whenever Quick runs');
+assert.equal(conditionOf(ci, 'perf'), conditionOf(ci, 'quick'), 'Performance Tests must run whenever Quick runs');
 const successful = Object.fromEntries(
   Object.keys(ci.jobs).map(name => [name, { result: 'success', outputs: { run: 'true' } }]),
 );
 for (const action of ['opened', 'synchronize', 'reopened']) {
   const quick = event('pull_request', action);
   assert.equal(evaluate(conditionOf(ci, 'quick'), quick, successful), true);
+  assert.equal(evaluate(conditionOf(ci, 'static'), quick, successful), true);
+  assert.equal(evaluate(conditionOf(ci, 'perf'), quick, successful), true);
   assert.equal(evaluate(conditionOf(ci, 'full-pending'), quick, successful), true);
   for (const name of [...fullJobs, 'full'])
     assert.equal(evaluate(conditionOf(ci, name), quick, successful), false, `${name} ran without full-ci`);
@@ -206,9 +221,13 @@ assert.ok(
     'nscloud-ubuntu-24.04-amd64-8x16-with-cache',
   ),
 );
-assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
-// A dispatch picks Quick's shape so main's 4x8 can be measured on a branch; the input never moves a PR or main.
-for (const [shape, pushShape] of [['8x16', '4x8']] as const) {
+// Main runs Quick on the pull-request shape: the unit groups do not fit a 4x8 (dispatch run 43825305638).
+assert.ok(evaluate(runsOnExpression('quick'), event('push')).includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
+// A dispatch picks Quick's shape so another one can be measured on a branch; the input never moves a PR or main.
+for (const [shape, pushShape] of [
+  ['8x16', '8x16'],
+  ['4x8', '8x16'],
+] as const) {
   const quickShape = (github: object, input: string) =>
     evaluate(runsOnExpression('quick'), github, {}, {}, { quick_shape: input });
   assert.ok(quickShape(event('workflow_dispatch'), '4x8').includes('nscloud-ubuntu-24.04-amd64-4x8-with-cache'));
@@ -233,7 +252,7 @@ const dispatchShape = (input: string) => ({
     { quick_shape: input },
   ),
 });
-assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', "a 4x8 dispatch must run main's part limits");
+assert.equal(dispatchShape('4x8').FY_CI_QUICK_PARALLEL, '3', 'a 4x8 dispatch runs three parts at once');
 assert.equal(dispatchShape('8x16').FY_CI_QUICK_PARALLEL, '6');
 assert.ok(runsOnOf('int').includes('nscloud-ubuntu-24.04-amd64-8x16-with-cache'));
 const prRunner = (name: string) =>
@@ -257,8 +276,8 @@ assert.equal(ci.jobs.sit, undefined, 'SIT is a step of compile, not a job of its
 }
 assert.equal(evaluate(runsOnExpression('full-gates'), event('push'), {}, {}), 'ubuntu-latest');
 assert.ok(
-  jobOf(ci, 'full').permissions?.['pull-requests'] === 'read',
-  'the verdict reads the PR head and labels: it needs pull-requests: read',
+  jobOf(ci, 'full').permissions?.['pull-requests'] === 'write',
+  'the verdict reads the PR head and removes the full-ci label from a pull request: it needs pull-requests: write',
 );
 
 const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwitch = '') =>

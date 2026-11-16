@@ -1750,6 +1750,101 @@ and ordinary asset links that land in a runtime credential home becoming copies.
 
 > "if the re-review proves only Runtimes' provisioning (fleet-disk.ts, file-provisioner.ts) reaches fleet.linkTo on the fleet root, ALSO add a fitness test that fails if any other module calls it there, so a future caller can't slip in before the after-merge move. Then fix4 is fine for merge; the last-look-to-rename race stays a declared GAP."
 
+## A harness's history pool in every ferret's home
+
+Each ferret has its own harness home (`state/<plugin>/agent-homes/<ferret>`, used as `CLAUDE_CONFIG_DIR` / `CODEX_HOME`),
+and the kernel refuses every link inside `agent-homes` except `linkCredential`. That left no plugin able to pool history,
+so a ferret resumed on a conversation another ferret started began a new one. The **history-pool door** is the one narrow
+link that lets a harness plugin pool, and it is built so it can share history and nothing else.
+
+**What it adds, said plainly.** Any ferret on a harness can read and continue any other ferret's conversations on that
+harness. That is the owner's ask and v4's behaviour (v4 linked each login home's history entries to `fleet/shared/<harness>`).
+A conversation can hold anything its ferret saw or typed: a pasted token, a file's text, a command's output. Pooling makes
+those transcripts readable by every ferret on the harness, exactly as v4 did; it does not make them readable to anyone else.
+
+**The door.** `RootHandle.linkHistory(home, entry)` on an `agent-homes` handle makes `<home>/<entry>` a symlink to the REAL
+path of `<pool>/<entry>`, where the pool is the caller's own `state/<plugin>/<folder>/` (outside every root, so never a
+credential home). It is on `RootHandle`, beside `linkCredential` and `copyShared`, because it writes into the handle's root
+through the same checked, no-follow folder descriptors, and the handle already knows its plugin. A plugin declares it in its
+manifest and can use nothing else of it:
+
+```ts
+permissions: {
+  roots: ['agent-homes'],
+  historyPool: {
+    state: 'history-pool',            // the NAME of its own opaque `history-pool/*` state def
+    entries: [{ name: 'projects', kind: 'folder' }, { name: 'history.jsonl', kind: 'file' } /* … */],
+  },
+},
+```
+
+The kernel names the target from the declaration; the caller passes a home and an entry name, never a path. Each refusal
+below is made BEFORE anything is written, with a closed reason (`HistoryPoolError.refusal`, or a `RootError` for a disk
+fact), identically on the real roots port and the testing host (`tests/unit/testing/history-pool-parity.test.ts`):
+
+| Refusal                   | When                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `not_internal`            | the handle is not an `agent-homes` handle                                                                                                                                                                                                                                                                                                                                                                    |
+| `not_permitted`           | the manifest lacks `permissions.historyPool`                                                                                                                                                                                                                                                                                                                                                                 |
+| `denied`                  | the entry is on the fixed deny list, whatever the manifest says: `.credentials.json`, `.claude.json`, any `settings*.json`, `auth.json`, `config.toml`, `CLAUDE.md`, `AGENTS.md`, `skills`, `plugins`, any name starting with `.`, a `/` or `\`, NUL, `..`, any name that looks like a credential (`credential`, `secret`, `token`, `oauth`, `passw`); compared case-insensitively, because macOS folds case |
+| `not_listed`              | a legal name that the manifest's closed list does not name (exact, case-sensitive)                                                                                                                                                                                                                                                                                                                           |
+| `not_own`                 | the pool is not the caller's own opaque `<one folder>/*` state tree, sits in a root the kernel makes (`agent-homes`, `credentials`, …), or holds a private place of the plugin                                                                                                                                                                                                                               |
+| `not_home`                | `home` is not exactly one ferret home folder at the top of `agent-homes` (the root itself, a folder two deep, and a scoped handle that is not one home)                                                                                                                                                                                                                                                      |
+| `exists`                  | anything (a folder, a file, a link) is already at `<home>/<entry>`: never an overwrite. A caller with a real folder moves it aside with `rename` first                                                                                                                                                                                                                                                       |
+| `outside` / `link_escape` | the home is missing (this call never makes one) or is, or sits behind, a link; or the pool folder, or the entry in it, is a link (nothing is followed, nothing is made behind it)                                                                                                                                                                                                                            |
+| `changed` / `hard_link`   | the pool already holds the wrong kind at the entry (or a file where the pool folder belongs), or a file with a second name; or the link made did not land on the pool entry's real path, or the pool entry is no longer the one proved when it was made (a different inode, kind or link count, found again after the link is published): the link THIS call made is taken back                              |
+| `no_descriptor_reach`     | a host that reaches an open folder by no descriptor path (macOS today): the link is never made by a path a swapped parent could redirect                                                                                                                                                                                                                                                                     |
+
+The pool folder and the entry in it are made on first use by the kernel, and what is already in the pool is kept as it is.
+The pool is reached by ONE descent (`reachHistoryEntry` in `host/roots.ts`): the plugin's state folder is checked once and is
+the anchor; the pool folder and then the entry are opened from their parent's descriptor with `O_DIRECTORY | O_NOFOLLOW`
+(a `0700` folder, or an empty `0600` file made exclusively), and every component that is already there is judged by name
+first and must be the very folder opened (same device and inode). An EXISTING pool folder swapped for a link, or for
+another directory of the plugin's state (an agent home), after the check is refused (`link_escape` / `changed`) before
+anything is made in it; a pool folder that did not exist yet is the "pool absent when first made" gap below. After the link is published the kernel proves it as `linkCredential` proves its source: the link lands on the pool
+entry's real path, and the entry is reached AGAIN from the anchor (no link on the way, the declared kind, the hard-link
+count, the private-place fence) and is the same file or folder it held when it made the link; otherwise it takes back the
+link it made and refuses.
+
+**What it does not touch.** `credentialHomeLinkVerdict` is unchanged: `linkTo` and `copyTree` link mode still refuse every
+link into or out of `agent-homes` and `credentials`, the pool link included. The pool is not a credential's place or source:
+`linkCredential` links `<home>/<file>` one level only (so never into a pooled folder) and also refuses, defence in depth,
+any place or source at or under the plugin's pool (`poolCredentialVerdict`). A sign-in file, a settings file, an instruction
+file, a skill or a plugin folder is never a pooled entry, so a ferret's login, credentials and settings stay its own. The
+kernel's own reads and writes never follow a pool link out of the root (`link_escape`); only the harness child does.
+
+**Declared gaps.**
+
+- **Same-user reach.** The agent runs as the same user, so a ferret on a harness can read, rewrite or delete any pooled
+  transcript, and so can poison what another ferret resumes (a rewritten history is read as that ferret's own past). The
+  kernel cannot stop the child that holds the link; the door only guarantees it is a link to the harness's own pool.
+- **A link outlives a revocation.** Removing `permissions.historyPool` stops new links only; a link made stays until its
+  holder removes it (`unlink`).
+- **macOS.** There is no descriptor-relative `symlinkat` in the held-folder steps yet, so on a host with no
+  `/proc/self/fd` the door refuses `no_descriptor_reach` rather than link by a path. Pooling on macOS waits for that step.
+- **Pool entry swapped by a ferret.** A ferret can replace a pool entry with a link (it writes the pool through its own
+  link). The next `linkHistory` for that entry refuses (`link_escape`) and links nothing; a link already made then points at
+  the replacement. The kernel does not repair the pool.
+- **A race can leave the pool folder.** The pool folder and entry are made after every other check; a name that appears
+  in the home in that instant is refused `exists`, and a pool entry replaced after the link is published is refused
+  `changed` (its link taken back). In both the pool folder and entry made are left (empty or as found, and owner-only): the
+  refusal writes nothing in the home or outside the pool, but "nothing is made" is true of the checks that come first.
+- **Pool absent when first made.** When the pool folder (or an entry) does not exist yet, a same-user actor that renames
+  a real folder into its name in the instant before the kernel makes it has that folder adopted as the pool (the make
+  finds it, opens it without following a link, and uses it), whatever it already holds. This adds nothing the same actor
+  could not do with no race at all, by planting the folder before the first link: an existing pool is kept as it is found,
+  and a link still only ever names a declared entry. The kernel does not judge an adopted pool's owner, mode or contents.
+- **The take-back is by name.** When the proof after publishing fails, the name at the link's place is unlinked through
+  the held home folder without re-checking it is still this call's link; it only ever removes one name in that ferret's
+  own home.
+- **A link made later is not re-proved.** The proof is made when this call makes the link; a pool entry replaced afterwards is
+  the "pool entry swapped by a ferret" gap above.
+- **The testing host has no identities.** A name in a home that is an alias of a private place (`fenced` in production) is
+  `exists` on the testing host, as for `linkCredential`; every other refusal here is mirrored (`history-pool-parity.test.ts`).
+- **Fitness test.** The new `RootHandle` member is a new link operation, so it is recorded in
+  `scripts/gen/tests/fleet-link-callers.snapshot.json` with its guard: the `agent-homes` handle only, the plugin's own pool
+  only, and no other root.
+
 ## Sign-in tokens the usage read sends
 
 A Claude Code or Codex sign-in is not a vault secret: it is the harness's own credential file or macOS

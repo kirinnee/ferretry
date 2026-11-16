@@ -10,7 +10,7 @@ set -euo pipefail
 # keeping, but it belongs in the realworld tier, which is non-blocking and files an issue instead of
 # failing a merge. Four checks:
 #
-#   1. every `*.test.ts(x)` lives under tests/{unit,integration,realworld,sit}/ of a workspace package
+#   1. every `*.test.ts(x)` lives under tests/{unit,integration,realworld,sit,perf}/ of a workspace package
 #      (`packages/<pkg>`, `packages/core/<id>`, `packages/plugins/<id>`), so Bun's tiers (bunfig.*.toml) and
 #      the CI groups see every test exactly once;
 #   2. nothing under tests/integration/ asserts an UPPER bound on elapsed time or on memory;
@@ -55,7 +55,7 @@ printf '%s\n' "${tests[@]}" | grep -x 'packages/core/kernel/tests/unit/contract.
 
 # ─── 1. every test lives in a tier ──────────────────────────────────────────────────────────────
 
-tier_dirs='unit|integration|realworld|sit'
+tier_dirs='unit|integration|realworld|sit|perf'
 for file in "${tests[@]}"; do
   [[ ${file} =~ ^packages/((core|plugins)/)?[^/]+/tests/(${tier_dirs})/ ]] ||
     refuse "${file}: a test file must live under <package>/tests/{${tier_dirs//|/,}}/; unit and integration are the blocking tiers, realworld holds what depends on the machine"
@@ -83,13 +83,17 @@ for pattern in "${claims[@]}"; do
   done
 done
 
+# ─── 2b. no speed or size budget in the unit tier ──────────────────────────────────────────────
+
+# Its own validator and hook: scripts/validate/unit-budgets.sh (a-unit-budgets), with a planted-violation test.
+
 # ─── 3. config/test-groups.json agrees with the tiers ───────────────────────────────────────────
 
 groups="config/test-groups.json"
 # The tiers `scripts/ci/test.sh` accepts a group for, and the directories each leaves out (see its `find`).
 declare -A excluded=(
-  [unit]='/tests/(integration|sit|realworld)/'
-  [int]='/tests/(unit|sit|realworld)/'
+  [unit]='/tests/(integration|sit|realworld|perf)/'
+  [int]='/tests/(unit|sit|realworld|perf)/'
 )
 for tier in $(jq -r 'keys[] | select(. != "schemaVersion")' "${groups}"); do
   [[ -n ${excluded[${tier}]:-} ]] || {
