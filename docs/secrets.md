@@ -1802,9 +1802,9 @@ The pool base is made `0700` at boot; the entry in it is made on first use by th
 The pool is reached by ONE descent (`reachHistoryEntry` in `host/roots.ts`): the plugin's state folder is checked once and is
 the anchor; the pool folder and then the entry are opened from their parent's descriptor with `O_DIRECTORY | O_NOFOLLOW`
 (a `0700` folder, or an empty `0600` file made exclusively), and every component that is already there is judged by name
-first and must be the very folder opened (same device and inode). A pool folder swapped for a link, or for another
-directory of the plugin's state (an agent home), after the check is refused (`link_escape` / `changed`) before anything is
-made in it. After the link is published the kernel proves it as `linkCredential` proves its source: the link lands on the pool
+first and must be the very folder opened (same device and inode). An EXISTING pool folder swapped for a link, or for
+another directory of the plugin's state (an agent home), after the check is refused (`link_escape` / `changed`) before
+anything is made in it; a pool folder that did not exist yet is the "pool absent when first made" gap below. After the link is published the kernel proves it as `linkCredential` proves its source: the link lands on the pool
 entry's real path, and the entry is reached AGAIN from the anchor (no link on the way, the declared kind, the hard-link
 count, the private-place fence) and is the same file or folder it held when it made the link; otherwise it takes back the
 link it made and refuses.
@@ -1864,6 +1864,14 @@ kernel's own reads and writes never follow a pool link out of the root (`link_es
   in the home in that instant is refused `exists`, and a pool entry replaced after the link is published is refused
   `changed` (its link taken back). In both the pool folder and entry made are left (empty or as found, and owner-only): the
   refusal writes nothing in the home or outside the pool, but "nothing is made" is true of the checks that come first.
+- **Pool absent when first made.** When the pool folder (or an entry) does not exist yet, a same-user actor that renames
+  a real folder into its name in the instant before the kernel makes it has that folder adopted as the pool (the make
+  finds it, opens it without following a link, and uses it), whatever it already holds. This adds nothing the same actor
+  could not do with no race at all, by planting the folder before the first link: an existing pool is kept as it is found,
+  and a link still only ever names a declared entry. The kernel does not judge an adopted pool's owner, mode or contents.
+- **The take-back is by name.** When the proof after publishing fails, the name at the link's place is unlinked through
+  the held home folder without re-checking it is still this call's link; it only ever removes one name in that ferret's
+  own home.
 - **A link made later is not re-proved.** The proof is made when this call makes the link; a pool entry replaced afterwards is
   the "pool entry swapped by a ferret" gap above.
 - **The testing host has no identities.** A name in a home that is an alias of a private place (`fenced` in production) is

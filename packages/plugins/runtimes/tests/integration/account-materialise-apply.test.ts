@@ -15,7 +15,11 @@ import path from 'node:path';
 import should from 'should';
 
 import { unavailableSharedHistory } from '../../daemon/adapters/shared-history-unavailable.ts';
-import { CLAUDE_QUESTION_HOOKS, codexTrustOverride } from '../../daemon/lib/account/fixed-layer.ts';
+import {
+  CLAUDE_QUESTION_HOOKS,
+  CODEX_QUESTIONS_OFF_OVERRIDE,
+  codexTrustOverride,
+} from '../../daemon/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../daemon/lib/account/ids.ts';
 import { materialiseFleet } from '../../daemon/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../daemon/lib/account/schema.ts';
@@ -490,7 +494,15 @@ describe('a runtime wrapper, run', () => {
     should(result.status).equal(0);
     // `cwd` is already physical: its parent came from realpath (which Bun mis-resolves for a name holding a backslash).
     const args = (result.harness as string).split('\n').slice(1, -1);
-    should(args).eql(['--no-alt-screen', '-c', codexTrustOverride(cwd), 'resume', '--last']);
+    should(args).eql([
+      '--no-alt-screen',
+      '-c',
+      CODEX_QUESTIONS_OFF_OVERRIDE,
+      '-c',
+      codexTrustOverride(cwd),
+      'resume',
+      '--last',
+    ]);
   });
 
   it('should say why a runtime cannot start, and not start it', async () => {

@@ -22,10 +22,13 @@ import {
   type HarnessCliView,
   type HarnessConfig,
   HooksItemSchema,
+  type SettingsItem,
   SettingsItemSchema,
 } from './wire.ts';
+import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */
 export const CODEX = 'codex' as const;
@@ -220,14 +223,23 @@ export const CODEX_CONFIG = configDef(
   }),
 );
 
-/** `config/codex/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
+/**
+ * A settings item loosens when an edit adds a launch flag that sets the approval policy or sandbox (`--sandbox`, `-a`,
+ * `--full-auto`, `-c approval_policy=…`): the same loosening as a looser `permissionMode`, so an agent's edit waits for
+ * the owner and the owner's own edit does not. The launch drops those flags anyway (`./launch-flags.ts`); the hold is so
+ * none is ever written unseen.
+ */
+export const settingsItemLoosens: Loosens<SettingsItem> = (before, after) =>
+  launchFlagsLoosen(before?.flags ?? [], after.flags ?? []);
+
+/** `config/codex/settings/<name>.yaml`: a config document and its launch flags. */
 export const CODEX_SETTINGS = configDef(
   defineConfig({
     collection: 'codex/settings',
     name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: settingsItemLoosens,
   }),
 );
 

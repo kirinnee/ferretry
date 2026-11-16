@@ -27,7 +27,7 @@ import { materializeSkills, poolHomeHistory } from '@ferretry/core-ferrets/contr
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
-import { settingsDocument } from '../lib/settings.ts';
+import { settingsDocument, settingsFlags } from '../lib/settings.ts';
 import {
   CODEX_HISTORY_ENTRIES,
   CODEX_LAUNCH_SETTINGS,
@@ -36,7 +36,7 @@ import {
   type HarnessConfig,
   type SettingsItem,
 } from '../../contract/index.ts';
-import { codexFixedArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
+import { codexFixedArguments, codexPermissionArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
 import { compareCodexLaunchSettings, codexLaunchSettingsRecord } from '../lib/launch-settings.ts';
 import { codexCorrelationArguments } from '../lib/transcript/rollout.ts';
@@ -142,28 +142,33 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
    * `CODEX_HOME` (and, for a pooled ferret, `CODEX_SQLITE_HOME`) is set by an `env` prefix: the Vault's environment is an
    * opaque handle this code cannot add to.
    */
-  const command = (
+  const command = async (
     spec: LaunchSpec,
     executable: string,
     permissionMode: HarnessConfig['permissionMode'],
     sqliteHome: string | undefined,
     resume?: string,
-  ): readonly string[] => [
-    'env',
-    `CODEX_HOME=${spec.home}`,
-    ...(sqliteHome === undefined ? [] : [`CODEX_SQLITE_HOME=${sqliteHome}`]),
-    ...buildCodexLaunchArgv({
-      executable,
-      harnessFlags: [
-        ...codexFixedArguments(permissionMode, spec.folder),
-        ...codexCorrelationArguments(spec.home),
-        ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
-      ],
-      ...(resume === undefined ? {} : { resume }),
-      ...(spec.model === undefined ? {} : { model: spec.model }),
-      ...(spec.effort === undefined ? {} : { effort: spec.effort }),
-    }),
-  ];
+  ): Promise<readonly string[]> => {
+    const items = await settingsNow(spec.runtime);
+    return [
+      'env',
+      `CODEX_HOME=${spec.home}`,
+      ...(sqliteHome === undefined ? [] : [`CODEX_SQLITE_HOME=${sqliteHome}`]),
+      ...buildCodexLaunchArgv({
+        executable,
+        settingsFlags: settingsFlags(items),
+        harnessFlags: [
+          ...codexPermissionArguments(permissionMode),
+          ...codexFixedArguments(permissionMode, spec.folder),
+          ...codexCorrelationArguments(spec.home),
+          ...codexQuestionArguments(spec.mode, options.questionTool?.() ?? false),
+        ],
+        ...(resume === undefined ? {} : { resume }),
+        ...(spec.model === undefined ? {} : { model: spec.model }),
+        ...(spec.effort === undefined ? {} : { effort: spec.effort }),
+      }),
+    ];
+  };
 
   /**
    * The shared history pool for this ferret's home (docs/design/shared-history.md): each history entry becomes a link to
@@ -212,7 +217,7 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
     if (location.outcome !== 'located') return err('unavailable');
     await ensureHome(spec);
     const sqliteHome = await poolHistory(spec.ferret);
-    const argv = command(spec, location.path, permissionMode, sqliteHome, harnessConversation);
+    const argv = await command(spec, location.path, permissionMode, sqliteHome, harnessConversation);
     await rollouts.launched(spec, harnessConversation);
     await recordLaunchSettings(spec.ferret, permissionMode, spec.runtime);
     const running =

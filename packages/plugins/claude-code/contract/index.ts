@@ -22,10 +22,13 @@ import {
   type HarnessCliView,
   type HarnessConfig,
   HooksItemSchema,
+  type SettingsItem,
   SettingsItemSchema,
 } from './wire.ts';
+import { launchFlagsLoosen } from './launch-flags.ts';
 
 export * from './wire.ts';
+export { launchFlagsKept } from './launch-flags.ts';
 
 /** The harness key and plugin id. */
 export const CLAUDE_CODE = 'claude-code' as const;
@@ -202,14 +205,22 @@ export const CLAUDE_CODE_CONFIG = configDef(
   }),
 );
 
-/** `config/claude-code/settings/<name>.yaml`. Today a component edit changes what an agent runs with, never what it may spend. */
+/**
+ * A settings item loosens when an edit adds a launch flag that sets the permission mode (`--permission-mode`, the skip
+ * switches): the same loosening as a looser `permissionMode`, so an agent's edit waits for the owner and the owner's own
+ * edit does not. The launch drops those flags anyway (`./launch-flags.ts`); the hold is so none is ever written unseen.
+ */
+export const settingsItemLoosens: Loosens<SettingsItem> = (before, after) =>
+  launchFlagsLoosen(before?.flags ?? [], after.flags ?? []);
+
+/** `config/claude-code/settings/<name>.yaml`: a settings document and its launch flags. */
 export const CLAUDE_CODE_SETTINGS = configDef(
   defineConfig({
     collection: 'claude-code/settings',
     name: ITEM_NAME_PATTERN,
     schema: SettingsItemSchema,
     axis: 'configure',
-    loosens: neverLoosens,
+    loosens: settingsItemLoosens,
   }),
 );
 
