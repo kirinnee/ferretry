@@ -12,7 +12,7 @@ import {
 } from '../contract/index.ts';
 import manifest from '../manifest.ts';
 import { StateBuzzLedger } from './adapters/state-buzz-ledger.ts';
-import { StateModeStore, StateNudgeStore, StateSeenStore } from './adapters/state-stores.ts';
+import { StateModeStore, StateNudgeStore, StateRestNudgeStore, StateSeenStore } from './adapters/state-stores.ts';
 import { AgendaModeService, adoptAgendaDefault } from './lib/agenda-mode.ts';
 import { agendaArchiveKeeps } from './lib/archive-keeps.ts';
 import { agendaLaunchPart } from './lib/launch-parts.ts';
@@ -29,6 +29,7 @@ import { BuzzService } from './lib/buzz-service.ts';
 import { AgendaAgentClearer } from './lib/clear-agents.ts';
 import { MachineAgendaView } from './lib/machine-agenda.ts';
 import { AgendaReferenceMenu } from './lib/reference-menu.ts';
+import { AGENDA_REST_NUDGE_ID_PREFIX, AgendaRestNudger, REST_NUDGE_SWEEP_MS } from './lib/rest-nudge.ts';
 import { AGENDA_NUDGE_ID_PREFIX, AgendaTurnNudge, NudgeSendFailure } from './lib/turn-nudge.ts';
 import { AgendaRollup } from './lib/rollup.ts';
 import { markSeen } from './lib/seen.ts';
@@ -55,9 +56,8 @@ const DEFAULT_CONFIG: AgendaConfig = { agendaMode: true, agendaNudge: true, dead
  * - **Agent ferrets.** Ferrets records a role, not "interactive or not": a helper ferret counts as an agent ferret.
  * - **Taking a buzz down on other devices.** Access's port has no clear; opening an ask records it as seen and answers
  *   the tags, and clears only when Access offers `clear`.
- * - **The rest nudge.** It needs Asks to expose resting items and their nudge counts. Unported. (The turn-end check is
- *   `lib/turn-nudge.ts`, taken on `turn.ended`.) (A ferret parked on a permission
- *   prompt or a dialog is Conversation's `prompt` Asks source, not Agenda's.)
+ * - (A ferret parked on a permission prompt or a dialog is Conversation's `prompt` Asks source, not Agenda's. The
+ *   turn-end check is `lib/turn-nudge.ts`, taken on `turn.ended`; the rest nudge is `lib/rest-nudge.ts`, a job.)
  */
 export default implementDaemon(manifest, {
   build({ needs, uses, kernel }) {
@@ -157,7 +157,10 @@ export default implementDaemon(manifest, {
               sendId: send.sendId,
               acceptedAt: send.acceptedAt,
               message: send.message,
-              agenda: send.by?.feature === 'Agenda' || send.sendId.startsWith(AGENDA_NUDGE_ID_PREFIX),
+              agenda:
+                send.by?.feature === 'Agenda' ||
+                send.sendId.startsWith(AGENDA_NUDGE_ID_PREFIX) ||
+                send.sendId.startsWith(AGENDA_REST_NUDGE_ID_PREFIX),
             }));
         },
         enabled: () => config().agendaNudge,
@@ -183,6 +186,48 @@ export default implementDaemon(manifest, {
       },
       BINARY_NAME,
     );
+
+    /**
+     * THE REST NUDGE: a ferret silent on an item the owner replied to is nudged on v4's schedule (30 min, then doubling to
+     * a day), capped at `AGENDA_REST_NUDGE_LIMIT` per rest. Asks owns the items (read from its boards); the counters are
+     * Agenda's own (state/agenda/rest-nudges.json) and written before each send. The send is the turn-end check's: the same
+     * Conversation port as `{ kind: 'agenda' }`, never reviving a stopped ferret, never the owner's words.
+     */
+    const restStore = new StateRestNudgeStore(state);
+    const restNudger = new AgendaRestNudger(
+      {
+        records: async ferret => await restStore.records(ferret),
+        reserve: async (ferret, taken, live) => await restStore.reserve(ferret, taken, live),
+        release: async (ferret, sendId, prior) => await restStore.release(ferret, sendId, prior),
+        prune: async (roster, resting) => await restStore.prune(roster, resting),
+        // Every ferret Ferrets still lists (stopped ones too: they can resume); a removed or archived one is not.
+        roster: async () => (await ferrets.list()).map(ferret => ferret.id as string),
+        enabled: () => config().agendaNudge,
+        boards: async () => await asks.snapshots(),
+        // Nothing is counted while Conversation is off: a count spent on a nudge that cannot be typed would be lost.
+        running: async ferret => {
+          if (uses.conversation.current() === undefined) return false;
+          const summary = await ferrets.get(ferret as FerretId);
+          return summary !== undefined && summary.state !== 'stopped';
+        },
+        now: () => String(clock.now()),
+        send: async (ferret, sendId, message) => {
+          const sent = await uses.conversation
+            .current()
+            ?.send(ferret as FerretId, { kind: 'agenda' }, { message, sendId, label: 'action' });
+          if (sent?.ok === false) throw new NudgeSendFailure(sent.error.code, sent.error.message);
+        },
+        failed: (ferret, error) => warn(`agenda could not nudge ${ferret} about a resting item: ${String(error)}`),
+      },
+      BINARY_NAME,
+    );
+    kernel.jobs.add({
+      id: 'rest-nudge',
+      schedule: { every: milliseconds(REST_NUDGE_SWEEP_MS) },
+      run: async () => {
+        await restNudger.sweep();
+      },
+    });
 
     const api: AgendaApi = {
       open: async query => await rollup.page(query),

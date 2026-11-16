@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { agendaDoneMessage, agendaReMessage } from '@ferretry/core-asks/contract';
 import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 import {
   AGENDA_NUDGE_MARK,
@@ -10,10 +11,12 @@ import {
   agendaNudgeSendId,
   agendaSends,
   attentionNudge,
+  discussionNudgeMessage,
   finishedTurn,
   nudgeSpent,
   raisesAgendaItem,
   startedByNudge,
+  type FinishedTurn,
   type NudgeMark,
   type NudgeSend,
   type NudgeSubject,
@@ -71,7 +74,13 @@ describe('the last finished turn of a transcript tail', () => {
       said('assistant', 'part one'),
       said('assistant', ASKING),
     ]);
-    expect(turn).toEqual({ opener: 'deploy it', reply: `part one\n${ASKING}`.trim(), raised: 1 });
+    expect(turn).toEqual({
+      opener: 'deploy it',
+      reply: `part one\n${ASKING}`.trim(),
+      raised: 1,
+      discussed: [],
+      handled: [],
+    });
   });
 
   test('the harness’s own records are never openers or replies', () => {
@@ -85,7 +94,52 @@ describe('the last finished turn of a transcript tail', () => {
   });
 
   test('a tail with no opener has an empty one', () => {
-    expect(finishedTurn([said('assistant', 'hello')])).toEqual({ opener: '', reply: 'hello', raised: 0 });
+    expect(finishedTurn([said('assistant', 'hello')])).toEqual({
+      opener: '',
+      reply: 'hello',
+      raised: 0,
+      discussed: [],
+      handled: [],
+    });
+  });
+
+  test('an owner reply names the items it was about, and the ones the turn’s own commands handled', () => {
+    const opener = agendaReMessage(
+      [
+        { id: 'A5', quote: 'Region' },
+        { id: 'A7', quote: 'Cluster' },
+        { id: 'A5', quote: 'Region' },
+      ],
+      'what is EU?',
+    );
+    const turn = finishedTurn([
+      said('user', opener),
+      call('Bash', { command: 'fy agenda answer A5 "Frankfurt"' }),
+      result(),
+      said('assistant', 'EU is Frankfurt.'),
+    ]);
+    expect(turn).toMatchObject({ discussed: ['A5', 'A7'], handled: ['A5'] });
+  });
+
+  test('a command that names no discussed item, or only mentions one, handles none', () => {
+    const opener = agendaReMessage([{ id: 'A5', quote: 'Region' }], 'what is EU?');
+    const turn = finishedTurn([
+      said('user', opener),
+      call('Bash', { command: 'fy agenda answer A50 "x"' }),
+      call('Bash', { command: 'echo A5' }),
+      result(),
+      said('assistant', 'EU is Frankfurt.'),
+    ]);
+    expect(turn).toMatchObject({ discussed: ['A5'], handled: [] });
+  });
+
+  test('an agenda form that is not a reply, and plain words, discuss nothing', () => {
+    const answered = 'x';
+    expect(finishedTurn([said('user', 'what about !A5?'), said('assistant', answered)])?.discussed).toEqual([]);
+    expect(
+      finishedTurn([said('user', agendaDoneMessage({ id: 'A5', quote: 'Region' })), said('assistant', answered)])
+        ?.discussed,
+    ).toEqual([]);
   });
 
   test('is nothing when the turn ended on a tool call or said nothing', () => {
@@ -115,11 +169,44 @@ describe('the nudge words', () => {
 });
 
 describe('whether a finished turn gets a nudge', () => {
-  const turn = (over: Partial<{ opener: string; reply: string; raised: number }> = {}) => ({
+  const turn = (over: Partial<FinishedTurn> = {}): FinishedTurn => ({
     opener: 'go',
     reply: ASKING,
     raised: 0,
+    discussed: [],
+    handled: [],
     ...over,
+  });
+
+  test('an owner reply the ferret answered in chat only gets the discussed-item line, alone when the reply asks nothing', () => {
+    const nudge = attentionNudge(turn({ reply: 'Sure, EU is Frankfurt.', discussed: ['A5'] }), subject, 'fy');
+    expect(nudge?.asks).toEqual(['discussed !A5']);
+    expect(nudge?.message).toBe(discussionNudgeMessage(['A5'], 'fy'));
+    expect(nudge?.message.startsWith(AGENDA_NUDGE_MARK)).toBe(true);
+    expect(nudge?.message).toContain('Owner replied about !A5; it rests, waiting on you.');
+    expect(nudge?.message).toContain('fy agenda answer A5 "<text>"');
+    expect(nudge?.message).toContain('fy agenda done A5');
+  });
+
+  test('several discussed items are named together, and the raise line follows in the same message', () => {
+    const nudge = attentionNudge(turn({ discussed: ['A5', 'A7'], handled: [] }), subject, 'fy');
+    expect(nudge?.asks).toEqual(['discussed !A5', 'discussed !A7', 'Approve the deploy', 'Pick a region']);
+    expect(nudge?.message).toContain('Owner replied about !A5, !A7; they rest, waiting on you.');
+    expect(nudge?.message).toContain('Your last reply asked the owner to:');
+    expect(nudge?.message.indexOf(AGENDA_NUDGE_MARK)).toBe(0);
+    expect(nudge?.message.lastIndexOf(AGENDA_NUDGE_MARK)).toBe(0);
+  });
+
+  test('a discussed item the turn handled is not nudged, and one left is', () => {
+    expect(attentionNudge(turn({ reply: 'ok', discussed: ['A5'], handled: ['A5'] }), subject, 'fy')).toBeUndefined();
+    const nudge = attentionNudge(turn({ reply: 'ok', discussed: ['A5', 'A7'], handled: ['A5'] }), subject, 'fy');
+    expect(nudge?.asks).toEqual(['discussed !A7']);
+  });
+
+  test('a helper is not nudged for a discussed item either', () => {
+    expect(
+      attentionNudge(turn({ reply: 'ok', discussed: ['A5'] }), { ...subject, parent: true }, 'fy'),
+    ).toBeUndefined();
   });
 
   test('a reply that asks the owner for more than the turn raised does', () => {
