@@ -25,7 +25,7 @@ import { CancellableTimers } from './adapters/cancellable-timers.ts';
 import type { MailboxRefusal, SendChannel, SendEvidenceSource, SendLedger } from '../contract/index.ts';
 import { ClockSendScheduler } from './adapters/index.ts';
 import { type QueuedSend, SendPathDeliveryView, SendPathQueueTransport } from './adapters/send-path-delivery.ts';
-import { QueueDeliverer, QueueingSends } from './lib/queue/index.ts';
+import { defaultQueueDeliverySettings, QueueDeliverer, QueueingSends } from './lib/queue/index.ts';
 import { type LedgerPath as SendPath } from '../contract/index.ts';
 import {
   defaultSendTrackerSettings,
@@ -1198,34 +1198,37 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const awaiting = new Set<string>();
   const answers = new Map<string, SendResult>();
   const failures = new Map<string, unknown>();
-  const deliverer = new QueueDeliverer({
-    store: deps.queueStore,
-    // The queue's own lock, never the ferret's send lane: the hand-over takes that one.
-    serial: new KeyedSerialExecutor(),
-    clock,
-    // One pending look per ferret, on its own scheduler: the tracker's keeps its own one pending look per ferret.
-    scheduler: new ClockSendScheduler(kernel.clock),
-    view: async id => await new SendPathDeliveryView(sendRepository, lookAtPane, { launching: () => false }).view(id),
-    transport: new SendPathQueueTransport(
-      {
-        type: async (id, request) => {
-          try {
-            const typed = await typeMessage(id, request);
-            if (awaiting.has(request.sendId)) answers.set(request.sendId, typed);
-            return typed;
-          } catch (error) {
-            if (awaiting.has(request.sendId)) failures.set(request.sendId, error);
-            throw error;
-          }
+  const deliverer = new QueueDeliverer(
+    {
+      store: deps.queueStore,
+      // The queue's own lock, never the ferret's send lane: the hand-over takes that one.
+      serial: new KeyedSerialExecutor(),
+      clock,
+      // One pending look per ferret, on its own scheduler: the tracker's keeps its own one pending look per ferret.
+      scheduler: new ClockSendScheduler(kernel.clock),
+      view: async id => await new SendPathDeliveryView(sendRepository, lookAtPane, { launching: () => false }).view(id),
+      transport: new SendPathQueueTransport(
+        {
+          type: async (id, request) => {
+            try {
+              const typed = await typeMessage(id, request);
+              if (awaiting.has(request.sendId)) answers.set(request.sendId, typed);
+              return typed;
+            } catch (error) {
+              if (awaiting.has(request.sendId)) failures.set(request.sendId, error);
+              throw error;
+            }
+          },
+          finishOwnDraft: async id => await sendActs.finishOwnDraft(id),
         },
-        finishOwnDraft: async id => await sendActs.finishOwnDraft(id),
-      },
-      ledger,
-      tracker,
-    ),
-    sessions: () => [...roster],
-    sleep: async milliseconds => await timers.after(milliseconds).done,
-  });
+        ledger,
+        tracker,
+      ),
+      sessions: () => [...roster],
+      sleep: async milliseconds => await timers.after(milliseconds).done,
+    },
+    { ...defaultQueueDeliverySettings },
+  );
   void rostered.then(async () => {
     if (!stopped) await deliverer.arm();
   });
@@ -1257,6 +1260,11 @@ export function buildSendHalf(deps: SendHalfDeps) {
   const agendaSends = new QueueingSends(queueingPorts, 'daemon', 'Agenda');
   const noticeSends = new QueueingSends(queueingPorts, 'daemon', 'Delivery');
   /**
+   * An agent's credential that names no ferret (the Warden's or Agenda's token over the route, which carries no flag): it is
+   * the daemon's, never a person's, so it never takes the owner's lane.
+   */
+  const unnamedAgentSends = new QueueingSends(queueingPorts, 'daemon');
+  /**
    * EVERY SEND PATH goes in here: the owner, a ferret, the Warden, Agenda and the daemon's own notices. The message is
    * written to the queue, answered as the queue and the ledger say it stands (the same words a repeat of its id gets), and
    * typed by the deliverer on its turn. A daemon notice to an interactive chat keeps the direct path (R3).
@@ -1272,7 +1280,8 @@ export function buildSendHalf(deps: SendHalfDeps) {
     // The ferret's terminal is opened first, as the typing send opens it: a ferret with no terminal to reach, or one
     // Ferrets will not let this caller touch, is refused here in plain words, before anything is kept or queued.
     if (!stopped) await terminal.bind(ferret);
-    const daemon = request.warden === true || request.agenda === true || request.notice === true;
+    const unnamedAgent = request.origin.kind === 'agent' && request.senderSessionId === undefined;
+    const daemon = request.warden === true || request.agenda === true || request.notice === true || unnamedAgent;
     const sends =
       request.warden === true
         ? wardenSends
@@ -1280,7 +1289,9 @@ export function buildSendHalf(deps: SendHalfDeps) {
           ? agendaSends
           : request.notice === true
             ? noticeSends
-            : ownerSends;
+            : unnamedAgent
+              ? unnamedAgentSends
+              : ownerSends;
     // Refused before anything is kept, as the typing send refuses it: a message with nothing in it is no message.
     const message = payloadOf(request.message);
     const label = bannerLabel(request.label);

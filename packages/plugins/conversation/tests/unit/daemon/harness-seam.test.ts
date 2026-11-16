@@ -1353,14 +1353,15 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
     await host.stop();
   });
 
-  test('the ROUTE: a warden’s send is no peer’s — typed bare, ledgered as the person, its label not honoured', async () => {
+  test('the ROUTE: a warden’s send is no peer’s — typed bare, ledgered as the daemon’s, its label not honoured', async () => {
     const { host, ferrets, api } = await conversation(undefined, OPEN, {}, { sendStanding: wardenStanding(CALLER) });
 
     await send(host, 'req-wdn', 'f1', { message: 'hello there', now: false, label: 'action' });
 
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
+    // The Warden's token names no ferret: the daemon's words, never the person's (its lane is the daemon's, not the owner's).
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
-      ['req-wdn', 'human', undefined],
+      ['req-wdn', 'daemon', undefined],
     ]);
     await host.stop();
   });
@@ -1391,7 +1392,7 @@ describe('a peer’s message is typed under today’s banner, so it never reads 
 
     expect(ferrets.delivered).toEqual([{ text: 'hello there' }]);
     expect((await api().sends(F1)).sends.map(row => [row.sendId, row.senderKind, row.from])).toEqual([
-      ['req-old', 'human', undefined],
+      ['req-old', 'daemon', undefined],
     ]);
     await host.stop();
   });
@@ -2881,6 +2882,23 @@ describe('the mailbox is armed at boot, told when a ferret changes, and stopped 
     expect(clock.now()).toBe(waited);
     expect(ferrets.delivered.map(entry => entry.text)).toContain('when you can');
     expect((await live(api)).map(row => row.sendId)).toEqual(['s-1']);
+    await host.stop();
+  });
+
+  test('who sent a message decides its lane: the Warden is the daemon’s, a ferret is a ferret’s, never the owner’s', async () => {
+    const { host, ferrets, api } = await conversation();
+    occupied(ferrets);
+
+    await api().send(F1, { kind: 'warden' }, { message: 'are you stuck?', sendId: 's-warden' });
+    await api().send(F1, { kind: 'ferret', ferret: CALLER }, { message: 'from a peer', sendId: 's-peer' });
+    await api().send(F1, { kind: 'owner' }, { message: 'from me', sendId: 's-owner' });
+
+    const lanes = (await api().queue(F1)).messages.map(entry => [entry.id, entry.lane]);
+    expect(lanes).toEqual([
+      ['s-warden', 'ferretry'],
+      ['s-peer', 'action'],
+      ['s-owner', 'owner'],
+    ]);
     await host.stop();
   });
 
