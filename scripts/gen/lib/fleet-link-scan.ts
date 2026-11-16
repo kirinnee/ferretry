@@ -52,7 +52,7 @@ export const LINK_OPERATIONS: ReadonlySet<string> = new Set(['linkTo', 'copyTree
 /** What a computed key on a handle that the checker cannot narrow to string literals is reported as. */
 export const UNRESOLVED_OPERATION = 'computed-key-on-RootHandle';
 
-const KERNEL_PORTS = '/packages/core/kernel/contract/ports.ts';
+const KERNEL_PORTS = '/packages/core/kernel/contract/ports/roots.ts';
 const ROOT_HANDLE = 'RootHandle';
 /** The second authority module and its class: the disk Runtimes' provisioner links through. */
 export const FLEET_DISK_MODULE = '/packages/plugins/runtimes/daemon/adapters/fleet-disk.ts';
