@@ -238,6 +238,12 @@ finished ferret reported), and `GET /v1/lessons/directory`, which names every fe
 narrowed off fleet use still read the whole fleet.) The gate is the **device's** only: a ferret's own credential is never
 grant-governed (`presentation.local`) and the host's admin token over loopback is ungoverned, so the owner's `fy` and
 the app of a device holding `fleet.use` (every default device, and a `--limited` one) read exactly what they did.
+**Changing a ferret's pin board is `fleet.use` too (c58-sec2).** `POST /v1/ferrets/:ferretId/pins` is the one route that
+adds, edits and removes a note or message pin (the body's `action`; there is no PATCH or DELETE), so it asks the same
+`fleet.use` as the read: a device narrowed off fleet use is refused (`403 grant_device_not_granted`) before the body is read
+and could otherwise have rewritten notes it is not allowed to see. It is `use`, not `configure`: a note pin changes no host
+behaviour, and `configure` would put the passkey step-up on the app's ordinary pin button. Admission is unchanged for a
+ferret's own credential and for the owner over loopback. The owner's sidebar pin (`…/pin`, `…/unpin`, below) asks `fleet.use` too.
 This list is what that change touched and no more: it says nothing about any other route that names a ferret (the
 asks and agenda reads, `/v1/gc`, the skills inventory, `/v1/projects`, `/v1/links/history`, `/v1/renders`), which are
 neither opened nor closed by it.
@@ -300,7 +306,7 @@ Each has two axes, and they are different questions:
 - **configure** — may the caller change how it behaves on this host?
 
 The list is closed. Everything the daemon does _inside its own state home_ — sessions, tasks,
-the agenda, pins — is deliberately absent: a grant list that grew to cover every route would be a
+the agenda — is deliberately absent (a pin is not: the pin routes ask `fleet.use`, below): a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
 **Shared drafts follow sends.** `GET`/`POST /v1/ferrets/:ferretId/shared-draft` and its live
@@ -311,13 +317,15 @@ only the owner's shell and paired devices — not a grant. An Inbox card's own d
 `?item=A5` (a malformed id is 422, an unknown or closed item 404) and the same gates. A test pins this choice
 (`tests/unit/runtime/mounts/shared-drafts.test.ts`), so making drafts governed is a reviewed decision.
 
-**Pinned agents are the owner's preference.** `POST /v1/ferrets/:ferretId/pin` and `…/unpin` are `operator`
-with **no capability** and `caller: 'person'`: a pin only decides where a ferret is listed in the owner's own
-sidebar, so it is strictly less than any change to the ferret, and a device that may use the app may pin. What
-guards it is **who acts** — every ferret is refused at the boundary — not a grant. The list is kept per
-machine in `state/agent-pins.json` (session ids and instants only), and rides `GET /v1/ferrets` as `pinnedAt`
-on the view. A test pins this choice (`tests/unit/runtime/mounts/session-pin.test.ts`), so making pinning
-governed is a reviewed decision.
+**Pinned agents are the owner's preference, and a pin is a read of the ferret (c58-sec2).** `POST
+/v1/ferrets/:ferretId/pin` and `…/unpin` are `operator` and `caller: 'person'` (every ferret is refused at the
+boundary) and ask `fleet.use`. The list is kept per machine in `state/agent-pins.json` (session ids and instants only),
+and rides `GET /v1/ferrets` as `pinnedAt` on the view. It was ungoverned in the first 5.0 drafts on the reasoning that a
+pin only decides where a ferret is listed; that missed the answer: a pin names a ferret by id, callsign or name and
+returns its whole identity record (folder, login, transcript location, attribution token), and pinning also brings an
+archived ferret back. So a device narrowed off fleet use could read through it what every ferret read refuses. Both routes
+now ask the same `fleet.use` as those reads, and a test pins it
+(`packages/core/gate/tests/unit/daemon/ferret-pin-writes-fleet-use.test.ts`).
 
 <a id="saved-pictures"></a>
 

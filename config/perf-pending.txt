@@ -33,6 +33,7 @@ packages/plugins/catalogs/tests/unit/catalog-installs/conservative-changes.test.
 packages/plugins/catalogs/tests/unit/catalog-installs/service-hidden.test.ts
 packages/plugins/catalogs/tests/unit/catalog-installs/service-updates.test.ts
 packages/plugins/conversation/tests/unit/app/search/chat-search-bar.test.tsx
+packages/plugins/conversation/tests/unit/links/conversation-index-query.test.ts
 packages/plugins/voice/tests/unit/app/stt/parakeet-voice.test.ts
 packages/plugins/voice/tests/unit/app/stt/speed-signals.test.ts
 packages/plugins/voice/tests/unit/app/stt/voice-cleanup-bounds.test.ts

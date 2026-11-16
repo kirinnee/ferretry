@@ -100,3 +100,18 @@ describe('move process inventory decisions', () => {
     ]);
   });
 });
+
+describe('a process whose exact command line is known', () => {
+  it('should classify the exact words, not the lossy ps text', () => {
+    // Arrange — `ps` shows the newline as `?`; the kernel's own words keep it.
+    const rows = [
+      { pid: 5, ppid: 1, startedSecondsAgo: 9, argv: 'sh -c echo?git stash', command: 'sh -c echo\ngit stash' },
+    ];
+
+    // Act
+    const [actual] = inventoryProcesses(rows, new Map());
+
+    // Assert
+    should(actual?.verdict).equal('destructive_to_interrupt');
+  });
+});

@@ -217,8 +217,9 @@ export class KernelProcessProbe implements ProcessProbePort {
       const cmdline = await this.host.procFile(pid, 'cmdline');
       const words = cmdline.split('\0');
       if (words.at(-1) === '') words.pop();
+      const command = words.join(' ');
       // biome-ignore lint/suspicious/noControlCharactersInRegex: procps prints every control character as `?`.
-      const argv = words.join(' ').replace(/[\u0000-\u001f\u007f]/gu, '?');
+      const argv = command.replace(/[\u0000-\u001f\u007f]/gu, '?');
       if (pid <= 1 || !Number.isSafeInteger(ppid) || !Number.isFinite(startTicks)) return undefined;
       return {
         pid,
@@ -228,6 +229,8 @@ export class KernelProcessProbe implements ProcessProbePort {
           Math.floor(clock.nowSeconds - clock.bootSeconds - startTicks / CLOCK_TICKS_PER_SECOND),
         ),
         argv: argv === '' ? `[${comm}]` : argv,
+        // The exact words, so a multi-line tool command is judged line by line rather than by its first (see ProcRow).
+        ...(command === '' ? {} : { command }),
       };
     } catch {
       // Exited between being listed and being read: a table read a moment later would not show it either.
