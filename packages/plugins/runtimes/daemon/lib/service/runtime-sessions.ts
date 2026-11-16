@@ -8,7 +8,7 @@
  * so each of those keeps matching; `ids.json` keeps the old name resolving for anything that still
  * says it (a record that could not be rewritten, a script, a habit).
  *
- * Pure: the records are read and written by the caller.
+ * Pure, and it only READS the records: Ferrets owns them, and the rewrite is its `repointRuntime`.
  */
 import type { HarnessKind } from '../manifest.ts';
 import { harnessKey, type SessionStatus } from './foreign.ts';
@@ -87,28 +87,4 @@ export interface SessionRuntimeRename {
   readonly to: string;
   readonly fromWrapper: string;
   readonly toWrapper: string;
-}
-
-/**
- * A session's configuration document re-pointed from the old runtime to the new one, or `undefined`
- * when it does not name the old one. `agent` keeps its form — a name stays a name, a wrapper path
- * becomes the new wrapper path — and only `command[0]` moves in the argv, because the rest of it is
- * what the session was launched with and still is.
- */
-export function renamedSessionConfig(
-  current: unknown,
-  rename: SessionRuntimeRename,
-): Record<string, unknown> | undefined {
-  if (typeof current !== 'object' || current === null || Array.isArray(current)) return undefined;
-  const document = current as Readonly<Record<string, unknown>>;
-  const agent =
-    document.agent === rename.from ? rename.to : document.agent === rename.fromWrapper ? rename.toWrapper : undefined;
-  const command = Array.isArray(document.command) ? document.command : undefined;
-  const movesCommand = command?.[0] === rename.fromWrapper;
-  if (agent === undefined && !movesCommand) return undefined;
-  return {
-    ...document,
-    ...(agent === undefined ? {} : { agent }),
-    ...(movesCommand && command !== undefined ? { command: [rename.toWrapper, ...command.slice(1)] } : {}),
-  };
 }

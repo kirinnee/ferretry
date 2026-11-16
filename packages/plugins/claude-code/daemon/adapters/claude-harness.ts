@@ -403,6 +403,7 @@ export class ClaudeHarness implements Harness {
       model: spec.model,
       hasMcp: spec.parts.some(part => part.kind === 'mcp'),
       mode: spec.mode,
+      questionTool: inputs.questionTool,
       conversation,
       readable: spec.readable,
     });
@@ -556,12 +557,17 @@ export class ClaudeHarness implements Harness {
   }
 
   /** The settings a launch now runs under, from this plugin's own configuration (the effort is the launch's, not here). */
-  private async launchInputs(runtime: string | undefined): Promise<LaunchSettingsInputs> {
+  private async launchInputs(
+    runtime: string | undefined,
+  ): Promise<LaunchSettingsInputs & { readonly questionTool: boolean }> {
     const selected = await this.deps.selected(runtime);
     const only = <T>(items: ReadonlyMap<string, T>, names: ReadonlySet<string>): ReadonlyMap<string, T> =>
       new Map([...items].filter(([name]) => names.has(name)));
+    const file = this.deps.config.file(configFile);
     return {
-      permissionMode: this.deps.config.file(configFile)?.permissionMode ?? 'skip',
+      permissionMode: file?.permissionMode ?? 'skip',
+      // Outside the recorded launch settings (no ferret reads as outdated for it), read in the same pass as the rest.
+      questionTool: file?.questionTool ?? false,
       settings: only(this.deps.config.collection(settingsCollection) as never, selected.settings),
       hooks: only(this.deps.config.collection(hooksCollection) as never, selected.hooks),
       ...(runtime === undefined ? {} : { runtime }),

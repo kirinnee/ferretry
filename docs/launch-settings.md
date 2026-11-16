@@ -272,21 +272,26 @@ Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--
 for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
 the user-settings control and the `--rc` argv in the unit tests.
 
-## The question tool is per ferret, from its mode
+## The question tool is withheld from every ferret, unless the owner opts in
 
-Only an **interactive** ferret has an owner at the pane, so only it can ask a question. The ferret's mode reaches the
-launch through the one builder as `LaunchSpec.mode` (the record's own mode, set on every launch: a start, a resume,
-Restart CLI, a migration, a revive), and each harness spells it:
+Owner decision !A527 ("disable question tool, so we dont get blocked"): **no ferret has the harness's question tool by
+default, an interactive one included**, because a form only the pane shows stops a ferret nobody is watching. A ferret
+asks through the agenda instead (`fy agenda add`). The one way back is `questionTool: true` in
+`config/harness-claude-code.yaml` or `config/harness-codex.yaml` (default `false`, never held: it makes ferrets block,
+not act more). The ferret's mode reaches the launch through the one builder as `LaunchSpec.mode` (the record's own
+mode, set on every launch: a start, a resume, Restart CLI, a migration, a revive), and each harness spells it:
 
-| Harness     | Interactive                                               | Auto, or no mode                     |
-| ----------- | --------------------------------------------------------- | ------------------------------------ |
-| Claude Code | keeps `AskUserQuestion`                                   | `--disallowed-tools=AskUserQuestion` |
-| Codex       | `--enable default_mode_request_user_input` (Default mode) | nothing added                        |
+| Harness     | Default (every mode)                 | `questionTool: true`, interactive                         | `questionTool: true`, auto or no mode |
+| ----------- | ------------------------------------ | --------------------------------------------------------- | ------------------------------------- |
+| Claude Code | `--disallowed-tools=AskUserQuestion` | keeps `AskUserQuestion`                                   | `--disallowed-tools=AskUserQuestion`  |
+| Codex       | nothing added                        | `--enable default_mode_request_user_input` (Default mode) | nothing added                         |
 
-The pane is also handed `FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part,
-so it can never disagree with what the harness decided; `instructions` and the Runtimes wrappers read it. A ferret's
-mode never changes, so these arguments are outside the recorded launch's fixed-layer fingerprint: they cannot make a
-running ferret read as outdated.
+Codex's `request_user_input` stays available in its own Plan mode; the feature above only adds it to Default mode, and
+no flag was found that turns Plan mode's off. The Runtimes wrapper has no opt-in: it always withholds Claude's tool and
+never enables Codex's (declared GAP; the setting governs the harness launch). The pane is also handed
+`FY_SESSION_MODE` (`interactive` or `auto`), from the same record and after every launch part. The setting and a
+ferret's mode are outside the recorded launch's fixed-layer fingerprint, so changing either cannot make a running
+ferret read as outdated; it takes effect at the ferret's next launch.
 
 ## Claude's questions reach the app through a hook
 

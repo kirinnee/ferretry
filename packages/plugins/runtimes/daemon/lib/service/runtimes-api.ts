@@ -40,6 +40,12 @@ export interface RuntimesApiDeps {
   harnesses(): readonly HarnessKey[];
   readonly logins: Pick<LoginsApi, 'list'>;
   now(): number;
+  /**
+   * The runtime a name it no longer carries now answers to (`ids.json` `formerNames`), or `undefined` when none claims it
+   * or it cannot be read. Absent: only a runtime's own name resolves. A rename is committed in the catalogue before the
+   * ferrets' records are rewritten, so a record left on the old name (a failed write, a crash between the two) still starts.
+   */
+  currentName?(former: string): Promise<string | undefined>;
 }
 
 async function loginsById(logins: Pick<LoginsApi, 'list'>): Promise<ReadonlyMap<string, LoginView>> {
@@ -141,17 +147,24 @@ export function createRuntimesApi(
     get: async id => (await summaries()).find(summary => summary.id === id),
     default: defaultRuntime,
     resolve: async (id): Promise<ResolveResult> => {
-      const wanted = id ?? (await defaultRuntime());
-      if (wanted === undefined) {
+      const named = id ?? (await defaultRuntime());
+      if (named === undefined) {
         return {
           ok: false,
           refusal: 'unknown',
           sentence: 'no runtime was named, and this machine has no default runtime for new agents',
         };
       }
-      const file = deps.runtimes().get(wanted);
+      let wanted = named;
+      let file = deps.runtimes().get(wanted);
       if (file === undefined) {
-        return { ok: false, refusal: 'unknown', sentence: `no runtime ${wanted} exists on this machine` };
+        const current = await deps.currentName?.(named).catch(() => undefined);
+        const renamed = current === undefined ? undefined : deps.runtimes().get(current);
+        if (current === undefined || renamed === undefined) {
+          return { ok: false, refusal: 'unknown', sentence: `no runtime ${named} exists on this machine` };
+        }
+        wanted = RuntimeIdSchema.parse(current);
+        file = renamed;
       }
       const logins = await loginsById(deps.logins);
       const entry = read(wanted, file, logins, deps.now());

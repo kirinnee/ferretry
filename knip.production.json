@@ -197,13 +197,7 @@
     "packages/plugins/voice": {
       "entry": [],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/lib/stt/speed-bench-report.ts",
-        "app/lib/voice-chat/turn-endpointer-scoring.ts",
-        "app/lib/voice-chat/turn-endpointer.ts",
-        "daemon/lib/speedups/index.ts",
-        "daemon/lib/stt/index.ts"
-      ],
+      "ignore": ["app/lib/stt/speed-bench-report.ts", "daemon/lib/speedups/index.ts", "daemon/lib/stt/index.ts"],
       "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"]
     },
     "packages/plugins/usage": {

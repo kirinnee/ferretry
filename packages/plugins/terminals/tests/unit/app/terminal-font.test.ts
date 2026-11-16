@@ -128,8 +128,7 @@ describe('loading the bundled face in a browser', () => {
     });
     try {
       // A fresh copy of the module: the shipped loader is one load per page and may already have run.
-      const freshModule = '../../../app/components/terminal-font-loader.ts?browser-face';
-      const fresh = (await import(freshModule)) as {
+      const fresh = (await import(`../../../app/components/terminal-font-loader.ts?${'browser-face'}`)) as {
         loadTerminalFont: () => Promise<void>;
       };
       await fresh.loadTerminalFont();
