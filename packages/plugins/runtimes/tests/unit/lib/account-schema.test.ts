@@ -44,7 +44,7 @@ describe('AccountModelSchema', () => {
 
     // Assert
     should(actual.machine).deepEqual({
-      agentPermissions: 'auto',
+      agentPermissions: 'skip',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false, pageScripts: false },
       browserMode: 'headless',
       browserPorts: 'random',

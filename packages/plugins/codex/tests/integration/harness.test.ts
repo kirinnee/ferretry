@@ -62,7 +62,11 @@ function fakeRunner() {
   return { runner, seen };
 }
 
-const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
+const harnessOver = (
+  location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>,
+  /** The permission mode the config file says; absent means the harness file says nothing (the default applies). */
+  permissionMode?: 'auto' | 'skip',
+) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
   const records: unknown[] = [];
@@ -80,6 +84,7 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
     },
+    ...(permissionMode === undefined ? {} : { permissionMode: () => permissionMode }),
     locate: async () => location,
     probe: {
       version: async () => ({ state: 'ok', version: '0.145.0' }),
@@ -171,7 +176,7 @@ describe('the Codex harness', () => {
     // `[]`: Codex's sandbox (`workspace-write`, `packages/fleet/src/lib/account/fixed-layer.ts:201`) reads anywhere and
     // limits only writes, so `buildLaunchArgv` (`launch/argv.ts:171`) added nothing. 5.0 hands Codex the same
     // `LaunchSpec.readable` Ferrets hands Claude, and its argv must not change for it.
-    const { harness } = harnessOver(LOCATED);
+    const { harness } = harnessOver(LOCATED, 'auto');
     const plain = fakeRunner();
     const handed = fakeRunner();
     const readable = ['turns', 'channel', 'attachments'].map(
@@ -183,6 +188,30 @@ describe('the Codex harness', () => {
     should(command).eql(plain.seen[0]?.spec.command);
     should(command.some(argument => argument.includes('allowedTools') || argument.includes('/fy/state/'))).be.false();
     should(command).containEql('sandbox_mode="workspace-write"');
+  });
+
+  it('!A525 a harness file that says no permission mode launches Codex with approval never and the full-access sandbox', async () => {
+    const { harness } = harnessOver(LOCATED);
+    const started = fakeRunner();
+    const resumed = fakeRunner();
+    await harness.start(specOf(), started.runner, ENV);
+    await harness.resume(specOf(), resumed.runner, ENV, 'conv-1');
+    for (const command of [started.seen[0]?.spec.command ?? [], resumed.seen[0]?.spec.command ?? []]) {
+      should(command).containEql('approval_policy="never"');
+      should(command).containEql('sandbox_mode="danger-full-access"');
+      should(command).not.containEql('approval_policy="on-request"');
+      should(command).not.containEql('sandbox_mode="workspace-write"');
+    }
+  });
+
+  it('!A525 an explicit auto keeps Codex asking: on-request and the workspace-write sandbox', async () => {
+    const { harness } = harnessOver(LOCATED, 'auto');
+    const { runner, seen } = fakeRunner();
+    await harness.start(specOf(), runner, ENV);
+    const command = seen[0]?.spec.command ?? [];
+    should(command).containEql('approval_policy="on-request"');
+    should(command).containEql('sandbox_mode="workspace-write"');
+    should(command).not.containEql('approval_policy="never"');
   });
 
   it('resumes by the harness conversation id, and reports it back', async () => {
