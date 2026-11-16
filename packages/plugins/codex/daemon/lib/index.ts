@@ -1,5 +1,6 @@
 export * from './app-server.ts';
 export * from './catalog-cache.ts';
+export * from './credential-links.ts';
 export * from './cleanup.ts';
 export * from './dismiss.ts';
 export * from './fast-mode.ts';
