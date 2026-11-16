@@ -83,7 +83,7 @@ describe('the compaction hooks in the fixed layer', () => {
       'You were just compacted',
       'session sess-42',
       'fy logs sess-42 --turn 1',
-      'assigned task',
+      'Your assignment',
       'fy task show <task id>',
       'fy board status',
       'fy agenda ls',
@@ -119,8 +119,9 @@ describe('the compaction hooks in the fixed layer', () => {
     const { code, out, err } = await run(CLAUDE_KEEP_COMMAND, { FY_SESSION_ID: 'sess-42', FY_TOKEN: SECRET });
     should(code).equal(0);
     should(err).equal('');
-    for (const needle of ['assigned task', 'card id', 'agenda item ids', 'owe a reply', 'PR links'])
+    for (const needle of ['your assignment', 'your task id', 'agenda item ids', 'owe a reply', 'PR links'])
       should(out).containEql(needle);
+    should(out).not.containEql('card');
     should(out).not.containEql(SECRET);
   });
 });
