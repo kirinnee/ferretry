@@ -35,7 +35,9 @@ const NO_STANDING = async () => 'unknown' as const;
 class AwkwardRunner extends FakeRunner {
   hidePid = false;
   failStop = false;
+  beforeStart: (() => Promise<void>) | undefined;
   override async start(spec: RunSpec) {
+    await this.beforeStart?.();
     const started = await super.start(spec);
     if (!started.ok || !this.hidePid) return started;
     const { pid: _pid, ...rest } = started.value;
@@ -128,6 +130,47 @@ describe('a pane the daemon opens holds its conversation', () => {
     expect(resumed.ok).toBe(true);
     expect([...f.disk.files.keys()]).toEqual([`claude/${OLD}`]);
     expect(f.disk.lease('claude', OLD)?.holder.pid).toBe(1001);
+  });
+});
+
+describe('a Restart hands the lease to the ferret across the pane’s replacement', () => {
+  test('should keep the conversation held between the old pane’s death and the new pane’s claim', async () => {
+    // Arrange
+    const f = built({ resumable: true });
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    const raced: ConversationLeaseOutcome[] = [];
+    // The first thing the replacement launch does with the harness, after the old pane is gone.
+    const prepared = f.harness.prepareHome.bind(f.harness);
+    f.harness.prepareHome = async spec => {
+      raced.push(await f.terminalClaim(OLD));
+      return await prepared(spec);
+    };
+
+    // Act
+    const restarted = await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true });
+
+    // Assert — a terminal's `claude --resume` finds it held while the pane is replaced, and the new pane owns it
+    expect(restarted.ok).toBe(true);
+    expect(raced.map(each => each.kind)).toEqual(['held']);
+    expect(f.disk.lease('claude', OLD)?.holder).toMatchObject({ session: f.id, pid: 1002 });
+  });
+
+  test('should free the conversation when the replacement launch is refused, as a stop does', async () => {
+    // Arrange
+    const f = built({ resumable: true });
+    await f.service.resume(f.id, undefined, { origin: PERSON_ORIGIN });
+    f.runner.beforeStart = async () => {
+      throw new Error('tmux is unreachable');
+    };
+
+    // Act
+    await f.service
+      .resume(f.id, undefined, { origin: PERSON_ORIGIN, replaceLiveTerminal: true })
+      .catch(() => undefined);
+    f.runner.beforeStart = undefined;
+
+    // Assert
+    expect((await f.terminalClaim(OLD)).kind).toBe('claimed');
   });
 });
 
