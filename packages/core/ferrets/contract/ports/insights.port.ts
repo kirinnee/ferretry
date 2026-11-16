@@ -24,6 +24,8 @@ export interface FerretIngestEvidence {
   readonly startedAt: string | null;
   readonly contextWindow: number | null;
   readonly contextEndPercent: number | null;
+  /** The used-token count the harness last reported for the context (`state.contextTokens`); the live read serves it. */
+  readonly contextTokens: number | null;
 }
 
 /**

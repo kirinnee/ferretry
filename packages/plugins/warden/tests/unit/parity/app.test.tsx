@@ -2,7 +2,7 @@
  * App-half parity (rebuild-parity.tsv, S rows of the Warden page and its Settings tab). Each name starts with the row
  * it covers. Where today's row lives in the app shell (a host route, the page-slot map, the machine-panel grouping,
  * the clone and settings-search catalogs) the name says so and the test claims only what the plugin declares for the
- * shell to read. Where a row's new owner is another plugin (the usage, browsers and conversation triggers) the test
+ * shell to read. Where a row's new owner is another plugin (the browsers and conversation triggers) the test
  * claims only the Warden form's own catalog entry for it.
  */
 
@@ -285,7 +285,7 @@ describe('app half: the screen and the Settings tab', () => {
 });
 
 describe('app half: the catalog entries of the Warden settings form', () => {
-  test('S-0453 S-0532 budget_exceeded and rate_limited: the form lists both move triggers, which the usage plugin owns', async () => {
+  test('S-0453 S-0532 budget_exceeded and rate_limited: the form says both move triggers in its own words (the Warden owns them)', async () => {
     expect(WARDEN_AUTO_MOVE_TRIGGERS).toEqual(expect.arrayContaining(['budget_exceeded', 'rate_limited']));
     const text = await formText();
     expect(text).toContain('Its login passes its hard spend budget');

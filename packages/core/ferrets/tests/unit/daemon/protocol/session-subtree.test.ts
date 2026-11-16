@@ -84,7 +84,13 @@ describe('ingestEvidence', () => {
     should(
       ingestEvidence(
         { model: 'claude-opus-5-5' },
-        { turn: 6, startedAt: '2026-11-01T00:00:00.000Z', contextWindow: 200000, contextPercent: 41 },
+        {
+          turn: 6,
+          startedAt: '2026-11-01T00:00:00.000Z',
+          contextWindow: 200000,
+          contextPercent: 41,
+          contextTokens: 82000,
+        },
       ),
     ).deepEqual({
       selectedModel: 'claude-opus-5-5',
@@ -92,6 +98,7 @@ describe('ingestEvidence', () => {
       startedAt: '2026-11-01T00:00:00.000Z',
       contextWindow: 200000,
       contextEndPercent: 41,
+      contextTokens: 82000,
     });
   });
 
@@ -102,6 +109,7 @@ describe('ingestEvidence', () => {
       startedAt: null,
       contextWindow: null,
       contextEndPercent: null,
+      contextTokens: null,
     });
   });
 });
@@ -112,10 +120,16 @@ describe('liveRead', () => {
       liveRead(
         ingestEvidence(
           { model: 'claude-opus-5-5' },
-          { turn: 6, startedAt: '2026-11-01T00:00:00.000Z', contextWindow: 200000, contextPercent: 41 },
+          {
+            turn: 6,
+            startedAt: '2026-11-01T00:00:00.000Z',
+            contextWindow: 200000,
+            contextPercent: 41,
+            contextTokens: 82000,
+          },
         ),
       ),
-    ).deepEqual({ turns: 6, contextPercent: 41, contextWindow: 200000 });
+    ).deepEqual({ turns: 6, contextPercent: 41, contextWindow: 200000, contextTokens: 82000 });
   });
 
   it('should say null for a context the document does not state, and for a ferret whose documents did not parse', () => {
@@ -123,7 +137,13 @@ describe('liveRead', () => {
       turns: 0,
       contextPercent: null,
       contextWindow: null,
+      contextTokens: null,
     });
-    should(liveRead(undefined)).deepEqual({ turns: null, contextPercent: null, contextWindow: null });
+    should(liveRead(undefined)).deepEqual({
+      turns: null,
+      contextPercent: null,
+      contextWindow: null,
+      contextTokens: null,
+    });
   });
 });

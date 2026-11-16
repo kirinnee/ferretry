@@ -14,7 +14,6 @@ import { AnalyticsQueryPage } from '../../../app/features/analytics/analytics-qu
 import { AnalyticsResponseView } from '../../../app/features/analytics/analytics-response-view.tsx';
 import { GlobalAnalyticsPage } from '../../../app/features/analytics/global-analytics-page.tsx';
 import { PerformanceSettings } from '../../../app/features/settings/performance-settings.tsx';
-import { MOVE_TRIGGERS } from '../../../app/lib/move-triggers.ts';
 import { daemonInsightsPath, daemonInsightsQueryPath } from '../../../app/shell.ts';
 import manifest from '../../../manifest.ts';
 import { fullReport, minimalReport } from '../contract/performance-report-fixtures.ts';
@@ -413,12 +412,6 @@ describe('usage parity · what the manifest declares and the half implements', (
     expect(typeof half.panels.insights).toBe('function');
   });
 
-  it('S-0453 the move trigger “its login passes its hard spend budget” is Usage’s', () => {
-    expect(MOVE_TRIGGERS.find(trigger => trigger.id === 'budget_exceeded')?.label).toBe(
-      'Its login passes its hard spend budget',
-    );
-  });
-
   it('S-0510 Model pricing is offered as the tab labelled “Model pricing” and it renders', async () => {
     const { half: pricingHalf } = halfOver({ 'GET /v1/usage/pricing': PRICING_VIEW });
     const view = await mount(asElement(pricingHalf.settings['model-pricing']({})));
@@ -438,9 +431,5 @@ describe('usage parity · what the manifest declares and the half implements', (
   it('S-0527 the palette finds Performance by the label its Settings tab declares', () => {
     const labels = manifest.ui.settings.map(entry => entry.label.toLowerCase());
     expect(labels.some(label => label.includes('performance'))).toBe(true);
-  });
-
-  it('S-0532 the move trigger “it hits a usage limit” is Usage’s', () => {
-    expect(MOVE_TRIGGERS.find(trigger => trigger.id === 'rate_limited')?.label).toBe('It hits a usage limit');
   });
 });
