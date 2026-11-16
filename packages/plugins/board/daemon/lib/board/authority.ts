@@ -184,9 +184,9 @@ export const claimableFrom = (
 /** The sentence a refused claim answers with: who may claim, and what to do instead. */
 export const claimRefusalMessage = (card: Pick<Card, 'id' | 'owner' | 'assignee'>, caller: BoardCaller): string => {
   const ref = formatCardRef(card);
-  if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy card assign ${ref} <ferret>\``;
+  if (caller.kind !== 'ferret') return `claim is a ferret's: ${ref} is taken with \`fy task assign ${ref} <ferret>\``;
   if (caller.ferret === effectiveAssignee(card)) return `${ref} is already yours`;
-  if (caller.ferret === card.owner) return `you own ${ref}: take it with \`fy card assign ${ref} ${caller.ferret}\``;
+  if (caller.ferret === card.owner) return `you own ${ref}: take it with \`fy task assign ${ref} ${caller.ferret}\``;
   return `only a ferret below the ferret holding ${ref} may claim it (held by ${effectiveAssignee(card)}); a card held by a ferret outside your lineage is theirs: ask your lead`;
 };
 

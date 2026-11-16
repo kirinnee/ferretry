@@ -66,7 +66,7 @@ export function renderBoardSwitch(state: BoardSwitch, projectName: string): stri
     owner: `set by the owner (${state.setAt ?? 'unknown'})`,
   };
   const meaning = state.on
-    ? 'Ferrets here keep a card for their work.'
-    : 'Ferrets here make no card unless the owner asks for one or their lead hands them one. The owner switches it on, in the app.';
+    ? 'Ferrets here keep a task for their work.'
+    : 'Ferrets here make no task unless the owner asks for one or their lead hands them one. The owner switches it on, in the app.';
   return `${projectName}: board ${state.on ? 'on' : 'off'} — ${who[state.setBy]}.\n${meaning}`;
 }

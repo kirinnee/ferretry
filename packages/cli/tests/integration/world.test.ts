@@ -308,11 +308,11 @@ describe('where each request goes (S57, S59)', () => {
       const half = implementCli(boardManifest, {
         build: ctx => ({
           verbs: {
-            'card move': async () => {
+            'task move': async () => {
               await ctx.client.call('POST /v1/cards/:id/move', { params: { id: 'a' } });
               return 0;
             },
-            'card show': async () => 0,
+            'task show': async () => 0,
             board: async () => 0,
           },
         }),
@@ -331,7 +331,7 @@ describe('where each request goes (S57, S59)', () => {
       });
 
       // Act
-      const code = await runFy(['card', 'move', 'a'], world);
+      const code = await runFy(['task', 'move', 'a'], world);
 
       // Assert
       should(code).equal(1);

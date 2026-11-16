@@ -1,5 +1,5 @@
 import { ALLOW, type StateFileDef } from '@ferretry/kernel/contract';
-import { implementDaemon, type ToolResult } from '@ferretry/kernel/manifest';
+import { implementDaemon, type ToolHandler } from '@ferretry/kernel/manifest';
 import { milliseconds, type Result } from '@ferretry/std';
 import type { ConfigFileDef } from '@ferretry/kernel/contract';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
@@ -13,6 +13,7 @@ import {
   CardMoved,
   CardMoving,
   CardProgressToolInputSchema,
+  TaskProgressToolInputSchema,
   type CardView,
 } from '../contract/index.ts';
 import type { BoardConfig } from '../contract/index.ts';
@@ -45,6 +46,13 @@ const refusalOf = (error: unknown): BoardRefusal => {
   throw error;
 };
 
+/** The parts of a progress write, without the id it names (`task` or, from an old instruction, `card`). */
+const progressParts = ({ now, doneSoFar, next }: { now?: string; doneSoFar?: string; next?: string }) => ({
+  ...(now === undefined ? {} : { now }),
+  ...(doneSoFar === undefined ? {} : { doneSoFar }),
+  ...(next === undefined ? {} : { next }),
+});
+
 /**
  * Board's daemon half (§2.3): cards and lanes for the work you ask for, with each card's progress and its PRs.
  *
@@ -70,8 +78,8 @@ export default implementDaemon(manifest, {
       conversation: () => ctx.uses.conversation.current(),
       // `card.moving`: takers say yes or no to a card changing lanes, asked by the service at its one write, whatever
       // moved the card; the first no wins, with its reason.
-      moving: async input => await ctx.hooks.decide(CardMoving, input),
-      moved: input => kernel.events.publish(CardMoved, input),
+      moving: async ({ card, ...rest }) => await ctx.hooks.decide(CardMoving, { task: card, ...rest }),
+      moved: ({ card, ...rest }) => kernel.events.publish(CardMoved, { task: card, ...rest }),
       product: 'ferretry',
       version: manifest.version,
       defs,
@@ -147,19 +155,29 @@ export default implementDaemon(manifest, {
       },
     });
 
+    const writeProgress: ToolHandler = async (call, input) => {
+      const asked = TaskProgressToolInputSchema.safeParse(input);
+      const asOld = asked.success ? undefined : CardProgressToolInputSchema.safeParse(input);
+      const wanted = asked.success
+        ? { id: asked.data.task, ...progressParts(asked.data) }
+        : asOld?.success === true
+          ? { id: asOld.data.card, ...progressParts(asOld.data) }
+          : undefined;
+      if (wanted === undefined)
+        return { text: 'task_progress takes a task and any of now, doneSoFar, next', isError: true };
+      if (call.credential?.tokenClass !== 'ferret')
+        return { text: 'only a ferret writes a task’s progress', isError: true };
+      const { id, ...parts } = wanted;
+      const result = await api.progress(call.credential.ferret, id, parts);
+      return result.ok ? { text: `${id} progress written` } : { text: result.error.message, isError: true };
+    };
+
     return {
       routes: { ...boardRoutes(acting), ...lanes },
       tools: {
-        card_progress: async (call, input): Promise<ToolResult> => {
-          const parsed = CardProgressToolInputSchema.safeParse(input);
-          if (!parsed.success)
-            return { text: 'card_progress takes a card and any of now, doneSoFar, next', isError: true };
-          if (call.credential?.tokenClass !== 'ferret')
-            return { text: 'only a ferret writes a card’s progress', isError: true };
-          const { card, ...parts } = parsed.data;
-          const result = await api.progress(call.credential.ferret, card, parts);
-          return result.ok ? { text: `${card} progress written` } : { text: result.error.message, isError: true };
-        },
+        task_progress: writeProgress,
+        // The old name of `task_progress`, on the same handler: it takes the input an old instruction hands it.
+        card_progress: writeProgress,
       },
       provides: { board: api },
       hooks: {

@@ -30,7 +30,7 @@ describe('fy plugin', () => {
     });
     should(await runFy(['plugin', 'show', 'board'], world)).equal(0);
     should(io.stdout()).containEql('Board (board) 5.0.0  code plugin, on');
-    should(io.stdout()).containEql('verbs     card show, card move, board');
+    should(io.stdout()).containEql('verbs     task show, task move, board');
     should(await runFy(['plugin', 'show', 'tiny'], world)).equal(0);
     should(io.stdout()).containEql('tiny  data plugin, on');
   });

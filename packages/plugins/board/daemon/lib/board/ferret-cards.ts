@@ -197,7 +197,7 @@ export const cardFooterLine = (
   bin: string,
   parent: CardRef | null = null,
 ): string =>
-  `Your card is ${formatCardRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatCardRef(parent)}`}; the daemon moves it for you (\`${bin} card note\` adds progress).`;
+  `Your card is ${formatCardRef({ id })} on the ${project === undefined ? "project's" : project} board${parent === null ? '' : `, under ${formatCardRef(parent)}`}; the daemon moves it for you (\`${bin} task note\` adds progress).`;
 
 /** A card request the daemon fills for a start. */
 const startRequest = (fields: {
@@ -284,7 +284,7 @@ export class FerretCards {
       const notes =
         parent === null
           ? [
-              `The helper's card has no parent, so it is at the top level of the board: \`${this.ports.bin} card reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} card focus <id>\` (or \`--card <id>\`) says where your helpers' cards go next time.`,
+              `The helper's card has no parent, so it is at the top level of the board: \`${this.ports.bin} task reparent ${formatCardRef({ id })} --parent <id>\` moves it, and \`${this.ports.bin} task focus <id>\` (or \`--card <id>\`) says where your helpers' cards go next time.`,
             ]
           : [];
       return {

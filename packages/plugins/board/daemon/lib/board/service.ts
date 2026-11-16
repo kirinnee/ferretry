@@ -1118,7 +1118,7 @@ export class BoardService {
       ) {
         throw new BoardError(
           error.code,
-          `${error.message}; your lead holds it: claim it first: fy card claim ${formatCardRef(card)}`,
+          `${error.message}; your lead holds it: claim it first: fy task claim ${formatCardRef(card)}`,
           error.allowed,
         );
       }
@@ -1139,7 +1139,7 @@ export class BoardService {
     if (caller.kind !== 'ferret')
       throw new BoardError(
         'forbidden',
-        `adopt is a ferret's: the owner assigns ${ref} with \`fy card assign ${ref} <ferret>\``,
+        `adopt is a ferret's: the owner assigns ${ref} with \`fy task assign ${ref} <ferret>\``,
       );
     if (card.dropped !== null) throw new BoardError('invalid', `${ref} is dropped: nothing to adopt`);
     const category = categoryOf(await this.requireLaneSet(card.projectId), card.laneId);
@@ -1213,7 +1213,7 @@ export class BoardService {
   private async claimCommand(caller: BoardCaller, card: Card): Promise<string | undefined> {
     if (caller.kind !== 'ferret') return undefined;
     const from = claimableFrom(caller, card, await ancestorsOf(caller.ferret, this.ports.parents));
-    return from === undefined ? undefined : `fy card claim ${formatCardRef(card)}`;
+    return from === undefined ? undefined : `fy task claim ${formatCardRef(card)}`;
   }
 
   /**
@@ -1562,7 +1562,7 @@ export class BoardService {
     const session = ferretOf(caller) ?? task.owner;
     for (const projectId of projects) {
       await this.ports.changes
-        .changed(session, { projectId, cardIds: [task.id] })
+        .changed(session, { projectId, taskIds: [task.id] })
         .catch((error: unknown) => this.warn(`could not publish board.changed for ${formatCardRef(task)}`, error));
     }
     await this.ports.gates

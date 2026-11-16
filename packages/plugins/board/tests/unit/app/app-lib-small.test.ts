@@ -89,8 +89,8 @@ describe('card and lanes paths', () => {
   it('open a card on the board, a card on its own page, and a project lanes editor', () => {
     setBrowser('location', { pathname: '/d/box/board' });
     expect(boardCardPath(undefined, 'F 12')).toBe('/d/box/board/F%2012');
-    expect(cardPagePath('F 12')).toBe('/d/box/card/F%2012');
-    expect(cardPagePath('F12', 'other')).toBe('/d/other/card/F12');
+    expect(cardPagePath('F 12')).toBe('/d/box/task/F%2012');
+    expect(cardPagePath('F12', 'other')).toBe('/d/other/task/F12');
     expect(projectLanesPath('p 1')).toBe('/d/box/board/p%201?lanes=1');
     expect(projectLanesPath('p1', 'other')).toBe('/d/other/board/p1?lanes=1');
   });

@@ -239,7 +239,10 @@ const SHELL_ALIAS_LINES = [
   { verb: 'daemon update', alias: 'update' },
   { verb: 'daemon import', alias: 'runtime link' },
   { verb: 'setup', alias: 'onboard' },
-] as const satisfies readonly { readonly verb: string; readonly alias: string }[];
+  // The Board's old noun: typed from habit, from an old transcript or from an agent's old instructions. It runs
+  // `task` and says so on stderr; it is not listed in `--help`.
+  { verb: 'card', alias: 'task', hidden: true },
+] as const satisfies readonly { readonly verb: string; readonly alias: string; readonly hidden?: true }[];
 
 export interface VerbEntry {
   /** The words a person types, in order. */
@@ -255,6 +258,8 @@ export interface VerbEntry {
   readonly options?: readonly VerbOptionDecl[];
   /** An alias (a data plugin's, or one of the shell's old spellings): the verb line it runs. */
   readonly alias?: string;
+  /** Left out of `--help`: an old spelling that still runs, and says what replaced it on stderr. */
+  readonly hidden?: true;
   /** Declared the default of its group: the bare group runs it. */
   readonly default?: true;
 }
@@ -317,6 +322,7 @@ export function buildVerbTable(registry: CommandRegistry): VerbTable {
         },
       ],
       alias: old.alias,
+      ...('hidden' in old ? { hidden: true as const } : {}),
     });
   for (const plugin of registry.plugins)
     for (const decl of declaredVerbs(plugin)) {

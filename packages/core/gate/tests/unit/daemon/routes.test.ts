@@ -79,6 +79,46 @@ describe('Gate routes', () => {
     expect(asked).toHaveLength(1);
   });
 
+  test('O18 GET /v1/audit reads the three Board kinds written before the rename as the kinds that replaced them', async () => {
+    const row = (event: string) => ({
+      format: 1 as const,
+      at: '2026-11-07T12:00:00.000Z',
+      event,
+      actor: { kind: 'host' as const },
+      outcome: 'succeeded' as const,
+    });
+    const reading = {
+      records: [row('card.created'), row('card.acted'), row('card.started'), row('task.acted'), row('board.skipped')],
+      kept: [row('card.acted')],
+      keptTotal: 1,
+      unreadable: 0,
+    };
+    const served = gateRoutes({
+      audit: { recent: async () => reading as never },
+      security: new SecuritySettingsService({
+        document: { read: () => ({ kind: 'defaults' }), write: async () => undefined },
+        history: {
+          record: async () => undefined,
+          recent: async () => ({ entries: [], unreadable: 0, truncated: false }),
+        },
+        clock: { now: () => '2026-11-07T12:00:00.000Z' },
+        widenCommand: 'fy daemon security set',
+      }),
+    });
+    const body = json(await served['GET /v1/audit'](call({}))) as {
+      records: { event: string }[];
+      kept: { event: string }[];
+    };
+    expect(body.records.map(record => record.event)).toEqual([
+      'task.created',
+      'task.acted',
+      'task.started',
+      'task.acted',
+      'board.skipped',
+    ]);
+    expect(body.kept.map(record => record.event)).toEqual(['task.acted']);
+  });
+
   test('R-0133 GET /v1/security is readable while locked, and says who may widen', async () => {
     expect(routeOf('GET /v1/security')).toMatchObject({ unlockExempt: true, noStore: true });
     expect(json(await routes['GET /v1/security'](call()))).toMatchObject({ source: 'defaults', mayWiden: true });

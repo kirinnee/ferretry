@@ -339,7 +339,7 @@ describe('adopting an orphaned card', () => {
       const byDaemon = await refusal(service.act('F1', adopt, { kind: 'daemon' }));
 
       // Assert
-      should(byOwner.message).containEql('fy card assign &F1 <ferret>');
+      should(byOwner.message).containEql('fy task assign &F1 <ferret>');
       should(byDaemon.code).equal('forbidden');
       unchanged(ports);
     });

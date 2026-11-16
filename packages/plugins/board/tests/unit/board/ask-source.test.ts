@@ -11,7 +11,7 @@ describe('a card’s ask source', () => {
       ask?: { text: string; source: string };
     };
     expect(stored.ask).toEqual({ text: 'Make the badge green.', source: 'owner (ask ^A3)' });
-    const read = await host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(read.json<{ card: { ask: { source: string } } }>().card.ask.source).toBe('owner (ask ^A3)');
+    const read = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(read.json<{ task: { ask: { source: string } } }>().task.ask.source).toBe('owner (ask ^A3)');
   });
 });

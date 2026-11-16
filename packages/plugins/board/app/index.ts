@@ -43,14 +43,14 @@ export default provideToShell(
         );
         return surfaces;
       };
-      const screen = (id: 'board' | 'card') =>
+      const screen = (id: 'board' | 'task' | 'card') =>
         lazyComponent<ScreenProps>(async () => (await surfacesOf()).screens[id] as AppComponent<ScreenProps>);
       const panel = (id: 'cards-of-ferret' | 'card-progress') =>
         lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       const renderer = (key: 'ask:card' | 'reference:&' | 'reference:&board') =>
         lazyComponent<RendererProps>(async () => (await surfacesOf()).renderers[key] as AppComponent<RendererProps>);
       return {
-        screens: { board: screen('board'), card: screen('card') },
+        screens: { board: screen('board'), task: screen('task'), card: screen('card') },
         panels: { 'cards-of-ferret': panel('cards-of-ferret'), 'card-progress': panel('card-progress') },
         settings: {
           board: lazyComponent<SettingsProps>(

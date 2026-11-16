@@ -12,10 +12,47 @@ describe('board daemon half', () => {
 
     const board = await host.request('GET', '/v1/board', { headers: as('owner') });
     expect(board.status).toBe(200);
-    expect(board.json<{ cards: { id: string }[] }>().cards.map(each => each.id)).toContain(card.id);
+    expect(board.json<{ tasks: { id: string }[] }>().tasks.map(each => each.id)).toContain(card.id);
 
-    const one = await host.request('GET', `/v1/board/cards/${card.id}`, { headers: as('owner') });
-    expect(one.json<{ card: { title: string } }>().card.title).toBe('Badge colour');
+    const one = await host.request('GET', `/v1/board/tasks/${card.id}`, { headers: as('owner') });
+    expect(one.json<{ task: { title: string } }>().task.title).toBe('Badge colour');
+  });
+
+  test('O18 the former /v1/board/cards paths answer exactly as the /v1/board/tasks paths do: one handler', async () => {
+    const { host } = await boot();
+    const owner = { headers: as('owner') };
+    const made = await host.request('POST', '/v1/board/cards', { body: NEW_CARD, ...owner });
+    expect(made.status).toBe(200);
+    const id = made.json<{ task: { id: string } }>().task.id;
+
+    const bothBoards = [
+      await host.request('GET', '/v1/board/tasks', owner),
+      await host.request('GET', '/v1/board/cards', owner),
+    ];
+    expect(bothBoards.map(each => each.status)).toEqual([200, 200]);
+    expect(bothBoards[1]?.body).toBe(bothBoards[0]?.body ?? '');
+    expect(bothBoards[0]?.json<{ tasks: { id: string }[] }>().tasks.map(each => each.id)).toContain(id);
+
+    const oneByNew = await host.request('GET', `/v1/board/tasks/${id}`, owner);
+    const oneByOld = await host.request('GET', `/v1/board/cards/${id}`, owner);
+    expect([oneByNew.status, oneByOld.status]).toEqual([200, 200]);
+    expect(oneByOld.body).toBe(oneByNew.body);
+    expect(oneByOld.json<{ task: { id: string }; card?: unknown }>().card).toBeUndefined();
+
+    const note = { body: { action: 'note', text: 'seen both ways' }, ...owner };
+    const viaOld = await host.request('POST', `/v1/board/cards/${id}`, note);
+    const viaNew = await host.request('POST', `/v1/board/tasks/${id}`, note);
+    expect([viaOld.status, viaNew.status]).toEqual([200, 200]);
+    expect(viaNew.json<{ task: { history: unknown[] } }>().task.history.length).toBe(
+      viaOld.json<{ task: { history: unknown[] } }>().task.history.length + 1,
+    );
+
+    const gone = [
+      await host.request('GET', '/v1/board/tasks/F999', owner),
+      await host.request('GET', '/v1/board/cards/F999', owner),
+    ];
+    expect(gone.map(each => each.status)).toEqual([404, 404]);
+    expect(gone[1]?.body).toBe(gone[0]?.body ?? '');
   });
 
   test('ids are never reused: the second card is a new number', async () => {
@@ -36,21 +73,38 @@ describe('board daemon half', () => {
 
   test('a body that is not a card is a 400 and writes nothing', async () => {
     const { host } = await boot();
-    const refused = await host.request('POST', '/v1/board/cards', { body: { kind: 'nope' }, headers: as('owner') });
+    const refused = await host.request('POST', '/v1/board/tasks', { body: { kind: 'nope' }, headers: as('owner') });
     expect(refused.status).toBe(400);
     expect(refused.json<{ code: string }>().code).toBe('invalid');
   });
 
   test('an unknown card is a 404', async () => {
     const { host } = await boot();
-    const missing = await host.request('GET', '/v1/board/cards/F999', { headers: as('owner') });
+    const missing = await host.request('GET', '/v1/board/tasks/F999', { headers: as('owner') });
     expect(missing.status).toBe(404);
   });
 
   test('a card id that is not an id is a 400', async () => {
     const { host } = await boot();
-    const refused = await host.request('GET', '/v1/board/cards/nonsense', { headers: as('owner') });
+    const refused = await host.request('GET', '/v1/board/tasks/nonsense', { headers: as('owner') });
     expect(refused.status).toBe(400);
+  });
+
+  test('the task_progress tool writes the parts it names and keeps the rest; card_progress is its old name, on the same handler', async () => {
+    const { host } = await boot();
+    const made = await makeCard(host, { assignee: 'f1' });
+    const id = made.id;
+    const first = await host.tool('task_progress', { task: id, now: 'writing it', next: 'test it' });
+    const second = await host.tool('card_progress', { card: id, doneSoFar: 'wrote it' });
+    expect(first.isError).not.toBe(true);
+    expect(second.isError).not.toBe(true);
+    expect(first.text).toBe(`${id} progress written`);
+    const read = await host.request('GET', `/v1/board/tasks/${id}`, { headers: as('owner') });
+    expect(
+      read.json<{ task: { progress?: { now: string; doneSoFar: string; next: string } } }>().task.progress,
+    ).toEqual({ now: 'writing it', doneSoFar: 'wrote it', next: 'test it' });
+    const neither = await host.tool('task_progress', { now: 'no id' });
+    expect(neither.isError).toBe(true);
   });
 
   test('the card_progress tool writes the parts it names and keeps the rest', async () => {
@@ -61,9 +115,9 @@ describe('board daemon half', () => {
     const second = await host.tool('card_progress', { card: id, doneSoFar: 'wrote it' });
     expect(first.isError).not.toBe(true);
     expect(second.isError).not.toBe(true);
-    const read = await host.request('GET', `/v1/board/cards/${id}`, { headers: as('owner') });
+    const read = await host.request('GET', `/v1/board/tasks/${id}`, { headers: as('owner') });
     expect(
-      read.json<{ card: { progress?: { now: string; doneSoFar: string; next: string } } }>().card.progress,
+      read.json<{ task: { progress?: { now: string; doneSoFar: string; next: string } } }>().task.progress,
     ).toEqual({
       now: 'writing it',
       doneSoFar: 'wrote it',
@@ -104,7 +158,7 @@ describe('board daemon half', () => {
     const { asks, host } = await boot();
     const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await host.request('POST', `/v1/board/cards/${made.id}`, {
+      await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
         headers: as('owner'),
       });
@@ -118,7 +172,7 @@ describe('board daemon half', () => {
     expect(open[0]?.kind).toBe('choice');
 
     // Another write of the same card, still at the gate, asks nothing new.
-    await host.request('POST', `/v1/board/cards/${made.id}`, {
+    await host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'note', text: 'still here' },
       headers: as('owner'),
     });
@@ -135,7 +189,7 @@ describe('board daemon half', () => {
     const { asks, host, apply } = await boot();
     const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await host.request('POST', `/v1/board/cards/${made.id}`, {
+      await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
         headers: as('owner'),
       });
@@ -159,21 +213,21 @@ describe('board daemon half', () => {
       }) as unknown as AskAnswer;
 
     expect(await apply(answer('an_000000000000000000000001', 'Done'))).toBe('applied');
-    const after = await host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(after.json<{ card: { laneId: string } }>().card.laneId).toBe('closed');
-    const history = after.json<{ card: { history: { type: string }[] } }>().card.history.length;
+    const after = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(after.json<{ task: { laneId: string } }>().task.laneId).toBe('closed');
+    const history = after.json<{ task: { history: { type: string }[] } }>().task.history.length;
 
     // A replay of the same answer finds the card gone from that gate: nothing moves, nothing is written.
     await apply(answer('an_000000000000000000000001', 'Done'));
-    const again = await host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(again.json<{ card: { history: unknown[] } }>().card.history.length).toBe(history);
+    const again = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(again.json<{ task: { history: unknown[] } }>().task.history.length).toBe(history);
   });
 
   test('#1552 an answer to a gate the card has left is refused in words, and the card is not moved', async () => {
     const { asks, host, apply } = await boot();
     const made = await makeCard(host, { howToTest: 'Open the badge and look at its colour.' });
     const move = async (to: string) =>
-      await host.request('POST', `/v1/board/cards/${made.id}`, {
+      await host.request('POST', `/v1/board/tasks/${made.id}`, {
         body: { action: 'move', to, reason: 'for the test' },
         headers: as('owner'),
       });
@@ -195,8 +249,8 @@ describe('board daemon half', () => {
       at: '2026-11-07T09:00:00.000Z',
     } as unknown as AskAnswer);
     expect(refused).toMatchObject({ refused: expect.stringContaining('no longer at that question') });
-    const read = await host.request('GET', `/v1/board/cards/${made.id}`, { headers: as('owner') });
-    expect(read.json<{ card: { laneId: string } }>().card.laneId).toBe('doing');
+    const read = await host.request('GET', `/v1/board/tasks/${made.id}`, { headers: as('owner') });
+    expect(read.json<{ task: { laneId: string } }>().task.laneId).toBe('doing');
   });
 
   test('a card survives a restart, and a damaged card file is quarantined: listed, never served, never overwritten', async () => {
@@ -205,14 +259,14 @@ describe('board daemon half', () => {
     host.state('board').files.set('cards/F77.json', '{ this is not a card');
     const again = await host.restart();
     const board = await again.request('GET', '/v1/board', { headers: as('owner') });
-    const body = board.json<{ cards: { id: string }[]; quarantined: { id: string }[] }>();
-    expect(body.cards.map(each => each.id)).toContain(kept.id);
+    const body = board.json<{ tasks: { id: string }[]; quarantined: { id: string }[] }>();
+    expect(body.tasks.map(each => each.id)).toContain(kept.id);
     expect(body.quarantined.map(each => each.id)).toEqual(['F77']);
     expect(again.state('board').files.get('cards/F77.json')).toBe('{ this is not a card');
     // The damaged card's number is skipped, never handed out again.
-    const next = await again.request('POST', '/v1/board/cards', { body: NEW_CARD, headers: as('owner') });
+    const next = await again.request('POST', '/v1/board/tasks', { body: NEW_CARD, headers: as('owner') });
     expect(next.status).toBe(200);
-    expect(next.json<{ card: { id: string } }>().card.id).not.toBe('F77');
+    expect(next.json<{ task: { id: string } }>().task.id).not.toBe('F77');
   });
 
   test('the sweep and the GitHub watch are jobs of the kernel, and the gates reconcile once at start', async () => {
@@ -244,7 +298,7 @@ describe('the sitrep a lead reads a card from', () => {
     const world = await boot();
     const card = await makeCard(world.host, { assignee: 'f1' });
     for (const number of [940, 941]) {
-      const linked = await world.host.request('POST', `/v1/board/cards/${card.id}`, {
+      const linked = await world.host.request('POST', `/v1/board/tasks/${card.id}`, {
         body: { action: 'link', pr: `https://github.com/kirinnee/ferretry/pull/${String(number)}` },
         headers: as('owner'),
       });

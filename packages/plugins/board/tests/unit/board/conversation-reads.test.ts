@@ -194,15 +194,15 @@ describe('F-0001 Board reads the owner’s words through Conversation, strictly 
   /** A card a ferret made on its own account, carrying words the owner may or may not have said to it. */
   const ferretCard = async (world: Awaited<ReturnType<typeof boot>>, text: string) => {
     await world.host.request('PUT', '/v1/board/projects/unfiled/switch', { body: { on: true }, headers: as('owner') });
-    const made = await world.host.request('POST', '/v1/board/cards', {
+    const made = await world.host.request('POST', '/v1/board/tasks', {
       body: { kind: 'feature', title: 'Badge colour', assignee: 'f1', ask: { text, source: 'session:f1' } },
       headers: as('ferret:f1'),
     });
     expect(made.status).toBe(200);
-    return made.json<{ card: { id: string } }>().card.id;
+    return made.json<{ task: { id: string } }>().task.id;
   };
   const hide = async (world: Awaited<ReturnType<typeof boot>>, id: string) =>
-    await world.host.request('POST', `/v1/board/cards/${id}`, {
+    await world.host.request('POST', `/v1/board/tasks/${id}`, {
       body: { action: 'visibility', visibility: 'private' },
       headers: as('ferret:f1'),
     });
@@ -261,7 +261,7 @@ describe('J-0091 Board hands its cards to Conversation’s work search through s
     const same = (await contribution?.item.list()) as readonly RawWork[];
     expect(same[0]).toBe(first[0] as RawWork);
 
-    await world.host.request('POST', `/v1/board/cards/${made.id}`, {
+    await world.host.request('POST', `/v1/board/tasks/${made.id}`, {
       body: { action: 'note', text: 'the colour is #0a0' },
       headers: as('owner'),
     });
