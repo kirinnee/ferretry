@@ -132,7 +132,7 @@ describe('attention writing lint: an isolated card', () => {
       const actual = lintAgendaWriting({ ...clean, context });
 
       should(actual).have.length(1);
-      should(actual[0]).match(/^points elsewhere \(.+\) in context: .*say the thing itself on the card/u);
+      should(actual[0]).match(/^points elsewhere \(.+\) in context: .*say the thing itself on the item/u);
     }
   });
 

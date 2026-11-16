@@ -157,7 +157,7 @@ describe('joining card asks onto an item (the pure half)', () => {
 
     // Assert
     should(full).match({ kind: 'refused', code: 'full' });
-    should(input).match({ kind: 'refused', code: 'invalid', message: /A1 cannot carry a card's ask \(&F1\)/u });
+    should(input).match({ kind: 'refused', code: 'invalid', message: /A1 cannot carry a task's ask \(&F1\)/u });
     should(notice).match({ kind: 'refused', code: 'invalid' });
   });
 
@@ -585,6 +585,6 @@ describe('a split carries a moved card’s asks', () => {
     });
 
     // Assert
-    should(result).match({ ok: false, error: { code: 'invalid', message: /cannot carry a card's ask/u } });
+    should(result).match({ ok: false, error: { code: 'invalid', message: /cannot carry a task's ask/u } });
   });
 });

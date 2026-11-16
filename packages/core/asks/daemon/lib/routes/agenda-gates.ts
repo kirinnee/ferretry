@@ -104,14 +104,14 @@ const refusedDevice = (context: RouteContext): ApiError | undefined => {
   if (decision === undefined) {
     return new ApiError(
       403,
-      'this daemon could not check whether this caller may move cards, so nothing was moved (update it: fy daemon update)',
+      'this daemon could not check whether this caller may move tasks, so nothing was moved (update it: fy daemon update)',
       'forbidden',
     );
   }
   if (decision.allowed) return undefined;
   return new ApiError(
     403,
-    'this device may not use the agent fleet, so it may not move a card',
+    'this device may not use the agent fleet, so it may not move a task',
     grantRefusalCode(decision.refusal),
   );
 };

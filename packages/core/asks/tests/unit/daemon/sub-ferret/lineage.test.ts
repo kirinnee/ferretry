@@ -106,7 +106,7 @@ describe('subFerretRefusal', () => {
 
     // Assert
     should(refusal).startWith("You are a sub-ferret, so you can't move this card. You may note on,");
-    should(refusal).endWith('Your lead holds this card: claim it first: fy task claim &F12');
+    should(refusal).endWith('Your lead holds this task: claim it first: fy task claim &F12');
   });
 
   it('should fall back to the lead id when the lead has no address', async () => {

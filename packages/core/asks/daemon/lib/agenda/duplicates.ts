@@ -93,9 +93,9 @@ const sameWords = (one: AgendaItem, other: AgendaItem): boolean => wordsOf(one) 
 /** Why an item may not be closed, or `undefined` when it may. */
 const protectedBecause = (entry: Entry): string | undefined => {
   const { item } = entry;
-  if (handsOnItem(item)) return 'a hands-on card';
+  if (handsOnItem(item)) return 'a hands-on item';
   // An agenda that carries a card's ask is the card's one ask: closing it as a duplicate would drop the ask.
-  if ((item.cardAsks ?? []).length > 0) return "it carries a card's ask";
+  if ((item.cardAsks ?? []).length > 0) return "it carries a task's ask";
   if (item.history !== undefined || item.infoRequests !== undefined || item.undelivered !== undefined)
     return 'the owner has begun talking about it';
   return undefined;

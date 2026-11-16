@@ -582,7 +582,7 @@ describe('agenda brief card kinds and answers', () => {
   it('should refuse a question on an info card', () => {
     // Act + Assert
     should(() => add(['x'], { kind: 'info', question: ['Which?'] })).throw(
-      /^an info card only tells: no --question, --option or --step/u,
+      /^an info item only tells: no --question, --option or --step/u,
     );
   });
 });
@@ -856,7 +856,7 @@ describe('agenda brief answer shapes', () => {
     for (const kind of ['reply', 'permission', 'review', 'yesno']) {
       should(() => add(['x'], { kind, step: ['One'] })).throw(STEPS_ONLY_TODO);
     }
-    should(() => add(['x'], { kind: 'info', step: ['One'] })).throw(/^an info card only tells/u);
+    should(() => add(['x'], { kind: 'info', step: ['One'] })).throw(/^an info item only tells/u);
     should(add(['x'], { step: ['One'] }).kind).equal('task');
   });
 

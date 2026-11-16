@@ -66,7 +66,7 @@ export const SOURCE_SHAPES: readonly SourceShape[] = [
   { name: 'asks port, other source', whose: 'other', match: /^(?:ask|standing):[^:]+:/u },
   { name: 'gate item', whose: 'other', match: /^gate:/u },
   { name: 'gate follow-up', whose: 'other', match: /^gate-followup:/u },
-  { name: 'card agenda', whose: 'other', match: /^card-agenda:/u },
+  { name: 'task agenda', whose: 'other', match: /^card-agenda:/u },
   { name: 'v4 lane proposal', whose: 'other', match: /^lanes:/u },
   { name: 'v4 handover', whose: 'other', match: /^handover:/u },
   { name: 'v4 budget notice', whose: 'other', match: /^budget:/u },
