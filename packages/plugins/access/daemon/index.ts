@@ -52,6 +52,7 @@ export default implementDaemon(manifest, {
         'DELETE /v1/pair/devices/:deviceId': route('DELETE /v1/pair/devices/:deviceId'),
         'PATCH /v1/pair/devices/:deviceId/grants': route('PATCH /v1/pair/devices/:deviceId/grants'),
         'GET /v1/pair/identity': route('GET /v1/pair/identity'),
+        'POST /v1/pair/redirect': route('POST /v1/pair/redirect'),
         'GET /v1/passkeys': route('GET /v1/passkeys'),
         'POST /v1/passkeys': route('POST /v1/passkeys'),
         'POST /v1/passkeys/options': route('POST /v1/passkeys/options'),

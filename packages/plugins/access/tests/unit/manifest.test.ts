@@ -7,7 +7,7 @@ const byKey = new Map(routes.map(route => [route.key, route]));
 
 describe('access manifest', () => {
   test("declares today's pairing, passkey, unlock and push routes, and not the daemon-wide grants", () => {
-    expect(routes).toHaveLength(19);
+    expect(routes).toHaveLength(20);
     // DECISIONS-1 #4: the seen route is Agenda's; Access keeps push subscriptions.
     expect(routes.map(route => route.key as string)).not.toContain('POST /v1/push/seen');
     expect(byKey.has('POST /v1/push/subscriptions')).toBe(true);
@@ -21,6 +21,12 @@ describe('access manifest', () => {
     expect(mint?.capability?.axis).toBe('use');
     expect(mint?.noStore).toBe(true);
     expect(mint?.audit).toEqual({ record: AUDIT.pairingCodeMinted });
+  });
+  test('the --open redirect page is made by the daemon for the host admin credential alone, never stored', () => {
+    const redirect = byKey.get('POST /v1/pair/redirect');
+    expect(redirect?.minimum).toBe('admin-token');
+    expect(redirect?.noStore).toBe(true);
+    expect(redirect?.capability).toBeUndefined();
   });
   test('revoking a device only narrows, so it is never harder than granting', () => {
     expect(byKey.get('DELETE /v1/pair/devices/:deviceId')?.capability?.narrowing).toBe(true);
