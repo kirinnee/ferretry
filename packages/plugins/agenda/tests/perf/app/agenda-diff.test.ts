@@ -13,6 +13,8 @@ describe('a very long text', () => {
     Array.from({ length: count }, (_, index) => `Sentence ${String(index)} ${edit[index] ?? 'holds'} steady.`).join(
       ' ',
     );
+  const kinds = (runs: ReturnType<typeof diffText>, kind: 'added' | 'removed'): string[] =>
+    runs.filter(run => run.kind === kind).map(run => run.text);
   const joined = (runs: ReturnType<typeof diffText>, drop: 'added' | 'removed'): string =>
     runs
       .filter(run => run.kind !== drop)
@@ -28,6 +30,8 @@ describe('a very long text', () => {
     const started = performance.now();
     const runs = diffText(before, after);
     expect(performance.now() - started).toBeLessThan(2000);
+    expect(kinds(runs, 'removed')).toEqual(['finished', 'finished']);
+    expect(kinds(runs, 'added')).toEqual(['failed', 'failed']);
     expect(joined(runs, 'added')).toBe(before);
     expect(joined(runs, 'removed')).toBe(after);
   });
@@ -38,6 +42,8 @@ describe('a very long text', () => {
     const started = performance.now();
     const runs = diffText(before, after);
     expect(performance.now() - started).toBeLessThan(2000);
+    expect(kinds(runs, 'removed')).toEqual(['holds', 'holds']);
+    expect(kinds(runs, 'added')).toEqual(['wobbles', 'wobbles']);
     expect(joined(runs, 'added')).toBe(before);
     expect(joined(runs, 'removed')).toBe(after);
   });

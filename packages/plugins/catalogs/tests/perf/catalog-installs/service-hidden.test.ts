@@ -24,16 +24,18 @@ describe('a large file on disk is previewed in bounded time', () => {
       Array.from({ length: (2 * 1024 * 1024) / 16 }, (_, depth) => `${' '.repeat(depth % 8)}pw: |`).join('\n'),
     ],
     ['2 MiB of repeated token prefixes', 'sk-'.repeat((2 * 1024 * 1024) / 3)],
-  ])('should answer %s on disk in bounded time', async (_label, text) => {
+  ])('should answer %s on disk in bounded time, with no text drawn', async (_label, text) => {
+    // The timer covers the whole operation, as the original did: rig, first preview, install, replacement, preview.
+    const started = performance.now();
     const r = rig();
     const first = await r.service.preview('project', await request(alice, skillV(1, '# one\n'), projectTarget()));
     await r.service.apply('project', { previewId: first.previewId, secretBindings: {} }, GOVERNANCE, STEP_UP);
     r.folders.folders.get(FOLDER)?.set('SKILL.md', text);
-    const started = performance.now();
-    await r.service.preview(
+    const preview = await r.service.preview(
       'project',
       await request(alice, skillV(2, '# two\n'), projectTarget(), { replaceEdited: true }),
     );
     should(performance.now() - started).be.below(15_000);
+    should(JSON.stringify(preview.changes)).not.match(/pw: \||sk-sk-/u);
   });
 });
