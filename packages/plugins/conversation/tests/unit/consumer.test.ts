@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { FerretId } from '@ferretry/core-ferrets/contract';
-import { conversationFor, WARDEN_PLUGIN } from '../../contract/index.ts';
+import { AGENDA_PLUGIN, conversationFor, WARDEN_PLUGIN } from '../../contract/index.ts';
 import { conversationConformance, fakeConversation, fakeConversationFor } from '../../contract/testing/index.ts';
 
 const F1 = 'f1' as FerretId;
@@ -28,6 +28,30 @@ describe('a consumer’s view of Conversation (conversationFor)', () => {
     );
     expect(sent.ok).toBe(true);
     expect((await core.sendRecord(F1, 's-1'))?.senderKind).toBe('daemon');
+  });
+
+  test('KCB-S the Agenda claim is the Agenda plugin’s alone: every other consumer, the Warden included, is refused forbidden before the core is called', async () => {
+    const core = fakeConversation();
+    for (const consumer of ['board', 'lessons', 'usage', WARDEN_PLUGIN, 'agenda-impostor', '']) {
+      const view = conversationFor(consumer, core);
+      expect(await view.send(F1, { kind: 'agenda' }, { message: 'x', sendId: 's-1' })).toEqual({
+        ok: false,
+        error: { code: 'forbidden', message: "only Ferretry's Agenda may speak as the Agenda" },
+      });
+    }
+    expect((await core.sends(F1)).sends).toEqual([]);
+
+    const sent = await conversationFor(AGENDA_PLUGIN, core).send(
+      F1,
+      { kind: 'agenda' },
+      { message: 'x', sendId: 's-1' },
+    );
+    expect(sent.ok).toBe(true);
+    expect((await core.sendRecord(F1, 's-1'))?.senderKind).toBe('daemon');
+    // And the Agenda may not speak as the Warden.
+    expect(
+      (await conversationFor(AGENDA_PLUGIN, core).send(F1, { kind: 'warden' }, { message: 'y', sendId: 's-2' })).ok,
+    ).toBe(false);
   });
 
   test('KCB-S the owner and a ferret may still be named by any consumer', async () => {

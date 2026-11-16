@@ -33,6 +33,12 @@ describe('the slots Ferrets offers', () => {
     expect(isNewFerretAccountSlotProps(null)).toBe(false);
   });
 
+  it('a panel may be handed `onOffered`, but only as a function', () => {
+    expect(isNewFerretAccountSlotProps({ ...page, onOffered: () => undefined })).toBe(true);
+    expect(isMoveAccountSlotProps({ ...page, harness: 'codex', onOffered: () => undefined })).toBe(true);
+    expect(isNewFerretAccountSlotProps({ ...page, onOffered: 'yes' })).toBe(false);
+  });
+
   it('the move slot also owes the harness the ferret is on', () => {
     expect(isMoveAccountSlotProps(page)).toBe(false);
     expect(isMoveAccountSlotProps({ ...page, harness: 'codex' })).toBe(true);

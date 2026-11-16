@@ -5,8 +5,9 @@ import {
   agentAddressName,
   ambiguousAgentAddressMessage,
   isLiveAgentCandidate,
+  provedAgentReference,
   resolveAgentAddress,
-} from '../../../../daemon/lib/protocol/agent-address.ts';
+} from '../../contract/agent-address.ts';
 
 const aniya: AgentAddressCandidate = { id: 'mvb0sw7d-27f71326', name: 'aniya', status: 'running' };
 const torrey: AgentAddressCandidate = { id: 'mvb0aaaa-11111111', name: 'Torrey', status: 'waiting' };
@@ -82,5 +83,46 @@ describe('agent address helpers', () => {
       'the name aniya is held by 2 sessions on this machine: mvb0sw7d-27f71326 (running), x (status unknown); ' +
         'address one by its session id',
     );
+  });
+});
+
+describe('provedAgentReference', () => {
+  const fleet: readonly AgentAddressCandidate[] = [aniya, torrey, oldAniya];
+
+  it('should prove an exact id as that ferret with its lowercase callsign', () => {
+    should(provedAgentReference({ sessionId: torrey.id }, fleet)).deepEqual({ id: torrey.id, name: 'torrey' });
+  });
+
+  it('should prove a name through the addressing rule, preferring the live holder', () => {
+    should(provedAgentReference({ name: 'Aniya' }, fleet)).deepEqual({ id: aniya.id, name: 'aniya' });
+  });
+
+  it('should prove nothing for a name two live ferrets hold', () => {
+    const revived: AgentAddressCandidate = { ...oldAniya, status: 'running' };
+    should(provedAgentReference({ name: 'aniya' }, [aniya, revived])).be.null();
+  });
+
+  it('should prove nothing for an unknown id or name', () => {
+    should(provedAgentReference({ sessionId: 'nope' }, fleet)).be.null();
+    should(provedAgentReference({ name: 'nobody' }, fleet)).be.null();
+    should(provedAgentReference({}, fleet)).be.null();
+  });
+
+  it('should prove nothing for a name the grammar refuses', () => {
+    should(provedAgentReference({ name: '9lives' }, [{ id: 'a', name: '9lives', status: 'running' }])).be.null();
+  });
+
+  it('should leave out a ferret without a callsign, with an unsafe id, or with a dot id', () => {
+    const odd: readonly AgentAddressCandidate[] = [
+      { id: 'no-name', status: 'running' },
+      { id: '../etc', name: 'evil', status: 'running' },
+      { id: '.', name: 'dot', status: 'running' },
+      { id: '..', name: 'dotdot', status: 'running' },
+    ];
+    should(provedAgentReference({ sessionId: 'no-name' }, odd)).be.null();
+    should(provedAgentReference({ sessionId: '../etc' }, odd)).be.null();
+    should(provedAgentReference({ name: 'evil' }, odd)).be.null();
+    should(provedAgentReference({ sessionId: '.' }, odd)).be.null();
+    should(provedAgentReference({ sessionId: '..' }, odd)).be.null();
   });
 });
