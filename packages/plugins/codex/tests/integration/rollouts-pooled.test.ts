@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { type LaunchSpec, poolHomeHistory } from '@ferretry/core-ferrets/contract';
 import type { FencedPath, FerretId, KernelPorts } from '@ferretry/kernel/contract';
 import { nodeFs, rootsPortFor, state } from '@ferretry/kernel/host';
+import { ensureInternalRootBases } from '../../../../core/kernel/host/roots.ts';
 import { instantFromEpochMs } from '@ferretry/std';
 import { CODEX_AGENT_HOMES, CODEX_HISTORY_ENTRIES, CODEX_HISTORY_POOL, CODEX_ROLLOUTS } from '../../contract/index.ts';
 import { CodexRollouts } from '../../daemon/adapters/rollouts.ts';
@@ -51,7 +52,17 @@ async function world() {
   await mkdir(owner, { recursive: true });
   for (const folder of ['', 'state', 'state/codex'])
     await mkdir(join(home, folder), { recursive: true, mode: 0o700 }).then(() => chmod(join(home, folder), 0o700));
-  await mkdir(pool(), { recursive: true, mode: 0o700 });
+  await mkdir(join(home, 'state/codex/agent-homes'), { recursive: true, mode: 0o700 });
+  await chmod(join(home, 'state/codex/agent-homes'), 0o700);
+  await ensureInternalRootBases(
+    nodeFs(() => crypto.randomUUID()),
+    { home, plugin: 'codex' },
+    ['agent-homes', 'harness-history'],
+    {
+      historyPool: { state: CODEX_HISTORY_POOL.name, entries: CODEX_HISTORY_ENTRIES },
+      stateFiles: [CODEX_AGENT_HOMES, CODEX_HISTORY_POOL],
+    },
+  );
   for (const ferret of ['f1', 'f2']) await mkdir(agent(ferret), { recursive: true, mode: 0o700 });
   const roots = rootsPortFor(
     nodeFs(() => crypto.randomUUID()),

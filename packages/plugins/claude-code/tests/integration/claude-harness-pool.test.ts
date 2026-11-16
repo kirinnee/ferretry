@@ -27,7 +27,7 @@ import type { FerretId } from '@ferretry/kernel/contract';
 import { MemoryStateFolder } from '@ferretry/kernel/testing';
 import { type Instant, ok } from '@ferretry/std';
 import { nodeFs } from '../../../../core/kernel/host/adapters/node-fs.ts';
-import { rootsPortFor } from '../../../../core/kernel/host/roots.ts';
+import { ensureInternalRootBases, rootsPortFor } from '../../../../core/kernel/host/roots.ts';
 import {
   CLAUDE_CODE_AGENT_HOMES,
   CLAUDE_CODE_HISTORY_ENTRIES,
@@ -53,21 +53,25 @@ beforeEach(async () => {
   await mkdir(join(fyHome, 'state/claude-code/agent-homes'), { recursive: true });
   for (const folder of ['', 'state', 'state/claude-code', 'state/claude-code/agent-homes'])
     await chmod(join(fyHome, folder), 0o700);
+  // The daemon makes every base at boot, the pool's among them (for a plugin that declares one).
+  await ensureInternalRootBases(
+    nodeFs(() => crypto.randomUUID()),
+    { home: fyHome, plugin: 'claude-code' },
+    ['agent-homes', 'harness-history'],
+    { historyPool: POOL_PERMISSION, stateFiles: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL] },
+  );
 });
 afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
+const POOL_PERMISSION = { state: CLAUDE_CODE_HISTORY_POOL.name, entries: CLAUDE_CODE_HISTORY_ENTRIES };
 const homeOf = (ferret: string) => join(fyHome, 'state/claude-code/agent-homes', ferret);
 const pool = (...parts: string[]) => join(fyHome, 'state/claude-code/history-pool', ...parts);
 
 /** The harness over the real roots; `pooled: false` declares no pool (a plugin the kernel does not let pool). */
 function build(options: { pooled?: boolean } = {}) {
   const fs = nodeFs(() => crypto.randomUUID());
-  const permission = {
-    state: CLAUDE_CODE_HISTORY_POOL.name,
-    entries: CLAUDE_CODE_HISTORY_ENTRIES,
-  };
   const roots = rootsPortFor(
     fs,
     { home: fyHome, plugin: 'claude-code', worktrees: join(fixture, 'worktrees') },
@@ -75,7 +79,7 @@ function build(options: { pooled?: boolean } = {}) {
     () => undefined,
     options.pooled === false
       ? {}
-      : { historyPool: permission, stateFiles: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL] },
+      : { historyPool: POOL_PERMISSION, stateFiles: [CLAUDE_CODE_AGENT_HOMES, CLAUDE_CODE_HISTORY_POOL] },
   );
   const harness = new ClaudeHarness({
     selected: async () => ({ settings: { has: () => true }, hooks: { has: () => true } }) as never,
