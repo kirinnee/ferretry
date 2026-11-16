@@ -3,10 +3,47 @@
  * new per-ferret variable is ONE feature file and touches no `service.ts`, `session-files.ts`, `index.ts` or port.
  * Daemon-internal on purpose: a contract slot would make the window in which a launch runs a permanent plugin API.
  *
- * The STORES half lives here (U6c): one declared pane variable each. The guards half (checks around the pane) joins this
- * file in U6b.
+ * Two lists: STORES (U6c), one declared pane variable each, and GUARDS (U6b), checks the lifecycle makes around every
+ * pane it opens (the conversation lease is the built-in innermost one; see `conversation-lease-guard.ts`).
  */
-import type { FencedPath, FerretId } from '../../../contract/index.ts';
+import { err, ok, type Result } from '@ferretry/std';
+import type { FencedPath, FerretId, FerretRecord, StartFailure } from '../../../contract/index.ts';
+
+/** A guard's answer. It can never invent another failure code (no `harness_unavailable`, `login_unavailable`...). */
+export type GuardVerdict =
+  | { readonly allow: true }
+  | { readonly allow: false; readonly code: 'refused' | 'failed'; readonly reason: string };
+
+/** Asked as the LAST step before the harness is asked to start: tokens issued, env resolved, folder re-verified. */
+export interface GuardedLaunch {
+  readonly record: Readonly<FerretRecord>;
+  /** The conversation the launch WILL resume (after `hasConversation`); `undefined` = a new conversation. */
+  readonly conversation: string | undefined;
+}
+
+/** Asked once the pane is open, BEFORE the launch-sections write and the record's `working` write. */
+export interface OpenedLaunch {
+  readonly record: Readonly<FerretRecord>;
+  /** `started.harnessConversation ?? conversation`; `undefined` when the harness named none. */
+  readonly conversation: string | undefined;
+  readonly pid: number | undefined;
+}
+
+/**
+ * A check the lifecycle makes around every pane it opens (start, resume, revive, restart, move, lifecycle launchHeld).
+ * Runs on the ferret's serial lane: it must never `serial.run` the same ferret (deadlock). Must be restart-safe:
+ * `released` frees from durable state by ferret id, never from memory kept since `beforePane`. Guards must not depend on
+ * each other: registration order is the generator's (file name), which is accidental.
+ */
+export interface LaunchGuard {
+  /** What this guard is called in a boot fault (a repeated id). Unique. */
+  readonly id: string;
+  readonly beforePane?: (launch: GuardedLaunch) => Promise<GuardVerdict>;
+  /** A refusal here: the launch's EXISTING cleanup stops the pane; the runner releases nothing itself. */
+  readonly paneOpened?: (launch: OpenedLaunch) => Promise<GuardVerdict>;
+  /** The ferret settled `stopped` (after `endWait`). Called whether or not `beforePane` ran. Never fails a stop. */
+  readonly released?: (ferret: FerretId) => Promise<void>;
+}
 
 /**
  * A per-ferret file or folder the pane is told about through ONE declared variable (`FY_QUESTION_FILE`, `FY_MEDIA_DIR`).
@@ -30,11 +67,14 @@ export interface LaunchSteps {
   sealed(): boolean;
   /** The stores, in registration order. */
   stores(): readonly SessionStore[];
+  /** The guards features registered, in registration order (the built-in lease guard is the service's, not listed). */
+  guards(): readonly LaunchGuard[];
 }
 
 /** What a feature is handed to add to the lists, at registration only. */
 export interface LaunchStepRegistrar {
   paneVariable(store: SessionStore): void;
+  guard(guard: LaunchGuard): void;
 }
 
 /**
@@ -57,6 +97,7 @@ const PANE_VARIABLE = /^FY_[A-Z][A-Z0-9_]*$/;
  */
 export class LaunchStepRegistry implements LaunchSteps, LaunchStepRegistrar {
   private readonly held: SessionStore[] = [];
+  private readonly heldGuards: LaunchGuard[] = [];
   private isSealed = false;
 
   sealed(): boolean {
@@ -65,6 +106,17 @@ export class LaunchStepRegistry implements LaunchSteps, LaunchStepRegistrar {
 
   stores(): readonly SessionStore[] {
     return this.held;
+  }
+
+  guards(): readonly LaunchGuard[] {
+    return this.heldGuards;
+  }
+
+  guard(guard: LaunchGuard): void {
+    if (this.isSealed) throw new Error(`ferrets: the launch guard ${guard.id} was registered after boot finished`);
+    if (this.heldGuards.some(held => held.id === guard.id))
+      throw new Error(`ferrets: two launch guards are called ${guard.id}`);
+    this.heldGuards.push(guard);
   }
 
   paneVariable(store: SessionStore): void {
@@ -101,4 +153,51 @@ export async function paneVariables(
     if (found !== undefined) variables[store.variable] = found;
   }
   return variables;
+}
+
+/** Fixed sentences: a guard that throws is never quoted (its text could carry a path or a secret). */
+export const GUARD_UNCHECKED = 'the ferret was not started: a check its launch needs could not be made';
+export const GUARD_UNHELD = 'the ferret was stopped: a check its launch needs could not be kept';
+
+const allowed = ok(undefined);
+
+/**
+ * Asks `guards` (outermost first) as the last step before the harness starts. The first refusal ends the walk: later
+ * guards and the harness are never asked. A guard that throws refuses the launch with a fixed sentence (never launch
+ * unchecked). Tokens are revoked and every guard's `released` runs through the launch's own abandon, not here.
+ */
+export async function beforePane(
+  guards: readonly LaunchGuard[],
+  launch: GuardedLaunch,
+): Promise<Result<void, StartFailure>> {
+  for (const guard of guards) {
+    if (guard.beforePane === undefined) continue;
+    const verdict = await guard.beforePane(launch).catch(() => undefined);
+    if (verdict === undefined) return err({ code: 'failed', reason: GUARD_UNCHECKED });
+    if (!verdict.allow) return err({ code: verdict.code, reason: verdict.reason });
+  }
+  return allowed;
+}
+
+/**
+ * Asks `guards` (INNERMOST first, the reverse of `beforePane`) once the pane is open, so the conversation moves onto the
+ * pane's pid before a slower feature guard runs. A refusal or throw is returned only: the launch's existing cleanup stops
+ * the pane, and a stop that fails keeps the handle and the lease (nothing is released here).
+ */
+export async function paneOpened(
+  guards: readonly LaunchGuard[],
+  launch: OpenedLaunch,
+): Promise<Result<void, StartFailure>> {
+  for (const guard of [...guards].reverse()) {
+    if (guard.paneOpened === undefined) continue;
+    const verdict = await guard.paneOpened(launch).catch(() => undefined);
+    if (verdict === undefined) return err({ code: 'failed', reason: GUARD_UNHELD });
+    if (!verdict.allow) return err({ code: verdict.code, reason: verdict.reason });
+  }
+  return allowed;
+}
+
+/** Frees what each guard holds for `ferret`, innermost first. One that throws never stops the rest or fails a stop. */
+export async function released(guards: readonly LaunchGuard[], ferret: FerretId): Promise<void> {
+  for (const guard of [...guards].reverse()) await guard.released?.(ferret).catch(() => undefined);
 }
