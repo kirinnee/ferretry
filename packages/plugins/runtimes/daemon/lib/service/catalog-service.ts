@@ -48,7 +48,6 @@ import type { HarnessKind } from '../manifest.ts';
 import { type MaterialiseBodies, materialiseFleet } from '../account/materialise.ts';
 import { nextDisableExpiry } from '../account/disabled.ts';
 import type { BudgetHolds } from '../account/disabled-runtime.ts';
-import type { ProviderPreset } from '../presets/schema.ts';
 import { parseSettings, type SettingsObject } from '../settings.ts';
 import {
   type AccountChange,
@@ -293,8 +292,6 @@ export interface FleetCatalogServiceDeps {
   readonly hostCodexHome?: string;
   /** Whether the installed Claude accepts `--permission-mode auto` (O4), measured on the pinned version. */
   readonly acceptsAutoPermissionMode: boolean;
-  /** The provider presets this machine offers, for a login made from one (docs/provider-presets.md). */
-  presets?(): Promise<readonly ProviderPreset[]>;
   /** The model catalogs and presets in effect (docs/model-catalog.md): what each runtime offers and pins. */
   modelCatalogs?(): Promise<ModelCatalogSources>;
   /** Where Logins keeps each Ferretry-kept login (`LoginsApi.launchStores`): how a wrapper and a home reach its sign-in. */
