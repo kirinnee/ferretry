@@ -2,9 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import {
   ACTIONS_ROW_SLOT,
   FERRET_ACCOUNT_SLOTS,
+  FERRET_LIST_ROW_MARK_SLOT,
   FERRET_SLOTS,
   FILES_SEARCH_SLOT,
   isActionsRowSlotProps,
+  isFerretListRowMarkSlotProps,
   isFilesSearchSlotProps,
   isNewFerretProjectSlotProps,
   NEW_FERRET_PROJECT_SLOT,
@@ -15,12 +17,21 @@ describe('the ferret page’s slots', () => {
     expect(ACTIONS_ROW_SLOT).toBe('ferrets.actions-row');
     expect(FILES_SEARCH_SLOT).toBe('ferrets.files-search');
     expect(NEW_FERRET_PROJECT_SLOT).toBe('ferrets.new-ferret-project');
+    expect(FERRET_LIST_ROW_MARK_SLOT).toBe('ferrets.list-row-mark');
     expect([...FERRET_SLOTS]).toEqual([
       ...FERRET_ACCOUNT_SLOTS,
       ACTIONS_ROW_SLOT,
       FILES_SEARCH_SLOT,
       NEW_FERRET_PROJECT_SLOT,
+      FERRET_LIST_ROW_MARK_SLOT,
     ]);
+  });
+
+  it('a row-mark panel needs the ferret and the runtime it runs on', () => {
+    expect(isFerretListRowMarkSlotProps({ ferret: 'f1', runtime: 'claude-main' })).toBe(true);
+    expect(isFerretListRowMarkSlotProps({ ferret: 'f1' })).toBe(false);
+    expect(isFerretListRowMarkSlotProps({ ferret: 'f1', runtime: 7 })).toBe(false);
+    expect(isFerretListRowMarkSlotProps(undefined)).toBe(false);
   });
 
   it('a panel accepts the props the host hands it and refuses anything short of them', () => {

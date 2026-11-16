@@ -214,6 +214,35 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Marks other plugins draw on a row (Usage's quota): their own line, quiet, under the directory. */
+.fy-sbar__marks {
+  grid-column: 2;
+  min-width: 0;
+  font-size: var(--text-2xs);
+}
+.fy-sbar__marks:empty,
+.fy-sbar__marks:has(.fy-slot:empty) {
+  display: none;
+}
+/* Folder mode: the focused folder's bar, and the group name that focuses a folder. */
+.fy-sbar__scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: var(--text-xs);
+}
+.fy-sbar__focus {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
 .fy-sbar__session[aria-current='page'] .fy-sbar__sub,
 .fy-sbar__session[aria-current='page'] .fy-sbar__dir {
   color: var(--nav-sel-sub, var(--nav-sel-fg, var(--accent)));

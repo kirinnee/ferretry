@@ -65,6 +65,11 @@ export class ProjectsStore {
     return this.#slice.projects ?? NO_PROJECTS;
   }
 
+  /** Whether a read has settled: an unread registry answers `projects()` with the empty list, which proves nothing. */
+  known(): boolean {
+    return this.#slice.projects !== null;
+  }
+
   /** Reads the registry once; a burst of callers makes ONE request. */
   hydrate(): Promise<readonly ProjectInfo[]> {
     if (this.#inflight !== undefined) return this.#inflight;
