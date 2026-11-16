@@ -38,9 +38,6 @@ export interface WardenRemedyHost {
 /** Ferrets ANSWERED that it would not start the ferret, before it committed a relaunch: nothing was started. */
 class ResumeRefused extends Error {}
 
-/** The reason the Warden's restart gives Ferrets for the stop half of it (today's restart recorded the Warden). */
-export const RESTART_STOP_REASON = 'restarted by the Warden: the process looked alive but was stuck';
-
 /** The remedies, and the one guarded resume the remedies and the auto-revive share. */
 export interface WardenRemedies {
   readonly remedies: WardenRemedyPort;
@@ -89,6 +86,7 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
     message: string | undefined,
     what: string,
     origin: LaunchOrigin,
+    replaceLiveTerminal = false,
   ): Promise<string | undefined> => {
     // Every resume the Warden makes is automated recovery, not a person asking: Ferrets records it as such, and the
     // turn it writes is from the Warden.
@@ -98,6 +96,8 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
       origin,
       automatic: true,
       actor: 'warden',
+      // A restart: the live pane is replaced by this one resume, Ferrets judging the start gate first.
+      ...(replaceLiveTerminal ? { replaceLiveTerminal: true } : {}),
       decided: disposition => {
         relaunched = disposition === 'relaunching';
       },
@@ -133,16 +133,13 @@ export function createWardenRemedies(host: WardenRemedyHost): WardenRemedies {
         await authorize(ferret);
         await resumeOrThrow(ferret, message, 'resume', origin);
       }),
-    // A restart replaces a process that only looks alive: stop it for real, then resume the conversation. Today this
-    // was ONE resume that replaced the live pane under the automatic policy (`replaceLiveTerminal`); Ferrets has no
-    // such resume (GAP(ferrets): `ResumeOptions` has no `replaceLiveTerminal`; a live pane is replaced only by a move, whose
-    // in-flight gate a stuck process must not meet), so today's refusals are checked first, before the stop.
+    // A restart replaces a process that only looks alive: ONE resume that replaces the live pane (`replaceLiveTerminal`).
+    // Ferrets judges today's refusals first (the runtime, its login, the folder and the start gate), then stops the old
+    // harness and relaunches, so a refusal leaves the stuck ferret as it was and its turn carries the message.
     restart: async (ferret, message, origin) =>
       await act(ferret, 'restart', async () => {
         await authorize(ferret);
-        await ferrets.stop(ferret as FerretId, 'now', RESTART_STOP_REASON);
-        // Stopped just now, so the resume relaunches it and its turn carries the message (Ferrets says so).
-        await resumeOrThrow(ferret, message, 'restart', origin);
+        await resumeOrThrow(ferret, message, 'restart', origin, true);
       }),
     stop: async (ferret, reason) =>
       await act(ferret, 'stop', async () => await ferrets.stop(ferret as FerretId, 'polite', reason)),

@@ -415,6 +415,11 @@ export interface FerretSessionPort {
    */
   setCompactAt?(ferret: FerretId, value: 'auto' | number | undefined): Promise<void>;
   /**
+   * Sets (or, for `false`, takes off) the `stalled` health mark in the ferret's state document under the storage's locked
+   * read-modify-write, changing no other field. Answers whether the document changed.
+   */
+  markStalled?(ferret: FerretId, stalled: boolean): Promise<boolean>;
+  /**
    * What the session config says about the runtime this ferret launched as (`agent`, `command[0]`), or `undefined` when
    * the document is missing or is not an object. Rejects when it cannot be read.
    */
@@ -641,7 +646,8 @@ export interface ServiceResumeOptions extends Omit<ResumeOptions, 'actor'> {
   readonly confirmRestore?: () => void;
   /**
    * Replace a LIVE pane instead of keeping the ferret running as it is: the pane is stopped and the ferret relaunched
-   * through the ordinary launch (new token, harness home, environment). Only a move sets it.
+   * through the ordinary launch (new token, harness home, environment). A move sets it, and so does the Warden's own
+   * resume (`ResumeOptions.replaceLiveTerminal`, checked at the port).
    */
   readonly replaceLiveTerminal?: boolean;
   /**
@@ -869,6 +875,17 @@ export class FerretsService implements FerretsApi {
       if (sources.length > 0) found.push({ harness: key, sources });
     }
     return found;
+  }
+
+  /**
+   * The Warden's stalled mark (`FerretsApi.markStalled`), on a ferret that is running only: a stopped or unknown one is a
+   * no-op. Answers whether the state document changed; a Ferrets with no session files marks nothing.
+   */
+  async markStalled(ferret: FerretId, stalled: boolean): Promise<boolean> {
+    await this.ports.ready?.();
+    const record = this.registry.get(ferret);
+    if (record === undefined || record.state === 'stopped') return false;
+    return (await this.ports.session?.markStalled?.(ferret, stalled)) ?? false;
   }
 
   /** The handle `ferret.json` keeps while the ferret runs; a stop clears it. */
