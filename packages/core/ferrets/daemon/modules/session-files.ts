@@ -48,6 +48,7 @@ import { resolveWardenLineage } from '../lib/session/provenance/lineage.ts';
 import { SessionProvenanceStamper } from '../lib/session/provenance/stamper.ts';
 import type { SessionSpawnRequest } from '../lib/session/provenance/types.ts';
 import { SessionConfigSchema } from '../lib/protocol/session.ts';
+import { markedHealth } from '../lib/ferrets/health-mark.ts';
 import { repointedSessionConfig, sessionRuntimeFacts } from '../lib/ferrets/runtime-repoint.ts';
 
 /** The id a lineage question about a ferret that does not exist yet carries; it names no real session. */
@@ -231,6 +232,16 @@ export class SessionFiles {
           const { compactAt: _previous, ...kept } = current as Readonly<Record<string, unknown>>;
           return value === undefined ? kept : { ...kept, compactAt: value };
         });
+      },
+      // The Warden's stalled mark: `health` alone, decided on what the locked read-modify-write reads.
+      markStalled: async (ferret, stalled) => {
+        let changed = false;
+        await this.deps.storage.updateState(parseSessionId(ferret), current => {
+          const next = markedHealth(current, stalled);
+          changed = next !== undefined;
+          return next ?? current;
+        });
+        return changed;
       },
       runtimeFacts: async ferret => sessionRuntimeFacts(await this.deps.storage.readConfig(parseSessionId(ferret))),
       // A rename's re-point (v4's `renameSessions`): read first, outside the lock, so a config that does not name the old

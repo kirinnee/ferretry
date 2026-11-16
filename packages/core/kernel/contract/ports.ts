@@ -1571,6 +1571,15 @@ export interface HostFactsPort {
   procFdReach(pid: number, fd: string): Promise<{ readonly character: boolean; readonly device: number }>;
   /** `readlink /proc/<pid>/exe`. */
   procExecutable(pid: number): Promise<string>;
+  /**
+   * `readlink /proc/<pid>/cwd`: the folder the process works in NOW, as the one fact the move gate uses to classify a
+   * `.mcp.json` server. Read-only and values-free (a path, no environment, no arguments). `undefined` when the
+   * process is gone, is another user's, has a working folder that was removed, or the host has no procfs (darwin
+   * always answers `undefined`). A pid that is not a whole number refuses like every other read. It is only a read:
+   * the caller proves the pid is a descendant it already holds before asking; this method reads that one `cwd` link
+   * and nothing else.
+   */
+  procWorkingDirectory(pid: number): Promise<string | undefined>;
   /** `/sys/fs/cgroup/<path>/<file>`; `path` is relative (`''` is the root). */
   cgroupFile(path: string, file: CgroupFile): Promise<string>;
   /** `readdir /sys/fs/cgroup/<path>`. */
