@@ -152,12 +152,98 @@ export function paneShowsActiveWork(pane: string): boolean {
  * so it is the one reading a transcript that says the turn ENDED may overrule.
  */
 export function paneActiveWork(pane: string): 'status' | 'spinner' | undefined {
-  const lower = pane.toLowerCase();
-  if (INTERRUPT_HINTS.some(marker => lower.includes(marker))) return 'status';
-  if (CODEX_ELAPSED.test(lower) || CLAUDE_ELAPSED.test(lower) || TOKEN_COUNTER.test(lower)) return 'status';
+  if (paneShowsLiveStatus(pane)) return 'status';
   // Compacting is work: a transcript that says the turn ENDED (an idle compaction starts from one) must not overrule it.
   if (paneShowsCompacting(pane)) return 'status';
   return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane) ? 'spinner' : undefined;
+}
+
+/** Whether any of the live-status readings (an interrupt hint, an elapsed clock, a token counter) is in this text. */
+function showsStatus(lower: string): boolean {
+  return (
+    INTERRUPT_HINTS.some(marker => lower.includes(marker)) ||
+    CODEX_ELAPSED.test(lower) ||
+    CLAUDE_ELAPSED.test(lower) ||
+    TOKEN_COUNTER.test(lower)
+  );
+}
+
+/**
+ * A harness's own status line above its composer: a spinner or bullet glyph at the left, then the reading inside the
+ * line's parenthetical — Claude's `✻ Crunching… (12s · ↓ 1.4k tokens · esc to interrupt)`, Codex's
+ * `• Working (5s • esc to interrupt)` and its `• Messages to be submitted … (press esc to interrupt …)`. The
+ * parenthetical may be clipped open on a narrow pane. Group 1 is the parenthetical onward; `working` is read on the
+ * whole line, because Codex's clock is `Working (5s` and its word sits before the bracket.
+ */
+const STATUS_SHAPED = /^[^\S\n]*[✻✳✶✽✢∗·*•◦⏺]\s[^(\n]*(\([^\n]*)$/u;
+
+/**
+ * Whether the visible pane shows a turn's live status: anywhere in the {@link liveRegion}, and above it only on a
+ * {@link STATUS_SHAPED} line. The words alone are NOT evidence there: they are the agent's own prose as often as the
+ * harness's — a transcript that quotes `esc to interrupt` held an idle ferret at "busy", and nothing was typed for it.
+ */
+function paneShowsLiveStatus(pane: string): boolean {
+  const lines = pane.replaceAll('\r\n', '\n').split('\n');
+  const start = liveRegionStart(lines);
+  if (showsStatus(lines.slice(start).join('\n').toLowerCase())) return true;
+  return lines.slice(0, start).some(line => {
+    const shaped = STATUS_SHAPED.exec(line);
+    if (shaped === null) return false;
+    const lower = line.toLowerCase();
+    return showsStatus((shaped[1] as string).toLowerCase()) || CODEX_ELAPSED.test(lower);
+  });
+}
+
+/** A rule drawn flush left, the way Claude draws the rules above and below its composer. */
+const FLUSH_RULE = /^[─━]{3,}/u;
+/** Claude's prompt row: its glyph in the first column. */
+const CLAUDE_PROMPT_ROW = /^[❯>](?:[\s ].*)?$/u;
+/** Codex's prompt row: its glyph in the first column. */
+const CODEX_PROMPT_ROW = /^›(?:[\s ].*)?$/u;
+/** A row of a Claude draft below its prompt row: indented under the glyph. */
+const DRAFT_CONTINUATION = /^\s{2,}\S/u;
+/** How far up from the bottom of the frame a live composer may sit (as {@link idlePromptShown} reads it). */
+const COMPOSER_WINDOW_LINES = 30;
+
+/**
+ * The first row of the frame's LIVE region — the harness's composer and everything drawn under it (its footer and
+ * status rows) — or `0` when the frame shows no composer this can prove, so the whole frame is read as it always was.
+ *
+ * Proven means drawn the way only the harness draws it: Claude's `❯` row flush left directly under a flush rule (the
+ * region opens at that rule), or Codex's `›` row flush left. A prompt-shaped row that is neither — a dialog's `❯ Yes`,
+ * a boxed `│ > …` — proves nothing, and a screen that has no composer (a startup modal, a sign-in) is read whole.
+ * Rows touching the composer from above, with no blank row between, belong to the region too.
+ */
+function liveRegionStart(lines: readonly string[]): number {
+  const start = composerTop(lines);
+  // Text TOUCHING the composer is part of what the harness drew with it — a modal's question sits on the row above its
+  // own prompt-shaped row — so the region reaches up over it. The transcript is set off by a blank row.
+  let top = start;
+  while (top > 0 && (lines[top - 1] as string).trim() !== '') top -= 1;
+  return top;
+}
+
+/** Where a proven composer begins (its opening rule, or Codex's prompt row), or `0` when there is none. */
+function composerTop(lines: readonly string[]): number {
+  let bottom = lines.length - 1;
+  while (bottom > 0 && (lines[bottom] as string).trim() === '') bottom -= 1;
+  const floor = Math.max(0, bottom - COMPOSER_WINDOW_LINES + 1);
+  for (let index = bottom; index >= floor; index -= 1) {
+    const line = lines[index] as string;
+    if (!PROMPT.test(line) || SELECTOR_ROW.test(line)) continue;
+    if (CODEX_PROMPT_ROW.test(line)) return index;
+    // A Claude draft's later rows are drawn indented under the glyph; its prompt row is the flush one above them.
+    let row = index;
+    while (row > 0 && !CLAUDE_PROMPT_ROW.test(lines[row] as string)) {
+      const above = lines[row] as string;
+      if (above.trim() !== '' && !DRAFT_CONTINUATION.test(above)) return 0;
+      row -= 1;
+    }
+    return row > 0 && CLAUDE_PROMPT_ROW.test(lines[row] as string) && FLUSH_RULE.test(lines[row - 1] as string)
+      ? row - 1
+      : 0;
+  }
+  return 0;
 }
 
 /**
@@ -233,8 +319,12 @@ export function paneShowsStartupWait(pane: string): boolean {
 }
 
 /** Whether the pane is working, parked, or on a modal: it shows no idle composer however it is drawn. */
-function paneIsBusyOrBlocked(pane: string, lower: string): boolean {
-  if (STARTUP_BLOCKERS.some(marker => lower.includes(marker)) || paneShowsActiveWork(pane)) return true;
+function paneIsBusyOrBlocked(pane: string): boolean {
+  // A modal replaces the composer, so it is read from the live region: above a proven composer the same words are
+  // the conversation (an agent writing "sign in" or "log in" held its idle pane "not ready" for hours in v4).
+  const lines = pane.replaceAll('\r\n', '\n').split('\n');
+  const live = lines.slice(liveRegionStart(lines)).join('\n').toLowerCase();
+  if (STARTUP_BLOCKERS.some(marker => live.includes(marker)) || paneShowsActiveWork(pane)) return true;
   // A parked submission is drawn in the composer, and the composer is not idle until Codex sends it.
   if (paneShowsStartupWait(pane)) return true;
   // A permission prompt's cursor row reads as a prompt line, and a message typed into it picks a row.
@@ -250,9 +340,8 @@ function paneIsBusyOrBlocked(pane: string, lower: string): boolean {
  * column. The turn look reads this, so a quiet pane with a draft in it settles `your-turn` (B187).
  */
 export function idlePromptShown(pane: string): boolean {
-  const lower = pane.toLowerCase();
-  if (paneIsBusyOrBlocked(pane, lower)) return false;
-  if (lower.includes(INTERRUPTED_BANNER)) return true;
+  if (paneIsBusyOrBlocked(pane)) return false;
+  if (pane.toLowerCase().includes(INTERRUPTED_BANNER)) return true;
   return pane
     .split('\n')
     .slice(-30)
@@ -260,9 +349,8 @@ export function idlePromptShown(pane: string): boolean {
 }
 
 export function promptIsReady(pane: string, cursorY?: number, cursorX?: number): boolean {
-  const lower = pane.toLowerCase();
-  if (paneIsBusyOrBlocked(pane, lower)) return false;
-  if (lower.includes(INTERRUPTED_BANNER)) return true;
+  if (paneIsBusyOrBlocked(pane)) return false;
+  if (pane.toLowerCase().includes(INTERRUPTED_BANNER)) return true;
   const lines = pane.split('\n');
   if (cursorY !== undefined && cursorY >= 0 && cursorY < lines.length) {
     const line = lines[cursorY]!;

@@ -516,3 +516,123 @@ describe('B188 a compaction is work, whatever the tick glyph', () => {
     should(actual).deepEqual({ idle: true, ready: false });
   });
 });
+
+describe('the words of a busy or blocked screen, read only where the harness draws them', () => {
+  // v4 held an idle lead "not prompt-ready" for six and a half hours, and every send to it waited: the startup
+  // blockers ('sign in', 'log in', …) and the live-status readings ('esc to interrupt', `(12s ·`, `1.2k tokens ·`)
+  // were matched over the WHOLE frame, so an agent's own prose above an idle composer read as a modal or a turn.
+  const FIXTURES = join(import.meta.dir, '../../../fixtures/composer');
+  const fixture = (name: string) => {
+    const frame = readFileSync(join(FIXTURES, `${name}.txt`), 'utf8');
+    const [x, y] = readFileSync(join(FIXTURES, `${name}.cursor`), 'utf8')
+      .trim()
+      .split('|')
+      .map(Number);
+    return { frame, x: x as number, y: y as number };
+  };
+  /** What an agent might write in its last message: every trap word, quoted, in prose. */
+  const PROSE = [
+    '  The plan: design in two phases, then sign in to the tracker and log in to CI.',
+    '  If it hangs, press enter to continue or answer "no, exit"; the footer says',
+    '  \'esc to interrupt\' while it runs, e.g. "(12s · ↓ 3.4k tokens · esc to interrupt)".',
+    '  Codex prints "working (5m" for the same thing.',
+  ];
+  /** The frame with the prose put directly above the LAST row matching `before` (the composer, or the done line). */
+  const withProse = (frame: string, before: RegExp) => {
+    const lines = frame.split('\n');
+    const at = lines.findLastIndex(line => before.test(line));
+    if (at < 0) throw new Error(`the fixture has no ${String(before)} row`);
+    // Replace as many rows as are inserted, so the cursor row the fixture recorded is still the composer's, and keep
+    // the blank row both harnesses draw between their transcript and what sits on the composer.
+    lines.splice(at - PROSE.length - 1, PROSE.length, ...PROSE);
+    return lines.join('\n');
+  };
+  const read = (frame: string, x: number, y: number) => ({
+    ready: promptIsReady(frame, y, x),
+    idle: idlePromptShown(frame),
+    work: paneActiveWork(frame) ?? 'none',
+  });
+
+  it('should read an idle Claude pane whose transcript quotes every trap word as ready', () => {
+    // Arrange — the real idle 2.1.281 frame (feedback-draft panel and all), the prose above its done line.
+    const { frame, x, y } = fixture('claude-2.1.281-feedback-draft-idle');
+    const quoted = withProse(frame, /^✻ Crunched for /u);
+
+    // Act / Assert — before the scoping, this read `{ ready: false, idle: false, work: 'status' }`.
+    should(read(quoted, x, y)).deepEqual({ ready: true, idle: true, work: 'none' });
+  });
+
+  it('should read an idle Codex pane whose transcript quotes every trap word as ready', () => {
+    // Arrange
+    const { frame, x, y } = fixture('codex-0.156.1-idle-empty');
+    const quoted = withProse(frame, /^› /u);
+
+    // Act / Assert
+    should(read(quoted, x, y)).deepEqual({ ready: true, idle: true, work: 'none' });
+  });
+
+  it('should still read the harness’s own status line above the composer as a turn, on both harnesses', () => {
+    // Arrange — the status row a running turn draws above the composer: Claude's spinner, Codex's Working line.
+    const claude = fixture('claude-2.1.281-feedback-draft-idle');
+    const codex = fixture('codex-0.156.1-idle-empty');
+    const claudeBusy = claude.frame.replace(/^✻ Crunched for .*$/mu, '✻ Crunching… (12s · ↓ 1.4k tokens)');
+    const claudeClipped = claude.frame.replace(
+      /^✻ Crunched for .*$/mu,
+      '✻ Crunching… (esc to interrupt · ctrl+t to sh',
+    );
+    const codexBusy = withProse(codex.frame, /^› /u).replace(
+      /^  Codex prints .*$/mu,
+      '• Working (5s • esc to interrupt)',
+    );
+
+    // Act
+    const actual = [claudeBusy, claudeClipped, codexBusy].map(frame => paneActiveWork(frame));
+
+    // Assert
+    should(actual).deepEqual(['status', 'status', 'status']);
+  });
+
+  it('should not read a bullet of prose that mentions the interrupt hint as a turn', () => {
+    // Arrange — Codex draws its own messages as `•` bullets too; only a status line's parenthetical counts.
+    const { frame, x, y } = fixture('codex-0.156.1-idle-empty');
+    const bullet = withProse(frame, /^› /u).replace(
+      /^  Codex prints .*$/mu,
+      '• I pressed esc to interrupt it, then 1.2k tokens · later it was idle',
+    );
+
+    // Act / Assert
+    should(read(bullet, x, y)).deepEqual({ ready: true, idle: true, work: 'none' });
+  });
+
+  it('should still read a modal with no composer under it as not ready, wherever its words sit', () => {
+    // Arrange — a sign-in screen draws no composer, so the whole frame is the harness's.
+    const signIn = [
+      '',
+      ' Welcome to Claude Code',
+      '',
+      ' Select login method:',
+      '   Sign in with your account',
+      '',
+    ].join('\n');
+
+    // Act / Assert
+    should({ ready: promptIsReady(signIn), idle: idlePromptShown(signIn) }).deepEqual({ ready: false, idle: false });
+  });
+
+  it('should still read a blocker drawn in or under the composer as not ready', () => {
+    // Arrange — the words below the composer's top rule are the harness's, whatever they say.
+    const { frame, x, y } = fixture('claude-2.1.281-feedback-draft-idle');
+    const footer = frame.replace('2 feedback drafts', 'press enter to continue');
+
+    // Act / Assert
+    should(promptIsReady(footer, y, x)).be.false();
+  });
+
+  it('should still read the one-shot auto-mode dialog as not ready: its `❯ Yes` row proves no composer', () => {
+    // Act / Assert
+    should({ ready: promptIsReady(AUTO_NUDGE), idle: idlePromptShown(AUTO_NUDGE) }).deepEqual({
+      ready: false,
+      idle: false,
+    });
+  });
+});
