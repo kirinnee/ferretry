@@ -824,3 +824,56 @@ test('a declaration that names nothing that exists is a failure of the gate, of 
 test('the real repository passes the declaration gate', async () => {
   expect(await checkDeclarations(REPO)).toEqual([]);
 });
+
+// A plugin B unit test that reads plugin A's app source through a file-system binding that is NOT spelled like the
+// export (a rename, a namespace, a default import, a destructured require) must be kept when A changes.
+const A_PATH = "'packages/plugins/a/app/index.ts'";
+const SPELLINGS: [string, string][] = [
+  ['a renamed named import', `import { readFileSync as read } from 'node:fs';\nread(${A_PATH}, 'utf8');\n`],
+  ['a namespace import', `import * as nodeFs from 'node:fs';\nnodeFs.readFileSync(${A_PATH}, 'utf8');\n`],
+  [
+    'a namespace import, member taken into a local',
+    `import * as nodeFs from 'node:fs';\nconst pull = nodeFs.readFileSync;\npull(${A_PATH}, 'utf8');\n`,
+  ],
+  ['a default import', `import fileSystem from 'node:fs';\nfileSystem.readFileSync(${A_PATH}, 'utf8');\n`],
+  [
+    'a default import, member taken into a local',
+    `import fileSystem from 'node:fs';\nconst pull = fileSystem.readFileSync;\npull(${A_PATH}, 'utf8');\n`,
+  ],
+  ['a destructured require', `const { readFileSync: r } = require('fs');\nr(${A_PATH}, 'utf8');\n`],
+  [
+    'a renamed fs/promises import',
+    `import { readFile as slurp } from 'node:fs/promises';\nawait slurp(${A_PATH}, 'utf8');\n`,
+  ],
+  [
+    'a destructuring of an imported namespace',
+    `import * as fs from 'fs';\nconst { readFileSync: r } = fs;\nr(${A_PATH}, 'utf8');\n`,
+  ],
+  [
+    'a function this list does not know (fail closed)',
+    `import { someNewReader as peek } from 'node:fs';\npeek(${A_PATH});\n`,
+  ],
+]; // prettier-ignore
+
+test.each(SPELLINGS)('a plugin B test reading plugin A source through %s is kept when A changes', async (_, source) => {
+  const file = 'packages/plugins/b/tests/unit/reads-a.test.ts';
+  const fx = fixture([
+    { id: 'a', files: { 'app/index.ts': 'export const value = 1;\n' } },
+    {
+      id: 'b',
+      files: { 'tests/unit/reads-a.test.ts': `import { test } from 'bun:test';\n${source}test('x', () => {});\n` },
+    },
+  ]);
+  fixtures.push(fx);
+  const read = await readGraph(fx.root);
+  expect(read.readers.has(file)).toBe(true);
+  const decision = scoped(choose(read, ['packages/plugins/a/app/index.ts']));
+  expect(filterFiles(decision, [`./${file}`])).toEqual([`./${file}`]);
+});
+
+test('a file-system binding that only writes or makes temp folders is still no read', async () => {
+  const { readsOf } = await import('./scope-readers.ts');
+  const source =
+    "import { mkdtempSync, writeFileSync as put, readFileSync as get } from 'node:fs';\nimport { tmpdir } from 'node:os';\nimport { join } from 'node:path';\nconst dir = mkdtempSync(join(tmpdir(), 'x-'));\nput(join(dir, 'a'), 'a');\nget(join(dir, 'a'), 'utf8');\n";
+  expect(readsOf('packages/plugins/b/tests/unit/pure.test.ts', source, true)).toEqual([]);
+});

@@ -15,6 +15,9 @@
  *       createReadStream, glob*, `.scan`/`.scanSync`, `Bun.file`, ...) with a path that is not PROVABLY under a temp
  *       folder the test made itself, or
  *     - cannot be parsed or resolved.
+ *   A file-system callee is named by what it IS in `fs` / `node:fs` / `fs/promises` / `node:fs/promises` / `bun`
+ *   (the IMPORTED name through a rename, `import * as x`, a default import, `require`, destructuring), and anything
+ *   taken from those modules that is not a known non-read (`FS_SAFE_APIS`) is a read: a new function keeps the test.
  *   "Provably under a temp folder": every identifier of the path is derived (through `const`/assignment chains in the
  *   same file) from `mkdtemp*`, `tmpdir()` or the workspace `fixture()`, with no anchor on the way. A function
  *   parameter or a name with no initializer is neutral only next to such an identifier. Anything else is a doubt.
@@ -88,6 +91,51 @@ const READ_APIS = new Set([
 const FS_ONLY_APIS = new Set(['open', 'watch', 'file', 'exists', 'stat', 'access', 'glob', 'readText', 'realpath']);
 const FS_MODULES = new Set(['fs', 'node:fs', 'fs/promises', 'node:fs/promises', 'bun']);
 const FS_OBJECTS = new Set(['fs', 'fsp', 'fsPromises', 'promises', 'Bun']);
+// What a file-system module exports that is NOT a read. Anything else taken from `fs` / `node:fs` / `fs/promises` /
+// `node:fs/promises` / `bun` is treated as a read API, so a new or unknown function keeps the test (fail closed).
+const FS_SAFE_APIS = new Set([
+  'writeFile',
+  'writeFileSync',
+  'appendFile',
+  'appendFileSync',
+  'mkdir',
+  'mkdirSync',
+  'mkdtemp',
+  'mkdtempSync',
+  'rm',
+  'rmSync',
+  'rmdir',
+  'rmdirSync',
+  'unlink',
+  'unlinkSync',
+  'rename',
+  'renameSync',
+  'symlink',
+  'symlinkSync',
+  'link',
+  'linkSync',
+  'chmod',
+  'chmodSync',
+  'chown',
+  'chownSync',
+  'utimes',
+  'utimesSync',
+  'truncate',
+  'truncateSync',
+  'constants',
+  'Glob',
+  '$',
+  'spawn',
+  'spawnSync',
+  'write',
+  'sleep',
+  'sleepSync',
+  'pathToFileURL',
+  'fileURLToPath',
+]); // prettier-ignore
+// Members that are themselves a file-system namespace (`fs.promises`, a module's default export).
+const FS_NAMESPACE_KEYS = new Set(['promises', 'default']);
+type FsBinding = { kind: 'namespace'; imported?: undefined } | { kind: 'named'; imported: string };
 const SPAWN_APIS = new Set(['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork', '$']);
 const SEEDS = new Set(['mkdtemp', 'mkdtempSync', 'tmpdir', 'fixture']);
 const PURE = new Set([
@@ -191,21 +239,137 @@ export function readsOf(file: string, source: string, isTest: boolean): string[]
     return [`the file could not be parsed (${error instanceof Error ? error.message : String(error)})`];
   }
   const nodes = [...descend(program)];
-  // Local names bound to a file-system module (`import { stat } from 'node:fs/promises'`, `import * as fs`).
-  const fsBound = new Set<string>();
+  // Local names bound to a file-system module, by what they ARE there: a namespace (`import * as fs`, a default
+  // import, `const fs = require('fs')`, `fs.promises`) or one named export under its IMPORTED name, whatever the
+  // local spelling (`import { readFileSync as read }`, `const { readFileSync: r } = require('fs')`, `= fs`).
+  // A name may be bound more than once (scopes are not tracked), so it keeps every binding it was given.
+  const fsBindings = new Map<string, FsBinding[]>();
+  const bindFs = (name: string, binding: FsBinding): boolean => {
+    const known = fsBindings.get(name) ?? [];
+    if (known.some(item => item.kind === binding.kind && item.imported === binding.imported)) return false;
+    fsBindings.set(name, [...known, binding]);
+    return true;
+  };
+  const bindingFor = (imported: string): FsBinding =>
+    FS_NAMESPACE_KEYS.has(imported) ? { kind: 'namespace' } : { kind: 'named', imported };
+  const unwrap = (expr: unknown): Node | undefined => {
+    let current = expr;
+    while (
+      isNode(current) &&
+      (current.type === 'AwaitExpression' ||
+        current.type === 'ParenthesizedExpression' ||
+        /^TS(As|NonNull|Satisfies|TypeAssertion)$/.test(current.type))
+    )
+      current = current.argument ?? current.expression;
+    return isNode(current) ? current : undefined;
+  };
+  /** `require('fs')` / `import('node:fs/promises')` of a file-system module. */
+  const isFsSource = (expr: unknown): boolean => {
+    const node = unwrap(expr);
+    if (node === undefined) return false;
+    let specifier: unknown;
+    if (node.type === 'ImportExpression') specifier = node.source;
+    else if (node.type === 'CallExpression' && isNode(node.callee) && node.callee.name === 'require')
+      specifier = (node.arguments as unknown[])[0];
+    return isNode(specifier) && specifier.type === 'Literal' && FS_MODULES.has(specifier.value as string);
+  };
+  /** An expression that evaluates to a file-system module (or a namespace inside one, `fs.promises`). */
+  const isFsObject = (expr: unknown): boolean => {
+    const node = unwrap(expr);
+    if (node === undefined) return false;
+    if (node.type === 'Identifier')
+      return (fsBindings.get(node.name as string) ?? []).some(b => b.kind === 'namespace');
+    if (isFsSource(node)) return true;
+    return node.type === 'MemberExpression' && isFsObject(node.object);
+  };
+  const keyName = (property: Node): string | undefined => {
+    const key = property.key;
+    if (!isNode(key)) return undefined;
+    if (!property.computed && key.type === 'Identifier') return key.name as string;
+    return key.type === 'Literal' && typeof key.value === 'string' ? key.value : undefined;
+  };
+  /** Names bound by `pattern` from the file-system object `init`; an unnameable key is an unknown (read) API. */
+  const bindPattern = (pattern: unknown, init: unknown): boolean => {
+    const target = unwrap(pattern);
+    if (target === undefined) return false;
+    if (target.type === 'AssignmentPattern') return bindPattern(target.left, init);
+    const source = unwrap(init);
+    if (source === undefined) return false;
+    if (target.type === 'Identifier') {
+      const name = target.name as string;
+      if (source.type === 'MemberExpression' && isFsObject(source.object)) {
+        const property = isNode(source.property) ? source.property : undefined;
+        const imported =
+          property !== undefined && !source.computed && property.type === 'Identifier'
+            ? (property.name as string)
+            : property !== undefined && property.type === 'Literal' && typeof property.value === 'string'
+              ? property.value
+              : '<computed>';
+        return bindFs(name, bindingFor(imported));
+      }
+      return isFsObject(source) ? bindFs(name, { kind: 'namespace' }) : false;
+    }
+    if (target.type !== 'ObjectPattern' || !isFsObject(source)) return false;
+    let changed = false;
+    for (const property of target.properties as Node[]) {
+      if (property.type === 'RestElement') {
+        const rest = unwrap(property.argument);
+        if (rest?.type === 'Identifier') changed = bindFs(rest.name as string, { kind: 'namespace' }) || changed;
+        continue;
+      }
+      const imported = keyName(property) ?? '<computed>';
+      const value = unwrap(property.value);
+      const inner = value?.type === 'AssignmentPattern' ? unwrap(value.left) : value;
+      if (inner?.type === 'Identifier') changed = bindFs(inner.name as string, bindingFor(imported)) || changed;
+      else if (inner?.type === 'ObjectPattern') changed = bindPattern(inner, source) || changed;
+    }
+    return changed;
+  };
   for (const node of nodes)
     if (node.type === 'ImportDeclaration' && isNode(node.source) && FS_MODULES.has(node.source.value as string))
-      for (const spec of node.specifiers as Node[]) if (isNode(spec.local)) fsBound.add(spec.local.name as string);
-  const isFsRead = (name: string, callee: unknown): boolean => {
+      for (const spec of node.specifiers as Node[]) {
+        if (!isNode(spec.local)) continue;
+        const local = spec.local.name as string;
+        if (spec.type !== 'ImportSpecifier') bindFs(local, { kind: 'namespace' });
+        else {
+          const imported = isNode(spec.imported) ? (spec.imported.name ?? spec.imported.value) : undefined;
+          bindFs(local, bindingFor(typeof imported === 'string' ? imported : '<computed>'));
+        }
+      }
+  // Declarations and assignments may come in any order: repeat until no new name is bound.
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const node of nodes) {
+      if (node.type === 'VariableDeclarator' && isNode(node.init)) changed = bindPattern(node.id, node.init) || changed;
+      else if (node.type === 'AssignmentExpression' && node.operator === '=')
+        changed = bindPattern(node.left, node.right) || changed;
+    }
+  }
+  /** The file-system API a callee names, by its imported name; undefined when the callee is not from a fs module. */
+  const fsApiOf = (callee: unknown): string | undefined => {
+    const node = unwrap(callee);
+    if (node === undefined) return undefined;
+    if (node.type === 'Identifier') {
+      const named = (fsBindings.get(node.name as string) ?? []).flatMap(b => (b.kind === 'named' ? [b.imported] : []));
+      return named.find(api => !FS_SAFE_APIS.has(api)) ?? named[0];
+    }
+    if (node.type !== 'MemberExpression' || !isFsObject(node.object)) return undefined;
+    const property = isNode(node.property) ? node.property : undefined;
+    if (property === undefined) return '<computed>';
+    if (!node.computed && property.type === 'Identifier') return property.name as string;
+    return property.type === 'Literal' && typeof property.value === 'string' ? property.value : '<computed>';
+  };
+  const isFsRead = (name: string, callee: unknown, viaFs: boolean): boolean => {
+    // FAIL CLOSED: anything taken from a file-system module that is not known to be safe is a read.
+    if (viaFs) return !FS_SAFE_APIS.has(name);
     if (READ_APIS.has(name)) return true;
     if (!FS_ONLY_APIS.has(name) || !isNode(callee)) return false;
-    if (callee.type === 'Identifier') return fsBound.has(name);
     const root = (function top(expr: unknown): string | undefined {
       if (!isNode(expr)) return undefined;
       if (expr.type === 'Identifier') return expr.name as string;
       return expr.type === 'MemberExpression' ? top(expr.object) : undefined;
     })(callee);
-    return root !== undefined && (FS_OBJECTS.has(root) || fsBound.has(root));
+    return root !== undefined && FS_OBJECTS.has(root);
   };
 
   // Names, and everything assigned to them.
@@ -257,10 +421,12 @@ export function readsOf(file: string, source: string, isTest: boolean): string[]
     const anchor = isAnchor(node);
     if (anchor !== undefined && isTest) reasons.push(`${at(node)}: ${anchor} locates files relative to the test`);
     if (node.type !== 'CallExpression' && node.type !== 'NewExpression') continue;
-    const name = calleeName(node.callee);
+    // A file-system callee is named by what it IS in its module, not by its local spelling.
+    const fsApi = fsApiOf(node.callee);
+    const name = fsApi ?? calleeName(node.callee);
     if (name === undefined) continue;
     const args = (node.arguments as unknown[]).filter(isNode);
-    if (isFsRead(name, node.callee)) {
+    if (isFsRead(name, node.callee, fsApi !== undefined)) {
       const checked = /^(cp|copyFile)/.test(name) ? args.slice(0, 2) : args.slice(0, 1);
       // `scan({ cwd })`: the options object is the path.
       const target = name.startsWith('scan') ? args : checked;
