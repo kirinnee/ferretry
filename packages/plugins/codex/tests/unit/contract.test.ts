@@ -42,4 +42,27 @@ describe('codex contract', () => {
     expect(harnessConfigLoosens(skip, auto)).toEqual([]);
     expect(CODEX_CONFIG.axis).toBe('configure');
   });
+
+  test('any change of the binary or the search paths is held (code execution); the file is judged by that rule', () => {
+    // What the file is judged by (the plugin's own def), not a helper the contract exports.
+    const held = CODEX_CONFIG.loosens;
+    const base = { searchPaths: ['/a', '/b'], permissionMode: 'auto' as const };
+    const binary = (path: string) => ({ ...base, binary: path });
+    expect(held(base, base)).toEqual([]);
+    expect(held(undefined, { searchPaths: [], permissionMode: 'auto' })).toEqual([]);
+    expect(held(base, binary('/x'))).toEqual(['agents now launch a different Codex program (binary changed)']);
+    expect(held(binary('/x'), binary('/y'))).toHaveLength(1);
+    expect(held(binary('/x'), base)).toHaveLength(1);
+    // A first document that names a binary AND search paths changes both: each is said.
+    expect(held(undefined, binary('/x'))).toHaveLength(2);
+    expect(held(undefined, { ...binary('/x'), searchPaths: [] })).toHaveLength(1);
+    const searched = (paths: string[]) => ({ ...base, searchPaths: paths });
+    const dirs = ['agents now look for the Codex program in different directories (searchPaths changed)'];
+    expect(held(base, searched(['/a']))).toEqual(dirs);
+    expect(held(base, searched(['/b', '/a']))).toEqual(dirs);
+    expect(held(base, searched(['/a /b']))).toEqual(dirs);
+    expect(held(undefined, searched(['/a']))).toEqual(dirs);
+    expect(held(base, { ...base, permissionMode: 'skip', binary: '/x' })).toHaveLength(2);
+    expect(held({ ...base, permissionMode: 'skip' }, base)).toEqual([]);
+  });
 });
