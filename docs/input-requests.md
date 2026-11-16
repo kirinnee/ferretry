@@ -2,7 +2,7 @@
 
 An agent stuck at a password, `sudo`, OTP or 2FA prompt raises an **input request** naming its own
 terminal (a browser field comes later). The **daemon**, not the agent, records what is actually
-there. The owner sees an agenda card, types the value or taps a [saved login](#saved-logins), and presses Send. The
+there. The owner sees an agenda item, types the value or taps a [saved login](#saved-logins), and presses Send. The
 daemon re-checks the target and types the value **straight into it**, optionally pressing Enter.
 
 The wire contract is `packages/protocol/src/lib/input-request.ts`. This page says what it means and
@@ -12,7 +12,7 @@ Which parts are live is the phase table at the end.
 ## The one rule
 
 **This applies to a `secret` value (a password or passphrase). A `plain` value (a username, an email, a
-hostname, `y`) is not secret: the card says so and the ferret may see it.**
+hostname, `y`) is not secret: the input says so and the ferret may see it.**
 
 **The bridge itself never carries a `secret` value through the agent, a tool call, the journal, `agenda.json`,
 the audit log, a push payload or disk.** This extends [secrets](secrets.md) ("use, never read"): no route,
@@ -34,29 +34,29 @@ limits.
 | The wire                                         | Only inside the end-to-end sealed carrier, **padded** to a 256-byte bucket (see below).               |
 | Daemon RAM while handling                        | From body parse to inject. No reference is kept after the handler returns.                            |
 | Daemon RAM, the **redaction window**             | The one retained copy: a per-session map, 10 minutes by default and 60 at most. Never serialized.     |
-| A **plain** value                                | Not held. It is not secret: the card says the ferret can see it, and the agent may get it back.       |
+| A **plain** value                                | Not held. It is not secret: the input says the ferret can see it, and the agent may get it back.      |
 | The target                                       | It now lives in the target program, and in whatever that program prints or stores. That is the point. |
 
 `InputDeliverBodySchema` is the only schema with a value, and only as `padded`. It is a request body:
 nothing stores or returns it.
 
-## The agenda card
+## The agenda item
 
 The input form **is** an agenda item of `kind: 'input'`, referenced like any item (`^A7`; no new
 sigil, see [the reference standard](reference-standard.md)). Its `input.requestId` points at the
-request. The card lives until it is answered, cancelled or expired, and **survives a daemon restart**:
-the facts are RAM-only, so after a restart the card reads "re-observing" and the daemon observes the
+request. The input lives until it is answered, cancelled or expired, and **survives a daemon restart**:
+the facts are RAM-only, so after a restart the input reads "re-observing" and the daemon observes the
 target again before Send is allowed.
 
-The daemon closes the card the moment its request ends, and an app showing it open closes its view
+The daemon closes the input the moment its request ends, and an app showing it open closes its view
 with it, saying how it ended. The view stays only while a Send from it is on its way or a follow-up
 offer ("Always use…", "Don't ask again…") is on screen and not yet carried out; finishing the last one
 lets it close. Only a view the owner saw open closes by itself, and only during that opening: leaving
 the view, or opening the closed record again from the history, starts afresh, and a hold never outlives
-the opening that made it; a card that goes while it holds (the owner picks an older version, which draws
-no card) lets the hold go with it. The card says the agent's prompt once, under
+the opening that made it; an input that goes while it holds (the owner picks an older version, which draws
+no input) lets the hold go with it. The input says the agent's prompt once, under
 the daemon's facts: the context's last line (after `INPUT_PROMPT_MARKER`, "The agent says: ") is
-for a restarted daemon and an app that cannot draw the form. Only a card that is drawn (the latest version of an
+for a restarted daemon and an app that cannot draw the form. Only an input that is drawn (the latest version of an
 item still open) takes the prompt out of the context; a closed record and an older version keep it as written.
 
 The generic agenda answer **refuses** `kind: 'input'` (400 `use_input_form`), so a value can never be
@@ -67,7 +67,7 @@ through the input tool; the generic add refuses it.
 
 - **`InputRaiseSchema`**: what the agent says: the target (`%terminal:<key>` or `%browser:<key>`), a
   prompt of at most 280 characters, a `submit` mode, and EITHER one `sensitivity` (one value) OR up to
-  four `fields` (see [cards of several fields](#cards-of-several-fields)). Nothing the daemon observes
+  four `fields` (see [inputs of several fields](#inputs-of-several-fields)). Nothing the daemon observes
   is accepted from the agent.
 - **`InputTargetFactsSchema`**: what the daemon saw: for a terminal, the pane proof, the foreground
   program (pid, pgid, `comm`, argv), `echo` (`off`, `on` or `unknown`), the cursor row, the prompt
@@ -79,64 +79,64 @@ through the input tool; the generic add refuses it.
   and risk), the strongest sensitivity, expiry, `chain` and `step`, the facts and their digest while
   observed, the state and the outcome.
 - **`InputDeliverBodySchema`**: `deliveryId` (a UUID), `observedDigest`, the value(s), `submit`, and
-  `save` (`{ entry, label }`, typed values only). A one-field card sends **exactly one of** `padded`
-  or `entry` (a saved login's handle). A card of several sends `fields` (`[{ field, padded }]`, each
+  `save` (`{ entry, label }`, typed values only). A one-field input sends **exactly one of** `padded`
+  or `entry` (a saved login's handle). An input of several sends `fields` (`[{ field, padded }]`, each
   value padded on its own) and may add `entry` for the fields it did not type.
   A paste of a [secure copy](secure-copy.md) sends `sealed: true` and no value: the daemon pastes the copy the
   request names.
 - **`InputAgentViewSchema`**: what the agent learns: state, whether Enter was pressed, `source`
   (`typed` or `saved`) and a redacted screen. **Never** the value, its length or a saved login's
   name.
-- **`InputRequestSchema.saved`** (the owner's view only): the target's key, the saved logins the card may
+- **`InputRequestSchema.saved`** (the owner's view only): the target's key, the saved logins the input may
   offer and what "Save as" suggests. See [saved logins](#saved-logins).
 - **`InputEventSchema`** and **`InputAuditDetailSchema`**: names and flags only. The audit detail
   does not carry the prompt text.
 
 ### Sensitivity
 
-| Value     | Meaning                                                                                                                                                                          | Checks                                                                                                                                                                                                                                           |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the card flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
-| `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The card says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
-| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the card flags it amber ("This value will show on screen while the terminal is hidden from the ferret for two minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                   |
-| `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                                         | Never refused: the card says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                |
+| Value     | Meaning                                                                                                                                                                          | Checks                                                                                                                                                                                                                                            |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the input flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
+| `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The input says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
+| `private` | A value that is not one-time but shows on screen as it is typed (rare).                                                                                                          | Never refused: the input flags it amber ("This value will show on screen while the terminal is hidden from the ferret for two minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                   |
+| `code`    | A one-time code: 2FA, an e-mail or SMS verification code, a device code. **Not secret.**                                                                                         | Never refused: the input says "One-time code: the ferret can see it." and flags it **neutral**. No lock, no quarantine, no page hold, not masked (but see [one-time codes](#one-time-codes-code)). Same hard refusals as `secret`.                |
 
 `secret`, `private` and `code` values containing a control character or a line break are refused
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 
 A `plain` value is typed the same way and is not held in the redaction window, so the agent's next read
-shows it as the target shows it. The card says it is visible to the ferret; nothing about it is
+shows it as the target shows it. The input says it is visible to the ferret; nothing about it is
 hidden. It is not handed back in the agent's result: the agent reads it off the screen like anything else.
 
-### Cards of several fields
+### Inputs of several fields
 
-One card can ask for several values for **one surface**: a Google login is "Email" (`plain`, flagged red
-beside the field) and "Password" (`secret`) on one card, and the daemon types each into its own element.
+One input can ask for several values for **one surface**: a Google login is "Email" (`plain`, flagged red
+beside the field) and "Password" (`secret`) on one input, and the daemon types each into its own element.
 
 - **A page's fields each name their element** (`element`: a snapshot `ref` or a selector, the agent's
   pointer). The daemon resolves every one and observes it: the frame, the node, the attributes, the box.
-  Each field gets its own risk flag; the card's header carries the worst.
+  Each field gets its own risk flag; the input's header carries the worst.
 - **A terminal takes exactly one field.** A terminal shows one prompt at a time, so a value it asks for
-  next is a new card with `chain`. A terminal field may carry a `label` ("Passphrase").
+  next is a new input with `chain`. A terminal field may carry a `label` ("Passphrase").
 - **Every field is covered before anything is typed**: typed, or filled from ONE saved login by its role
   (`plain` → the username, `secret` → the password, `code` or `private` → the 2FA code). Only a saved login that
   holds every field's value is offered.
-- **"Save as" keeps a login card as ONE saved login**, in one change under the store-wide lock: the `plain`
+- **"Save as" keeps a login input as ONE saved login**, in one change under the store-wide lock: the `plain`
   field as the username and the `secret` one as the password (`savedRolesOf`). A one-time code is never
-  kept. A card with two usernames or two passwords cannot be kept as one login and does not offer it, and
+  kept. An input with two usernames or two passwords cannot be kept as one login and does not offer it, and
   every field it keeps must be typed (not filled from a saved login). The kept record is written once per
   field kept.
 - **One write**: the target adapter gets the values in field order and types them under one binding
   check, with Enter (submit) after the last. Each value that is not `plain` is masked before it is typed.
-- **A login on two pages is two cards**: the second names the first in `chain` and reads "Step 2 · after
-  ^A7" (`request.step`). Submit is per card, so each step chooses its own. `chain` must name one of the
-  SAME session's input requests that this daemon holds; another session's card or an unknown one is refused.
+- **A login on two pages is two inputs**: the second names the first in `chain` and reads "Step 2 · after
+  ^A7" (`request.step`). Submit is per input, so each step chooses its own. `chain` must name one of the
+  SAME session's input requests that this daemon holds; another session's input or an unknown one is refused.
 - **Only a password input is green.** `autocomplete="current-password"` or `"new-password"` says what a field
   is for, not that it hides what is typed: a text input carrying it stays amber.
-- **With a saved login on offer, the card still lists every field** with its flag (the red "not secret" of a
+- **With a saved login on offer, the input still lists every field** with its flag (the red "not secret" of a
   `plain` field, the daemon's risk of the rest) above the one-tap button, so nothing is sent unseen.
-- A page's card does not survive a daemon restart: its elements are the agent's words and are not
-  journalled, so the card ends as interrupted and the agent raises it again.
+- A page's input does not survive a daemon restart: its elements are the agent's words and are not
+  journalled, so the input ends as interrupted and the agent raises it again.
 
 ### One-time codes (`code`)
 
@@ -144,13 +144,13 @@ The owner decided that one-time codes are not secrets: a ferret may read an e-ma
 and may see a TOTP code. `code` is the sensitivity for them; `private` stays for a value that echoes but is not
 one-time.
 
-- **The card** says "One-time code: the ferret can see it.", flags it neutral (not the red of `plain`, not the amber
+- **The input** says "One-time code: the ferret can see it.", flags it neutral (not the red of `plain`, not the amber
   of `private`), and shows the value as it is typed (no Show toggle, no numeric pad: a device code may hold letters).
 - **Nothing is held**: no lock, no quarantine, no page hold, no redaction window. The ferret's next read shows the
   screen as it is.
-- **The ferret may type a code itself** with `terminal_send` or `browser_type`. A pending card whose every field is a
-  `code` does not keep those two off the surface; a script, a key press or a form fill still waits, and a card with any
-  other field still blocks them all. The card stays open (the owner
+- **The ferret may type a code itself** with `terminal_send` or `browser_type`. A pending input whose every field is a
+  `code` does not keep those two off the surface; a script, a key press or a form fill still waits, and an input with any
+  other field still blocks them all. The input stays open (the owner
   can dismiss it), and an owner's Send after the ferret typed is checked against the target like any other.
 - **A code the DAEMON made** from a saved 2FA seed: no tool, result or route **returns** it, and it is typed only into
   the observed field of that sign-in ([Codes Ferretry makes](#codes-ferretry-makes)). Its text is also masked from
@@ -180,46 +180,46 @@ one-time.
   "ᴘᴀssword", Armenian "Passwօrd") counts as a password word; and a password word spelled with spaces, dots, dashes or
   underscores between its letters ("Pass-word", "P a s s w o r d") is still one.
 
-  Then the field is hidden on the card, fully locked, masked, blocks the ferret's typing, and is `secret` in the
-  journal and audit. The card says "Treated as a secret: this is a password field." This is decided at raise and
+  Then the field is hidden on the input, fully locked, masked, blocks the ferret's typing, and is `secret` in the
+  journal and audit. The input says "Treated as a secret: this is a password field." This is decided at raise and
   checked again at a redraw, a restart and the write (never undone); a saved login still fills the role the owner
   picked, **except a code the daemon makes**: a code field found going into a password at the write gets no code
-  Ferretry made (the Send is refused, nothing typed, and the card asks for a secret from then on).
+  Ferretry made (the Send is refused, nothing typed, and the input asks for a secret from then on).
 
 - **Never saved**: "Save as" keeps no code; the seed is added in Settings.
-- **Never probed**: a card with a code is not dummy-probed, as before.
+- **Never probed**: an input with a code is not dummy-probed, as before.
 
 Where `code` is weaker than `private`, and why that is the design:
 
-| `private` does                                 | `code` does                                                                                                      | Why                                                                                                 |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Locks the target 120 s (quarantine, page hold) | No lock                                                                                                          | The ferret may see the code; a lock would hide nothing it may not read.                             |
-| Masks the typed value for the redaction window | Not masked (a daemon-made code's text still is)                                                                  | Same. No tool returns a daemon-made code (open question 11), though the ferret may see it on screen |
-| Keeps the ferret's keystrokes off the surface  | A code-only card lets `terminal_send` and `browser_type` through; scripts, key presses and form fills still wait | The ferret may type a code it read itself                                                           |
-| Flagged amber                                  | Flagged neutral                                                                                                  | It is not secret and goes where it was asked for.                                                   |
-| Hidden behind Show on the card                 | Shown as typed                                                                                                   | It is not secret.                                                                                   |
+| `private` does                                 | `code` does                                                                                                       | Why                                                                                                 |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Locks the target 120 s (quarantine, page hold) | No lock                                                                                                           | The ferret may see the code; a lock would hide nothing it may not read.                             |
+| Masks the typed value for the redaction window | Not masked (a daemon-made code's text still is)                                                                   | Same. No tool returns a daemon-made code (open question 11), though the ferret may see it on screen |
+| Keeps the ferret's keystrokes off the surface  | A code-only input lets `terminal_send` and `browser_type` through; scripts, key presses and form fills still wait | The ferret may type a code it read itself                                                           |
+| Flagged amber                                  | Flagged neutral                                                                                                   | It is not secret and goes where it was asked for.                                                   |
+| Hidden behind Show on the input                | Shown as typed                                                                                                    | It is not secret.                                                                                   |
 
 What a ferret or a page could abuse (design §11.4):
 
-| Who    | Abuse                                                                                     | Answer                                                                                                                                                                                                                                                                                         |
-| ------ | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Ferret | relays a live code to an attacker's page (real-time phishing) within its 30 s–10 min life | a daemon-made TOTP code is typed only into the sign-in's observed field and no tool returns it. **Not covered**: a code the ferret reads itself, or sees on screen (a screenshot, a scripted read of the field), can be typed anywhere                                                         |
-| Ferret | with inbox access, resets the password of any account that recovers by e-mail             | not Ferretry's to stop: **inbox access is account-recovery power.** Give a ferret an inbox only when you would give it the accounts behind it                                                                                                                                                  |
-| Page   | an e-mail or page tells the ferret "enter this code at evil.example" (prompt injection)   | the agent instruction says to type a code only on the page of the sign-in it is for                                                                                                                                                                                                            |
-| Page   | a look-alike page asks for the code                                                       | the card shows where it goes and flags a missing, covered, insecure or cross-site field amber, as for a password                                                                                                                                                                               |
-| Ferret | raises a `code` card for a password field or prompt                                       | the daemon sees the password field or prompt and handles the field as a `secret` ("Treated as a secret: this is a password field."). A prompt it cannot tell from a code (a shell's echoing `read` with no password wording) stays a `code`; its card and ask say the ferret can see the value |
+| Who    | Abuse                                                                                     | Answer                                                                                                                                                                                                                                                                                          |
+| ------ | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ferret | relays a live code to an attacker's page (real-time phishing) within its 30 s–10 min life | a daemon-made TOTP code is typed only into the sign-in's observed field and no tool returns it. **Not covered**: a code the ferret reads itself, or sees on screen (a screenshot, a scripted read of the field), can be typed anywhere                                                          |
+| Ferret | with inbox access, resets the password of any account that recovers by e-mail             | not Ferretry's to stop: **inbox access is account-recovery power.** Give a ferret an inbox only when you would give it the accounts behind it                                                                                                                                                   |
+| Page   | an e-mail or page tells the ferret "enter this code at evil.example" (prompt injection)   | the agent instruction says to type a code only on the page of the sign-in it is for                                                                                                                                                                                                             |
+| Page   | a look-alike page asks for the code                                                       | the input shows where it goes and flags a missing, covered, insecure or cross-site field amber, as for a password                                                                                                                                                                               |
+| Ferret | raises a `code` input for a password field or prompt                                      | the daemon sees the password field or prompt and handles the field as a `secret` ("Treated as a secret: this is a password field."). A prompt it cannot tell from a code (a shell's echoing `read` with no password wording) stays a `code`; its input and ask say the ferret can see the value |
 
 **Older clients fail closed.** A PWA or `fy` built before `code` existed reads a request through a closed enum and
-refuses the whole request (the card shows an error), so it is never drawn or answered as `plain`. A client from
+refuses the whole request (the input shows an error), so it is never drawn or answered as `plain`. A client from
 this release on reads an unknown sensitivity as `secret` and an unknown risk level as `amber`
-(`ReadInputSensitivitySchema`), so the next addition fails closed without refusing the card. An older daemon refuses a
+(`ReadInputSensitivitySchema`), so the next addition fails closed without refusing the input. An older daemon refuses a
 raise naming `code`, and the agent is told so.
 
 ## Who may do what
 
 - **Raise**: only an agent, through `/v1/agent/tools`, on a surface it opened or was handed.
-- **Read a card's accounts**: a card's `saved` (offers, Save as, who the page signs in) goes only to a caller with
-  `secrets.use`; any other reads the card without it. Typing a saved account needs `secrets.use`, and Save to
+- **Read an input's accounts**: an input's `saved` (offers, Save as, who the page signs in) goes only to a caller with
+  `secrets.use`; any other reads the input without it. Typing a saved account needs `secrets.use`, and Save to
   Accounts `secrets.configure` ([grants](grants.md)).
 - **Answer or cancel**: the owner only. The route refuses an agent caller (`peer:`, `warden:`) before
   it reads the body, and the service refuses again **before anything else** (`cancel` included: an
@@ -238,11 +238,11 @@ raise naming `code`, and the agent is told so.
   then sends **one** `tmux if-shell -F` command whose condition tmux evaluates in its own server in the
   immediately before it queues the write (see the honest limits for what that does not prove): the
   pane (by id), the pane's shell pid, tmux's `pane_current_command`, the cursor row and "the pane is
-  not dead". The foreground facts shown on the card come from `ps` and are digested; tmux can only be
+  not dead". The foreground facts shown on the input come from `ps` and are digested; tmux can only be
   asked about its own command name, so that name is what the guard compares. Any mismatch types nothing and answers 409 `target_changed`;
   a refused or failed command is _uncertain_. A foreground program whose name tmux cannot compare
   safely is refused. Three failed checks end the request; a change that is still the same target redraws
-  the card instead of counting ([When the target changes](#when-the-target-changes)). **What tmux cannot
+  the input instead of counting ([When the target changes](#when-the-target-changes)). **What tmux cannot
   bind** is in the honest limits below.
 - **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` carrying the
   value and, when the owner wants Enter pressed, the `\r` in the same command (on by default for a
@@ -252,16 +252,16 @@ raise naming `code`, and the agent is told so.
 - **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close` and a delivery
   take one lock per session, so an agent send cannot complete after a request is raised on its pane,
   and two raises on one target cannot both be admitted. Admission reserves the surface and the
-  pending-request capacity under that lock. An **owner cancel and a card being dismissed do not take
+  pending-request capacity under that lock. An **owner cancel and an input being dismissed do not take
   that lock**: they check the request's state and make their final-state change synchronously, so a
   delivery already past its last look finishes as delivered and one that has not started finds the
-  request closed. A close the daemon itself caused is ignored by the card-closed observer.
+  request closed. A close the daemon itself caused is ignored by the input-closed observer.
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
 
 ## When the target changes
 
-The card binds to everything the daemon saw, so ANY change refuses the write: a page's field node, its box,
+The input binds to everything the daemon saw, so ANY change refuses the write: a page's field node, its box,
 whether something covers it, the document; a terminal's cursor row. Most changes are not a different target.
 A 2FA page re-renders its code input as a new node (React replaces it, and the agent's ref goes stale), a
 countdown moves the box, a toast covers it for a moment, a reload makes a new document; a terminal redraws the
@@ -285,37 +285,37 @@ What it finds is then compared on its **binding**, the part of the facts that na
 | a secret   | its name                                                                                                           | whether it already holds a value                    |
 
 - **The same target, exactly as shown**: it is typed into (a stale ref that finds the same node, say).
-- **The same target, something else changed**: the card is **redrawn** — a new picture taken before anything
+- **The same target, something else changed**: the input is **redrawn** — a new picture taken before anything
   is typed, a new digest, the risk worked out again — the request stays pending, nothing is typed and **nothing
-  is counted**. Send answers 409 `target_rebound` and the card says "The page changed. Check the picture and
+  is counted**. Send answers 409 `target_rebound` and the input says "The page changed. Check the picture and
   send again." (a terminal: "The terminal redrew its prompt."). The owner always approves the target the value
-  goes into: a re-bind never types. It is audited as `input.rebound`. A page card redrawn onto ANOTHER document
+  goes into: a re-bind never types. It is audited as `input.rebound`. A page input redrawn onto ANOTHER document
   than the one it was raised on (a reload, or a navigation within the same origin) is flagged amber: "The page
   loaded a new document since you were asked: check the picture, and open the page if you are not sure it is the
-  one you meant." The card shows the origin, not the address. A field whose own flag is red (a plain value) keeps
-  red; the other fields of the card carry the amber.
+  one you meant." The input shows the origin, not the address. A field whose own flag is red (a plain value) keeps
+  red; the other fields of the input carry the amber.
 - **Anything else** is a failed check, counted as before: another origin or page, an http page, a field in
   another site's frame, a password field that became a text field, a hidden field, no such field, **several
   look-alikes** (none is chosen), another program or prompt, echo turned on.
 
-A card older than the request (the owner's client still holds the digest from before a redraw) is answered
+An input older than the request (the owner's client still holds the digest from before a redraw) is answered
 `target_rebound` and not counted: nothing is wrong with the target. Both endings are `check_failures`, told apart
 in plain words:
 
-- redrawn more than `INPUT_MAX_REBINDS` (5) times: Send answers 410 `target_unsettled`, and the card closes with
+- redrawn more than `INPUT_MAX_REBINDS` (5) times: Send answers 410 `target_unsettled`, and the input closes with
   "The page kept changing, so nothing was typed. Ask the ferret to request again."
-- three failed checks (another target): Send answers 409 `target_changed` as each one did, and the card closes
+- three failed checks (another target): Send answers 409 `target_changed` as each one did, and the input closes
   with "The page is no longer what you approved, so nothing was typed. Look at it before the ferret asks again."
   It never invites a fresh request on a target that turned into another one.
 
-The guarded write is unchanged: `inputType` still writes only to the exact nodes the (redrawn) card showed and
-refuses anything different, and a write refused at the last moment redraws the card but is never retried within
+The guarded write is unchanged: `inputType` still writes only to the exact nodes the (redrawn) input showed and
+refuses anything different, and a write refused at the last moment redraws the input but is never retried within
 that Send.
 
 ## The risk is flagged, never a reason to refuse
 
 The owner can always be asked. A rogue program can print `[sudo] password for kirin:` itself, so the
-card draws what the **daemon** observed (`sudo` is reading it, typing is hidden) large and what the
+input draws what the **daemon** observed (`sudo` is reading it, typing is hidden) large and what the
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
@@ -323,7 +323,7 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | green   | A `secret`, echo off in line mode, and EVERY process of the foreground group PROVED to run one recognised program (`sudo`, `ssh`, `gpg` and so on), with no stranger holding the terminal. |
 | amber   | A proved program in raw or readline mode: it may be relaying keys (`ssh -t`, `docker exec -it`), not asking for a password itself.                                                         |
-| amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The card says "unverified".                  |
+| amber   | **Unverified**: the program reading the terminal is not proved ([who reads the terminal](#who-reads-the-terminal)), whatever name `ps` shows. The input says "unverified".                 |
 | amber   | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.                                                                          |
 | amber   | A `private` value (it echoes): "This value will show on screen while the terminal is hidden from the ferret for two minutes."                                                              |
 | neutral | A one-time `code`: "One-time code: the ferret can see it." A page field's amber checks (missing, covered, not https, another site's frame) still come first.                               |
@@ -333,7 +333,7 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
-a `secret`, `private` or `code` value ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
+a `secret`, `private` or `code` value ("this would press keys"), a target that changed since the input was drawn (`target_changed`),
 and a caller who is not the owner. A `private` value is always flagged amber, a `code` neutral.
 
 **`sudo` always goes through the app.** The agent instruction makes `terminal_request_input` the only way
@@ -376,7 +376,7 @@ When a `secret` is delivered the terminal is **quarantined** from the write for 
   declared compare-and-enqueue gap.
 - **Every projection of what the daemon saw is covered.** While a pane is quarantined the prompt line, the
   program name and the argv in the owner's list, the agent's view and a restored request are replaced with a
-  notice, not just masked. The agenda card and the audit trail never carry what the pane showed at all: the card
+  notice, not just masked. The agenda item and the audit trail never carry what the pane showed at all: the input
   says "Type it into the terminal", and an audit record holds ids, kinds, flags and outcomes, not the program name,
   so no later fold, flush or projection of either can republish it.
 - **A viewer gets a notice instead of the pane**, unless that viewer chose "Show anyway". That choice
@@ -414,45 +414,45 @@ When a `secret` is delivered the terminal is **quarantined** from the write for 
 
 ### How long the lock lasts
 
-The owner chose an **adaptive** lock (!A149). The card shows its length and why ("Hidden from the ferret for 10 s
+The owner chose an **adaptive** lock (!A149). The input shows its length and why ("Hidden from the ferret for 10 s
 after typing. …"), from `request.lock` (`InputLockSchema`: `seconds` and a fixed `reason`); the agent learns the
 seconds (`lockSeconds`). It is decided only from what the daemon observed (`packages/daemon/src/lib/input-requests/lock.ts`):
 
-| Reason               | Lock  | When                                                                                                                                                                                                                                                                                                                                                                  |
-| -------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `hidden-terminal`    | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified card are never short. |
-| `proven-field`       | 10 s  | Exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise; only for a value Ferretry SUBMITS.                                                                                                    |
-| `probed-field`       | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                               |
-| `code`               | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                           |
-| `terminal-shows`     | 120 s | Any other terminal: "Ferretry couldn't prove this is a local sudo, su, doas or passwd prompt with typing hidden."                                                                                                                                                                                                                                                     |
-| `scripted`           | 120 s | A page script ran on this page or on its site (see [what the ferret did](#what-the-ferret-did-judged-per-page)): "A ferret ran a script on this page or this site."                                                                                                                                                                                                   |
-| `steered`            | 120 s | The ferret used this page, or a tab sharing its storage on its site, after the card was raised: "The ferret used this page, or another tab on this site, after asking you."                                                                                                                                                                                           |
-| `not-password-field` | 120 s | A secret field that does not qualify (below): "This is not a plain password box on a secure page."                                                                                                                                                                                                                                                                    |
-| `did-not-move-on`    | 120 s | A record for this field says it was not masked, showed the value or did not move on: "Last time here, the page didn't move on or it showed the value."                                                                                                                                                                                                                |
-| `until-moved-on`     | 120 s | The facts hold but Ferretry is not pressing Enter: held while the page shows the document the value went into, at most 120 s (below): "It ends sooner once the page moves on, because the value hasn't been submitted yet."                                                                                                                                           |
-| `probe-shown`        | 120 s | The probe found its throwaway value: "A test value Ferretry typed showed in the page's text."                                                                                                                                                                                                                                                                         |
-| `probe-stopped`      | 120 s | The probe did not finish cleanly: "Ferretry's quick test of this page didn't finish cleanly."                                                                                                                                                                                                                                                                         |
-| `first-time`         | 120 s | No facts for this field and no probe ran: "First time on this page: Ferretry hasn't seen it hide a password yet."                                                                                                                                                                                                                                                     |
-| `not-proven`         | 120 s | Nothing could be checked: no observer is wired, or the login store can't be read. (An older daemon's one word for every long lock.)                                                                                                                                                                                                                                   |
+| Reason               | Lock  | When                                                                                                                                                                                                                                                                                                                                                                   |
+| -------------------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hidden-terminal`    | 10 s  | A LOCAL password prompt: echo off AND line (canonical) mode, the PROVED program is sudo, sudoedit, su, doas or passwd, and EVERY process of the foreground group runs setuid root (effective uid 0, real uid not), which a script or binary the ferret wrote cannot. ssh, docker, psql, every readline or raw-mode program and every unverified input are never short. |
+| `proven-field`       | 10 s  | Exactly the page fields below, AND the facts of the sign-ins matched to this page (every account's, read together) for that very field identity say masked, no echo after submit and moved on, with no record saying otherwise; only for a value Ferretry SUBMITS.                                                                                                     |
+| `probed-field`       | 10 s  | One password field as below, and the daemon's **dummy probe** at raise came back clean.                                                                                                                                                                                                                                                                                |
+| `code`               | 120 s | A `private` value: it shows as it is typed. (A one-time `code` field gets no lock at all; the reason's name is older than the sensitivity.)                                                                                                                                                                                                                            |
+| `terminal-shows`     | 120 s | Any other terminal: "Ferretry couldn't prove this is a local sudo, su, doas or passwd prompt with typing hidden."                                                                                                                                                                                                                                                      |
+| `scripted`           | 120 s | A page script ran on this page or on its site (see [what the ferret did](#what-the-ferret-did-judged-per-page)): "A ferret ran a script on this page or this site."                                                                                                                                                                                                    |
+| `steered`            | 120 s | The ferret used this page, or a tab sharing its storage on its site, after the input was raised: "The ferret used this page, or another tab on this site, after asking you."                                                                                                                                                                                           |
+| `not-password-field` | 120 s | A secret field that does not qualify (below): "This is not a plain password box on a secure page."                                                                                                                                                                                                                                                                     |
+| `did-not-move-on`    | 120 s | A record for this field says it was not masked, showed the value or did not move on: "Last time here, the page didn't move on or it showed the value."                                                                                                                                                                                                                 |
+| `until-moved-on`     | 120 s | The facts hold but Ferretry is not pressing Enter: held while the page shows the document the value went into, at most 120 s (below): "It ends sooner once the page moves on, because the value hasn't been submitted yet."                                                                                                                                            |
+| `probe-shown`        | 120 s | The probe found its throwaway value: "A test value Ferretry typed showed in the page's text."                                                                                                                                                                                                                                                                          |
+| `probe-stopped`      | 120 s | The probe did not finish cleanly: "Ferretry's quick test of this page didn't finish cleanly."                                                                                                                                                                                                                                                                          |
+| `first-time`         | 120 s | No facts for this field and no probe ran: "First time on this page: Ferretry hasn't seen it hide a password yet."                                                                                                                                                                                                                                                      |
+| `not-proven`         | 120 s | Nothing could be checked: no observer is wired, or the login store can't be read. (An older daemon's one word for every long lock.)                                                                                                                                                                                                                                    |
 
-The card shows the reason's sentence after "Hidden from the ferret for … after typing." The sentences are fixed
-(`INPUT_LOCK_WORDS`), never page or terminal text. While a card waits, the lock it shows is the lock Send would give
-now: once the ferret uses the card's page, or a script taints it, the card says "2 minutes" and why before the owner
+The input shows the reason's sentence after "Hidden from the ferret for … after typing." The sentences are fixed
+(`INPUT_LOCK_WORDS`), never page or terminal text. While an input waits, the lock it shows is the lock Send would give
+now: once the ferret uses the input's page, or a script taints it, the input says "2 minutes" and why before the owner
 presses Send. New reasons need no feature gate: the app ships before the daemon (Architecture, "The app ships
 before the daemon"), so the app that knows them is out before any daemon sends one.
 
 A page field qualifies when every secret field is a visible, uncovered `input type=password` on a secure page, in the
 page's own origin, with no human check showing.
 
-A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): the ferret may see both. A card with a
+An input of `plain` values and one-time `code`s has **no lock** (`heldFromView`): the ferret may see both. An input with a
 `code` beside a `secret` is locked for the secret alone, by the rules above.
 
 - **Masking does not shorten.** The redaction window stays 10 minutes whatever the lock; the owner can still end a
   lock early or reveal.
-- **A card never shortens at the write.** The lock is decided again from the facts seen at Send and the longer of
-  that and the card's is used. A card redrawn onto a re-rendered field drops its probe result.
+- **An input never shortens at the write.** The lock is decided again from the facts seen at Send and the longer of
+  that and the input's is used. An input redrawn onto a re-rendered field drops its probe result.
 - **The ferret's own steering voids a page's proof, judged per page** (below): a page a script ran on, or whose site
-  one ran on, never gets a short lock and is never probed, and at Send an act of the ferret on THAT page since the card
+  one ran on, never gets a short lock and is never probed, and at Send an act of the ferret on THAT page since the input
   was raised voids it. An act on another tab or a terminal does not.
 - **A value Ferretry does not submit is held until the page moves on** (`until-moved-on`, secrev-1333 M1). The facts
   say what the page does AFTER a submit; they never looked at the document while a value sits in its field (only the
@@ -465,9 +465,9 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
   A page whose probe showed the test value, or did not finish, gets no such relaxation (secrev-1333 L4): the plain full
   hold, with the probe's own reason (`probe-shown`, `probe-stopped`) at the raise and again at Send.
 - **A terminal's OBSERVED facts never shorten it** (a program the ferret placed can carry the right name). Only the
-  card's own facts do, and only when every process of the foreground group is a setuid-root password program.
-- **The dummy probe** runs on a page card only, for exactly ONE secret field, after the field picture and before the
-  owner is asked, inside the page's own queue. It is skipped for a session that ran a page script, for any card with a
+  input's own facts do, and only when every process of the foreground group is a setuid-root password program.
+- **The dummy probe** runs on a page input only, for exactly ONE secret field, after the field picture and before the
+  owner is asked, inside the page's own queue. It is skipped for a session that ran a page script, for any input with a
   `private` value or a one-time `code`, and for a field whose `autocomplete`, `name` or `id` says code, PIN, OTP, 2FA, verification, CVV or
   token, or whose `inputmode` is numeric, tel or decimal. It runs only on an EMPTY field in the page's main frame, and
   only when the page holds no WebSocket open. A throwaway value of three characters (a tilde and two random letters or
@@ -492,31 +492,31 @@ A card of `plain` values and one-time `code`s has **no lock** (`heldFromView`): 
 
 #### What the ferret did, judged per page
 
-A page card's lock reads only what could have changed what THAT page shows (`LoginObserver.pageSteer`, and the
+A page input's lock reads only what could have changed what THAT page shows (`LoginObserver.pageSteer`, and the
 input service's `steerOf`):
 
 - **By site.** Hosts are grouped by SITE (`siteOf`): sibling subdomains of one registrable domain share cookies, so
   `mail.example.com` and `accounts.example.com` are one site. With no public-suffix list it is the host's last two
   labels, port dropped: never narrower than the registrable domain, sometimes wider (every `*.co.uk` page is one site),
   which only ever counts more. An IP address or a one-label host is its own site.
-- **Scripts, ever.** A page script this session ran on the card's page, or on any page while it was on the card's site,
+- **Scripts, ever.** A page script this session ran on the input's page, or on any page while it was on the input's site,
   or where the page or host could not be told; a script of this session still running; and, from any caller in any
-  session, a script on the card's site, on a host that couldn't be read, or one running anywhere now (the machine-wide
+  session, a script on the input's site, on a host that couldn't be read, or one running anywhere now (the machine-wide
   taint the standing rules keep, [below](#standing-rule-fills-a-sign-in-the-owner-approved-for-any-ferret)). Any of
   these: `scripted`, no probe, the full lock.
-- **Acts, since the card was raised** (at Send, and on the card while it waits): an act of this session on the card's
+- **Acts, since the input was raised** (at Send, and on the input while it waits): an act of this session on the input's
   page (a click, a key, a navigation, a close), or on another page that may share its cookies and storage (two pages of
-  the shared agent profile, or a popup, which lives in its opener's context) while that page was on the card's site.
+  the shared agent profile, or a popup, which lives in its opener's context) while that page was on the input's site.
   An incognito page shares nothing with any other page, so an act on one never counts for another. At Send this is
   asked after the login store is read, and once more with the page held, right before the write: an act that began in
   between gets the full hold, taken before the short one is let go.
-- **Not counted**: an act on a tab of another site, on any incognito tab but the card's own, or on a terminal; a
+- **Not counted**: an act on a tab of another site, on any incognito tab but the input's own, or on a terminal; a
   script on another site's page. The owner's two Google tabs (one profile, one incognito) no longer lengthen each
   other's lock.
 - **How an act is placed.** The agent tools tell the observer before an act runs. Until the call is over it counts
   on EVERY page; then it is placed on the page it touched, with every host that page was on around the act: where it
   was when it was looked up, where it is now, and where its popups are now. A page that can't be looked up leaves the
-  act on every page; a host that can't be read leaves it on every host of that page. A card's page the observer never
+  act on every page; a host that can't be read leaves it on every host of that page. An input's page the observer never
   saw an act on may share storage with any page.
 - **Limits.**
   - Only the hosts before and after an act are known: a page that went through a third host on the way (a redirect
@@ -524,7 +524,7 @@ input service's `steerOf`):
   - Another session's non-script acts are not counted, as before: every ferret's profile pages share sign-ins and
     storage, and only scripts are tainted machine-wide.
   - The facts a sign-in keeps (`navigatedAway`, `tapped`, ...) are still dropped for ANY act of the session on a page
-    since the card was raised (below), so a standing rule's history is unchanged.
+    since the input was raised (below), so a standing rule's history is unchanged.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input ^A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
@@ -542,7 +542,7 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
   the argv are masked WHOLE first and only then cut to their limits (200, 64 and 200 characters), so a
   clipped echo cannot leave the front of a value. A prompt line that ends with the start of a value, or
   starts with its end (three characters or more), is a value that wrapped over a row: no exact match
-  finds half a value, so the line is replaced outright. The card, the agent's view, the journal, the
+  finds half a value, so the line is replaced outright. The input, the agent's view, the journal, the
   audit record and the owner's list all use the projection. The raw facts are digested and handed to
   the write, then dropped: a request that ends keeps no observed facts and no digest.
 - **The viewer's stream is scrubbed too.** The live terminal the app draws goes through
@@ -565,14 +565,14 @@ and (after the quarantine) the agent's `terminal.read` and `terminal.wait`. Reda
 - **Values are really dropped.** Each purge replaces the stored array with only the unexpired entries.
   A clock-driven sweep purges every session, not only the one that was just read, and a session that
   ends drops its values at once. Neither depends on someone reading the window.
-- **An input card takes no free text.** Resolving or dismissing an `input` card from a human actor
-  ignores any note, and the app empties the composer when such an action is taken (and the next card
+- **An input takes no free text.** Resolving or dismissing an `input` item from a human actor
+  ignores any note, and the app empties the composer when such an action is taken (and the next input
   starts with no note), because a note is the one place a value could be pasted into the ledger by
   mistake.
 
 ## Pages
 
-A request on a page (`browser_request_input`) goes through the same service, card and deliver as a terminal's.
+A request on a page (`browser_request_input`) goes through the same service, input and deliver as a terminal's.
 What is different is how the daemon looks and types, and what it holds back afterwards.
 
 ### Looking: the browser decides, the agent only points
@@ -584,12 +584,12 @@ What is different is how the daemon looks and types, and what it holds back afte
   `type`/`autocomplete`/`name`/`id`/`inputmode`, its box and whether it is visible.
 - A field the page lacks refuses the raise. Every look and write runs in the page's own queue
   (`BrowserSubsystem.inputOnPage`), so no act of the agent lands between the check and the write.
-- The card's flags come from those facts: http, a field in a frame from another site, a `secret` into a field
+- The input's flags come from those facts: http, a field in a frame from another site, a `secret` into a field
   that is not `type=password`, a field that cannot be seen: amber. Only a password input on a secure page
   is green.
-- **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the card
+- **A picture of the fields** is taken at raise, before anything is typed, and kept in RAM for the input
   (`GET /v1/ferrets/:ferretId/input-requests/:requestId/shot`, owner only; `request.pictured` says there is one). The
-  card draws each field's box on it from the browser's facts. It is let go when the request ends.
+  input draws each field's box on it from the browser's facts. It is let go when the request ends.
 
 - **The field's identity is the node Playwright holds.** Playwright resolves the agent's ref or selector in its
   own isolated world and holds the element; the node is the one Playwright's own DevTools session names for that
@@ -597,16 +597,16 @@ What is different is how the daemon looks and types, and what it holds back afte
   unique inside one renderer. The session the write uses must be a session of that same target (the frame's own,
   or its nearest ancestor's, or the page's; never the page's for a frame in another target) and must describe the
   same node, or the field is refused.
-  Every fact on the card (node, attributes, box) comes from that node; no page script is asked which element it
+  Every fact on the input (node, attributes, box) comes from that node; no page script is asked which element it
   is. This reaches past Playwright's public API (pinned with the version the worker ships, and a unit test fails
   when the installed Playwright is another release): a missing part refuses the field, it never guesses.
 - **Covered or off screen is a flag, not a refusal.** The node on top at the field's centre (hit-tested by
-  DevTools) that is not the field, or a field off screen, marks it `covered`; the card says "covered or off screen"
+  DevTools) that is not the field, or a field off screen, marks it `covered`; the input says "covered or off screen"
   and flags it amber, and the owner decides.
 
-### Typing: one write into exactly the nodes the card showed
+### Typing: one write into exactly the nodes the input showed
 
-`inputType` re-checks the page against the card's facts first: the same document, the same origin, and every
+`inputType` re-checks the page against the input's facts first: the same document, the same origin, and every
 node still there with the same attributes. Anything different types nothing (`target_changed`). Then, per
 value in order: focus the node, confirm the focus landed on it, select what the field holds, and insert the
 text (`Input.insertText`, which a page's script sees as ordinary input). Enter goes to the last field when
@@ -638,7 +638,7 @@ A `secret` or `private` value typed into a page (never a one-time `code`) holds 
   passes the same redactor as a read (a page that throws the password back shows a mask), and fails closed to a
   fixed sentence when the redactor cannot run.
 - Page holds share the terminal's registry under their own names (a hold on page `app` never seals terminal
-  `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's card ends as
+  `app`) and are not journalled: a page does not outlive the daemon that drove it, and a page's input ends as
   interrupted on restart. GAP: the owner cannot end a page's hold early from the app; it runs its two minutes.
 
 ### Password saving is off in the agent profile
@@ -672,7 +672,7 @@ covered.
 
 The daemon recognises the common human checks (reCAPTCHA, hCaptcha, Cloudflare Turnstile and interstitials,
 and others; `recogniseBrowserChallenge`) from what the browser knows about the page, and puts `challenge` in
-the facts. The card says so and the agent's answer tells it to hand the page over with `browser_ask_owner`
+the facts. The input says so and the agent's answer tells it to hand the page over with `browser_ask_owner`
 ("complete the captcha") and wait. Ferretry never solves, skips or disguises itself past one.
 
 ## Saved logins
@@ -685,8 +685,8 @@ reads ("GitHub (kirinnee)"), what it is for (`match`), and its fields. The wire 
 
 | Field      | Kind               | Where it rests                                        | Who sees it                                              |
 | ---------- | ------------------ | ----------------------------------------------------- | -------------------------------------------------------- |
-| `label`    | plain              | the index, `login-entries.json` (`0600`)              | the owner's list and card                                |
-| `match`    | plain              | the index                                             | the owner's list and card                                |
+| `label`    | plain              | the index, `login-entries.json` (`0600`)              | the owner's list and input                               |
+| `match`    | plain              | the index                                             | the owner's list and input                               |
 | `method`   | plain              | the index                                             | the owner, and the ferret's `account_hint`               |
 | `domains`  | plain              | the index                                             | the owner, and the ferret's `account_hint`               |
 | `username` | **plain**          | the index                                             | the owner, and the ferret once it is typed (it is plain) |
@@ -699,9 +699,9 @@ fields exist. The sealed document is not the main vault: `fy secret use` cannot 
 `${secret:…}` cannot name one. Saved values are masked wherever the daemon scrubs text, as
 `[redacted:login:<ID>:password]`.
 
-**How the card reaches them in 5.0.** The Vault owns the card; Accounts owns the entries. So the Vault declares the
+**How the input reaches them in 5.0.** The Vault owns the input; Accounts owns the entries. So the Vault declares the
 `input.saved` hook (key `saved`, taken by Accounts alone) and Accounts provides it: the listing the offers are drawn
-from, the one value a field types (`fill`), "Save as", the card's order, and the facts the daemon saw after a submit.
+from, the one value a field types (`fill`), "Save as", the input's order, and the facts the daemon saw after a submit.
 The Vault looks the provider up **on every call** and parses what it answers against its own strict schemas. **Fail
 closed:** with Accounts off or unreadable nothing is offered or saved, the lock reads the facts as unreadable (the long
 lock), a value typed by hand still goes in, and a client that sends a saved entry is told "Ferretry could not read the
@@ -722,11 +722,11 @@ is for (`match`, the site the work is on):
   security key is refused (`namesPasskey`): the agent browser has [passkeys off](#passkeys-are-off-in-the-agent-browser),
   so a login that needs one is the owner's hands (`browser_ask_owner`), never a saved login.
 - **`domains`**: web hosts, exact (`app.vercel.com`, `accounts.google.com`). A pasted URL is read as its host. A
-  **page** card's one-tap choice is an entry whose login domain is the page's host **exactly** — no wildcard, no
-  parent domain. A **terminal** card still matches by `match` (`sudo@kirin-box`).
+  **page** input's one-tap choice is an entry whose login domain is the page's host **exactly** — no wildcard, no
+  parent domain. A **terminal** input still matches by `match` (`sudo@kirin-box`).
 - **Older entries** (saved before methods) read as `password`, with their web `match` hosts as their login
   domains, and are not rewritten until edited.
-- When a sign-in a page is for goes through a provider, the owner's card says so ("Sign in with Google via
+- When a sign-in a page is for goes through a provider, the owner's input says so ("Sign in with Google via
   'Google (kirin@…)'", `InputSaved.signIn`), and **no** saved password is offered there but one the daemon matched
   on that page: not the provider's (it is typed only on the provider's own domain), and nothing by hand either. That
   holds when a migration dropped the `via` link and left only the method, so the provider is never one tap away on
@@ -742,7 +742,7 @@ Before a sign-in, a ferret calls **`account_hint`** (a page by name, so the daem
 (`accountHintsFor`): the **sign-in id** (`si_…`, what `account_propose` names), the account's **handle, label and
 plain username**, the place, the method and the provider it goes via, the account's 2FA keys by kind and label, its
 [recipe and observed facts](#login-recipes-how-it-signs-in-and-what-the-daemon-saw), and why it would be first on
-this session's card ("Only account here", a default) — decided by the same `chosenSignIn` as the card, over every
+this session's input ("Only account here", a default) — decided by the same `chosenSignIn` as the input, over every
 matched sign-in, so it never says which accounts lack a password. Never a password, a seed, a code, which secret
 fields exist, the 2FA parameters, seal names, auto-apply or proposals (`AccountHintSchema` has no field for one).
 Every answer ends "passkeys are off". The tool answers the lines as its summary; the structured hint is
@@ -790,10 +790,10 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
     whole answers "cannot tell", never "not there". For a terminal: the screen and 50 rows above it. The value never
     leaves the daemon for this; the look answers yes or no, and what it read is dropped.
   - `navigatedAway`: the page showed a new document within 10 s of the submit.
-  - `secondFactor`: `code` (a one-time code card was typed on the same account soon after), `push` (the page waited on
+  - `secondFactor`: `code` (a one-time code input was typed on the same account soon after), `push` (the page waited on
     the sign-in hosts, then left them with no code typed), or `none` (it left at once). Watched for 3 minutes.
   - `tapped`: the fill was the OWNER's own tap from a paired device that went through, on a page that moved on
-    unsteered (written beside `navigatedAway`; `false` for one that did not move on). It is never shown to a ferret. Who filled a card maps to
+    unsteered (written beside `navigatedAway`; `false` for one that did not move on). It is never shown to a ferret. Who filled an input maps to
     the observer through one exhaustive table (`observerByOf`: `device`, `host`, `plan` or `rule`, with no default),
     and only `device` writes this fact, so plan fills, rule fills and the admin token never count toward a standing
     rule's history.
@@ -804,12 +804,12 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   surface and open another under the same name. So the facts from after the submit are dropped when, at any time
   since the request was RAISED, the ferret called any tool that may change a surface of that kind (every tool but the
   read-only ones; `actsOn`), or, for a page, when the session ever ran a page script (a script can arm a page before
-  the card). The looks are pinned to the page or terminal that was typed into (by its id): another surface under the
+  the input). The looks are pinned to the page or terminal that was typed into (by its id): another surface under the
   same name answers "cannot tell". Each after-submit fact is decided at its own moment (the echo once both looks are
   in, the page moving on at the end of its window, the second factor when the page leaves the sign-in hosts), and an
   act after that moment does not undo it. A raise time that cannot be read keeps no after-submit fact. The proposal
-  card and the owner's change and approval answers are masked like any read. The facts of the write itself come from
-  the card's own observation.
+  input and the owner's change and approval answers are masked like any read. The facts of the write itself come from
+  the input's own observation.
 - **The ferret reads both** in `account_hint`, and the agent instruction says to read it before a sign-in.
 - **The ferret proposes, the owner decides.** After a sign-in a ferret may call `account_propose` (`signIn`, the
   whole new `recipe`, `why`). It is keyed by the **sign-in**: the older `{ login }` (and `login.propose`) is
@@ -817,8 +817,8 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   that signs in at several places is refused ("That account signs in at 2 places; name one as signIn (si*…, si*…)."),
   and one that signs in nowhere too. A rule suggestion (`preapprove`) resolves the sign-in with the same decision,
   codes and words, so the two halves of one call never answer differently. The audit names the sign-in it resolved to. The proposal waits on that sign-in (three at most;
-  a fourth pushes out the oldest and closes its card) and on an agenda card, "Recipe change on github.com" (the place only: agenda text is every ferret's to
-  read, so no daemon card names an account's label or username), that shows the changed lines and "The ferret says: …". **The card approves nothing**: the owner
+  a fourth pushes out the oldest and closes its input) and on an agenda item, "Recipe change on github.com" (the place only: agenda text is every ferret's to
+  read, so no daemon input names an account's label or username), that shows the changed lines and "The ferret says: …". **The input approves nothing**: the owner
   approves or declines in Settings › Accounts › the account › the place › Recipe, or with
   `fy account site recipe approve|decline <sign-in> <proposal>`, through the owner-only
   `POST /v1/accounts/sign-ins/:si/recipe/proposals/:proposalId` (or `/v1/secrets/logins/:id/…`, which finds the
@@ -839,7 +839,7 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
   - The facts are never stronger than the shared admin token: a ferret that calls the person routes without naming
     itself, or drives tmux or the browser from its own shell, is not seen acting. Terminal facts are weaker still: a
     program the ferret placed (a fake `sudo` on its PATH) has the same name, so a terminal's OBSERVED facts are
-    information for the ferret and the owner, and never shorten the post-typing lock (only the card's own
+    information for the ferret and the owner, and never shorten the post-typing lock (only the input's own
     echo-off and recognised-program facts do).
   - The echo look reads the main frame; a value echoed only inside another frame, or transformed on its way to the
     screen, is not recognised. `push` is inferred from timing and hosts, and an owner who types the code by hand on a
@@ -849,25 +849,25 @@ facts are `packages/daemon/src/lib/input-requests/login-observer.ts`.
 
 ### The first time: "Save as"
 
-The owner types the value on the card and ticks **Save to Accounts**. An account IS a username and a password, so the
-card shows, in this order:
+The owner types the value on the input and ticks **Save to Accounts**. An account IS a username and a password, so the
+input shows, in this order:
 
 - **Username**, pre-filled only with [who the page is signing in](#who-is-signing-in) (what the ferret typed or chose
-  there), and editable. Never another account's username. A card that types a username itself keeps that one instead.
+  there), and editable. Never another account's username. An input that types a username itself keeps that one instead.
 - **Save as a new account** or **Update `<account>`** — an explicit choice, drawn only when the daemon offers an
   account to update (`InputSaved.update`); otherwise one plain line, "Saves as a new account". It **always starts on
   new**: who the page signs in is the ferret's word and may be stale, so writing over a saved password is only ever the
   owner's own pick of Update. The Update choice says "(same username)" only when the page said who it signs in and
   that is the account's own username. Picked, it says plainly "Replaces the saved password of …" and keeps the
   account's own username (read-only). Into an account with no username saved, the owner's Username is kept on it, and
-  the card says so before Send: "… has no username saved. This sets its username to b@… and replaces its password."
+  the input says so before Send: "… has no username saved. This sets its username to b@… and replaces its password."
 - **Name** (new only), from the provider and the username: "Google · a@gmail.com" (`suggestedNewAccount`; a fixed
   provider list — Google, Microsoft, an Okta tenant — else the host, `github.com · kirinnee`).
 - **More › Name in the terminal** (new only): the account's handle, the name `fy account` uses (`GOOGLE_A`), derived
   from the Name until edited and never one an account already has (`_2`, `_3`…). It is not an environment
-  variable; the card never calls it a label or a handle.
+  variable; the input never calls it a label or a handle.
 
-The daemon sends `InputSaved.update` — the account the card's primary is chosen as (`chosenSignIn` without the
+The daemon sends `InputSaved.update` — the account the input's primary is chosen as (`chosenSignIn` without the
 ferret's hint; two or more and nothing chooses one: none), and **never** when the page is signing in someone that
 account is not (another username, or none saved: the owner adds the username in Settings › Accounts first) — and
 `newAccount` (the name and terminal name above). The typed username never chooses the account to update. `suggest`
@@ -879,10 +879,10 @@ The deliver's `save` is enforced twice, before anything is typed and again under
 - **No `mode`** (an older app) saves only a NEW account; an `entry` that is an account is refused, nothing typed. A
   `username` is accepted only with a `mode`.
 - **`new`** never lands on a terminal name an account has.
-- **`update`** only into the account the card offers to update, decided again at Send; never one that is not there,
+- **`update`** only into the account the input offers to update, decided again at Send; never one that is not there,
   never another person (the owner's box or the page naming another username, or the page naming anyone when the
   account has none).
-- Each is refused with nothing typed, or, when another card saved first in between, "typed, but not saved" with
+- Each is refused with nothing typed, or, when another input saved first in between, "typed, but not saved" with
   nothing overwritten.
 - **Saving needs `secrets.configure`** from a governed device, as every other write to the accounts does; typing a
   saved account needs `secrets.use` ([who may do what](#who-may-do-what)).
@@ -899,7 +899,7 @@ The deliver's `save` is enforced twice, before anything is typed and again under
 - **It is recorded as a change to the secret store**: a KEPT `secrets.changed` record (`login-save`) with
   the handle and the field, exactly as `fy secret set` is audited. Never the value.
 - **One change at a time, for the whole store.** Every saved login shares the same two files, and a change
-  reads both, seals and writes both back whole. Every change — a card's "Save as", a Settings edit, a rename,
+  reads both, seals and writes both back whole. Every change — an input's "Save as", a Settings edit, a rename,
   a delete, `fy account` (alias `fy secret entry`) — runs its read, merge and write in one store-wide queue (`LoginStoreLock`), so
   two that overlap both land and every acknowledged secret stays masked. A per-entry or per-session lock would
   not be enough: the files are shared.
@@ -914,14 +914,14 @@ The deliver's `save` is enforced twice, before anything is typed and again under
   daemon's staged ciphertext. A boot with no committed index sweeps nothing, and neither does one whose index
   names a value the sealed document does not hold: the store is reported as damaged and every value is kept,
   and masked.
-- **A username and a password from one card are kept together** (`LoginDirectory.saveFields`, one change), so a
-  login card never leaves an entry with half of what was typed. The one-field card saves the one field it has.
+- **A username and a password from one input are kept together** (`LoginDirectory.saveFields`, one change), so a
+  login input never leaves an entry with half of what was typed. The one-field input saves the one field it has.
 
 ### Who is signing in
 
-A ferret types the email itself on a two-step sign-in (it fills every non-secret field), so the password card would
+A ferret types the email itself on a two-step sign-in (it fills every non-secret field), so the password input would
 not know whose password it asks for. The daemon keeps who a page is signing in (`TypedIdentities`, memory only), per
-**page** — the daemon's own page id, the same one the input target checks a card's facts against — and the host of
+**page** — the daemon's own page id, the same one the input target checks an input's facts against — and the host of
 the field's document, from the ferret's own acts as the browser saw them:
 
 - a `browser.type` into an **identifier field**: an `input` of type email, or text with `autocomplete` username or
@@ -947,26 +947,26 @@ goes around it:
 
 Only the agent tools put a record back, from what a finished act of the ferret's was seen to do (above). Any act by a
 person through the agent tools clears it too, and so does a password delivered into the page (the sign-in moved on). It is also
-forgotten when the page is seen on another host, after 15 minutes, and when the session ends. A card raised on the same
+forgotten when the page is seen on another host, after 15 minutes, and when the session ends. An input raised on the same
 page and host reads it **at raise**, through the redactor like the ferret's prompt (a value the redactor would change
 is dropped), as `InputSaved.typedUsername`.
 
 It is the **ferret's word (or the page's), never proof**, and it may only take things away:
 
 - **It removes a one-tap, never makes one.** When the account that would be the one-tap (only, default or hint) has
-  another username, or none saved, there is **no one-tap**; `differentFrom` names it and the card says "This looks like
+  another username, or none saved, there is **no one-tap**; `differentFrom` names it and the input says "This looks like
   a different account. The page is signing in b@…, not …". The account stays pickable by hand; nothing is ever
   promoted or moved to another account, and a username matching a by-hand or second account chooses nothing.
 - **It removes an Update**: the account it is not is never offered or accepted for one (above).
 - **It pre-fills the Username under Save as**, which the owner reads ("What the ferret typed on the page. Check it is
   right.") and can change, and names a new account.
 - **When it is unknown**, the one-tap says whose password it types: the account's username, or "no username saved".
-- **The app's title** names the card's account only from the secrets-gated accounts listing (`GET /v1/accounts`,
+- **The app's title** names the input's account only from the secrets-gated accounts listing (`GET /v1/accounts`,
   `secrets.use`), and says the typed name as what it is: "… needs a password, signing in b@… as typed on the page". A
-  device without `secrets.use` sees the place-only title, and gets no `saved` at all from the card routes (it names
+  device without `secrets.use` sees the place-only title, and gets no `saved` at all from the input routes (it names
   accounts and people). The **agenda** text (title, ask, prompt) names no account or person, ever (secrev-1261 L4).
 
-Honest limits: a card restored after a daemon restart has no typed username (it was in memory), so its one-tap is
+Honest limits: an input restored after a daemon restart has no typed username (it was in memory), so its one-tap is
 decided as before. A navigation the page makes by itself on the same host (no ferret act) does not clear the record;
 the delivered password, the next ferret act and the 15 minutes do. A typed username does not stop a task-plan or
 standing-rule fill; those are already pinned to the sign-in the owner approved.
@@ -977,7 +977,7 @@ When a ferret raises a request, the daemon works out the target's **key** from w
 `program@host` for a terminal (the foreground program and this machine's short name, or the destination
 for `ssh`, `scp` and `sftp`), or the web host for a page. A **sign-in** whose place has that key **exactly**
 (`signInMatches`: a site's login domains, a terminal's `tool@host`) is **matched**, and its account is offered with
-the sign-in's id (`offer.signIn`). The card's primary action, **"Use saved <label>"**, is the one sign-in
+the sign-in's id (`offer.signIn`). The input's primary action, **"Use saved <label>"**, is the one sign-in
 `chosenSignIn` picks among the matched ones (`offer.primary`, with `offer.why`: `ferret`, `project`, `folder`,
 `site` or `only`); see [Accounts and sign-ins](#accounts-and-sign-ins-data-model). Two or more matched and nothing
 chose one: no offer is the primary. Offers come primary first, then the other matched ones by label, then the
@@ -987,8 +987,8 @@ accounts that may be picked by hand.
   unchanged: owner only (twice), the `deliveryId`, the target re-observed and compared, the tmux guard, one
   hex write, the quarantine, the risk flag. The value is opened **inside the daemon**, after every check that
   can refuse without typing, and goes only into that write.
-- **A saved value never passes through the app.** The card sends the entry's handle (and the offer's `signIn`);
-  the daemon resolves it. **The card's rules are the daemon's, not only the app's list**: at Send it draws the offers
+- **A saved value never passes through the app.** The input sends the entry's handle (and the offer's `signIn`);
+  the daemon resolves it. **The input's rules are the daemon's, not only the app's list**: at Send it draws the offers
   again (`savedForFields`, over the fields the owner did not type) and refuses (`bad_request`), before anything is
   opened or typed, an account that is not offered there now (a provider on a page that signs in through it, a 2FA
   code from an account that does not sign in here), and a `signIn` that is not that offer's matched sign-in: one of
@@ -1006,10 +1006,10 @@ accounts that may be picked by hand.
   `sudo@kirin-box`; EMPTY for an account that signs in nowhere). "Choose another account" lists first ONLY the accounts
   that sign in at THIS site; an account whose sign-ins are all elsewhere, or that has none, is behind "Use an account
   from another site…", each saying "signs in at …" or "not linked to a site", after the others and never the primary or
-  a one-tap, even as the only account on the card. A sign-in that is only FOR this site (its `match`) is not elsewhere.
+  a one-tap, even as the only account on the input. A sign-in that is only FOR this site (its `match`) is not elsewhere.
   The place keys are names, so they leave the daemon only inside `saved`, which a caller without `secrets.use` never
-  gets. An older daemon sends no `elsewhere`: its card keeps the one list. "Only account here" is said only when the
-  one-tap truly is the only account that signs in here: a card whose `primary` says `only` beside another matched
+  gets. An older daemon sends no `elsewhere`: its input keeps the one list. "Only account here" is said only when the
+  one-tap truly is the only account that signs in here: an input whose `primary` says `only` beside another matched
   account draws no one-tap and no such line, and asks "Pick one" instead.
 - **The ferret may hint** (`secretHint` / `secret_hint`, a handle or a `si_…`): a hint naming a matched sign-in
   makes it the primary ("Ferret chose this", `why: ferret`); one naming anything else is only tagged "the ferret
@@ -1020,7 +1020,7 @@ accounts that may be picked by hand.
 
 ### Codes Ferretry makes
 
-A code card is titled by the owner's 2FA key and offers **"Use code from Ferretry"** once per key whose seed this
+A code input is titled by the owner's 2FA key and offers **"Use code from Ferretry"** once per key whose seed this
 machine holds. The tap is the permission, as for a password; what follows is where the daemon may type the code.
 
 - **The title** is `factorAskWords` over the keys of the account the daemon matched, by the place and each code key's
@@ -1034,15 +1034,15 @@ machine holds. The tap is the permission, as for a password; what follows is whe
   one that worked first, then one never tried, then one that did not (`checked`), newest first. The app shows
   `LOGIN_ONE_FACTOR_WARNING` under every one: "Password and code both come from this machine: together they are
   one factor."
-- **Where it may go** (`codeTargetProblem`), decided from what the daemon saw, at the card and again at the write:
+- **Where it may go** (`codeTargetProblem`), decided from what the daemon saw, at the input and again at the write:
   a page on https, a field the browser reported visible and uncovered, in the page's own frame; a terminal's one
   prompt, whose `tool@host` key (a proved program in line mode) the sign-in matched. Matching is exact, so a
   look-alike origin, a subdomain, another port, another program or another ssh host offers nothing. Anything else
-  and the card **offers no code at all** (the owner types it), and a deliver for one is refused.
+  and the input **offers no code at all** (the owner types it), and a deliver for one is refused.
 - **The deliver** names the account (`entry`), its sign-in and the key (`factor`, absent: the first button). The
   daemon refuses it with `bad_request` and nothing opened or typed when: the key is not one of that offer's
   buttons (another account's, one with no seed, no key at all), the account is not offered there (**never a hand
-  pick**: "Use another account…" never makes a code), the card has no code field, the target may not take one (the
+  pick**: "Use another account…" never makes a code), the input has no code field, the target may not take one (the
   list above), or the code field now looks like a password (R0b's upgrade wins).
 - **Never returned.** The code is made inside the vault (`fill(account, 'totp', now, { factor })`) and handed only to
   the write. `input.delivered` records `source: saved`, the account and the key's id (`factor`); no result, wait,
@@ -1052,22 +1052,22 @@ machine holds. The tap is the permission, as for a password; what follows is whe
   again, went through; a page that stayed, or the same prompt again, did not. Either is kept on the key
   (`verified`, "working" / "didn't work"); it orders the buttons and grants nothing. Nothing is kept when the
   daemon cannot tell, or when the ferret acted on that kind of surface after the write (or ever ran a page script).
-- **Didn't go through: the card opens again.** The same request goes back to `pending` on a NEW card that starts
-  "The saved key's code didn't go through: type the code.", with the same title. The ferret is told the new card's
-  id, and `input_wait` on the old id still answers. Only for a card that is all codes, while nothing else waits on
+- **Didn't go through: the input opens again.** The same request goes back to `pending` on a NEW input that starts
+  "The saved key's code didn't go through: type the code.", with the same title. The ferret is told the new input's
+  id, and `input_wait` on the old id still answers. Only for an input that is all codes, while nothing else waits on
   that target and the target is still there; otherwise the ferret is told to read the target and raise again.
-- **Use it now.** A seed saved with a passkey from an open code card (the stage's `request`, from a paired device)
-  types the new key's first code into that card at once, through the same deliver and every check above, as that
-  device, against the card as it was when the seed was staged (a card redrawn since types nothing, as a tap on it
+- **Use it now.** A seed saved with a passkey from an open code input (the stage's `request`, from a paired device)
+  types the new key's first code into that input at once, through the same deliver and every check above, as that
+  device, against the input as it was when the seed was staged (an input redrawn since types nothing, as a tap on it
   would not); `TwoFactorSeedSaved.typed` says whether it was typed. A save staged from the machine or a ferret's token
-  (`fy account factor add --totp`, confirmed on an agenda card that says nothing about typing) never types anything.
+  (`fy account factor add --totp`, confirmed on an agenda item that says nothing about typing) never types anything.
 
-**In the app.** A code card's title is the daemon's `factorAskWords` text, not the ferret's. Each key with a seed
+**In the app.** A code input's title is the daemon's `factorAskWords` text, not the ferret's. Each key with a seed
 is its own "Use code from Ferretry · <label>" button, with the one-factor line under them; a tap sends the entry, its
 sign-in and the key; the same buttons draw for an account under "Choose another account". The title and the panel
-follow the card's FIELDS (a field the daemon upgraded to a secret gets neither, whatever the card says it is). A card
+follow the input's FIELDS (a field the daemon upgraded to a secret gets neither, whatever the input says it is). An input
 whose page matches an account's sign-in offers **"Set up automatic codes"** (collapsed), also for an account with no
-key yet, which gets no offer: the app matches the card's `saved.match` against the account's sign-ins the way the
+key yet, which gets no offer: the app matches the input's `saved.match` against the account's sign-ins the way the
 daemon checks a stage. The panel has a masked field
 for the seed or `otpauth://` link (`autocomplete="new-password"` and the password-manager ignore attributes, so a
 browser never offers to save it), what the app read from it, the `LOGIN_TOTP_WARNING` tick, a second tick when
@@ -1076,7 +1076,7 @@ the step-up subject; the prompt names the account from the daemon's own list: "s
 kirinnee"). Both ticks start off and Save stays disabled until they are ticked; the second tick is taken back whenever
 the key or the account changes. The seed is staged once, the field is emptied the moment it is sent (and when the page is
 hidden or the panel closes), and the commit carries no body. A dismissed passkey drops the stage and saves nothing.
-The panel needs a daemon that reports `accounts.2fa-keys.1` and `accounts.signins.1`; Settings › Accounts › an account › 2FA keys mounts this same panel (the stage and the passkey are asked here and nowhere else, see [the Accounts screen](secrets.md#the-accounts-screen)), with no card to answer (`request` is left off the stage).
+The panel needs a daemon that reports `accounts.2fa-keys.1` and `accounts.signins.1`; Settings › Accounts › an account › 2FA keys mounts this same panel (the stage and the passkey are asked here and nowhere else, see [the Accounts screen](secrets.md#the-accounts-screen)), with no input to answer (`request` is left off the stage).
 
 ### 2FA seeds (opt-in, per entry)
 
@@ -1105,21 +1105,21 @@ place by `--domain`/`--for`, or `--tool`/`--host`/`--dest`; the method by `--met
 echo off; never a flag. **Every write is a person route**: a ferret's call is answered `403 owner_only`, `fy` says so and tries
 no other credential. A daemon without the `/v1/accounts*` routes answers `404 unknown_route` and `fy` says to run `fy daemon update`.
 `fy account factor add --totp` makes the same owner-only read (`GET /v1/accounts`) before it shows the warning or asks for the key, so a refused caller never gets a seed prompt, and the typed key is dropped as soon as the stage request is answered, not held through the passkey wait.
-At the machine, `fy input answer <^A7> --account <ACCOUNT>` answers a waiting card with an account (only its name is
+At the machine, `fy input answer <^A7> --account <ACCOUNT>` answers a waiting input with an account (only its name is
 sent, and the daemon types it), and
 `--save-as <ACCOUNT> [--label <text>]` keeps the value you type as an account. When the daemon matched an account to
-the card, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".
+the input, `fy input answer` says so: "an account matches: GITHUB (GitHub) (answer with --account GITHUB)".
 Routes: `GET /v1/secrets/logins`, `GET /v1/secrets/logins/hint?site=`, `PUT /v1/secrets/logins/:id` (create or change; an omitted field is kept,
 `null` removes it), `POST /v1/secrets/logins/:id/rename`, `DELETE /v1/secrets/logins/:id`, `POST /v1/secrets/logins/:id/recipe/proposals/:proposalId`, all `secrets`
 capability (`use` to list, `configure` to change) and each change a kept `secrets.changed` record.
 
 ### Accounts and sign-ins (data model)
 
-> **The store, the daemon's side of the card and the app's Accounts screen have landed.** The shapes are in
+> **The store, the daemon's side of the input and the app's Accounts screen have landed.** The shapes are in
 > `packages/protocol/src/lib/accounts.ts`; the store, the migration at boot and the `/v1/accounts*` routes are in
-> [secrets](secrets.md#accounts-and-sign-ins-the-store). The card's offers, a deliver's `signIn`, the facts, the
+> [secrets](secrets.md#accounts-and-sign-ins-the-store). The input's offers, a deliver's `signIn`, the facts, the
 > lock, `account_hint` and `account_propose` read sign-ins ([one tap](#the-next-time-one-tap)). The app reads
-> `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends a deliver's `signIn` whenever the offer it answers carries one (only a daemon that understands sign-ins sends such an offer, so no feature name gates it); the daemon reports `accounts.signins.1` now that the Accounts screen exists, and that name only chooses between that screen and the older saved-logins one. The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the card and to `account_hint`, and the card says which one chose ([which account is first](#which-account-is-first-and-why)).
+> `primary`/`why` whenever the daemon sends them (a one-tap is the daemon's `primary` only) and sends a deliver's `signIn` whenever the offer it answers carries one (only a daemon that understands sign-ins sends such an offer, so no feature name gates it); the daemon reports `accounts.signins.1` now that the Accounts screen exists, and that name only chooses between that screen and the older saved-logins one. The project, folder and site defaults are `config/account-defaults.yaml` ([config files](config-files.md#default-accounts)); the daemon feeds them to the input and to `account_hint`, and the input says which one chose ([which account is first](#which-account-is-first-and-why)).
 
 A saved login is being split in two:
 
@@ -1161,9 +1161,9 @@ daemon reads a `v: 2` index as **damaged**, never as empty.
 The index keeps its rules on every read: each sign-in's account exists, one account never has two sign-ins at
 the same place, `via` names another account that signs in on a site and never goes round in a circle.
 
-**Which account a card offers first** (`chosenSignIn`) is decided **only among the sign-ins the daemon matched**:
+**Which account an input offers first** (`chosenSignIn`) is decided **only among the sign-ins the daemon matched**:
 the ferret's `secretHint` (a handle or a `si_…`), then the session's project default, then (an Unfiled session)
-its folder default, then the site default ([`config/account-defaults.yaml`](config-files.md#default-accounts): only the owner sets a line; the daemon feeds these lines to the card and to `account_hint`), then the only matched one.
+its folder default, then the site default ([`config/account-defaults.yaml`](config-files.md#default-accounts): only the owner sets a line; the daemon feeds these lines to the input and to `account_hint`), then the only matched one.
 Two or more matched and nothing chose one: **no one-tap primary**, the owner picks ("Pick one: 2 accounts sign
 in here"). A hint or a default naming an account with no matched sign-in is ignored. None of them types
 anything: **the tap is still the permission.** A line that would choose two matched sign-ins at once chooses
@@ -1172,9 +1172,9 @@ neither, so the answer never depends on list order.
 #### Which account is first, and why
 
 The daemon builds the order from **what it knows about the asking session, never from a field the ferret sends**
-(`SessionSignInContext`, `lib/secrets/sign-in-context.ts`). It is used by BOTH the card's offers (every
+(`SessionSignInContext`, `lib/secrets/sign-in-context.ts`). It is used by BOTH the input's offers (every
 `savedForFields` call: the offers and `InputSaved.suggest`) and BOTH `account_hint` paths (the agent tool and the
-`/v1/accounts/hint` route), so both come from one function (`chosenSignIn`). They do not look at quite the same sign-ins: the card narrows to accounts that hold the field it asks for, while the hint deliberately looks at every matched sign-in, so that "only" does not reveal which accounts have no password. A card can therefore say "Only account here" while the hint shows no default:
+`/v1/accounts/hint` route), so both come from one function (`chosenSignIn`). They do not look at quite the same sign-ins: the input narrows to accounts that hold the field it asks for, while the hint deliberately looks at every matched sign-in, so that "only" does not reveal which accounts have no password. An input can therefore say "Only account here" while the hint shows no default:
 
 - **The project** is the board project of the session, `projectOf(sessionId)`, resolved from the credential-derived
   actor (`peer:<id>`), never a query or a body field. It is named only when it is a registered project; a name two
@@ -1185,7 +1185,7 @@ The daemon builds the order from **what it knows about the asking session, never
 - **Honest limit:** the project is the board's stamp, and an Unfiled ferret can influence it (a `.git` it writes in
   its folder lets `fy task create` adopt a registered project), so the label is only as trustworthy as that stamp.
   It still only orders sign-ins the daemon matched, and the owner's tap is still the permission. Closing it is a follow-up.
-- **Anything unreadable is left out**, and the card falls to the next rule. A line that names an account with no
+- **Anything unreadable is left out**, and the input falls to the next rule. A line that names an account with no
   sign-in matched here promotes nothing.
 - **A site line also matches a site's `match` hosts** (what the account is for), both when a line is written (a 409
   `no_sign_in_here` is refused only if the account has no sign-in at the key or its `match` hosts) and in the status
@@ -1194,10 +1194,10 @@ The daemon builds the order from **what it knows about the asking session, never
 The owner reads it as one quiet line under the one-tap button: **"Ferret chose this"**, **"Default for ferretry"**,
 **"Default for this folder"**, **"Default for app.clickup.com"**, **"Only account here"**; with two or more accounts and
 nothing chosen: **"Pick one: N accounts sign in here"** over one button per account. The offer carries `primary`/`why`
-(and `project`), and the card's `saved.project` names the project the daemon resolved.
+(and `project`), and the input's `saved.project` names the project the daemon resolved.
 
 **One tap is the daemon's `primary` and nothing else.** The app never takes "the first matched offer": an offer
-without `primary` (an older daemon, or nothing chosen) is a button to pick by hand, and a card with no `primary`
+without `primary` (an older daemon, or nothing chosen) is a button to pick by hand, and an input with no `primary`
 anywhere keeps the typing field. After the owner **hand-taps** a matched account in a project, a quiet **"Always use
 for <project>"** offers to write `projects.<project>.<place>: <account>` with `PUT /v1/accounts/defaults` (the owner's
 route: a ferret is refused, a paired device asks the passkey, and the line is [in effect at once](secrets.md#accounts-and-sign-ins-the-store) as the owner's own act, not held).
@@ -1210,7 +1210,7 @@ secret fields an account holds, nor its 2FA parameters, seal names, auto-apply o
 
 > The shapes are in `accounts.ts` and `two-factor.ts`. The store and its routes — adding, relabelling and removing
 > a key, and saving a seed with a passkey bound to that save — are built ([secrets: 2FA keys](secrets.md#2fa-keys)),
-> and so is the daemon's side of the code cards ([Codes Ferretry makes](#codes-ferretry-makes)); the app draws them and a daemon reports `accounts.2fa-keys.1`, so the app sends a `factor` and shows the keys under Settings › Accounts.
+> and so is the daemon's side of the code inputs ([Codes Ferretry makes](#codes-ferretry-makes)); the app draws them and a daemon reports `accounts.2fa-keys.1`, so the app sends a `factor` and shows the keys under Settings › Accounts.
 
 **An account is a username, a password and a list of 2FA keys** (`factors`, at most 8). Each key has an id
 (`tf_` and 12 hex digits, never shown to people), a kind, a label **the owner wrote** ("Okta Verify on Pixel",
@@ -1257,11 +1257,11 @@ into a guessed key. This is folded into the `v: 2` index directly; there is no `
   A ferret can still tell which accounts have a `totp` key, and right after the migration every such key holds a
   seed. The design allows that (a ferret may know which 2FA kinds an account has); it never learns more.
 
-**A code card's title** comes from the keys (`factorAskWords`). The daemon's is agenda text, which every ferret and a
+**A code input's title** comes from the keys (`factorAskWords`). The daemon's is agenda text, which every ferret and a
 device without `secrets.use` reads, so it names the place and the keys' kinds alone ("One-time code for github.com, by
 SMS or authenticator app"; with no code key, "One-time code for github.com"): never the account's label, its username,
 a key's label, its digits or the address an email key goes to, which is often the username (secrev-1329a L6). The
-app's card names the keys in the owner's words ("Code sent to ••42 (SMS)", "Code from Authenticator app") and the
+app's input names the keys in the owner's words ("Code sent to ••42 (SMS)", "Code from Authenticator app") and the
 account ("One-time code for GitHub · kirinnee") from the accounts it reads. A raise may name the key with `factor`. Like `secretHint`, it is a hint: it is used
 only if it is a key of the matched account, and otherwise ignored ([Codes Ferretry makes](#codes-ferretry-makes)).
 
@@ -1285,18 +1285,18 @@ saving it to GitHub · kirinnee." The daemon refuses the save unless the owner t
 
 **The passkey is asked every time, even at the machine.** `add-2fa-key` is a step-up act that **every**
 caller must prove, the admin token on loopback included (the others are `approve-task-plan`,
-[secure-copy.md](secure-copy.md#task-plans), and `approve-sign-in-rule` for a standing sign-in rule). Its proof is bound to the one staged save:
+[secure-copy.md](secure-copy.md#sign-in-plans), and `approve-sign-in-rule` for a standing sign-in rule). Its proof is bound to the one staged save:
 `StepUpOptionsRequest.subject` is the stage (`st_…`), and the challenge carries
 `addTwoFactorKeySubject(accountKey, stage)`. A proof for one save can never commit another.
 
 #### Approve on your phone
 
-> **The app draws it.** The agenda shows the card only for a daemon that reports `input.phone-approval.1`
+> **The app draws it.** The agenda shows the input only for a daemon that reports `input.phone-approval.1`
 > (`DAEMON_FEATURES.phoneApproval`); an older daemon refuses `push: true` and the app shows nothing.
-> The card is `packages/pwa/src/features/input-request/phone-approval-card.tsx`, decided in
-> `src/lib/phone-approval-card.ts`.
+> The Accounts app draws it (`packages/plugins/accounts/app/features/sign-in-approval/`) and decides what it shows in
+> that feature's `lib/` module.
 
-A sign-in that waits for a push the owner approves on their phone has its own card, a `PhoneApproval`. It is
+A sign-in that waits for a push the owner approves on their phone has its own input, a `PhoneApproval`. It is
 not an input request, because nothing is typed.
 
 **How a ferret asks.** `browser_request_input` or `terminal_request_input` with `push: true` and no prompt. No
@@ -1309,7 +1309,7 @@ kept that fact), `timed-out`, `refused` or `gone`. It is never told the number.
 account to find it: the fixed-layer prompt ("Phone prompt (tap Yes, a number): request_input push: true"), the `push`
 flag's own MCP description ("Approve on your phone"), and `account_hint`'s result (`ACCOUNT_HINT_PHONE`, appended whether or
 not a sign-in is saved). Without it a ferret polled Google's own phone-number prompt with `browser_read` for about two
-minutes and the owner saw no number on a card; with it the card and its high-priority push are raised in seconds.
+minutes and the owner saw no number on an input; with it the input and its high-priority push are raised in seconds.
 
 **Nothing of the ferret's is shown.** The raise (`PhoneApprovalRaise`) names only:
 
@@ -1321,30 +1321,30 @@ minutes and the owner saw no number on a card; with it the card and its high-pri
 
 It has no prompt, message, label or number field, and it is strict, so an extra field is refused.
 
-The account, site, time and number on the card all come from the daemon. `phoneApprovalWords` builds the card,
+The account, site, time and number on the input all come from the daemon. `phoneApprovalWords` builds the input,
 the agenda subject and the push from the approval's own fields, and from nothing else:
 
-- **Card:** "Approve on your phone" · "ClickUp · a@gmail.com" · "ClickUp via Okta on company.okta.com" · "Tap 42
+- **Input:** "Approve on your phone" · "ClickUp · a@gmail.com" · "ClickUp via Okta on company.okta.com" · "Tap 42
   on your phone" (Duo: "Enter 123456 in Duo Mobile").
 - **Push** (owner decision !A171): the daemon-read number comes first, as in "Tap 42 on your phone: your account on
   company.okta.com". It names the place, never the account: a push reaches every subscribed device, one without
   `secrets.use` included (secrev-1329a L7). With no number, it ends "— open for the number".
 - **Agenda subject and why:** never the number, and never the account's label, its provider or the username: the
   place alone ("Approve on your phone: your account on company.okta.com"), because agenda text is every ferret's to
-  read. The card names the account from the approval, read on a person's route. It is a plain `info` item with a
-  `phoneApproval` ref, so an older app shows it as an info card.
+  read. The input names the account from the approval, read on a person's route. It is a plain `info` item with a
+  `phoneApproval` ref, so an older app shows it as an info input.
 - **Asked:** "Asked 14:02 by lizzette", from the approval's own `raisedAt` and `agentName`.
 - **A number is the daemon's read, nothing else:** a number marked as pointed at by a ferret draws as no number, and
-  the number is dropped when the approval can no longer be read, after it expires, and the moment the card shows a
+  the number is dropped when the approval can no longer be read, after it expires, and the moment the input shows a
   different approval.
-- **No number:** the card says why ("A ferret scripted this page, so Ferretry won't read a number from it.").
-- **A sign-in Ferretry does not know:** the card says so, and where ("a sign-in Ferretry doesn't know, on
+- **No number:** the input says why ("A ferret scripted this page, so Ferretry won't read a number from it.").
+- **A sign-in Ferretry does not know:** the input says so, and where ("a sign-in Ferretry doesn't know, on
   login.microsoftonline.com"), so an unexpected push is easy to refuse.
-- **Every card** ends with: "Never use a number a ferret tells you."
+- **Every input** ends with: "Never use a number a ferret tells you."
 
-**Which sign-in it is.** The daemon matches the page's host, or the terminal's `program@host`, as a card does. The
+**Which sign-in it is.** The daemon matches the page's host, or the terminal's `program@host`, as an input does. The
 ferret's hint only orders among the matched sign-ins. One more case: when the hint names a sign-in whose `via` chain
-signs in at this host, the card names that sign-in. On ClickUp's Okta page, a hint of `CLICKUP` reads "ClickUp via
+signs in at this host, the input names that sign-in. On ClickUp's Okta page, a hint of `CLICKUP` reads "ClickUp via
 Okta on company.okta.com". A hint that reaches nothing here is ignored. The account's push key is named when the
 ferret's `factor` is one of its push keys, or when it has exactly one.
 
@@ -1354,14 +1354,14 @@ queue). The daemon believes it only when all of these hold:
 1. **Where.** The page is https, with no port, on a login domain of the matched sign-in or of a sign-in its `via`
    chain reaches, or on a fixed identity-provider host: `login.microsoftonline.com`, `login.live.com`,
    `accounts.google.com`, `*.okta.com`, `*.oktapreview.com`, `*.okta-emea.com` or `*.duosecurity.com`. This is
-   what keeps an adversary-in-the-middle proxy's page off the card: it shows the real number of the attacker's
+   what keeps an adversary-in-the-middle proxy's page off the input: it shows the real number of the attacker's
    sign-in. A provider's number must also be on that provider's own host, so a Microsoft number is believed only on
    Microsoft's two hosts. Okta's widget gives a number off Okta's own hosts only on an organisation's **custom Okta
    domain**: a login domain of a provider sign-in that the matched sign-in reaches through its `via` chain. A domain
    of the matched sign-in itself never qualifies, since a site the ferret can write pages on could carry the widget's
    markup (secrev-1244 R1). And it must be **the host the approval was raised on**: a page that moves to another host,
    even another tenant on the same identity provider, shows no number (`numberMissing: 'origin'`).
-2. **Not steered.** No page script ran in this session (`browser.eval`). Otherwise the card says
+2. **Not steered.** No page script ran in this session (`browser.eval`). Otherwise the input says
    `numberMissing: 'scripted'`.
 3. **What.** The number is in a provider's own challenge view: Okta's Identity Engine widget (Gen2 and Gen3),
    Microsoft Entra's `#idRichContext_DisplaySign`, Google's challenge page, or Duo's Verified Push code, and that
@@ -1372,19 +1372,19 @@ queue). The daemon believes it only when all of these hold:
 **Never where the ferret points** (secrev-1244 H1). An earlier design let a ferret name the element showing the
 number. It is gone: a page may echo back text the ferret typed, and Okta shows the username it was given in a
 visible element no one can type into. A ferret steered by an attacker could type the attacker's number as the
-username and point at the echo. So the daemon reads only a recognised provider view. When it finds none, the card
+username and point at the echo. So the daemon reads only a recognised provider view. When it finds none, the input
 says it couldn't read a number and offers View the page. The raise's `element` field and the `pointed` number source
 stay in the protocol for the wire only: no daemon reads the one or produces the other.
 
 **While it waits**, the daemon looks at the page every second. When the document changes, the number is cleared, and
 only a number read in the new document shows. **After the ferret acts on its pages** (any browser tool that changes a
-page: navigate, click, type, press, a script), a new document's number is never shown: the card says
+page: navigate, click, type, press, a script), a new document's number is never shown: the input says
 `numberMissing: 'steered'`. Only a number from the page the owner's sign-in reached on its own counts, so a ferret
-cannot restart challenges until the card matches an attacker's push (secrev-1244 R2). The page the approval was raised
+cannot restart challenges until the input matches an attacker's push (secrev-1244 R2). The page the approval was raised
 on is still read. A new number pushes again, under the same tag, at most four pushes per
 approval. A ferret may have two approvals waiting and raise ten an hour, and one page or terminal holds one at a time.
 
-**A terminal never shows a number.** A ferret can print any text into its own pane, so a terminal card always
+**A terminal never shows a number.** A ferret can print any text into its own pane, so a terminal input always
 reads `numberMissing: 'terminal'` and sends the owner to the terminal.
 
 **Success is observed, never claimed.** `moved-on` is set only by the daemon, when it sees the sign-in move on:
@@ -1393,44 +1393,44 @@ reads `numberMissing: 'terminal'` and sends the owner to the terminal.
   provider's, or the same host once a provider's challenge view gives way to a page with none (Microsoft's "Stay
   signed in?", but also a provider's own "denied" or "expired" view, which Ferretry cannot yet tell apart). Only the
   first, a page that left the identity providers, keeps `secondFactor: 'push'` on the sign-in and tells the ferret
-  so. The card only ever says "The page moved on.", never that the sign-in went through.
+  so. The input only ever says "The page moved on.", never that the sign-in went through.
 - **A terminal:** its prompt line or its program changed.
 
 There is no "I approved" button and no route that sets it. When the ferret acted on that kind of surface since the
-raise, or ran a page script, the move still ends the card. But the daemon keeps no `secondFactor: 'push'` fact on
+raise, or ran a page script, the move still ends the input. But the daemon keeps no `secondFactor: 'push'` fact on
 the sign-in, and does not tell the ferret one: the move may be the ferret's own.
 
 **How it ends.**
 
-| State       | When                                                           | The card's note                                         |
+| State       | When                                                           | The input's note                                        |
 | ----------- | -------------------------------------------------------------- | ------------------------------------------------------- |
 | `moved-on`  | the daemon saw the page move on                                | "The page moved on."                                    |
 | `refused`   | the owner tapped **Not me — stop**; the ferret is told to stop | "You said this was not you. Deny it on your phone too." |
 | `timed-out` | its wait ran out                                               | "Nothing happened in time: the ferret can ask again."   |
 | `gone`      | the page or terminal closed, or its name is another one now    | "The page or terminal closed."                          |
 
-An approval lives in RAM. A restart ends it: at start, the daemon closes every card that still presents one.
+An approval lives in RAM. A restart ends it: at start, the daemon closes every input that still presents one.
 
 **The owner's routes** (owner only, like every input route; an agent is refused before anything is read):
 `GET /v1/phone-approvals` (the ones waiting), `GET /v1/ferrets/:ferretId/phone-approvals/:approvalId` (one, for
-its card) and `POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
-card itself is refused (`use_input_form`). They are `terminal.use` routes, and an approval names an account, its
+its input) and `POST /v1/ferrets/:ferretId/phone-approvals/:approvalId/refuse` ("Not me"). Answering the agenda
+input itself is refused (`use_input_form`). They are `terminal.use` routes, and an approval names an account, its
 username and the account it signs in via: a caller without `secrets.use` gets each approval **without** `account`,
-`username` and `via`, as a card comes without `saved`. Only the daemon raises a card with the `phoneApproval` ref: the agenda's
+`username` and `via`, as an input comes without `saved`. Only the daemon raises an input with the `phoneApproval` ref: the agenda's
 add route has no field for it, so a ferret's own "Approve on your phone" note draws as a plain note.
 
 **The security log** records `phone-approval.raised`, `phone-approval.refused` and `phone-approval.settled`. Each
 names the account, the sign-in, the site, the ferret, where the number came from or why there was none, and how it
 ended. **It never records the number.**
 
-**The card** is drawn ONLY from a daemon-raised `phoneApproval` ref, never from a ferret's words. The number is large,
+**The input** is drawn ONLY from a daemon-raised `phoneApproval` ref, never from a ferret's words. The number is large,
 with a direction line from the daemon's words ("Tap 42 on your phone", "Enter 123 in Duo Mobile"); the site, account
 and ferret are the daemon's facts. With no number (`numberMissing`) it says so, offers "View the page" and says
 "Never use a number a ferret tells you": there is no path that shows a number a ferret supplied. A steered sign-in
 and a terminal each have their own state, and "Not me — stop" calls the refuse route. A settled approval says how it
 ended (moved on, timed out, refused, gone) and stops asking.
 
-**The push** is high priority inside the code cards' caps. It is held no longer than the card has left, under the
+**The push** is high priority inside the code inputs' caps. It is held no longer than the input has left, under the
 tag `pa-<id>` ([notifications](notifications.md#high-priority)).
 
 **Declared GAPs.**
@@ -1445,22 +1445,24 @@ tag `pa-<id>` ([notifications](notifications.md#high-priority)).
   recognisers read fixed provider elements, so this is not known to be exploitable, but the gate is not
   machine-wide.
 - **A tenant host is anyone's.** `*.okta.com` and `*.duosecurity.com` are tenants that anyone can create. A sign-in
-  Ferretry doesn't know may show a number there, and the card names that host so the owner can judge it.
+  Ferretry doesn't know may show a number there, and the input names that host so the owner can judge it.
 - **No "denied" auto-close yet.** A sign-in the owner denies on the phone ends `timed-out` (or `moved-on`, if the
   page leaves the challenge), not `refused`.
 
 While it waits, the ferret is told only the state and, once the sign-in moved on, `secondFactor: 'push'`
 (`PhoneApprovalAgentView`). It is **never told the number**.
 
-### Task plan fills: a sign-in the owner approved in advance
+<a id="task-plan-fills-a-sign-in-the-owner-approved-in-advance"></a>
+
+### Sign-in plan fills: a sign-in the owner approved in advance
 
 > **Needs `task-plan.1`.** The daemon fills under a plan line only while it reports `task-plan.1`, which it does now
-> that the app draws the plan card (R3a-5). The plan itself (lines, ticks, the passkey, revoke) is
-> [secure copy › Task plans](secure-copy.md#task-plans).
+> that the app draws the sign-in plan (R3a-5). The plan itself (lines, ticks, the passkey, revoke) is
+> [secure copy › Sign-in plans](secure-copy.md#sign-in-plans).
 
-A ferret's [task plan](secure-copy.md#task-plans) line that the owner ticked, with a passkey, is a **grant**: a
+A ferret's [sign-in plan](secure-copy.md#sign-in-plans) line that the owner ticked, with a passkey, is a **grant**: a
 permission to fill ONE sign-in without a tap. The ferret still raises `browser_request_input` or
-`terminal_request_input` as usual; when a grant covers the card, Ferretry fills it itself and closes the card.
+`terminal_request_input` as usual; when a grant covers the input, Ferretry fills it itself and closes the input.
 
 **One shared matcher** (`packages/daemon/src/lib/sign-in-grants/`) decides, on what the daemon saw. It runs at the
 raise, on the raise's facts, and again at the write, on the facts looked at before typing. Every check must hold,
@@ -1486,7 +1488,7 @@ or nothing is typed:
   pins what it filled; every later fill of that field set must match it.
 - **What is typed** is what a tap types: the account's username and password, opened inside the use boundary after
   every check that can refuse, and a code Ferretry makes only when the line's code tick was approved. Enter is
-  pressed unless the ferret raised the card with `submit: 'agent'`. The write gets the same lock and hold as a tap,
+  pressed unless the ferret raised the input with `submit: 'agent'`. The write gets the same lock and hold as a tap,
   never a shorter one.
 - **Uses are spent synchronously** (`SignInGrantLedger`), inside the session lock, counting fills still in flight,
   so two raises can't both spend a line's last use. **One use is one sign-in attempt, and each role is typed once per
@@ -1499,16 +1501,16 @@ or nothing is typed:
   held synchronously, again inside the target's own turn (the page's queue, right before arming and right before the
   first key; the terminal's guarded write): a line revoked, expired or stopped while the fill looked or waited its turn
   types nothing. What is left is the worker's own round trip between that check and the keystroke.
-- **A miss is the usual card.** Nothing is typed, the card stays for the owner, and the owner's view of the request
+- **A miss is the usual input.** Nothing is typed, the input stays for the owner, and the owner's view of the request
   carries `preapproval: { by: 'plan', plan, line, outcome: 'did-not-apply', reason }`; the app draws one line from
-  `grantMissLine` ("Task plan line 2 didn't apply: the sign-in form changed since you approved it"). The ferret is
-  told one sentence for every reason (`TASK_PLAN_MISS_AGENT_NOTE`), and the agenda card's context gets one line in
+  `grantMissLine` ("Sign-in plan line 2 didn't apply: the sign-in form changed since you approved it"). The ferret is
+  told one sentence for every reason (`TASK_PLAN_MISS_AGENT_NOTE`), and the agenda item's context gets one line in
   the same words whatever the reason, because a ferret can read its own session's agenda: a reason like
   `account-lacks-field` would say which secret fields an account holds.
-- **The input card says so.** The owner's card carries the miss line above its fields (`data-input-plan-miss`), and
-  `not-here` has none. A card a line filled shows "Filled under your task plan (line 2) on github.com." from the same
+- **The input says so.** The owner's input carries the miss line above its fields (`data-input-plan-miss`), and
+  `not-here` has none. An input a line filled shows "Filled under your sign-in plan (line 2) on github.com." from the same
   `preapproval` note, in the words `grantFilledLineFor` gives the agenda history.
-- **A filled card closes at once**, so the agenda history shows "Filled under your task plan (line 2) on
+- **A filled input closes at once**, so the agenda history shows "Filled under your sign-in plan (line 2) on
   github.com." It is raised **quiet**: it does not buzz the owner's phone ([notifications](notifications.md)).
 - **A password left in a field is emptied, and the line stops.** Before a grant types a password into a page, the
   browser arms (its own `inputArm` call) a `pagehide` listener in an isolated world that empties every password
@@ -1531,8 +1533,8 @@ or nothing is typed:
 
 ### Standing rule fills: a sign-in the owner approved for any ferret
 
-> **Needs `sign-in-rules.1`, which this build reports** now that the app draws the rule sheet and its cards (R3c-6). A
-> daemon that did not report it would leave every sign-in a rule would cover as a normal card (invariant 32). How a rule
+> **Needs `sign-in-rules.1`, which this build reports** now that the app draws the rule sheet and its inputs (R3c-6). A
+> daemon that did not report it would leave every sign-in a rule would cover as a normal input (invariant 32). How a rule
 > is made, pinned, suspended and revoked is [secrets › Standing sign-in rules](secrets.md#standing-sign-in-rules).
 
 A **standing rule** is one owner-signed permission for Ferretry to fill ONE sign-in, for any ferret unless the owner
@@ -1581,28 +1583,28 @@ in the table above holds for a rule too, plus these:
   (`unknown`), suspends the rule (`did-not-move-on`), exactly as it stops a plan line. A write that could not say whether it
   typed (`uncertain`) gets the same clear and its own hold for the full window, and suspends the rule at once.
 - **What the ferret is told.** On a fill: "Filled under a rule the owner approved in advance." and `source: saved`,
-  never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda card are
+  never the rule or the account. On a miss: **nothing at all**. Its view, its words and its agenda item are
   byte-identical to a sign-in no rule was ever about (no "didn't apply" note, no context line), and so are the states
-  it can read while the rule is tried: until the request really ends it reads the card as it stood when the fill began
-  (never `delivering`, never a longer lock), so a late refusal looks the same as a card nobody answered yet. A card a
+  it can read while the rule is tried: until the request really ends it reads the input as it stood when the fill began
+  (never `delivering`, never a longer lock), so a late refusal looks the same as an input nobody answered yet. An input a
   plan line was also tried on says the plan's words, as it would without the rule, even when the rule missed only at
   the write. **Timing is not equal:** a raise a
-  rule was tried on, and missed, does more work before it answers (the accounts are read, the miss is audited, the card
+  rule was tried on, and missed, does more work before it answers (the accounts are read, the miss is audited, the input
   is made to buzz), so a ferret that measures how long its raises take could tell that some rule is about that sign-in.
   It learns nothing more (not which account, not why), and it is accepted. A grant fill that finds the target changed
-  is a miss: it neither redraws the card nor counts a failed check, because nobody tapped anything. **Declared (R4):**
+  is a miss: it neither redraws the input nor counts a failed check, because nobody tapped anything. **Declared (R4):**
   the session's event log (`GET /v1/events` socket from that ferret's cursor, readable by any ferret) is not frozen like the view. A rule
   attempt that reaches the write takes the page hold and journals `surface.input_delivering` and the quarantine start
   before its last `held()` check, because nothing may be awaited between that check and the write; a miss there
   journals the request pending again and the quarantine's end. So a ferret that reads the event log could tell that a
-  fill was tried, as it could from the timing, and nothing more. A suspension raises no card in the ferret's session: the owner sees it in Settings, on the input card's reason
+  fill was tried, as it could from the timing, and nothing more. A suspension raises no input in the ferret's session: the owner sees it in Settings, on the input's reason
   line and in the audit.
 - **What the owner reads.** The request carries `preapproval: { by: 'rule', rule, revision, outcome, reason }`, and the
-  card's line comes from `grantMissLineFor` ("Your standing rule for this sign-in didn't apply: … The rule is suspended
+  input's line comes from `grantMissLineFor` ("Your standing rule for this sign-in didn't apply: … The rule is suspended
   until you approve it again." for a miss that suspends), and a fill's from `grantFilledLineFor` ("Filled under your
-  standing sign-in rule on github.com."). The agenda card a rule filled closes in the words a tap fill closes with
+  standing sign-in rule on github.com."). The agenda item a rule filled closes in the words a tap fill closes with
   ("Input request delivered."): every ferret can read every session's agenda, so naming the rule there would let ferrets
-  list which places have one. It is raised quiet, and a miss buzzes once, with no edit to the card
+  list which places have one. It is raised quiet, and a miss buzzes once, with no edit to the input
   ([notifications](notifications.md)).
 - **Terminal rules: sudo, su or doas only** (owner decision !A197). A rule's signed `surface` is `page` or `terminal`.
   A terminal rule is pinned to exactly one `sudo@host`, `su@host` or `doas@host`, types the password alone, lasts a
@@ -1619,13 +1621,13 @@ in the table above holds for a rule too, plus these:
   that approval ([secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)). Terminal rules fill only while
   the daemon reports `sign-in-rules-terminal.1`, which this build does (owner decision !A226, the risk accepted in
   [secrets › Terminal rules](secrets.md#terminal-rules-sudo-su-or-doas)), and only beside `sign-in-rules.1`. A program the kernel did not prove has no key at all: a shell that renamed itself `sudo` makes no rule
-  even be tried, and the card is a plain one. A setuid sudo with echo on, a prompt not proved to ask for secrets, or a
+  even be tried, and the input is a plain one. A setuid sudo with echo on, a prompt not proved to ask for secrets, or a
   sudo not running setuid root (`not-proved`, `not-system`) types nothing and suspends nothing. Any other program
   (ssh, npm, passwd) can never have a rule (`tool-not-covered`). Its history is the owner's own taps into a proved
   setuid sudo, su or doas ([secrets › What can have a rule](secrets.md#what-can-have-a-rule)), and a miss leaves the
   ferret's view byte-identical to sudo with no rule, as for a page.
 - **A ferret can only suggest one.** `account.propose` takes `preapprove: true` (then `recipe` is optional). It raises a
-  card that opens the owner's sheet with nothing ticked, and creates, stages and widens nothing
+  input that opens the owner's sheet with nothing ticked, and creates, stages and widens nothing
   ([agent tools › Suggesting a standing rule](agent-tools.md#suggesting-a-standing-rule)). A daemon with no suggestion
   port refuses such a call whole (`unavailable`) and files no recipe from it.
 - **Audited, never a value.** `input.delivered` carries `by: 'rule'`, `signInRule` and `revision` beside the sign-in,
@@ -1638,7 +1640,7 @@ What it does NOT do, said plainly:
 - **A refusal that lands in the last moment before typing can show.** The fill asks whether the rule still holds
   before the page is held from the ferret, so a refusal the ferret can cause (a script it starts, say) lands before
   anything it can read changes. One that lands in the few milliseconds between taking that hold and typing (a revoke, a
-  script started in exactly that gap) leaves the page held from the ferret for that moment, which a card no rule was
+  script started in exactly that gap) leaves the page held from the ferret for that moment, which an input no rule was
   about never does: a ferret polling its page could so learn that some rule was tried. It learns nothing more.
 - **A code page fills only right after the rule's own password.** The owner's history counts a form only when its
   secret went into a password box (`masked`), so a code page is never in it, however often you tap it. A rule with the
@@ -1671,14 +1673,14 @@ What it does NOT do, said plainly:
 
 ## Who reads the terminal
 
-A secret card's green flag, its short lock, the code exception, a secure-copy rule's destination and a saved login's
+A secret input's green flag, its short lock, the code exception, a secure-copy rule's destination and a saved login's
 one-tap match all rest on ONE question: which program will read what the owner types? The daemon answers it from
 the kernel (`TmuxInputTarget` with `KernelProgramProof`, `packages/daemon/src/adapters/system/kernel-program-proof.ts`),
 never from the name `ps` shows. Before this (#1218's review, &B112) every one of them trusted that name, for the
 foreground group's LEADER only, and both halves were wrong:
 
 - **The name is the process's own.** Any process can rewrite it: `printf sudo > /proc/$/comm; read -s X` makes `ps`
-  print `sudo` for a shell, and on macOS `ps -o comm=` is argv[0] (`exec -a sudo bash`). The card then said green
+  print `sudo` for a shell, and on macOS `ps -o comm=` is argv[0] (`exec -a sudo bash`). The input then said green
   "sudo is asking", locked for 10 s, and the owner's password landed in a variable the ferret could read.
 - **The leader is not the only reader.** Every process of the TTY's foreground process group can read it: an ssh
   `LocalCommand` or `ProxyCommand` child, or `sudo … | sh -c 'read -s X'`, a pipeline a real setuid sudo leads.
@@ -1698,7 +1700,7 @@ So the daemon proves the GROUP or nothing:
    one) is never proved: its executable cannot be read, and it is whatever a ferret with a cached sudo started.
    Separately, the daemon may note a program every member runs that is proved only through the owner's OWN Nix
    profile (`~/.nix-profile`), and only under a name no root-controlled folder holds that is no password or code
-   program. That note is the daemon's own, never on the card's facts; it earns no green, no short lock and no one-tap,
+   program. That note is the daemon's own, never on the input's facts; it earns no green, no short lock and no one-tap,
    and only a secure-copy rule the owner allowed for it ([secure copy](secure-copy.md#programs-in-your-own-profile))
    reads it.
 2. No process whose controlling terminal is another (or none) holds the TTY open: on Linux every `/proc/<pid>/fd`,
@@ -1711,18 +1713,18 @@ So the daemon proves the GROUP or nothing:
    the pty's master side.
 3. Then `program` is the ONE program every member is proved to run (two different programs, such as sudo leading a
    proved `sh`, are unverified), `recognisedConsumer` says it is a program that asks for a secret, and `trustedProgram`
-   says every member runs setuid root. Anything unread, unproved or thrown leaves `program` out: the card is
+   says every member runs setuid root. Anything unread, unproved or thrown leaves `program` out: the input is
    **unverified** (amber, never green), the lock stays full, the code exception is refused, no secure-copy rule matches
-   and no saved login is the one-tap choice. A member that joins the group after the card changes the facts, so the
+   and no saved login is the one-tap choice. A member that joins the group after the input changes the facts, so the
    write refuses with nothing typed.
 4. **Line mode too.** A proved program that RELAYS keys (`ssh -t` to a remote shell, `docker exec -it`) hands them to a
    reader outside this machine's foreground group. A real password prompt (getpass, readpassphrase, Go's
    `ReadPassword`) reads a line; a relay puts the terminal in raw mode. So green, a secure-copy rule's match and the
    one-tap saved login also need the terminal in line (canonical) mode, as the short lock always did. Otherwise the
-   card is amber: "The terminal is not reading a line…".
+   input is amber: "The terminal is not reading a line…".
 
-Raising a card to a password from the NAME (`sudo` in `ps`, or the prompt line) still happens: a fake name there only
-makes the card stricter.
+Raising an input to a password from the NAME (`sudo` in `ps`, or the prompt line) still happens: a fake name there only
+makes the input stricter.
 
 - **GAP: a macOS daemon proves only setuid programs.** No reading of a macOS process's executable is wired, so ssh,
   gpg, psql and every other program there is unverified (amber, full lock); sudo and su stay green.
@@ -1731,7 +1733,7 @@ makes the card stricter.
   too: it is a program root placed, the same trust its proof gives.
 - **GAP: the name of a setuid program is the caller's choice.** Whoever starts it picks the name: a link's name on
   Linux, any argv[0] on macOS (`exec -a sudo /usr/bin/<another setuid program>`). So the proved `program` of a setuid
-  process says only that root placed it and that it runs under a getpass name; the card may say sudo while another
+  process says only that root placed it and that it runs under a getpass name; the input may say sudo while another
   setuid program reads. What reads the value is still a program root put there, and no common setuid program is known
   to hand what it reads to its caller.
 - **The stranger scan is a look at one moment, and best effort against this same account.** A TTY opened after the
@@ -1758,7 +1760,7 @@ makes the card stricter.
 - **The quarantine hides the pane from the agent's reads, not from the pane's program.** An agent that
   can send keys can still make the program print what it received; the agent's `terminal.read` of it is
   refused, but a process the agent started in another pane or a file it redirected to is not covered.
-- **A task plan is for honest-client ferrets** (RF-5 is no-go: nobody can be walled on this machine). Ferrets
+- **A sign-in plan is for honest-client ferrets** (RF-5 is no-go: nobody can be walled on this machine). Ferrets
   here can read Ferretry's own files, so this stops misuse through their tools and page text, not a ferret that goes
   around Ferretry. A ferret that reads the admin token or `secrets.key` through its shell can already do everything a
   plan grants, and more: against it a plan is moot, not weakened. What the plan machinery still holds against is a
@@ -1774,7 +1776,7 @@ makes the card stricter.
   named `sudo` reads as `sudo`, and the approved password goes to it. With full sudo that gives nothing beyond the
   approval; under a restricted sudoers it could set a password the ferret then knows. Approve a terminal line only
   where that is acceptable.
-- **A `plain` value is visible by design.** It is marked on the card.
+- **A `plain` value is visible by design.** It is marked on the input.
 - **A browser `private` value can appear in an after-screenshot** (a later phase).
 - **A one-time `code` is weaker than `private` on purpose** (the owner's decision, see [one-time codes](#one-time-codes-code)).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
@@ -1788,7 +1790,7 @@ makes the card stricter.
   anything that changes between the queue and the program reading the bytes. In that gap the foreground
   can become **any** command (a different name as well as a same-named replacement), echo can flip, and
   the prompt can change; the bytes then go to whatever reads the pty next. Unit tests pin each of these as
-  a declared limit. One unit test pins the gap (`DECLARED LIMIT` in `terminal-target.test.ts`). The remaining defences are the owner's warning card, the risk flag, the
+  a declared limit. One unit test pins the gap (`DECLARED LIMIT` in `terminal-target.test.ts`). The remaining defences are the owner's warning input, the risk flag, the
   short window and the masking above. The `if-shell` syntax itself is exercised against a real tmux
   in CI (`tmux-input-guard.test.ts`); if a tmux build rejects it the write fails closed as _uncertain_,
   never as a silent type.
@@ -1803,7 +1805,7 @@ makes the card stricter.
 - **A saved login is as safe as the vault's key.** The sealed document sits beside the vault under the same
   key file: it fails safe when one file is copied somewhere, and protects nothing against someone with this
   user account ([secrets](secrets.md)). An agent that reads the admin token can deliver a saved login into a
-  capture program it built; the card, the risk flag and the exact match make that visible, not impossible.
+  capture program it built; the input, the risk flag and the exact match make that visible, not impossible.
 - **A 2FA seed beside its password is one factor.** That is why it is opt-in with the warning above.
 - **Matching is exact and by the PROVED program.** `sudo@kirin-box` is the proved program's name and this machine's
   name; a terminal whose program is unverified has no key, so a shell that renames itself `sudo` never makes the sudo
@@ -1830,7 +1832,7 @@ makes the card stricter.
 | ----- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------- |
 | P0    | This contract and the schemas                                                                                                           | done        |
 | P1    | Terminal secret and plain: service, agent tools, deliver and cancel, quarantine, `fy input`                                             | done        |
-| P2    | The app card, cards of several fields, `chain` steps                                                                                    | done        |
+| P2    | The app input, inputs of several fields, `chain` steps                                                                                  | done        |
 | P3    | Saved logins (one tap), "Save as", 2FA codes, `fy account` (alias `fy secret entry`), Settings › Saved logins (now Settings › Accounts) | done        |
 | P4    | Pages: browser fields, field shot, page holds, passkeys off, captcha handover                                                           | done        |
 | P4b   | Login recipes: steps, daemon-observed facts, ferret proposals the owner approves                                                        | this change |
