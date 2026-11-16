@@ -40,17 +40,28 @@ export function codexFixedArguments(permissionMode: HarnessConfig['permissionMod
  */
 export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
 
+/** The explicit OFF: a `-c` override beats `config.toml`, so a settings component's `features` entry cannot turn it on. */
+export const CODEX_QUESTIONS_OFF: readonly string[] = ['-c', `features.${CODEX_QUESTIONS_FEATURE}=false`];
+
 /**
  * The question tool (owner !A527: no ferret stops on a prompt only the pane shows): NOT enabled by default, an
  * interactive ferret included, so Codex keeps `request_user_input` to its Plan mode and a ferret asks through the
  * agenda. The `questionTool` setting (`config/harness-codex.yaml`) is the one way back: with it on, an INTERACTIVE
  * ferret (it has an owner at the pane) gets `--enable default_mode_request_user_input`; an auto one, or one with no
- * mode, never does. Deliberately NOT part of {@link codexFixedArguments}, whose fingerprint is the launch record's
- * `fixed-layer` section, so a change can never make a recorded launch read as outdated.
+ * mode, never does.
+ *
+ * "Not enabled" is an explicit OFF, never just an omitted `--enable`: a runtime-selected settings component may carry
+ * `features.default_mode_request_user_input = true`, which `prepareHome` writes into `config.toml`, and an omitted flag
+ * would leave the tool on. `-c features.<name>=false` is the spelling because a `-c` override always beats
+ * `config.toml` and it is the form this repo's fixtures already launch Codex with (`-c model=…`, `-c projects=…`);
+ * no doc or fixture here shows `--disable`, so it is not relied on.
+ *
+ * Deliberately NOT part of {@link codexFixedArguments}, whose fingerprint is the launch record's `fixed-layer`
+ * section, so a change can never make a recorded launch read as outdated.
  */
 export function codexQuestionArguments(
   mode: 'interactive' | 'auto' | undefined,
   questionTool: boolean,
 ): readonly string[] {
-  return questionTool && mode === 'interactive' ? ['--enable', CODEX_QUESTIONS_FEATURE] : [];
+  return questionTool && mode === 'interactive' ? ['--enable', CODEX_QUESTIONS_FEATURE] : CODEX_QUESTIONS_OFF;
 }

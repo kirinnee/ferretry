@@ -209,6 +209,13 @@ const CODEX_PERMISSIONS: Readonly<
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
+/**
+ * Codex's question feature switched explicitly OFF (owner !A527), as the `-c` value the wrapper prepends: an override
+ * beats `config.toml`, where a selected settings component may have turned `default_mode_request_user_input` on.
+ * Copied from the Codex plugin's `CODEX_QUESTIONS_OFF` (a plugin never imports another's daemon code).
+ */
+export const CODEX_QUESTIONS_OFF_OVERRIDE = 'features.default_mode_request_user_input=false';
+
 /** Claude's "start Remote Control in every session" preference. */
 const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
 

@@ -8,7 +8,12 @@ import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
 import { CODEX_LAUNCH_SETTINGS } from '../../contract/index.ts';
-import { CODEX_QUESTIONS_FEATURE, codexFixedArguments, codexQuestionArguments } from '../../daemon/lib/fixed-layer.ts';
+import {
+  CODEX_QUESTIONS_FEATURE,
+  CODEX_QUESTIONS_OFF,
+  codexFixedArguments,
+  codexQuestionArguments,
+} from '../../daemon/lib/fixed-layer.ts';
 import { selectEverything } from '../support/selected.ts';
 
 const FERRET = 'f1' as FerretId;
@@ -68,6 +73,8 @@ const harnessOver = (
   permissionMode?: 'auto' | 'skip',
   /** `questionTool` in the config file; absent means the harness file says nothing (off). */
   questionTool?: boolean,
+  /** A settings component the runtime selects (`config/codex/settings/`): its document is merged into `config.toml`. */
+  settings?: Record<string, unknown>,
 ) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
@@ -77,6 +84,9 @@ const harnessOver = (
     selected: selectEverything,
     kernel: {
       roots,
+      ...(settings === undefined
+        ? {}
+        : { config: { collection: () => new Map([['features', { settings }]]) } as unknown as KernelPorts['config'] }),
       state: {
         // Only the launch-settings record is of interest: the rollouts write their own beside it.
         write: async (definition: unknown, record: unknown) => {
@@ -227,14 +237,22 @@ describe('the Codex harness', () => {
     should(resumed.ok && resumed.value.harnessConversation).equal('conv-1');
   });
 
-  describe('the question tool (!A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in)', () => {
+  describe('the question tool (!A527: Codex gets --enable default_mode_request_user_input only when questionTool opts in, and an explicit OFF otherwise)', () => {
     const FEATURE = ['--enable', 'default_mode_request_user_input'];
+    const OFF = ['-c', 'features.default_mode_request_user_input=false'];
     const withFeature = (command: readonly string[]): boolean =>
       command.some((argument, at) => argument === '--enable' && command[at + 1] === 'default_mode_request_user_input');
+    /** The OFF override, as an adjacent `-c` / `features.…=false` pair: counted, so a doubled one fails too. */
+    const offCount = (command: readonly string[]): number =>
+      command.filter((argument, at) => argument === OFF[0] && command[at + 1] === OFF[1]).length;
 
     for (const call of ['start', 'resume'] as const) {
-      const launch = async (mode: 'interactive' | 'auto' | undefined, questionTool?: boolean) => {
-        const { harness, records } = harnessOver(LOCATED, undefined, questionTool);
+      const launch = async (
+        mode: 'interactive' | 'auto' | undefined,
+        questionTool?: boolean,
+        settings?: Record<string, unknown>,
+      ) => {
+        const { harness, records } = harnessOver(LOCATED, undefined, questionTool, settings);
         const { runner, seen } = fakeRunner();
         const spec = specOf(mode === undefined ? {} : { mode });
         const launched =
@@ -242,26 +260,55 @@ describe('the Codex harness', () => {
         should(launched.ok).be.true();
         return { command: seen[0]?.spec.command ?? [], records };
       };
+      /** A selected settings component that switches the feature ON in `config.toml`. */
+      const FEATURE_ON = { features: { default_mode_request_user_input: true } };
 
-      it(`a ${call} enables nothing by default, an interactive ferret included`, async () => {
+      it(`a ${call} enables nothing by default, an interactive ferret included, and says OFF explicitly`, async () => {
         for (const mode of ['interactive', 'auto', undefined] as const) {
-          const { command } = await launch(mode);
-          should(withFeature(command)).be.false();
-          should(command.includes('--enable')).be.false();
-          should(withFeature((await launch(mode, false)).command)).be.false();
+          for (const questionTool of [undefined, false] as const) {
+            const { command } = await launch(mode, questionTool);
+            should(withFeature(command)).be.false();
+            should(command.includes('--enable')).be.false();
+            should(offCount(command)).equal(1);
+          }
         }
       });
 
-      it(`a ${call} of an interactive ferret enables it once when questionTool is on`, async () => {
+      it(`a ${call} of an interactive ferret enables it once when questionTool is on, with no OFF beside it`, async () => {
         const { command } = await launch('interactive', true);
         should(withFeature(command)).be.true();
         should(command.filter(argument => argument === '--enable')).eql(['--enable']);
         should(command.indexOf('--enable') + 1).equal(command.indexOf(FEATURE[1] as string));
+        should(offCount(command)).equal(0);
+        should(command.join(' ')).not.containEql('default_mode_request_user_input=false');
       });
 
-      it(`a ${call} of an auto ferret, or one with no mode, never enables it, even with questionTool on`, async () => {
-        should(withFeature((await launch('auto', true)).command)).be.false();
-        should(withFeature((await launch(undefined, true)).command)).be.false();
+      it(`a ${call} of an auto ferret, or one with no mode, never enables it, even with questionTool on: it carries the OFF`, async () => {
+        for (const mode of ['auto', undefined] as const) {
+          const { command } = await launch(mode, true);
+          should(withFeature(command)).be.false();
+          should(offCount(command)).equal(1);
+        }
+      });
+
+      it(`a ${call} overrides a selected settings component that turns the feature ON in config.toml`, async () => {
+        // The launch names the OFF, which a `-c` override ranks above the config.toml the component fills (see below).
+        for (const mode of ['interactive', 'auto', undefined] as const) {
+          for (const questionTool of [undefined, false] as const) {
+            const { command } = await launch(mode, questionTool, FEATURE_ON);
+            should(offCount(command)).equal(1);
+            should(withFeature(command)).be.false();
+          }
+        }
+        for (const mode of ['auto', undefined] as const) {
+          const { command } = await launch(mode, true, FEATURE_ON);
+          should(offCount(command)).equal(1);
+          should(withFeature(command)).be.false();
+        }
+        // An interactive ferret the owner opted in carries --enable and no OFF, whatever the component says.
+        const { command } = await launch('interactive', true, FEATURE_ON);
+        should(withFeature(command)).be.true();
+        should(offCount(command)).equal(0);
       });
 
       it(`a ${call} records the same launch settings whatever the mode, so no ferret reads as outdated for it`, async () => {
@@ -272,13 +319,23 @@ describe('the Codex harness', () => {
       });
     }
 
-    it('names the feature only for an interactive ferret with the setting on', () => {
+    it("writes a selected settings component's feature ON into config.toml unchanged: the launch OFF is what wins", async () => {
+      const { harness, written } = harnessOver(LOCATED, undefined, undefined, {
+        features: { default_mode_request_user_input: true },
+      });
+      await harness.prepareHome(specOf());
+      const toml = [...written.entries()].find(([path]) => path.endsWith('config.toml'))?.[1] ?? '';
+      should(toml).containEql('default_mode_request_user_input = true');
+    });
+
+    it('names the feature only for an interactive ferret with the setting on, and the OFF for every other launch', () => {
       should(codexQuestionArguments('interactive', true)).eql(FEATURE);
-      should(codexQuestionArguments('auto', true)).eql([]);
-      should(codexQuestionArguments(undefined, true)).eql([]);
-      should(codexQuestionArguments('interactive', false)).eql([]);
-      should(codexQuestionArguments('auto', false)).eql([]);
-      should(codexQuestionArguments(undefined, false)).eql([]);
+      should(codexQuestionArguments('auto', true)).eql(OFF);
+      should(codexQuestionArguments(undefined, true)).eql(OFF);
+      should(codexQuestionArguments('interactive', false)).eql(OFF);
+      should(codexQuestionArguments('auto', false)).eql(OFF);
+      should(codexQuestionArguments(undefined, false)).eql(OFF);
+      should(CODEX_QUESTIONS_OFF).eql(OFF);
       should(CODEX_QUESTIONS_FEATURE).equal('default_mode_request_user_input');
     });
 

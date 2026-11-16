@@ -92,13 +92,24 @@ describe('the question tool, per ferret (O3)', () => {
     ]);
   });
 
-  it("should never enable Codex's question feature from the wrapper, whatever the ferret's mode (!A527)", () => {
+  it("should switch Codex's question feature explicitly OFF from the wrapper, whatever the ferret's mode, and never enable it (!A527)", () => {
     // Arrange
     const wrapper = render(account({ kind: 'codex' }));
+    const OFF = ['-c', 'features.default_mode_request_user_input=false'];
+
+    // Act + Assert
+    should(wrapper).not.containEql('--enable');
+    should(wrapper).not.containEql('FY_SESSION_MODE');
+    for (const mode of ['interactive', 'auto', undefined] as const)
+      should(argumentsAfterQuestionLine(wrapper, mode, ['do the thing'])).deepEqual([...OFF, 'do the thing']);
+  });
+
+  it("should leave a non-agent Codex runtime without the OFF: it behaves like the person's own CLI", () => {
+    // Arrange
+    const wrapper = render({ ...account({ kind: 'codex' }), agent: false });
 
     // Act + Assert
     should(wrapper).not.containEql('default_mode_request_user_input');
-    should(wrapper).not.containEql('FY_SESSION_MODE');
   });
 
   it("should leave a non-agent runtime alone: it behaves like the person's own CLI", () => {
