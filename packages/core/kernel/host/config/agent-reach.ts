@@ -10,14 +10,13 @@
  * permissions, plus the harness `binary` and `searchPaths` that lived in `daemon.json`, out of an agent's reach). Each
  * plugin's `loosens` holds a looser permission mode AND any change of `binary` or `searchPaths`, since a path names the
  * program every new ferret launches; an agent's edit of either is HELD through the same writer as every other file.
+ * Also `browsers.yaml` (machine.yaml's browser mode and proxy: Browsers' `loosens` holds a new or re-aimed proxy, as today
+ * did) and `usage.yaml` (machine.yaml's time zone and public feed: Usage's `loosens` holds ANY time-zone change and the
+ * feed turned on, as today did).
  * Never `gate.yaml`, `plugins.yaml` or any file the 5.0 plugins added with no today equivalent: widening that is the
  * owner's decision, not a side effect of the declared-file reader.
  *
  * NOT MAPPED, each a declared GAP (docs/config-files.md, the agent's tools):
- * - `browsers.yaml` (today machine.yaml's browser mode, proxy and ports): its `loosens` holds nothing, and today a new or
- *   re-aimed browser proxy was held. Mapped the day Browsers ports `browserProxyLoosening`.
- * - `usage.yaml` (today machine.yaml's time zone and public feed): a time-zone change is not held, and today it was
- *   (it moves when budgets reset). Mapped the day Usage ports the zone rule.
  * - `components/instructions/<n>` and `components/hooks/<n>` of Codex: now `config/instructions/<n>.yaml` (Runtimes) and
  *   `config/codex/hooks/<n>.yaml` (Codex), which plugins DO declare, but are left out on purpose. Their `neverLoosens` holds
  *   nothing (as in v4), so mapping them would let an agent add agent instructions and shell hook commands with no owner
@@ -42,6 +41,9 @@ const FILES: ReadonlyMap<string, string> = new Map([
   // Owner decision !A525: a permission-mode loosening and any binary/searchPaths change is held by the plugin's rule.
   ['harness-claude-code.yaml', "machine.yaml's agent permissions, and the harness binary and searchPaths (held)"],
   ['harness-codex.yaml', "machine.yaml's agent permissions, and the harness binary and searchPaths (held)"],
+  // Each one's `loosens` holds what today's did: a new or re-aimed proxy; any time-zone change and the public feed on.
+  ['browsers.yaml', "machine.yaml's browser mode and proxy (a new or re-aimed proxy is held)"],
+  ['usage.yaml', "machine.yaml's time zone and public feed (a time-zone change and the feed on are held)"],
   // Today's machine.yaml `conversations.listComputer` ("Keep in sync", docs/migration/v4-formats.md): no rule of
   // today's judged it, and 5.0's `neverLoosens` holds nothing either, so parity maps it.
   ['conversation.yaml', "machine.yaml's conversations.listComputer (keep in sync)"],
