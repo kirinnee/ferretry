@@ -10,7 +10,6 @@
  * what the v4 daemon did against a pane id (read the frame, verify the row, press a digit) is done through that seam.
  */
 import type {
-  FormKey,
   HarnessRuntimeSwitch,
   RuntimeModelCatalog,
   RuntimeSwitchPane,
@@ -30,9 +29,6 @@ import {
 import { pickerStillShows } from './picker-screen.ts';
 import type { CodexPickerPanePort } from './ports.ts';
 import { CodexQuirkService } from './quirk-service.ts';
-
-/** The command that opens Codex's own model picker. */
-const CODEX_PICKER_COMMAND = '/model';
 
 /** The word the cleanup resolves a pane to: the pane is already bound to ONE ferret, so there is nothing to choose. */
 const THIS_FERRET = 'this-ferret';
@@ -56,28 +52,31 @@ class FerretPickerPane implements CodexPickerPanePort {
 }
 
 /**
- * The picker driver's transport, over the seam. THE VERIFICATION IS NOT ADVISORY: the frame is read again immediately
- * before a digit is pressed, and if it no longer shows the exact row the driver named the key is not sent at all.
+ * The picker driver's transport, VERIFIED. Ferrets hands over the pane's own part (open the picker, read a frame, press a
+ * digit); what only Codex knows is what its picker looks like, so the frame is read again immediately before a digit goes
+ * and, if it no longer shows the exact row the driver named, the key is not sent at all.
+ * THE VERIFICATION IS NOT ADVISORY: a "send it anyway, it is probably still right" branch is how a model switch becomes a
+ * different model.
  */
-export class FerretPickerTransport implements CodexPickerDrivePort {
-  constructor(private readonly pane: RuntimeSwitchPane) {}
+export class VerifiedPickerTransport implements CodexPickerDrivePort {
+  constructor(private readonly transport: CodexPickerDrivePort) {}
 
   async openPicker() {
-    return await this.pane.command(CODEX_PICKER_COMMAND);
+    return await this.transport.openPicker();
   }
 
   async readPane() {
-    return await this.pane.observe();
+    return await this.transport.readPane();
   }
 
   async sendKey(key: string, expected: CodexPickerKeyExpectation): Promise<void> {
     if (!isAddressablePickerKey(key)) throw new CodexPickerDriveError(`refusing to send ${key} into a Codex picker`);
     if (expected.row.number !== Number(key))
       throw new CodexPickerDriveError('the Codex picker shortcut no longer matches the verified row');
-    const frame = await this.pane.observe();
+    const frame = await this.transport.readPane();
     if (!pickerStillShows(frame.visible, expected))
       throw new CodexPickerDriveError('the Codex picker changed before the verified shortcut could be sent');
-    await this.pane.key(key as FormKey);
+    await this.transport.sendKey(key, expected);
   }
 }
 
@@ -115,7 +114,8 @@ export function codexRuntimeSwitch(
           // Only a Codex session is switched through this, so the catalog it is asked about is Codex's own.
           catalog as Parameters<typeof fastModeFacts>[1],
         ),
-      pickerDriver: (sleeper: PickerSleeper) => new CodexModelPickerDriver(new FerretPickerTransport(pane), sleeper),
+      pickerDriver: (transport, sleeper: PickerSleeper) =>
+        new CodexModelPickerDriver(new VerifiedPickerTransport(transport), sleeper),
     },
     liveCatalog: options.choices,
   });
