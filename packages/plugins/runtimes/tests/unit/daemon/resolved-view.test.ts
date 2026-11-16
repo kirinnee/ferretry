@@ -440,7 +440,7 @@ describe('resolvedEntries — a credential in a command line', () => {
 
 const SECRET_NAMED = ['--token', '--api-key', '--auth-token', '--password', '--client-secret', '-token', '-password'];
 const HARMLESS_NAMED = ['--header', '--model', '--name'];
-const ONE_LETTER = ['-k', '-H', '-p'];
+const ONE_LETTER = ['-k', '-H'];
 type Separator = '=' | 'next word' | 'space' | 'none';
 const SPELLING_CASES: readonly ((flag: string) => string)[] = [
   flag => flag.toLowerCase(),
@@ -478,6 +478,10 @@ function familyCases(): readonly FamilyCase[] {
     ...SECRET_NAMED.map(flag => ({ flag, named: true, separators: ['=', 'next word', 'space'] as Separator[] })),
     ...HARMLESS_NAMED.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space'] as Separator[] })),
     ...ONE_LETTER.map(flag => ({ flag, named: false, separators: ['=', 'next word', 'space', 'none'] as Separator[] })),
+    // `-p` means "password" (mysql's `-p<password>`) when the value is stuck to the letter, and only as `-p`: `-P` is a
+    // port, and with a separator of its own the flag is `-p` as any other one-letter flag.
+    { flag: '-p', named: false, separators: ['=', 'next word', 'space'] as Separator[] },
+    { flag: '-p', named: true, separators: ['none'] as Separator[], lowerOnly: true },
   ];
   for (const spelling of spellings) {
     for (const spell of SPELLING_CASES) {
@@ -499,7 +503,11 @@ function familyCases(): readonly FamilyCase[] {
                 flagAt: 1,
                 valueAt: shape.length,
                 flag,
-                secret: secret === 'always' || (secret === 'under a secret name' && spelling.named),
+                secret:
+                  secret === 'always' ||
+                  (secret === 'under a secret name' &&
+                    spelling.named &&
+                    (!('lowerOnly' in spelling) || flag === spelling.flag)),
                 body,
               });
             }
@@ -1137,7 +1145,7 @@ describe('resolvedEntries — the #40 rule after review r4 (B1, B2)', () => {
   });
 
   it('#40 B1 should keep a flag value that is composed with the pointer, too short, or under a flag that names no secret (control)', () => {
-    // Arrange — `-k` is a one-letter name (the declared `-p<password>` GAP), `--model` a harmless one.
+    // Arrange — `-k` is a one-letter name that means nothing (`-p` means "password"), `--model` a harmless one.
     const words = [
       '--token',
       `Bearer ${P}`,

@@ -7,8 +7,10 @@ import should from 'should';
 import { resolveProfile } from '../../../daemon/lib/account/layering.ts';
 import { parseAccountModel } from '../../../daemon/lib/account/schema.ts';
 import { resolvedEntries } from '../../../daemon/lib/service/resolved-view.ts';
+import { WITHHELD_WORDS_TEXT as WITHHELD } from '../../../contract/index.ts';
 
 const GSK = 'gsk_AbCdEfGhIjKlMnOpQrSt12';
+const V = 'Zk3pQ9vXw2LmN7rT';
 
 const line = (url: string): string => {
   const parsed = parseAccountModel({
@@ -38,5 +40,30 @@ describe('a Resolved url path with a malformed escape', () => {
 
     // Assert
     should(shown).not.containEql(GSK);
+  });
+});
+
+describe('a Resolved url path with a malformed escape AND a refused flag value in the same path', () => {
+  for (const bad of ['%zz', '%E0%A4%A', '%']) {
+    it(`should withhold https://h/${bad}/mcp --token <value>, the valid escapes read though ${bad} does not parse`, () => {
+      // Act
+      const shown = line(`https://h.example/${bad}/mcp --token ${V}`);
+
+      // Assert
+      should(shown).not.containEql(V);
+      should(shown).equal(WITHHELD);
+    });
+  }
+
+  it('should read the ASCII escapes of a run that does not parse as a whole (%20 then half a character)', () => {
+    // Act
+    const shown = line(`https://h.example/mcp%20--token%20${V}%20%E0%A4`);
+
+    // Assert
+    should(shown).equal(WITHHELD);
+  });
+
+  it('should still show a path that has a malformed escape and nothing refused beside it', () => {
+    should(line('https://h.example/%zz/mcp%20v2')).equal('https://h.example/%zz/mcp%20v2');
   });
 });

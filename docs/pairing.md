@@ -394,7 +394,11 @@ Whatever draws a QR of a pairing link is handling a credential for somebody's ma
   `fy pair --open` never hands `xdg-open`, `open` or `start` the link. It writes a one-line redirect page
   (`packages/cli/src/lib/pair/redirect-page.ts`) into a fresh `0700` directory under the user's state home
   (`<FY_HOME>/pair-open-*`, never the shared `/tmp`), as a `0600` file created with `O_EXCL`, and opens
-  _that path_; the page's script does `location.replace(<link>)`, fragment intact. This is the one place the
+  _that path_; the page's script does `location.replace(<link>)`, fragment intact. The DAEMON makes the page
+  (`POST /v1/pair/redirect`, the host's admin credential only; the CLI sends the page and the daemon names the
+  directory), not the CLI: a file the CLI's own state port made would be pinned in the fence only at its index's
+  next look, within 250 ms, and a file the daemon makes is pinned by identity before the write returns, so no
+  alias of it is reachable through any root from the moment it exists. This is the one place the
   code touches disk, so the page lives seconds, not minutes: it is deleted 10 seconds after the launcher
   starts, at once if the launcher is missing, and when the process exits or is stopped. The timer holds
   `fy pair --no-wait` open for those seconds so the page is not removed before a cold browser reads it.

@@ -5,6 +5,7 @@ import {
   PairingCodeStatusResponseSchema,
   type PairingGrantSet,
   type PairingId,
+  PairingRedirectResponseSchema,
 } from '../../../contract/index.ts';
 import { callDaemon } from '../../shell.ts';
 import type { IPairGateway, PairingApiClient } from './ports.ts';
@@ -36,6 +37,7 @@ export function pairingCodePath(pairingId: PairingId): string {
 export const PAIRING_ROUTES = {
   mint: 'POST /v1/pair/code',
   status: 'GET /v1/pair/code/:pairingId',
+  redirect: 'POST /v1/pair/redirect',
 } as const;
 
 /**
@@ -61,6 +63,17 @@ export class ProtocolPairingGateway implements IPairGateway {
     return PairingCodeMintResponseSchema.parse(
       await callDaemon(this.client, PAIRING_ROUTES.mint, { body: grants === 'full' ? {} : { grants } }),
     );
+  }
+
+  /**
+   * Has the DAEMON make the `--open` redirect page, so it is pinned by identity before it exists for anyone else: a
+   * file this process's own state port made would be pinned only at the fence index's next look. Answers the
+   * directory it made, below Access's `pairing-redirects`.
+   */
+  async redirect(page: string): Promise<string> {
+    return PairingRedirectResponseSchema.parse(
+      await callDaemon(this.client, PAIRING_ROUTES.redirect, { body: { page } }),
+    ).directory;
   }
 
   /** The pairing id travels as a path parameter (`pairingCodePath`'s shape); the code never does. */

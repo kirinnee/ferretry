@@ -39,8 +39,12 @@
  * `-H‹hidden›`). Every way of reading a word with a value (the glued flag and its value, the value stuck to a
  * one-letter flag, the whole word) is searched and what ANY of them cuts is cut, so no reading shows what another hid.
  *
- * NOT handled (declared GAPs): a JSON document inside a flag (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are
- * quoted) and a plain password stuck to a one-letter flag (`-p<password>`: a single letter is no secret name). A value
+ * A JSON object or array inside a word (`--settings '{"env":{"API_KEY":"v"}}'`, its keys are quoted) is read key by
+ * key ({@link jsonCuts}): a string under a secret-named key that looks like a credential is cut, wherever in the
+ * document it sits. A one-letter flag whose letter means "password" ({@link STUCK_FLAG_NAMES}: mysql's `-p<password>`)
+ * is read under that name, so its stuck value is cut like any value under a secret name (a value under 8 characters is
+ * no credential, as everywhere) unless a longer flag glued to a value makes the word (`-password=$X` is that flag's, not
+ * `-p` and a value), so a value with a plain `=` or blank in it (`-pabc=def12345`) is still shown. A value
  * glued to a pointer with no space or `#` between them (`API_KEY=v${secret:X}`, `prefix${secret:X}`,
  * `${secret:X}?model=short`) is NOT one: CFG-LEAK-R cuts the whole value ({@link gluedToPointer}), because the write
  * rule refuses it. The same holds for raw text in ANY piece of a credential's value that holds a pointer
@@ -82,6 +86,9 @@ const GLUED_VALUE = /^(-{1,2}[A-Za-z0-9][^=\s]*)(=|\s+)([\s\S]*)$/u;
 
 /** A one-letter flag with its value stuck straight to it: `-Hv`. */
 const STUCK_VALUE = /^(-[A-Za-z])([^-=\s][\s\S]*)$/u;
+
+/** One-letter flags whose letter says what the value stuck to it is, by the program's own convention: `-p<password>`. */
+const STUCK_FLAG_NAMES: ReadonlyMap<string, string> = new Map([['-p', 'password']]);
 
 /** What splits a value into the pieces a token may start at: spaces, quotes and separators. */
 const PIECE_BREAK = /[\s"'`:,;=]+/u;
@@ -525,6 +532,96 @@ function throughPasswords(cuts: readonly Cut[], passwords: readonly Cut[]): read
   return merged(cuts).map(([from, to]) => [place(from, false), place(to, true)] as const);
 }
 
+/** A JSON document's text: an object or an array, after any blanks. */
+const JSON_DOCUMENT = /^\s*[{[]/u;
+
+/** One JSON string literal, or one of the marks that give a document its shape. */
+const JSON_TOKEN = /"(?:[^"\\]|\\.)*"|[{}[\]:,]/gu;
+
+/** One object or array of a JSON document being read: the key whose value is being read, and the key above it. */
+interface JsonFrame {
+  readonly object: boolean;
+  /** The nearest key above this one (`''` for none): an item of a list is named by the key the list is under. */
+  readonly inherited: string;
+  key: string | undefined;
+  expectKey: boolean;
+}
+
+/** A JSON string literal's text, as written when it does not parse. */
+function jsonString(literal: string): string {
+  try {
+    return String(JSON.parse(literal));
+  } catch {
+    return literal.slice(1, -1);
+  }
+}
+
+/** A key's name as a broken document may write it: bare, or in `"`, `'` or `\"`, then a `:`, `=` or blanks. */
+const JSON_KEY_ISH = /(?<![A-Za-z0-9_.-])([A-Za-z_][A-Za-z0-9_.-]*)(?:\\?["'])?[ \t]*[:=]?[ \t]*/gu;
+
+/** Whether a text parses as JSON (a document too deep for the parser does not). */
+function parses(text: string): boolean {
+  try {
+    JSON.parse(text);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The cut of a document that does not parse (`{"API_KEY": v}`, `{'API_KEY':'v'}`, `{\"API_KEY\":\"v\"}`, a stray `}}}`
+ * before the key): it has no key and value pairs to read, so the first secret-named key anywhere in it (quoted with
+ * `"`, `'` or `\"`, or bare) cuts from its value to the end of the document, whatever shape that takes.
+ */
+function brokenJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  for (const found of matchesOf(JSON_KEY_ISH, text)) {
+    const from = found.index + found[0].length;
+    if (tests.namesSecret(found[1] ?? '') && from < text.length) return [[from, text.length]];
+  }
+  return [];
+}
+
+/**
+ * The cuts of the strings of a JSON document inside a value (`{"env":{"API_KEY":"v"}}`) that look like credentials
+ * under the key they are held by, as W names it: the nearest key above a string, however deep. Read lexically, one
+ * pass and no recursion, so a document that does not parse is read as far as it goes and a deep one costs its length.
+ * The quotes stay: only what is between them is cut. A document that does not parse is also cut from the value of its
+ * first secret-named key to its end ({@link brokenJsonCuts}), so a shape the lexical read misses shows nothing.
+ */
+function jsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  if (!JSON_DOCUMENT.test(text)) return [];
+  return parses(text)
+    ? lexicalJsonCuts(text, tests)
+    : [...lexicalJsonCuts(text, tests), ...brokenJsonCuts(text, tests)];
+}
+
+function lexicalJsonCuts(text: string, tests: CutterTests): readonly Cut[] {
+  const cuts: Cut[] = [];
+  const frames: JsonFrame[] = [];
+  for (const token of matchesOf(JSON_TOKEN, text)) {
+    const mark = token[0];
+    const top = frames.at(-1);
+    if (mark === '{' || mark === '[')
+      frames.push({
+        object: mark === '{',
+        inherited: top === undefined ? '' : (top.key ?? top.inherited),
+        key: undefined,
+        expectKey: mark === '{',
+      });
+    else if (mark === '}' || mark === ']') frames.pop();
+    else if (mark === ':' || mark === ',') {
+      if (top?.object === true) {
+        top.expectKey = mark === ',';
+        if (mark === ',') top.key = undefined;
+      }
+    } else if (top?.object === true && top.expectKey) top.key = jsonString(mark);
+    else if (tests.looksSecret(top === undefined ? '' : (top.key ?? top.inherited), jsonString(mark)))
+      cuts.push([token.index + 1, token.index + mark.length - 1]);
+  }
+  return cuts;
+}
+
 /** The cuts of a value: each URL user's password, and each nested credential (inside one pair of quotes, kept). */
 function nestedCuts(value: string, tests: CutterTests): readonly Cut[] {
   const quoted = QUOTED.exec(value);
@@ -535,7 +632,9 @@ function nestedCuts(value: string, tests: CutterTests): readonly Cut[] {
     passwords.length === 0
       ? nestedValueCuts(inner, tests)
       : throughPasswords(nestedValueCuts(withCuts(inner, passwords), tests), passwords);
-  return [...passwords, ...nested].map(([from, to]) => [from + offset, to + offset] as const);
+  return [...passwords, ...nested, ...jsonCuts(inner, tests)].map(
+    ([from, to]) => [from + offset, to + offset] as const,
+  );
 }
 
 /**
@@ -633,7 +732,10 @@ export function shownWordWith(tests: CutterTests, word: string, before: string |
   // #37 first, whole: a value glued on or stuck to its flag, then the word under the flag before it. A nested cut
   // (#40) is only ever a FURTHER cut of a word #37 would show, so it never shows what #37 hid: `-H<token> KEY=v` is a
   // flag `-H<token>` with a value after a space, and stays `-H‹hidden›`.
-  const stuckHidden = stuck !== null && secretValue('', stuckValue, tests);
+  // A one-letter flag's letter names its value (`-p<password>`) only when nothing else makes the word a flag: a longer
+  // flag glued to its value (`-password=$X`, `-port 80`) is that flag's and is read as it always was.
+  const stuckName = glued === null || !PLAIN_FLAG.test(gluedFlag) ? (STUCK_FLAG_NAMES.get(stuckFlag) ?? '') : '';
+  const stuckHidden = stuck !== null && secretValue(stuckName, stuckValue, tests);
   if (glued !== null && secretValue(gluedFlag, gluedValue, tests)) {
     // A token in what the glued reading calls the flag (`-H<token>,API_KEY=v`) is cut with everything after the letter,
     // as the stuck reading cuts it (review r2 G1).

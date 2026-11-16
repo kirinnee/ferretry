@@ -259,9 +259,13 @@ describe('pairing routes as declared (the boundary Gate enforces)', () => {
   it('P21 nothing on the pairing surface is public, and POST /v1/pair is not a route', () => {
     const keys = manifest.actions.routes.map(route => route.key);
     should(keys).not.containEql('POST /v1/pair');
+    // `operator` for every route but the `--open` page, which is the host's admin credential alone: stricter, never open.
     should(
-      manifest.actions.routes.filter(route => route.path.startsWith('/v1/pair')).map(route => route.minimum),
+      manifest.actions.routes
+        .filter(route => route.path.startsWith('/v1/pair') && route.key !== 'POST /v1/pair/redirect')
+        .map(route => route.minimum),
     ).matchEach('operator');
+    should(declared('POST /v1/pair/redirect').minimum).equal('admin-token');
     should(mount(new FakePairing()).some(route => route.method === 'POST' && route.path === '/v1/pair')).be.false();
   });
 
@@ -293,7 +297,10 @@ describe('pairing routes as declared (the boundary Gate enforces)', () => {
       manifest.actions.routes
         .filter(route => route.method === 'POST' && route.path.startsWith('/v1/pair'))
         .map(route => route.key),
-    ).deepEqual(['POST /v1/pair/code']);
+    ).deepEqual(['POST /v1/pair/code', 'POST /v1/pair/redirect']);
+    // The second takes a page the host's own CLI renders (never a code, never a credential to redeem), host admin only.
+    should(declared('POST /v1/pair/redirect').capability).be.undefined();
+    should(declared('POST /v1/pair/redirect').minimum).equal('admin-token');
   });
 });
 

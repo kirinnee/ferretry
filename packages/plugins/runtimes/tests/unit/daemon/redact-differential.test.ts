@@ -503,8 +503,11 @@ const refusedToday = (line: string): boolean =>
 
 /** Whether the write rule refuses today's unit `at` only with the last word of the unit before it (`--token⏎value`). */
 function refusedWithPrevious(units: readonly string[], at: number): boolean {
-  const words = (units[at - 1] ?? '').trimEnd().split(/\s+/u);
-  const last = words.at(-1) ?? '';
+  // The word that ends the nearest line before it that holds one: blank lines between a flag and its value do not break
+  // the pairing (cfg-leak-d-residuals, as the write rule reads the string).
+  let last = '';
+  for (let before = at - 1; before >= 0 && last === ''; before -= 1)
+    last = (units[before] ?? '').trimEnd().split(/\s+/u).at(-1) ?? '';
   return last !== '' && findFlagSecrets({ text: `${last}\n${units[at] ?? ''}` }).length > 0;
 }
 

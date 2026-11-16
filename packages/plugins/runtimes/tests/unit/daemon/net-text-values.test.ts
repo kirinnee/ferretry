@@ -57,6 +57,12 @@ const PROSE: Readonly<Record<string, readonly string[]>> = {
     `run it with --password\n  ${V2} please`,
     `x --api-key\n${LONG40}\ny`,
   ],
+  'a flag at the end of a line and its value past blank lines': [
+    `mytool --token\n\n${V}`,
+    `run it with --password\n   \n\t\n  ${V2} please`,
+    `x --api-key\n\n\n${LONG40}\ny`,
+    `x --api-key\r\n\r\n${LONG40}\r\ny`,
+  ],
 };
 
 describe('instructions lines the write rule refuses as values are withheld', () => {
@@ -95,6 +101,8 @@ describe('instructions lines the write rule refuses as values are withheld', () 
     'a url with a user only': 'clone https://user@git.example.com/x.git',
     'a url with a pointer password': 'clone https://u:${secret:GIT}@h.example.com/x.git',
     'a flag name alone at the end of a line': 'pass the --token\nflag to the tool',
+    'a flag name alone, blank lines, then a plain word': 'pass the --token\n\n   \nflag to the tool',
+    'a flag, blank lines, then a pointer': 'mytool --token\n\n${secret:MYTOOL_TOKEN}',
   })) {
     it(`should show ${name} as written`, () => {
       // Arrange: the write rule accepts it
