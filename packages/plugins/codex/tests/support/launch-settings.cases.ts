@@ -378,6 +378,24 @@ export function launchSettingsCases(): void {
       expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
     });
 
+    test('F-0422 a launch flag gained, changed or lost since the launch drifts in the settings section only', async () => {
+      const { state } = fresh();
+      const items = new Map<string, unknown>([['guard', guard('one')]]);
+      const harness = over({ value: 'auto' }, state, items);
+      await harness.start(spec, runner, {} as never);
+      const drifted = { kind: 'drifted', sections: ['settings'] } as const;
+
+      items.set('guard', { ...guard('one'), flags: ['--search'] });
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+      items.set('guard', { ...guard('one'), flags: ['--verbose'] });
+      expect(await harness.launchSettings?.(FERRET)).toEqual(drifted);
+
+      // No flags (absent or empty) is the digest a record taken before flags existed holds.
+      items.set('guard', { ...guard('one'), flags: [] });
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+    });
+
     test('F-0422 the record keeps no settings value, and a resume records the settings afresh', async () => {
       const { folder, state } = fresh();
       const items = new Map<string, unknown>([['guard', guard('secret-looking-value')]]);

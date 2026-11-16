@@ -2,12 +2,13 @@
  * The argv of one Codex launch, built from what is true NOW rather than replayed from what was true once.
  *
  * Codex's half of the old launch argv builder: the harness CLI itself, `resume <id>` when its conversation is known,
- * the model, the reasoning effort and the service tier, the compaction trigger, and the owner's free-form flags LAST so
- * an explicitly supplied flag still wins. Codex has no flag for effort, tier or the compaction trigger; it reads them
+ * the settings items' flags (any flag; the permission switches the launch decides are dropped from them), the model, the
+ * reasoning effort and the service tier, the compaction trigger, and the launch's own flags LAST so they win. Codex has no flag for effort, tier or the compaction trigger; it reads them
  * from configuration, which `-c` overrides for one invocation.
  *
  * Pure: strings in, strings out. Which values go in is the caller's decision.
  */
+import { launchFlagsKept } from '../../contract/index.ts';
 import { startupModelArguments } from './startup.ts';
 
 /** A TOML basic string, for a value a Codex `-c` override carries. */
@@ -46,6 +47,11 @@ export interface CodexLaunchParts {
   readonly fast?: boolean;
   /** Where to compact the conversation, in tokens. Absent leaves Codex's own trigger in charge. */
   readonly compactAt?: number;
+  /**
+   * The settings items' launch flags (`launchFlagsKept`, the ones the launch decides already dropped by it): placed BEFORE
+   * every argument the launch sets, so the model, effort, tier, trigger and fixed layer all win over them.
+   */
+  readonly settingsFlags?: readonly string[];
   readonly harnessFlags?: readonly string[];
 }
 
@@ -59,6 +65,7 @@ export function buildCodexLaunchArgv(parts: CodexLaunchParts): readonly string[]
   return [
     parts.executable,
     ...(parts.resume === undefined ? [] : [CODEX_RESUME, parts.resume]),
+    ...launchFlagsKept(parts.settingsFlags ?? []),
     ...(parts.model === undefined ? [] : startupModelArguments(parts.model)),
     ...effortLaunchArguments(parts.effort),
     ...(parts.fast === undefined
