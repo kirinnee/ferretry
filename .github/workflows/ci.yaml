@@ -271,7 +271,7 @@ jobs:
     runs-on:
       [
         nscloud-ubuntu-24.04-amd64-4x8-with-cache,
-        nscloud-cache-tag-ferretry-nix-d,
+        nscloud-cache-tag-ferretry-nix,
         nscloud-cache-size-10gb,
         nscloud-cache-allow-commit-from-main,
       ]
@@ -288,7 +288,7 @@ jobs:
           echo '--- top CPU now'; ps -eo pid,ppid,pcpu,rss,etime,args --sort=-pcpu | head -12 | cut -c1-200
           echo '--- nix processes'; pgrep -a -f 'nix|determinate' | cut -c1-200 || true
           # shellcheck disable=SC2016
-          nohup setsid bash -c 'while :; do echo "=== $(date +%T) load $(cut -d" " -f1-3 /proc/loadavg) cpu: $(head -1 /proc/stat)"; ps -eo pcpu,rss,args --sort=-pcpu | sed -n 2,6p | cut -c1-150; sleep 10; done' >"${RUNNER_TEMP}/perf-sampler.log" 2>&1 &
+          nohup setsid bash -c 'while :; do echo "=== $(date +%T) load $(cut -d" " -f1-3 /proc/loadavg) cpu: $(head -1 /proc/stat) mem: $(grep -E "^(MemAvailable|Dirty)" /proc/meminfo | tr -s " " | tr "\n" " ") psi-mem: $(head -1 /proc/pressure/memory) psi-io: $(head -1 /proc/pressure/io)"; ps -eo pcpu,rss,args --sort=-pcpu | sed -n 2,6p | cut -c1-150; sleep 10; done' >"${RUNNER_TEMP}/perf-sampler.log" 2>&1 &
       - name: Run the perf tier
         env:
           FY_CI_PERF_PARALLEL: '2'
