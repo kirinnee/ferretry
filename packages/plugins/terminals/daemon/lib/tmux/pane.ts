@@ -172,10 +172,11 @@ function showsStatus(lower: string): boolean {
  * A harness's own status line above its composer: a spinner or bullet glyph at the left, then the reading inside the
  * line's parenthetical — Claude's `✻ Crunching… (12s · ↓ 1.4k tokens · esc to interrupt)`, Codex's
  * `• Working (5s • esc to interrupt)` and its `• Messages to be submitted … (press esc to interrupt …)`. The
- * parenthetical may be clipped open on a narrow pane. Group 1 is the parenthetical onward; `working` is read on the
+ * parenthetical may be clipped open on a narrow pane. With reduced motion Claude 2.1.317 draws its spinner as a still
+ * `●` (U+25CF), so that glyph is one too. Group 1 is the parenthetical onward; `working` is read on the
  * whole line, because Codex's clock is `Working (5s` and its word sits before the bracket.
  */
-const STATUS_SHAPED = /^[^\S\n]*[✻✳✶✽✢∗·*•◦⏺]\s[^(\n]*(\([^\n]*)$/u;
+const STATUS_SHAPED = /^[^\S\n]*[✻✳✶✽✢∗·*•◦⏺●]\s[^(\n]*(\([^\n]*)$/u;
 
 /**
  * Codex's status header with its animation off (`tui.animations = false`, or progress effects disabled): the same

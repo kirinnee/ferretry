@@ -580,16 +580,19 @@ describe('the words of a busy or blocked screen, read only where the harness dra
       /^✻ Crunched for .*$/mu,
       '✻ Crunching… (esc to interrupt · ctrl+t to sh',
     );
+    // Reduced motion (`prefersReducedMotion`): Claude 2.1.317 draws the spinner as a still `●`.
+    const claudeStill = claude.frame.replace(/^✻ Crunched for .*$/mu, '● Crunching… (12s · ↓ 1.4k tokens)');
     const codexBusy = withProse(codex.frame, /^› /u).replace(
       /^  Codex prints .*$/mu,
       '• Working (5s • esc to interrupt)',
     );
 
     // Act
-    const actual = [claudeBusy, claudeClipped, codexBusy].map(frame => paneActiveWork(frame));
+    const actual = [claudeBusy, claudeClipped, claudeStill, codexBusy].map(frame => paneActiveWork(frame));
 
     // Assert
-    should(actual).deepEqual(['status', 'status', 'status']);
+    should(actual).deepEqual(['status', 'status', 'status', 'status']);
+    should(promptIsReady(claudeStill, claude.y, claude.x)).be.false();
   });
 
   it('should still read Codex’s status header drawn without its bullet (animations off) as a turn', () => {
