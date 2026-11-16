@@ -81,7 +81,9 @@ export interface RuntimesAssembly {
     FleetCatalogService,
     'machine' | 'components' | 'profiles' | 'previewProfile' | 'runtimes' | 'propose' | 'read' | 'apply' | 'serialise'
   > &
-    Partial<Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles' | 'currentRuntimeName'>>;
+    Partial<
+      Pick<FleetCatalogService, 'republish' | 'runtimesAfterLoginChange' | 'publishFromFiles' | 'currentRuntimeName'>
+    >;
   readonly setup: Pick<
     FleetSetupService,
     'scan' | 'installTools' | 'exportBundle' | 'reviewClone' | 'forgetCloneSource' | 'recordCloneKeys' | 'executors'
