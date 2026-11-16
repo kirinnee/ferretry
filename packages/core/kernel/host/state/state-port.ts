@@ -12,7 +12,7 @@ import {
 } from '../../contract/index.ts';
 import { StoreDamagedError, UndeclaredStateFileError } from './errors.ts';
 import { encodeDocument, stateLabel } from './format.ts';
-import type { HostFs } from './host-fs.ts';
+import type { HostFileInfo, HostFs } from './host-fs.ts';
 import { isInternalRootFolder } from '../../contract/internal-roots.ts';
 import { assertRecordSize } from './jsonl-scan.ts';
 import { readBytesFile, readJsonDocument, readJsonlLines, readJsonlRecords } from './readers.ts';
@@ -24,6 +24,16 @@ const PRIVATE_DIRECTORY_MODE = 0o700;
 
 /** A name that fills the `*` of a collection path: one path segment, no dots-only, no separators. */
 const COLLECTION_NAME = /^[A-Za-z0-9_][A-Za-z0-9._%~-]{0,200}$/u;
+
+/** Within this of now, a status-change time is not yet a stamp a later write would have to move (the fence's racy window). */
+const RACY_NS = 20_000_000n;
+
+/** {@link StateVersion.settled}: a fine-grained, device-and-ctime stamp that is old enough that no later write shares it. */
+function settled(info: HostFileInfo): boolean {
+  const changed = info.changedAtNs;
+  if (changed === undefined || info.device === undefined) return false;
+  return changed % 1_000_000n !== 0n && BigInt(Date.now()) * 1_000_000n - changed > RACY_NS;
+}
 
 export interface StateDamageEvent {
   readonly damage: StateDamage;
@@ -357,7 +367,12 @@ export function createStatePort(options: StatePortOptions): HostStatePort {
       const at = locate(def, name);
       const info = await fs.info(at.path);
       if (info === undefined) return undefined;
-      return { size: info.size, etag: `${info.inode}:${info.size}:${info.modifiedAtMs}` };
+      const stamp = info.changedAtNs === undefined ? '' : `:${String(info.device)}:${String(info.changedAtNs)}`;
+      return {
+        size: info.size,
+        etag: `${info.inode}:${info.size}:${info.modifiedAtMs}${stamp}`,
+        settled: settled(info),
+      };
     },
 
     async records<Shape>(def: StateFileDef<string, Shape>, name?: string): Promise<JsonlRecords<Shape>> {

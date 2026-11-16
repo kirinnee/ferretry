@@ -72,3 +72,9 @@ test('a conversion preview without a model sends only the agent', async () => {
   await new ClientMoveGateway(client, () => 'unused').conversionPreview('ses-1', 'codex-secondary');
   expect(calls[0]?.init).toEqual({ params: { ferretId: 'ses-1' }, body: { agent: 'codex-secondary' } });
 });
+
+test('a move sends this process pid, so the daemon can leave the requesting call out of its safety check', async () => {
+  const { client, calls } = recording(sessionView());
+  await new ClientMoveGateway(client, () => 'unused', 4242).move('ses-1', 'claude-alpha');
+  expect(calls[0]?.init).toMatchObject({ body: { agent: 'claude-alpha', requesterPid: 4242 } });
+});

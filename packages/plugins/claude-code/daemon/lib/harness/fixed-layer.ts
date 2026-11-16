@@ -22,6 +22,21 @@ export const CLAUDE_QUESTION_HOOKS = {
 export const CLAUDE_JSON_DEFAULTS = { claudeInChromeDefaultEnabled: false } as const;
 
 /**
+ * What a ferret's home pre-answers so that no screen of the harness's own stops it (docs/harness-dialogs.md).
+ *
+ * - `DISABLE_AUTOUPDATER=1` (the variable v4's harness probe sets, here in the launch's process environment — never in
+ *   the `--settings` overlay, which carries no env so a project's own wins): no "update available / installing"
+ *   notice or self-update in a ferret's pane. Updates are Ferretry's to apply.
+ * - `projects[<cwd>].hasTrustDialogAccepted`: the "Do you trust this folder?" screen, for the ferret's OWN working
+ *   folder and no other (not a parent, not `*`). It lets that folder's `.claude/settings` and hooks run.
+ * - NOT `projects[<cwd>].enableAllProjectMcpServers`: it would approve EVERY server a folder's `.mcp.json` ever
+ *   declares, and 5.0 has no owner-approved per-server list to write instead (v4 never wrote it either). The "New MCP
+ *   server found in this project" screen is therefore left to the owner: the Warden raises ONE notice for it
+ *   (docs/harness-dialogs.md), and an `enableAllProjectMcpServers` already in the home is never touched.
+ */
+export const CLAUDE_HOME_ENV = { DISABLE_AUTOUPDATER: '1' } as const;
+
+/**
  * Fixed settings override item settings; the question hook and the compaction hooks (`./compaction.ts`) are ONLY in the
  * separate flag overlay. They are part of the `fixed-layer` fingerprint, so a ferret launched before them reads as
  * Restart-needed.

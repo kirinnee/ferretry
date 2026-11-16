@@ -308,7 +308,7 @@ function memoryStatePort(folder: MemoryStateFolder, declared: readonly StateFile
       if (stored === undefined) return undefined;
       const size = typeof stored === 'string' ? new TextEncoder().encode(stored).byteLength : stored.byteLength;
       // content-addressed: equal etags mean the same bytes (the real port's moves on any rewrite or append)
-      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}` };
+      return { size, etag: `${size}:${Bun.hash(stored).toString(36)}`, settled: true };
     },
     async records(file, name) {
       guard(file);

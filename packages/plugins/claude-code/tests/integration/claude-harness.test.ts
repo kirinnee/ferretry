@@ -685,7 +685,10 @@ describe('ClaudeHarness', () => {
       const now = await document();
       expect(now.userID).toBe('fake-user-id');
       expect(now.hasCompletedOnboarding).toBe(true);
-      expect(now.projects['/work']).toEqual({ allowedTools: ['Bash'], hasTrustDialogAccepted: true });
+      expect(now.projects['/work']).toEqual({
+        allowedTools: ['Bash'],
+        hasTrustDialogAccepted: true,
+      });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
       expect(plan.files as readonly string[]).toContain(claudeJson());
     });
@@ -733,9 +736,10 @@ describe('ClaudeHarness', () => {
 
     expect(result.ok && result.value.harnessConversation).toBe('conv-1');
     expect(started.cwd).toBe('/work');
-    expect(started.command?.slice(0, 7)).toEqual([
+    expect(started.command?.slice(0, 8)).toEqual([
       'env',
       `CLAUDE_CONFIG_DIR=${HOME}`,
+      'DISABLE_AUTOUPDATER=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
