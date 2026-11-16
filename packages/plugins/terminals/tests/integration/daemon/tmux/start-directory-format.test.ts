@@ -71,12 +71,12 @@ describe('a start directory named like a tmux format', () => {
     const script = scriptLine(newSessionArguments({ session: 'probe', cwd: hostile, command: ['sleep', '60'] }));
     // Act
     const socket = join(root, 's');
-    const child = Bun.spawn([TMUX as string, '-S', socket, 'start-server', ';', 'source-file', '-'], {
-      stdin: new Blob([script]),
+    const child = Bun.spawnSync([TMUX as string, '-S', socket, 'start-server', ';', 'source-file', '-'], {
+      stdin: Buffer.from(script),
       stdout: 'pipe',
       stderr: 'pipe',
     });
-    const created = { code: await child.exited, stderr: await new Response(child.stderr).text() };
+    const created = { code: child.exitCode, stderr: child.stderr.toString() };
     // Assert
     should(created.code).equal(0, created.stderr);
     const where = await waitForValue(async () => {
