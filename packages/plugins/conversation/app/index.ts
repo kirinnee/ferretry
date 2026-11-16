@@ -71,6 +71,7 @@ export default provideToShell(
           | 'turn'
           | 'files-search'
           | 'interrupt-row'
+          | 'stuck-messages-row'
           | 'agenda-conversation',
       ) => lazyComponent<PanelProps>(async () => (await surfacesOf()).panels[id] as AppComponent<PanelProps>);
       return {
@@ -85,6 +86,7 @@ export default provideToShell(
           'message-marks': notDrawnPerDaemon,
           'files-search': panel('files-search'),
           'interrupt-row': panel('interrupt-row'),
+          'stuck-messages-row': panel('stuck-messages-row'),
           'agenda-conversation': panel('agenda-conversation'),
         },
         settings: {

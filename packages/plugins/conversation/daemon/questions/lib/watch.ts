@@ -4,7 +4,7 @@ import type { PendingQuestion } from '@ferretry/core-mailbox/contract';
 import type { TranscriptEvent } from '../../seams/transcript-types.ts';
 import { createHash } from 'node:crypto';
 import { parseAskedQuestion } from './asked.ts';
-import { projectStructuredQuestion } from './projection.ts';
+import { paneQuestionUpgrade, projectStructuredQuestion, storedQuestionCount } from './projection.ts';
 import type { OpenForm } from './rendered-form.ts';
 
 /** How often the roster is looked at for a question the hook recorded (the plan's 2 s cadence). */
@@ -281,11 +281,16 @@ export class QuestionWatch {
     const stamped = await this.deps.lastAnswered(ferret);
     const projection = projectStructuredQuestion(events);
     const pending = projection.kind === 'pending' ? projection.question : undefined;
+    // The call for the very form a pane question was read from is that question's upgrade, not another question.
+    const upgrade =
+      claude && open !== undefined && isPaneQuestionId(open.toolUseId)
+        ? paneQuestionUpgrade(open, projection)
+        : undefined;
     const over =
       open !== undefined &&
       (open.toolUseId === stamped ||
         (projection.kind === 'resolved' && projection.toolUseId === open.toolUseId) ||
-        (pending !== undefined && pending.toolUseId !== open.toolUseId) ||
+        (pending !== undefined && upgrade === undefined && pending.toolUseId !== open.toolUseId) ||
         (claude
           ? events.some(event => resultsTool(event, open.toolUseId)) ||
             (isPaneQuestionId(open.toolUseId) && paneAnswered(events, open))
@@ -293,6 +298,15 @@ export class QuestionWatch {
     if (over) {
       await this.deps.clear(ferret, open.toolUseId);
       await this.deps.answered(ferret, open.toolUseId);
+    }
+    // A pane question holds only the tab that was on screen: the call carries them all, so it is stored whole, in place
+    // (same id, same time: nothing is retired or asked anew). The pane's own look still runs for its retirement.
+    if (upgrade !== undefined && open !== undefined && !over) {
+      if (upgrade.questions.length > storedQuestionCount(open)) {
+        const stored = await write(ferret, upgrade, open.askedAt);
+        if (stored !== undefined) await this.deps.asked(ferret, stored.toolUseId);
+      }
+      return 'skip';
     }
     if (pending === undefined) return claude ? 'skip' : 'handled';
     if (pending.toolUseId === stamped) return 'handled';

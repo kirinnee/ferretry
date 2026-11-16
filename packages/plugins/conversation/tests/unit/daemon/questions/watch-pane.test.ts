@@ -97,7 +97,16 @@ function world(ferrets: readonly WatchedFerret[] = [FERRET]) {
           ...(description === undefined ? {} : { description }),
         })),
         multiple: first.multiSelect === true,
-        ...(more.length === 0 ? {} : { more: [] }),
+        ...(more.length === 0
+          ? {}
+          : {
+              more: more.map(item => ({
+                ...(item.header === undefined ? {} : { header: item.header }),
+                text: item.question,
+                options: (item.options ?? []).map(({ label }) => ({ label })),
+                multiple: item.multiSelect === true,
+              })),
+            }),
         askedAt: (askedAt ?? state.now) as Instant,
       };
       return state.question;
@@ -288,6 +297,78 @@ describe('a question call in the transcript (M7)', () => {
     expect(w.events).toEqual(['asked cla toolu_open', 'answered cla toolu_open']);
     await w.watch.sweep();
     expect(w.events).toHaveLength(2);
+  });
+});
+
+describe('a form of several questions the pane showed one tab of (M7)', () => {
+  /** The transcript's call for the form on the pane: its first question is the pane's, and it carries two more. */
+  const tabbed = (id: string, at = '2026-11-16T09:59:55.000Z'): TranscriptEvent => {
+    const [first] = (call(id) as unknown as { call: { questions: object[] } }).call.questions;
+    return {
+      kind: 'tool-call',
+      timestamp: at,
+      call: {
+        id,
+        name: 'AskUserQuestion',
+        input: {},
+        questions: [
+          first,
+          { question: 'Where to?', options: [{ label: 'Prod' }, { label: 'Stage' }], multiple: false },
+          { header: 'Checks', question: 'Which checks?', options: [{ label: 'Unit' }], multiple: true },
+        ],
+      },
+    } as unknown as TranscriptEvent;
+  };
+
+  it('stores every tab when the call lands, under the pane question’s own id, without retiring or asking anew', async () => {
+    const w = world();
+    w.state.pane = { form: FORM, ownsPane: true };
+    await w.watch.sweep();
+    const pane = w.state.question;
+    expect(pane?.more).toBeUndefined();
+
+    w.state.events = [chatter('2026-11-16T09:59:00.000Z'), tabbed('toolu_tabs')];
+    await w.watch.sweep();
+
+    expect(w.state.question?.toolUseId).toBe(pane?.toolUseId ?? '');
+    expect(w.state.question?.askedAt).toBe(pane?.askedAt as Instant);
+    expect(w.state.question?.text).toBe(pane?.text ?? '');
+    expect(w.state.question?.more?.map(item => item.text)).toEqual(['Where to?', 'Which checks?']);
+    expect(w.state.question?.more?.[1]?.multiple).toBe(true);
+    // Not retired (no 'answered'), and the form is announced again so a screen shows its tabs.
+    expect(w.events).toEqual([`asked cla ${pane?.toolUseId}`, `asked cla ${pane?.toolUseId}`]);
+
+    // Nothing more is written while the call stays open and the form stays on the pane.
+    w.state.pane = { form: FORM, ownsPane: true };
+    await w.watch.sweep();
+    await w.watch.sweep();
+    expect(w.events).toHaveLength(2);
+  });
+
+  it('is retired as the pane question is once the call’s result lands', async () => {
+    const w = world();
+    w.state.pane = { form: FORM, ownsPane: true };
+    await w.watch.sweep();
+    const id = w.state.question?.toolUseId ?? '';
+    w.state.events = [tabbed('toolu_tabs')];
+    await w.watch.sweep();
+    // The form is answered: the call has its result and the pane draws no form.
+    w.state.pane = { ownsPane: false };
+    w.state.events = [tabbed('toolu_tabs'), result('toolu_tabs')];
+    await w.watch.sweep();
+    expect(w.state.question).toBeUndefined();
+    expect(w.events.at(-1)).toBe(`answered cla ${id}`);
+  });
+
+  it('is another question, as before, when the call is for a different form', async () => {
+    const w = world();
+    w.state.pane = { form: FORM, ownsPane: true };
+    await w.watch.sweep();
+    const id = w.state.question?.toolUseId ?? '';
+    w.state.events = [call('toolu_other', { ...FORM, question: 'A different question entirely?' })];
+    await w.watch.sweep();
+    expect(w.state.question?.toolUseId).toBe('toolu_other');
+    expect(w.events).toContain(`answered cla ${id}`);
   });
 });
 
