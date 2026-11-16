@@ -213,6 +213,71 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     });
   }
 
+  // Round 2: under a credential-named flag that is not a pointer flag (no -file / -path / -dir suffix) the next word is
+  // NEVER a place, even when it looks like a path: it is withheld. A pointer flag keeps round 1's rule.
+  it('should withhold a path-looking word after --token, as a value: ./V', () => {
+    // Arrange
+    const command = `srv --token ./${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(seen.resolved).not.containEql(W20);
+    should(seen.detail).not.containEql(W20);
+    should(seen.held).be.true();
+  });
+
+  it('should withhold a path-looking word after --token, as a value: /tmp/V', () => {
+    // Arrange
+    const command = `srv --token /tmp/${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(seen.resolved).not.containEql(W20);
+    should(seen.detail).not.containEql(W20);
+    should(seen.held).be.true();
+  });
+
+  it('should withhold a path-looking word after --password: /a/b', () => {
+    // Act
+    const command = 'srv --password /a/b';
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(views(command).held).be.true();
+  });
+
+  it('should still show a path after a pointer flag: --token-file ./V', () => {
+    // Arrange
+    const command = `srv --token-file ./${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.false();
+    should(seen.resolved).equal(command);
+    should(seen.held).be.false();
+  });
+
+  it('should still show a path after --key: /home/u/.ssh/id_ed25519', () => {
+    // Arrange
+    const command = 'srv --key /home/u/.ssh/id_ed25519';
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.false();
+    should(seen.resolved).equal(command);
+    should(seen.held).be.false();
+  });
+
   // A `--settings` document that does not parse, in each shape the reviewer's probe wrote it, shows no value.
   const BROKEN_SETTINGS: readonly (readonly [string, string])[] = [
     ['a bare value', `{"API_KEY": ${W20}}`],

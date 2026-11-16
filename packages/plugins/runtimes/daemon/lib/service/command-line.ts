@@ -24,6 +24,7 @@ import {
   HIDDEN_VALUE_TEXT,
   looksSecret,
   type ShownWord,
+  SHOWN_TESTS,
   shownWord,
   shownWords,
 } from '@ferretry/std/credential-words';
@@ -38,7 +39,30 @@ export { type ShownWord, shownWords } from '@ferretry/std/credential-words';
 export function refusedIndexes(shown: readonly ShownWord[]): ReadonlySet<number> {
   const args = shown.map(word => word.text);
   const found = [...findFlagSecrets({ args }), ...findRawSecrets({ args })];
-  return new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
+  const refused = new Set(found.map(finding => finding.path[1]).filter((at): at is number => typeof at === 'number'));
+  args.forEach((word, index) => {
+    if (valueOfNonPointerCredentialFlag(args[index - 1], word)) refused.add(index);
+  });
+  return refused;
+}
+
+/**
+ * Whether `word` is a path-looking value given to a credential-named flag that is NOT a pointer flag (`--token ./V`,
+ * `--password /a/b`, `--api-key /tmp/V`, `--auth-token=./V`): the write rule accepts a path under a credential name, but
+ * only a pointer flag (`--token-file`, `--key`, `--config`) names a place, so under any other the word is a value and is
+ * never shown. `before` is the word before `word`; a flag glued to its value with `=` is read from `word` itself.
+ */
+function valueOfNonPointerCredentialFlag(before: string | undefined, word: string): boolean {
+  const glued = /^(-{1,2}[A-Za-z0-9][^=\s]*)=(.*)$/su.exec(word);
+  const flag = glued === null ? before : glued[1];
+  const value = glued === null ? word : (glued[2] ?? '');
+  return (
+    flag !== undefined &&
+    FLAG_ONLY.test(flag) &&
+    !POINTER_FLAG.test(flag) &&
+    PLACE.test(value) &&
+    (SHOWN_TESTS.namesSecret(flag) || /^-{1,2}auth/iu.test(flag))
+  );
 }
 
 /**
@@ -95,16 +119,25 @@ const NOT_IN_A_PLACE = /[\s${}#?@:=]/u;
 const FLAG_ONLY = /^-{1,2}[A-Za-z0-9][^=\s]*$/u;
 
 /**
+ * A flag that names WHERE a thing is kept, not the thing: a `-file` / `-path` / `-dir` suffix (`--token-file`,
+ * `--key-file`, `--cert-path`), or the two bare names that are paths by convention (`--key <path>`, `--config`). Under any
+ * other flag the cutter cut (`--token`, `--password`, `--api-key`, `--secret`, `--auth*`) the next word is a value, even
+ * when it looks like a path: it is never a place. An unknown flag is not a pointer flag (fail closed).
+ */
+const POINTER_FLAG = /^-{1,2}(?:key|config|[A-Za-z0-9][A-Za-z0-9_.-]*[-_.](?:files?|paths?|dirs?))$/iu;
+
+/**
  * Whether a part the cutter cut is one path and nothing else (`--token-file ~/.config/tool/token`,
  * `--key /home/u/.ssh/id_ed25519`): where a credential is kept, which the write rule accepts under a credential name.
- * It is a place only as the word right after a FLAG word (never after `KEY=` or `Header:`), only a real path of more than
- * one segment (never `/x` or `~x`), with no pointer, query, fragment, user, scheme or pair in it, and no segment the
- * token test refuses on its own: a segment that is a value is a value. A URL is never a place.
+ * It is a place only as the word right after a POINTER flag word (never after `--token`, `KEY=` or `Header:`), only a real
+ * path of more than one segment (never `/x` or `~x`), with no pointer, query, fragment, user, scheme or pair in it, and no
+ * segment the token test refuses on its own: a segment that is a value is a value. A URL is never a place.
  */
 function isPlace(part: string, flagBefore: string | undefined): boolean {
   return (
     flagBefore !== undefined &&
     FLAG_ONLY.test(flagBefore) &&
+    POINTER_FLAG.test(flagBefore) &&
     PLACE.test(part) &&
     !NOT_IN_A_PLACE.test(part) &&
     !part.split('/').some(segment => looksSecret('', segment)) &&
