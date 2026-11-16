@@ -53,7 +53,15 @@ import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
 import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, FetchPort, HostFactsPort, SelfCountersPort, UpdateHostPort } from '../contract/ports.ts';
+import type {
+  ContractSurface,
+  FetchPort,
+  FileEventsPort,
+  HostFactsPort,
+  SelfCountersPort,
+  UpdateHostPort,
+} from '../contract/ports.ts';
+import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from '../host/adapters/file-events.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from '../host/adapters/self-counters.ts';
 import { nodeFs } from '../host/adapters/node-fs.ts';
@@ -327,6 +335,8 @@ export interface TestHostOptions {
   readonly hostFacts?: HostFactsPort;
   /** What `kernel.selfCounters` answers to a plugin that declared `permissions.selfCounters`. Absent: every read refuses. */
   readonly selfCounters?: SelfCountersPort;
+  /** What `kernel.fileEvents` lists to a plugin that declared `permissions.fileEvents`. Absent: nothing is polled. */
+  readonly fileEvents?: FileEventsPort;
   /**
    * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
    * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
@@ -2686,6 +2696,10 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.selfCounters === true && options.selfCounters !== undefined
           ? options.selfCounters
           : undeclaredSelfCounters(manifest.id, (options.selfCounters ?? NO_SELF_COUNTERS).platform),
+      fileEvents:
+        manifest.permissions?.fileEvents === true
+          ? polledOnly(options.fileEvents ?? NO_FILE_EVENTS)
+          : undeclaredFileEvents(manifest.id),
       processes: processesPortFor(
         manifest.id,
         manifest.permissions?.processes,
