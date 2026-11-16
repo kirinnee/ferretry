@@ -7,7 +7,8 @@ import { daemonConnection } from '../../../../app/composer/seam.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../../../app/composer/drafts.ts';
 import { LocationError, type LocationFix, type LocationShareHost } from '@ferretry/app';
 import { writeMdComposePref } from '@ferretry/app';
-import { ensureDom } from '@ferretry/app/testing';
+import { ensureDom, WithAppHooks } from '@ferretry/app/testing';
+import { ACCESS_HOW_TO_ENABLE_LOCATION_HOOK } from '@ferretry/plugin-access/contract';
 ensureDom();
 import { render, run, runAsync } from '@ferretry/app/testing';
 
@@ -38,10 +39,10 @@ interface Pending {
   readonly reject: (reason: unknown) => void;
 }
 
-const mountComposer = (host: LocationShareHost | null) => {
+const mountComposer = (host: LocationShareHost | null, provided?: Readonly<Record<string, unknown>>) => {
   let clicked = 0;
   const sent: { message: string }[] = [];
-  const composer = render(
+  const page = (
     <LocationShareContext.Provider value={host}>
       <Composer
         api={{
@@ -54,24 +55,24 @@ const mountComposer = (host: LocationShareHost | null) => {
         draftStore={new DaemonDraftStore(new MemoryStorage())}
         ferretId="s1"
       />
-    </LocationShareContext.Provider>,
-    {
-      createNodeMock: element => {
-        const props = element.props as { type?: string; 'data-composer-attach'?: string };
-        if (element.type === 'input' && props.type === 'file') {
-          return {
-            click: () => {
-              clicked += 1;
-            },
-          };
-        }
-        if (element.type === 'button' && props['data-composer-attach'] !== undefined) {
-          return { closest: () => null, getBoundingClientRect: () => ({ left: 12, top: 34 }) };
-        }
-        return null;
-      },
-    },
+    </LocationShareContext.Provider>
   );
+  const composer = render(provided === undefined ? page : <WithAppHooks provided={provided}>{page}</WithAppHooks>, {
+    createNodeMock: element => {
+      const props = element.props as { type?: string; 'data-composer-attach'?: string };
+      if (element.type === 'input' && props.type === 'file') {
+        return {
+          click: () => {
+            clicked += 1;
+          },
+        };
+      }
+      if (element.type === 'button' && props['data-composer-attach'] !== undefined) {
+        return { closest: () => null, getBoundingClientRect: () => ({ left: 12, top: 34 }) };
+      }
+      return null;
+    },
+  });
   const menu = () => composer.root.findByType(ComposerAddMenu);
   const chips = () => composer.root.findAllByType(PendingLocationChip);
   const chip = () => {
@@ -193,6 +194,23 @@ describe('composer share my location', () => {
     expect(view.chip().props.draft.kind).toBe('failed');
     expect(view.chip().props.draft.error.code).toBe('unavailable');
     run(() => view.composer.unmount());
+  });
+
+  test('a refused location shows the steps Access provides for this device, and generic ones without Access', async () => {
+    const steps = ['Open Settings', 'Turn Location on'];
+    const { host, pending } = hostWith();
+    const provided = mountComposer(host, { [ACCESS_HOW_TO_ENABLE_LOCATION_HOOK]: () => steps });
+    provided.choose('location');
+    await runAsync(async () => pending[0]?.reject(new LocationError('denied', 'Location is off.')));
+    expect(provided.chip().props.howToEnable()).toEqual(steps);
+    run(() => provided.composer.unmount());
+
+    const bare = hostWith();
+    const without = mountComposer(bare.host);
+    without.choose('location');
+    await runAsync(async () => bare.pending[0]?.reject(new LocationError('denied', 'Location is off.')));
+    expect(without.chip().props.howToEnable).toBeUndefined();
+    run(() => without.composer.unmount());
   });
 
   test('removing the chip drops a late answer instead of resurrecting it', async () => {

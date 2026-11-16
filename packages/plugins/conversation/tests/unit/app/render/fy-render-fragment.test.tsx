@@ -9,7 +9,7 @@
  */
 import { afterAll, afterEach, describe, test } from 'bun:test';
 import should from 'should';
-import { ensureDom, interact, mount } from '@ferretry/app/testing';
+import { ensureDom, interact, mount, ShellContext, WithViewPlace } from '@ferretry/app/testing';
 
 ensureDom();
 import {
@@ -345,8 +345,10 @@ describe('FyRenderFragment', () => {
   });
 
   describe('links inside the fragment', () => {
-    // GAP(browsers): the "Open links in" policy (the side panel, the iOS hand-off) is the Browsers plugin's; until it
-    // provides the behaviour every tap keeps the shipped default, which is the anchor's own new tab.
+    // The "Open links in" policy (the side panel, the iOS hand-off) is the Browsers plugin's (`shell.links`) and is
+    // proved there (`link-provision.test.tsx`): with no provider every tap keeps the shipped default, which is the
+    // anchor's own new tab. The policy cases below draw the fragment in a shell that PROVIDES one, to show the fragment
+    // hands every tap to it.
     const DOC = 'https://example.com/doc';
     const verdicts: boolean[] = [];
     const record = (event: Event): void => {
@@ -398,6 +400,96 @@ describe('FyRenderFragment', () => {
       await clickLink({ metaKey: true });
 
       // Assert
+      should(verdicts).eql([false]);
+      await page.unmount();
+    });
+  });
+
+  describe('links inside the fragment, with Browsers providing the policy', () => {
+    const DOC = 'https://example.com/doc';
+    const verdicts: boolean[] = [];
+    const taken: string[] = [];
+    const record = (event: Event): void => {
+      verdicts.push(event.defaultPrevented);
+    };
+    const guard = (event: Event): void => event.preventDefault();
+    const clickLink = async (init: MouseEventInit = {}): Promise<void> => {
+      const root = roots[0] as ShadowRoot;
+      root.addEventListener('click', record);
+      root.addEventListener('click', guard);
+      await interact(() =>
+        (root.querySelector('b') as HTMLElement).dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, ...init }),
+        ),
+      );
+      root.removeEventListener('click', record);
+      root.removeEventListener('click', guard);
+    };
+    afterEach(() => {
+      verdicts.length = 0;
+      taken.length = 0;
+    });
+    /** A shell whose `linkProvision` takes a plain tap as `kind` does and leaves a modified one to the browser. */
+    const mountProvided = (kind: 'panel' | 'safari') => {
+      const provision = {
+        activate: (click: Event, target: { readonly href: string | undefined }): boolean => {
+          if ((click as MouseEvent).metaKey) return false;
+          click.preventDefault();
+          taken.push(`${kind}:${target.href ?? ''}`);
+          return true;
+        },
+        open: () => undefined,
+        sheet: null,
+        destination: () => (kind === 'panel' ? 'in-app' : 'this-device-browser'),
+      };
+      const shell = { runtime: { linkProvision: () => provision, subscribe: () => () => undefined, version: () => 0 } };
+      return mount(
+        <ShellContext.Provider value={shell as never}>
+          <WithViewPlace place={{ daemon: 'desk', machine: 'Desk' } as never}>
+            <FyRenderFragment alt="links" source={`<p>See <a href="${DOC}"><b>the doc</b></a>.</p>`} />
+          </WithViewPlace>
+        </ShellContext.Provider>,
+      );
+    };
+
+    test('should hand a tap to the side panel when the policy opens links there', async () => {
+      // Arrange
+      capture();
+      const page = await mountProvided('panel');
+
+      // Act
+      await clickLink();
+
+      // Assert — the provision took the click, so the anchor's own new tab did not open.
+      should(taken).eql([`panel:${DOC}`]);
+      should(verdicts).eql([true]);
+      await page.unmount();
+    });
+
+    test('should hand a tap to the Safari hand-off when the policy says so', async () => {
+      // Arrange
+      capture();
+      const page = await mountProvided('safari');
+
+      // Act
+      await clickLink();
+
+      // Assert
+      should(taken).eql([`safari:${DOC}`]);
+      should(verdicts).eql([true]);
+      await page.unmount();
+    });
+
+    test('should leave a Cmd-click to the anchor’s own new tab under either policy', async () => {
+      // Arrange
+      capture();
+      const page = await mountProvided('panel');
+
+      // Act
+      await clickLink({ metaKey: true });
+
+      // Assert
+      should(taken).eql([]);
       should(verdicts).eql([false]);
       await page.unmount();
     });

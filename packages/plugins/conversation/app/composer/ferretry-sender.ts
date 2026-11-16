@@ -1,18 +1,4 @@
-/** Who a send is from, as the daemon says it (today's `send-ledger.ts` `LedgerSender`). */
-interface LedgerSender {
-  readonly kind: 'owner' | 'ferret' | 'ferretry';
-  readonly name?: string;
-  readonly feature?: string;
-}
-
-/**
- * GAP(C3): the part of a send-ledger row this file reads, until C3's `chat/send-ledger.ts` exports `LedgerSendRecord`
- * (the queue's own record of who sent it, or the ledger's, for a send that never went through the queue).
- */
-export interface LedgerSendRecord {
-  readonly by?: LedgerSender;
-  readonly queue?: { readonly by?: LedgerSender };
-}
+import type { LedgerSendRecord } from '../chat/send-ledger.ts';
 
 /** Which part of Ferretry sent this, when the sender says it is Ferretry itself — as metadata, never read from the words. */
 export const ferretryFeatureOf = (record: LedgerSendRecord | undefined): string | undefined => {
