@@ -7,6 +7,8 @@ import {
   type HarnessRuntimeSwitch,
   type RuntimeControlRequest,
   type RuntimeSwitchPane,
+  type CodexPickerKeyExpectation,
+  type RuntimeSwitchPlan,
   RuntimeControlError,
 } from '../../../../../contract/index.ts';
 import {
@@ -56,23 +58,50 @@ function seamOf(screen: () => Screen, typed: string[], pressed: string[], outcom
   } as unknown as FerretHarness;
 }
 
+/** What a test's harness plans, and which of its catalog members it supplies. */
+interface SwitchOptions {
+  readonly plan?: RuntimeSwitchPlan;
+  /** `none`: a harness that supplies a live catalog but none of the projections the service asks for. */
+  readonly catalogs?: 'full' | 'none';
+  readonly keys?: string[];
+}
+
+const KEY_ROW: CodexPickerKeyExpectation = { kind: 'quick-models', row: { number: 2, name: 'two' } };
+
 /** A harness's switch that plans what a command-switched harness plans, and records its own use. */
-function switchOf(calls: { planned: unknown[]; built: number }): (pane: RuntimeSwitchPane) => HarnessRuntimeSwitch {
+function switchOf(
+  calls: { planned: unknown[]; built: number },
+  options: SwitchOptions = {},
+): (pane: RuntimeSwitchPane) => HarnessRuntimeSwitch {
   return () => {
     calls.built += 1;
     return {
       quirks: {
         planSwitch: request => {
           calls.planned.push(request);
-          return { kind: 'inject', command: '/model', claimsOutcome: false };
+          return options.plan ?? { kind: 'inject', command: '/model', claimsOutcome: false };
         },
         recoverFromFailedDrive: async () => ({ kind: 'recovered' }),
         report: () => 'a report',
       },
-      catalogs: {
-        codexRuntimeCatalog: choices => ({ harness: 'codex', source: 'codex-app-server', choices: [...choices] }),
-        codexSwitchContext: () => ({ choices: [] }),
-      },
+      catalogs:
+        options.catalogs === 'none'
+          ? {}
+          : {
+              codexRuntimeCatalog: choices => ({ harness: 'codex', source: 'codex-app-server', choices: [...choices] }),
+              codexSwitchContext: () => ({ choices: [] }),
+              fastModeFacts: () => ({ supported: true, current: false }),
+              // A driver that uses the pane transport Ferrets built, the way a harness's real one does.
+              pickerDriver: transport => ({
+                drive: async () => {
+                  await transport.openPicker();
+                  await transport.readPane();
+                  await transport.sendKey('2', KEY_ROW);
+                  options.keys?.push('driven');
+                  await transport.sendKey('y', KEY_ROW);
+                },
+              }),
+            },
       liveCatalog: {
         get: async () => [{ value: 'gpt-6', label: 'GPT 6', reasoningEfforts: [{ value: 'high' }] }],
       },
@@ -98,6 +127,8 @@ const world = (
     readonly offers?: boolean;
     readonly outcome?: 'handled-local' | 'turn-started';
     readonly viewAnswer?: 'present' | 'missing';
+    readonly switchOptions?: SwitchOptions;
+    readonly journalFails?: boolean;
   } = {},
 ): World => {
   const state: World = {
@@ -123,12 +154,13 @@ const world = (
         throw new ApiError(403, `a ferret acts only on itself and its helpers, and ${ferret} is neither`, 'forbidden');
       return seam;
     },
-    runtimeSwitchOf: () => (options.offers === false ? undefined : switchOf(state.switched)),
+    runtimeSwitchOf: () => (options.offers === false ? undefined : switchOf(state.switched, options.switchOptions)),
     view: async () => {
       state.views.reads += 1;
       return options.viewAnswer === 'missing' ? undefined : CODEX_VIEW();
     },
     journal: async (_id, event, data) => {
+      if (options.journalFails === true) throw new Error('the journal is not writable');
       state.journal.push({ event, data });
     },
     quarantine: async (_id, patch) => {
@@ -267,11 +299,81 @@ describe('the runtime control over a ferret', () => {
       should(catalog.choices.map(choice => choice.value)).eql(['gpt-6']);
     });
 
+    it('lets a failure that is not a refusal go on as it came, never dressed as one', async () => {
+      const w = world({ journalFails: true });
+      const failure = await refusal(w.control.control(undefined, 's1', MODEL, 'request-1'));
+      should(failure).not.be.instanceOf(RuntimeControlError);
+      should((failure as Error).message).equal('the journal is not writable');
+    });
+
     it('answers failed for a ferret whose documents cannot be read', async () => {
       const w = world({ viewAnswer: 'missing' });
       const refused = await refusal(w.control.control(undefined, 's1', MODEL, 'request-1'));
       should((refused as RuntimeControlError).failure).equal('failed');
     });
+  });
+});
+
+describe('what a harness that supplies only part of the switch is asked for', () => {
+  const bare = (control: RuntimeControlRequest | 'models') => {
+    const w = world({ switchOptions: { catalogs: 'none' } });
+    return {
+      w,
+      call:
+        control === 'models' ? w.control.models(undefined, 's1') : w.control.control(undefined, 's1', control, 'r-1'),
+    };
+  };
+
+  it('answers unsupported for a model list when its live catalog cannot be projected', async () => {
+    const { call } = bare('models');
+    should(((await refusal(call)) as RuntimeControlError).failure).equal('unsupported');
+  });
+
+  it('answers unsupported for a targeted switch it has no switch context for, with nothing typed', async () => {
+    const { w, call } = bare({ action: 'model', model: 'gpt-6', effort: 'high' });
+    should(((await refusal(call)) as RuntimeControlError).failure).equal('unsupported');
+    should(w.typed).eql([]);
+  });
+
+  it('answers unsupported for a fast switch it has no fast facts for', async () => {
+    const { call } = bare({ action: 'fast', fast: true });
+    should(((await refusal(call)) as RuntimeControlError).failure).equal('unsupported');
+  });
+
+  it('asks the harness that supplies them for the switch context and the fast facts, then types its plan', async () => {
+    const w = world({
+      switchOptions: { plan: { kind: 'inject', command: '/fast', requestedFast: true, claimsOutcome: true } },
+    });
+    await w.control.control(undefined, 's1', { action: 'model', model: 'gpt-6', effort: 'high' }, 'r-1');
+    await w.control.control(undefined, 's1', { action: 'fast', fast: true }, 'r-2');
+    should(w.typed).eql(['/fast', '/fast']);
+  });
+
+  it('answers unsupported for a drive of a picker it has no driver for, with nothing pressed', async () => {
+    const w = world({
+      switchOptions: { catalogs: 'none', plan: { kind: 'drive_picker', target: { model: 'gpt-6' } } },
+    });
+    const refused = await refusal(
+      w.control.control(undefined, 's1', { action: 'model', model: 'gpt-6', effort: 'high' }, 'r-1'),
+    );
+    should((refused as RuntimeControlError).failure).equal('unsupported');
+    should(w.pressed).eql([]);
+  });
+});
+
+describe('the picker transport Ferrets builds over a ferret pane', () => {
+  const drive = () =>
+    world({ switchOptions: { plan: { kind: 'drive_picker', target: { model: 'gpt-6', effort: 'high' } }, keys: [] } });
+
+  it('opens the picker with the harness command, reads a frame, and presses only a key of the closed set', async () => {
+    const w = drive();
+    const refused = await refusal(
+      w.control.control(undefined, 's1', { action: 'model', model: 'gpt-6', effort: 'high' }, 'r-1'),
+    );
+    // The test driver presses a row's digit (allowed), then a key outside the closed set (refused), which fails the drive.
+    should((refused as RuntimeControlError).failure).equal('failed');
+    should(w.typed).eql(['/model']);
+    should(w.pressed).eql(['2']);
   });
 });
 
@@ -317,6 +419,19 @@ describe('a ferret pane as a harness reaches it', () => {
     await pane.stop();
     should(pressed).eql(['3']);
     should(stopped()).equal(1);
+  });
+
+  it('says so, without a sentence of its own, when the failure is no closed code at all', async () => {
+    const seam = {
+      deliver: async () => ({ ok: true as const, value: 'handled-local' as const }),
+      form: {
+        capture: async () => ({ ok: false as const, error: {} }),
+        key: async () => ({ ok: false as const, error: 'nothing' }),
+      },
+    } as unknown as FerretHarness;
+    const pane = ferretRuntimePane(seam, async () => undefined);
+    should(((await refusal(pane.observe())) as Error).message).match(/it could not be done/u);
+    should(((await refusal(pane.key('Enter'))) as Error).message).match(/it could not be done/u);
   });
 
   it('says so when it could not type: a refusal reads as one sentence with its closed code, and never pane text', async () => {

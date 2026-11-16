@@ -234,10 +234,11 @@ export interface HarnessRuntimeCatalogs {
   /** The facts the planner needs for a fast switch on this session. */
   fastModeFacts?(view: FerretView, catalog: RuntimeModelCatalog): FastModeFacts;
   /**
-   * The driver of this harness's modal picker. The harness binds its own transport to the pane it was built for (it
-   * alone knows how to prove a row is still on screen before a digit is pressed), so none is passed in.
+   * The driver of this harness's modal picker, over the ferret's pane transport Ferrets built (open the picker, read a
+   * frame, press a digit). The harness wraps it with what only it knows: proving a row is still on screen before a digit is
+   * let through.
    */
-  pickerDriver?(sleeper: PickerSleeper): CodexModelPickerDriver;
+  pickerDriver?(transport: CodexPickerDrivePort, sleeper: PickerSleeper): CodexModelPickerDriver;
 }
 
 /** What a harness offers Ferrets' runtime control for ONE ferret (`Harness.runtimeSwitch`). */

@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { FormKey, RuntimeSwitchFrame, RuntimeSwitchPane } from '@ferretry/core-ferrets/contract';
-import { codexRuntimeSwitch, FerretPickerTransport } from '../../daemon/lib/ferret-runtime-switch.ts';
+import { codexRuntimeSwitch, VerifiedPickerTransport } from '../../daemon/lib/ferret-runtime-switch.ts';
+import type { CodexPickerDrivePort } from '../../daemon/lib/picker-drive.ts';
 
 /**
  * Codex's part of the live switch, with the ferret's pane replaced by a script of screens. The screens are real
@@ -47,6 +48,13 @@ const NO_WAIT = { sleep: async () => undefined };
 const choices = { get: async () => [] };
 const build = (pane: RuntimeSwitchPane) => codexRuntimeSwitch({ choices, sleeper: NO_WAIT, binaryName: 'fy' })(pane);
 
+/** The pane's own part of a picker transport, as Ferrets builds it: open with the command, read a frame, press a key. */
+const transportOver = (pane: ScriptedPane): CodexPickerDrivePort => ({
+  openPicker: async () => await pane.command('/model'),
+  readPane: async () => await pane.observe(),
+  sendKey: async key => await pane.key(key as FormKey),
+});
+
 const quickRow = { number: 1, name: 'gpt-5.6-codex' };
 const expectation = { kind: 'quick-models', title: 'Select Model', row: quickRow } as const;
 
@@ -73,7 +81,8 @@ describe('Codex runtime switch, over a ferret pane', () => {
   });
 
   describe('the picker transport', () => {
-    const driverFor = (pane: ScriptedPane) => build(pane).catalogs.pickerDriver;
+    const driverFor = (pane: ScriptedPane) => (sleeper: typeof NO_WAIT) =>
+      build(pane).catalogs.pickerDriver?.(transportOver(pane), sleeper);
 
     it('presses the digit of a row it has just proved is still on screen, through the form seam', async () => {
       const pane = new ScriptedPane([
@@ -92,8 +101,8 @@ describe('Codex runtime switch, over a ferret pane', () => {
     it('refuses to open a picker Codex read as a message: a model turn it started is reported, not hidden', async () => {
       const pane = new ScriptedPane([{ visible: QUICK }], 'turn-started');
       let failure: unknown;
-      await driverFor(pane)?.(NO_WAIT)
-        .drive({ model: 'gpt-5.6-codex' })
+      await driverFor(pane)(NO_WAIT)
+        ?.drive({ model: 'gpt-5.6-codex' })
         .catch((error: unknown) => {
           failure = error;
         });
@@ -106,7 +115,7 @@ describe('Codex runtime switch, over a ferret pane', () => {
       const pane = new ScriptedPane([{ visible: IDLE, promptReady: true }]);
       const picker = driverFor(pane);
       should(picker).be.ok();
-      const stale = new FerretPickerTransport(pane);
+      const stale = new VerifiedPickerTransport(transportOver(pane));
       let failure: unknown;
       await stale.sendKey('1', expectation).catch((error: unknown) => {
         failure = error;
@@ -117,7 +126,7 @@ describe('Codex runtime switch, over a ferret pane', () => {
 
     it('refuses a key that is not a row digit and a digit that is not the verified row', async () => {
       const pane = new ScriptedPane([{ visible: QUICK }]);
-      const transport = new FerretPickerTransport(pane);
+      const transport = new VerifiedPickerTransport(transportOver(pane));
       for (const [key, why] of [
         ['Enter', /refusing to send/u],
         ['2', /no longer matches the verified row/u],

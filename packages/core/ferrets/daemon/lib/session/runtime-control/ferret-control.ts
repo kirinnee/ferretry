@@ -15,24 +15,26 @@
  * ferret reaches itself and its lead and helpers, and `FerretsService.harness` refuses anyone else with a 403 `forbidden`
  * before anything else is read. It is checked here, not in the route, so every transport gets the same rule.
  */
-import type {
-  FerretHarness,
-  FerretId,
-  FerretView,
-  HarnessRuntimeSwitch,
-  RuntimeControlApi,
-  RuntimeControlRequest,
-  RuntimeModelCatalog,
-  RuntimeSwitchFrame,
-  RuntimeSwitchPane,
+import {
+  FORM_KEYS,
+  RuntimeControlError,
+  type FerretHarness,
+  type FerretId,
+  type FerretView,
+  type FormKey,
+  type HarnessRuntimeSwitch,
+  type RuntimeControlApi,
+  type RuntimeControlRequest,
+  type RuntimeModelCatalog,
+  type RuntimeSwitchFrame,
+  type RuntimeSwitchPane,
 } from '../../../../contract/index.ts';
-import { RuntimeControlError } from '../../../../contract/index.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
 import type { SessionEffectLedger } from '../effects/types.ts';
 import type { AccountInventoryPort } from '../peers/core.ts';
 import type { CodexRuntimeCatalogCache, HarnessRuntimeCatalogs, PickerSleeper } from '../peers/harness.ts';
-import { SessionRuntimeControlService, type SessionRuntimeControlPorts } from './service.ts';
+import { HARNESS_PICKER_COMMAND, SessionRuntimeControlService, type SessionRuntimeControlPorts } from './service.ts';
 import {
   SessionRuntimeError,
   type RuntimePane,
@@ -123,9 +125,8 @@ function catalogsOf(supplied: HarnessRuntimeSwitch['catalogs']): HarnessRuntimeC
         : supplied.codexSwitchContext(choices),
     fastModeFacts: (view, catalog) =>
       supplied.fastModeFacts === undefined ? lacking('a fast mode') : supplied.fastModeFacts(view, catalog),
-    // The harness binds its own transport to the pane it was built for; the one the service asks for is not used.
-    pickerDriver: (_transport, sleeper) =>
-      supplied.pickerDriver === undefined ? lacking('a model picker') : supplied.pickerDriver(sleeper),
+    pickerDriver: (transport, sleeper) =>
+      supplied.pickerDriver === undefined ? lacking('a model picker') : supplied.pickerDriver(transport, sleeper),
   };
 }
 
@@ -134,11 +135,29 @@ const NO_LIVE_CATALOG: CodexRuntimeCatalogCache = {
   get: async () => lacking('a live model catalog'),
 };
 
-/** The transport the service asks for and never uses (see {@link catalogsOf}): it types nothing. */
-const UNUSED_TRANSPORT: RuntimePickerTransport = () => ({
-  openPicker: async () => lacking('a picker transport'),
-  readPane: async () => lacking('a picker transport'),
-  sendKey: async () => lacking('a picker transport'),
+/**
+ * The picker transport over ONE ferret's pane: open the picker with the harness's own command, read a frame, press a row's
+ * digit. It does the pane's part only. Whether the row a digit is aimed at is STILL on screen is the harness's own
+ * knowledge of its picker, so a harness's `pickerDriver` wraps this and proves the row before it lets a digit through.
+ * Only the closed `FORM_KEYS` can be pressed.
+ */
+function pickerTransportOf(pane: RuntimeSwitchPane): RuntimePickerTransport {
+  return () => ({
+    openPicker: async () => await pane.command(HARNESS_PICKER_COMMAND),
+    readPane: async () => await pane.observe(),
+    sendKey: async key => {
+      if (!(FORM_KEYS as readonly string[]).includes(key))
+        throw new Error(`${key} is not a key a picker is driven with`);
+      await pane.key(key as FormKey);
+    },
+  });
+}
+
+/** What the service reads of a ferret to address its pane: its account's executable and the folder it works in. */
+const launchTargetOf = (ferret: FerretId, view: FerretView) => ({
+  tmuxSession: ferret,
+  agent: view.config.agent,
+  cwd: view.config.cwd,
 });
 
 export class FerretRuntimeControl implements NonNullable<RuntimeControlApi['runtimeControl']> {
@@ -198,9 +217,7 @@ export class FerretRuntimeControl implements NonNullable<RuntimeControlApi['runt
         launch: async found => {
           const view = await deps.view(found);
           // The "tmux session" is the ferret's own id: every act on the pane goes through the seam bound to it.
-          return view === undefined
-            ? undefined
-            : { tmuxSession: ferret, agent: view.config.agent, cwd: view.config.cwd };
+          return view === undefined ? undefined : launchTargetOf(ferret, view);
         },
         journal: deps.journal,
         quarantine: deps.quarantine,
@@ -208,7 +225,7 @@ export class FerretRuntimeControl implements NonNullable<RuntimeControlApi['runt
       effects: deps.effects(id),
       pane: runtimePane,
       injector: { deliver: async (_session, command) => await pane.command(command) },
-      picker: UNUSED_TRANSPORT,
+      picker: pickerTransportOf(pane),
       harness: harness.quirks,
       catalogs: catalogsOf(harness.catalogs),
       accounts: deps.accounts,
