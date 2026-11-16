@@ -35,6 +35,7 @@ import {
   QueueChanged,
   QuestionAnswered,
   QuestionAsked,
+  PromptAskRefSchema,
   QuestionSchema,
   ReferenceCatalog,
   RELATED_SEARCHED_AUDIT,
@@ -479,8 +480,8 @@ export default definePlugin({
 
   ui: {
     screens: [
-      // The chat offers two slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row and
-      // `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
+      // The chat offers three slots of its own (`contract/slots.ts`): `conversation.row` after each transcript row,
+      // `conversation.row-body` in place of a person's own words (Agenda's card) and `conversation.row-actions` in a row's actions, each with `{ entry }` (only {id, kind, text, at?, label?, tools?}; `tools` are
       // a tool row's shell commands) and the ferret as subject — Voice's read-aloud and Packs' card draw there. It mounts `ferret.toolbar` and
       // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
@@ -522,6 +523,7 @@ export default definePlugin({
   hooks: {
     takes: [
       { hook: AskSources, key: 'question', schema: QuestionSchema },
+      { hook: AskSources, key: 'prompt', schema: PromptAskRefSchema },
       { hook: SitrepLines, priority: 50 },
       // A ferret that stops has its unlocked attachments zeroed; every change of state is a look for `turn.ended`.
       { hook: FerretChanged },
