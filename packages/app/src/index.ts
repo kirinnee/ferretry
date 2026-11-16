@@ -18,6 +18,7 @@ export {
   type ConnectPorts,
   type DaemonlessPorts,
   type PairedList,
+  type ChooseDaemonOptions,
   type ChosenDaemon,
   type DaemonlessScreenProps,
   type DaemonlessViews,
