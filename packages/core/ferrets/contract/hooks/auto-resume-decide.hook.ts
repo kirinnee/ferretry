@@ -1,6 +1,7 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { FerretIdSchema, HarnessKeySchema } from '../ids.ts';
+import { DECIDE_ASK_TIMEOUT_MS } from './decide-timeout.ts';
 
 /**
  * What `auto-resume.decide` takers are asked (W2-a, RULING #27 Q5) before the daemon spends anything bringing back a
@@ -25,9 +26,12 @@ export type AutoResumeDecideInput = z.infer<typeof AutoResumeDecideInputSchema>;
 /**
  * Runtimes answers whether an automatic resume may spend (W2-a). It FAILS CLOSED, unlike `start.decide`: Ferrets
  * resumes only on Runtimes' OWN yes (`AUTO_RESUME_ANSWERER`); no taker, a failed, hung, throwing or garbage answer, or
- * a yes from any other plugin is a no. The wait is the kernel's decide bound, on the kernel clock.
+ * a yes from any other plugin is a no. The wait is `DECIDE_ASK_TIMEOUT_MS`, on the kernel clock: Runtimes reads files to
+ * answer, so the kernel's 200 ms default silently skipped an automatic resume on a loaded host. A yes after the bound
+ * is still a no (fails closed).
  */
 export const AutoResumeDecide = defineHook('auto-resume.decide', {
   mode: 'decide',
   input: AutoResumeDecideInputSchema,
+  timeoutMs: DECIDE_ASK_TIMEOUT_MS,
 });

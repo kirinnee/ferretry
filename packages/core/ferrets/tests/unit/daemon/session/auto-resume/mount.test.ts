@@ -22,6 +22,7 @@ import {
   StartDecide,
   type StartDecideInput,
 } from '../../../../../contract/index.ts';
+import { DECIDE_ASK_TIMEOUT_MS } from '../../../../../contract/hooks/decide-timeout.ts';
 import { FakeHarness, FakeRunner } from '../../../../../contract/testing/index.ts';
 import { AUTO_RESUME_JOB } from '../../../../../daemon/modules/auto-resume.ts';
 import { NO_AUTO_RESUME_ANSWER } from '../../../../../daemon/lib/ferrets/auto-resume.ts';
@@ -494,10 +495,9 @@ describe('W2-a auto-resume, mounted', () => {
   });
 
   describe('fails closed, per question and per pass', () => {
-    // Late on BOTH clocks: the daemon bounds a decide on the kernel clock, this test host on a real-time timer, so an
-    // answer late on only one of them would prove nothing about the other.
-    test('W2-a a LATE yes (300 ms, past the 200 ms decide bound on the kernel clock and in real time) resumes nothing', async () => {
-      const plugin = implementDaemon(
+    /** Runtimes whose per-ferret answer (a yes) takes `delayMs` of the kernel's virtual clock: no real waiting. */
+    const slowRuntimes = (delayMs: number) =>
+      implementDaemon(
         definePlugin({
           id: 'runtimes',
           title: 'runtimes (fake)',
@@ -512,17 +512,34 @@ describe('W2-a auto-resume, mounted', () => {
             hooks: {
               'runtime.start:runtimes': fakeRuntimeStartAnswer,
               'auto-resume.decide': async (input: AutoResumeDecideInput) => {
-                if (input.ask === 'runtime') {
-                  await ctx.kernel.clock.sleep(milliseconds(300));
-                  await Bun.sleep(300);
-                }
+                if (input.ask === 'runtime') await ctx.kernel.clock.sleep(milliseconds(delayMs));
                 return { allow: true } as never;
               },
             },
           }),
         },
       );
-      let { h, runner } = await boot([plugin as never]);
+
+    test('W2-a a SLOW yes (1 s, a loaded host reading files) still resumes: the bound is the start.decide bound, not 200 ms', async () => {
+      let { h, runner } = await boot([slowRuntimes(1_000) as never]);
+      const id = await start(h, 'sycamore');
+      const launches = runner.starts;
+      h = await hostRestart(h, runner);
+      await runPass(h);
+      expect(runner.starts).toBe(launches + 1);
+      expect((await view(h, id)).state).not.toBe('stopped');
+      expect(types(h, id)).toContain('session.auto_resumed');
+      await h.stop();
+    });
+
+    test('W2-a the decide bound is the shared start.decide bound', () => {
+      expect(AutoResumeDecide.timeoutMs).toBe(DECIDE_ASK_TIMEOUT_MS);
+    });
+
+    // The bound is wound on the kernel's virtual clock (the test host races it with its real timer), so a yes past it
+    // costs no real wait.
+    test('W2-a a LATE yes (past the decide bound, on the kernel clock) resumes nothing', async () => {
+      let { h, runner } = await boot([slowRuntimes(DECIDE_ASK_TIMEOUT_MS + 1_000) as never]);
       const id = await start(h, 'tupelo');
       const launches = runner.starts;
       h = await hostRestart(h, runner);
