@@ -32,6 +32,7 @@ import { StatePassiveAssignments } from './adapters/credentials/state-passive-as
 import { codexCredentialSource } from './adapters/credentials/codex-credential.ts';
 import { AnthropicUsageProbe, quotaFetch } from './adapters/credentials/anthropic-usage-probe.ts';
 import { CodexUsageProbe } from './adapters/credentials/codex-usage-probe.ts';
+import { HOUSEKEEPING_WORKER_URL, housekeepingClient } from './adapters/credentials/housekeeping-client.ts';
 import { codexTokenRefresh } from './adapters/credentials/token-refresh.ts';
 import { parseModelCatalog } from './lib/catalog/catalog.ts';
 import { suggestedOllamaModel } from './lib/local-models/ollama.ts';
@@ -76,6 +77,8 @@ const PROGRAMS: Readonly<Record<HarnessKind, string>> = { claude: 'claude', code
  */
 export function buildLoginsDaemon() {
   return implementDaemon(manifest, {
+    // The sign-in read's thread: `fyd --check` starts and stops it, so a binary that did not carry it is seen at once.
+    workers: { housekeeping: HOUSEKEEPING_WORKER_URL },
     build({ needs, uses, kernel, hooks }) {
       const { clock, config, events, jobs, lifecycle, log, state } = kernel;
       const files = () => loginFiles(config);
@@ -152,12 +155,17 @@ export function buildLoginsDaemon() {
         }
       });
       const quota = quotaFetch(kernel.fetch, clock);
+      // The free usage read happens on the housekeeping worker, which reads the sign-in itself (read-only grant).
+      const housekeeping = housekeepingClient({ workers: kernel.workers, clock });
+      lifecycle.onStop(() => housekeeping.stop());
       const vaultNames = async (): Promise<ReadonlySet<string>> =>
         new Set((await needs.vault.names()).map(summary => String(summary.name)));
       const status = new CredentialStatusService(
         store.statusPorts({
           anthropic: new AnthropicUsageProbe({ fetch: quota }),
           codex: new CodexUsageProbe({ fetch: quota, now: () => clock.nowMs() }),
+          activeUsage: async resolution =>
+            await housekeeping.activeUsage(resolution.harness, store.signInFile(resolution)),
           refresh: codexTokenRefresh(kernel.spawn, clock),
           usageIntervalMs: 60_000,
           secretNames: vaultNames,

@@ -1,12 +1,16 @@
 /**
- * Provider assertions for the Appendix D secrets rows Logins co-owns (S167, S175–S178). Worker guarantees S176/S177
- * remain skipped until the Usage/Logins worker boundary exists. The executable assertions use Logins and the Vault:
- * the Vault is the scripted holder and the kernel's `restrictFetch` is the real permission check, so what is proved
- * here is that nothing in Logins can put a value in a result, or a token anywhere but its provider.
+ * Provider assertions for the Appendix D secrets rows Logins co-owns (S167, S175–S178). S176 and S177 are proved at the
+ * housekeeping worker: the protocol has no field a token could travel in, a failed job is answered with a fixed word, and
+ * the worker's real bundle carries no vault, store or redactor. The other assertions use Logins and the Vault: the
+ * Vault is the scripted holder and the kernel's `restrictFetch` is the real permission check, so what is proved here is
+ * that nothing in Logins can put a value in a result, or a token anywhere but its provider.
  */
 import { describe, expect, test } from 'bun:test';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { FetchPort } from '@ferretry/kernel/contract';
 import { restrictFetch } from '@ferretry/kernel/host';
 import {
@@ -14,6 +18,12 @@ import {
   AnthropicUsageProbe,
   quotaFetch,
 } from '../../../daemon/adapters/credentials/anthropic-usage-probe.ts';
+import { HOUSEKEEPING_WORKER_URL } from '../../../daemon/adapters/credentials/housekeeping-client.ts';
+import { answerHousekeeping } from '../../../daemon/adapters/credentials/housekeeping-job.ts';
+import type {
+  HousekeepingRequest,
+  HousekeepingResponse,
+} from '../../../daemon/lib/credentials/housekeeping-protocol.ts';
 import { AuthorizedProviderProbe } from '../../../daemon/adapters/provider-probe/authorized-provider-probe.ts';
 import type { CredentialMaterial } from '../../../daemon/lib/shared/identity.ts';
 import { ProviderProbeService } from '../../../daemon/lib/provider-probe/service.ts';
@@ -102,6 +112,7 @@ describe('S167 callers are handed no value; a login Test goes only to the login�
           harness: 'claude',
           store: 'environment',
           preset: 'deepseek',
+          // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
           env: { ANTHROPIC_AUTH_TOKEN: '${secret:DEEPSEEK_API_KEY}' },
         }),
         preset,
@@ -165,10 +176,122 @@ describe('the Logins source imports only the Vault contract', () => {
   });
 });
 
-// Usage is still a skeleton and Logins has no worker protocol or entrypoint. These rows are not proved by the
-// in-process failure assertion or source scan above. Replace these skips at the actual worker boundary when ported.
-test.skip('S176 worker protocol type has no token field — worker boundary unported', () => {});
-test.skip('S177 actual worker bundle excludes Vault, store and redactor — worker boundary unported', () => {});
+/** The field names a credential's material, or a token taken from it, would be found under. */
+type MaterialField =
+  | 'blob'
+  | 'token'
+  | 'accessToken'
+  | 'refreshToken'
+  | 'access_token'
+  | 'refresh_token'
+  | 'id_token'
+  | 'idToken'
+  | 'bearer'
+  | 'authorization'
+  | 'secret';
+
+/** Every key reachable from `T`, through objects, arrays and unions. */
+type DeepKeys<T, Depth extends unknown[] = []> = Depth['length'] extends 8
+  ? never
+  : T extends readonly (infer Item)[]
+    ? DeepKeys<Item, [...Depth, unknown]>
+    : T extends object
+      ? { [K in keyof T]-?: K | DeepKeys<T[K], [...Depth, unknown]> }[keyof T]
+      : never;
+
+/** `true` exactly when no key reachable from `T` is a material field. */
+type CarriesNoMaterial<T> = [Extract<DeepKeys<T>, MaterialField>] extends [never] ? true : false;
+
+// Decided by the type checker (`typecheck`), not at run time: a field added to either direction of the protocol, or to a
+// fact the worker answers with, that a token could travel in turns this file red before any test runs.
+const requests: CarriesNoMaterial<HousekeepingRequest> = true;
+const responses: CarriesNoMaterial<HousekeepingResponse> = true;
+// The check itself must be able to fail, or it proves nothing.
+const canary: CarriesNoMaterial<{ readonly facts: { readonly accessToken: string } }> = false;
+
+describe('S176 only facts cross back from the worker; a failed job is answered with a fixed word, never the caught error', () => {
+  test('S176 the protocol has no field a token could travel in, in either direction (type test)', () => {
+    expect([requests, responses, canary]).toEqual([true, true, false]);
+  });
+
+  test('S176 a job that throws a token comes back as the fixed word, and a read that finds one carries facts only', async () => {
+    const tokenFile = JSON.stringify({ claudeAiOauth: { accessToken: TOKEN, expiresAt: 1_900_000_000_000 } });
+    const quoting = {
+      lstat: async () => undefined,
+      stat: async () => ({}),
+      readText: async () => {
+        throw new Error(`cannot read ${tokenFile}`);
+      },
+    };
+    const answering = { ...quoting, readText: async () => tokenFile };
+    const fetched = recordingFetch();
+    const job = (id: number): HousekeepingRequest => ({
+      type: 'job',
+      id,
+      job: { kind: 'credential.active', harness: 'claude', file: 'claude/.credentials.json', nowMs: 1_800_000_000_000 },
+    });
+
+    const failed = await answerHousekeeping(() => ({ root: quoting, fetch: fetched.port, clock: realClock }), job(1));
+    const read = await answerHousekeeping(() => ({ root: answering, fetch: fetched.port, clock: realClock }), job(2));
+
+    expect(failed).toEqual({ type: 'result', id: 1, ok: false, failure: 'internal' });
+    expect(JSON.stringify(failed).includes(TOKEN)).toBe(false);
+    expect(fetched.sent.map(sent => sent.headers.get('authorization'))).toEqual([`Bearer ${TOKEN}`]);
+    expect(JSON.stringify(read).includes(TOKEN)).toBe(false);
+  });
+});
+
+interface Metafile {
+  readonly inputs: Record<string, { readonly imports: readonly { readonly path: string }[] }>;
+}
+
+/** Modules the worker must never carry, by what their path or specifier says. */
+const FORBIDDEN: readonly [string, RegExp][] = [
+  // The Vault's CONTRACT (the secret-reference grammar, a pure function) is the one seam Logins may import; its implementation never.
+  ['the secret vault', /packages\/core\/vault\/(?!contract\/)|secret-vault|SecretVault/u],
+  ['a secret store or the redactor', /secret-store|redact/u],
+  ['the file system or a child process', /^(node:)?(fs|fs\/promises|child_process)$/u],
+  ['another plugin', /packages\/plugins\/(?!logins\/)/u],
+];
+
+describe('S177 the worker holds no SecretVault; the build fails if its bundle carries the vault, its store or the redactor', () => {
+  test('S177 the bundled housekeeping worker carries the sign-in read and nothing of the vault side (diet test)', async () => {
+    const outdir = await mkdtemp(join(tmpdir(), 'logins-worker-bundle-'));
+    try {
+      const entry = fileURLToPath(HOUSEKEEPING_WORKER_URL);
+      const built = (await Bun.build({ entrypoints: [entry], target: 'bun', outdir, metafile: true } as Parameters<
+        typeof Bun.build
+      >[0])) as Awaited<ReturnType<typeof Bun.build>> & { readonly metafile: Metafile };
+      expect(built.success).toBe(true);
+      const modules = Object.entries(built.metafile.inputs).flatMap(([file, input]) => [
+        file,
+        ...input.imports.map(imported => imported.path),
+      ]);
+
+      for (const [, pattern] of FORBIDDEN) expect(modules.filter(module => pattern.test(module))).toEqual([]);
+      // The diet is of the real program: the reader, both probes and the kernel's grant client are in it.
+      for (const needed of [
+        'material-read.ts',
+        'anthropic-usage-probe.ts',
+        'codex-usage-probe.ts',
+        'core/kernel/worker.ts',
+      ])
+        expect(modules.some(module => module.endsWith(needed))).toBe(true);
+    } finally {
+      await rm(outdir, { recursive: true, force: true });
+    }
+  });
+
+  test('S177 the diet can fail: a module list that carries a vault, a store or a file call is refused by it', () => {
+    const carried = [
+      'packages/core/vault/daemon/lib/secret-store.ts',
+      'node:fs',
+      'packages/plugins/usage/daemon/index.ts',
+      'packages/plugins/logins/daemon/adapters/credentials/material-read.ts',
+    ];
+    expect(FORBIDDEN.map(([, pattern]) => carried.filter(module => pattern.test(module)).length)).toEqual([1, 1, 1, 1]);
+  });
+});
 
 describe('S178 the token goes only to its provider; any other origin is refused', () => {
   test('S178 the manifest’s network list admits the provider and refuses an origin it does not name', async () => {

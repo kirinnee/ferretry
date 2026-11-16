@@ -23,18 +23,15 @@ import { login as makeLogin, preset } from './usage/provider-quota/logins.ts';
  *
  * - S175 and S178 drive the quota reader (`ProviderQuotaService`, `planProviderQuota`) and the probe-origin rule
  *   (`usageProbeUrls`): what Usage sends and where it may send it.
- * - S176 and S177 are LINT TESTS. By design the worker sandbox rests on the repository's own lints (`banned-globals`,
- *   `fetch-binding`, `no-sync-io`), so each test feeds those lints a fixture of the code a worker bundle must never
- *   contain and asserts it is refused, then asserts Usage's real source passes the same lints. `fetch-binding` scans
- *   a package's browser (`app/`) half only; the daemon half's fetch ban is `banned-globals`.
+ * - S176 and S177 here are what USAGE holds to. The worker itself is Logins' (its protocol type test, its fixed-word
+ *   failure and its built-bundle diet are Logins' `S176`/`S177` in tests/integration/rows/secrets-rows.test.ts); a
+ *   thread is not a sandbox, so what keeps plugin code off the world around the kernel ports is the repository's own
+ *   lints (`banned-globals`, `fetch-binding`, `no-sync-io`). Each test feeds those lints a fixture of the code that
+ *   must never appear and asserts it is refused, then asserts Usage's real source passes the same lints.
+ *   `fetch-binding` scans a package's browser (`app/`) half only; the daemon half's fetch ban is `banned-globals`.
  *
- * (The ids S175–S178 were `it.skip` lines in rows.test.ts, waiting on the Claude/Codex sign-in read; they now live
- * here, driving what Usage owns today — the environment-key quota read through Logins' `authorizeFetch` and the
- * probe-origin rule.)
- *
- * What these tests do NOT prove: the housekeeping worker program, its message protocol and its bundle diet belong to
- * Logins and are not ported (ports-pending.json), so there is no Usage worker bundle to build and inspect. The
- * lint tests prove the rule a worker would be held to, not a built bundle.
+ * Usage has no worker of its own, so there is no Usage bundle to build and inspect: the Claude/Codex sign-in read, its
+ * protocol and its bundle diet are proved where the worker is built, in Logins.
  */
 
 /** A key value planted on the Vault's side of the world; nothing Usage holds, sends or returns may contain it. */
@@ -48,6 +45,7 @@ const GLM = makeLogin(
   'glm',
   {
     harness: 'claude',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
     env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic', ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}' },
   },
   preset('zai-glm'),
@@ -151,6 +149,7 @@ describe('S175 S178 the sign-in is read through Logins and goes only where it be
       'oa',
       {
         harness: 'claude',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
         env: { ANTHROPIC_BASE_URL: 'https://api.openai.com/v1', ANTHROPIC_API_KEY: '${secret:OPENAI}' },
       },
       { ...preset('deepseek'), origin: 'file', test: { kind: 'none', reason: 'none' } },
@@ -167,6 +166,7 @@ describe('S175 S178 the sign-in is read through Logins and goes only where it be
       'oa',
       {
         harness: 'claude',
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: a secret reference is the literal text `${secret:NAME}`
         env: { ANTHROPIC_BASE_URL: 'https://api.openai.com/v1', ANTHROPIC_API_KEY: '${secret:OPENAI}' },
       },
       { ...preset('deepseek'), origin: 'file', test: { kind: 'none', reason: 'none' } },
@@ -229,8 +229,8 @@ const browserRepo = (name: string, source: string): string => {
 
 const WORKER_TOKEN_FIELD = /token|secret|password|credential|digest|apikey|api_key|bearer/iu;
 
-describe('S176 S177 the worker sandbox rests on the lints: they refuse, and Usage’s own source passes (proxy until the housekeeping worker lands)', () => {
-  it('S176 a worker that reaches the network or the world around the kernel ports is refused, and nothing crosses back but facts (proxy until the housekeeping worker lands)', async () => {
+describe('S176 S177 what keeps plugin code off the world around the kernel ports is the lints: they refuse, and Usage’s own source passes', () => {
+  it('S176 a worker that reaches the network or the world around the kernel ports is refused, and nothing crosses back but facts', async () => {
     // banned-globals refuses the ways a worker could carry a token out of its job: the network, the environment,
     // the file system, a child process, a timer that outlives the job.
     const refused = bannedNames(
@@ -294,7 +294,7 @@ describe('S176 S177 the worker sandbox rests on the lints: they refuse, and Usag
     should(JSON.stringify(reading).includes('socket closed')).be.false();
   });
 
-  it('S177 a worker that blocks on a file call or binds a vault-side file API is refused, and Usage’s own source holds no vault, store or redactor (proxy until the housekeeping worker lands)', () => {
+  it('S177 a worker that blocks on a file call or binds a vault-side file API is refused, and Usage’s own source holds no vault, store or redactor', () => {
     // no-sync-io counts every blocking file function a daemon-half file uses and refuses a rebinding outright.
     const blocking = scanSource(
       'worker-fixture.ts',
