@@ -13,6 +13,7 @@ import {
   inboxCard,
 } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '@ferretry/app/testing';
+import { answerFilePorts } from '../../../../app/lib/answer-file-ports.ts';
 import { sessionView } from '../../../support/app/sessions.ts';
 import { laptop } from '../board-support.ts';
 import {
@@ -319,6 +320,43 @@ describe('a gate item in the Inbox', () => {
       await press(sendBackSubmit(why));
       expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
         note: 'The code is blank',
+        attachments: { from: 'sess-g', ids: [attachId] },
+      });
+      await mounted.unmount();
+    });
+
+    it('offers "+" through the half’s own ports, and uploads by Conversation’s route into the card’s ferret', async () => {
+      await mouseIsLastPointer();
+      const calls: Array<{ route: string; init: unknown }> = [];
+      const client = {
+        call: async (route: string, init: unknown) => {
+          calls.push({ route, init });
+          return {
+            id: attachId,
+            filename: 'blank.png',
+            mime: 'image/png',
+            size: 3,
+            sha256: '0'.repeat(64),
+            createdAt: '2026-10-30T10:00:00.000Z',
+          } as never;
+        },
+      };
+      const fake = fakeInbox();
+      const mounted = await mount(
+        page(fake, [gate], {
+          initialOpen: gate.key,
+          answerPorts: answerFilePorts({ daemon: laptop.daemonId, client }),
+        }),
+      );
+      await press(buttonNamed(mounted, 'Not good'));
+      await flush();
+      expect(attach(mounted)).not.toBeNull();
+      await pick(mounted);
+      expect(calls.map(call => call.route)).toEqual(['POST /v1/ferrets/:ferretId/attachments']);
+      const why = sendBackBox(mounted.container);
+      await writeSendBack(why, 'The code is blank');
+      await press(sendBackSubmit(why));
+      expect(fake.deferred.getSnapshot().pending[0]?.action).toMatchObject({
         attachments: { from: 'sess-g', ids: [attachId] },
       });
       await mounted.unmount();

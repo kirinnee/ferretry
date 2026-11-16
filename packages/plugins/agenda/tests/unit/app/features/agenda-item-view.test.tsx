@@ -7,7 +7,7 @@ import { AgendaItemView, type AgendaItemViewProps } from '../../../../app/featur
 import type { HistoryEvent } from '../../../../app/lib/agenda-history.ts';
 import { DISMISS_ACTION, type InboxAction } from '../../../../app/lib/agenda-inbox.ts';
 import type { DaemonId } from '../../../../app/shell.ts';
-import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import { agendaItem, choices } from '../../../support/app/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '@ferretry/app/testing';
 
@@ -1051,7 +1051,7 @@ describe('Request changes, with a composer at hand', () => {
   } as Partial<AgendaItem>);
   const composer = (draft: string) => {
     const replaced: string[] = [];
-    const dispose = registerComposerQuoteTarget({
+    const dispose = registerComposerFor({
       ...scope,
       draft: () => draft,
       replaceDraft: next => replaced.push(next),

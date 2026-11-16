@@ -26,7 +26,7 @@ import { AgendaDrawer, AgendaLine } from '../../../../app/features/agenda/agenda
 import { inboxCardKey } from '../../../../app/lib/agenda-inbox.ts';
 import { daemonConnection } from '../../../../app/shell.ts';
 import { daemonSessionScope } from '../../../../app/shell.ts';
-import { registerComposerQuoteTarget } from '../../../../app/shell.ts';
+import { registerComposerFor } from '../../../support/app/composer-quote.ts';
 import type { TranscriptEntry } from '../../../../app/lib/transcript.ts';
 import type { AgendaCall } from '../../../../app/lib/agenda-call.ts';
 import { AgendaClientContext } from '../../../../app/lib/agenda-client-context.tsx';
@@ -755,7 +755,7 @@ describe('the open item and the composer', () => {
 describe('what the item view sends', () => {
   const composer = (draft: string) => {
     const state = { draft, replaced: [] as string[] };
-    const dispose = registerComposerQuoteTarget({
+    const dispose = registerComposerFor({
       ...scope,
       draft: () => state.draft,
       replaceDraft: next => {
@@ -1305,8 +1305,7 @@ describe('a form opened in the chat (#B143)', () => {
       await landing;
     },
   });
-  const typed = (draft: string) =>
-    registerComposerQuoteTarget({ ...scope, draft: () => draft, replaceDraft: () => undefined });
+  const typed = (draft: string) => registerComposerFor({ ...scope, draft: () => draft, replaceDraft: () => undefined });
   const inputs = (view: ReturnType<typeof render>, type: string) =>
     view.root.findAll(node => node.type === 'input' && node.props.type === type);
   const yesNo = (view: ReturnType<typeof render>) =>

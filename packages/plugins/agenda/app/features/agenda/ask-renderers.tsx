@@ -8,8 +8,8 @@
  *
  * - `ask:sign-in-approval` is Accounts': the value names the ref's kind (`two-factor-seed`, `phone-approval`,
  *   `task-plan`, `copy-plan`, `rule-suggestion`) with the ask's words, the shape Accounts' renderer reads.
- * - `ask:input` is the owner of input requests (Vault): no plugin contributes it yet, so an input card shows its
- *   words and the answer row only, as a machine without that owner would.
+ * - `ask:input` is the owner of input requests (Vault contributes it): where Vault is not installed, an input card shows
+ *   its words and the answer row only.
  *
  * Nothing owns the key (or there is no shell): nothing extra is drawn and the card keeps its own words.
  */

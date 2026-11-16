@@ -36,7 +36,7 @@ import type { AgendaCardAnswer, AgendaItem } from '@ferretry/core-asks/contract'
 import { GitCompareArrows, Merge } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import type { DoneCloseSource } from '../../lib/agenda-done-close.ts';
-import { composerQuoteTarget, useQuoteMenu } from '../../shell.ts';
+import { composerQuoteTarget, ferretScopeOf, useQuoteMenu } from '../../shell.ts';
 import { answerAction } from '../../lib/agenda-answers.ts';
 import type { DaemonId, DaemonSessionScope } from '../../lib/machine.ts';
 import { agendaCardHead } from '../../lib/agenda-card-head.ts';
@@ -218,7 +218,7 @@ export function AgendaItemView({
   const latest = shown >= count;
   const showVersion = (version: number): void => setPicked(version >= count ? null : { id: item.id, version });
   useScrollPadding(body, top, dock);
-  const quote = useQuoteMenu(root, quoteScope);
+  const quote = useQuoteMenu(root, quoteScope === null ? null : ferretScopeOf(quoteScope));
   const map = swipeMap(item);
   const head = agendaCardHead(item);
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
@@ -297,7 +297,7 @@ export function AgendaItemView({
     (merge !== undefined && latest);
   // Request changes IS the owner's words: sent with what the composer holds, or the owner is put in the composer first.
   const requestChanges = (answer: AgendaCardAnswer): void => {
-    const composer = quoteScope === null ? null : composerQuoteTarget(quoteScope);
+    const composer = quoteScope === null ? null : composerQuoteTarget(ferretScopeOf(quoteScope));
     const words = composer?.draft().trim() ?? '';
     if (words === '') {
       composer?.replaceDraft(composer.draft());

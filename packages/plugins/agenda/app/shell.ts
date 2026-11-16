@@ -20,9 +20,6 @@ export {
   ContextFilterChips,
   CopyButton,
   cn,
-  composerQuoteTarget,
-  registerComposerQuoteTarget,
-  useQuoteMenu,
   escapeCloses,
   type Marquee,
   marqueeOf,
@@ -40,6 +37,7 @@ export {
   browserListRefreshEnvironment,
   ChatProse,
   clockOfInstant,
+  composerQuoteTarget,
   daemonOfClient,
   ListRefresh,
   type ListRefreshEnvironment,
@@ -53,6 +51,7 @@ export {
   useAppHook,
   useFerretWorkspace,
   useOptionalRouter,
+  useQuoteMenu,
   useReferenceSurface,
   useRouter,
   useScreenHref,
@@ -66,6 +65,7 @@ export {
   daemonId,
   daemonSessionKey,
   daemonSessionScope,
+  ferretScopeOf,
 } from './lib/machine.ts';
 export { DaemonResponseError, FyHttpError } from './lib/agenda-call.ts';
 export {

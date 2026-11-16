@@ -54,7 +54,7 @@ import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../shell.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../shell.ts';
 import type { AgendaLaneEditor as LaneEditor } from '../../../contract/app-hooks.ts';
-import { composerQuoteTarget } from '../../shell.ts';
+import { composerQuoteTarget, ferretScopeOf } from '../../shell.ts';
 import type { TranscriptEntry } from '../../lib/transcript.ts';
 import { RendererView, useOptionalRouter } from '../../shell.ts';
 import { browserClipboardWriter } from '../../shell.ts';
@@ -163,10 +163,10 @@ const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
 
 /** What is typed in the composer right now: an answer carries it as its note. */
-const composerDraft = (scope: DaemonSessionScope): string => composerQuoteTarget(scope)?.draft() ?? '';
+const composerDraft = (scope: DaemonSessionScope): string => composerQuoteTarget(ferretScopeOf(scope))?.draft() ?? '';
 
 /** The note an answer took is spent: the composer is emptied. */
-const spendDraft = (scope: DaemonSessionScope): void => composerQuoteTarget(scope)?.replaceDraft('');
+const spendDraft = (scope: DaemonSessionScope): void => composerQuoteTarget(ferretScopeOf(scope))?.replaceDraft('');
 
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
