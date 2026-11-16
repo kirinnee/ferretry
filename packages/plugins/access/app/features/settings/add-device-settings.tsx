@@ -33,7 +33,9 @@
 import { CAPABILITY_AXES, CAPABILITY_NAMES, type CapabilityName } from '@ferretry/core-gate/contract';
 import type { CapabilityAxis } from '@ferretry/kernel/contract';
 import { Check, ChevronRight, CircleAlert, MonitorSmartphone, Plus, ShieldCheck, Trash2 } from 'lucide-react';
+import { PanelSlot } from '@ferretry/app';
 import { type ReactNode, useCallback, useEffect, useId, useState } from 'react';
+import { DEVICE_NOTE_SLOT } from './device-note-slot.ts';
 import {
   type DeviceGrantsPatch,
   invitationRedeemableByAnotherDevice,
@@ -44,14 +46,7 @@ import {
   pairingMintOutcome,
 } from '../../../contract/index.ts';
 import { QrSymbol } from '../../components/qr-symbol.tsx';
-import {
-  cn,
-  type DaemonConnection,
-  DeviceRuleNote,
-  localOnlyNotice,
-  refusalNotice,
-  useDaemonClient,
-} from '../../shell-pairing.ts';
+import { cn, type DaemonConnection, localOnlyNotice, refusalNotice, useDaemonClient } from '../../shell-pairing.ts';
 import { axisLabel, capabilityLabel } from '../../lib/grants.ts';
 import {
   deviceAxisControl,
@@ -804,9 +799,11 @@ export function AddDeviceSurface({
         busy={busy}
         failure={failure}
         grantFailure={grantFailure}
-        // A device's revoke says how many standing sign-in rules its passkey approved, whenever this device may read
-        // the rules; the note itself draws nothing when they cannot be read.
-        deviceNote={client !== null ? deviceId => <DeviceRuleNote client={client} deviceId={deviceId} /> : undefined}
+        // What else revoking a device does is said by whatever plugin places a panel here (Accounts: how many standing
+        // sign-in rules its passkey approved); a panel with nothing to say draws nothing, and none placed shows no note.
+        deviceNote={deviceId => (
+          <PanelSlot daemon={String(connection.daemonId)} slot={DEVICE_NOTE_SLOT} subject={deviceId} />
+        )}
         onMint={() => void mint()}
         onDiscardInvite={() => setInvite(null)}
         onRevokeCode={() => void revokeCode()}

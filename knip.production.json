@@ -150,11 +150,7 @@
     "packages/plugins/conversation": {
       "entry": ["app/surfaces.tsx"],
       "project": ["**/*.{ts,tsx}", "!tests/**"],
-      "ignore": [
-        "app/render/fy-render-workspace-media.ts",
-        "app/render/workspace-path.ts",
-        "daemon/questions/lib/projection.ts"
-      ]
+      "ignore": ["daemon/questions/lib/projection.ts"]
     },
     "packages/plugins/mcp": {
       "entry": ["app/views/surfaces.tsx"],

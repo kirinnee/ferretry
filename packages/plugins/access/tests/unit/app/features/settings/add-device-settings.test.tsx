@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { WithSlotPanels } from '@ferretry/app/testing';
 import { InstantSchema } from '@ferretry/std';
 import {
   CAPABILITY_NAMES,
@@ -22,6 +23,7 @@ import {
   AddDeviceSurface,
   type PairingClientFactory,
 } from '../../../../../app/features/settings/add-device-settings.tsx';
+import { DEVICE_NOTE_SLOT } from '../../../../../app/features/settings/device-note-slot.ts';
 import { daemonConnection } from '../../../../../app/shell-pairing.ts';
 import '../../../../support/app/dom.ts';
 import { render, run, runAsync } from '../../../../support/app/react.ts';
@@ -621,6 +623,62 @@ function fakeClient(world: {
     },
   });
 }
+
+describe('AddDeviceSurface device note slot', () => {
+  it('offers the slot Accounts writes by the same name (the shell’s slot test pins the other side)', () => {
+    should(DEVICE_NOTE_SLOT).equal('access.device-note');
+  });
+
+  const noteSlots = {
+    'access.device-note': [
+      {
+        plugin: 'accounts',
+        id: 'device-rule-note',
+        view: (props: Record<string, unknown>) => <p data-slot-note={String(props['subject'])}>note</p>,
+      },
+    ],
+  };
+
+  it('P125 mounts the plugins’ panels under each device’s row with that device as the subject, and no other', async () => {
+    // Arrange
+    let renderer: ReactTestRenderer | undefined;
+
+    // Act
+    await runAsync(async () => {
+      renderer = render(
+        <WithSlotPanels slots={noteSlots}>
+          <AddDeviceSurface connection={connection()} createClient={fakeClient({})} />
+        </WithSlotPanels>,
+      );
+    });
+
+    // Assert
+    const notes = marked(renderer as ReactTestRenderer, 'data-slot-note');
+    should(notes.map(node => node.props['data-slot-note'])).deepEqual([DEVICE_ID]);
+  });
+
+  it('shows no note and no wrapper when no plugin places a panel, and revoke is unchanged', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let renderer: ReactTestRenderer | undefined;
+
+    // Act
+    await runAsync(async () => {
+      renderer = render(
+        <WithSlotPanels slots={{}}>
+          <AddDeviceSurface connection={connection()} createClient={fakeClient({ calls })} />
+        </WithSlotPanels>,
+      );
+    });
+    await runAsync(async () =>
+      marked(renderer as ReactTestRenderer, 'data-pair-revoke-device', DEVICE_ID)[0]?.props.onClick(),
+    );
+
+    // Assert
+    should(marked(renderer as ReactTestRenderer, 'data-slot')).be.empty();
+    should(calls).containEql(`DELETE /v1/pair/devices/${DEVICE_ID}`);
+  });
+});
 
 describe('AddDeviceSurface', () => {
   it('reads the device list for the daemon it was given and then offers the button', async () => {

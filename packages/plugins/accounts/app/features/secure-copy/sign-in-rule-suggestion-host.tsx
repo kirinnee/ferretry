@@ -20,6 +20,7 @@ import {
   failureWords,
   isForbidden,
   listSuggestions,
+  readFerretProject,
   RULE_NO_ACCOUNTS_DEVICE_WORDS,
   type RuleClient,
 } from '../../lib/sign-in-rules.ts';
@@ -52,9 +53,27 @@ export function SignInRuleSuggestionHost({
   askPasskey,
   onDone,
 }: SignInRuleSuggestionHostProps) {
+  // The ferret's board project, read from its record: the owner may limit the rule to it. Until it is read (or when the
+  // ferret has none) the choice is simply not offered.
+  const [project, setProject] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    setProject(undefined);
+    if (asking === undefined) return;
+    let current = true;
+    void readFerretProject(client, asking).then(found => {
+      if (current) setProject(found);
+    });
+    return () => {
+      current = false;
+    };
+  }, [client, asking]);
   const scopes = useMemo<readonly SignInRuleScope[]>(
-    () => [{ kind: 'any' }, ...(asking === undefined ? [] : [{ kind: 'session' as const, session: asking }])],
-    [asking],
+    () => [
+      { kind: 'any' },
+      ...(asking === undefined ? [] : [{ kind: 'session' as const, session: asking }]),
+      ...(project === undefined ? [] : [{ kind: 'project' as const, project }]),
+    ],
+    [asking, project],
   );
   const [found, setFound] = useState<Found | null>(null);
   const [forbidden, setForbidden] = useState(false);
