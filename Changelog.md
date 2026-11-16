@@ -1,3 +1,9 @@
+## [4.291.19](https://github.com/kirinnee/ferretry/compare/v4.291.18...v4.291.19) (2026-11-16)
+
+### Fixes
+
+* **daemon:** parse a session's queue log once, and back off an unreadable screen ([#1673](https://github.com/kirinnee/ferretry/issues/1673)) ([877ed1f](https://github.com/kirinnee/ferretry/commit/877ed1fa5f7a0d1e34dd842d122a79089ec3e9a6))
+
 ## [4.291.18](https://github.com/kirinnee/ferretry/compare/v4.291.17...v4.291.18) (2026-11-14)
 
 ### Fixes
