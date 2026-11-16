@@ -156,34 +156,92 @@ pid=
 gpid=
 writer=
 stopping=
-seen=
-tree() {
-  for child in $(pgrep -P "$1" 2>/dev/null); do tree "$child"; done
-  echo "$1"
-}
-ident() {
+fresh=
+tracked="$dir/tracked"
+known="
+"
+kids() {
   if [ -d /proc/self ]; then
-    sed 's/^.*) //' "/proc/$1/stat" 2>/dev/null | awk '$1 != "Z" && $1 != "X" { print $20 }'
+    for file in /proc/$1/task/*/children; do
+      [ -r "$file" ] || continue
+      list=
+      read -r list <"$file" 2>/dev/null || :
+      [ -z "$list" ] || echo $list
+    done
   else
-    ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' _
+    pgrep -P "$1" 2>/dev/null
   fi
 }
-snap() {
-  for one in $(tree "$1"); do
-    started=$(ident "$one")
-    [ -z "$started" ] || echo "$one=$started"
-  done
+ident() {
+  started=
+  if [ -d /proc/self ]; then
+    stat=
+    read -r stat <"/proc/$1/stat" 2>/dev/null || :
+    [ -n "$stat" ] || return 0
+    set -- \${stat##*) }
+    case "$1" in Z|X) return 0 ;; esac
+    started=\${20}
+  else
+    started=$(ps -o lstart= -p "$1" 2>/dev/null | tr -s ' ' _)
+  fi
 }
 live() {
-  [ "$(ident "\${1%%=*}")" = "\${1#*=}" ]
+  ident "\${1%%=*}"
+  [ -n "$started" ] && [ "$started" = "\${1#*=}" ]
 }
-signal_seen() {
-  more=$(for entry in $seen; do live "$entry" && snap "\${entry%%=*}"; done)
-  for entry in $seen $more; do live "$entry" && kill -s "$1" "\${entry%%=*}" 2>/dev/null; done
+take() {
+  ident "$1"
+  [ -n "$started" ] || return 1
+  entry="$1=$started"
+  case "$known" in *"
+$entry
+"*) return 1 ;; esac
+  known="$known$entry
+"
+  fresh="$fresh $entry"
+  printf '%s\\n' "$entry" >>"$tracked"
+}
+adopt() {
+  for child in $(kids "$1"); do
+    if take "$child"; then adopt "$child"; fi
+  done
+}
+discover() {
+  known="
+$(cat "$tracked" 2>/dev/null)
+"
+  [ -z "$1" ] || take "$1" || :
+  for entry in $known; do
+    if live "$entry"; then adopt "\${entry%%=*}"; fi
+  done
+}
+send() {
+  for entry in $fresh; do
+    if live "$entry"; then kill -s "$1" "\${entry%%=*}" 2>/dev/null; fi
+  done
+  fresh=
 }
 any_live() {
-  for entry in $seen; do live "$entry" && return 0; done
+  for entry in $(cat "$tracked" 2>/dev/null); do
+    if live "$entry"; then return 0; fi
+  done
   return 1
+}
+reap() {
+  fresh=
+  discover ""
+  send KILL
+  for entry in $(cat "$tracked" 2>/dev/null); do
+    if live "$entry"; then kill -s KILL "\${entry%%=*}" 2>/dev/null; fi
+  done
+  rounds=0
+  while [ "$rounds" -lt 3 ]; do
+    fresh=
+    discover ""
+    [ -n "$fresh" ] || break
+    send KILL
+    rounds=$((rounds + 1))
+  done
 }
 capped() {
   while :; do
@@ -200,13 +258,12 @@ capped() {
 term() {
   stopping=1
   [ -n "$pid" ] || return 0
-  seen="$seen
-$(snap "$pid")"
-  signal_seen TERM
+  discover "$pid"
+  send TERM
   if [ -z "$gpid" ]; then
     (
       sleep ${JOB_STOP_GRACE_SECONDS}
-      signal_seen KILL
+      reap
     ) >/dev/null 2>&1 &
     gpid=$!
   fi
@@ -218,7 +275,7 @@ capped <"$fifo" &
 writer=$!
 ( cd -- "$cwd" && exec "$shell" -l -c "$cmd" ) >"$fifo" 2>&1 </dev/null &
 pid=$!
-( while [ ! -e "$dir/stop" ]; do sleep 1; done; kill -TERM $$ ) >/dev/null 2>&1 &
+( while [ ! -e "$dir/stop" ]; do sleep 0.2; done; kill -TERM $$ ) >/dev/null 2>&1 &
 watcher=$!
 [ -z "$stopping" ] || term
 wait "$pid"
@@ -229,11 +286,17 @@ while kill -0 "$pid" 2>/dev/null; do
 done
 kill "$watcher" 2>/dev/null
 if [ -n "$gpid" ]; then
-  while any_live && kill -0 "$gpid" 2>/dev/null; do sleep 0.2; done
-  tries=0
-  while any_live && [ "$tries" -lt 20 ]; do
-    sleep 0.1
-    tries=$((tries + 1))
+  warned=
+  waited=0
+  while any_live; do
+    discover ""
+    if kill -0 "$gpid" 2>/dev/null; then send TERM; else send KILL; fi
+    sleep 0.2
+    waited=$((waited + 1))
+    if [ -z "$warned" ] && ! kill -0 "$gpid" 2>/dev/null && [ "$waited" -gt 50 ]; then
+      warned=1
+      printf '[fy: a process of this job is still running after SIGKILL; the job is not recorded as ended until it is gone]\\n' >>"$log"
+    fi
   done
   kill "$gpid" 2>/dev/null
 fi

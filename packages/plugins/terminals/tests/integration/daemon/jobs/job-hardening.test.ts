@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { jobPaneArgv } from '../../../../daemon/lib/jobs/policy.ts';
 import { type Keeper, keeper } from '../support/job-keeper.ts';
+import { alive, level, stopThreeDeepTree } from '../support/job-tree.ts';
 import { waitForValue } from '../support/wait-for.ts';
 
 const kept: Keeper[] = [];
@@ -169,5 +170,48 @@ describe('stopping a job whose parent exits first (a private tmux server)', () =
     should(stopped.state).equal('exited');
     should(survivedAt).be.false();
     if (await running(pid)) process.kill(pid, 'SIGKILL');
+  }, 40_000);
+});
+
+describe('stopping a job whose tree ignores TERM and HUP (a private tmux server, a slow host)', () => {
+  it('should end the whole 3-deep tree by the wrapper alone, never reaching the service fallback, and record the exit only after', async () => {
+    // Act
+    const stop = await stopThreeDeepTree(kept, homes);
+
+    // Assert: the shell died on TERM (143); no tmux session was taken down by the service; every descendant was already
+    // gone the first time exit.json could be read.
+    should(stop.stoppedState).equal('exited');
+    should(stop.exitCode).equal(143);
+    should(stop.killSessions).deepEqual([]);
+    should(stop.aliveAfter).deepEqual([]);
+    should(stop.aliveAtExit).deepEqual([]);
+  }, 40_000);
+
+  it('should also end a child that only appears after the TERM, while its parent still lives', async () => {
+    // Arrange: the job shell itself ignores HUP and, on TERM, starts a child that ignores TERM and HUP (born after the snapshot).
+    const one = await keeper({ realProof: true });
+    kept.push(one);
+    const jobs = one.service();
+    const pids = join(one.home, 'pids');
+    const late = join(one.home, 'late.sh');
+    await writeFile(late, level(pids, undefined));
+    const command = `trap '' HUP; trap '/bin/sh ${late} &' TERM; echo $$ >> ${pids}; while :; do sleep 1; done`;
+    const job = await jobs.start('ferret-a', { command }, person);
+    await waitForValue(async () => (await readFile(pids, 'utf8').catch(() => '')).trim() || undefined, 'the job shell');
+    await Bun.sleep(200);
+
+    try {
+      // Act
+      const stopped = await jobs.stop('ferret-a', job.id);
+      const seen = (await readFile(pids, 'utf8')).split('\n').filter(Boolean).map(Number);
+
+      // Assert
+      should(stopped.state).equal('exited');
+      should(seen).have.length(2);
+      should(await Promise.all(seen.map(alive))).deepEqual([false, false]);
+    } finally {
+      for (const pid of (await readFile(pids, 'utf8').catch(() => '')).split('\n').filter(Boolean).map(Number))
+        if (await alive(pid)) process.kill(pid, 'SIGKILL');
+    }
   }, 40_000);
 });

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, rmdir, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, rmdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { defineState } from '@ferretry/kernel/contract';
@@ -38,8 +38,16 @@ export function folderState(root: string) {
 /** Process proof over a table the test controls: a pid is alive while the test says so. */
 class TableProof implements ProcessProof {
   readonly starts = new Map<number, string>();
+  constructor(private readonly real: boolean) {}
   async startOf(pid: number): Promise<string | undefined> {
-    return this.starts.get(pid);
+    if (this.starts.has(pid) || !this.real) return this.starts.get(pid);
+    // The host's own reading (Linux): the start time in ticks, as the daemon's proof gives it.
+    const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => '');
+    const fields = stat.slice(stat.lastIndexOf(') ') + 2).split(' ');
+    return stat === '' || fields[0] === 'Z' || fields[0] === 'X' ? undefined : fields[19];
+  }
+  async kill(pid: number): Promise<void> {
+    if (this.real) process.kill(pid, 'SIGKILL');
   }
 }
 
@@ -54,12 +62,19 @@ export interface Keeper {
 }
 
 /** A real tmux on a private socket, a state folder, and services over them. Only the clock and ids are the test's. */
-export async function keeper(): Promise<Keeper> {
+export async function keeper(
+  options: {
+    /** Extra environment the job's pane starts with (the daemon passes its terminal environment the same way). */
+    readonly environment?: Readonly<Record<string, string>>;
+    /** Read start times from the host's /proc and really signal, instead of the test's table. */
+    readonly realProof?: boolean;
+  } = {},
+): Promise<Keeper> {
   const executable = Bun.which('tmux');
   if (executable === null) throw new Error('tmux is required for job integration coverage');
   const home = await mkdtemp(join(tmpdir(), 'fy-job-'));
   const tmux = new BunTmuxProcess(executable, join(home, 'tmux.sock'));
-  const proof = new TableProof();
+  const proof = new TableProof(options.realProof === true);
   const clock = { now: Date.now() };
   let attachments: AttachmentsState = EMPTY_ATTACHMENTS;
   const store: AttachmentStore = {
@@ -76,7 +91,7 @@ export async function keeper(): Promise<Keeper> {
     service: () =>
       new JobService(
         new StateJobFiles(folderState(home) as never, tree),
-        new TmuxJobRuntime(tmux, { shell: async () => '/bin/sh' }),
+        new TmuxJobRuntime(tmux, { shell: async () => '/bin/sh' }, undefined, () => options.environment ?? {}),
         store,
         proof,
         sessions,

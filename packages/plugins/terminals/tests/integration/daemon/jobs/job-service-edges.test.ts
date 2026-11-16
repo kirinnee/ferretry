@@ -152,3 +152,65 @@ describe('JobService attachments', () => {
     should((await service.listAttachments('f1')).attachments.every(item => item.detaching)).be.true();
   });
 });
+
+describe('JobService stop when the wrapper does not finish in time', () => {
+  it('should SIGKILL the tracked descendants first, spare a reused pid, and only then take the pane down and record the exit', async () => {
+    // Arrange: two tracked processes still the same, one whose pid has been reused since.
+    const { service, files, runtime, starts, killed } = memoryService();
+    const job = await service.start('f1', { command: 'a' }, person);
+    files.tracked.set(`f1/${job.id}`, [
+      { pid: 301, start: '1000' },
+      { pid: 302, start: '1001' },
+      { pid: 303, start: '1002' },
+    ]);
+    starts.set(301, '1000');
+    starts.set(302, '1001');
+    starts.set(303, '7777'); // reused by an unrelated process: never signalled
+
+    // Act
+    const stopped = await service.stop('f1', job.id);
+
+    // Assert
+    should(killed).deepEqual([301, 302]);
+    should(runtime.killed).deepEqual([job.id]);
+    should(stopped.state).equal('exited');
+    should(stopped.exitCode).equal(137);
+    should(starts.get(303)).equal('7777');
+  });
+
+  it('should record no exit and leave the pane up when a tracked process survives SIGKILL, saying which one', async () => {
+    // Arrange
+    const { service, files, runtime, starts, immortal, killed } = memoryService();
+    const job = await service.start('f1', { command: 'a', name: 'stuck' }, person);
+    files.tracked.set(`f1/${job.id}`, [{ pid: 401, start: '2000' }]);
+    starts.set(401, '2000');
+    immortal.add(401);
+
+    // Act + Assert
+    await should(service.stop('f1', job.id)).be.rejectedWith(
+      /could not stop job stuck: 401 still running after SIGKILL/u,
+    );
+    should(killed).deepEqual([401]);
+    should(files.exits.has(`f1/${job.id}`)).be.false();
+    should(runtime.killed).deepEqual([]);
+    should((await service.get('f1', job.id)).state).equal('running');
+  });
+
+  it('should never signal a start reading it cannot compare, and count that process as still running', async () => {
+    // Arrange: a start that is not the Linux tick count (macOS `ps -o lstart=`), or a host that cannot say.
+    const { service, files, runtime, starts, killed } = memoryService();
+    const job = await service.start('f1', { command: 'a' }, person);
+    files.tracked.set(`f1/${job.id}`, [
+      { pid: 501, start: 'Mon_Nov_16_00:00:00_2026' },
+      { pid: 502, start: '3000' },
+    ]);
+    starts.set(501, '1763251200');
+    starts.set(502, 'unknown');
+
+    // Act + Assert
+    await should(service.stop('f1', job.id)).be.rejectedWith(/501, 502 still running after SIGKILL/u);
+    should(killed).deepEqual([]);
+    should(runtime.killed).deepEqual([]);
+    should(files.exits.has(`f1/${job.id}`)).be.false();
+  });
+});

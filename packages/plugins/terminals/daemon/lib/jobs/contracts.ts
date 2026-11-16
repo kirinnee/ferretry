@@ -11,6 +11,11 @@ export interface JobFilesPort {
   readExit(owner: string, id: string): Promise<JobExit | undefined>;
   /** Writes `exit.json` atomically (the daemon's fallback only, when the wrapper could not). */
   writeExit(owner: string, id: string, exit: JobExit): Promise<void>;
+  /**
+   * The processes the wrapper has tracked for this job, as it wrote them (`pid=start`, one per line): what a stop must not
+   * leave running. Empty when the wrapper has tracked none, or its file is absent.
+   */
+  readTracked(owner: string, id: string): Promise<readonly TrackedProcess[]>;
   /** Asks the wrapper to stop the job: writes `stop`, which the wrapper's watcher turns into SIGTERM on the job's tree. */
   requestStop(owner: string, id: string): Promise<void>;
   outputSize(owner: string, id: string): Promise<number>;
@@ -20,6 +25,12 @@ export interface JobFilesPort {
   list(): Promise<readonly { readonly owner: string; readonly id: string }[]>;
   /** Deletes a job's folder and what is in it. */
   remove(owner: string, id: string): Promise<void>;
+}
+
+/** One process of a job's tree, by incarnation: its pid and the start reading the wrapper took of it. */
+export interface TrackedProcess {
+  readonly pid: number;
+  readonly start: string;
 }
 
 /** A job's tmux session, as the runtime lists it. */
@@ -53,4 +64,6 @@ export interface AttachmentStore {
 /** Proof of which process a pid is: an opaque start reading, or `undefined` when no such process runs, or `'unknown'`. */
 export interface ProcessProof {
   startOf(pid: number): Promise<string | undefined | 'unknown'>;
+  /** SIGKILL to one pid. The caller has just re-proved with `startOf` which process that pid is. */
+  kill(pid: number): Promise<void>;
 }

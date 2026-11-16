@@ -1,7 +1,7 @@
 import type { JobExit, JobMeta } from '../../../contract/index.ts';
 import { JobService } from '../../../daemon/adapters/jobs/job-service.ts';
 import { type AttachmentsState, EMPTY_ATTACHMENTS } from '../../../daemon/lib/jobs/attachments.ts';
-import type { JobFilesPort, JobRuntimePort, RunningJob } from '../../../daemon/lib/jobs/contracts.ts';
+import type { JobFilesPort, JobRuntimePort, RunningJob, TrackedProcess } from '../../../daemon/lib/jobs/contracts.ts';
 
 /** Job files in memory: the wrapper's part (log, exit record) is played by the test. */
 export class MemoryFiles implements JobFilesPort {
@@ -27,6 +27,10 @@ export class MemoryFiles implements JobFilesPort {
   }
   async writeExit(owner: string, id: string, exit: JobExit): Promise<void> {
     this.exits.set(this.key(owner, id), exit);
+  }
+  readonly tracked = new Map<string, readonly TrackedProcess[]>();
+  async readTracked(owner: string, id: string): Promise<readonly TrackedProcess[]> {
+    return this.tracked.get(this.key(owner, id)) ?? [];
   }
   async requestStop(owner: string, id: string): Promise<void> {
     this.stops.add(this.key(owner, id));
@@ -72,12 +76,20 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
   const clock = { now: Date.parse('2026-11-16T00:00:00.000Z') };
   let attachments: AttachmentsState = EMPTY_ATTACHMENTS;
   const starts = new Map<number, string | undefined | 'unknown'>();
+  const killed: number[] = [];
+  const immortal = new Set<number>();
   let counter = 0;
   const service = new JobService(
     files,
     runtime,
     { read: async () => attachments, update: async change => (attachments = change(attachments)) },
-    { startOf: async pid => (starts.has(pid) ? starts.get(pid) : undefined) },
+    {
+      startOf: async pid => (starts.has(pid) ? starts.get(pid) : undefined),
+      kill: async pid => {
+        killed.push(pid);
+        if (!immortal.has(pid)) starts.delete(pid);
+      },
+    },
     { resolve: async reference => (reference === 'ghost' ? undefined : { id: reference, cwd: '/work' }) },
     { now: () => clock.now },
     { next: () => (++counter).toString(16).padStart(12, 'b') },
@@ -88,5 +100,5 @@ export function memoryService(over: { isDirectory?: (path: string) => Promise<bo
       },
     },
   );
-  return { service, files, runtime, clock, starts };
+  return { service, files, runtime, clock, starts, killed, immortal };
 }

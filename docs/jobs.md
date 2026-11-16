@@ -27,6 +27,7 @@ one did (the integration tests build a second service over the same folder to pr
 | `output.log` | wrapper    | stdout and stderr of the job, appended, **capped at 64 MiB** (below)              |
 | `exit.json`  | wrapper    | `{code, signal?, endedAt}`, atomic (temp file + `mv`)                             |
 | `stop`       | daemon     | an empty file: "stop this job". The wrapper's watcher turns it into SIGTERM       |
+| `tracked`    | wrapper    | the incarnations (`pid=start`) of the job's tree; the daemon's fallback reads it  |
 
 State is **derived**: an `exit.json` means `exited`; otherwise a live tmux session means `running`; neither means `lost` (the host
 rebooted or tmux was killed under it).
@@ -45,14 +46,28 @@ rebooted or tmux was killed under it).
 - After it exits the pane closes. The files stay (retention below).
 - **A job is never idle-reaped.** The terminal idle deadline is not applied to jobs at all; a job ends when it ends, is stopped, or its
   ferret is removed from the machine's point of view (files age out).
-- **Stopping** (`fy job stop`): the daemon writes `stop`; within a second the wrapper sends SIGTERM to the job's whole **process
-  tree** (children found with `pgrep -P`), then, after 5 s, SIGKILL to every one of those processes (and whatever they started since) that is still the SAME process.
-  Each is tracked by its **incarnation** (pid plus start time: `/proc/<pid>/stat` on Linux, `ps -o lstart=` elsewhere), so a descendant reparented to
-  any subreaper (init, `systemd --user`) is still followed and a reused pid is never signalled. The wrapper does not record the exit until every
-  descendant it found has gone, so a shell that dies on TERM cannot leave a child that ignored TERM running behind a recorded exit. A job that
-  ignores TERM ends with code 137 / signal KILL. If the wrapper itself does not finish in time the pane is taken down and a KILL exit is
-  recorded by the daemon. A process that detached itself (setsid, double fork) before the stop is out of reach. Where the start time cannot be
-  read the process is not tracked (and so not signalled): a documented degrade, never a guess.
+- **Stopping** (`fy job stop`): the daemon writes `stop`; within about a fifth of a second the wrapper takes ONE snapshot of the job's
+  whole **process tree** (children read from `/proc/<pid>/task/*/children` on Linux, `pgrep -P` elsewhere; no per-subtree re-walk), sends
+  SIGTERM to every process in it, and **starts the 5 s KILL clock at that moment** — a slow host cannot push the deadline out, and
+  the daemon's fallback below cannot be the thing that ends the job. At the deadline it looks once more for descendants born since
+  (while their parent still lives) and sends SIGKILL to all of them. Each is tracked by its **incarnation** (pid plus start time: `/proc/<pid>/stat` on Linux,
+  `ps -o lstart=` elsewhere; the wrapper keeps them in `<job>/tracked`), so a descendant reparented to any subreaper (init,
+  `systemd --user`) is still followed and a reused pid is never signalled. **The wrapper does not record the exit while any tracked
+  descendant is alive**, so a shell that dies on TERM cannot leave a child that ignored TERM running behind a recorded exit; if one
+  survives even SIGKILL the wrapper keeps the job running, says so in the log once, and records the exit only when it is gone. A job
+  that ignores TERM ends with code 137 / signal KILL.
+  If the wrapper has not recorded the exit after 9 s (it is wedged, not slow), the daemon SIGKILLs every tracked process that is still
+  the same incarnation, waits up to 2 s, and only then takes the pane down and records a KILL exit. If a tracked process is still alive after
+  that, `fy job stop` fails saying which pids survived SIGKILL, the job stays `running`, and **no exit is recorded**.
+  - **Escape boundary.** Out of reach: a process that detached itself (setsid, double fork) before the stop; and a child
+    born DURING the stop window whose parent then exits before the next look (it is orphaned between two walks, so no walk from a live process
+    finds it). A child born after the snapshot whose parent is still alive at the next look (the deadline, or the wrapper's own loop once
+    the job shell is gone) IS found and killed — pinned by a test.
+  - **macOS.** `ps -o lstart=` has one-second resolution and does not exclude zombies, so the incarnation check there is
+    weaker than on Linux (where the start time is the kernel's tick count): a pid reused within the same second would pass as
+    the same process, and a zombie reads as alive. It is not an absolute pid-reuse guarantee. The daemon's fallback acts
+    only on Linux tick-count readings; on a start it cannot compare it never signals, and reports the process as still running.
+  - Where the start time cannot be read the process is not tracked (and so not signalled): a documented degrade, never a guess.
 - A signal death is recorded as the shell reports it: **128 + the signal's number**, and `exit.json` also names the signal
   (`"signal":"TERM"`). A command that itself exits 143 reads the same; the code is the fact, the name a convenience.
 - Redaction: a command line and a log are text a secret can ride in, so every route that returns either is built inside one

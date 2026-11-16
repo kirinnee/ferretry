@@ -61,6 +61,23 @@ describe('the job folder', () => {
     should(await sut.readOutput('f1', ID, 0, 0)).have.length(0);
   });
 
+  it('should read the processes the wrapper tracked, skipping a torn or foreign line, and none when the file is absent', async () => {
+    const { files: sut, home } = await files();
+    await sut.create('f1', ID);
+    should(await sut.readTracked('f1', ID)).deepEqual([]);
+
+    await writeFile(
+      join(home, 'jobs', 'f1', ID, 'tracked'),
+      '101=5500\nnot a line\n102=Mon_Nov_16_00:00:00_2026\n103=\n104=77',
+    );
+
+    should(await sut.readTracked('f1', ID)).deepEqual([
+      { pid: 101, start: '5500' },
+      { pid: 102, start: 'Mon_Nov_16_00:00:00_2026' },
+      { pid: 104, start: '77' },
+    ]);
+  });
+
   it("should write the stop request and delete a job's folder and then its ferret's when empty", async () => {
     const { files: sut, home } = await files();
     await sut.create('f1', ID);

@@ -35,6 +35,7 @@ import type {
   JobRuntimePort,
   ProcessProof,
   RunningJob,
+  TrackedProcess,
 } from '../../lib/jobs/contracts.ts';
 import {
   jobCapacityRefusal,
@@ -77,6 +78,8 @@ interface Row {
 /** How long `stop` waits for the wrapper's own TERM → KILL before it takes the pane down itself. */
 const STOP_WAIT_MS = (JOB_STOP_GRACE_SECONDS + 4) * 1_000;
 const STOP_POLL_MS = 200;
+/** How long, after the service's own SIGKILL, the tracked processes get to disappear before one is called a survivor. */
+const KILL_SETTLE_MS = 2_000;
 
 export class JobService {
   private turn: Promise<unknown> = Promise.resolve();
@@ -305,8 +308,11 @@ export class JobService {
   }
 
   /**
-   * Stops a job's tree: the wrapper turns the stop request into SIGTERM, then SIGKILL after the grace. If the wrapper itself does
-   * not finish in time the pane is taken down and a KILL exit is recorded here. A job already ended is answered as it is.
+   * Stops a job's tree: the wrapper turns the stop request into SIGTERM, then SIGKILL after the grace (its KILL clock starts at the
+   * TERM, so it lands well inside `STOP_WAIT_MS`). If the wrapper still has not recorded the exit by then, this service KILLs every
+   * process the wrapper tracked (the same pid + start, never a reused pid) BEFORE it takes the pane down, and records the exit only
+   * once none of them is alive. A process that survives even SIGKILL is said plainly, as an error, and the job stays running: an
+   * exit is never recorded over a live descendant. A job already ended is answered as it is.
    */
   async stop(reference: string, key: string): Promise<JobView> {
     const session = await this.session(reference);
@@ -318,6 +324,12 @@ export class JobService {
       if ((await this.files.readExit(session.id, row.meta.id)) !== undefined) break;
     }
     if ((await this.files.readExit(session.id, row.meta.id)) === undefined) {
+      const survivors = await this.killTracked(session.id, row.meta.id);
+      if (survivors.length > 0)
+        throw new JobServiceError(
+          'conflict',
+          `could not stop job ${row.meta.name}: ${survivors.map(one => one.pid).join(', ')} still running after SIGKILL; the job stays running until ${survivors.length === 1 ? 'it is' : 'they are'} gone`,
+        );
       await this.runtime.kill(row.running);
       if ((await this.files.readExit(session.id, row.meta.id)) === undefined)
         await this.files.writeExit(session.id, row.meta.id, {
@@ -328,6 +340,36 @@ export class JobService {
     }
     this.options.onEvent?.({ kind: 'stopped', sessionId: session.id, jobId: row.meta.id });
     return await this.get(session.id, row.meta.id);
+  }
+
+  /**
+   * SIGKILL to every tracked process that is still the SAME process (pid + start), then up to `KILL_SETTLE_MS` for them to go.
+   * Answers those still alive. A start reading this host cannot compare (not the Linux tick count) counts as alive and is never
+   * signalled: a pid is only signalled once proved to be the process the wrapper saw.
+   */
+  private async killTracked(owner: string, id: string): Promise<readonly TrackedProcess[]> {
+    const tracked = await this.files.readTracked(owner, id);
+    const numeric = (start: string): boolean => /^\d+$/u.test(start);
+    /** Whether the tracked process may still run: gone and a reused pid are not; one this host cannot compare is. */
+    const status = async (one: TrackedProcess): Promise<'gone' | 'same' | 'unprovable'> => {
+      const now = await this.proof.startOf(one.pid).catch(() => 'unknown' as const);
+      if (now === undefined) return 'gone';
+      if (now === 'unknown' || !numeric(one.start)) return 'unprovable';
+      return now === one.start ? 'same' : 'gone';
+    };
+    const alive = async (): Promise<readonly TrackedProcess[]> => {
+      const still: TrackedProcess[] = [];
+      for (const one of tracked) if ((await status(one)) !== 'gone') still.push(one);
+      return still;
+    };
+    for (const one of tracked)
+      if ((await status(one)) === 'same') await this.proof.kill(one.pid).catch(() => undefined);
+    let left = await alive();
+    for (let waited = 0; left.length > 0 && waited < KILL_SETTLE_MS; waited += STOP_POLL_MS) {
+      await this.options.sleep(STOP_POLL_MS);
+      left = await alive();
+    }
+    return left;
   }
 
   // ─── retention ──────────────────────────────────────────────────────────────────────────────────────────────────

@@ -1,9 +1,9 @@
 import { type FileHandle, open, readFile, stat } from '../host/fs.ts';
 import type { StateFileDef, StatePort } from '@ferretry/kernel/contract';
 import { JobExitSchema, type JobExit, type JobMeta, JobMetaSchema } from '../../../contract/index.ts';
-import type { JobFilesPort } from '../../lib/jobs/contracts.ts';
+import type { JobFilesPort, TrackedProcess } from '../../lib/jobs/contracts.ts';
 
-const JOB_FILES = ['job.json', 'exit.json', 'exit.json.tmp', 'stop', 'output.log'] as const;
+const JOB_FILES = ['job.json', 'exit.json', 'exit.json.tmp', 'stop', 'tracked', 'output.log'] as const;
 const ID = /^[a-f0-9]{12}$/u;
 
 /**
@@ -60,6 +60,21 @@ export class StateJobFiles implements JobFilesPort {
     } catch {
       return undefined;
     }
+  }
+
+  async readTracked(owner: string, id: string): Promise<readonly TrackedProcess[]> {
+    let text: string;
+    try {
+      text = await readFile(this.path(owner, id, 'tracked'), 'utf8');
+    } catch {
+      return [];
+    }
+    const found: TrackedProcess[] = [];
+    for (const line of text.split('\n')) {
+      const match = /^(\d+)=(\S+)$/u.exec(line);
+      if (match !== null) found.push({ pid: Number(match[1]), start: match[2] ?? '' });
+    }
+    return found;
   }
 
   async requestStop(owner: string, id: string): Promise<void> {

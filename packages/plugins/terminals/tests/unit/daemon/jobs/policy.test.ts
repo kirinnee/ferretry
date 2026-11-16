@@ -140,8 +140,16 @@ describe('the pane wrapper', () => {
     should(JOB_LOG_CAP_BYTES).equal(64 * 1024 * 1024);
     should(jobPaneArgv({ dir: 'd', shell: 's', command: 'c', cwd: '/', logCapBytes: 5 }).at(-1)).equal('5');
     should(JOB_WRAPPER_SCRIPT).containEql('further output is dropped');
-    should(JOB_WRAPPER_SCRIPT).containEql('signal_seen KILL');
+    should(JOB_WRAPPER_SCRIPT).containEql('reap()');
     should(JOB_WRAPPER_SCRIPT).containEql('ident()');
+  });
+
+  it('should snapshot the tree once and send TERM before it starts the KILL clock, with no re-walk in between', () => {
+    const term = /\nterm\(\) \{[\s\S]*?\n\}\n/u.exec(JOB_WRAPPER_SCRIPT)?.[0] ?? '';
+    should(term.match(/discover/gu)).have.length(1);
+    should(term.indexOf('send TERM')).be.above(term.indexOf('discover'));
+    should(term.indexOf('sleep ')).be.above(term.indexOf('send TERM'));
+    should(term).not.containEql('pgrep');
   });
 
   it('should record the exit atomically, from the pane, and never forward a signal as the attachment would', () => {

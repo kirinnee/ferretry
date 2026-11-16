@@ -55,7 +55,7 @@ import {
   TerminalWaitInputSchema,
 } from '../contract/index.ts';
 import manifest, { JobAttachments, JobFiles } from '../manifest.ts';
-import { hostPlatform, hostUserId, stat } from './adapters/host/fs.ts';
+import { hostPlatform, hostUserId, signalProcess, stat } from './adapters/host/fs.ts';
 import { ExecutableCodePrograms } from './adapters/system/executable-code-programs.ts';
 import { KernelProgramProof } from './adapters/system/kernel-program-proof.ts';
 import {
@@ -640,6 +640,13 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
           return start === undefined ? undefined : String(start);
         } catch {
           return 'unknown';
+        }
+      },
+      kill: async pid => {
+        try {
+          signalProcess(pid, 'SIGKILL');
+        } catch {
+          // already gone
         }
       },
     },
