@@ -14,7 +14,16 @@ export type MessageLabel = z.infer<typeof MessageLabelSchema>;
 export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out', 'cancelled']);
 export type SendFate = z.infer<typeof SendFateSchema>;
 
-export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
+export const SendPathSchema = z.enum([
+  'direct',
+  'turn-file',
+  'native-inline',
+  'native-file',
+  'revive',
+  'revive-queue',
+  /** Handed to a Claude ferret through its MCP channel, never typed (a ferret's or the daemon's own message). */
+  'channel',
+]);
 export type SendPath = z.infer<typeof SendPathSchema>;
 
 export const SendUnaccountedReasonSchema = z.enum([
@@ -165,6 +174,8 @@ export const SendResultSchema = z.strictObject({
   waitBehind: z.string().min(1).optional(),
   label: MessageLabelSchema.optional(),
   heldUntil: InstantSchema.optional(),
+  /** How the message travelled, when that changes what the sender is told: `channel` (handed to the ferret's Ferretry channel, nothing typed). */
+  path: SendPathSchema.optional(),
 });
 export type SendResult = z.infer<typeof SendResultSchema>;
 

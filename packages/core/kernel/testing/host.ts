@@ -53,7 +53,15 @@ import type { DaemonContext } from '../manifest/implement.ts';
 import { projectFilesScope } from '../manifest/project-files.ts';
 import { PROJECT_SOURCES, projectFileKey, projectFilesHandle } from './project-files.ts';
 import { failureResponse } from '../host/responses.ts';
-import type { ContractSurface, FetchPort, HostFactsPort, SelfCountersPort, UpdateHostPort } from '../contract/ports.ts';
+import type {
+  ContractSurface,
+  FetchPort,
+  FileEventsPort,
+  HostFactsPort,
+  SelfCountersPort,
+  UpdateHostPort,
+} from '../contract/ports.ts';
+import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from '../host/adapters/file-events.ts';
 import { undeclaredHostFacts } from '../host/adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from '../host/adapters/self-counters.ts';
 import { nodeFs } from '../host/adapters/node-fs.ts';
@@ -327,6 +335,8 @@ export interface TestHostOptions {
   readonly hostFacts?: HostFactsPort;
   /** What `kernel.selfCounters` answers to a plugin that declared `permissions.selfCounters`. Absent: every read refuses. */
   readonly selfCounters?: SelfCountersPort;
+  /** What `kernel.fileEvents` lists to a plugin that declared `permissions.fileEvents`. Absent: nothing is polled. */
+  readonly fileEvents?: FileEventsPort;
   /**
    * The process table `kernel.processes` asks for a plugin that declared `permissions.processes` (`testProcessTable`).
    * Absent: nothing is listed or signalled. The rule over it is the real host's (`host/processes.ts`).
@@ -336,6 +346,8 @@ export interface TestHostOptions {
   readonly updateHost?: UpdateHostPort;
   /** What `kernel.timings` answers. Default: the shipped numbers (`DEFAULT_DAEMON_TIMINGS`). */
   readonly timings?: DaemonTimings;
+  /** What `kernel.loop.blockedMs()` answers. Default: 0 (the loop never blocked). */
+  readonly loopBlockedMs?: () => number;
   /** The Vault stand-in for `kernel.secrets` (`resolve` and `send`): name to value. Absent, every declared and configured name is `unknown`. */
   readonly vault?: Readonly<Record<string, string>>;
   /** The contract hash per package, as `kernel.contract.hash()` answers its own plugin (`surface` is `'member'` for the member-surface hash). Default: `unhashed`. */
@@ -2684,6 +2696,10 @@ async function start(world: World): Promise<TestHost> {
         manifest.permissions?.selfCounters === true && options.selfCounters !== undefined
           ? options.selfCounters
           : undeclaredSelfCounters(manifest.id, (options.selfCounters ?? NO_SELF_COUNTERS).platform),
+      fileEvents:
+        manifest.permissions?.fileEvents === true
+          ? polledOnly(options.fileEvents ?? NO_FILE_EVENTS)
+          : undeclaredFileEvents(manifest.id),
       processes: processesPortFor(
         manifest.id,
         manifest.permissions?.processes,
@@ -2691,6 +2707,7 @@ async function start(world: World): Promise<TestHost> {
         options.processes ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      loop: { blockedMs: options.loopBlockedMs ?? (() => 0) },
       // the real order: declared, named by its own config (as the test world holds it), then the Vault stand-in;
       // `send` places the value through this plugin's own fetch guard and `options.fetch`, as the real host does
       secrets: ownSecretsPort(

@@ -44,6 +44,8 @@ export interface KernelPorts {
   readonly hostFacts: HostFactsPort;
   /** THIS process's own `/proc/self/io` and `/proc/self/stat` counters and nothing else; only for a manifest with `permissions.selfCounters`. */
   readonly selfCounters: SelfCountersPort;
+  /** Which directories the host polls instead of watching for file events; only for a manifest with `permissions.fileEvents`. */
+  readonly fileEvents: FileEventsPort;
   /**
    * This user's live processes, as pids and yes/no answers only, and SIGTERM to one that runs from this plugin's own
    * folder; only for a manifest with `permissions.processes` ({@link ProcessesPort}).
@@ -56,6 +58,8 @@ export interface KernelPorts {
    * (R247). Read-only; Access's idle expiry counts in `idleDayMs`.
    */
   readonly timings: DaemonTimings;
+  /** How blocked this daemon's event loop has been, read-only and open to every plugin ({@link LoopPort}). */
+  readonly loop: LoopPort;
   /** This plugin's OWN secrets, for its own daemon-side use: declared, named by its own config, known to the Vault. */
   readonly secrets: SecretsPort;
   /**
@@ -1501,6 +1505,19 @@ export interface BindPort {
 export type ProcPidFile = 'stat' | 'status' | 'comm' | 'cmdline' | 'cgroup' | 'statm';
 
 /**
+ * The event loop's own account of its lateness, from the 250 ms tick that also feeds `GET /healthz`. Read-only: there is
+ * no write, no restart lever and no way to reach the meter's detail from here, so it needs no permission.
+ */
+export interface LoopPort {
+  /**
+   * The total milliseconds the loop has been unable to run anything since this daemon started, through NOW (a late tick
+   * that has not fired yet is counted). Never decreasing, so the blocked time over a window is the difference of two
+   * readings. `0` on a host whose composition root does not run the tick (a suite).
+   */
+  blockedMs(): number;
+}
+
+/**
  * The daemon's OWN process counters, for a plugin that reports on the daemon itself (Usage's `fy daemon profile`). A port of
  * its own rather than a grant of `hostFacts`: `hostFacts` reaches any pid's command line, the process list, descriptors and
  * machine facts, and none of that is needed (or allowed) here. The two methods name their one file; no pid, path or file name
@@ -1513,6 +1530,24 @@ export interface SelfCountersPort {
   io(): Promise<string>;
   /** `/proc/self/stat`: CPU times, including the reaped children's (`cutime`, `cstime`). */
   stat(): Promise<string>;
+}
+
+/** One directory the host polls instead of watching, and why: a system error code (`EMFILE`, `ENOENT`), or `failed`. */
+export interface PolledDirectory {
+  readonly directory: string;
+  readonly reason: string;
+  /** How often the host looks at it, in milliseconds. */
+  readonly everyMs: number;
+}
+
+/**
+ * What the host's file events could not watch, for a plugin that reports on the daemon itself (Usage's performance
+ * profile). READ-ONLY and no subscribe: it lists the directories the host polls (every few seconds a `stat` sweep instead
+ * of an event) so a report can say so; it watches nothing for the caller and takes no path.
+ */
+export interface FileEventsPort {
+  /** The directories polled right now, in the order they began to be. */
+  polled(): readonly PolledDirectory[];
 }
 
 /** A machine-wide file under `/proc/` that `hostFacts.procSystemFile` reads. */

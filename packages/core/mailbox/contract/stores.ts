@@ -31,7 +31,9 @@ export type SendPath =
   /** The session was terminal or its pane was gone: the message became a revive's first turn. */
   | 'revive'
   /** The revive was refused, so the message is held durably for an explicit one. */
-  | 'revive-queue';
+  | 'revive-queue'
+  /** Handed to a Claude ferret through its MCP channel, never typed: only the transcript's word proves it arrived. */
+  | 'channel';
 
 /**
  * What the daemon KNOWS about a send, as distinct from what it hoped.

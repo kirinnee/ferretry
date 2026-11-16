@@ -4,6 +4,7 @@ import type {
   BoundAddress,
   ContractSurface,
   HostFactsPort,
+  FileEventsPort,
   SelfCountersPort,
   UpdateHostPort,
 } from '../contract/ports.ts';
@@ -122,6 +123,14 @@ import { exactNetworkHosts, ownSecretsPort } from './secrets.ts';
 import { NO_HOST_FACTS } from './no-host-facts.ts';
 import { undeclaredHostFacts } from './adapters/host-facts.ts';
 import { NO_SELF_COUNTERS, undeclaredSelfCounters } from './adapters/self-counters.ts';
+import { NO_FILE_EVENTS, polledOnly, undeclaredFileEvents } from './adapters/file-events.ts';
+import {
+  createLoopMeter,
+  describeLoopStall,
+  type IoPressureSource,
+  LOOP_INTERVAL_MS,
+  type LoopWatchdogPort,
+} from './loop-health.ts';
 import { type UpdateHostFiles, undeclaredUpdateHost } from './adapters/update-host.ts';
 import { PRODUCT_BINARIES } from './binaries.ts';
 import { hostProgramLines } from './doctor-programs.ts';
@@ -255,8 +264,17 @@ export interface HostAdapters {
   readonly operatorVariable?: (name: string) => string | undefined;
   /** `kernel.hostFacts` (`/proc`, `/sys`). Absent: every read refuses. */
   readonly hostFacts?: HostFactsPort;
+  /**
+   * Turns the loop meter's 250 ms tick on (the daemon's composition root does; a suite that does not ask has no tick,
+   * so its driven clock has no extra timer, and `/healthz` reports a loop that never lagged). `ioPressure`: the
+   * disk's reading for stalls and `/healthz` (absent on macOS or without PSI); `watchdog`: starts the thread that
+   * ends a process whose loop has stopped (absent: none).
+   */
+  readonly loopHealth?: { readonly ioPressure?: IoPressureSource; readonly watchdog?: () => LoopWatchdogPort };
   /** `kernel.selfCounters` (this process's `/proc/self/{io,stat}`). Absent: every read refuses. */
   readonly selfCounters?: SelfCountersPort;
+  /** `kernel.fileEvents` (the directories the host polls instead of watching). Absent: none is polled. */
+  readonly fileEvents?: FileEventsPort;
   /** This user's process table, for `kernel.processes` (kernel-only). Absent: nothing is listed or signalled. */
   readonly processTable?: ProcessTable;
   /** Gzips an opted-in route's answer. Absent: every answer is plain. */
@@ -507,6 +525,32 @@ async function bootLocked(
   for (const implementation of options.implementations)
     if (implementation.manifest.id !== 'kernel') implementations.set(implementation.manifest.id, implementation);
   const manifests: Manifest[] = [kernelManifest, ...[...implementations.values()].map(impl => impl.manifest)];
+  // The loop's own account of its lateness, ticking from here so a stall DURING boot is on the record too. Stopped with
+  // the host, or here when the boot does not end running.
+  const knownIds = new Set(manifests.map(manifest => manifest.id));
+  const ioPressure = adapters.loopHealth?.ioPressure;
+  const watchdog = adapters.loopHealth?.watchdog?.();
+  const loop = createLoopMeter({
+    nowMs: () => clock.nowMs(),
+    ...(ioPressure === undefined ? {} : { io: () => ioPressure.current() }),
+    onStall: stall => log.warn(describeLoopStall(stall)),
+  });
+  let serving = false;
+  const stopIoPressure = ioPressure?.start();
+  const stopTick =
+    adapters.loopHealth === undefined
+      ? (): void => {}
+      : clock.every(milliseconds(LOOP_INTERVAL_MS), () => {
+          loop.tick();
+          // What the watchdog quotes if it has to end the process: the boot step still running, never a path or value.
+          watchdog?.beat(serving ? [] : [`boot: ${phases.current(knownIds)?.step ?? 'start'}`]);
+        });
+  const stopLoopHealth = (): void => {
+    stopTick();
+    stopIoPressure?.();
+    watchdog?.stop();
+  };
+  own(stopLoopHealth);
   const unsound = privacyRefusals(manifests);
   if (unsound.length > 0)
     return {
@@ -984,6 +1028,10 @@ async function bootLocked(
         manifest.permissions?.selfCounters === true
           ? (adapters.selfCounters ?? NO_SELF_COUNTERS)
           : undeclaredSelfCounters(manifest.id, (adapters.selfCounters ?? NO_SELF_COUNTERS).platform),
+      fileEvents:
+        manifest.permissions?.fileEvents === true
+          ? polledOnly(adapters.fileEvents ?? NO_FILE_EVENTS)
+          : undeclaredFileEvents(manifest.id),
       // The same rule as the testing host (`./processes.ts`), over this machine's table and this host's own handles.
       processes: processesPortFor(
         manifest.id,
@@ -992,6 +1040,8 @@ async function bootLocked(
         adapters.processTable ?? NO_PROCESS_TABLE,
       ),
       timings: options.timings ?? DEFAULT_DAEMON_TIMINGS,
+      // Read-only and for every plugin: the same meter `/healthz` reports, never ticked (so 0) unless the root asked.
+      loop: { blockedMs: () => (adapters.loopHealth === undefined ? 0 : loop.blockedMs()) },
       // `send` goes through this plugin's OWN guarded fetch, to the exact hosts its manifest names (`./secrets.ts`).
       secrets: ownSecretsPort(
         manifest.permissions?.secrets ?? [],
@@ -1336,11 +1386,22 @@ async function bootLocked(
         ...(await doctorLines(records, hooks, jobs, data.refused)),
         ...(await programLines()),
       ]),
-    liveness: () => ({
-      status: phase === 'started' ? 'ok' : 'starting',
-      uptimeSeconds: Math.max(0, Math.round((clock.nowMs() - startedAtMs) / 1000)),
-      pid: options.pid ?? 0,
-    }),
+    liveness: () => {
+      const boot = phases.current(knownIds);
+      const seconds = (ms: number): number => Math.max(0, Math.round(ms / 1000));
+      return {
+        status: phase === 'started' ? 'ok' : 'starting',
+        uptimeSeconds: seconds(clock.nowMs() - startedAtMs),
+        pid: options.pid ?? 0,
+        boot: {
+          phase: phase === 'started' ? 'ready' : 'starting',
+          step: boot?.step ?? 'start',
+          stepElapsedSeconds: seconds(boot?.stepElapsedMs ?? 0),
+          elapsedSeconds: seconds(boot?.bootElapsedMs ?? 0),
+        },
+        eventLoop: loop.view(),
+      };
+    },
   };
   const kernelHandlers = kernelRoutes(kernelSources);
   const kernelBus = kernelSockets(kernelSources);
@@ -1605,6 +1666,7 @@ async function bootLocked(
   phases.mark('jobs');
   jobs.start();
   phase = 'started';
+  serving = true;
   events.publish(PluginsChanged, { generation: 1 });
 
   // 9. Stop in reverse.
@@ -1636,6 +1698,7 @@ async function bootLocked(
         // file-system call the job had already issued may still land after the lock is released (the writes are
         // atomic renames, so at worst a stray temp file).
         trace.push('stop:lock');
+        stopLoopHealth();
         await lease.release();
       }
     })();

@@ -191,6 +191,39 @@ export const MonitorTickFile = defineState({
   store: 'json',
   format: 1,
 });
+/**
+ * `health.jsonl` (F-0203, today's `health-events.jsonl`): the daemon's own journal of fleet-wide health events (a
+ * wedged self-check, an index that would not heal, a self-restart), one stamped line each. A daemon journal, not a
+ * ferret's: none of them belong to one session. Ferrets' own file, written through its state port.
+ */
+export const HealthEventSchema = z.strictObject({
+  at: IsoInstantSchema,
+  type: z.string().min(1),
+  data: z.record(z.string(), JsonValueSchema),
+});
+export const HealthEventsFile = defineState({
+  name: 'health',
+  path: 'health.jsonl',
+  store: 'jsonl',
+  format: 1,
+  schema: HealthEventSchema,
+});
+/**
+ * `self-restart.json` (F-0209): the self-restart cooldown stamp, kept so it outlives the restart it records. A file that
+ * is there but cannot be read is NOT "no stamp" (the reader fails): that is the shape a restart loop leaves.
+ */
+export const SelfRestartStampSchema = z.strictObject({
+  format: z.literal(1),
+  at: IsoInstantSchema,
+  sessions: z.array(z.string().min(1)),
+});
+export const SelfRestartFile = defineState({
+  name: 'self-restart',
+  path: 'self-restart.json',
+  store: 'json',
+  format: 1,
+  schema: SelfRestartStampSchema,
+});
 // ─── worktrees.json (today's managed worktree registry, `lib/worktrees/registry.ts`) ────────────────────────────
 
 export const ManagedWorktreeRecordSchema = z.strictObject({

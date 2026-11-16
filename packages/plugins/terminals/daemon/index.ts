@@ -590,7 +590,12 @@ export function buildTerminals(ctx: DaemonContext<TerminalsManifest>, overrides:
   // reads the environment. Armed, no launch may reach the owner's real Claude Code or Codex, found on the daemon's PATH
   // as the kernel states it at each launch; a refusal is logged here and answered `real_harness`.
   const launchGuard = kernel.hostFacts.launchGuard().active
-    ? new RealHarnessLaunchGuard(() => kernel.hostFacts.launchGuard().searchPath)
+    ? new RealHarnessLaunchGuard(
+        () => kernel.hostFacts.launchGuard().searchPath,
+        undefined,
+        // A launch whose handle sets PATH is searched on that PATH, unspent (`permissions.which`).
+        async (name, env) => await kernel.paths.whichFor(name, env),
+      )
     : undefined;
   const runner = new TmuxRunner({
     tmux,

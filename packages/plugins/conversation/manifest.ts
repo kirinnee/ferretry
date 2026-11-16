@@ -39,6 +39,8 @@ import {
   RELATED_SEARCHED_AUDIT,
   RENDER_SAVED_AUDIT,
   SearchSources,
+  ChannelClaimInputSchema,
+  ChannelPollInputSchema,
   SearchWorkToolInputSchema,
   TurnEnded,
 } from './contract/index.ts';
@@ -416,6 +418,27 @@ export default definePlugin({
         guard: 'secrets',
         summary: 'Find cards and asks by words or id before filing a duplicate; `all` adds old closed ones.',
         input: SearchWorkToolInputSchema,
+      }),
+      // The Claude channel pump of `fy mcp serve` (contract/wire-channel.ts): called as the session by the server itself,
+      // never listed to a model. Polled every few seconds for the life of a ferret, so neither is audit-recorded.
+      tool('channel_poll', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: { skip: 'read' },
+        guard: { none: 'the messages already shown to the ferret, as typed' },
+        summary: 'The channel pump: wait for messages to forward into this Claude session.',
+        input: ChannelPollInputSchema,
+      }),
+      tool('channel_claim', {
+        minimum: 'authenticated',
+        caller: 'any',
+        capability: cap('fleet', 'use'),
+        audit: { skip: 'not recorded: bookkeeping for a message the daemon already ledgered' },
+        guard: { none: 'ids only' },
+        summary:
+          'The channel pump: claim one polled message before writing it to this Claude session (granted only while it is not withdrawn).',
+        input: ChannelClaimInputSchema,
       }),
     ],
     app: [

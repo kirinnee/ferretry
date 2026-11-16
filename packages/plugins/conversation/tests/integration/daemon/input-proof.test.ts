@@ -122,6 +122,46 @@ describe('#45 BG-052 what a harness plugin’s entry proves of an input, through
     ).eql([]);
   });
 
+  it('should keep the channel send id the harness’s reader kept, on every input an entry proves (user, hold, release, drain)', () => {
+    const observer = inputObserverFor('claude');
+    const data = (extra: object) => ({ channelSendId: 's-9', ...extra });
+    const proven = [
+      entry({ id: 'u', role: 'user', text: 'FIXTURE channel words', data: data({}) }),
+      entry({
+        id: 'q:1',
+        role: 'system',
+        text: 'FIXTURE channel words',
+        data: data({ proof: 'queue-operation', operation: 'enqueue' }),
+      }),
+      entry({
+        id: 'q:2',
+        role: 'system',
+        text: 'FIXTURE channel words',
+        data: data({ proof: 'queue-operation', operation: 'dequeue' }),
+      }),
+      entry({ id: 'p', role: 'system', text: 'FIXTURE channel words', data: data({ proof: 'queued-prompt' }) }),
+    ].flatMap((one, ordinal) => observedInputsOf(observer, one, ordinal));
+
+    should(proven.map(input => [input.proof, input.channelSendId])).eql([
+      ['normal-user-record', 's-9'],
+      ['native-queue-hold', 's-9'],
+      ['native-queue-release', 's-9'],
+      ['native-queue-drain', 's-9'],
+    ]);
+  });
+
+  it('should keep no channel send id for typed text, or for an empty or non-text one', () => {
+    const observer = inputObserverFor('claude');
+    for (const data of [undefined, { channelSendId: '' }, { channelSendId: 7 }]) {
+      const [proven] = observedInputsOf(
+        observer,
+        entry({ id: 'u', role: 'user', text: 'FIXTURE typed', ...(data === undefined ? {} : { data }) }),
+        0,
+      );
+      should(proven).not.have.property('channelSendId');
+    }
+  });
+
   it('should prove nothing from an entry that is no input: an assistant’s words, a tool result, or no text', () => {
     for (const harness of ['claude', 'codex'] as const) {
       const observer = inputObserverFor(harness);

@@ -114,3 +114,31 @@ describe('boot phase timings', () => {
     expect(createBootPhases(() => 0, []).line(new Set())).toBe('boot phases: ; total 0ms');
   });
 });
+
+describe('the phase the boot is in now (what the public liveness answer names)', () => {
+  test('is nothing before the first mark', () => {
+    expect(createBootPhases(() => 0, []).current(new Set())).toBeUndefined();
+  });
+
+  test('names the latest phase with how long it and the boot have taken, a known plugin by id', () => {
+    // Reads: mark home (0), mark state:board (2 000), then the current() read (7 500).
+    const phases = createBootPhases(steppedClock([0, 2_000, 7_500]), []);
+    phases.mark('home');
+    phases.mark('state:board');
+    expect(phases.current(new Set(['board']))).toEqual({
+      step: 'state:board',
+      stepElapsedMs: 5_500,
+      bootElapsedMs: 7_500,
+    });
+  });
+
+  test('never prints what a label carried beyond its kind: an unknown plugin, a path or a carrier it does not know', () => {
+    const phases = createBootPhases(steppedClock([0, 1, 2, 3, 4, 5]), []);
+    phases.mark('state:stranger');
+    expect(phases.current(new Set(['board']))?.step).toBe('state');
+    phases.mark('something:/home/me/secret');
+    expect(phases.current(new Set())?.step).toBe('other');
+    phases.mark('carrier:relay');
+    expect(phases.current(new Set())?.step).toBe('carrier:relay');
+  });
+});

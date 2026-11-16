@@ -38,16 +38,18 @@ export class RealHarnessRefusedError extends LaunchGuardRefusal {
  * Why an armed guard could not tell which harness a launch reaches, so it refused it. FAILS CLOSED: a search the
  * guard cannot make is never read as "no real harness found".
  *
- * - `own-path`: the launch's environment sets `PATH` through a handle whose values the guard never sees, so the pane
- *   would look `claude` up on a PATH the guard cannot search.
+ * - `own-path`: the launch's environment sets `PATH` through a handle whose values the guard never sees, and the kernel
+ *   could not search that PATH completely (a handle it may not read, no PATH, an entry it skips such as an empty or
+ *   relative one, or more folders than it searches), so the pane could reach a `claude` the guard did not look at.
  * - `no-path`: the kernel handed no search path at all, so a bare `claude` cannot be looked up.
  */
 export class UnprovableHarnessError extends LaunchGuardRefusal {
   constructor(readonly why: 'own-path' | 'no-path') {
     super(
       why === 'own-path'
-        ? 'test mode refused to launch: the launch sets its own PATH, so it cannot prove which ' +
-            `${GUARDED_HARNESS_NAMES.join('/')} the pane reaches. A test must not set PATH in a ferret's environment.`
+        ? 'test mode refused to launch: the launch PATH could not be searched completely, so it cannot prove which ' +
+            `${GUARDED_HARNESS_NAMES.join('/')} the pane reaches. A test must keep the PATH it sets in a ferret's ` +
+            'environment to absolute folders, at most 64 of them, with no empty entry.'
         : 'test mode refused to launch: this daemon has no PATH to search, so it cannot prove which ' +
             `${GUARDED_HARNESS_NAMES.join('/')} the pane reaches. A test must put a fake first on the daemon's PATH.`,
     );

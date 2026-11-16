@@ -103,6 +103,29 @@ describe('terminals #23 launch guard (U1)', () => {
     expect(warned.map(entry => entry.message)).toEqual([new UnprovableHarnessError('own-path').message]);
   });
 
+  test('terminals #23 launch guard is handed the launch env handle itself and refuses a real claude on its PATH', async () => {
+    const tmux = recordingTmux();
+    const runs: string[][] = [];
+    const handle = { names: ['FY_SESSION_TOKEN', 'PATH'] };
+    const seen: unknown[] = [];
+    const guard = new RealHarnessLaunchGuard(
+      () => '/fake/bin',
+      undefined,
+      async (name, env) => {
+        seen.push(env);
+        return name === 'claude' ? { kind: 'found', path: REAL_CLAUDE } : { kind: 'absent' };
+      },
+    );
+
+    const refused = await runnerOver(tmux, runs, guard).start({ ...spec, env: handle } as unknown as RunSpec);
+
+    expect(refused).toEqual({ ok: false, error: 'real_harness' });
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(env => env === handle)).toBe(true);
+    expect(tmux.asked).toEqual([]);
+    expect(runs).toEqual([]);
+  });
+
   test('terminals #23 launch guard searches a launch PATH it was handed by value, as today', async () => {
     const searched: string[] = [];
     const guard = new RealHarnessLaunchGuard(() => '/daemon/bin', realOnPath(searched));
