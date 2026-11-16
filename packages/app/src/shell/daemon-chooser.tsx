@@ -1,16 +1,22 @@
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ChosenDaemon } from '../connect/provides.ts';
+import type { ChooseDaemonOptions, ChosenDaemon } from '../connect/provides.ts';
 import { distinctDaemonName } from '../daemons/machine-names.ts';
 import { BottomSheet } from '../ui/bottom-sheet.tsx';
 import { useRuntimeVersion, useShell } from './context.tsx';
 import { useFrameRoot } from './frame-root.tsx';
+import type { ShellRuntime } from './runtime.ts';
 
 /**
  * A DAEMON-LESS SCREEN MAY ASK FOR A MACHINE (shell contract S10). The shell draws its own picker (the paired machines
  * where the plugin is on, the purpose as its heading) and answers ONLY the machine the person chose, with that plugin's
  * own client on it. Nothing is chosen for the person: it never resolves without a click, and a cancel (or leaving the
  * screen) answers `undefined`.
+ *
+ * ONE EXCEPTION, opt-in per call: `answerAloneWhenOne` answers at once, no picker, only when exactly ONE machine is
+ * paired at all (v4's rule: it counted every connection record) and it qualifies by the picker's own rule (connected,
+ * inventory read, plugin on). A second paired machine in ANY state asks. Only `/shared` Install asks it; a question
+ * without it always draws the picker, even with one machine. The click that opened the question is still the person's.
  *
  * The picker is a REAL OVERLAY: the app's `BottomSheet` (scrim, focus trap, Escape), portalled to the frame root and
  * painted above every plugin overlay. A plugin's own sheet is a `fixed` `z-40` overlay inside its screen's subtree
@@ -32,9 +38,27 @@ interface Asking {
 }
 
 export interface DaemonChooser {
-  readonly chooseDaemon: (purpose: string) => Promise<ChosenDaemon | undefined>;
+  readonly chooseDaemon: (purpose: string, options?: ChooseDaemonOptions) => Promise<ChosenDaemon | undefined>;
   /** The picker while a question is open, else nothing: portalled to the frame root, outside `WithoutShell`. */
   readonly picker: ReactNode;
+}
+
+/**
+ * The machines the picker lists, and the ones it is told apart among. ONE rule for the picker and for
+ * `answerAloneWhenOne`: a paired machine counts only while this plugin's client on it is answered, which is
+ * `undefined` before the machine answers (down) and while the plugin is off there.
+ */
+function qualifying(runtime: ShellRuntime, plugin: string) {
+  const everyone = runtime.daemons.snapshot().daemons;
+  return { everyone, machines: everyone.filter(paired => runtime.client(paired.daemon, plugin) !== undefined) };
+}
+
+/** The answer for one machine with this plugin's own client on it; `undefined` when either is not there to take. */
+function answerFor(runtime: ShellRuntime, plugin: string, daemon: string): ChosenDaemon | undefined {
+  const paired = runtime.daemons.get(daemon);
+  const client = runtime.client(daemon, plugin);
+  if (paired === undefined || client === undefined) return undefined;
+  return { daemon, machine: distinctDaemonName(paired, runtime.daemons.snapshot().daemons), client };
 }
 
 export function useDaemonChooser(plugin: string): DaemonChooser {
@@ -54,15 +78,31 @@ export function useDaemonChooser(plugin: string): DaemonChooser {
   }, []);
 
   const chooseDaemon = useCallback(
-    (purpose: string): Promise<ChosenDaemon | undefined> =>
+    (purpose: string, options?: ChooseDaemonOptions): Promise<ChosenDaemon | undefined> =>
       new Promise(resolve => {
         // One question at a time: a new one cancels the one still open.
         open.current?.settle(undefined);
+        open.current = null;
+        setAsking(null);
+        // Opt-in, per call: with EXACTLY ONE qualifying machine the shell answers alone and draws no picker. Zero or
+        // several ask as ever. The caller's own click started this question; nothing here acts without it.
+        if (options?.answerAloneWhenOne === true) {
+          const { everyone, machines } = qualifying(runtime, plugin);
+          // v4's rule: alone only when ONE machine is paired at all. Any second paired machine, whatever its state
+          // (connecting, unreachable, refused, unreadable, plugin off), could be the one the person means: ask.
+          const only = everyone.length === 1 && machines.length === 1 ? machines[0] : undefined;
+          const alone = only === undefined ? undefined : answerFor(runtime, plugin, only.daemon);
+          if (alone !== undefined) {
+            releases.current.push(runtime.passkeyOnScreen.choose(alone.daemon));
+            resolve(alone);
+            return;
+          }
+        }
         const next: Asking = { purpose, settle: resolve };
         open.current = next;
         setAsking(next);
       }),
-    [],
+    [runtime, plugin],
   );
 
   useEffect(
@@ -75,15 +115,13 @@ export function useDaemonChooser(plugin: string): DaemonChooser {
   );
 
   if (asking === null) return { chooseDaemon, picker: null };
-  const everyone = runtime.daemons.snapshot().daemons;
-  const machines = everyone.filter(paired => runtime.client(paired.daemon, plugin) !== undefined);
+  const { everyone, machines } = qualifying(runtime, plugin);
   const choose = (daemon: string): void => {
     // Look the machine and its client up first: the override is taken only for a choice that is really answered.
-    const paired = runtime.daemons.get(daemon);
-    const client = runtime.client(daemon, plugin);
-    if (paired === undefined || client === undefined) return;
+    const answer = answerFor(runtime, plugin, daemon);
+    if (answer === undefined) return;
     releases.current.push(runtime.passkeyOnScreen.choose(daemon));
-    close({ daemon, machine: distinctDaemonName(paired, everyone), client });
+    close(answer);
   };
   return {
     chooseDaemon,

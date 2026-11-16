@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { ownerAsks } from '@ferretry/core-asks/contract';
+import { ownerAsks, parseAgendaMessage } from '@ferretry/core-asks/contract';
 import type { TranscriptEvent } from '@ferretry/plugin-conversation/contract';
 
 /**
@@ -41,6 +41,10 @@ export interface FinishedTurn {
   readonly reply: string;
   /** How many Agenda items the turn's own tool calls raised or edited. */
   readonly raised: number;
+  /** The items the opener was an owner reply about (`[re !A5 «title»] …`), without the `!`. */
+  readonly discussed: readonly string[];
+  /** Of those, the ones the turn's own tool calls answered, rested, edited, closed or surfaced. */
+  readonly handled: readonly string[];
 }
 
 /**
@@ -55,6 +59,19 @@ export const raisesAgendaItem = (event: TranscriptEvent): boolean => {
   if (RAISING_TOOL.test(event.call.name)) return true;
   if (event.call.name.endsWith('_open') && JSON.stringify(event.call.input).includes('"askOwner"')) return true;
   return RAISING_COMMAND.test(JSON.stringify(event.call.input));
+};
+
+/** A command that answers, rests, edits, closes or surfaces the item: `agenda answer|rest|edit|done|dismiss|surface` naming it. */
+const handles = (event: TranscriptEvent, id: string): boolean =>
+  event.kind === 'tool-call' &&
+  new RegExp(`\\b(?:attention|agenda)\\W+(?:answer|rest|edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
+    JSON.stringify(event.call.input),
+  );
+
+/** The items an owner chat message was about: the opener the daemon words for one, `[re !A5 «title», !A7 «title»] …`. */
+const discussedIn = (opener: string): string[] => {
+  const [first] = parseAgendaMessage(opener)?.parts ?? [];
+  return first?.kind === 're' ? [...new Set(first.items.map(item => item.id))] : [];
 };
 
 /**
@@ -78,7 +95,14 @@ export function finishedTurn(events: readonly TranscriptEvent[]): FinishedTurn |
     .join('\n')
     .trim();
   if (reply === '') return undefined;
-  return { opener, reply, raised: turn.filter(raisesAgendaItem).length };
+  const discussed = discussedIn(opener);
+  return {
+    opener,
+    reply,
+    raised: turn.filter(raisesAgendaItem).length,
+    discussed,
+    handled: discussed.filter(id => turn.some(event => handles(event, id))),
+  };
 }
 
 /** What the session is, as far as the check is concerned. */
@@ -111,7 +135,8 @@ export function agendaNudgeMessage(
 /**
  * The nudge for a finished turn, or `undefined` when there is nothing to say. Pure: a helper, a turn the nudge itself
  * started, a reply that asks nothing of the owner, and a turn that raised as many items as the reply asked for are all
- * left alone.
+ * left alone. One message at most: the discussed-item line first, then, only when the reply also asked the owner to
+ * act, the raise line.
  */
 export function attentionNudge(
   turn: FinishedTurn,
@@ -122,9 +147,28 @@ export function attentionNudge(
   if (subject.parent) return undefined;
   if (turn.opener.trimStart().startsWith(AGENDA_NUDGE_MARK)) return undefined;
   if (startedByNudge(turn.opener, lastNudge)) return undefined;
+  const left = turn.discussed.filter(id => !turn.handled.includes(id));
   const asks = ownerAsks(turn.reply);
-  if (asks.length === 0 || turn.raised >= asks.length) return undefined;
-  return { asks, message: agendaNudgeMessage(asks, turn.raised, subject, binary) };
+  const toRaise = asks.length > 0 && turn.raised < asks.length;
+  const raise = toRaise ? agendaNudgeMessage(asks, turn.raised, subject, binary) : undefined;
+  if (left.length === 0) return raise === undefined ? undefined : { asks, message: raise };
+  const discussion = discussionNudgeMessage(left, binary);
+  return {
+    asks: [...left.map(id => `discussed !${id}`), ...(toRaise ? asks : [])],
+    message: raise === undefined ? discussion : `${discussion}\n${raise.slice(AGENDA_NUDGE_MARK.length).trim()}`,
+  };
+}
+
+/**
+ * THE DISCUSSED-ITEM LINE (as v4): the owner replied about items (`[re !A5 …]`) and the ferret answered in chat only. A
+ * replied item RESTS, off the owner's list and waiting on the ferret: the words say to answer on it (back to the owner,
+ * in its old place), or to close it when nothing more is expected.
+ */
+export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
+  const named = ids.map(id => `!${id}`).join(', ');
+  const first = ids[0] as string;
+  const off = ids.length === 1 ? 'it rests, waiting on you' : 'they rest, waiting on you';
+  return `${AGENDA_NUDGE_MARK} Owner replied about ${named}; ${off}. Answer on it: \`${binary} agenda answer ${first} "<text>"\` (back on their list), or \`${binary} agenda done ${first}\` when nothing more is expected.`;
 }
 
 /** How long after a turn ends the transcript is read: the pane shows the end before the last words reach the file (as v4). */
@@ -218,7 +262,8 @@ const NOTHING_TYPED: ReadonlySet<string> = new Set([
  * a `session_send_failed` whose record is kept, a code not listed, a throw that is not a {@link NudgeSendFailure}) may
  * have reached the prompt, and keeps the mark: an under-nudge is harmless, a nudge loop spends the owner's model.
  */
-const nothingTyped = (error: unknown): boolean => error instanceof NudgeSendFailure && NOTHING_TYPED.has(error.code);
+export const nothingTyped = (error: unknown): boolean =>
+  error instanceof NudgeSendFailure && NOTHING_TYPED.has(error.code);
 
 /** What the check reads and how it sends. */
 export interface AgendaNudgePorts extends NudgeStore {
