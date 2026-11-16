@@ -112,11 +112,11 @@ jobs:
         run: ./scripts/ci/scope-fetch.sh
       - name: Run the quick set
         env:
-          # FOUR test processes on the 8x16, not six: each bun process is several threads (GC helpers, workers), and six
-          # of them on eight vCPUs stretched a 100 ms synchronous-slice budget to 164 ms (board watcher-stall, measured on
-          # the first run of this shape). With the groups longest first, four slots finish at the kernel group's ~280 s,
-          # exactly what six did: the pool starts plugins-a and scripts as the shorter groups end.
-          FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '4' }}
+          # SIX parts on the 8x16 (six unit groups + scripts, longest first; scripts and anything past six start as the
+          # first groups end). Measured: six and four at a time ran the kernel-heavy groups equally fast (252-283 s), so
+          # the CPU is not oversubscribed; the board watcher-stall budget miss seen in both was heap state, not cores
+          # (see config/test-groups.json's board placement in docs/standards/ci-cd).
+          FY_CI_QUICK_PARALLEL: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'workflow_dispatch' && inputs.quick_shape == '4x8')) && '3' || '6' }}
           # The tsc cache is the Static Checks job's (typecheck runs there); quick.sh still empties a local one on main.
           FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
           FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
@@ -157,8 +157,8 @@ jobs:
   # The static parts of the quick set - formatting, every pre-commit gate (typecheck included) and the build checks -
   # BESIDE the unit tier instead of after it (`quick.sh --static`). They read no test result and are never scoped: the
   # same events as Quick, the whole tree. On Quick's runner they started only after its ~13 min of tests and added
-  # ~105 s; here they finish while the tests run. A 4x8 with two parts and two gates at a time: four gates at once
-  # got typecheck's tsc OOM-killed on its 8 GB (measured on the first run of this job).
+  # ~105 s; here they finish while the tests run. An 8x16 with the limits they had there (three parts, four gates):
+  # on a 4x8 typecheck's tsc (TypeScript 7) was OOM-killed on the 8 GB, with four gates at once AND with two.
   static:
     name: Static Checks
     if: ${{ (github.event.action != 'labeled' || github.event.label.name == 'full-ci') && (github.event.action != 'edited' || github.event.changes.base != null) }}
@@ -167,7 +167,7 @@ jobs:
       contents: read
     runs-on:
       [
-        nscloud-ubuntu-24.04-amd64-4x8-with-cache,
+        nscloud-ubuntu-24.04-amd64-8x16-with-cache,
         nscloud-cache-tag-ferretry-nix,
         nscloud-cache-size-10gb,
         nscloud-cache-allow-commit-from-main,
@@ -192,8 +192,8 @@ jobs:
         run: ./scripts/ci/check-base.sh
       - name: Run the static parts
         env:
-          FY_CI_QUICK_PARALLEL: '2'
-          FY_CI_GATE_PARALLEL: '2'
+          FY_CI_QUICK_PARALLEL: '3'
+          FY_CI_GATE_PARALLEL: '4'
           # quick.sh derives FY_TSC_CACHE_DIR from $HOME, the directory mounted above, and on main empties it first.
           FY_CI_MAIN: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && '1' || '' }}
           FY_CI_CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}

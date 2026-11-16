@@ -51,7 +51,7 @@ cancel a running set.
 | Set / job                                                | PR runner           | Other events                          | Work                                                        |
 | -------------------------------------------------------- | ------------------- | ------------------------------------- | ----------------------------------------------------------- |
 | Quick Checks                                             | Namespace 8x16      | Namespace 4x8 on main; dispatch picks | five unit groups + scripts tests side by side; unit ledger  |
-| Static Checks                                            | Namespace 4x8       | Namespace 4x8                         | format, every pre-commit gate, build checks                 |
+| Static Checks                                            | Namespace 8x16      | Namespace 8x16                        | format, every pre-commit gate, build checks                 |
 | Integration Tests                                        | Namespace 8x16      | Namespace 8x16                        | six isolated groups, then the integration ledger            |
 | Full Gates                                               | Namespace 4x8       | GitHub                                | both Knip checks and route agreement (Knip needs >4GB)      |
 | Compile Binaries + SIT                                   | Namespace 2x4       | GitHub                                | cross-compile, upload the binaries, then SIT on those bytes |
@@ -104,19 +104,24 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   `parallel.sh` is a POOL: the next part starts the moment any running part ends, so parts are listed longest
   first. The contention rule still holds - no test budget is raised to make room for other work - and is now met by
   RUNNER, not by ordering: the static parts (format/gates/build, `nice -n 10`) run in their own `Static Checks` job,
-  so Quick's 8x16 runs only the five unit groups and the scripts tests, FOUR at a time: six on eight vCPUs stretched
-  the board watcher-stall test's 100 ms slice to 164 ms, and four finish at the kernel group's ~280 s anyway. Static
-  Checks runs two parts and two gates at a time on its 4x8 (four gates got tsc OOM-killed). The first 8x16
+  so Quick's 8x16 runs only the unit groups and the scripts tests, six at a time. Static
+  Checks is an 8x16 with three parts and four gates at a time, as on Quick's runner before (on a 4x8 the TypeScript 7
+  tsc was OOM-killed with four gates and with two). The first 8x16
   run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
   instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
   `unit-timings.tsv` in the part artifact.
-- **Why five unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
+- **Why six unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
   files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
-  260 s, runtimes 149, voice 75, conversation 58, catalogs 31, std 24, browsers 23, terminals 23, board 20, ferrets 20,
-  everything else ~118. The groups keep each package whole (the ledger passes a file only when ONE group covers it
-  100%) and balance by those seconds: `kernel` (~260), `runtimes` (~150), `conversation-voice` (~133), `plugins-a`
-  (catalogs, browsers, terminals, board, std: ~120) and `everything-else` (~140). The kernel group is the floor; going
-  lower means splitting the kernel package, which the per-group ledger rule forbids. Rebalance from
+  260 s (its `tests/unit/host-config/` alone 147 s), runtimes 149, voice 75, conversation 58, catalogs 31, std 24,
+  browsers 23, terminals 23, board 20, ferrets 20, everything else ~118. The groups balance by those seconds:
+  `runtimes` (~150), `kernel-host-config` (~145), `conversation-voice` (~133), `kernel` (the rest, ~110), `plugins-a`
+  (catalogs, browsers, terminals, std: ~100) and `everything-else` (~160). A plugin package stays whole (the ledger
+  passes a file only when ONE group covers it 100%); the kernel is split by test folder because it has a single
+  `lib/` file (`app/lib/`), which its `kernel` group covers alone, so the split cannot move a judged file between
+  groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-card
+  tick writes) passed every time behind app, cli, core and the plugins before it in one process, and missed the budget
+  (128-164 ms) twice as the FIRST files of a fresh process - with six and with four processes at once, so not CPU. The
+  budget is unchanged; the test keeps the position it always passed in. Rebalance from
   `unit-timings.tsv` and the JUnit per-file times, never by guessing. A SCOPED run may leave a group with no file;
   only then is an empty group not a failure (`group-files.sh` says so, `test.sh` leaves an empty ledger and a
   `scoped-out` marker).
