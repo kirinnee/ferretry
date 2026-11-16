@@ -34,6 +34,16 @@ export const LinkableConversationSchema = z.strictObject({
   model: z.string().min(1).optional(),
   keptBy: z.string().min(1).optional(),
   keptIn: z.enum(['ferretry', 'computer']).optional(),
+  /**
+   * The ferret that runs, or ran, this conversation, and its name now. `name` leads with the ferret's name and adds the
+   * conversation's own `title` when that differs, so one line names the conversation either way it is remembered.
+   */
+  ferret: FerretIdSchema.optional(),
+  ferretName: z.string().min(1).max(CONVERSATION_NAME_MAX).optional(),
+  /** The conversation's own title: the owner's `/rename`, the CLI's generated one, or Codex's thread name. */
+  title: z.string().min(1).max(CONVERSATION_NAME_MAX).optional(),
+  /** The listed copy is Ferretry's (a ferret's or the pool's) and the same conversation is also in the owner's own CLI history. */
+  alsoOnComputer: z.literal(true).optional(),
 });
 export type LinkableConversation = z.infer<typeof LinkableConversationSchema>;
 
@@ -53,6 +63,8 @@ export const LinkListingSchema = z.strictObject({
   matched: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
   computerListed: z.literal(false).optional(),
+  /** The index is still being read (first build after a start, or catching up): this answer lists what is indexed so far. */
+  indexing: z.literal(true).optional(),
 });
 export type LinkListing = z.infer<typeof LinkListingSchema>;
 

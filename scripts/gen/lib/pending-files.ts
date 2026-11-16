@@ -34,13 +34,22 @@ const KEYS = ['pending', 'pendingReasons', 'pendingHalves', 'pendingAppPorts', '
  */
 export const NOT_SEARCHED = ['.git', 'node_modules', '.worktrees', '.direnv'] as const;
 
-/** Every `ports-pending.json` under `root`, root-relative, sorted; skips only the directories in `NOT_SEARCHED`. */
+/**
+ * The one folder skipped by its path from the root, not its name: the fixture workspaces `scripts/gen/tests` build (each
+ * has a `packages/plugins/alpha/ports-pending.json` of its own). It is git-ignored and owned by those tests, which run in
+ * the same job as the checks that scan the real tree, so a scan that met a fixture still alive read a pending list that was
+ * not the repo's and failed with "listed twice". A fixture's own scan has its folder as root, so it never meets this path.
+ */
+export const NOT_SEARCHED_PATHS = ['scripts/gen/tests/.tmp'] as const;
+
+/** Every `ports-pending.json` under `root`, root-relative, sorted; skips only the directories in `NOT_SEARCHED` and `NOT_SEARCHED_PATHS`. */
 export function pendingFilePaths(root: string): string[] {
   const found: string[] = [];
   const walk = (rel: string): void => {
     for (const entry of readdirSync(join(root, rel), { withFileTypes: true })) {
       if ((NOT_SEARCHED as readonly string[]).includes(entry.name)) continue;
       const next = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if ((NOT_SEARCHED_PATHS as readonly string[]).includes(next)) continue;
       if (entry.isDirectory()) walk(next);
       else if (entry.name === PENDING_FILE) found.push(next);
     }

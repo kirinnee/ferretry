@@ -90,9 +90,10 @@ describe('the launch argv', () => {
       hasMcp: false,
       conversation: { kind: 'new', id: 'c-1' },
     });
-    expect(argv.slice(0, 7)).toEqual([
+    expect(argv.slice(0, 8)).toEqual([
       'env',
       'CLAUDE_CONFIG_DIR=/state/claude-code/agent-homes/f1',
+      'DISABLE_AUTOUPDATER=1',
       API_KEY_SEED_SHELL,
       '-c',
       API_KEY_SEED_SCRIPT,
@@ -119,8 +120,8 @@ describe('the launch argv', () => {
       model: 'claude-opus-5-5',
       conversation: { kind: 'resume', id: 'c-2' },
     });
-    expect(one[4]).toBe(API_KEY_SEED_SCRIPT);
-    expect(two[4]).toBe(API_KEY_SEED_SCRIPT);
+    expect(one[5]).toBe(API_KEY_SEED_SCRIPT);
+    expect(two[5]).toBe(API_KEY_SEED_SCRIPT);
     for (const word of ['/a/claude', '/b/claude', '/h/one', '/h/two', 'c-1', 'c-2', 'claude-opus-5-5'])
       expect(API_KEY_SEED_SCRIPT.includes(word)).toBe(false);
     // The value reaches jq through its environment, never as an argument a process listing would show.

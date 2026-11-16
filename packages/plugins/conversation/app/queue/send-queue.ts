@@ -6,13 +6,13 @@
 // ledger rows, so one message is one bubble for its whole life.
 
 import { DaemonCallError } from '@ferretry/app';
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import { heldRead, type PluginClient } from '@ferretry/kernel/manifest';
 import { FerretQueueSchema, type QueuedMessage, QueueEditRequestSchema } from '../../contract/index.ts';
 import type { LedgerSendRecord } from '../chat/send-ledger.ts';
 import { type OutboxEntry, type SendOutbox, WAITING_REASON } from '../composer/send-outbox.ts';
 
 /** The half's client, as far as the queue uses it. */
-type QueueClient = Pick<PluginClient, 'call'>;
+type QueueClient = Pick<PluginClient, 'call' | 'conditional'>;
 
 interface QueueSender {
   readonly kind: 'owner' | 'ferret' | 'ferretry';
@@ -69,8 +69,14 @@ export const readFerretQueuePage = async (
   ferretId: string,
   request: QueuePageRequest = {},
 ): Promise<QueuePageRead> => {
+  // Through the held-read memory: a queue nobody touched is a bodyless `304` and the page already held.
   const page = FerretQueueSchema.parse(
-    await client.call('GET /v1/ferrets/:ferretId/queue', { params: { ferretId }, query: pageQuery(request) }),
+    (
+      await heldRead(client, 'GET /v1/ferrets/:ferretId/queue', {
+        params: { ferretId },
+        query: pageQuery(request),
+      })
+    ).body,
   );
   return { messages: page.messages, nextCursor: page.nextCursor ?? null };
 };

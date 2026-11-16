@@ -24,8 +24,16 @@ semantic_release="${FY_SEMANTIC_RELEASE:-./node_modules/.bin/semantic-release}"
 attempts=3
 
 ./scripts/ci/setup.sh
-# The release commit ("release: x.y.z") must not fight local hooks in CI.
+# The release commit ("release: x.y.z") must run NO git hooks. setup.sh above installs the repo's hooks
+# and points core.hooksPath at them, so deleting .git/hooks/* alone left the whole pre-commit gate set
+# running on a commit that only touches the generated release assets: 100 s of every release, measured
+# on 2026-11-16. `GIT_CONFIG_COUNT` is "command"-scope config, which outranks the repo, worktree and
+# global files, so no hooksPath set anywhere can bring a hook back. /dev/null is not a directory, so git
+# finds no hook in it. An inherited GIT_CONFIG_COUNT is extended, never overwritten.
 rm -f .git/hooks/*
+config_count="${GIT_CONFIG_COUNT:-0}"
+export "GIT_CONFIG_KEY_${config_count}=core.hooksPath" "GIT_CONFIG_VALUE_${config_count}=/dev/null"
+export GIT_CONFIG_COUNT=$((config_count + 1))
 
 # CI's own list of files a commit may change without a CI run: one fact, one owner.
 mapfile -t ignored < <(yq -r '.on.push."paths-ignore"[]' .github/workflows/ci.yaml)

@@ -1,6 +1,26 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { firstInstantMs, instantMs, isoFromMs, latestInstantMs } from '../../daemon/lib/index.ts';
+import { pacificOf, resetInstantMs } from '../../daemon/lib/time.ts';
+
+describe('the reset time of a limit', () => {
+  it('should accept a real instant and refuse unset, zero, negative, infinite and non-numbers', () => {
+    // Arrange / Act / Assert
+    should(resetInstantMs(1_800_000_000_000)).equal(1_800_000_000_000);
+    for (const bad of [undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])
+      should(resetInstantMs(bad)).be.undefined();
+  });
+
+  it('should show an instant in Pacific time, standard and daylight, never UTC', () => {
+    // Arrange / Act
+    const winter = pacificOf(Date.parse('2026-11-03T17:00:00.000Z'));
+    const summer = pacificOf(Date.parse('2026-07-04T19:30:00.000Z'));
+
+    // Assert
+    should(winter).match(/^Nov 3, 9:00\sAM PST$/);
+    should(summer).match(/^Jul 4, 12:30\sPM PDT$/);
+  });
+});
 
 describe('warden instant parsing', () => {
   it.each([

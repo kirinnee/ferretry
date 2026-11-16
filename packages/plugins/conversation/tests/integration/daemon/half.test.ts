@@ -98,6 +98,42 @@ describe('conversation daemon half, through the kernel test host', () => {
     expect(response.json()).toMatchObject({ messages: [] });
   });
 
+  for (const [name, route, file] of [
+    ['the send ledger', '/v1/ferrets/f1/sends', SENDS_STATE],
+    ['the queue', '/v1/ferrets/f1/queue', QUEUE_STATE],
+  ] as const) {
+    test(`${name} is a conditional read: 200 with an etag, 304 for a repeat, a new etag once a line is appended`, async () => {
+      const host = await boot();
+      const first = await host.request('GET', route, { as: owner() });
+      expect(first.status).toBe(200);
+      const tag = first.headers.get('etag');
+      expect(tag).toMatch(/^"[A-Za-z0-9_-]{43}"$/u);
+
+      const repeat = await host.request('GET', route, { as: owner(), headers: { 'if-none-match': tag as string } });
+      expect(repeat.status).toBe(304);
+      expect(repeat.body).toBe('');
+
+      // Any line landing in the file moves its identity, whatever the line says.
+      host.state('conversation').plant(file, '{"v":1}\n', 'f1');
+      const changed = await host.request('GET', route, { as: owner(), headers: { 'if-none-match': tag as string } });
+      expect(changed.status).toBe(200);
+      expect(changed.headers.get('etag')).not.toBe(tag);
+    });
+  }
+
+  test('a queue nobody wrote to, of a ferret nobody knows, is not found even to a reader holding a tag', async () => {
+    const host = await testHost({
+      plugins: [daemon],
+      fakes: { ferrets: { get: async () => undefined, resolve: async () => ({ kind: 'unknown' as const }) }, asks: {} },
+      clock: fixedClock('2026-11-06T09:00:00Z'),
+    });
+    const answered = await host.request('GET', '/v1/ferrets/f1/queue', {
+      as: owner(),
+      headers: { 'if-none-match': '*' },
+    });
+    expect(answered.status).toBe(404);
+  });
+
   test('a send says plainly that the ferret’s terminal is not connected yet', async () => {
     // The harness gate is open, so a send reaches the terminal seam. This host's Ferrets fake offers no harness (the
     // seam is optional on the port), so the honest answer is that Conversation has no way to reach the terminal: 503,
@@ -156,18 +192,13 @@ describe('the merged half', () => {
     expect(logs.json()).toMatchObject({ code: 'no_transcript' });
   });
 
-  test('a render saved is served back, and a link listing and its preview say plainly that they are not in 5.0 yet', async () => {
+  test('a link listing answers from the conversation index (empty while no harness offers history), and an unknown preview is a 404', async () => {
     const host = await boot();
     const links = await host.request('GET', '/v1/links/conversations', { as: owner() });
-    expect(links.status).toBe(503);
-    // One fixed sentence, never a raw error: the app draws `error` as it is.
-    expect(links.json()).toMatchObject({
-      code: 'conversation_harness_unavailable',
-      error: expect.stringContaining('Not in 5.0 yet'),
-    });
+    expect(links.status).toBe(200);
+    expect(links.json()).toMatchObject({ conversations: [], matched: 0, skipped: 0 });
     const preview = await host.request('GET', '/v1/links/conversations/claude-code/abc/preview', { as: owner() });
-    expect(preview.status).toBe(503);
-    expect(preview.json()).toMatchObject({ error: (links.json() as { error: string }).error });
+    expect(preview.status).toBe(404);
     const unknown = await host.request('GET', '/v1/renders/rd_000000000000000000000000/meta', { as: owner() });
     expect([400, 404]).toContain(unknown.status);
   });

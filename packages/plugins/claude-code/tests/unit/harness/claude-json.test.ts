@@ -48,6 +48,7 @@ describe('mergeClaudeJson', () => {
       projects: {
         [CWD]: {
           hasTrustDialogAccepted: false,
+          enableAllProjectMcpServers: false,
           enabledMcpjsonServers: ['docs'],
           disabledMcpjsonServers: ['tracker'],
           allowedTools: ['Bash'],
@@ -63,6 +64,7 @@ describe('mergeClaudeJson', () => {
       projects: {
         [CWD]: {
           hasTrustDialogAccepted: true,
+          enableAllProjectMcpServers: false,
           enabledMcpjsonServers: ['docs'],
           disabledMcpjsonServers: ['tracker'],
           allowedTools: ['Bash'],

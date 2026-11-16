@@ -63,6 +63,9 @@ export function refusal(edge: ImportEdge): string | undefined {
     // A half: its own area, its manifest and its contract. The Kernel's app half has the kernel's own: its manifest
     // (`plugin.ts`), the manifest SDK and the contract, the three every other half reaches by package name.
     if (to === from || to === 'manifest' || to === 'contract') return undefined;
+    // The half's own feature list (`daemon/generated/features.ts`, written by the generator from `daemon/features/`).
+    if (from === 'daemon' && to === 'generated' && /^\.\/generated\/features\.ts$/.test(edge.specifier))
+      return undefined;
     if (from === 'app' && (to === 'kernel-plugin' || to === 'kernel-manifest' || to === 'kernel-contract'))
       return undefined;
     return `the ${from} half imports its own ${to} files; halves share only the manifest and the contract`;
