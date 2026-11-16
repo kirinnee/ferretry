@@ -438,7 +438,7 @@ export class FakeHarness implements Harness {
   readonly bytes = new Map<FerretId, Uint8Array>();
   /** Which parser speaks the fake's bytes. */
   bytesFormat: 'claude' | 'codex' = 'claude';
-  /** Every ferret `transcriptBytes` was asked about, in order. */
+  /** Every ferret a `transcriptBytes` ask OPENED a handle for, in order (an ask that proves no transcript opens none, so it is not counted: it leaves nothing to close). */
   readonly bytesAsked: FerretId[] = [];
   /** Every ferret whose handle was closed, in order (a handle's `close()` is idempotent in the real harnesses, not here). */
   readonly bytesClosed: FerretId[] = [];
@@ -465,9 +465,9 @@ export class FakeHarness implements Harness {
     return this.transcripts.get(ferret)?.stamp;
   }
   async transcriptBytes(ferret: FerretId): Promise<HarnessTranscriptBytes | undefined> {
-    this.bytesAsked.push(ferret);
     const opened = this.bytes.get(ferret);
     if (opened === undefined) return undefined;
+    this.bytesAsked.push(ferret);
     let file = this.#bytesTokens.get(opened);
     if (file === undefined) {
       this.#bytesOpened += 1;
