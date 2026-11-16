@@ -1666,8 +1666,13 @@ the kernel makes ONE symlink to it at `<the ferret's Codex home>/auth.json` (and
 Codex reads it, and refreshes it in place, so the link keeps pointing at the one file. A login with no usable sign-in
 refuses the start with one sentence, before any pane exists. The residual is the same-user one: the agent runs as the
 same user and Codex's sandbox reads anywhere, so an agent's shell command can `cat` that file, exactly as in the old
-account model. The link outlives a revocation until the next launch of that ferret clears it, and two ferrets refreshing
-one login in the same instant can race on its single-use refresh token (both declared gaps).
+account model. Codex takes the link back out of the ferret's home when the ferret stops or goes away, and out of every home
+it linked when its login is removed, signed out or switched off (it also removes a file Codex wrote in the link's place,
+which is a copy of the same sign-in). That ends the link; it does not hide it, because while the link is there the agent can
+read it, and a copy an agent made for itself is not Codex's to find. Two declared gaps remain. Which ferret holds which login
+is kept in memory, so after a daemon restart a revoked login clears nothing until each of its ferrets stops or is launched
+again (a stop clears the link whether or not this daemon placed it). And two ferrets refreshing one login in the same
+instant can race on its single-use refresh token.
 
 Every ferret on a login shares that ONE `auth.json`, and each runs as the same user, so **any ferret on a login can
 rewrite the shared file** and so change the account for every other ferret on it (or hard-link it, which makes the next
