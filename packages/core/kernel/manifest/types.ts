@@ -104,7 +104,7 @@ export interface VerbDecl<Verb extends string = string> {
 /** A button or menu item on a thing, naming the route it calls; hidden when Gate would refuse this device. */
 export interface AppActionDecl<Id extends string = string> {
   readonly id: Id;
-  readonly on: 'card' | 'ferret' | 'ask' | 'page' | 'terminal' | 'project' | 'daemon';
+  readonly on: 'task' | 'ferret' | 'ask' | 'page' | 'terminal' | 'project' | 'daemon';
   readonly label: string;
   /** A route key of this plugin or of a contract it consumes. */
   readonly calls: string;
