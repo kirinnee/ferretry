@@ -1,9 +1,9 @@
 import type { Instant } from '@ferretry/std';
-import { parseHandoffPointer } from '../turn-handoff.ts';
-import { type SendEvidence } from '../wire-send.ts';
+import { parseHandoffPointer } from '../../turn-handoff.ts';
+import { type SendEvidence } from '../../wire-send.ts';
 import { PASTE_PLACEHOLDER_PATTERN } from './composer.ts';
-import type { ObservedHumanInput } from '../transcript.ts';
-import { type SendRecord } from '../stores.ts';
+import type { ObservedHumanInput } from '../../transcript.ts';
+import { type SendRecord } from '../../stores.ts';
 import { type SendSenderKind } from './types.ts';
 
 /**

@@ -6,7 +6,7 @@ import { type SendLedger, SendRefused, type SendTarget } from '@ferretry/core-ma
 import { answerOf } from '@ferretry/core-mailbox/contract';
 import type { QueueDeliverer } from './deliverer.ts';
 import { boardOnly } from '@ferretry/core-mailbox/contract';
-import type { SessionQueueService } from './service.ts';
+import type { SessionQueue } from '@ferretry/core-mailbox/contract';
 
 /**
  * THE SEND PATH EVERY PRODUCER INSIDE THE DAEMON USES WHEN THE QUEUE IS ON: the message is written to the
@@ -28,7 +28,7 @@ import type { SessionQueueService } from './service.ts';
  */
 
 export interface QueueingSendsPorts {
-  readonly queue: Pick<SessionQueueService, 'enqueue'>;
+  readonly queue: Pick<SessionQueue, 'enqueue'>;
   readonly deliverer: Pick<QueueDeliverer, 'enqueued'>;
   /** The direct send path: what the queue does not carry, and the refusals only a person can lift. */
   readonly direct: {

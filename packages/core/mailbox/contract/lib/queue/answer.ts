@@ -1,6 +1,6 @@
-import type { QueuedMessage, QueueWaitReason, SendFate } from '../wire-send.ts';
-import type { SendDisposition } from '../protocol-names.ts';
-import { type SendRecord } from '../stores.ts';
+import type { QueuedMessage, QueueWaitReason, SendFate } from '../../wire-send.ts';
+import type { SendDisposition } from '../../protocol-names.ts';
+import { type SendRecord } from '../../stores.ts';
 import { dispositionOf } from '../send/types.ts';
 
 /**

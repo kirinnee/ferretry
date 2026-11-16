@@ -1,7 +1,7 @@
-import type { SendDisposition } from '../protocol-names.ts';
-import type { SessionHealth, SessionStatus } from '../ferret-types.ts';
-import type { SessionId } from '../session-id.ts';
-import type { SendLedger, SendNoticeOwed, SendPath, SendRecord, SendSenderKind, SendSettlement } from '../stores.ts';
+import type { SendDisposition } from '../../protocol-names.ts';
+import type { SessionHealth, SessionStatus } from '../../ferret-types.ts';
+import type { SessionId } from '../../session-id.ts';
+import type { SendLedger, SendNoticeOwed, SendPath, SendRecord, SendSenderKind, SendSettlement } from '../../stores.ts';
 
 // `SendFate`, `SendPath` and `SendRecord` are the ledger's own and clash with the wire's of the same names: they leave
 // the package as `LedgerFate`, `LedgerPath` and `LedgerRecord` (index.ts).

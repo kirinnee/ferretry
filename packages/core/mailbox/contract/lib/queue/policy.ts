@@ -1,7 +1,7 @@
-import type { InteractionMode } from '../ferret-types.ts';
-import type { PeerMessageLabel } from '../peer-messages.ts';
-import type { QueuedMessage } from '../wire-send.ts';
-import type { SendSenderKind } from '../stores.ts';
+import type { InteractionMode } from '../../ferret-types.ts';
+import type { PeerMessageLabel } from '../../peer-messages.ts';
+import type { QueuedMessage } from '../../wire-send.ts';
+import type { SendSenderKind } from '../../stores.ts';
 import { type SendTarget, TERMINAL_SEND_STATUSES } from '../send/types.ts';
 import type { QueueCoalesceSettings } from './settings.ts';
 

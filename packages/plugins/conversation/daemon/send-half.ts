@@ -56,7 +56,7 @@ import {
 import type { SessionStatus } from '@ferretry/core-mailbox/contract';
 import { SessionSendError } from './delivery/lib/mounts/session-send.ts';
 import { answerOf } from '@ferretry/core-mailbox/contract';
-import { QueueRefused, SessionQueueService } from './queue/lib/index.ts';
+import { QueueRefused, type SessionQueue } from '@ferretry/core-mailbox/contract';
 import {
   type HarnessGate,
   INTERRUPT_UNAVAILABLE,
@@ -226,7 +226,7 @@ export interface SendHalfDeps {
   /** A cheap token for the log of `queue` or `sends` that moves with every line appended; `absent` when there is none. */
   readonly stamp: (log: 'queue' | 'sends', ferret: SessionId) => Promise<string>;
   readonly clock: ClockPort;
-  readonly queue: SessionQueueService;
+  readonly queue: Pick<SessionQueue, 'list' | 'edit' | 'cancel'>;
   readonly ledger: SendLedger;
   readonly channel: SendChannel;
   readonly attachments?: AttachmentSource;

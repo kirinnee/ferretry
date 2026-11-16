@@ -3,11 +3,11 @@ import {
   type PeerMessageKind,
   type PeerMessageLabel,
   peerEnvelopePreamble,
-} from '../peer-messages.ts';
-import { queuedMessageInstruction, turnFileInstruction } from '../turn-handoff.ts';
-import { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '../answer-release.ts';
+} from '../../peer-messages.ts';
+import { queuedMessageInstruction, turnFileInstruction } from '../../turn-handoff.ts';
+import { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '../../answer-release.ts';
 import type { SessionSendSettings } from './settings.ts';
-import { type SendRecord } from '../stores.ts';
+import { type SendRecord } from '../../stores.ts';
 import {
   IDLE_SEND_STATUSES,
   type SendPaneObservation,

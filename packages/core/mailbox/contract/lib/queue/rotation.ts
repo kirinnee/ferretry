@@ -1,5 +1,5 @@
-import type { QueueSegmentHeader } from '@ferretry/core-mailbox/contract';
-import { type HeldMessage, isFinal, type SegmentFold } from '@ferretry/core-mailbox/contract';
+import type { QueueSegmentHeader } from '../../lines.ts';
+import { type HeldMessage, isFinal, type SegmentFold } from './model.ts';
 
 /**
  * ROTATING A QUEUE'S LOG, as pure decisions. The store (`adapters/state-queue-store.ts`) does the IO.

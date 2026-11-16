@@ -12,7 +12,7 @@ import {
 } from '@ferretry/core-mailbox/contract';
 import type { QueueEvent } from '@ferretry/core-mailbox/contract';
 import { deliveryOrder, planDelivery } from '@ferretry/core-mailbox/contract';
-import type { SessionQueueStore } from './ports.ts';
+import type { SessionQueueStore } from '@ferretry/core-mailbox/contract';
 import { defaultQueueCoalesceSettings, type QueueCoalesceSettings } from '@ferretry/core-mailbox/contract';
 
 /**

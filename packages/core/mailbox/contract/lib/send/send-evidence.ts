@@ -1,5 +1,5 @@
-import type { SessionId } from '../session-id.ts';
-import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '../transcript.ts';
+import type { SessionId } from '../../session-id.ts';
+import type { ObservedHumanInput, TranscriptBatch, TranscriptIssueCode } from '../../transcript.ts';
 
 /**
  * Issues that make a transcript read BLIND to its newest records — the only ones a send could be

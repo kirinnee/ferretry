@@ -3,7 +3,7 @@
  * transcript file, and the drain that walks a window. The reader itself (resolving a harness's file, parsing it)
  * is the reader's (`../reader`); this is the narrow port the watch stands on.
  */
-import type { TranscriptBatch, TranscriptHarness, TranscriptWindow, TranscriptWindowStart } from '../transcript.ts';
+import type { TranscriptBatch, TranscriptHarness, TranscriptWindow, TranscriptWindowStart } from '../../transcript.ts';
 
 /** The ferret facts a transcript read needs. */
 export interface TranscriptTarget {
