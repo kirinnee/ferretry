@@ -136,6 +136,181 @@ describe('(I) a command is withheld in every view when the cutter cuts a value i
     should(JSON.stringify(seen.detail)).not.containEql(V);
   });
 
+  for (const command of [
+    'srv --token-file ~/.config/tool/token',
+    'srv --key /home/u/.ssh/id_ed25519',
+    'srv --key ./keys/server.pem',
+    'srv --token-file ../tool/token',
+    'srv --token-file /etc/tool/token',
+    'env API_KEY="$API_KEY" npx -y @scope/pkg',
+    'env API_KEY="${secret:X}" npx -y @scope/pkg',
+  ]) {
+    it(`should show a path flag or a quoted pointer as written, W accepts it: ${command}`, () => {
+      // Act
+      const seen = views(command);
+
+      // Assert
+      should(commandWithheld(command)).be.false();
+      should(seen.resolved).equal(command);
+      should(seen.held).be.false();
+    });
+  }
+
+  for (const command of [
+    `srv --key https://person:${V}@h.example/key`,
+    `srv --key ./keys?token=${V}`,
+    `srv --token-file /a/b --token ${V}`,
+    `env API_KEY="${V}" npx -y @scope/pkg`,
+    `env API_KEY="$API_KEY" ${V}`,
+  ]) {
+    it(`should still withhold a path flag that is a URL with a value in it, or any value beside it: ${command.slice(0, 30)}`, () => {
+      // Act
+      const seen = views(command);
+
+      // Assert
+      should(commandWithheld(command)).be.true();
+      should(seen.resolved).not.containEql(V);
+      should(seen.detail).not.containEql(V);
+    });
+  }
+
+  // A place is a real path right after a flag word and nothing else: each shape below was shown by the first cut of the
+  // place rule and is a value, so each is withheld in every view, as the arguments form withholds it.
+  const B64 = '/9j4AAQSkZJRgABAQEASABIAAD';
+  const W20 = 'Zk3pQ9vXw2LmN7rTq8Yb';
+  const NOT_PLACES: readonly (readonly [string, string])[] = [
+    ['a bare /word after --password', `srv --password /hunter2hunter2`],
+    ['a ~word after --password', `srv --password ~hunter2hunter2`],
+    ['a base64 value that starts with a slash after --password', `srv --password ${B64}`],
+    ['a base64 value that starts with a slash after --api-key', `srv --api-key ${B64}`],
+    ['a base64 value that starts with a slash glued with =', `srv --token=${B64}`],
+    ['a pointer glued into a path', `srv --token /x\${secret:K}${W20}`],
+    ['a value after KEY= that starts with a slash', `srv API_KEY=/${W20}`],
+    ['a value after KEY= that starts with ./', `srv API_KEY=./${W20}`],
+    ['a value after a bare KEY= that starts with a slash', `srv KEY=/${W20}`],
+    ['a value after a Header: glued to its colon', `srv -H Authorization:/${W20}`],
+    ['a value after a Header: that is its own word', `srv --header Authorization: /${W20}`],
+    ['an http URL', `srv --token http://${W20}`],
+    ['a URL of an unknown scheme', `srv --token x://${W20}`],
+    ['a URL whose scheme has a +', `srv --token a+b://${W20}`],
+    ['a URL with the value in its path', `srv --token https://h/${W20}`],
+    ['a fragment in a path', `srv --token ./x#${W20}`],
+    ['a ~word', `srv --token ~${W20}`],
+    ['a .word', `srv --token .${W20}`],
+  ];
+  for (const [name, command] of NOT_PLACES) {
+    it(`should withhold ${name}, in the Resolved line and the detail`, () => {
+      // Act
+      const seen = views(command);
+
+      // Assert
+      should(commandWithheld(command)).be.true();
+      for (const value of [W20, B64, 'hunter2']) {
+        should(seen.resolved).not.containEql(value);
+        should(seen.detail).not.containEql(value);
+      }
+      should(seen.held).be.true();
+    });
+  }
+
+  // Round 2: under a credential-named flag that is not a pointer flag (no -file / -path / -dir suffix) the next word is
+  // NEVER a place, even when it looks like a path: it is withheld. A pointer flag keeps round 1's rule.
+  it('should withhold a path-looking word after --token, as a value: ./V', () => {
+    // Arrange
+    const command = `srv --token ./${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(seen.resolved).not.containEql(W20);
+    should(seen.detail).not.containEql(W20);
+    should(seen.held).be.true();
+  });
+
+  it('should withhold a path-looking word after --token, as a value: /tmp/V', () => {
+    // Arrange
+    const command = `srv --token /tmp/${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(seen.resolved).not.containEql(W20);
+    should(seen.detail).not.containEql(W20);
+    should(seen.held).be.true();
+  });
+
+  it('should withhold a path-looking word after --password: /a/b', () => {
+    // Act
+    const command = 'srv --password /a/b';
+
+    // Assert
+    should(commandWithheld(command)).be.true();
+    should(views(command).held).be.true();
+  });
+
+  it('should still show a path after a pointer flag: --token-file ./V', () => {
+    // Arrange
+    const command = `srv --token-file ./${W20}`;
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.false();
+    should(seen.resolved).equal(command);
+    should(seen.held).be.false();
+  });
+
+  it('should still show a path after --key: /home/u/.ssh/id_ed25519', () => {
+    // Arrange
+    const command = 'srv --key /home/u/.ssh/id_ed25519';
+
+    // Act
+    const seen = views(command);
+
+    // Assert
+    should(commandWithheld(command)).be.false();
+    should(seen.resolved).equal(command);
+    should(seen.held).be.false();
+  });
+
+  // A `--settings` document that does not parse, in each shape the reviewer's probe wrote it, shows no value.
+  const BROKEN_SETTINGS: readonly (readonly [string, string])[] = [
+    ['a bare value', `{"API_KEY": ${W20}}`],
+    ['a missing colon', `{"API_KEY" "${W20}"}`],
+    ['a key after stray closing marks', `{"x":}}}"API_KEY":"${W20}"}`],
+    ['a key after unclosed lists', `{"x":[[[[ "API_KEY":"${W20}"}`],
+    ['single quotes', `{'API_KEY':'${W20}'}`],
+    ['escaped quotes', `{\\"API_KEY\\":\\"${W20}\\"}`],
+    ['escaped quotes inside a pair of quotes', `"{\\"API_KEY\\":\\"${W20}\\"}"`],
+  ];
+  for (const [name, document] of BROKEN_SETTINGS) {
+    it(`should withhold a --settings document that does not parse: ${name}`, () => {
+      // Act: the document is an argument, after the flag that names it
+      const seen = views('srv', ['--settings', document]);
+
+      // Assert
+      should(seen.resolved).not.containEql(W20);
+      should(seen.detail).not.containEql(W20);
+    });
+  }
+
+  it('should show a real path only as the word right after a flag word, never after KEY= or a Header:', () => {
+    // Act
+    const afterFlag = commandWithheld('srv --token-file ~/.config/tool/token');
+    const afterKey = commandWithheld('srv API_KEY=~/.config/tool/token');
+    const afterHeader = commandWithheld('srv --header Authorization: ~/.config/tool/token');
+
+    // Assert
+    should(afterFlag).be.false();
+    should(afterKey).be.true();
+    should(afterHeader).be.true();
+  });
+
   it('should show a plain command and its arguments as before', () => {
     // Act
     const seen = views('npx', ['-y', '@scope/pkg']);
