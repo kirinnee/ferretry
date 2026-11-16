@@ -258,8 +258,12 @@ jobs:
           if-no-files-found: warn
 
   # THE PERF TIER (bunfig.perf.toml, `scripts/ci/test.sh perf`): every speed or size budget, kept out of the unit groups
-  # (owner, 2026-11-16: "dont mix performance and correctness test together"). Blocking, on exactly Quick's events,
-  # BESIDE Quick, ONE job with its processes inside (owner: one unit job, one perf job, parallel inside). Two processes
+  # (owner, 2026-11-16: "dont mix performance and correctness test together"). On exactly Quick's events, BESIDE Quick.
+  # REPORT-ONLY on a pull request, BLOCKING on a push to main (lead ruling 2026-11-16): runner load swings the same
+  # tests 618-2273 ms on identical code (52 perf jobs, suite wall 121-327 s), so a budget cannot gate a PR. On a PR the
+  # job shows what went over budget and exits 0 (and Full CI does not count it, scripts/ci/full-status.sh); on main a
+  # failing file is re-run ONCE and fails the job only if it fails again (scripts/ci/perf-tier.sh). Not a required
+  # check. ONE job with its processes inside (owner: one unit job, one perf job, parallel inside). Two processes
   # on a 4x8: half the vCPUs, so each keeps a spare core for its GC/JIT threads and a budget measures the code, not a
   # neighbour. The 4x8 also starts within seconds where an 8x16 queued a median ~5 minutes.
   perf:
@@ -289,6 +293,7 @@ jobs:
       - name: Run the perf tier
         env:
           FY_CI_PERF_PARALLEL: '2'
+          FY_PERF_REPORT_ONLY: ${{ github.event_name == 'pull_request' }}
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh perf
       - name: Upload perf results
         if: always()

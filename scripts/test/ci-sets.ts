@@ -295,11 +295,30 @@ const judge = (needs: object, macos = '', eventName = 'pull_request', strictSwit
   }).exitCode;
 assert.equal(judge(successful), 0);
 // `proof` is not a gate: when it did not prove anything the verdict judges the jobs exactly as before.
-for (const name of needsOf('full').filter(dependency => dependency !== 'proof')) {
+for (const name of needsOf('full').filter(dependency => dependency !== 'proof' && dependency !== 'perf')) {
   for (const result of ['failure', 'cancelled', 'skipped']) {
     assert.notEqual(judge({ ...successful, [name]: { result } }), 0, `gate accepted ${name} ${result}`);
   }
 }
+// The perf tier is REPORT-ONLY on a pull request (whatever its job ended as, Full CI passes) and BLOCKING on a push
+// (main): scripts/ci/perf-tier.sh reports on one and re-runs the failing files once on the other.
+assert.ok(
+  needsOf('full').includes('perf'),
+  'Full CI still waits for the perf job, so its result is read before the verdict',
+);
+assert.equal(
+  need(
+    jobOf(ci, 'perf').steps?.find(step => step.name === 'Run the perf tier')?.env?.FY_PERF_REPORT_ONLY,
+    'perf step env',
+  ),
+  "${{ github.event_name == 'pull_request' }}",
+  'the perf job is report-only exactly on a pull_request',
+);
+for (const result of ['failure', 'cancelled', 'skipped']) {
+  assert.equal(judge({ ...successful, perf: { result } }), 0, `a ${result} perf job failed Full CI on a pull request`);
+  assert.notEqual(judge({ ...successful, perf: { result } }, '', 'push'), 0, `main accepted a ${result} perf job`);
+}
+assert.notEqual(judge({ ...successful, quick: { result: 'failure' }, perf: { result: 'failure' } }), 0);
 // The strict-guarantee report is report-only while the ONE switch (workflow env) is 'false': the job's own setup steps
 // or timeout cannot turn Full CI red then. At 'true' it is judged like every other job, and only it is relaxed.
 assert.equal(ci.env?.FY_STRICT_GUARANTEES_BLOCKING, 'true', 'the strict report is blocking (the count reached 0)');

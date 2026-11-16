@@ -15,6 +15,8 @@ verdict | judge)
   # report-only while the switch is 'false': whatever that job ends as (a failed setup step, the timeout) cannot turn
   # Full CI red. Once the switch is 'true' it must succeed like every other job.
   proof_reused=false
+  # The perf tier is REPORT-ONLY on a pull request (scripts/ci/perf-tier.sh): its job shows its result and never
+  # counts here, whatever that job ended as. On a push (main) it is blocking like every other job.
   # Proof reuse on main (scripts/ci/proof-reuse.sh): a push whose tree the merged pull request already
   # proved with the whole set. Only a `push` may say so, and it is honoured only with a URL to show for it.
   if [[ ${PROOF_REUSED:-} == true ]]; then
@@ -34,7 +36,8 @@ verdict | judge)
     fi
   elif jq -e --arg macos "${MACOS_SMOKE:-}" --arg event "${EVENT_NAME:-}" --arg strict "${FY_STRICT_GUARANTEES_BLOCKING:-}" '
     . as $needs |
-    ["quick", "static", "perf", "int", "full-gates", "compile", "smoke"]
+    ["quick", "static", "int", "full-gates", "compile", "smoke"]
+      + (if $event == "pull_request" then [] else ["perf"] end)
       | all(.[]; $needs[.].result == "success")
     and ($strict == "false" or $needs["strict-guarantees"].result == "success")
     and ($needs["full-pending"].result == "success" or
@@ -85,9 +88,9 @@ gh api --method POST "repos/${GITHUB_REPOSITORY:?repository required}/statuses/$
 # this workflow exists for the same head SHA. A real `failure` always counts.
 remove_label=false
 if [[ ${mode} == verdict && ${state} == failure && ${EVENT_NAME:-} == pull_request ]]; then
-  if jq -e 'del(.proof) | any(.[]; .result == "failure")' <<<"${NEEDS}" >/dev/null; then
+  if jq -e 'del(.proof, .perf) | any(.[]; .result == "failure")' <<<"${NEEDS}" >/dev/null; then
     remove_label=true
-  elif jq -e 'del(.proof) | any(.[]; .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
+  elif jq -e 'del(.proof, .perf) | any(.[]; .result == "cancelled")' <<<"${NEEDS}" >/dev/null; then
     newer_run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&event=pull_request&per_page=100" \
       --jq "any(.workflow_runs[]; .id > ${GITHUB_RUN_ID} and .name == \"${GITHUB_WORKFLOW:-CI}\")")"
     [[ ${newer_run} == true ]] || remove_label=true

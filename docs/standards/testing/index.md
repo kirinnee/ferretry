@@ -533,10 +533,13 @@ A test whose claim is a SPEED or SIZE budget - no synchronous slice of 100 ms wh
 linear time on adversarial input, a reload within a CPU bound, a memory ceiling - lives in `<package>/tests/perf/`,
 never in `tests/unit/`.
 
-- **Blocking, on its own runner.** `scripts/ci/test.sh perf` runs the tier (`bunfig.perf.toml`) in
+- **Its own runner; report-only on a PR, blocking on `main`.** `scripts/ci/test.sh perf` runs the tier (`bunfig.perf.toml`) in
   `FY_CI_PERF_PARALLEL` processes (default 1; CI: 2 on a 4x8, half its vCPUs), and the ONE `Performance Tests` CI
-  job runs it on a runner with nothing else, on exactly Quick's events, beside Quick and in the Full CI
-  verdict. A budget measured next to other test processes measures the neighbours: on the first run of the parallel
+  job runs it on a runner with nothing else, on exactly Quick's events, beside Quick. **A pull request only REPORTS it**
+  (the job shows what went over budget and exits 0; Full CI does not count it): the same tests took 618-2273 ms on
+  identical code across 52 perf jobs (suite wall 121-327 s), and no budget was raised for it. **`main` BLOCKS**, after one automatic re-run of just the
+  failing files, one process per file; `perf-failed: <files>` in the job summary names a file that failed twice
+  (`scripts/ci/perf-tier.sh`, [CI/CD](../ci-cd/index.md#performance-tests-report-only-on-prs-blocking-on-main)). A budget measured next to other test processes measures the neighbours: on the first run of the parallel
   unit groups a slice budget read 128-164 ms against 100 because of where the test sat, not what the code did.
   `task test:perf` runs it locally - on a quiet machine, or the numbers mean nothing.
 - **The correctness half stays in unit at a small size.** A file that proved both "the answer is right" and "it came
