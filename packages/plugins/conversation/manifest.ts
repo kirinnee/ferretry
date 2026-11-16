@@ -493,6 +493,8 @@ export default definePlugin({
       // `ferret.side` with the ferret as subject.
       screen('chat', { path: 'ferrets/:ferret/chat' }),
       screen('links', { path: 'links', nav: { label: 'Conversations', icon: 'messages', order: 25 } }),
+      // Every ferret's queue on this machine (v4's "All queues"), opened from a ferret's queue panel; no nav entry of its own.
+      screen('queues', { path: 'queues' }),
     ],
     panels: [
       panel('composer.tools', { id: 'attachments', order: 10 }),
