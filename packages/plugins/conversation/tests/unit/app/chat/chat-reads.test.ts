@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { PluginClient } from '@ferretry/kernel/manifest';
 import { chatReadApi, readLogPage, VALIDATED_LOG_LIMIT, ValidatedLogMemory } from '../../../../app/chat/chat-reads.ts';
 import { fakeClient } from '../../../support/app/fake-client.ts';
+import { ferretSummary } from '../../../support/app/ferret-view.ts';
 
 /**
  * R265 — the transcript tail is read conditionally. A quiet ferret answers the same redacted text on every poll, so
@@ -141,5 +142,42 @@ describe('R265 the transcript validator memory', () => {
 
     expect(answer.log).toBe('on two');
     expect(two.asked).toEqual([{ ferretId: 'a' }]);
+  });
+});
+
+describe('the chat’s session read: the summary beside the observer’s redacted prompt read', () => {
+  const SUMMARY = 'GET /v1/ferrets/:ferretId';
+  const PROMPT = 'GET /v1/ferrets/:ferretId/prompt';
+  const summary = (state: 'working' | 'idle', stateAt: string) =>
+    ferretSummary('f1', { state, stateAt }) as unknown as Record<string, unknown>;
+
+  test('reads the prompt quietly for the same ferret and dates the turn from the observer, never the registry', async () => {
+    const client = fakeClient({
+      [SUMMARY]: () => summary('idle', '2026-11-05T03:00:30.000Z'),
+      [PROMPT]: () => ({ turnState: 'needs-input', turnStateAt: '2026-11-05T03:00:09.000Z', prompt: 'Run it?' }),
+    });
+
+    const session = await chatReadApi(client).get('f1');
+
+    expect(session.state).toMatchObject({
+      turnState: 'needs-input',
+      turnStateAt: '2026-11-05T03:00:09.000Z',
+      turnPrompt: 'Run it?',
+    });
+    expect(client.callsTo(PROMPT).map(call => call.params)).toEqual([{ ferretId: 'f1' }]);
+  });
+
+  test('a prompt read that fails (a refusal, no Claude Code) is not live: the session is read, and no turn is dated', async () => {
+    const client = fakeClient({
+      [SUMMARY]: () => summary('idle', '2026-11-05T03:00:30.000Z'),
+      [PROMPT]: () => {
+        throw new Error('no route');
+      },
+    });
+
+    const session = await chatReadApi(client).get('f1');
+
+    expect(session.state).toMatchObject({ status: 'running', turnState: 'your-turn' });
+    expect(session.state.turnStateAt).toBeUndefined();
   });
 });

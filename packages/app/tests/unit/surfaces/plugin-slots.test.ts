@@ -140,8 +140,8 @@ describe('the slots Runtimes’ Add runtime page offers and Logins fills', () =>
   });
 });
 
-describe('the slot Conversation offers above its composer and Claude Code and Agenda fill', () => {
-  test('Claude Code writes the name Conversation owns, puts its two cards there, and Agenda’s line follows them', () => {
+describe('the slot Conversation offers above its composer and Claude Code, Agenda and Voice fill', () => {
+  test('Claude Code writes the name Conversation owns, puts its two cards there, and Agenda’s line and Voice’s auto-read follow them', () => {
     const contributors = (viewsOf(entries).panels.get(CONVERSATION_ABOVE_COMPOSER_SLOT) ?? []).map(
       panel => `${panel.plugin}.${panel.id}`,
     );
@@ -149,6 +149,7 @@ describe('the slot Conversation offers above its composer and Claude Code and Ag
       'claude-code.permission-request',
       'claude-code.harness-dialog',
       'agenda.ferret-agenda-line',
+      'voice.auto-read',
     ]);
     expect(CONVERSATION_ABOVE_COMPOSER_SLOT).toBe('conversation.above-composer');
     expect(isSlotName(CONVERSATION_ABOVE_COMPOSER_SLOT)).toBe(true);
