@@ -1,0 +1,4 @@
+{
+  "entry": ["tests/**/*.test.{ts,tsx}", "tests/types/*.types.ts"],
+  "project": ["**/*.{ts,tsx}"]
+}

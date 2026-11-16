@@ -657,7 +657,6 @@ describe('ClaudeHarness', () => {
       expect(now.projects['/work']).toEqual({
         allowedTools: ['Bash'],
         hasTrustDialogAccepted: true,
-        enableAllProjectMcpServers: true,
       });
       expect(now.projects['/elsewhere']).toEqual({ enabledMcpjsonServers: ['x'] });
       expect(plan.files as readonly string[]).toContain(claudeJson());
@@ -719,6 +718,60 @@ describe('ClaudeHarness', () => {
     expect(started.command).toContain('--session-id');
     expect(started.command?.slice(-2)).toEqual(['--model', 'claude-opus-5-5']);
     expect(panes.require(FERRET)).toBe('%7');
+  });
+
+  describe('the settings items’ launch flags (any flag, owner decision !A525)', () => {
+    const withItems = (items: ReadonlyMap<string, unknown>) =>
+      build({
+        config: {
+          file: () => ({ searchPaths: [], permissionMode: 'auto' }),
+          collection: definition => (definition === CLAUDE_CODE_SETTINGS ? items : new Map()),
+        },
+      });
+    const items = new Map<string, unknown>([
+      ['b-tools', { settings: {}, flags: ['--add-dir', '/data', '--some-future-flag'] }],
+      ['a-risky', { settings: {}, flags: ['--dangerously-skip-permissions', '--session-id', 'evil', '--verbose'] }],
+    ]);
+
+    test('a start and a resume pass them as one word per flag in item name order, ahead of the launch’s own flags', async () => {
+      const { harness } = withItems(items);
+      const started: { command?: readonly string[] } = {};
+      const resumed: { command?: readonly string[] } = {};
+
+      await harness.start(spec({ model: 'claude-opus-5-5' }), runner(started), {} as never);
+      await harness.resume(spec(), runner(resumed), {} as never, 'conv-9');
+
+      for (const command of [started.command ?? [], resumed.command ?? []]) {
+        const at = command.indexOf('/opt/bin/claude');
+        expect(command.slice(at + 1, at + 4)).toEqual(['--verbose', '--add-dir=/data', '--some-future-flag']);
+        expect(command.indexOf('--some-future-flag')).toBeLessThan(command.indexOf('--settings'));
+      }
+    });
+
+    test('lose to the launch on the permission mode and the conversation: those flags never reach the argv', async () => {
+      const { harness } = withItems(items);
+      const started: { command?: readonly string[] } = {};
+
+      await harness.start(spec(), runner(started), {} as never);
+      const command = started.command ?? [];
+
+      expect(command).not.toContain('--dangerously-skip-permissions');
+      expect(command).not.toContain('evil');
+      expect(command.filter(argument => argument === '--session-id')).toEqual(['--session-id']);
+      expect(command[command.indexOf('--session-id') + 1]).toBe('conv-1');
+      expect(command[command.indexOf('--permission-mode') + 1]).toBe('auto');
+    });
+
+    test('change the launch record, so a ferret launched before the flag was added reads as drifted', async () => {
+      const live = new Map<string, unknown>([['b-tools', { settings: {}, flags: ['--verbose'] }]]);
+      const { harness } = withItems(live);
+      await harness.start(spec(), runner({}), {} as never);
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'current' });
+
+      live.set('b-tools', { settings: {}, flags: ['--verbose', '--debug'] });
+
+      expect(await harness.launchSettings?.(FERRET)).toEqual({ kind: 'drifted', sections: ['settings'] });
+    });
   });
 
   test('a start and a resume turn the spec’s readable folders into one read-only allowance each, and nothing more', async () => {
@@ -1760,10 +1813,18 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     });
   });
 
-  describe('the question tool, per ferret (v4: only an interactive Claude keeps AskUserQuestion)', () => {
+  describe('the question tool (!A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
     const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
-    const launched = async (call: 'start' | 'resume', mode: 'interactive' | 'auto' | undefined) => {
-      const { harness } = build();
+    const optedIn = {
+      file: () => ({ searchPaths: [], permissionMode: 'auto', questionTool: true }),
+      collection: () => new Map(),
+    };
+    const launched = async (
+      call: 'start' | 'resume',
+      mode: 'interactive' | 'auto' | undefined,
+      config?: typeof optedIn,
+    ) => {
+      const { harness } = build(config === undefined ? {} : { config });
       const started: { command?: readonly string[] } = {};
       const more = mode === undefined ? {} : { mode };
       const result =
@@ -1775,13 +1836,17 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     };
 
     for (const call of ['start', 'resume'] as const) {
-      test(`a ${call} of an interactive ferret keeps the question tool`, async () => {
-        expect(await launched(call, 'interactive')).not.toContain(NO_QUESTIONS);
+      test(`a ${call} withholds it exactly once from every ferret by default, an interactive one included`, async () => {
+        for (const mode of ['interactive', 'auto', undefined] as const)
+          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
       });
 
-      test(`a ${call} of an auto ferret, or one with no mode, withholds it exactly once`, async () => {
+      test(`a ${call} with questionTool on keeps it for an interactive ferret only`, async () => {
+        expect(await launched(call, 'interactive', optedIn)).not.toContain(NO_QUESTIONS);
         for (const mode of ['auto', undefined] as const)
-          expect((await launched(call, mode)).filter(argument => argument === NO_QUESTIONS)).toEqual([NO_QUESTIONS]);
+          expect((await launched(call, mode, optedIn)).filter(argument => argument === NO_QUESTIONS)).toEqual([
+            NO_QUESTIONS,
+          ]);
       });
     }
 

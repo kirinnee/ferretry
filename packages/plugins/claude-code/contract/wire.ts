@@ -319,13 +319,27 @@ export const HarnessConfigSchema = z.strictObject({
   /** Directories to look in, in order, on top of what the daemon inherited. */
   searchPaths: z.array(HarnessPathSchema).default([]),
   permissionMode: PermissionModeSchema.default('skip'),
+  /**
+   * Opt a harness's question tool back in (owner !A527: off by default, so no ferret stops on a prompt only the pane
+   * shows). `true` gives an INTERACTIVE ferret the tool again; an auto ferret never has it. It makes ferrets block
+   * rather than act, so it is never held.
+   */
+  questionTool: z.boolean().default(false),
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 
-/** A settings component: the harness's own settings document, as data. Values never hold a raw secret (`${secret:NAME}` only). */
+/**
+ * A settings component: the harness's own settings document, as data, and the launch flags that go with it. Values never
+ * hold a raw secret (`${secret:NAME}` only); the kernel's write rule refuses a flag value that looks like one.
+ *
+ * `flags` are argv words in order, ANY flag (there is no name allowlist, owner decision !A525): each is passed to Claude
+ * as its own word, never through a shell and never re-split. Which flags the launch keeps for itself is
+ * `./launch-flags.ts`.
+ */
 export const SettingsItemSchema = z.strictObject({
   description: z.string().optional(),
-  settings: z.record(z.string(), z.unknown()),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  flags: z.array(z.string().min(1)).optional(),
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 

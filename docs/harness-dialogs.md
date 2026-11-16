@@ -127,13 +127,18 @@ change marks a running ferret Restart.
 | Harness | Screen                                                                       | Key                                                                                        | What it allows                                                                             |
 | ------- | ---------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------ |
 | Claude  | Trust this folder                                                            | `.claude.json` `projects[<cwd>].hasTrustDialogAccepted`                                    | the ferret's OWN working folder only (not a parent, not all): its settings and hooks run   |
-| Claude  | New MCP server found in this project                                         | `.claude.json` `projects[<cwd>].enableAllProjectMcpServers`                                | the servers of THAT folder's `.mcp.json` only; a `disabledMcpjsonServers` name still wins  |
+| Claude  | New MCP server found in this project                                         | none: NOT pre-answered                                                                     | nothing: the owner chooses in the ferret’s terminal (the one notice below)                 |
 | Claude  | Bypass-mode / auto-mode warning                                              | `skipDangerousModePermissionPrompt` (bypass) / `skipAutoPermissionPrompt` (auto), settings | shows no warning; the mode itself is the owner's `permissionMode`, held when loosened      |
 | Claude  | Onboarding, theme, Chrome, nudges                                            | `hasCompletedOnboarding`, `hasCompletedClaudeInChromeOnboarding`, `hasSeen…Nudge`          | nothing: they are seen screens                                                             |
 | Claude  | Update notice / self-update                                                  | `DISABLE_AUTOUPDATER=1` in the launch's process environment (v4's probe sets the same)     | nothing is installed by Claude; Ferretry applies updates                                   |
 | Codex   | Trust this folder                                                            | `-c projects={"<cwd>"={trust_level="trusted"}}`                                            | the ferret's OWN working folder only; it also lets that folder's `.codex/config.toml` load |
 | Codex   | Approvals and sandbox                                                        | `-c approval_policy` / `sandbox_mode` (`never` + `danger-full-access` when bypassing)      | bypass mode never asks; auto mode asks on request                                          |
 | Codex   | Full-access / world-writable warnings, rate-limit and model-migration nudges | `-c notice={hide_…=true}`                                                                  | nothing: they are notices                                                                  |
+
+**The project-MCP approval has no safe key.** `enableAllProjectMcpServers` approves EVERY server a folder's
+`.mcp.json` ever declares, and 5.0 has no owner-approved per-server list to write instead; v4 never wrote it. So a
+ferret launched in a folder with a new MCP server stops at that screen, and the owner is told once (below). An
+`enableAllProjectMcpServers` the owner (or Claude, on their answer) already put in the home is never touched.
 
 What no key answers is **told to the owner once** (`packages/plugins/warden/daemon/lib/dialog-watch.ts`): the Warden
 reads each ferret's recorded `harnessDialog` or `permissionRequest` every 10 s and raises ONE plain notice on that
@@ -198,6 +203,12 @@ saved until the owner says yes: `fy warden dialog learn <ferret> --confirm` or t
 written to `config/warden-dialogs.yaml` (`personOnly`, so no agent edits it; every added rule is a loosening, so an edit by
 anyone but the owner is held for the owner, as every held config edit is) and the next appearance is cleared. A tool
 permission prompt and the usage-limit screen are never taught.
+
+**The notice carries no pane text.** A dialog's title, body and row labels, and a tool prompt's command, path or URL
+(a `curl` with a bearer token, say), are served only to a caller holding `terminal.use`; the agenda carries no
+capability and keeps every ask version. So the notice says only fixed words: "<ferret> is waiting on a <kind> prompt in
+<harness>; open its terminal to read and choose", sits on that ferret's own board (the link to the ferret and its
+terminal), and names no row. What the screen says is read in the terminal.
 
 ## Declared gaps
 

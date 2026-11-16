@@ -425,6 +425,8 @@ export class FakeHarness implements Harness {
   /** Every launch spec `prepareHome` was handed, in order. */
   readonly prepared: LaunchSpec[] = [];
   readonly #seen = new Set<string>();
+  /** The harness's own hand-over (`Harness.inject`); absent, as for Claude Code, until a test sets one. */
+  inject: Harness['inject'];
   /** The harness's turn stop; a test sets it to `undefined` for a harness that names none. */
   turnStop: HarnessStop | undefined = { key: 'Escape', safeWhenIdle: true };
   /** The transcript this fake proves for a ferret (U5): a test sets one to prove it; a ferret with none has no transcript. */
