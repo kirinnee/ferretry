@@ -371,7 +371,7 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 ## Checking on your sub-ferrets
 
 A lead does not need its children to message it progress. A sub-ferret keeps its card's **Status** current (read it with `fy task show
-<id>`, then `fy task edit <id> --status-now|--status-done|--status-next`; [board.md](board.md#the-cards-status)), puts
+<id>`, then `fy task edit <id> --status-now|--status-done|--status-next`; [board.md](board.md#the-tasks-status)), puts
 routine progress on its card (`fy task note`) and messages its lead only for a result, a blocker or a decision the lead must make; the lead
 **looks when it wants to**:
 
@@ -427,7 +427,7 @@ to report back. Enforced by the daemon from the caller's session identity, not b
 - **Refused** (`forbidden`, saying what to do instead): every agenda write (`add`, `edit`, `surface`, `done`, `dismiss`),
   `fy notify`, every card verb except the three below, and editing a project's lanes. The message reads
   `You are a sub-ferret, so you can't <this>. You may <what it may>. For anything else ask your lead: fy send <lead-callsign> "…"`.
-  For a `move`, `focus` or commit/doc `link` on a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-card-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
+  For a `move`, `focus` or commit/doc `link` on a card its lead holds the last sentence is "Your lead holds this card: claim it first: fy task claim <id>": `fy task claim` takes the card (only from an ancestor, never a sibling's or cousin's), and the holder may then do exactly those, not `drop` or re-plan it ([board.md](board.md#claiming-a-task-your-lead-holds)). A sub-ferret that leads a subtree may still `drop` and `assign` cards in it ([board.md](board.md#authority)).
 - **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
   `fy task edit <id>` naming only the status (`--status-now|--status-done|--status-next|--status-file`) and How to test
   (`--how-to-test`), on the card it holds;

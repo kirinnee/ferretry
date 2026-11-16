@@ -57,7 +57,7 @@ Codex as `$name`. Whichever you type is what the reader keeps seeing — a refer
 into "the canonical form" behind your back.
 
 Terminals and browser pages are **surfaces**, and they are SESSION-scoped, as agenda ids are and
-card ids are not — a card id is minted machine-wide and is unique on this machine's board. The
+task ids are not — a task id is minted machine-wide and is unique on this machine's board. The
 twelve hex characters that name a shell in one session name nothing at all in another, so a proved
 surface carries both the daemon and the session it was proved against.
 A surface reference is never an index — "the second terminal" shifts when a neighbour closes, and a
@@ -122,7 +122,7 @@ never rewritten.
 | ------------ | ------------------------------------------------------------------------------------- |
 | `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
 | `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
-| `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
+| `&task`      | The task detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
 | `^attention` | That item's view over this conversation (a full page on a phone), whatever its state  |
 | `/skill`     | The Skills tab of this session's "This folder" context                                |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
@@ -132,7 +132,7 @@ The `^attention` reference kind keeps its name in the grammar and in the proof t
 agenda (renamed in a later release).
 
 Every id the proof accepts opens the SAME view — the one the agenda line, Info's agenda list, the Inbox and a
-card's "Agenda asks" open. An open item is answered there; a parked one (snoozed, or replied to) says so and offers
+task's "Agenda asks" open. An open item is answered there; a parked one (snoozed, or replied to) says so and offers
 "Back to my list"; a resolved one is read-only. Agenda mode does not gate it. A proved `^A3` is therefore never a dead
 click, and no click switches a tab or a menu instead of opening the item (#B76).
 
@@ -234,51 +234,51 @@ What "proved" means per kind:
 | ----------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `agent`     | A session in **this daemon's** fleet slice holds that callsign                                                            |
 | `file`      | The session filesystem answers with a canonical, readable path                                                            |
-| `task`      | Any card on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
+| `task`      | Any task on this machine's board, whatever its project, or the old id of one of this session's imported tasks (see below) |
 | `attention` | The id is in this session's agenda ledger, open or resolved                                                               |
 | `skill`     | The name is in this session's skills catalog                                                                              |
 | `surface`   | The session's owner is holding that terminal or page right now                                                            |
 
-**A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
+**A `&task` click opens the task, not a sheet.** The task detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
-with no card selected). Chat included: the host's own Tasks destination is only the fallback when the card
-route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
+with no task selected). Chat included: the host's own Tasks destination is only the fallback when the task
+route is unavailable (an older daemon without `/v1/board`, or a host with no router). A task id is unique on
 its machine only, so the destination always carries the daemon the reference was proved against.
 
 > **Task proof is the whole machine; the menu is the project.** The proof set behind `&F12` is the id of
-> EVERY card on this machine's board — whatever its project, lane, state or assignee, closed and dropped
-> cards included — so a lead that cites cards from many projects gets a link for each real one. It is
-> ONE read per machine, `GET /v1/board/ids` (`{ ids }`, nothing about a card but its id), made through
+> EVERY task on this machine's board — whatever its project, lane, state or assignee, closed and dropped
+> tasks included — so a lead that cites tasks from many projects gets a link for each real one. It is
+> ONE read per machine, `GET /v1/board/ids` (`{ ids }`, nothing about a task but its id), made through
 > the PWA's board store and shared by every surface that draws a reference: the cost is a request per
-> machine, never one per reference. `board.changed` adds the ids it names, so a card made a moment ago
+> machine, never one per reference. `board.changed` adds the ids it names, so a task made a moment ago
 > links without a re-read, and the resolver is asked again before a click acts, against the set the feed keeps current. The route is `fleet`
 > _use_ like `GET /v1/board` ([grants.md](grants.md)): a remote caller whose credential cannot read the
 > board gets no list, and the references stay prose. A daemon from before the route answers 404; the
 > proof then falls back to the session's project slice below, so an older machine loses nothing it had.
-> Unknown ids stay prose, and the detail itself answers "no card" for an id the machine does not have.
+> Unknown ids stay prose, and the detail itself answers "no task" for an id the machine does not have.
 >
 > **The `&` / `@@@@` Tasks menu stays project-scoped; only the proof widens.** The rows it offers are
-> ONE board read, `project = <the session's project>` with `state = all` and agent cards included, made
-> through the same store. Every open human card on the project is offered whatever its lane or
+> ONE board read, `project = <the session's project>` with `state = all` and agent tasks included, made
+> through the same store. Every open human task on the project is offered whatever its lane or
 > assignee; "human" is the daemon's `origin`, falling back to the older owner/waiting guess only for a
-> card with no `origin`. The menu shows the most relevant 50 and the query (id, title or summary)
+> task with no `origin`. The menu shows the most relevant 50 and the query (id, title or summary)
 > narrows them. A session with no project, or a daemon that cannot answer that read, falls back to this
 > ferret's own slice (`ferret = <session>`). The chat's task search keeps the ferret slice. Offering
-> every card on the machine would drown the menu; proving every card costs one id list.
+> every task on the machine would drown the menu; proving every task costs one id list.
 >
-> **Surfaces that are not a chat prove the same way.** The Inbox and the Board's card detail have no
+> **Surfaces that are not a chat prove the same way.** The Inbox and the Board's task detail have no
 > session, so `DaemonTaskReferences` hands them the same proof (the machine's ids) and the same
-> click (this machine's card route) through the one reference surface — never a second path. A surface
+> click (this machine's task route) through the one reference surface — never a second path. A surface
 > already above it wins, so a chat's own is never downgraded.
 >
-> **Old references resolve through the project read.** A card imported from one of this session's old
-> tasks carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a card on the
-> slice, or when it is the old id of one: it stays written as `&F12` and its click opens the card that
-> replaced it. A card on the slice wins over an old id that spells the same, and so does a card id
+> **Old references resolve through the project read.** A task imported from one of this session's old
+> tasks carries `legacyRef = <session>:<oldId>`. `&F12` in the transcript is proved when `F12` is a task on the
+> slice, or when it is the old id of one: it stays written as `&F12` and its click opens the task that
+> replaced it. A task on the slice wins over an old id that spells the same, and so does a task id
 > anywhere on the machine; the two cannot be told apart by their text, which is the GAP — a session
 > whose old `F12` and a new machine-board `F12` both exist always means the new one. Because the lookup
 > is the board read itself, it needs no `GET /v1/board/tasks?legacyRef=` call per reference; the
-> project limit applies to old ids, so an imported task whose card sits on another project stays prose.
+> project limit applies to old ids, so an imported task that sits on another project stays prose.
 > A reader with no resolver for a kind cannot prove it, so that kind stays prose there. A missing
 > answer is refusal, never assumption: a fleet that has not been read yet is **not** a fleet with
 > nobody in it, and is treated as "cannot prove".
@@ -300,13 +300,13 @@ still share a shell. No listing at all still proves nothing, and stays prose.
 Everything is keyed by `(daemonId, …)`. A resolved agent reference carries the daemon it was proved
 against and navigates to `/d/:daemon/session/:id`, so a reference in one daemon's transcript can
 never open a same-named session on another. A resolved task reference carries the machine whose
-board proved it, because a card id is unique there and nowhere else. Agenda ids still collide per
+board proved it, because a task id is unique there and nowhere else. Agenda ids still collide per
 session, so an `^attention` reference stays session-scoped and resolves against the transcript's
-own session — on the Board and on a card an ask is always shown with its card chip and its ferret,
+own session — on the Board and on a task an ask is always shown with its task chip and its ferret,
 so it is never ambiguous there.
 
 **A `card` or `board` hypermedia block is a pointer under the same gate.** Its payload is nothing but `&F12` tokens, read by the same
-token reader; what it draws (title, lane, progress, PRs) is whatever the board answered, and a card the daemon did not
+token reader; what it draws (title, lane, progress, PRs) is whatever the board answered, and a task the daemon did not
 answer is never a link or a frame, only a quiet note. It is drawn only where the surface lends a board to read
 (`cardEmbed`, offered with a task route); anywhere else the fence stays an ordinary code fence
 ([fy-render.md](fy-render.md#tasks-and-boards)).
@@ -357,14 +357,14 @@ page in its own workspace tab.
 
 ## 9. Agenda message headings
 
-Some chat messages are ABOUT agenda items: the owner's answer from a card, a request for more
+Some chat messages are ABOUT agenda items: the owner's answer from an item, a request for more
 information, a wish to talk an item through, and the owner's own message that references `^AN`. The
 daemon words each with a bracketed heading — a kind, then every item it names as this grammar's `^AN`
 token and its quoted ask or title — so the ferret always knows which item a message is about:
 
-| Heading                           | Means                                    | What the card shows as the owner's words                               |
+| Heading                           | Means                                    | What the item shows as the owner's words                               |
 | --------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `[answer to ^A3 «ask»] …`         | The owner answered from the card         | The answer (a choice as a selected pill), and any `· note: …` under it |
+| `[answer to ^A3 «ask»] …`         | The owner answered from the item         | The answer (a choice as a selected pill), and any `· note: …` under it |
 | `[done ^A3 «ask»] …`              | The owner marked it done, with no note   | The body as written                                                    |
 | `[dismissed ^A3 «ask»] …`         | The owner dismissed it                   | The body as written                                                    |
 | `[needs more info ^A3 «ask»] …`   | The owner needs more before answering    | Their note                                                             |
@@ -375,24 +375,24 @@ A burst of board answers is ONE message: each form in turn, a blank line apart.
 
 **One owner, both directions.** The writer and the reader are the same module,
 `packages/protocol/src/lib/agenda-message.ts`: the daemon builds every heading through it, and the app
-reads them back through `parseAgendaMessage` to draw each as a compact card (kind, the `^AN` chip, the
+reads them back through `parseAgendaMessage` to draw each as a compact item (kind, the `^AN` chip, the
 item's title, the owner's words) instead of raw text. Never parse or word a heading anywhere else — a
 second reader is how the two drift apart.
 
-The `^AN` in a card is an ordinary reference: proved against the session's ledger and opened exactly as
+The `^AN` in an item is an ordinary reference: proved against the session's ledger and opened exactly as
 in section 4, or left as plain text when it cannot be proved. The text the ferret actually received is
-always one tap away on the card ("Show sent text", and copy), so the card is a reading of the message,
+always one tap away on the item ("Show sent text", and copy), so the item is a reading of the message,
 never a replacement for it. A message that does not read as headings in full — prose before the first
 heading, an unknown kind, an id that is not `A` and a positive number — is drawn as the words it is.
 
-## 10. Input cards are agenda items
+## 10. Inputs are agenda items
 
 An [input request](input-requests.md) is an agenda item of `kind: 'input'`, so it is cited exactly as
 every other item: `^AN`, proved against the session's ledger, opened as in section 4. **There is no
 new sigil.** Two consequences for this grammar:
 
-- A message about an input card uses the existing headings (`[delivered ^A7 …]` is worded by the
+- A message about an input uses the existing headings (`[delivered ^A7 …]` is worded by the
   daemon's agenda path). The heading never carries the value, and no heading is ever built from an
   input answer, because the generic agenda answer refuses `kind: 'input'`.
-- The `^AN` of an input card is a pointer to the card, nothing more. The card's own kind, `Input`, is
+- The `^AN` of an input is a pointer to the item, nothing more. The item's own kind, `Input`, is
   drawn from the item's `kind` like the others.
