@@ -1,7 +1,8 @@
-import { type ConfigDef, defineConfig, defineState, neverLoosens } from '@ferretry/kernel/contract';
+import { type ConfigDef, defineConfig, defineState } from '@ferretry/kernel/contract';
 import { GatePort } from '@ferretry/core-gate/contract';
 import { definePlugin, panel, renderer, route, settingsTab, socket, tool, verb } from '@ferretry/kernel/manifest';
 import { AgentControlPort, FerretsPort } from '@ferretry/core-ferrets/contract';
+import { browsersLoosens } from './contract/config-loosens.ts';
 import { InputTargets, VaultPort } from '@ferretry/core-vault/contract';
 import { PairingWindowPort } from '@ferretry/plugin-access/contract';
 import { ShareWindowPort } from '@ferretry/plugin-catalogs/contract';
@@ -754,7 +755,7 @@ export default definePlugin({
         file: 'browsers.yaml',
         schema: BrowsersConfigSchema,
         axis: 'configure',
-        loosens: neverLoosens,
+        loosens: browsersLoosens,
       }) as ConfigDef,
     ],
     readModels: ['state', 'pages'],
