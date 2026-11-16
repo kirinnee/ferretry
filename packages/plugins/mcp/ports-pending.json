@@ -3,7 +3,6 @@
   "pending": ["mcp"],
   "pendingReasons": {
     "mcp": [
-      "[compose] GAP(mcp): the sign-in network resolver (daemon/lib/reach.ts) answers the host of every project server listed from a project's .mcp.json, as v4 fetched freely: an agent that can write a project's .mcp.json can make the daemon fetch that server's sign-in endpoints (the server address itself is not checked by endpointAllowed). The agent already runs on the same host, so this reaches nothing it could not; a sign-in route is person-only and the fetch carries no credential",
       "[compose] GAP(mcp): endpointAllowed strips ONE trailing dot, so `localhost..` is judged a public host, as in v4 (the URL parser keeps it). A resolver that resolves it could reach this host; glibc does not, so the request fails closed here. Nothing a public server names reaches more than in v4",
       "[compose] GAP(mcp): endpointAllowed judges the IPv4-translated literal `[::ffff:0:7f00:1]` (::ffff:0:0/96) a public host, as in v4. Linux does not route it to loopback; an endpoint that names it is not refused",
       "[compose] GAP(mcp): endpointAllowed judges the NAT64 literal `[64:ff9b::7f00:1]` a public host, as in v4. Linux does not route it to loopback; an endpoint that names it is not refused",
