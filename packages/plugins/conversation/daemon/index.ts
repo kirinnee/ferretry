@@ -164,6 +164,8 @@ export const conversationDaemon = (gate: HarnessGate) =>
           // The files a start was given (`fy start -f`): decoded, bounded and worded here, written and appended by Ferrets.
           // The one provider of this security-path hook (`takers: ['conversation']`), under its one key.
           'opening.attachments:opening': openingAttachmentsSource(),
+          // Ferrets' turn watch asks once per look whether a question is open: the stored `question.json` answers.
+          'turn.question-open:question': { isOpen: async ferret => (await api.question(ferret)) !== undefined },
           'ask.delivery:ferret': askDeliveryOf(api),
           'ask.owner-chat:conversation': a.ownerChat,
           // Where the Mailbox keeps a ferret's queue and send ledger: the files stay in this plugin's folder.

@@ -98,6 +98,11 @@ export interface TurnEvidence {
   readonly transcript: TranscriptTurnPhase;
   /** `undefined` when no frame could be read this time. */
   readonly pane: TurnPaneEvidence | undefined;
+  /**
+   * The ferret's owner stores a question that is open right now (`turn.question-open`). It reads exactly as a recorded
+   * `pendingQuestion` does: a person is being asked something. `undefined` when nobody answered the probe.
+   */
+  readonly questionOpen?: boolean | undefined;
 }
 
 /**
@@ -125,7 +130,11 @@ export interface TurnObservation {
 export function observeTurn(evidence: TurnEvidence): TurnObservation | undefined {
   const { state, transcript, pane } = evidence;
   if (!TURN_STATUSES.has(state.status)) return undefined;
-  if (state.status === 'awaiting_question' || (state.pendingQuestion ?? null) !== null)
+  if (
+    state.status === 'awaiting_question' ||
+    (state.pendingQuestion ?? null) !== null ||
+    evidence.questionOpen === true
+  )
     return { state: 'needs-input', confirmed: true };
   if (pane?.dialog !== undefined)
     return {
