@@ -199,6 +199,7 @@ test('harness paths and the agenda deadline are added to the files the Settings 
     binary: '~/bin/claude',
     searchPaths: ['~/.local/bin'],
     questionTool: false,
+    dangerousRmWaiver: false,
   });
   expect(await read('harness-codex.yaml', CodexHarnessSchema)).toEqual({
     permissionMode: 'skip',

@@ -410,7 +410,14 @@ export function buildConversationA(deps: {
   };
   let questionAsksReconciled = false;
 
-  const queueStore = new StateQueueStore(kernel.state);
+  const queueStore = new StateQueueStore(kernel.state, undefined, failure =>
+    kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
+      ferret: failure.ferret,
+      events: failure.events,
+      bytes: failure.bytes,
+      error: String(failure.error),
+    }),
+  );
   const queue = new SessionQueueService({
     store: new NotifyingSessionQueueStore(queueStore, {
       publish: async (id, _type, data) => {

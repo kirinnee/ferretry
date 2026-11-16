@@ -65,6 +65,13 @@ function itemsOf(report: InflightReport): readonly InflightItem[] {
       ...(entry.toolShell === undefined ? {} : { pid: entry.pid, backgroundJob: true as const }),
     });
   }
+  if (report.midTurn)
+    items.push({
+      kind: 'turn',
+      verdict: 're_armable',
+      title: `The agent is mid-turn, ${report.status === 'thinking' ? 'thinking' : 'working'} — moving interrupts this turn; the new session is told to pick it up`,
+      blocks: false,
+    });
   if (report.codexBackgroundTerminals > 0)
     items.push({
       kind: 'terminal',

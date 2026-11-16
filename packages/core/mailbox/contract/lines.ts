@@ -70,6 +70,40 @@ export const QueueEventSchema = z.discriminatedUnion('kind', [
 ]);
 export type QueueEvent = z.infer<typeof QueueEventSchema>;
 
+/**
+ * A message that outlived the segment it was accepted in: the message WITH its `version` (the fold's 1-based position
+ * of its latest change — required here, since it can no longer be recomputed from lines that were rotated away) and its
+ * `order`, the 0-based index of when it was first accepted, so a list stays "in the order first accepted".
+ */
+export const SegmentMessageSchema = z.strictObject({
+  order: NonNegativeInteger,
+  message: QueuedMessageSchema.required({ version: true }),
+});
+export type SegmentMessage = z.infer<typeof SegmentMessageSchema>;
+
+/**
+ * The ONE line of a rotated `queue.jsonl` that is not an event: its FIRST (a live SEGMENT's header). A queue is a log
+ * that is rotated, so it never grows without bound: when the live segment reaches its limit, its FINAL messages are
+ * sealed into a shard (`QueueShardSchema`) and its OPEN ones are carried into the next segment in a carry file
+ * (`QueueCarrySchema`), which is a document and so has no record cap a long message could pass.
+ *
+ * - `base`: how many events came before this segment. The event on line `i` after the header (1-based) is at position
+ *   `base + i`, which is a message's `version` — so versions survive a rotation unchanged.
+ * - `accepted`: how many messages were first accepted before this segment (the next message's `order`).
+ * - `carried`: how many open messages the segment's carry file (named for its `base`) holds; none when 0.
+ *
+ * A file with no header is a segment with base 0, nothing accepted and nothing carried: every log written before
+ * rotation existed reads exactly as it did.
+ */
+export const QueueSegmentHeaderSchema = z.strictObject({
+  v: z.literal(1),
+  kind: z.literal('segment'),
+  base: NonNegativeInteger,
+  accepted: NonNegativeInteger,
+  carried: NonNegativeInteger,
+});
+export type QueueSegmentHeader = z.infer<typeof QueueSegmentHeaderSchema>;
+
 // sends.jsonl ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /** A fate as the ledger writes it: the wire's, and `withdrawn` (nothing was ever typed; the id may start over). */
