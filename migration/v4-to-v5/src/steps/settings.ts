@@ -674,7 +674,8 @@ const isRecordValue = (value: unknown): value is Record<string, unknown> =>
  * file, flags or env. `env` is data in the YAML itself and is written inline; a `file` that is a plain file under
  * `fleet/assets/` (v4's rule exactly, `component-files.ts`) is read from the snapshot and inlined; any other file is
  * NEVER opened. Codex `-c` and Claude `--disallowedTools` flags are
- * carried as settings keys; any other thing the converter cannot carry in full (another flag, an outside file, a hooks
+ * carried as settings keys and every other settings flag as the item's `flags`; any other thing the converter cannot
+ * carry in full (a hooks flag, an outside file, a hooks
  * directory, a secret-shaped or `${secret:...}` value, an oversize file, a v5 refusal) makes the component NOT CARRIED:
  * it is named with its flags (names only) and every profile that layers it, and `settleUncarried` decides what happens
  * to those layers (pending by default, stripped with `--drop-uncarried`).
@@ -735,21 +736,30 @@ async function planHarnessComponent(
   }
   if (typeof v4.directory === 'string') entry.reasons.push('a folder of hook scripts has no inline v5 form');
 
-  // Launch flags: `-c` and `--disallowedTools` have a v5 form; the rest are named by name and hold the component.
+  // Launch flags: `-c` and `--disallowedTools` become settings keys; every other flag is carried as the item's `flags`
+  // (a settings item holds any launch flag). A hooks item holds none, so there they are named and hold the component.
   const flags: FlagOutcome = carryFlags(harnessName, Array.isArray(v4.flags) ? v4.flags : []);
   if (flags.superseded.length > 0)
     plan.dropped.push({
       what: `${label} flags (superseded)`,
       why: `${flags.superseded.join(', ')}: v4's own fixed layer discarded these (it decides the permission, sandbox and approval settings), so they never reached a v4 ferret; nothing is lost`,
     });
-  const noForm = [...flags.uncarried];
+  const noForm = flags.notText ? ['(a flag that is not text)'] : [];
   if (kind === 'hooks') {
-    noForm.push(...flags.deny.map(() => '--disallowedTools'), ...flags.config.map(([key]) => `-c ${key}`));
+    noForm.push(
+      ...flags.carriedNames,
+      ...flags.deny.map(() => '--disallowedTools'),
+      ...flags.config.map(([key]) => `-c ${key}`),
+    );
   }
   if (noForm.length > 0) {
     entry.flags.push(...new Set(noForm));
-    entry.reasons.push(`v5 ${kind} items hold no launch flags, and these have no inline form`);
-  }
+    entry.reasons.push(
+      kind === 'hooks'
+        ? 'v5 hooks items hold no launch flags, and these have no inline form'
+        : 'a flag that is not text has no word to carry',
+    );
+  } else if (kind === 'settings') entry.flags.push(...new Set(flags.carriedNames));
 
   let body: Record<string, unknown> = {};
   if (kind === 'hooks') {
@@ -798,7 +808,10 @@ async function planHarnessComponent(
         }
         node[parts[parts.length - 1] as string] = value;
       }
-    if (Object.keys(settings).length > 0) body = { settings };
+    body = {
+      ...(Object.keys(settings).length > 0 ? { settings } : {}),
+      ...(flags.carried.length > 0 ? { flags: [...flags.carried] } : {}),
+    };
   }
 
   // A string that names a file under v4's fleet/assets is rewritten to the v5 copy (component-assets.ts); any other

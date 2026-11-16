@@ -45,6 +45,24 @@ describe('launchSettingsRecord', () => {
     expect(compareLaunchSettings(before, after)).toEqual({ kind: 'drifted', sections: ['settings'] });
   });
 
+  it('moves only the settings section when a settings item gains, loses or reorders a launch flag', () => {
+    const flagged = (...flags: string[]) =>
+      launchSettingsRecord({ ...BASE, settings: settings(['theme', { settings: { theme: 'dark' }, flags }]) });
+    const before = launchSettingsRecord(BASE);
+
+    expect(compareLaunchSettings(before, flagged('--verbose'))).toEqual({ kind: 'drifted', sections: ['settings'] });
+    expect(compareLaunchSettings(flagged('--verbose'), flagged('--debug'))).toEqual({
+      kind: 'drifted',
+      sections: ['settings'],
+    });
+    expect(compareLaunchSettings(flagged('--a', '--b'), flagged('--b', '--a'))).toEqual({
+      kind: 'drifted',
+      sections: ['settings'],
+    });
+    // No flags at all keeps the digest a record taken before flags existed holds.
+    expect(compareLaunchSettings(before, flagged())).toEqual({ kind: 'current' });
+  });
+
   it('moves only the hooks section when a hooks item changes', () => {
     const before = launchSettingsRecord(BASE);
     const after = launchSettingsRecord({

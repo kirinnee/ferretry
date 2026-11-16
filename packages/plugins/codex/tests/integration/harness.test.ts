@@ -7,7 +7,7 @@ import { CODEX_OFFLINE_LAUNCH_ERROR, codexLaunchFailure } from '@ferretry/plugin
 import { codexHarness } from '../../daemon/adapters/codex-harness.ts';
 import { realClock } from '../support/ports.ts';
 import { tomlString, tomlTables } from '../../daemon/lib/index.ts';
-import { CODEX_LAUNCH_SETTINGS } from '../../contract/index.ts';
+import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS } from '../../contract/index.ts';
 import { CODEX_QUESTIONS_FEATURE, codexFixedArguments, codexQuestionArguments } from '../../daemon/lib/fixed-layer.ts';
 import { selectEverything } from '../support/selected.ts';
 
@@ -62,7 +62,10 @@ function fakeRunner() {
   return { runner, seen };
 }
 
-const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>) => {
+const harnessOver = (
+  location: Awaited<ReturnType<NonNullable<Parameters<typeof codexHarness>[0]['locate']>>>,
+  items: ReadonlyMap<string, unknown> = new Map(),
+) => {
   const { written, privateDirectories, roots } = fakeRoots();
   /** The launch-settings records the launches wrote, in order. */
   const records: unknown[] = [];
@@ -79,6 +82,7 @@ const harnessOver = (location: Awaited<ReturnType<NonNullable<Parameters<typeof 
       log: { warn: () => undefined } as never,
       clock: realClock(),
       redaction: { read: async fn => await fn({ text: (s: string) => s } as never) },
+      config: { collection: (definition: unknown) => (definition === CODEX_SETTINGS ? items : new Map()) } as never,
     },
     locate: async () => location,
     probe: {
@@ -183,6 +187,60 @@ describe('the Codex harness', () => {
     should(command).eql(plain.seen[0]?.spec.command);
     should(command.some(argument => argument.includes('allowedTools') || argument.includes('/fy/state/'))).be.false();
     should(command).containEql('sandbox_mode="workspace-write"');
+  });
+
+  describe('the settings items’ launch flags (any flag, owner decision !A525)', () => {
+    const items = new Map<string, unknown>([
+      ['b-search', { settings: {}, flags: ['--search', '-c', 'model_verbosity="low"'] }],
+      ['a-risky', { settings: {}, flags: ['--full-auto', '-c', 'approval_policy="never"', '--some-future-flag'] }],
+    ]);
+
+    it('reach the argv as separate words, in item name order, before the launch’s own arguments', async () => {
+      const { harness } = harnessOver(LOCATED, items);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf({ model: 'gpt-5.6-codex' }), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+      const at = command.indexOf('--some-future-flag');
+
+      should(command.slice(at, at + 4)).eql(['--some-future-flag', '--search', '-c', 'model_verbosity="low"']);
+      should(at).be.below(command.indexOf('--model'));
+      should(command.indexOf('--model')).be.below(command.indexOf('--no-alt-screen'));
+    });
+
+    it('lose to the launch on a permission switch: the item’s sandbox and approval flags never reach the argv', async () => {
+      const { harness } = harnessOver(LOCATED, items);
+      const { runner, seen } = fakeRunner();
+      await harness.start(specOf(), runner, ENV);
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command).not.containEql('--full-auto');
+      should(command).not.containEql('approval_policy="never"');
+      should(command.filter(argument => argument.startsWith('approval_policy='))).eql(['approval_policy="on-request"']);
+    });
+
+    it('reach a resume too, after the conversation id', async () => {
+      const { harness } = harnessOver(LOCATED, items);
+      const { runner, seen } = fakeRunner();
+      await harness.resume(specOf(), runner, ENV, 'conv-1');
+      const command = seen[0]?.spec.command ?? [];
+
+      should(command.slice(command.indexOf('resume'), command.indexOf('resume') + 3)).eql([
+        'resume',
+        'conv-1',
+        '--some-future-flag',
+      ]);
+    });
+
+    it('add nothing when no item carries a flag', async () => {
+      const { harness } = harnessOver(LOCATED, new Map([['plain', { settings: { model: 'm' } }]]));
+      const bare = harnessOver(LOCATED);
+      const withItem = fakeRunner();
+      const without = fakeRunner();
+      await harness.start(specOf(), withItem.runner, ENV);
+      await bare.harness.start(specOf(), without.runner, ENV);
+
+      should(withItem.seen[0]?.spec.command).eql(without.seen[0]?.spec.command);
+    });
   });
 
   it('resumes by the harness conversation id, and reports it back', async () => {

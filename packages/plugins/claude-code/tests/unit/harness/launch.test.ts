@@ -10,6 +10,7 @@ import {
   launchCommand,
   questionArguments,
   settingsDocument,
+  settingsFlags,
 } from '../../../daemon/lib/harness/launch.ts';
 import {
   API_KEY_SEED_NAME,
@@ -307,6 +308,89 @@ describe('launchCommand', () => {
       '--model',
       'claude-opus-5-5',
     ]);
+  });
+});
+
+describe('launchCommand with settings flags', () => {
+  const base = {
+    binary: '/opt/bin/claude',
+    home: '/state/claude-code/agent-homes/f1',
+    permissionMode: 'auto' as const,
+    hasMcp: true,
+    mode: 'interactive' as const,
+    conversation: { kind: 'resume' as const, id: 'c-1' },
+    model: 'claude-opus-5-5',
+  };
+  /** The words after the seeded shell's own: what claude is `exec`ed with. */
+  const claudeWords = (argv: readonly string[]): readonly string[] => argv.slice(argv.indexOf(base.binary));
+
+  it('passes every flag, any flag, as its own word and in order, before the launch’s own flags', () => {
+    const flags = ['--some-future-flag', 'a value with spaces', '--verbose', '--add-dir', '/a', '/b'];
+    const words = claudeWords(launchCommand({ ...base, flags }));
+
+    should(words.slice(1, 1 + flags.length)).eql(flags);
+    should(words.slice(1 + flags.length, 3 + flags.length)).eql([
+      '--settings',
+      '/state/claude-code/agent-homes/f1/launch-settings.json',
+    ]);
+  });
+
+  it('keeps the launch’s own flags authoritative: the permission mode, the conversation, the home files and the model', () => {
+    const words = claudeWords(
+      launchCommand({
+        ...base,
+        flags: [
+          '--permission-mode',
+          'bypassPermissions',
+          '--dangerously-skip-permissions',
+          '--session-id',
+          'evil',
+          '--resume',
+          'other',
+          '--settings',
+          'x.json',
+          '--mcp-config',
+          'x.json',
+          '--model',
+          'cheap',
+          '--keep',
+        ],
+      }),
+    );
+
+    should(words).eql([
+      '/opt/bin/claude',
+      '--model',
+      'cheap',
+      '--keep',
+      '--settings',
+      '/state/claude-code/agent-homes/f1/launch-settings.json',
+      '--permission-mode',
+      'auto',
+      '--mcp-config',
+      '/state/claude-code/agent-homes/f1/mcp.json',
+      '--resume',
+      'c-1',
+      // The model the launch decides is LAST, so it wins over the item's own `--model`.
+      '--model',
+      'claude-opus-5-5',
+    ]);
+  });
+
+  it('is the same argv with no flags, and with none given', () => {
+    should(launchCommand({ ...base, flags: [] })).eql(launchCommand(base));
+  });
+});
+
+describe('settingsFlags', () => {
+  it('appends every selected item’s flags item by item in name order, and skips an item with none', () => {
+    const items = new Map([
+      ['z-last', { settings: {}, flags: ['--a', '1'] }],
+      ['a-none', { settings: { theme: 'dark' } }],
+      ['m-middle', { settings: {}, flags: ['--b'] }],
+    ]);
+
+    should(settingsFlags(items)).eql(['--b', '--a', '1']);
   });
 });
 

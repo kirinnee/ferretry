@@ -53,7 +53,7 @@ import {
 import type { DialogAnswerService } from '../lib/dialog/service.ts';
 import { MAX_HOME_DOCUMENT_BYTES as MAX_CLAUDE_JSON_BYTES, mergeClaudeJson } from '../lib/harness/claude-json.ts';
 import { claudeTranscriptPath, isConversationId } from '../lib/harness/claude-path.ts';
-import { HOME_FILES, homeText, launchCommand } from '../lib/harness/launch.ts';
+import { HOME_FILES, homeText, launchCommand, settingsFlags } from '../lib/harness/launch.ts';
 import {
   compareLaunchSettings,
   type LaunchSettingsInputs,
@@ -397,6 +397,7 @@ export class ClaudeHarness implements Harness {
     await this.prepareHomeFrom(spec, inputs);
     const command = launchCommand({
       binary: found.binary,
+      flags: settingsFlags(inputs.settings),
       home: spec.home,
       permissionMode: inputs.permissionMode,
       model: spec.model,

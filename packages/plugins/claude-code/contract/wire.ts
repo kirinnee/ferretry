@@ -322,10 +322,18 @@ export const HarnessConfigSchema = z.strictObject({
 });
 export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 
-/** A settings component: the harness's own settings document, as data. Values never hold a raw secret (`${secret:NAME}` only). */
+/**
+ * A settings component: the harness's own settings document, as data, and the launch flags that go with it. Values never
+ * hold a raw secret (`${secret:NAME}` only); the kernel's write rule refuses a flag value that looks like one.
+ *
+ * `flags` are argv words in order, ANY flag (there is no name allowlist, owner decision !A525): each is passed to Claude
+ * as its own word, never through a shell and never re-split. Which flags the launch keeps for itself is
+ * `./launch-flags.ts`.
+ */
 export const SettingsItemSchema = z.strictObject({
   description: z.string().optional(),
-  settings: z.record(z.string(), z.unknown()),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  flags: z.array(z.string().min(1)).optional(),
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 

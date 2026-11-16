@@ -391,11 +391,98 @@ describe('m1 flag values never reach the report', () => {
       await text('config/components/settings/odd.yaml', `harness: ${harness}\nflags:\n${flags}`);
       await text('config/profiles/default.yaml', 'contents:\n  - settings/odd\n');
       const report = await done();
-      const step = settingsOf(report);
+      // The flag is carried (a settings item holds any flag): the report never echoes its value, the item file holds it.
       expect(JSON.stringify(report)).not.toContain(SENTINEL);
-      expect(namedIn(step)).toContain('config/components/settings/odd.yaml');
-      if (label !== 'codex -cKEY=VALUE') expect(step.status).toBe('pending');
+      expect(settingsOf(report).status).not.toBe('pending');
+      const item = await readV5(`config/${harness === 'claude' ? 'claude-code' : 'codex'}/settings/odd.yaml`);
+      expect(item).toContain(SENTINEL);
     });
+});
+
+describe('every v4 settings flag is carried into the item `flags` (a settings item holds any launch flag)', () => {
+  const flagsOf = async (harness: 'claude-code' | 'codex', name: string): Promise<unknown> =>
+    (parse(await readV5(`config/${harness}/settings/${name}.yaml`)) as { flags?: unknown }).flags;
+
+  test('a Claude component: unknown flags and their values verbatim and in order, beside the settings keys', async () => {
+    await text('layout-version', '2\n');
+    await text(
+      'config/components/settings/tools.yaml',
+      'harness: claude\nflags:\n  - --verbose\n  - --model\n  - sonnet-x\n  - --disallowedTools\n  - Edit\n  - --add-dir=/data\n  - --permission-mode\n  - plan\n  - --debug\n',
+    );
+    await text('config/profiles/default.yaml', 'contents:\n  - settings/tools\n');
+    const report = await done();
+    expect(report.complete).toBe(true);
+    expect(await flagsOf('claude-code', 'tools')).toEqual([
+      '--verbose',
+      '--model',
+      'sonnet-x',
+      '--add-dir=/data',
+      '--debug',
+    ]);
+    const item = parse(await readV5('config/claude-code/settings/tools.yaml')) as {
+      settings: { permissions: { deny: string[] } };
+    };
+    expect(item.settings.permissions.deny).toEqual(['Edit']);
+    // v4's own fixed layer discarded the permission mode, so it is named as left out and never carried.
+    expect(JSON.stringify(await flagsOf('claude-code', 'tools'))).not.toContain('plan');
+    expect(namedIn(settingsOf(report))).toContain('--permission-mode');
+    expect(await modelAccepts()).toEqual(['default']);
+  });
+
+  test('a Codex component: -c on an ordinary key is a settings key, every other flag word is carried verbatim', async () => {
+    await text('layout-version', '2\n');
+    await text(
+      'config/components/settings/net.yaml',
+      'harness: codex\nflags:\n  - --search\n  - -c\n  - model_verbosity="low"\n  - -c\n  - mcp_servers.other.command="x"\n  - -c\n  - =oops\n  - --profile\n  - work\n  - --sandbox\n  - danger-full-access\n',
+    );
+    await text('config/profiles/default.yaml', 'contents:\n  - settings/net\n');
+    const report = await done();
+    expect(report.complete).toBe(true);
+    expect(await flagsOf('codex', 'net')).toEqual([
+      '--search',
+      '-c',
+      'mcp_servers.other.command="x"',
+      '-c',
+      '=oops',
+      '--profile',
+      'work',
+    ]);
+    const item = parse(await readV5('config/codex/settings/net.yaml')) as { settings: Record<string, unknown> };
+    expect(item.settings).toEqual({ model_verbosity: 'low' });
+    expect(JSON.stringify(item)).not.toContain('danger-full-access');
+  });
+
+  test('an item with flags and no other settings is written, and the item file keeps the flags in order', async () => {
+    await text('layout-version', '2\n');
+    await text('config/components/settings/only.yaml', 'harness: claude\nflags:\n  - --b\n  - --a\n');
+    await text('config/profiles/default.yaml', 'contents:\n  - settings/only\n');
+    expect((await done()).complete).toBe(true);
+    expect(parse(await readV5('config/claude-code/settings/only.yaml'))).toEqual({ flags: ['--b', '--a'] });
+  });
+
+  test('a flag value shaped like a credential is still held, named by its path and never echoed', async () => {
+    await text('layout-version', '2\n');
+    await text('config/components/settings/key.yaml', `harness: claude\nflags:\n  - --api-key\n  - ${FAKE_SECRET}\n`);
+    await text('config/profiles/default.yaml', 'contents:\n  - settings/key\n');
+    const report = await done();
+    const step = settingsOf(report);
+    expect(step.status).toBe('pending');
+    expect(namedIn(step)).toContain('config/components/settings/key.yaml');
+    expect(JSON.stringify(report)).not.toContain(FAKE_SECRET);
+    await expect(stat(join(f.to, 'config/claude-code/settings/key.yaml'))).rejects.toThrow();
+  });
+
+  test('a hooks component with flags, and a flag that is not text, are still held: v5 has no word to carry them as', async () => {
+    await text('layout-version', '2\n');
+    await text('config/components/hooks/h.yaml', 'harness: claude\nflags:\n  - --verbose\n');
+    await text('config/components/settings/num.yaml', 'harness: claude\nflags:\n  - 5\n  - --x\n');
+    await text('config/profiles/default.yaml', 'contents:\n  - hooks/h\n  - settings/num\n');
+    const step = settingsOf(await done());
+    expect(step.status).toBe('pending');
+    const named = namedIn(step);
+    expect(named).toContain('v5 hooks items hold no launch flags');
+    expect(named).toContain('a flag that is not text has no word to carry');
+  });
 });
 
 describe('m2 a cloud voice provider v4 never confirmed stays held', () => {

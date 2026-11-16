@@ -1,11 +1,12 @@
 /**
- * The launch flags of a v4 settings component, sorted into what v5 can hold and what it cannot.
+ * The launch flags of a v4 settings component, sorted into what becomes a settings key and what is carried as it is.
  *
- * v5 settings items hold no launch flags (`SettingsItemSchema` is `{ description?, settings }`), but two flag families
- * have an exact v5 form: Codex `-c key=value` / `--config key=value` is a config override (a key of the item's `settings`
- * table) and Claude `--disallowedTools X` is `settings.permissions.deny`. The flags v4's own fixed layer discarded
- * (`SUPERSEDED_FLAGS`: the permission, sandbox and approval switches) never reached a v4 ferret, so they are named as
- * left out and never carried (carrying one would LOOSEN). Every other flag is not carried, and is named by NAME only.
+ * A v5 settings item holds ANY launch flag in its `flags` list (owner decision !A525), so nothing is held for being a flag.
+ * Two families still have an exact, better v5 form: Codex `-c key=value` / `--config key=value` is a config override (a
+ * key of the item's `settings` table) and Claude `--disallowedTools X` is `settings.permissions.deny`. The flags v4's own
+ * fixed layer discarded (`SUPERSEDED_FLAGS`: the permission, sandbox and approval switches) never reached a v4 ferret, so
+ * they are named as left out and never carried (carrying one would LOOSEN). EVERY other flag word is carried verbatim, in
+ * order, and named by NAME only in a report.
  */
 
 export interface FlagOutcome {
@@ -15,8 +16,12 @@ export interface FlagOutcome {
   readonly config: readonly (readonly [string, unknown])[];
   /** Flags v4 itself discarded (names only). */
   readonly superseded: readonly string[];
-  /** Flags with no v5 form (names only, never a value). */
-  readonly uncarried: readonly string[];
+  /** The words of every other flag, verbatim and in order: the item's `flags`. */
+  readonly carried: readonly string[];
+  /** The names of the carried flags (never a value), for a report. */
+  readonly carriedNames: readonly string[];
+  /** Whether a flag was not text, so it has no word to carry. */
+  readonly notText: boolean;
 }
 
 type Shape = 'bare' | 'value';
@@ -74,9 +79,10 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
   const deny: string[] = [];
   const config: [string, unknown][] = [];
   const superseded: string[] = [];
-  const uncarried: string[] = [];
+  const carried: string[] = [];
+  const carriedNames: string[] = [];
   const text = flags.filter((flag): flag is string => typeof flag === 'string');
-  if (text.length !== flags.length) uncarried.push('(a flag that is not text)');
+  const notText = text.length !== flags.length;
   const table = harness === 'codex' ? CODEX_SUPERSEDED : CLAUDE_SUPERSEDED;
   const isFlag = (token: string | undefined): boolean => token?.startsWith('-') === true;
   for (let index = 0; index < text.length; index++) {
@@ -93,8 +99,11 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
       if (inline === undefined)
         while (index + 1 < text.length && !isFlag(text[index + 1])) values.push(text[++index] as string);
       const patterns = values.flatMap(splitPatterns);
-      if (patterns.length === 0) uncarried.push(name);
-      else deny.push(...patterns);
+      if (patterns.length === 0) {
+        // No pattern to hold as a setting: the flag is carried as it was written.
+        carried.push(token, ...(inline === undefined ? values : []));
+        carriedNames.push(name);
+      } else deny.push(...patterns);
       continue;
     }
     if (harness === 'codex' && (name === '-c' || name === '--config')) {
@@ -103,13 +112,21 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
       const split = assignment?.indexOf('=') ?? -1;
       const key = assignment === undefined || split < 1 ? '' : assignment.slice(0, split).trim();
       const parts = key.split('.');
-      if (key === '' || parts.some(part => part === '' || UNSAFE_KEY_PART.has(part))) {
-        uncarried.push(name);
+      if (isFixedCodexKey(key)) {
+        superseded.push(`${name} ${key}`);
         continue;
       }
-      if (isFixedCodexKey(key)) superseded.push(`${name} ${key}`);
-      else if (key.startsWith('mcp_servers.')) uncarried.push(`${name} ${key}`);
-      else config.push([key, configValue((assignment as string).slice(split + 1).trim())]);
+      if (
+        key === '' ||
+        parts.some(part => part === '' || UNSAFE_KEY_PART.has(part)) ||
+        key.startsWith('mcp_servers.')
+      ) {
+        // No settings key to hold it under (an empty or unsafe key, an MCP server table): carried as it was written.
+        carried.push(token, ...(inline === undefined && assignment !== undefined ? [assignment] : []));
+        carriedNames.push(key === '' ? name : `${name} ${key}`);
+        continue;
+      }
+      config.push([key, configValue((assignment as string).slice(split + 1).trim())]);
       continue;
     }
     const shape = table[name];
@@ -118,19 +135,20 @@ export function carryFlags(harness: 'claude-code' | 'codex', flags: readonly unk
       if (shape === 'value' && inline === undefined && !isFlag(text[index + 1])) index++;
       continue;
     }
-    if (!token.startsWith('-')) continue; // the stray value of a flag already named
-    uncarried.push(name);
+    carried.push(token);
+    if (!token.startsWith('-')) continue; // the stray value of a flag already named: carried, never named
+    carriedNames.push(name);
     // An unknown flag's value is never named (it may be a secret, and may start with `-`). A next token is a real
     // flag only when it is `--name` or a bare `-x`; a longer single-dash token (`-VALUE`, `-cKEY=VALUE`) is taken as
-    // the value (a placeholder says so, the token is never echoed); a plain next token is the value.
+    // the value; a plain next token is the value. Either way it is carried as it was written, right after its flag.
     const following = inline === undefined ? text[index + 1] : undefined;
     if (following !== undefined) {
       const clearFlag = following.startsWith('--') || (following.startsWith('-') && following.length === 2);
       if (!clearFlag) {
-        if (following.startsWith('-')) uncarried.push('(a flag value that starts with -)');
+        carried.push(following);
         index++;
       }
     }
   }
-  return { deny, config, superseded, uncarried };
+  return { deny, config, superseded, carried, carriedNames, notText };
 }

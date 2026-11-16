@@ -198,6 +198,54 @@ describe('the whole Codex launch argv', () => {
     ]);
   });
 
+  it('puts the settings items’ flags before every argument the launch sets, as their own words, any flag', () => {
+    expect(
+      buildCodexLaunchArgv({
+        executable: 'codex',
+        resume: 'conv-1',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        settingsFlags: ['--some-future-flag', 'a value with spaces', '-c', 'model_verbosity="low"', '-m', 'cheap'],
+        harnessFlags: ['--fixed'],
+      }),
+    ).toEqual([
+      'codex',
+      'resume',
+      'conv-1',
+      '--some-future-flag',
+      'a value with spaces',
+      '-c',
+      'model_verbosity="low"',
+      '-m',
+      'cheap',
+      // The launch's own model and effort come after, so they win over an item's.
+      '--model',
+      'gpt-6.1-sol',
+      '-c',
+      'model_reasoning_effort="high"',
+      '--fixed',
+    ]);
+  });
+
+  it('drops from the settings flags what the launch decides: the permission switches and the tools server', () => {
+    expect(
+      buildCodexLaunchArgv({
+        executable: 'codex',
+        settingsFlags: [
+          '--search',
+          '--sandbox',
+          'danger-full-access',
+          '-c',
+          'approval_policy="never"',
+          '--full-auto',
+          '-c',
+          'mcp_servers.ferretry.command="x"',
+          '--keep',
+        ],
+      }),
+    ).toEqual(['codex', '--search', '--keep']);
+  });
+
   it('names the standard tier explicitly for fast: false, because a saved /fast would otherwise win', () => {
     expect(buildCodexLaunchArgv({ executable: 'codex', fast: false })).toEqual([
       'codex',

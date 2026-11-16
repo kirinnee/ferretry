@@ -182,7 +182,13 @@ export type HarnessConfig = z.infer<typeof HarnessConfigSchema>;
 /** A settings component: the harness's own settings document, as data. Values never hold a raw secret (`${secret:NAME}` only). */
 export const SettingsItemSchema = z.strictObject({
   description: z.string().optional(),
-  settings: z.record(z.string(), z.unknown()),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * Launch flags: argv words in order, ANY flag (no name allowlist, owner decision !A525), each passed to Codex as its own
+   * word, never through a shell and never re-split. The kernel's write rule refuses a flag value that looks like a
+   * secret. Which flags the launch keeps for itself is `./launch-flags.ts`.
+   */
+  flags: z.array(z.string().min(1)).optional(),
 });
 export type SettingsItem = z.infer<typeof SettingsItemSchema>;
 

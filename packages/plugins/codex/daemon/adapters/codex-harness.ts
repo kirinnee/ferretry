@@ -26,7 +26,7 @@ import { materializeSkills } from '@ferretry/core-ferrets/contract';
 import { codexLaunchFailure } from '@ferretry/plugin-runtimes/contract';
 import { err, ok, type Result } from '@ferretry/std';
 import { buildCodexLaunchArgv, tomlDocument, tomlTables } from '../lib/index.ts';
-import { settingsDocument } from '../lib/settings.ts';
+import { settingsDocument, settingsFlags } from '../lib/settings.ts';
 import { CODEX_LAUNCH_SETTINGS, CODEX_SETTINGS, type HarnessConfig, type SettingsItem } from '../../contract/index.ts';
 import { codexFixedArguments, codexQuestionArguments } from '../lib/fixed-layer.ts';
 import type { SelectedComponents } from '@ferretry/plugin-runtimes/contract';
@@ -123,11 +123,13 @@ export function codexHarness(options: CodexHarnessOptions): Harness {
   ): Promise<Result<readonly string[], StartRefusal>> => {
     const location = await locate();
     if (location.outcome !== 'located') return err('unavailable');
+    const items = await settingsNow(spec.runtime);
     return ok([
       'env',
       `CODEX_HOME=${spec.home}`,
       ...buildCodexLaunchArgv({
         executable: location.path,
+        settingsFlags: settingsFlags(items),
         harnessFlags: [
           ...codexFixedArguments(permissionMode, spec.folder),
           ...codexCorrelationArguments(spec.home),
