@@ -42,7 +42,7 @@ is, a notice without `--ping`, the owner's own moves — moves the Inbox badge a
 | 2   | An item's **`neededBy`** comes within `attention.deadlineWarnHours` (default 3 hours)                                                             | The item's title; "Needed in 25 min" / "Overdue" ahead of its ask | Once per item                           |
 | 3   | A notice with **`--ping`**                                                                                                                        | The notice's summary                                              | Once per notice                         |
 | 4   | A **snoozed** item wakes and it **blocks** the ferret or has a **`neededBy`**                                                                     | The item's title; "Back from snooze: <ask>"                       | Once per wake                           |
-| 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
+| 5   | A card the owner asked for **reaches a gate**: its ask is put on its agenda ([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda)) | The agenda's title; "&F12 <card> is at <lane>: Done or Not good"  | Once per card ask, when it is put on    |
 
 A card ask is the card's one signal: it pushes when it is put on its agenda (row 5) and that agenda is left out
 of a stop only while its sole open items are card asks, so a ferret that stops with only such an agenda waiting makes

@@ -312,7 +312,7 @@ ferret launched with it on **Restart needed**. A record from before this reads a
 
 ## Claude's questions reach the app from the screen, not a hook
 
-An interactive ferret's `AskUserQuestion` is offered as a question card only when the daemon knows the question is
+An interactive ferret's `AskUserQuestion` is offered as a question only when the daemon knows the question is
 open. Claude Code 2.1.281 writes the call to its transcript only in the same write as its answer, so the transcript says
 nothing while the form waits. The fixed layer used to put a `PreToolUse` hook in the overlay for that; **it no longer
 writes one** (M7, owner: "dont use hooks"). The conversation plugin's question watch
@@ -335,14 +335,14 @@ alone, so a new launch does not read as `awaiting_question` (the mailbox does no
 
 ## After a compaction a Claude ferret re-reads what it owes
 
-A compaction keeps a summary and drops the rest, so a ferret can lose its assigned task, its card, its open agenda
+A compaction keeps a summary and drops the rest, so a ferret can lose its assignment, its task, its open agenda
 items and the messages it still owes a reply to. The **fixed layer** puts two more hooks into the `--settings` overlay
 (`daemon/lib/harness/compaction.ts` in the Claude Code plugin), and never in a settings entry:
 
-- `PreCompact` (manual and auto) prints what the summary must keep — task, card id and status, agenda item ids, owed
+- `PreCompact` (manual and auto) prints what the summary must keep — assignment, task id and status, agenda item ids, owed
   messages, PR links;
 - `SessionStart` with the matcher `compact` prints, once the compaction is done, what to read again:
-  `fy logs <session> --turn 1`, `fy card show <card id>` (`fy board status` when the id is lost), `fy agenda ls` and
+  `fy logs <session> --turn 1`, `fy task show <task id>` (`fy board status` when the id is lost), `fy agenda ls` and
   `fy agenda show <id>`, `fy transcript <session> --tail` and `fy reply <id> <text>`. The only value it reads is
   `FY_SESSION_ID`; it prints no credential and always exits 0.
 

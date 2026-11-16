@@ -25,7 +25,7 @@ For every `<state home>/sessions/<id>/tasks.json`:
 - **Agenda items:** open items that name no card get one: the single owner-blocked card, else the session's single
   in-progress card, else an auto-created "Untriaged asks" card for that session.
 
-- **Board:** the session's project, resolved as for any session ([board.md](board.md#which-board-a-card-is-on-and-how-a-project-gets-one)).
+- **Board:** the session's project, resolved as for any session ([board.md](board.md#which-board-a-task-is-on-and-how-a-project-gets-one)).
   A session whose repository was never registered imports onto Unfiled; that ferret's next card registers the
   repository, and `fy task refile <id> --project <name>` moves the imported cards across, closed ones included.
 

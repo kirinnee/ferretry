@@ -168,7 +168,7 @@ Rendering is gated by `MarkdownProps.enableFyRender`, which **defaults to `false
 production call site sets it: `ChatProse` in `packages/pwa/src/components/chat-prose.tsx`. Three
 surfaces draw through it, all of them text the owner's own ferrets (or the owner) wrote on the owner's
 daemon: an assistant's message, an agenda card, and a board card's detail (its summary, premise,
-context, brief and How to test, [board.md](board.md#how-a-card-reads)). Every other `<Markdown>`
+context, brief and How to test, [board.md](board.md#how-a-task-reads)). Every other `<Markdown>`
 consumer — file previews, warden reports, and the composer's own preview once it lands — gets the
 inert escaped fence automatically by not passing it, with no new code on those surfaces.
 

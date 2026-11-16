@@ -7,11 +7,11 @@ nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 **An agenda is one channel of the owner's attention** ([One channel per topic](#one-channel-per-topic)): a ferret
 opens one only for what the owner alone can give — information, a decision or an action — and only when no open
 agenda passes the three-part test; otherwise it adds to the closest. It never opens one just to track or check its
-own work: no "please test X", "please verify Y" or "try it after the release". Testing a card goes through the card's own agenda — the board
-runs itself and a card never asks (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda
-tracks all those and are the one request user to test so it can move it"_): a finished card reaches its Released or
-Ready to try lane, the daemon puts its card ask on the card's agenda, and the owner's **Done** or **Not good** there
-moves the card ([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
+own work: no "please test X", "please verify Y" or "try it after the release". Testing a task goes through the task's own agenda — the board
+runs itself and a task never asks (the owner, 2026-11-04: _"TASK no longer have user interactivity anymore! agenda
+tracks all those and are the one request user to test so it can move it"_): a finished task reaches its Released or
+Ready to try lane, the daemon puts its task ask on the task's agenda, and the owner's **Done** or **Not good** there
+moves the task ([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda)). The ferret's instruction says all of this (`AGENDA_INSTRUCTION`,
 [notifications.md](notifications.md#agenda-mode)).
 
 **A question the owner asks is answered on the agenda too.** The owner reads the agenda, not every reply, so an answer
@@ -68,7 +68,7 @@ they would want to hear about in the same place, against the same background, an
 
 **`fy agenda add` runs the check.** Before it opens anything it lists the open agendas on the caller's own agenda
 (its lineage: a sub-ferret has none of its own), closest first, each with its reference, its state (`needs you`,
-`resting` or `snoozed`), its title and its card:
+`resting` or `snoozed`), its title and its task:
 
 ```text
 Search, check, then open: these agendas are open, closest first.
@@ -90,7 +90,7 @@ Open a new agenda only when none passes the test:
   lines stay, the new ask is added to them, and the premise and context are the union of both. An item the owner
   replied to is brought back by the same edit with `--question-answer '<the new ask>' --summary '<the new ask>'`, the old subject kept as a
   still-open line. A **structured ask** (options, an approval, a form, questions, steps, a body, `--blocking`,
-  `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different card, `--offer-close` onto an agenda that does not already offer the Done button) is never squeezed in:
+  `--will-block`, `--by`, links, terms, an answer of its own such as `--up`, its own `--why` or `--resolve`, a different task, `--offer-close` onto an agenda that does not already offer the Done button) is never squeezed in:
   the listing says what would be lost and the safe way out, `--new "<why none fits; closest is ^A7>"`.
 - **`--new` bypasses the refusal, not the listing.** With `--new "<why>"` the same search runs and the same list is
   printed (to stderr, so `--json` still prints the raised item on stdout), ending "Opening a new agenda anyway: <why>";
@@ -99,11 +99,11 @@ Open a new agenda only when none passes the test:
   nothing is opened). Enter, `n` or anything else opens nothing either: the two ways out are printed, and a new
   agenda needs `--new "<why>"`.
 
-- **The order.** An agenda carrying the card `--task` names, or a card that one depends on or blocks, comes first
+- **The order.** An agenda carrying the task `--task` names, or a task that one depends on or blocks, comes first
   (dependent things share one agenda); then the daemon's strong and weak related matches
   ([work-search.md](work-search.md#the-related-check)); then the words they share; then the oldest.
 - **The candidates** are the items a ferret raised and can add to. The owner's own items, notices, held configuration
-  changes, gate items and the daemon's input cards are never listed.
+  changes, gate items and the daemon's inputs are never listed.
 - **A ferret** (nobody at a terminal) is refused with the list and the two ways out; `--json` prints
   `{candidates, related}` and refuses the same way. **A person at a terminal** is asked "Should this join ^A7?": yes
   prints the edit and opens nothing, anything else opens nothing and prints the two ways out.
@@ -113,16 +113,16 @@ Open a new agenda only when none passes the test:
   questions or more, or its `-q` questions are wanted at different paces (one "now", one "next week"). The warning
   says both rules: independent decisions belong in two agendas, dependent ones share one. The heuristic is
   `twoDecisionSignals` in `packages/cli/src/lib/agenda/two-decisions.ts`.
-- **A held configuration change** (`--confirms`) is its own card and skips the check.
+- **A held configuration change** (`--confirms`) is its own item and skips the check.
 
 **What the daemon raises on a ferret's behalf.** An input request (`terminal_request_input`,
-`browser_request_input`) raises its own form card, because the form is what the owner answers. When the agent's
-prompt strongly matches an open agenda of the same ferret, the card links to it ("Part of: <title>" → `^A3`), so it
+`browser_request_input`) raises its own form item, because the form is what the owner answers. When the agent's
+prompt strongly matches an open agenda of the same ferret, the item links to it ("Part of: <title>" → `^A3`), so it
 does not read as a fresh topic (`closestAgenda` in `packages/daemon/src/lib/agenda/closest.ts`). The
 `*_ask_owner` tools raise no agenda item at all: they bring the surface's tab forward.
 
-**GAP: an input card does not join its agenda.** It stays a separate item that links to the closest one. Folding the
-form into the topic's own item needs the card asks that card gates get later, and is not built.
+**GAP: an input does not join its agenda.** It stays a separate item that links to the closest one. Folding the
+form into the topic's own item needs the task asks that task gates get later, and is not built.
 
 The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.
@@ -142,85 +142,85 @@ nothing; a stored per-ferret value always wins and ferrets that already exist ar
 loosening, so it needs no `fy config confirm`. The whole contract is
 [notifications.md § Agenda mode](notifications.md#agenda-mode).
 
-## Every item belongs to a card
+## Every item belongs to a task
 
-An item names the board card it is about (`task`, board-design.md §2.6). `fy agenda add --task F18` names it;
-an add that names none takes the raising session's **focus card** (`config.focusTask`) — the CLI's, a harness
-question's and a Warden escalation's alike. A session with no focus card raises an item with no card. The card
+An item names the board task it is about (`task`, board-design.md §2.6). `fy agenda add --task F18` names it;
+an add that names none takes the raising session's **focus task** (`config.focusTask`) — the CLI's, a harness
+question's and a Warden escalation's alike. A session with no focus task raises an item with no task. The task
 only derives from the agenda: the open agendas that carry it are its asks, and while one carries its open
-[card ask](#card-asks) the card is never stale — nothing is written to the card. A card never shows "waiting on
+[task ask](#task-asks) the task is never stale — nothing is written to the task. A task never shows "waiting on
 you": its ask is on the agenda. A notice is context, never an ask.
 
 The CLI sends `task` only to a daemon that reports `agenda.task.1`; an older one refuses the whole add over the
 field, so the item is raised without it and the CLI says so. A to-do is `--todo`, and its kind is
-named `--kind todo` — "task" means a board card. The wire value stays `task`, so a released daemon keeps accepting
+named `--kind todo` — "task" means a board task. The wire value stays `task`, so a released daemon keeps accepting
 the add.
 
 ### Done · closes &F12
 
-An item tied to a card can offer the owner one extra answer, **Done · closes &F12**: one tap resolves the item
-AND closes the card, through the same shared Done the board uses (the Closed lane, the card's history, and the
+An item tied to a task can offer the owner one extra answer, **Done · closes &F12**: one tap resolves the item
+AND closes the task, through the same shared Done the board uses (the Closed lane, the task's history, and the
 plain message to its ferret — nothing here is a second path).
 
 - **Opt in**: `fy agenda add --task F12 --offer-close` (the flag `offerClose` on the item). It is **on by default**
-  for a to-do (`--kind todo`) or a review on a card that is in the board's to-test lane when the item is raised —
+  for a to-do (`--kind todo`) or a review on a task that is in the board's to-test lane when the item is raised —
   the lane `release.published` enters ("Released"), the one notion the board's lane facts already use. A
-  notice never offers it, and an add that names no card (and the session has no focus card) is refused the flag.
-- **Where it sits**: one more answer in the one A/B/C row, in the → slot while the card gave fewer than three
+  notice never offers it, and an add that names no task (and the session has no focus task) is refused the flag.
+- **Where it sits**: one more answer in the one A/B/C row, in the → slot while the task gave fewer than three
   answers and in the full-width row otherwise. It is tap only: no swipe and no arrow reaches it, so a swipe
-  can never close a card.
-- **Order**: the card is closed first; only when that succeeded is the item resolved. A card the board refuses to
+  can never close a task.
+- **Order**: the task is closed first; only when that succeeded is the item resolved. A task the board refuses to
   close, or one that cannot be read, leaves the item open with "Not closed: …" under the row. The button is off
-  while the card is closing, so a second tap closes nothing twice. The close is immediate: the Inbox's Undo window
-  holds the item's resolution, not the card's.
-- **Several cards**: the app lists them with a checkbox each, all ticked, and asks to confirm; cards close in
-  turn and a failure names the card and which earlier ones already closed. (An item carries one `task` today, so
-  the wire yields one card; the list is ready for the day it carries more.)
+  while the task is closing, so a second tap closes nothing twice. The close is immediate: the Inbox's Undo window
+  holds the item's resolution, not the task's.
+- **Several tasks**: the app lists them with a checkbox each, all ticked, and asks to confirm; tasks close in
+  turn and a failure names the task and which earlier ones already closed. (An item carries one `task` today, so
+  the wire yields one task; the list is ready for the day it carries more.)
 - **Owner only**: the tap is the owner's in the app, and the board's own gate already refuses a ferret moving a
-  card into the Closed lane (`ownerGate`, standing `owner-human`).
-- **The button is offered** for an item with a linked card of that machine that asked for it. The CLI sends
+  task into the Closed lane (`ownerGate`, standing `owner-human`).
+- **The button is offered** for an item with a linked task of that machine that asked for it. The CLI sends
   `offerClose` only to a daemon that reports `agenda.offer-close.1` on `GET /v1/health`; to an older one it raises the item without and says so.
 
-## Card asks
+## Task asks
 
-**Cards show progress; their asks ride the card's agenda.** A card never asks the owner itself. When a card the owner
+**Tasks show progress; their asks ride the task's agenda.** A task never asks the owner itself. When a task the owner
 asked for reaches a stage that needs them — a plan to approve (**OK to build**) or a release to try (**Done / Not
-good**) — the daemon puts a **card ask** on the agenda that carries the card, and the owner answers it there
-([board.md](board.md#cards-show-progress-their-asks-ride-the-agenda) owns the rules: which agenda, who passes, what
-each answer does to the card).
+good**) — the daemon puts a **task ask** on the agenda that carries the task, and the owner answers it there
+([board.md](board.md#tasks-show-progress-their-asks-ride-the-agenda) owns the rules: which agenda, who passes, what
+each answer does to the task).
 
 - **`cardAsks`** (`AgendaCardAskSchema`, oldest first, at most 16): each one carries its `gate` (`cardId`, `laneId`,
-  `laneName`, `entry` — the card history's `seq` that put it there —, `projectId`, `projectName?`, `cardTitle?`, and
+  `laneName`, `entry` — the task history's `seq` that put it there —, `projectId`, `projectName?`, `cardTitle?`, and
   the lane's `options`: `id`, `label`, `outcome` of `next`, `lane`, `reopen-with-agenda` or `close`), `at` (when it
-  was put on this agenda), the card's **How to test** (`howToTest`, Markdown as written), and once answered its
+  was put on this agenda), the task's **How to test** (`howToTest`, Markdown as written), and once answered its
   `answer` (`at`, `response`, `note?`, `receipt` — a SHA-256 of everything the answer said —, `askVersion?`). A "Not
   yet" leaves it open with `notYet`. Only the daemon writes one; an add or edit that carries one is refused. Its name is
-  its gate's reference, `gate:<card>:<lane>:<entry>`.
-- **Which agenda.** The open agenda that carries the card (it is about the card, or carries one of its asks), else the
-  one that carries its parent card, else ONE new agenda the daemon opens on the card's ferret's home, named after the
-  card, raised on that ferret's behalf (`sourceRef` `card-agenda:<card>`), stage `test` or `plan`. That agenda's own ask
+  its gate's reference, `gate:<task>:<lane>:<entry>`.
+- **Which agenda.** The open agenda that carries the task (it is about the task, or carries one of its asks), else the
+  one that carries its parent task, else ONE new agenda the daemon opens on the task's ferret's home, named after the
+  task, raised on that ferret's behalf (`sourceRef` `card-agenda:<task>`), stage `test` or `plan`. That agenda's own ask
   is only a reply; the ferret works and closes it as its own.
-- **It needs you.** A new card ask puts its agenda in Needs you, fresh — even out of a snooze, because it is a blocker
-  of its card — and it stays one entry in the unique queue, blockers first. Its stage moves to `test` (its gate can send
-  the card back with words) or `plan`. While it is open, its ferret cannot rest the agenda, and nobody but the owner
+- **It needs you.** A new task ask puts its agenda in Needs you, fresh — even out of a snooze, because it is a blocker
+  of its task — and it stays one entry in the unique queue, blockers first. Its stage moves to `test` (its gate can send
+  the task back with words) or `plan`. While it is open, its ferret cannot rest the agenda, and nobody but the owner
   closes it: their bare done is refused (answer the ask, or Not needed).
-- **Swipes and labels.** → the first option that moves the card on (Done), ← the reopen-with-agenda option (Not good),
-  ↑ a third (the owner's decision !A205). A gate with one option gets a second answer, **Not yet**: the card stays, and
+- **Swipes and labels.** → the first option that moves the task on (Done), ← the reopen-with-agenda option (Not good),
+  ↑ a third (the owner's decision !A205). A gate with one option gets a second answer, **Not yet**: the task stays, and
   the ask stays open (`gateAskOptions`, `gateAnswers`, `gateChoice` in `@ferretry/protocol`).
 - **Answering** is `resolve` with `{kind: 'multiple-choice', choice: <label>}`, `cardAsk: <its gate reference>` and
   the owner's words as `note`; Not good needs words (the note, or `{kind: 'other', answer}`) and may carry files. The
-  card moves FIRST; a refusal leaves the ask open (`400 invalid`, `403 forbidden`, `409 gate_moved_on`,
+  task moves FIRST; a refusal leaves the ask open (`400 invalid`, `403 forbidden`, `409 gate_moved_on`,
   `409 gate_not_moved`). An exact repeat comes back unchanged and moves nothing; the same choice with other words or
   files is refused. **After the answer the agenda RESTS, waiting on its ferret**, which is told; the answer never closes
   it, and the ferret marks it done once nothing more is expected.
 - **Who.** The owner at the machine, or a paired device the `fleet` grant lets use the board (the same grant guards
-  Not needed on an agenda with an open card ask). A ferret, its lead and the daemon's other producers are refused.
-- **Leaving.** A card that leaves the gate some other way has its open ask withdrawn quietly. When no open ask
+  Not needed on an agenda with an open task ask). A ferret, its lead and the daemon's other producers are refused.
+- **Leaving.** A task that leaves the gate some other way has its open ask withdrawn quietly. When no open ask
   still waits on the owner (the last one went, or only ones they said Not yet to are left), the agenda stops being a
-  blocker: it rests waiting on its ferret, or, if it is the daemon-opened card agenda (`card-agenda:`) and holds no
+  blocker: it rests waiting on its ferret, or, if it is the daemon-opened task agenda (`card-agenda:`) and holds no
   conversation, it closes. **One rule decides whether the daemon may move a thread when it withdraws an ask: only a
   thread exactly as the daemon left it.** The daemon seals the thread (`cardAsksSeal`): a digest of everything on it
-  but the card asks and their mirror and the Warden's nudge clock (`resting.nudgedAt`, `nudges`, `nudgeSend`: a nudge
+  but the task asks and their mirror and the Warden's nudge clock (`resting.nudgedAt`, `nudges`, `nudgeSend`: a nudge
   of a rest nobody touched does not make it a different thread), taken of the thread **as it is stored** (after the
   history is cut to its bound, with the seal's own room counted, so a thread with a full history still matches). Anything else written on the thread afterwards — the owner's reply,
   answer, Needs info or snooze, the ferret's edit (its revision), hand-back, rest or new question, and the daemon's own
@@ -233,19 +233,19 @@ each answer does to the card).
   owner answered or said Not yet to ANY ask on it since the withdrawn one was put on — in whichever order the answer
   and the withdrawal came — and otherwise goes back to the turn the ask woke it out of (the owner's, with the question
   it had, or the park, rest or wait it was in). A thread that does not match stays as it is, in Needs you — the
-  daemon-opened card agenda too, once it is sealed (an owner's reply already rested it; a ferret's answer is in front
+  daemon-opened task agenda too, once it is sealed (an owner's reply already rested it; a ferret's answer is in front
   of them): a
   leftover question the owner can read costs nothing, a ferret's answer hidden behind a "waiting on ferret" costs the
-  answer. A thread from before the seal (none is stored) is never moved, and the daemon-opened card agenda from before
+  answer. A thread from before the seal (none is stored) is never moved, and the daemon-opened task agenda from before
   it keeps the older rule (a conversation line, or an owner's answer on it, is talk, and it rests). The stage the ask moved the
   agenda to is not undone: the stage is a log of what changed.
 - **It buzzes once**, when the ask is put on. An agenda is left out of a stop's push only while its sole open items are
-  card asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).
-- **Not needed.** The owner's Not needed on the card's own agenda (`card-agenda:`, or a converted gate item) means they
+  task asks; a question the ferret asks on the same agenda is counted ([notifications.md](notifications.md)).
+- **Not needed.** The owner's Not needed on the task's own agenda (`card-agenda:`, or a converted gate item) means they
   have seen the ask and want it left: it counts as asked. On any other thread that carries the ask it means "drop this
-  thread", so the ask is put on the next carrier, or on a new card agenda.
-- **An older app** reads `gateAttached`: the daemon mirrors the FIRST open card ask's gate there on every write, so an
-  app that predates card asks still draws Done / Not good on the agenda, and answers it with `gate: true` and no
+  thread", so the ask is put on the next carrier, or on a new task agenda.
+- **An older app** reads `gateAttached`: the daemon mirrors the FIRST open task ask's gate there on every write, so an
+  app that predates task asks still draws Done / Not good on the agenda, and answers it with `gate: true` and no
   `cardAsk`. Such an answer is to the ask the mirror shows. The app sends `cardAsk` from this version on, naming the ask it
   drew; one that does not is guarded by the daemon: while an ask on that agenda was answered with the same receipt (the
   choice, words and files) in the last two minutes, a no-`cardAsk` answer is never applied to another ask, whenever
@@ -256,41 +256,41 @@ each answer does to the card).
   answer again in two minutes. When several asks were answered in that time, the repeat is read against the one whose
   receipt it matches, else the latest. With no ask left to show, an exact repeat of that answer
   comes back unchanged, on an open or a closed agenda, so a retry after a lost response succeeds. A
-  daemon that puts card asks lists `agenda.card-asks.1` on `GET /v1/health`; an older one raised standalone gate items
+  daemon that puts task asks lists `agenda.card-asks.1` on `GET /v1/health`; an older one raised standalone gate items
   (`gate`, deprecated), which no daemon raises any more.
 - **The migration** is read-time, total and idempotent, like the channel's: a thread's bare `gateAttached` becomes its
-  open card ask (a "Not yet" in its history becomes `notYet`); an open gate item whose card has an open thread here puts
+  open task ask (a "Not yet" in its history becomes `notYet`); an open gate item whose task has an open thread here puts
   its ask on that thread and closes, its note naming the thread (the thread takes the gate item's place in Needs you if
-  only the gate item was there); a gate item whose card ask cannot be read stays as it is, and a plain answer to it is
-  refused (it would close the item without moving the card); any other open gate item BECOMES its card's agenda in place — the same id, history,
-  snooze and turn — its gate now its card ask, raised on its ferret's behalf. Closed items stay as they were, so an
+  only the gate item was there); a gate item whose task ask cannot be read stays as it is, and a plain answer to it is
+  refused (it would close the item without moving the task); any other open gate item BECOMES its task's agenda in place — the same id, history,
+  snooze and turn — its gate now its task ask, raised on its ferret's behalf. Closed items stay as they were, so an
   answered gate keeps its receipt and a replay still finds it. A thread carries asks only when the engine would let it
   (`canCarryCardAsk`, one predicate for both: not an input, confirm, plan, 2FA, phone-approval or sign-in item).
 
-  **GAP: one ledger.** The migration folds a gate item and a thread only inside one home's ledger. A card that changed
+  **GAP: one ledger.** The migration folds a gate item and a thread only inside one home's ledger. A task that changed
   hands can keep two agendas, the converted gate item and a thread on another home, until one is closed.
 
 ## One ask per thing
 
 The owner is asked about one thing **once**:
 
-- **One agenda carries a card's ask.** The daemon puts it on the agenda that already carries the card rather than
+- **One agenda carries a task's ask.** The daemon puts it on the agenda that already carries the task rather than
   opening another (above), and a second open copy of the same ask is withdrawn.
-- **A second add is refused.** `fy agenda add --task <card>` by an agent, for a card whose ask is open, answers
-  `invalid`, pointing to the agenda that carries the card: on the agent's own agenda `&F12 already asks the owner on ^A3,
-which carries the card; put yours on it: fy agenda edit A3 --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`, else naming that agenda and
-  `fy task note F12 "<text>"`. An add with no `--task` that would take the focus card while that card is asking is
-  raised **without** the card link, and the response carries `notes` (the CLI prints each as `Note: …`). If the card's
-  ask cannot be read, the add is raised without the card, with a note saying so. Notices are never refused.
+- **A second add is refused.** `fy agenda add --task <task>` by an agent, for a task whose ask is open, answers
+  `invalid`, pointing to the agenda that carries the task: on the agent's own agenda `&F12 already asks the owner on ^A3,
+which carries the task; put yours on it: fy agenda edit A3 --where "<each existing point>" --where "<what you need>" (--where replaces them all, so repeat the ones already there)`, else naming that agenda and
+  `fy task note F12 "<text>"`. An add with no `--task` that would take the focus task while that task is asking is
+  raised **without** the task link, and the response carries `notes` (the CLI prints each as `Note: …`). If the task's
+  ask cannot be read, the add is raised without the task, with a note saying so. Notices are never refused.
 - **`--thread` only links.** `fy task create --thread ^A12` sets the `task` of the caller's own open thread to the
-  new card (refused when that thread is already linked to another card): that thread then carries the card's asks.
+  new task (refused when that thread is already linked to another task): that thread then carries the task's asks.
 - **The duplicate sweep.** At boot and on every Warden sweep the daemon reads every agenda (pure `findDuplicates`) and
-  closes only what is provably the same ask. Every rule is scoped to **one lineage** (one home): one card with more than
+  closes only what is provably the same ask. Every rule is scoped to **one lineage** (one home): one task with more than
   one open owner item; one `source` + `sourceRef`; identical normalized titles. It keeps the **oldest** (the first
   ask) unless a newer one is on the owner's turn, and closes the rest with the note `duplicate of ^A<n>` — only when
   both were raised by the **same session**, and for identical titles only when the ask and body match too (else it
-  reports). It never closes an item the owner has begun to talk about, a hands-on card, a gate the owner answered, or
-  an agenda that carries a card ask, and closes nothing while any agenda is unreadable. What it leaves is listed by
+  reports). It never closes an item the owner has begun to talk about, a hands-on item, a gate the owner answered, or
+  an agenda that carries a task ask, and closes nothing while any agenda is unreadable. What it leaves is listed by
   `fy doctor` ("N possible duplicate asks left open"). `GET /v1/health` gives an unauthenticated caller only the
   **count** (`duplicateAskCount`); the list (`duplicateAsks`) is for the privileged loopback path.
 
@@ -335,7 +335,7 @@ fields every item already carries, so an item from any daemon reads as exactly o
   later reply cycle never reuses a delivered nudge's id; the batch is recorded on each item (`resting.nudgeSend`)
   BEFORE it is sent, so a restart, or a failure after the first item was recorded, resumes that very message and
   never sends a second; and the completion is checked against the episode and count it was decided on, so a reply
-  that arrives while the send is in flight keeps its own full 30 minutes. A `working` item and a snoozed one are never nudged; nor is a card the daemon raised.
+  that arrives while the send is in flight keeps its own full 30 minutes. A `working` item and a snoozed one are never nudged; nor is an item the daemon raised.
   **5.0** (`agenda/daemon/lib/rest-nudge.ts`, a job every minute) keeps v4's words and schedule and adds a HARD CAP: at
   most **7 nudges per item per rest** (30 min, 1 h, 2 h, 4 h, 8 h, 16 h, then one at the 24 h ceiling), where v4 nudged
   daily for ever. Asks owns the items (Agenda reads their boards); the counts are Agenda's own
@@ -352,8 +352,8 @@ says what that field cannot: the sub-state, what the ferret is doing, and the nu
 the item rests; a `resting` with nothing parked is dropped on the next write.
 
 **Who is exempt.** An answer still CLOSES what the daemon acts on: a held configuration change (`--confirms`), an
-input card, an old gate item read before the migration, and every item the daemon raised for itself
-(`restsOnAnswer`). A card ask is no exception to resting: its agenda rests on the answer ([Card asks](#card-asks)).
+input, an old gate item read before the migration, and every item the daemon raised for itself
+(`restsOnAnswer`). A task ask is no exception to resting: its agenda rests on the answer ([Task asks](#task-asks)).
 
 ### The Needs-you queue
 
@@ -384,8 +384,8 @@ first**, then those it is **working** on, each oldest rest first, then the snooz
      writes it whole with `--where-file <file>` (`-` reads stdin), or as points with `--where` (repeat); both together
      are refused.
   2. **"The full picture"** (a review's **"Reasoning"**) — `body` (`--body-file`): the report, explainer or plan.
-     It is unchanged: the gate's How to test, a notice's card and older apps all keep reading `body`. A notice draws
-     it in its ask and a card gate's body is its How to test, so for those it is not a tab.
+     It is unchanged: the gate's How to test, a notice's task and older apps all keep reading `body`. A notice draws
+     it in its ask and a task gate's body is its How to test, so for those it is not a tab.
   3. **The ferret's own tabs** — `tabs: [{ id, name, body }]`, at most 6 (8 tabs in all): one per KIND of content
      (the rule below). `--tab-file "Name=file"` makes or rewrites one; `--rename-tab "Old=New"`,
      `--move-tab "Name=1"` (1 = first of the ferret's own) and `--remove-tab Name`. All of them, in one `edit`, are
@@ -448,7 +448,7 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
   answers the old ask and must never be blessed with the new version. A new kind with no ask of its own drops the
   old one (an explainer has no options).
 - **A replacement drops the shape of the ask it replaces.** A kind change drops the old `ask`, `answers`,
-  `questions`, `optionDetails`, `fields` and `steps` (a question becomes an info card, a todo a reply, a form
+  `questions`, `optionDetails`, `fields` and `steps` (a question becomes an info item, a todo a reply, a form
   anything else). A new ask of the same kind (an explicit `--kind`, or a new `ask` or `answers`) drops the old
   `questions` and `optionDetails`, which described the ask it replaces and would otherwise sit beside the new one
   or name an option it no longer offers. The replacement is validated as the composed item, and the revision records
@@ -468,7 +468,7 @@ command line `fy agenda edit A5 --kind <kind> --option … --question …` compo
 ask_changed`, the new question stays open). A close that names no version — the owner's own explicit closing of
   the item as it stands, an older app, the ferret's `done` — closes whatever the item asks now.
 - **A stale "Answer to your question" clears**: `fy agenda edit A5 --clear-question-answer`.
-- A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input card has none: those
+- A configuration change's ask is fixed (Allow, Deny, Discard change), and a notice or input has none: those
   are refused.
 
 ### Patch: the item as one document
@@ -528,8 +528,8 @@ fy agenda patch A5 --file a5.yaml    # one atomic edit; --file - reads stdin; JS
   the ask itself (`kind`, `ask`, `answers`, `fields`). `show --yaml` prints every one the item has, multi-line Markdown
   as YAML block text.
 - **What stays fixed, and why.** The conversation and history (the log of what was said: only `answer`, `log` and the
-  owner add to it), the owner's answer, the state, stage history, versions, the card asks a card carries (the card's,
-  not the ferret's), who raised it and when, the source and the card it belongs to. They are records of what
+  owner add to it), the owner's answer, the state, stage history, versions, the task asks an item carries (the item's,
+  not the ferret's), who raised it and when, the source and the item it belongs to. They are records of what
   happened or belong to someone else, so no patch rewrites them; `show` prints them.
 - **Unknown and read-only keys are refused**, each by name, with the keys a patch takes: a typo never silently does
   nothing. Every problem is said per field (`tabs.Status: a tab's words are 1 to 200,000 characters`), all at once.
@@ -668,11 +668,11 @@ fields. **A chat reply is not a turn at all: it rests the item** (stored as `par
 ## Handing it back
 
 On the ferret's turn there are a few ways out. An item RESTING on the owner's reply or answer (see [States](#states))
-is off their list: a plain `edit` updates the card and leaves it resting, `fy agenda answer` brings it back to its old
+is off their list: a plain `edit` updates the item and leaves it resting, `fy agenda answer` brings it back to its old
 place, and a bare `surface` is refused there. **None of them pings the owner.**
 
 - `fy agenda answer <id> "<text>"` — answer the owner on it: it is theirs again, in its old place.
-- `fy agenda edit <id> …` — change the card (settled answers, what is still open, its stage). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
+- `fy agenda edit <id> …` — change the item (settled answers, what is still open, its stage). Any edit by the raising agent on its own turn for more information hands the item back to the owner,
   even one that changes nothing. (Not an item resting on a reply: that edit keeps it resting, unless it answers on
   it.)
 - `fy agenda rest <id> --why "…"` — take it on, quiet, while working.
@@ -699,7 +699,7 @@ only the 30-minute silence nudge ([States](#states)) speaks. The turn-end nudge 
 rests, waiting on you. Answer on it: `fy agenda answer A5 "<text>"` (back on their list), or `fy agenda done A5`
 when nothing more is expected." It never says it is the ferret's turn to hand the item back.
 
-Picking an option on the card (`respond`) answers the item and rests it, waiting on the ferret ([States](#states));
+Picking an option on the item (`respond`) answers the item and rests it, waiting on the ferret ([States](#states));
 it no longer closes it. `--other "<words>"` remains on the CLI and in the app for "none of the options"; chat no
 longer guesses it.
 
@@ -858,39 +858,39 @@ made meanwhile are missing; a snapshot is the item, so an item at the 1 MB trans
 ### Merge
 
 `fy agenda merge A2 A5` merges A5 **into** A2 (`POST …/agenda` with `{ action: 'merge', id, from }`). The two
-conversations are interleaved by time, and all cards, card asks and links of both are kept (a merge that would pass a
+conversations are interleaved by time, and all tasks, task asks and links of both are kept (a merge that would pass a
 bound is refused, never trimmed). A2 keeps its state and its ask. A5 closes as `merged into ^A2`, and the two point at
 each other (`mergedFrom` on A2, `mergedInto` on A5), A5's versions kept.
 
-[Card asks](#card-asks) move to A2, and A5 closes carrying none:
+[Task asks](#task-asks) move to A2, and A5 closes carrying none:
 
-- **One ask per card and entry.** When both carry the ask of the same card's same entry into its lane, A2 keeps one:
+- **One ask per task and entry.** When both carry the ask of the same task's same entry into its lane, A2 keeps one:
   the one the owner got further with (an answer, then a Not yet), else A2's own. Every receipt is kept.
 - **Still asking.** An ask still waiting on the owner does to A2 what putting it there does: a resting or snoozed A2
   wakes into Needs you, at stage `test` or `plan`.
-- **Refused.** More asks than one agenda carries (16 in all, answered or not: no answer or receipt is dropped to fit), or an A2 that cannot carry a card's ask (an input, a
+- **Refused.** More asks than one agenda carries (16 in all, answered or not: no answer or receipt is dropped to fit), or an A2 that cannot carry a task's ask (an input, a
   confirmation, a task plan, …).
-- **Answering.** The owner answers the ask on A2 as before: owner only, the card moves first, the same receipt and
+- **Answering.** The owner answers the ask on A2 as before: owner only, the task moves first, the same receipt and
   replay. An answer that names its ask (`cardAsk`) but reaches A5, from a screen that still shows it, is answered on
   A2. An answer from an app that names no ask finds nothing on A5 and is refused.
 
 Who may: the owner, or a lead over its own items and its sub-ferrets'. A merge is within one board, so across sessions
 only items in the same agenda home (one lineage) can be merged. Refused: an item with itself, into or from a done item,
-a gate item from before card asks, a notice or a card the daemon acts on, and a caller the item is not theirs to
+a gate item from before task asks, a notice or a task the daemon acts on, and a caller the item is not theirs to
 address.
 
 In the app, an open plain conversation offers **Merge with…** in the item's ⋯ menu; it opens the picker under the head, by the lineage lines. The picker asks "Merge this item with
 which open agenda?" and lists the other open plain conversations on the same board by id and title, each title once.
 A confirm step says what will happen before anything is sent, and repeats no title (the picker just showed it): the
 heading "Merge ^A2 into this item?" (the `^A2` is a reference, opened as in a message), one line, "^A2 closes; this item
-keeps its ask. Both conversations and all cards are kept.", and the checkbox "Keep ^A2 instead". The viewed item
+keeps its ask. Both conversations and all tasks are kept.", and the checkbox "Keep ^A2 instead". The viewed item
 survives by default, and the checkbox flips it ("Merge this item into ^A2?", "This item closes; ^A2 keeps its ask. …").
 The choices sit in the fixed order: Cancel on the left, **Merge** on the right; Cancel leaves the panel, and the
 picker is reopened from ⋯ with **Merge with…**. There is no grant to gate on: the daemon decides by who acts, so the app offers the button
 only when the host can send a merge and the item is an open plain
 conversation, and a refusal from the daemon is shown in the panel in the daemon's own words. A merged item shows
 **Merged into ^A2 (its title)** as a link, and the survivor shows **Merged in from ^A5 (its title)**. A merged-away agenda is closed, so
-its title is read from the board's resolved records as well as its open items. An Inbox card that says it merged
+its title is read from the board's resolved records as well as its open items. An Inbox item that says it merged
 another in, whose conversation board this device does not yet hold (only the machine's roll-up, which lists open items
 alone), reads that one board once, so the title appears; until it lands, or if that read fails (it is tried again), the
 line names the bare id. A machine with no merge never shows the
@@ -901,17 +901,17 @@ button, and the machine's own agenda (`machine-agenda`) offers none.
 `fy agenda split A5 --title … --premise … --context … "<ask>" [--move-cards F12,…] [--stage …]` raises a new item for
 the part of A5 that stopped passing the one-agenda test. The new item is the same ferret's, with its own ask and its own
 place in the owner's queue (one Needs-you entry per item); it and A5 point at each other (`splitFrom`, `splitInto`),
-and the cards named in `--move-cards` go along. A5 keeps its state, ask and conversation. Refused: a card A5 does not
-hold, a gate, a notice or a card the daemon acts on, and a request an open item of the ferret already makes.
+and the tasks named in `--move-cards` go along. A5 keeps its state, ask and conversation. Refused: a task A5 does not
+hold, a gate, a notice or a task the daemon acts on, and a request an open item of the ferret already makes.
 
-A card A5 carries only through its [card ask](#card-asks) can be moved too. A moved card's asks go with it:
+A task A5 carries only through its [task ask](#task-asks) can be moved too. A moved task's asks go with it:
 
 - **The new item carries them,** answered or not, at stage `test` or `plan` when one still waits on the owner.
 - **A5 keeps the rest.** When A5 asked the owner nothing but the asks that moved, it does not sit in Needs you with
-  nothing to answer: a ferret's thread goes back to the turn the first of them woke it out of, and the card's own
+  nothing to answer: a ferret's thread goes back to the turn the first of them woke it out of, and the task's own
   agenda rests on its ferret.
-- **Refused:** a new item that cannot carry a card's ask. A split off the card's own agenda is the daemon's item, not
-  the card's agenda, so moving its card is refused; merge the two instead.
+- **Refused:** a new item that cannot carry a task's ask. A split off the task's own agenda is the daemon's item, not
+  the task's agenda, so moving its task is refused; merge the two instead.
 - **Answering.** The owner answers on the new item as before. An answer that names its ask but reaches A5 is answered
   on the new item.
 
@@ -930,7 +930,7 @@ mechanism: why it is parked, and its way back.
 
 ### Replied
 
-An item the owner replied to in the chat (`[re ^A5 «title»] …`), or ANSWERED on its card, RESTS the moment the
+An item the owner replied to in the chat (`[re ^A5 «title»] …`), or ANSWERED on its item, RESTS the moment the
 message or answer is accepted: it is **parked as `replied`** (the field every app reads) and its `resting` says it
 waits on the ferret ([States](#states)). Otherwise an item a ferret never touches would hang on the owner's list for
 ever, and closing it would lose it when the ferret still needs something.
@@ -939,12 +939,12 @@ ever, and closing it would lose it when the ferret still needs something.
   to the reply bound. A reply with no words (a bare chip) records the entry without a note. Any wait (more
   information, a discussion) ends: the reply answered it.
 - **It stays off the list until the ferret answers on it.** A plain `fy agenda edit <id> …` by the ferret updates the
-  card (the living summary) and **leaves it resting**: no `waitingSince` bump, nothing unread, no badge.
+  item (the living summary) and **leaves it resting**: no `waitingSince` bump, nothing unread, no badge.
   `fy agenda answer <id> "<text>"` brings it back to the owner **in its old place** (`waitingSince` unchanged); a
   replaced ask (`edit --kind …`) brings it back fresh. `fy agenda done <id>` / `dismiss <id>` closes it **without
   telling the owner** (no push, no buzz, no badge change): the CLI prints "A5 closed; the owner is not notified
   (they had already replied)", and the item shows under Resolved as usual.
-- **The daemon still takes `--back`** from an older CLI: a `--back` with the whole card refreshed (`--summary`, `--premise`, `--context`)
+- **The daemon still takes `--back`** from an older CLI: a `--back` with the whole item refreshed (`--summary`, `--premise`, `--context`)
   brings the item back fresh, and one that leaves one out is refused (`invalid`, naming the missing flags); so is a
   bare `fy agenda surface <id>` of a resting item.
 - The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list"). The Inbox does not wait for the next board read: a reply sent from an open Inbox item is shown as replied at once, with an Undo (see "In the Inbox").
@@ -1014,7 +1014,7 @@ reference it. `ping: true` asks for the phone to buzz and is only valid on a not
 
 ## The machine agenda
 
-Some notices belong to no ferret's thread: the Warden could not move a ferret, a card has nobody working on it, a login
+Some notices belong to no ferret's thread: the Warden could not move a ferret, a task has nobody working on it, a login
 hit its budget. They are held on **one daemon-owned board** — the machine agenda — instead of on whichever
 ferret's agenda they concern, and the Inbox shows them as their own **Machine** group (a stand-in conversation named
 "Machine", with a small machine icon), counted, searchable and notified like any other item. The ledger's id,
@@ -1036,27 +1036,27 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
   - `warden:auto-move-failed` — "N ferrets could not be moved", listing each (up to 12, then "…and N more."). A
     ferret that stops, is gone, or moved to another login drops off; the item resolves when the list is empty. A
     stopped ferret is never added.
-  - `warden:orphans` — one item naming the cards that have nobody working on them, titled "A card has nobody working on it"
-    (or "N cards have nobody working on them"), one plain line per card: "&B1 Fix simcha Loge 502 is waiting in
-    Review/CI, but no ferret is assigned, so nothing will happen to it." A card leaves it when someone takes it. The
+  - `warden:orphans` — one item naming the tasks that have nobody working on them, titled "A task has nobody working on it"
+    (or "N tasks have nobody working on them"), one plain line per task: "&B1 Fix simcha Loge 502 is waiting in
+    Review/CI, but no ferret is assigned, so nothing will happen to it." A task leaves it when someone takes it. The
     nudge to a live owner ferret is unchanged. (On 5.0 the Warden keeps it as the `daemon` + `warden.orphans` standing
     notice, `AsksApi.standing`: the same item while the list changes, nothing written when it is unchanged, a new one if
-    it was closed and cards are orphaned again; it names the first 12 cards oldest wait first, then "…and N more.", as
+    it was closed and tasks are orphaned again; it names the first 12 tasks oldest wait first, then "…and N more.", as
     plain lines in the context: Asks carries no `cards` rows.) It is information, so **Got it** dismisses the whole item, and it
-    carries `cards` (below): each card gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
-    holds the three; a screen reader hears "Open card &B1", "Start a ferret on &B1", "Close card &B1").
+    carries `cards` (below): each task gets its own **Open**, **Start a ferret** and **Close**, on one line (a phone's width
+    holds the three; a screen reader hears "Open task &B1", "Start a ferret on &B1", "Close task &B1").
     - **`cards`** is a structured field on an `info` item (1 to 12 rows, each `{ task: { id }, line }`, strict; refused
       on any other kind). The daemon sets it only for a machine that reports `agenda.cards.1`; an older app drops the
       unknown field and reads the same lines from the context instead, so nothing is lost. An app that draws `cards`
-      hides the context, because it would say every line twice, and a lone card's line is not repeated under its own title.
-    - **Open** goes to the card. **Close** asks first (with a reason the owner may edit) and then drops the card with
+      hides the context, because it would say every line twice, and a lone task's line is not repeated under its own title.
+    - **Open** goes to the task. **Close** asks first (with a reason the owner may edit) and then drops the task with
       the board's own `POST /v1/board/tasks/:taskId` `{action:'drop', reason}`. The button is shown to the person and
       confirms first; the drop underneath keeps the board's existing rules (`caller: any`, the planner ACL), which are
-      unchanged, so a card's owner ferret or an ancestor may still drop it as before. **Start a ferret** is
-      `POST /v1/board/tasks/:taskId/start` ([board.md](board.md#start-a-ferret-on-a-card)): it starts a NEW ferret on
-      the card, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
+      unchanged, so a task's owner ferret or an ancestor may still drop it as before. **Start a ferret** is
+      `POST /v1/board/tasks/:taskId/start` ([board.md](board.md#start-a-ferret-on-a-task)): it starts a NEW ferret on
+      the task, and is the person's act only (operator minimum, `fleet` use). Each click carries its own action key
       (kept across a retry when no answer came back), so a lost response cannot start a second ferret.
-    - **A card a live ferret already holds** is not offered a start: the daemon answers with that ferret
+    - **A task a live ferret already holds** is not offered a start: the daemon answers with that ferret
       (`started: false`); the row swaps **Start a ferret** for **Open its chat**, and its line reads "… — a ferret has
       picked it up." in place of "no ferret is assigned".
     - There is no sentence under the notice telling the owner what the buttons do; the buttons say it.
@@ -1096,18 +1096,18 @@ hit on one, open the **Inbox** item, never a `/session/<id>` page.
 A ferret that works in a project with no lanes runs `fy board lanes propose --template <t> [--rename old=new]…`.
 The daemon stores the set at once (unconfirmed, live) and raises **one** choice on the proposer's agenda,
 `Lanes for <project>: A → B → … · Accept / Edit`, with `source: 'task'` and the stable `sourceRef`
-`lanes:<projectId>:<version>`, so proposing the same version twice is one card. **Accept** confirms the set
+`lanes:<projectId>:<version>`, so proposing the same version twice is one task. **Accept** confirms the set
 as the owner; **Edit** points at the Board lane editor. A ferret's change to lanes a project already has is NOT
-live: it waits beside them as the set's pending proposal, and its card, keyed by the proposal's own version, says
+live: it waits beside them as the set's pending proposal, and its task, keyed by the proposal's own version, says
 the board keeps its lanes until the owner accepts and what the change would do (lanes removed and where their
-cards go, gates that stop waiting). Only a person's Accept takes it live, and only then do its cards move, as the
+tasks go, gates that stop waiting). Only a person's Accept takes it live, and only then do its tasks move, as the
 owner's ([board.md](board.md#a-ferrets-lane-change-waits-for-the-owner)). An owner's edit confirms at once. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
-If the card cannot be raised the set stays live and the response says `agenda: "failed"`.
+If the task cannot be raised the set stays live and the response says `agenda: "failed"`.
 
 ## Reserved sourceRefs
 
 Some daemon producers ACT on the owner's answer to their item: a lane proposal's Accept confirms lanes, a gate item's
-answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes:`, `gate:`, `gate-followup:`,
+answer moves a task. So the grammars the daemon writes `sourceRef` in — `lanes:`, `gate:`, `gate-followup:`,
 `warden:`, `warden-orphan:`, `handover:`, `budget:`, `prompt:`, `question:` (`DAEMON_SOURCE_REF_PREFIXES` in
 `@ferretry/protocol`) — are the daemon's alone, held at both ends:
 
@@ -1117,10 +1117,10 @@ answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes
   grammar, blank or too long is not raised at all; the daemon log says so, with the id's control characters made
   harmless.
 - **Every consumer checks the producer, not just the reference.** A lane proposal's Accept counts only on the daemon's
-  own `task`-source card (`acceptedProposal`); a gate item is the `task` source with its `gate`, and its follow-up
-  the daemon's `task` source too — so a question naming either moves no card, routes no words to a ferret, and, raised
+  own `task`-source item (`acceptedProposal`); a gate item is the `task` source with its `gate`, and its follow-up
+  the daemon's `task` source too — so a question naming either moves no item, routes no words to a ferret, and, raised
   and closed first, suppresses no real item. The harness settles only its own `question:` and `prompt:` items (and a
-  question raised before the namespace that carries no other producer's mark): an input or secret card, a phone
+  question raised before the namespace that carries no other producer's mark): an input or secret item, a phone
   approval, a 2FA seed, a login recipe or a task plan — all `question` items too — is never closed by a console
   prompt coming and going.
 - **A carried `question:<tool id>` item is answered like the ferret's own item.** A v4 home brings the daemon's question
@@ -1132,7 +1132,7 @@ answer moves a card. So the grammars the daemon writes `sourceRef` in — `lanes
 ## Confirming a configuration change
 
 An edit that loosens what the machine may spend or do is **held** until the owner confirms it
-([config-files.md](config-files.md#how-a-file-is-read)). A ferret must not confirm, so it raises a card whose
+([config-files.md](config-files.md#how-a-file-is-read)). A ferret must not confirm, so it raises an item whose
 **Allow is the confirmation** — the owner answers it and nothing else has to be run:
 
 ```
@@ -1143,16 +1143,16 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 - **Raising.** `--confirms <file>` names the file; the daemon looks up its held edit and records on the item
   (`confirms`) the edit's digest — its etag, the same one `fy config confirm` confirms by — and each loosening
   in the daemon's words. The caller never supplies either. A file with no held change is refused and nothing
-  is raised. The daemon writes the card: a choice of **Allow** (swipe right), **Deny** (left) and **Discard
+  is raised. The daemon writes the item: a choice of **Allow** (swipe right), **Deny** (left) and **Discard
   change** (up), and a premise that is the change itself followed by "Allow applies this change to
   warden.yaml." (the raiser's own `--premise` follows, when it fits). `--kind`, `--option`, `--question` and
   `--up` are refused beside `--confirms`.
 - **Allow** puts the held edit into effect **only if it still has the recorded digest**. If the file was edited
-  after the card was raised, nothing is confirmed: the card is restated with the change as it is now
+  after the item was raised, nothing is confirmed: the item is restated with the change as it is now
   (`confirms.restated`, the new premise kept as a daemon revision, the owner's turn again) and the answer is
   refused `409 config_changed` so the owner reads it again. If no change waits any more (confirmed elsewhere,
-  reverted), the card is closed and the answer refused `409` saying so.
-- **Deny** closes the card and touches nothing: the held edit stays held, the tighter version in effect.
+  reverted), the item is closed and the answer refused `409` saying so.
+- **Deny** closes the item and touches nothing: the held edit stays held, the tighter version in effect.
 - **Discard change** drops the held edit — the file goes back to the version in effect (a new file that was
   never in effect is removed) — under the same digest rule.
 - The ferret reads the outcome with the owner's answer: `confirmed warden.yaml: the change is in effect`,
@@ -1164,7 +1164,7 @@ fy agenda add "Allow the Jev price correction?" --title "Jev price correction" \
 | ------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                                                             |
 | a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a fresh passkey proof that already existed when the request was admitted (the app asks for one as `loosen-config` and resends) |
-| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                                                                      |
+| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the item is touched                                                                                                                      |
 | an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                                                              |
 | a caller nothing can say the grants of                       | refused `403`                                                                                                                                                              |
 
@@ -1173,7 +1173,7 @@ grant, the file's grant on `configure`, and for Allow from a governed device the
 change are written to the security log as `fleet.configured` (`config-confirm` / `config-discard`,
 `via: agenda`) naming the caller — a paired device by its id — and the file's `kind` (`warden`, `pack`, `accountDefaults` …; never its name or path), exactly as a confirmation in Settings is
 ([audit.md](audit.md)); Deny changes nothing and is not recorded. The state
-machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
+machine refuses any non-owner answer to such an item a second time. A ferret may still close its own item
 unanswered (`fy agenda dismiss`). A ferret on its own session credential is always itself here, whatever
 header it sends. As for every admin-token caller WITHOUT one, telling the owner's shell from a ferret's
 rests on the session header the CLI sends ([grants.md](grants.md)): an honest-client boundary, not a
@@ -1197,16 +1197,16 @@ not take ferret credentials; `fy --as-owner`; `FY_TOKEN` set in a pane; and any 
 | Verb                                | Does                                                                                                                                       |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `add`                               | Open an item with `--title` and its ask; `--stage`, `--where`, `--detail`. Lists open candidates; `--new "<why none fits>"` opens another. |
-| `add --offer-close`                 | With `--task`: the owner may close the card with the same tap that resolves it.                                                            |
-| `add --task <card>`                 | Refused for an agent when the card is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
-| `edit <id>`                         | Rewrite the card, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
+| `add --offer-close`                 | With `--task`: the owner may close the task with the same tap that resolves it.                                                            |
+| `add --task <task>`                 | Refused for an agent when the task is already asking the owner ([One ask per thing](#one-ask-per-thing)).                                  |
+| `edit <id>`                         | Rewrite the item, its stage, `--where`, `--detail`; on the ferret's turn hands it back. A resting one stays.                               |
 | `edit <id> --kind <kind>`           | Replace the ask (with `--option` / `--question`): it asks again, fresh ([Editable asks](#editable-asks)).                                  |
 | `patch <id> --file <f\|->`          | Change the item as ONE YAML or JSON document (merge patch; tabs by name): one atomic edit ([Patch](#patch-the-item-as-one-document)).      |
 | `edit <id> --clear-question-answer` | Take a stale answer to the owner's question off the item.                                                                                  |
 | `answer <id> "<text>"`              | Answer the owner on it; a resting item goes back to their list in its old place.                                                           |
 | `rest <id> --why "<what>"`          | Take it on without asking anything: Resting, working, quiet, never nudged.                                                                 |
 | `log <id> --reply\|--rest`          | Copy the owner's chat words onto the item verbatim, then answer or rest ([`fy agenda log`](#fy-agenda-log)).                               |
-| `merge <into> <from>`               | Merge `<from>` into `<into>`: one conversation, every card kept ([Merge](#merge)).                                                         |
+| `merge <into> <from>`               | Merge `<from>` into `<into>`: one conversation, every task kept ([Merge](#merge)).                                                         |
 | `split <id> …`                      | Split a new item off `<id>`, linked both ways ([Split](#split)).                                                                           |
 | `surface <id>`                      | Hand it back to the owner, unchanged (silent). Refused for a resting item.                                                                 |
 | `snooze <id>`                       | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh.                                                               |
@@ -1256,7 +1256,7 @@ one recovering clears only its own. The Warden plan reads each ferret's home (`h
 a standing escalation is never cleared as "recovered" for sitting on a board that is not the ferret's, and a row
 about a ferret whose own board could not be read is neither judged nor cleared.
 
-**Hands-on cards stay on the sub-ferret** because only that session can consume the answer: a request with `input`,
+**Hands-on items stay on the sub-ferret** because only that session can consume the answer: a request with `input`,
 `phoneApproval`, `copyPlan`, `taskPlan`, `signInRuleSuggestion`, `signInRuleSuspended` (on an existing item), `twoFactorSeed` or `confirms`, and any raise with
 the cause `harness-prompt`, `input-request`, `phone-approval`, `secure-copy` or `login-recipe`. A password, a code or an
 approval the daemon asks for is the only thing that reaches the owner from a sub-ferret.
@@ -1273,7 +1273,7 @@ after a move is logged with the session and the item and holds the marker back; 
 (`forbidden`, `invalid`, `too-long`) is logged, stays, and does not. The boot log says how many moved.
 
 **A lead clears its sub-ferrets' agenda.** The lead (and any ancestor) may `edit`, `surface`, `done` and `dismiss`
-items on the board of a session it started (never an open [card ask](#card-asks)): `fy agenda done ^A1 -s <sub-session>`. `AgendaService.apply` proves the
+items on the board of a session it started (never an open [task ask](#task-asks)): `fy agenda done ^A1 -s <sub-session>`. `AgendaService.apply` proves the
 lineage from `config.parent` and marks the actor for the state machine (`overSubFerret`; a request cannot set it);
 anyone else keeps `forbidden: an agent may change the agenda only in its own session`. The change is recorded as the
 lead's. Warden escalations are not the lead's to close.
@@ -1286,7 +1286,7 @@ ignores it.
 
 ## Rules the writing keeps
 
-The card is read cold, so it must stand alone: a title of about 40 characters, an ask that is a short
+The item is read cold, so it must stand alone: a title of about 40 characters, an ask that is a short
 title-like line (about 80 characters at most, `AGENDA_ASK_TARGET_LENGTH`; the detail goes in the body, `--body-file`), the premise, context and what is decided or still open as short bullets, every term of art
 defined with `--term`, never a secret value. The daemon lints for this and answers with advice, never a
 refusal — with one exception below. Agents close their own items as soon as the reason is gone: an open item
@@ -1294,7 +1294,7 @@ whose blocker has cleared is a bug.
 
 **Every link says what it is.** A link is a label, a target and a plain `meaning` (`AgendaLink`, at most
 `MAX_AGENDA_TERM_MEANING_LENGTH` characters, the bound a term's meaning has), because the item is
-self-contained: its terms-and-references table lists every term and every PR, card or link with a plain meaning,
+self-contained: its terms-and-references table lists every term and every PR, task or link with a plain meaning,
 and an address explains nothing. `fy agenda add|edit --link "label=target=meaning"` gives one; `label=target` (new
 with meanings) and a bare target (the only form before) are read too, and the `--json-file` form takes
 `{"label", "target", "meaning"}`. The label is read only when it looks like one: a word or two without `/`, `?`, `&`
@@ -1312,25 +1312,25 @@ plain words"). The item view shows the meaning in its terms-and-references table
 the label for an item raised before meanings existed. The daemon reports `agenda.link-meaning.1` on
 `GET /v1/health`; the CLI sends a meaning only to a daemon that lists it, and when the daemon lacks it (or its
 features cannot be read) sends each link as `label=target` and says it could not confirm the daemon takes link
-meanings. A card the daemon raises on a ferret's behalf (an input form) links its closest agenda with a meaning of
+meanings. An item the daemon raises on a ferret's behalf (an input form) links its closest agenda with a meaning of
 its own.
 
 **Every segment is short points, never a paragraph.** The premise, context, decided, still-open, question
-answer, body, option details, ask, revision notes and terms all read as the same Markdown on the card: bullets
+answer, body, option details, ask, revision notes and terms all read as the same Markdown on the item: bullets
 (`-` or `•`), numbered lists, **bold**, `code`, references, and a single line break kept as a line
 (`segmentMarkdown` in the app owns that, so no segment flattens its lines, and a label line directly above a list that starts at 4 still reads as a label and a list). Writing follows: answer first, one
 idea per line. `fy agenda add` and `agenda edit` warn, never block, when a segment is a single paragraph over
 280 characters (`AGENDA_SEGMENT_PARAGRAPH_LENGTH` in `@ferretry/protocol`), saying to split it into short points
 or bold the answer first. Lists, tables, headings and fenced code are not counted as paragraphs.
 
-**No Markdown headings in the ask or a segment.** A `#` heading draws as a huge title inside a card (the "What I need from you" card read as one wall of H1s), so the ask and every segment — premise, context, decided, still-open, question answer, impact, recommendation and option details — are short points or a bold lead, never `# …` to `###### …`. `fy agenda add` and `agenda edit` warn, never block, when the ask is over about 80 characters (saying to move the detail to `--body` or `--context`) and when the ask or any of those segments holds a heading line (outside fenced code; `#812` is a reference, not a heading). `--body` is left alone: it is where longer instructions go.
+**No Markdown headings in the ask or a segment.** A `#` heading draws as a huge title inside an item (the "What I need from you" item read as one wall of H1s), so the ask and every segment — premise, context, decided, still-open, question answer, impact, recommendation and option details — are short points or a bold lead, never `# …` to `###### …`. `fy agenda add` and `agenda edit` warn, never block, when the ask is over about 80 characters (saying to move the detail to `--body` or `--context`) and when the ask or any of those segments holds a heading line (outside fenced code; `#812` is a reference, not a heading). `--body` is left alone: it is where longer instructions go.
 
 **A bunch of bugs or asks heard at once is not a pile of new items.** When the owner reports several bugs, or asks several things in one message, an interactive (Agenda-mode) ferret adds each to the agenda it belongs with, by the three-part test ([One channel per topic](#one-channel-per-topic)), and opens a new one only for what fits none. The prompt says it in one line — "Bug batch: ONE agenda, line each + where tracked." — a line per bug and where each is tracked. Sub-ferrets do not (Agenda mode is left out of their prompt) and report to their lead instead. The rule follows from the test the Agenda-mode instruction teaches (`AGENDA_INSTRUCTION`).
 
-**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000); the ferret's own tabs (&F923) at most `MAX_AGENDA_TABS_LENGTH` (200,000) together, refused "the tabs together" the same way. One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections. The body is the live document of the current state, not an archive: what no longer bears on the item moves behind a link. The same holds for a gate item's body (the card's _How to test_): over the cap, the body says how long it is and points at the card instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
+**A body over 200,000 characters is refused, never trimmed.** `body`, `questionAnswer` (`--question-answer`), `whereWeAre` and `detail` take at most `MAX_AGENDA_BODY_LENGTH`, `MAX_AGENDA_WHERE_LENGTH` and `MAX_AGENDA_FOLDED_DETAIL_LENGTH` (200,000 each), and a step at most `MAX_AGENDA_STEP_LENGTH` (16,000); the ferret's own tabs (&F923) at most `MAX_AGENDA_TABS_LENGTH` (200,000) together, refused "the tabs together" the same way. One schema (`longProse`, `packages/protocol/src/lib/agenda.ts`) enforces it for every path that takes one — `agenda add`, `agenda edit`, `--body-file`, `--json-file` and the daemon's own check — so the CLI refuses before it sends and the daemon refuses with the same words: _the body is 200,001 characters; the most is 200,000. Do not trim it: put the full report in a file or artifact, add it with --link, and keep the body to the current state and the choice._ Nothing is ever cut to fit: a trimmed report loses its sections. The body is the live document of the current state, not an archive: what no longer bears on the item moves behind a link. The same holds for a gate item's body (the item's _How to test_): over the cap, the body says how long it is and points at the item instead of showing a cut-off copy. The Agenda-mode instruction carries the one-line version.
 
 **A segment never draws a heading.** A Markdown heading (`#` … `######`) a ferret writes inside any segment is drawn
-as bold text at the segment's own size, never an h1–h6: the card's own labels (Premise, Context, **What I need from
+as bold text at the segment's own size, never an h1–h6: the item's own labels (Premise, Context, **What I need from
 you**) are its only headings. Chat messages keep their headings; only agenda segments demote them
 (`demoteHeadings` on `Markdown`, set once by `AgendaProse`).
 
@@ -1338,8 +1338,8 @@ you**) are its only headings. Chat messages keep their headings; only agenda seg
 title too wide scrolls to its end and back (the marquee), and where motion is reduced it ends at the last whole WORD
 that fits, then "…" (`wordCut`), with the whole title a tap away. It is never wrapped and never drawn a second time in
 the body: the room under the head is the premise's. Every item does this — ordinary, gate or machine notice — and so
-does every other card head (a card to test in the Inbox). List rows keep their own clamps. A card's who/where line
-("ferret · task · card · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
+does every other item head (an item to test in the Inbox). List rows keep their own clamps. An item's who/where line
+("ferret · task · item · machine") puts a dot only between parts that have words (`joinMeta`): a missing part leaves no
 leading, trailing or doubled dot.
 
 **The premise and the context are required.** They are what a cold reader starts from — what is going on, and
@@ -1358,9 +1358,9 @@ the facts around it — so every NEW item a ferret raises must carry both:
 
 ## The kind chip
 
-Every card wears one chip that says what the OWNER does with it, in plain words. The words live in ONE place —
+Every item wears one chip that says what the OWNER does with it, in plain words. The words live in ONE place —
 `AGENDA_KIND_LABELS` in `@ferretry/protocol` (`agenda-card.ts`, with `agendaKindLabel(item)` to read it) — and the
-Inbox chip, the card header and the row's meta line read it; the app keeps only the tone. The open item's head says
+Inbox chip, the item header and the row's meta line read it; the app keeps only the tone. The open item's head says
 its STAGE instead ([The item view](#the-item-view)), which is what it needs from the owner right now.
 
 | Kind (`--kind`)   | Chip     | The owner…                                      |
@@ -1371,10 +1371,10 @@ its STAGE instead ([The item view](#the-item-view)), which is what it needs from
 | `permission`      | Approve  | says yes or no to a request                     |
 | `info`, a notice  | FYI      | reads it and says Got it                        |
 | `review`          | Review   | reads the work and approves or asks for changes |
-| `form`            | Fill in  | fills in the card's fields                      |
-| `input`           | Type in  | types in what the card asks for                 |
+| `form`            | Fill in  | fills in the item's fields                      |
+| `input`           | Type in  | types in what the task asks for                 |
 
-A **gate item from before card asks** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
+A **gate item from before task asks** waiting for the owner to try the work wears **Test** (`TEST_KIND_LABEL`), and a plan waiting for a
 go-ahead wears **Approve**, whatever kind the item was raised with. Peer-message kinds are another thing and keep their own words.
 
 ## The item view
@@ -1391,15 +1391,15 @@ and a part the item does not carry is not drawn:
 | 1   | Title, description, state and stage | the title row (ONE line, a marquee when too long; the quiet controls behind ⋯); on the line under it two small chips, the STATE chip (Needs you · Resting · waiting on Zoe · Resting · working · Snoozed until … · Done) and the STAGE chip (Explainer · Question · Plan to approve · Tracker · Test · Done); then the **description** — the item's summary (its ask, `subject`), drawn whole |
 | 2   | Premise and context                 | the two tinted blocks; long is fine                                                                                                                                                                                                                                                                                                                                                           |
 | 3   | Detailed context                    | `detail`, explained from zero — **folded**                                                                                                                                                                                                                                                                                                                                                    |
-| 4   | Terms and references                | ONE table of every term and every link (PR, card, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
-| 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every card ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
+| 4   | Terms and references                | ONE table of every term and every link (PR, task, file, page), a term says what it means; a link is named by its target (drawn by the one reference renderer) and means its label, or nothing when it has none — **folded**                                                                                                                                                                   |
+| 5   | What I need from you                | the ask ([below](#what-i-need-from-you)), why the recommendation, the steps, the impact, then **every task ask with its own buttons** (test steps and Done / Not good, or OK to build); **marked out** (a heavier accent frame and a tint, the heading in the accent) while the item needs the owner                                                                                          |
 | 6   | The live document (tabs)            | **Where we are now** first and open (the answer to the owner's question, decided so far, still open, then `whereWeAre`), **The full picture** (`body`; a review's Reasoning), then the ferret's own tabs — each drawn open and whole, Markdown with fy-render                                                                                                                                 |
 | 7   | Conversation                        | the owner's and the ferret's words about the item, oldest first, each whole: the log, at the bottom — **folded**                                                                                                                                                                                                                                                                              |
 | 8   | Activity                            | the grey lines — each stage entered, each edit with what it changed, where it rests or sleeps now — **folded**                                                                                                                                                                                                                                                                                |
 
-- **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the card under the
-  title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before card asks,
-  which repeats nothing, keeps its summary behind ⓘ, and so does a machine notice drawn with its cards, whose rows say
+- **The head says what it is, whole.** The description (`data-agenda-description`) is drawn on the item under the
+  title, never behind ⓘ, so ⓘ holds only a host's quiet tools (the Inbox's Skip). A gate item from before task asks,
+  which repeats nothing, keeps its summary behind ⓘ, and so does a machine notice drawn with its tasks, whose rows say
   its lines once. The ask in part 6 still leads with the same words when the item has no question of its own, on
   purpose: the head says what the item is, and part 6 — where a push lands — reads whole on its own.
 - **The one thing that needs the owner stands out.** While the item is Needs you, part 6 is marked out
@@ -1411,7 +1411,7 @@ and a part the item does not carry is not drawn:
   the owner reaches for only now and then is behind ⋯ (`agenda-item-menu.tsx`), so on a 390px phone the premise starts
   in the top quarter of the screen: the version picker and **Changes**, **Snooze** (1 hour · 4 hours · Tomorrow 9:00 ·
   Custom…), **Merge with…**, **Not needed** (or the host's own quiet tools — the Inbox's Skip and Not needed — said
-  once), and a gate item's or card notice's summary under "About this item". On a phone (under 768px) the menu is the
+  once), and a gate item's or task notice's summary under "About this item". On a phone (under 768px) the menu is the
   app's bottom sheet; wider, it is a popover under ⋯. Esc, a tap outside and the sheet's swipe close it; every choice
   that does something closes it, and Esc never closes the item under it. Only what the item has is offered, and an item
   with nothing to put there draws no ⋯. The two chips sit small on the line under the title, and an earlier version on
@@ -1461,22 +1461,22 @@ and a part the item does not carry is not drawn:
   (two ticks) until then. A chat reply the daemon stored on the item is stored once the queue accepts it, still
   queued, so its `fromChat` mark is no proof of reading. A stored entry records no delivery, so the item never claims
   more than that.
-- **Card asks live inside the item.** A card ready to test or approve is answered in part 6, with its own buttons,
-  never as an item of its own. Today a card ask arrives as the thread's `gateAttached`; the part is drawn over a
+- **Task asks live inside the item.** A task ready to test or approve is answered in part 6, with its own buttons,
+  never as an item of its own. Today a task ask arrives as the thread's `gateAttached`; the part is drawn over a
   list, so a machine that carries several (`cardAsks`, `agenda.card-asks.1`) fills it unchanged. The item's own
-  one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until card asks
+  one-row answer is the sticky dock at the view's foot, in reach however long the item runs — until task asks
   share the view: then it sits inline right under the item's own ask, headed **Your answer for this item**, and
-  every card ask has its own heading (**Card &F12: your answer for the card**, then a line saying where the card stands), so two button sets are
-  never docked beside each other and never mistaken for one another. A card ask keeps its own buttons whatever the
-  item asks itself: a thread of numbered questions, steps or a form still draws the card's **OK to build** or
+  every task ask has its own heading (**Task &F12: your answer for the task**, then a line saying where the task stands), so two button sets are
+  never docked beside each other and never mistaken for one another. A task ask keeps its own buttons whatever the
+  item asks itself: a thread of numbered questions, steps or a form still draws the task's **OK to build** or
   **Done / Not good** (`attachedGateView` leaves the thread's own answer shape behind), and an item answered in words
-  gets no "Your answer for this item" heading over nothing. A card ask carries the card's **How to test**,
+  gets no "Your answer for this item" heading over nothing. A task ask carries the task's **How to test**,
   read from the board the app already loads (`howToTestFor`), above its Done / Not good.
-- **A reply that already says yes is offered as the card's answer (&B155).** The owner who answers an item holding a
-  card ask in words ("build", "ok to build!") has not pressed the card's button, so the card stays where it is and the
-  ferret may not press it for them. When the owner's words are the LAST thing on the item and plainly approve, the card
-  ask says "You replied “build”. Use it as your answer for the card?" beside its forward button (OK to build, Done),
-  one tap away (`replyApproval`). It is only offered, never applied, and only conservatively: ONE open card ask
+- **A reply that already says yes is offered as the task's answer (&B155).** The owner who answers an item holding a
+  task ask in words ("build", "ok to build!") has not pressed the task's button, so the task stays where it is and the
+  ferret may not press it for them. When the owner's words are the LAST thing on the item and plainly approve, the task
+  ask says "You replied “build”. Use it as your answer for the task?" beside its forward button (OK to build, Done),
+  one tap away (`replyApproval`). It is only offered, never applied, and only conservatively: ONE open task ask
   (counted in `cardAsks`, never the one-ask `gateAttached` mirror, so an item from a daemon that keeps none offers
   nothing), one forward option, words written AFTER that ask was raised, and a short approval (yes, ok, go ahead,
   lgtm, ship it…; build words only for OK to build, "works" or "tested" only for Done) or the button's own label. The
@@ -1488,7 +1488,7 @@ and a part the item does not carry is not drawn:
 - **The version slot is in the ⋯ menu** (`data-agenda-version-slot`): the version picker and the diff control. Beside the diff
   control the picker counts the item's EDITS ("Edit 2 of 3"), because the diff's own numbers (v1, v2…) are the stored
   versions, which count more than the edits do; a machine with no stored versions keeps "v2 of 3". Picking a version
-  closes the menu and redraws the card as it read then, with "Showing v2" among the chips and the way back to the latest.
+  closes the menu and redraws the item as it read then, with "Showing v2" among the chips and the way back to the latest.
 - **Changes (the diff).** With two or more versions on a machine that keeps them, the slot gains a **Changes** button.
   It closes the menu and opens a panel under the head (the menu's button then says **Hide changes**) that compares "since you last looked" by default (this device's last-seen mark
   against the newest version) and lets the owner pick any two versions from **From** and **To**. Each changed section
@@ -1516,7 +1516,7 @@ and a part the item does not carry is not drawn:
   and a one-line **Tab order** when the tabs both versions have moved. Each changed section that is a tab (or a part of
   the main tab) offers **Open tab ›**, which switches the tabs to it and brings them into view; then the title, the type, the question, the
   premise, the context, the detail, the terms, the references, the ask, a multi-decision ask's questions, each
-  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the cards,
+  option's explanation, a form's fields, the recommendation, the impact, the urgency, the steps, the tasks,
   why it matters and how to resolve it, so a changed type (Question to Plan to Tracker) or a replaced form is never "Nothing
   changed". Sections that did not change fold
   under one line. Opening an item writes the seen mark (`PUT …/seen`) for its newest version, after the baseline is
@@ -1525,11 +1525,11 @@ and a part the item does not carry is not drawn:
 
 ## What I need from you
 
-**Every card has one answer shape, and it says it in one place.** In the item view's sixth part, right after where we
-are now ([The item view](#the-item-view)), every open card draws a segment headed **What I need
+**Every item has one answer shape, and it says it in one place.** In the item view's sixth part, right after where we
+are now ([The item view](#the-item-view)), every open item draws a segment headed **What I need
 from you**. It holds exactly the ask and
 ends with one plain instruction, so the owner always knows what to do. The ask itself is a short **bold line at body size** — never heading-sized, however long it is; a long ask wraps
-and the card stays the card:
+and the item stays the item:
 
 | Kind (`--kind`)                     | The segment shows                                   | The buttons                                                         |
 | ----------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------- |
@@ -1539,7 +1539,7 @@ and the card stays the card:
 | `review`                            | what to review (`--link`)                           | Approve · Request changes                                           |
 | `reply`, one question               | the question                                        | none: "Type your answer below."                                     |
 | `reply`, several questions or a mix | a numbered list of each answer wanted               | none: "Reply with your answers below, numbered. Skip any you like." |
-| `form`                              | numbered fields, each answered where it is asked    | none: the card's fields, the reply box, one Send                    |
+| `form`                              | numbered fields, each answered where it is asked    | none: the item's fields, the reply box, one Send                    |
 | `todo`                              | the steps, numbered, each ticked                    | Mark as done                                                        |
 | `info`, and a notice                | the message                                         | Got it (quiet: a bare Got it does not wake the ferret)              |
 
@@ -1559,9 +1559,9 @@ and the card stays the card:
   form with `skipped`, so the whole form still goes in one go. It reads nothing from prose: a reply that does not
   start with a number, or whose numbers do not rise within the questions, is refused and the item is raised again.
 - **Request changes** is a button, never a swipe: it sends what the composer holds as the change asked for, or puts
-  the owner in the composer when it is empty. Where no composer is at hand (the Sessions page's compact card), the
-  card says to type the changes in the message box instead.
-- **Swipes are the visible buttons only.** A card answered in words swipes nowhere except ↓ Skip.
+  the owner in the composer when it is empty. Where no composer is at hand (the Sessions page's compact item), the
+  item says to type the changes in the message box instead.
+- **Swipes are the visible buttons only.** An item answered in words swipes nowhere except ↓ Skip.
 - **It is enforced where an item is raised.** `fy agenda add` refuses a raise that mixes shapes before anything is
   sent, and the daemon refuses the same raise from a ferret (`invalid`), each naming the shape to write instead —
   "several questions → write them as a numbered list for the owner to answer in the reply: one --question each,
@@ -1593,7 +1593,7 @@ answer uses (`Region~Which region?` → "1. Region: EU"). The same list can be t
 unique (`1`, `region`); a pick-one or pick-many needs 2–12 options, a text field none. `fy agenda edit <id> --field …` replaces
 the whole list.
 
-- **One Send.** The card's fields and the reply box are one answer. Send combines them — "1. Region: EU · 2. Alerts: Page, Mail · 3. Restart: Yes · 4. <typed text>" — and delivers that to the ferret as the answer to the item. A form that has no `text`
+- **One Send.** The item's fields and the reply box are one answer. Send combines them — "1. Region: EU · 2. Alerts: Page, Mail · 3. Restart: Yes · 4. <typed text>" — and delivers that to the ferret as the answer to the item. A form that has no `text`
   field sends the typed words as a note instead.
 - **No secrets.** There is no secret field kind and a form answer is plain text on the item, so a password, token or code is never asked here: it goes through an input request ([input-requests.md](input-requests.md)), which the agent never reads.
 - **Recorded by field id.** The answer is stored on the item as `{ kind: "form", answers: [{ id, picked }] }` (a pick-many's
@@ -1608,12 +1608,12 @@ the whole list.
 - **No swipes** except ↓ Skip. Recommended values start picked and carry a "Recommended" tag; what is picked is the
   filled row (or the filled Yes/No half, with a check), so a recommendation never reads as a pick.
 - **What is answered is counted.** No field says it needs an answer; a foot pinned to the bottom
-  of the open item counts the fields answered on the card ("2 of 3 answered") above how to send, so neither hides under
+  of the open item counts the fields answered on the item ("2 of 3 answered") above how to send, so neither hides under
   the composer. Once the answer has gone, the Inbox's undo toast and the chat's "Sent to …" line name what was picked
   ("Region: US · Alerts: Page, Mail").
 - **In the chat** the item's view is the Inbox's: the same fields, the same picks (one key per item, so a pick made in
   one place is there in the other), and the chat's reply box is the form's one Send. The view stays open until the
-  answer lands, so a refusal is read on the card. Only a form nothing can answer from here (settled, or a chat without
+  answer lands, so a refusal is read on the item. Only a form nothing can answer from here (settled, or a chat without
   an agenda client) is drawn read-only, with "Open this in the Inbox to fill it in, or answer in the reply box, numbered."
 - **Stored `ask` is still `open-question`**, so an app that predates forms still reads the item as an open-question reply item;
   `kind: form` is what makes a current app draw the fields.
@@ -1639,19 +1639,19 @@ the owner never meant to read. One owner action dismisses every open item on the
 
 The Inbox lists every item waiting on the owner, from every paired machine, grouped by ferret. Each group — and
 each open item — says **who and what**, never the callsign alone: the ferret, what it works on (its task's name and
-its card, `&F12`), and the machine. A row whose item is about a different card than its ferret's says that card too.
+its task, `&F12`), and the machine. A row whose item is about a different task than its ferret's says that task too.
 
 - **Opening an item shows the chat's own item view** — the same component (`AgendaItemView`), so Markdown, the
   options, the quick replies, the terms and the history read exactly as in the chat — with that ferret's **real
   composer** under it. A message typed there goes to the ferret's chat about the item (`^A5 …`, delivered as
   `[re ^A5 …]`), the chat's own path; a quick reply carries what is typed as its note. "Open chat" goes to the
   conversation at the item, and so does a modified click on a row.
-- **Each card has its own draft.** The composer under an item is **not** the chat's composer: its unsent text is a
+- **Each item has its own draft.** The composer under an item is **not** the chat's composer: its unsent text is a
   synced draft of its own, keyed by machine + conversation + **slot** — the slot is `chat` (the chat box, exactly
-  today's draft) or the item's id (`A5`). Typing in a card never shows in the ferret's chat, typing in the chat never
-  shows in a card, and two cards of one ferret hold two drafts, each in step across the owner's devices (route
+  today's draft) or the item's id (`A5`). Typing in an item never shows in the ferret's chat, typing in the chat never
+  shows in an item, and two items of one ferret hold two drafts, each in step across the owner's devices (route
   `…/shared-draft?item=A5`, advertised as the daemon feature `shared-draft.slots.1`; a daemon without it gives the
-  card a local-only draft, never the chat's). Sending from a card empties **that card's** draft only, and the quick
+  item a local-only draft, never the chat's). Sending from an item empties **that item's** draft only, and the quick
   replies take their note from it. When an item closes (any `addressed` change) its draft is deleted; a replied
   (parked) item keeps what is still typed. A conversation holds at most 100 item drafts.
 
@@ -1659,45 +1659,45 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   (the send resolved: queued, delivered or revived), the item is marked **replied here, at once** — an overlay on what
   the boards say (`lib/agenda-replied.ts`), the same fact the daemon records as `parked: { reason: 'replied' }` a board
   read later. It leaves Stopped on you, Needs you, Answer quickly and the badge, appears under Replied, and the deck
-  deals the next card (past the last one, the end card). A failed send changes nothing: the card stays and the box keeps
+  deals the next item (past the last one, the end item). A failed send changes nothing: the item stays and the box keeps
   its words and shows the error. A form item's Send is an answer, not a reply, and a notice is not parked by a reply, so
   neither moves. The chat's own composer keeps today's behaviour: the daemon parks the item, with no toast.
   - **The overlay never outlives the boards.** It drops when a board read shows the item parked or gone, or open under a
     new ask (`waitingSince` moved: the ferret brought it back — its new ask wins), and at the latest after 30 s.
   - **Toast: "Moved to Replied · Undo"**, the answer toast's look and five-second window; a polite status
     (`role="status"`) for screen readers. It sits in its own row **between the open
-    card and the composer** (on a phone and on a wide screen alike), so it never covers the input, the send button or the
+    item and the composer** (on a phone and on a wide screen alike), so it never covers the input, the send button or the
     keys hint; where no composer row is drawn (the end of the run, a to-test step) it floats at the bottom as the answer
     toast does.
-  - **Undo** brings the card back at once (the owner `unsnooze`, "Back to my list"), opens it, and puts the words back
-    in **that card's** composer — once, and only when the ferret has not read the message: the message is taken out of
+  - **Undo** brings the item back at once (the owner `unsnooze`, "Back to my list"), opens it, and puts the words back
+    in **that item's** composer — once, and only when the ferret has not read the message: the message is taken out of
     the session queue by the route the chat uses to cancel a waiting message (`DELETE /v1/ferrets/:ferretId/queue/:messageId`;
     a message still on this device is cancelled in the outbox). If the ferret already took it (the transport delivered
-    it at once, or the queue answers 409/404) Undo only brings the card back and says so: "Back on your list — Zoe
-    already read your reply." (words are never duplicated). If the queue cannot be reached the card still comes back
-    and the toast says the reply may still reach the ferret. The words are put back before the card is asked back, so a
+    it at once, or the queue answers 409/404) Undo only brings the item back and says so: "Back on your list — Zoe
+    already read your reply." (words are never duplicated). If the queue cannot be reached the item still comes back
+    and the toast says the reply may still reach the ferret. The words are put back before the item is asked back, so a
     failed unsnooze loses nothing.
   - **Keys and focus.** The wide-screen run keys keep working after an advance. When focus was in the composer that went,
-    it lands on the next card's frame — never on a removed node; reduced motion drops the fly-off as everywhere.
+    it lands on the next item's frame — never on a removed node; reduced motion drops the fly-off as everywhere.
 - **The open items are a deck**, on a phone and a wide screen alike. Swipe with a finger — from the item's head or its
   who-and-what line; the body scrolls — or press the arrow keys. **Only touch swipes, on every screen size** (decided by
   the gesture's `pointerType`, never by width): a mouse or trackpad drag never swipes or pulls down anywhere — Inbox
-  cards, Answer quickly, the side-panel cards — and stays the reader selecting text; a mouse uses the buttons and keys:
-  - **← ↑ →** send the card's answers, which mean the same everywhere (the deck, the card, the item view, what the
+  items, Answer quickly, the side-panel items — and stays the reader selecting text; a mouse uses the buttons and keys:
+  - **← ↑ →** send the item's answers, which mean the same everywhere (the deck, the item, the item view, what the
     CLI prints): a row of options is in the **options list's order** — the first ←, the second ↑, the third →
     (two options: ← and →) — wherever the recommendation sits. **Yes and No have one fixed place: No ←, Yes →**,
     whichever order the ferret listed them in and whatever its kind (`yesno`, or a two-way `choice` of Yes and No),
-    as a gate is Not good ← · Done →: the forward answer on the right. The row, the docked row, a card ask's own answer,
+    as a gate is Not good ← · Done →: the forward answer on the right. The row, the docked row, a task ask's own answer,
     the deck's swipes and keys, a form's yes/no field and the CLI's `answers: ← No · → Yes` all read it from one rule
     in `@ferretry/protocol` (`yesNoOrder`);
-  - **↓ is Skip**, everywhere a card swipes (the deck, the chat dock, the card's top bar and answer row, the ↓ key,
-    and the to-test and task-panel cards): it moves on to the next one; nothing is sent, nothing is dismissed and
-    the item stays open. A single mis-swipe can therefore never close a card.
+  - **↓ is Skip**, everywhere an item swipes (the deck, the chat dock, the item's top bar and answer row, the ↓ key,
+    and the to-test and task-panel items): it moves on to the next one; nothing is sent, nothing is dismissed and
+    the item stays open. A single mis-swipe can therefore never close an item.
   - **Not needed is a button, or the far side of the compass** (below) — never a plain swipe. It is a button in the open
     item's ⋯ menu, into the same undo window as any answer. A notice has no Not needed
     (it is cleared, not dismissed). The item's › also skips.
 
-  A held drag is stamped with what letting go would do (there is no hint line under the card); a card pulled down shows
+  A held drag is stamped with what letting go would do (there is no hint line under the item); an item pulled down shows
   "Skip" on the ground it uncovers, in the to-test rows' style. Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
@@ -1728,14 +1728,14 @@ Ferrets and Find filters keep, never a total taken before they applied.
   30 conversations on every machine, and its footer says so.
 - **Rows name the owner's thread.** A sub-ferret is named for a piece of work ("Revive Button Flaky") or a callsign
   ("Vena"); the owner talks to the thread that started it. Every Inbox row — an agenda item, a parked item, a resolved
-  record and a card to test — names the **root of the conversation's lineage**, found client-side by walking
+  record and a task to test — names the **root of the conversation's lineage**, found client-side by walking
   `SessionConfig.parent` through the session list the app already holds (a parent that is gone ends the walk at the
   topmost session that is held; a loop ends where it repeats). Find also matches the sub-ferret's own words.
 
 ### The compass
 
 Every item — a question, a gate, a notice — has a second swipe layer. Pull **down** past the Skip threshold and **keep the
-pointer down**: a small compass opens on the ground the card uncovers, and where the pointer goes from there is what
+pointer down**: a small compass opens on the ground the item uncovers, and where the pointer goes from there is what
 letting go does:
 
 - **↓ (let go)** is Skip, unchanged: the plain swipe down never reaches the compass.
@@ -1744,54 +1744,54 @@ letting go does:
   answer gets) really un-dismisses it — nothing is sent while the window is open.
 - **↓ ↓** is **Snooze**, and going further down shows the three lengths — **↓↓↓ 1 h / 4 h / 1 day**, one per column;
   letting go over one snoozes the item until then, into the same undo window.
-- Pulling back up, or letting go before the threshold, cancels: the card springs back and nothing happens.
+- Pulling back up, or letting go before the threshold, cancels: the item springs back and nothing happens.
 
 A swipe down is therefore never destructive without Undo. The choices are a pure state machine
 (`agenda-compass.ts`: a drag path in, an intent out), so the thresholds are tested without a pointer. Nothing depends on the
-gesture: behind every open card's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /
+gesture: behind every open item's ⋯ are plain buttons — **Skip** and **Not needed** — and **Snooze** (1 h / 4 h /
 tomorrow / custom); the arrow keys are unchanged. Snooze is offered in the compass and in the menu alike. The touch rules stay: a drag never starts on a control, and the direction locks on its first move.
 
-### Card asks in the Inbox
+### Task asks in the Inbox
 
-Today's app draws a card ask from its mirror, `gateAttached`, as the agenda's second answer row (`attachedGateView`):
-the same labels and directions as below, naming the card by its title, tap only, and every answer sent with `gate: true`.
-What follows is how it draws a card at a gate. A **gate item** (read from a daemon older than card asks) is a board card
-waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-card: the owner tests its parent, and a sub-card [closes itself](board.md#sub-cards-close-themselves) instead of waiting in a verify lane) (`item.gate`: the card, its lane and what each option does):
+Today's app draws a task ask from its mirror, `gateAttached`, as the agenda's second answer row (`attachedGateView`):
+the same labels and directions as below, naming the task by its title, tap only, and every answer sent with `gate: true`.
+What follows is how it draws a task at a gate. A **gate item** (read from a daemon older than task asks) is a board task
+waiting on the owner at a gate, raised as an ordinary Inbox item (never for a sub-task: the owner tests its parent, and a sub-task [closes itself](board.md#sub-tasks-close-themselves) instead of waiting in a verify lane) (`item.gate`: the task, its lane and what each option does):
 the owner meets one stream, not a question list and a separate to-test list. It is
-the card's ONE head row (the title, ‹ n/N ›, ⋯, ✕ — `CardHead`; its summary, Snooze and Skip behind ⋯) under ONE quiet meta line: **what it is** — the **Test** chip
-(a card in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats
-nothing: no summary line, no chip, no restated ask. Its body is the card's _How to test_ as numbered tick-steps, and its
+the item's ONE head row (the title, ‹ n/N ›, ⋯, ✕ — `CardHead`; its summary, Snooze and Skip behind ⋯) under ONE quiet meta line: **what it is** — the **Test** chip
+(a task in a verify lane; its ask reads "Try it: …") or the **Approve** chip (a plan awaiting approval; its ask reads "OK to build?") — the project, the ferret and "Open chat ›". It repeats
+nothing: no summary line, no chip, no restated ask. Its body is the task's _How to test_ as numbered tick-steps, and its
 options are the gate's own, laid out as every choice is (the first ←, the second ↑, the third →) and then MIRRORED left/right for a gate, so the forward option is always on the right.
 
-- **→** is the forward option (Done, OK to build, Yes), the same as the to-test rows; **←** is **Not good**, which reopens the card with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
+- **→** is the forward option (Done, OK to build, Yes), the same as the to-test rows; **←** is **Not good**, which reopens the task with an agenda item; **↓** is Skip. The buttons read Not good (left) · Done (right).
 - **Not good needs words.** Pressing it (or ←) answers nothing yet: the "why" box opens where the answer row was, and
   Send back stays disabled until something is written. The words go as the answer's note. Cancel (or Esc) changes nothing.
   The box is the chat's own composer — the same field, mic, Enter to send and Shift+Enter for a new line — with the same
-  inset as the card above it, so it is exactly as wide. It is the one send-back box ([board.md](board.md#done-and-not-good)).
-- On a **one-option gate** the left answer is **Not yet** — not one of `gate.options`: the card stays where it is, and words
+  inset as the task above it, so it is exactly as wide. It is the one send-back box ([board.md](board.md#done-and-not-good)).
+- On a **one-option gate** the left answer is **Not yet** — not one of `gate.options`: the task stays where it is, and words
   are welcome but not required.
 - Answering is a plain choice, `{ kind: 'multiple-choice', choice: <label> }`, held in the undo window like any answer. A
-  refusal (the card moved on, or the gate was not reached) shows beside the buttons, as for every answer.
+  refusal (the task moved on, or the gate was not reached) shows beside the buttons, as for every answer.
 - **Question items keep their sticky options and composer exactly as they were.**
 
 **The app ships before the daemon.** A machine that advertises `board.gate-items.1` sends gate items, and the
 Inbox then drops the _synthesized_ to-test rows those items replace. A machine that advertises `agenda.card-asks.1` sends the
-card's ask on the card's own agenda instead, and the Inbox keeps no to-test row for that machine at all (next paragraph).
-Either way the owner answers through their authority and the card moves once; the other path is withdrawn. A machine that
+task's ask on the task's own agenda instead, and the Inbox keeps no to-test row for that machine at all (next paragraph).
+Either way the owner answers through their authority and the task moves once; the other path is withdrawn. A machine that
 advertises neither keeps today's rows.
 
-**The Inbox has no To test list on a card-asks machine.** Once a machine advertises `agenda.card-asks.1` its cards leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the card's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no card waiting on the owner is lost while machines are on different versions. A person-asked
-card in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates but not card asks, so no card
+**The Inbox has no To test list on a card-asks machine.** Once a machine advertises `agenda.card-asks.1` its tasks leave the Inbox's To test section, the Answer-quickly run step and the snoozed to-test rows, and out of the Inbox's count: the task's ask is an item on an agenda, and that is the one place the owner meets it. The check is per machine (`AgendaWireDirectory.cardAsksOf`), so a machine that does not advertise it keeps every row it has today, and no task waiting on the owner is lost while machines are on different versions. A person-asked
+task in a gate lane **with no open gate item** keeps its to-test row even on a machine that advertises gates but not task asks, so no task
 waiting on the owner is ever lost between the two lists.
 
 **Not good takes pictures and files.** The resolve request carries optional `attachments: { from, ids }` — the same shape as
 the board's move back (`docs/board.md`) — and only on the answer to a gate item. The app uploads each file to the **item's own
 session** (`from` is that session; the daemon refuses any other), then names the ids with the answer. The daemon carries
-them to the card's ferret (its assignee, else its owner ferret) **before the board is touched**, so a file that cannot be
-carried leaves the card where it is and the item open, saying so; it then reopens the card with `{ from: <that ferret>, ids }`,
+them to the task's ferret (its assignee, else its owner ferret) **before the board is touched**, so a file that cannot be
+carried leaves the task where it is and the item open, saying so; it then reopens the task with `{ from: <that ferret>, ids }`,
 and the ferret reads them as it does on the Board. Only a Not good takes files: "Not yet" and the forward option are
 refused with them, and the Inbox draws no "+" on "Not yet". A resolve with files on anything that is not a gate item is
-refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged and the card moved and the ferret told **once**, but only when the repeat is the SAME answer: the same choice, the same words (spacing aside) and the same files (`from` and ids). The same choice with other words or other files is a stale tab, refused `409 gate_moved_on` ("was already answered, differently: nothing was sent") rather than a success that drops them, and a repeat is still held to a first answer's rules (the owner, the grant, words for a Not good, files from this session). The full answer is kept with the answered item, so an exact repeat succeeds even after a restart. A repeat from anyone else is not a replay. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
+refused `400 invalid` rather than dropping them. Repeating an answer the owner already gave (a lost response replayed, or the same request twice at once) answers success with the item unchanged and the task moved and the ferret told **once**, but only when the repeat is the SAME answer: the same choice, the same words (spacing aside) and the same files (`from` and ids). The same choice with other words or other files is a stale tab, refused `409 gate_moved_on` ("was already answered, differently: nothing was sent") rather than a success that drops them, and a repeat is still held to a first answer's rules (the owner, the grant, words for a Not good, files from this session). The full answer is kept with the answered item, so an exact repeat succeeds even after a restart. A repeat from anyone else is not a replay. A daemon reports `agenda.gate.attachments.1` on `GET /v1/health` when it
 takes them; the app draws the "+" only there, and an older machine keeps Not good as words alone.
 
 ### The side panel's Agenda tab
@@ -1817,22 +1817,22 @@ Plan to approve, Tracker, Test; a resolved row shows the last stage it had) and 
 **Overview** keeps one line — "2 need you · 1 resting · 0 snoozed · 5 resolved" — with an **Open Agenda** button into the
 tab, so the two cannot disagree. The tab is hidden while the agenda has nothing on it and agenda mode is off.
 
-The task panel has no Cards view: the Tasks tab is **Kanban** or **List** (List by default). A card's ask is an item on an
-agenda, so it appears here and in the Inbox, and a card ask swipes as a card's answer does (**→ Done**, **← Not good**,
+The task panel has no Items view: the Tasks tab is **Kanban** or **List** (List by default). A task's ask is an item on an
+agenda, so it appears here and in the Inbox, and a task ask swipes as an item's answer does (**→ Done**, **← Not good**,
 **↓ Skip**) wherever its ask is drawn.
 
 ## Delivery
 
-How the owner's card actions — an answer, a done, a dismiss, a Discuss or a request for more information —
+How the owner's item actions — an answer, a done, a dismiss, a Discuss or a request for more information —
 reach the ferret (`AgendaReplyBatcher`, `packages/daemon/src/lib/agenda/reply-batch.ts`; the class keeps
 its old name until a later release renames it; its files are [on disk](#on-disk) under the agenda names). The owner's words that drove it:
-"only on receipt (the harness receive the 'card reply'), then it can be considered 'DONE', else it surfaces
-back as a card again".
+"only on receipt (the harness receive the 'item reply'), then it can be considered 'DONE', else it surfaces
+back as an item again".
 
 A bare **Got it** (or Done with no words) on an `info` item is never delivered: it resolves the item quietly, for the ferret to see in `fy agenda ls`, and starts no turn. Words the owner typed, a dismiss and every other kind still go through the steps below.
 
 1. **Held.** The action goes to the ferret's outbox (`agenda-replies.json`, beside the agenda's own
-   file). It is due **10 seconds after the last card action**: every further action on that ferret's cards
+   file). It is due **10 seconds after the last item action**: every further action on that ferret's items
    restarts the countdown, and the first one never waits more than **2 minutes**. The agenda says so:
    `replies: {pending, dueAt, heldForTurn?}` on every `GET` and `POST` of the agenda route
    (`/v1/ferrets/:ferretId/agenda`). "Send now"
@@ -1852,7 +1852,7 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
    those items again.
 5. **Undelivered.** A send refused outright, a fate of `timed_out`, `unaccounted`, `withdrawn` or
    `cancelled`, no proof within the receipt wait (15 minutes), or a composer that never emptied: each
-   item goes **back to the owner as an open card**. A done or dismiss reopens the closed item; an answer that
+   item goes **back to the owner as an open item**. A done or dismiss reopens the closed item; an answer that
    rested a ferret's item brings it back from resting (each answer is its own delivery, keyed by the item's request
    counter, `A5~2`, so a second answer after the ferret replied is told too); a Discuss or request for more
    information ends that wait. The item carries
@@ -1862,7 +1862,7 @@ A bare **Got it** (or Done with no words) on an `info` item is never delivered: 
 
 | Key in `config/daemon.json`       | Default | Range (whole seconds) | What it bounds                                   |
 | --------------------------------- | ------- | --------------------- | ------------------------------------------------ |
-| `agenda.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last card action        |
+| `agenda.replySettleSeconds`       | 10      | 1–3600                | the quiet time after the last item action        |
 | `agenda.replyMaxWaitSeconds`      | 120     | 1–3600                | the longest the first action waits               |
 | `agenda.replyComposerWaitSeconds` | 600     | 10–86400              | waiting for an empty composer, past the cap      |
 | `agenda.replyReceiptSeconds`      | 900     | 30–86400              | waiting for the transcript's proof after sending |
@@ -1899,18 +1899,18 @@ source module does not exist yet), and fails the checklist once it does.
 | #   | The claim (the spec's words)                                                                                                                                                                                                                                                                                       | Proved by                                                                                                                                                                                                                                                     |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | A ferret only opens an agenda when no open one passes the 3-part test. Otherwise it adds to the closest.                                                                                                                                                                                                           | `DoD 1` (`fy agenda add` refuses without `--new` and prints the `fy agenda edit` join; the join and the `--new` path both run)                                                                                                                                |
-| 2   | Things that depend on each other are always in one agenda.                                                                                                                                                                                                                                                         | `DoD 2` (`fy agenda add --task` lists the agenda carrying a card the new one depends on, or blocks, first: "carries &F1, which &F2 depends on"); a card that already asks points the second ask at its agenda                                                 |
+| 2   | Things that depend on each other are always in one agenda.                                                                                                                                                                                                                                                         | `DoD 2` (`fy agenda add --task` lists the agenda carrying a task the new one depends on, or blocks, first: "carries &F1, which &F2 depends on"); a task that already asks points the second ask at its agenda                                                 |
 | 3   | A Needs you item notifies you and opens straight at its ask. A Resting item never buzzes you.                                                                                                                                                                                                                      | `DoD 3` (the real notification service: one push, blockers first, opening at the ask; none for Resting or snoozed); the opening: `packages/pwa/tests/unit/features/agenda-inbox-notification-open.test.tsx` (PR 7)                                            |
 | 4   | Any reply or answer from you moves the item to Resting ("waiting on <ferret>") and out of Needs you. The ferret's answer on it brings it back to Needs you automatically, in its old spot. About 30 minutes of ferret silence gets a Warden nudge. Needs you never lists an agenda twice, and puts blockers first. | `DoD 4` (reply and owner answer rest it; the ferret's answer returns it ahead of a newer item; one nudge at 31 minutes, none at 29); `DoD 3` (unique queue, blockers first)                                                                                   |
 | 5   | Snooze keeps an item Resting until the time you picked, unless a blocker wakes it.                                                                                                                                                                                                                                 | `DoD 5`                                                                                                                                                                                                                                                       |
-| 6   | A card that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                                                                                                                                          | `DoD 6`, and the board's gate path in `packages/daemon/tests/unit/board/card-asks.test.ts` (the ask rides the open agenda, or opens ONE named after the card); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                         |
+| 6   | A task that's ready shows its test steps and Done / Not good inside its agenda, never as a separate item.                                                                                                                                                                                                          | `DoD 6`, and the board's gate path in `packages/daemon/tests/unit/board/card-asks.test.ts` (the ask rides the open agenda, or opens ONE named after the task); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                         |
 | 7   | An explainer or report you ask for appears in that agenda's tabs, the main tab ("Where we are now") first and "The full picture" beside it (&F923). (It was "where we are now" until the owner made the body the live document, !A332.)                                                                            | `DoD 7` (`fy agenda edit --where` and `--body-file`, a second `--body-file` replacing the body whole); the page: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                 |
 | 8   | A long report fits with no cut-off. Every reply shows in the conversation, in order.                                                                                                                                                                                                                               | `DoD 8`: a 200k report through `fy agenda edit --body-file` read back whole; replies and the ferret's answers in their full interleaved order; the page: `agenda-conversation.test.ts` (PR 8); a long report is the body (see below)                          |
 | 9   | The activity log is folded. Diff mode shows what changed between any two versions you pick.                                                                                                                                                                                                                        | `DoD 9` (the versions list and any two can be fetched); the folds: `agenda-item-sections.test.ts` and `features/agenda-item-parts.test.tsx` (PR 7); the diff: `features/agenda-version-diff.test.tsx` (PR 8)                                                  |
-| 10  | Merging two agendas keeps both conversations and all their cards.                                                                                                                                                                                                                                                  | `DoD 10` (`fy agenda merge`); the button: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                                     |
-| 11  | A sub-ferret can't create a card or agenda without permission.                                                                                                                                                                                                                                                     | `DoD 11` (a sub-ferret is refused a card and an agenda; its lead is not)                                                                                                                                                                                      |
-| 12  | A ferret can show a live card or mini board inline, and it updates when the card moves.                                                                                                                                                                                                                            | `packages/pwa/tests/unit/fy-render-card-embed.test.tsx` (`DoD 12`, by pointer)                                                                                                                                                                                |
-| 13  | The board shows public cards by default, each linked to its PRs and approvals.                                                                                                                                                                                                                                     | `DoD 13`; `features/board-page.test.tsx`, `board-private-preference.test.ts`, `card-visibility.sit.test.ts`. **GAP:** each linked to its PRs and approvals has no test here                                                                                   |
+| 10  | Merging two agendas keeps both conversations and all their tasks.                                                                                                                                                                                                                                                  | `DoD 10` (`fy agenda merge`); the button: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                                     |
+| 11  | A sub-ferret can't create a task or agenda without permission.                                                                                                                                                                                                                                                     | `DoD 11` (a sub-ferret is refused a task and an agenda; its lead is not)                                                                                                                                                                                      |
+| 12  | A ferret can show a live task or mini board inline, and it updates when the task moves.                                                                                                                                                                                                                            | `packages/pwa/tests/unit/fy-render-card-embed.test.tsx` (`DoD 12`, by pointer)                                                                                                                                                                                |
+| 13  | The board shows public tasks by default, each linked to its PRs and approvals.                                                                                                                                                                                                                                     | `DoD 13`; `features/board-page.test.tsx`, `board-private-preference.test.ts`, `card-visibility.sit.test.ts`. **GAP:** each linked to its PRs and approvals has no test here                                                                                   |
 | 14  | One agenda can go from explainer to question to plan to tracker to test, with its type showing the current stage, and the history keeps each stage.                                                                                                                                                                | `DoD 14` (`fy agenda edit --stage` through every stage, then `fy agenda done`); the head: `features/agenda-item-parts.test.tsx` (PR 7)                                                                                                                        |
 | 15  | When part of an agenda no longer passes the test, the ferret splits it into a new linked agenda.                                                                                                                                                                                                                   | `DoD 15` (`fy agenda split --move-cards`); the page: `features/agenda-merge-control.test.tsx` (PR 8)                                                                                                                                                          |
 | 16  | A main-chat exchange about an agenda shows in that agenda's conversation, with your words verbatim and tagged "from chat", plus the ferret's reply. The chat reply links to the agenda, and the exchange moves the state as a reply would (it rests, and comes back on the ferret's answer).                       | `DoD 16` (`fy agenda log --reply` and `--rest`: verbatim, tagged, the same message never logged twice, the item rests and comes back ahead of a newer one). **GAP:** the chat reply links to the agenda — taught only (`link` in the Agenda-mode instruction) |
@@ -1993,7 +1993,7 @@ reads every item; the CLI checks the feature first and says the daemon needs an 
 `GET /v1/ferrets/:ferretId/agenda` and `GET /v1/machine/agenda` return
 `AgendaListSnapshot`: active items (including resting and snoozed ones) in full, and every addressed item as a
 `projection: header` record. A header keeps its id, title, kind, author, resolution time and disposition,
-conversation count, card and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
+conversation count, task and reference links, the short reason searched by Find, and the outcome metadata the Resolved rows display. The document's
 tabs, revisions, history, conversation text and full picture travel only on an item read. Stored ledgers and mutation
 responses retain the full `AgendaSnapshot` shape. List readers also accept full records from older daemons.
 
@@ -2047,7 +2047,7 @@ old one, and always writes the new one**, so a daemon upgraded or downgraded in 
   item's history, owner-history lines in the sidecar under its cursor — is read back on the way up.
 - **Coming back up** loses no owner word and repeats none (the declared limits below say where this stops). Each item resumes from its **latest recorded version**
   in the version store, which holds the whole tagged thread (verbatim, in order, chat tags included, and chat text
-  over the history bound too) and the links 2a stripped, so merges, splits and related cards return. Only what the
+  over the history bound too) and the links 2a stripped, so merges, splits and related tasks return. Only what the
   item's history says was said after that version is added, once, after the thread; a word already in the thread
   (same chat message, or same time, speaker and text) is never added again, and a second read finds nothing new.
   The ferret's answer to the owner's question has no time of its own: it is dated by the latest edit that changed it
@@ -2089,8 +2089,8 @@ it):
   "raised once". So the board stays one that reads whole should the entry read again.
 - **Only the Warden's own words are fitted.** An item the Warden raised whose only fault is text past a limit reads
   with that text cut at a word to the limit, its line breaks kept, and the next write keeps the cut. Every other item
-  is left as written, the daemon's other items included, since those can quote a person or a ferret (an input card's
-  prompt, a gate's card title): such an item is set aside as above.
+  is left as written, the daemon's other items included, since those can quote a person or a ferret (an input's
+  prompt, a gate's task title): such an item is set aside as above.
 - **What is written reads back.** Every item a change makes or changes is checked against the schema the reader uses,
   and a change that would not read back is refused (`invalid`) instead of written. The Warden's notices fit their
   subject to the limit themselves, and carry the whole of it in their reason; one the agenda still refuses is
