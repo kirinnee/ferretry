@@ -442,6 +442,28 @@ describe('a message the durable queue holds', () => {
   });
 });
 
+describe('a send the daemon said is stuck', () => {
+  test('reads not delivered yet, says the agent’s box could not be read, and is never red', () => {
+    const stuck = record({ stuckAt: STATE_AT });
+    expect(sendReceipt(stuck)).toMatchObject({ kind: 'sending', name: 'Not delivered yet', chip: 'not delivered yet' });
+    expect(sendBadge(stuck).label).toBe('not delivered yet');
+    expect(sendBadge(stuck).detail).toContain('input box could not be read');
+    expect(sendBadge(stuck).tone).not.toContain('err');
+    // Delivered after all: the fate speaks, not the old mark.
+    expect(sendReceipt(record({ fate: 'delivered', stuckAt: STATE_AT })).kind).toBe('delivered');
+  });
+
+  test('outranks the queue saying it is being typed: a refused send sits in the queue as typing the whole time', () => {
+    const typing = { state: 'typing', stateAt: STATE_AT, revision: 2 } as const;
+    const stuck = record({ stuckAt: STATE_AT, queue: typing });
+    expect(sendReceipt(stuck)).toMatchObject({ kind: 'sending', name: 'Not delivered yet', chip: 'not delivered yet' });
+    expect(sendBadge(stuck).label).toBe('not delivered yet');
+    // Without the mark the queue's words stand, and a settled fate still outranks the mark.
+    expect(sendReceipt(record({ queue: typing }))).toMatchObject({ kind: 'queued', name: 'Sending' });
+    expect(sendReceipt(record({ fate: 'cancelled', stuckAt: STATE_AT, queue: typing })).kind).toBe('cancelled');
+  });
+});
+
 describe('a session that ended is never "not delivered"', () => {
   test('a ledger timeout with session_ended reads unconfirmed, quietly and without the red mark', () => {
     const ended = record({ fate: 'timed_out', unaccountedReason: 'ferret_ended', retryable: true });

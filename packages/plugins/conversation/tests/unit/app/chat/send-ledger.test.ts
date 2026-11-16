@@ -248,6 +248,8 @@ describe('a cancelled send, and one typed but never submitted', () => {
     });
     expect(unknown).not.toHaveProperty('cancelEffect');
     expect(unknown).not.toHaveProperty('typedNotSent');
+    expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), stuckAt: at(1) })?.stuckAt).toBe(at(1));
+    expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), stuckAt: 7 })).not.toHaveProperty('stuckAt');
   });
 
   it('lets a cancel supersede anything unproven in the same attempt, but never a delivered proof', () => {
