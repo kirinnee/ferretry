@@ -1,6 +1,7 @@
 /**
  * WHERE AGENDA READS THE CARDS' HOOKS: the three app hooks this half offers (`contract/app-hooks.ts`), read from the
- * shell for this half's daemon and handed to the ask surfaces below, each through the seam that already reads it:
+ * shell for ONE daemon (a page's own, or an open Inbox card's machine: {@link AgendaCardBoard}) and handed to the ask
+ * surfaces below, each through the seam that already reads it:
  *
  * - `agenda.card-answer` → {@link DoneCloseBoardProvider} (an item's Done · closes) and {@link AgendaCardsBoardProvider}
  *   (a notice's Start and Close);
@@ -12,6 +13,7 @@
  */
 
 import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import type { InboxLaneEditor } from '../../hooks/use-agenda-inbox.ts';
 import {
   AGENDA_CARD_ANSWER_HOOK,
   AGENDA_CARD_REFERENCE_HOOK,
@@ -62,6 +64,77 @@ export const useAgendaBoardHooks = (daemonId: DaemonId): AgendaBoardHooks => {
 
 /** The lane editor the Inbox opens on Edit, or `undefined` without a provider. */
 export const laneEditorOf = (hooks: AgendaBoardHooks): AgendaLaneEditor | undefined => hooks.laneProposal?.editorFor;
+
+/** The lane editors of the machines whose cards are on screen, as each card's scope registered them. */
+export interface LaneEditorBook {
+  /** Registers `editor` for `daemonId` until the returned release; no editor registers nothing. */
+  readonly register: (daemonId: DaemonId, editor: AgendaLaneEditor | undefined) => () => void;
+  readonly editorFor: InboxLaneEditor;
+}
+
+export const laneEditorBook = (): LaneEditorBook => {
+  // One entry per REGISTRATION, not per function: every scope of one machine registers the same cached `editorFor`, so a
+  // release that matched by function would erase every card's editor on that machine at once.
+  const held = new Map<DaemonId, { readonly editor: AgendaLaneEditor }[]>();
+  return {
+    register: (daemonId, editor) => {
+      if (editor === undefined) return () => undefined;
+      const registration = { editor };
+      held.set(daemonId, [...(held.get(daemonId) ?? []), registration]);
+      return () => {
+        const rest = (held.get(daemonId) ?? []).filter(known => known !== registration);
+        if (rest.length === 0) held.delete(daemonId);
+        else held.set(daemonId, rest);
+      };
+    },
+    editorFor: (daemonId, ask, answer) => held.get(daemonId)?.at(-1)?.editor(ask, answer),
+  };
+};
+
+/**
+ * One card's Board: the three hooks read for THE CARD'S machine (the Inbox is every machine's), handed to what is drawn
+ * inside as {@link AgendaBoardProviders} does for a page's own, and the machine's lane editor entered in `editors` while
+ * it is on screen. Each card of another machine gets that machine's Board, never the page's.
+ */
+export function AgendaCardBoard({
+  daemonId,
+  editors,
+  onNavigate,
+  children,
+}: {
+  readonly daemonId: DaemonId;
+  readonly editors: LaneEditorBook;
+  readonly onNavigate: (to: string) => void;
+  readonly children: ReactNode;
+}) {
+  const hooks = useAgendaBoardHooks(daemonId);
+  const editor = laneEditorOf(hooks);
+  useEffect(() => editors.register(daemonId, editor), [editors, daemonId, editor]);
+  return (
+    <AgendaBoardProviders hooks={hooks} onNavigate={onNavigate}>
+      {children}
+    </AgendaBoardProviders>
+  );
+}
+
+/** What the Inbox screens hand the page: the per-machine lane editor and the per-card scope that feeds it. */
+export const useCardBoards = (
+  onNavigate: (to: string) => void,
+): {
+  readonly laneEditor: InboxLaneEditor;
+  readonly cardBoard: (daemonId: DaemonId, children: ReactNode) => ReactNode;
+} => {
+  const editors = useMemo(laneEditorBook, []);
+  const cardBoard = useCallback(
+    (daemonId: DaemonId, children: ReactNode): ReactNode => (
+      <AgendaCardBoard daemonId={daemonId} editors={editors} onNavigate={onNavigate}>
+        {children}
+      </AgendaCardBoard>
+    ),
+    [editors, onNavigate],
+  );
+  return { laneEditor: editors.editorFor, cardBoard };
+};
 
 const ELSEWHERE = 'That card is on another machine, so it cannot be changed from here.';
 
