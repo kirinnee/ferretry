@@ -408,11 +408,21 @@ export function buildConversationA(deps: {
   let questionAsksReconciled = false;
 
   const queue = new SessionQueueService({
-    store: new NotifyingSessionQueueStore(new StateQueueStore(kernel.state), {
-      publish: async (id, _type, data) => {
-        await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+    store: new NotifyingSessionQueueStore(
+      new StateQueueStore(kernel.state, undefined, failure =>
+        kernel.log.warn('the queue log could not be rotated; it keeps growing until a rotation succeeds', {
+          ferret: failure.ferret,
+          events: failure.events,
+          bytes: failure.bytes,
+          error: String(failure.error),
+        }),
+      ),
+      {
+        publish: async (id, _type, data) => {
+          await kernel.events.publish(QueueChanged, { ferret: id, message: data.messageId, change: data.change });
+        },
       },
-    }),
+    ),
     clock,
     serial: queueSerial,
   });
