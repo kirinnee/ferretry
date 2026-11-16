@@ -84,16 +84,6 @@ export interface CoreAccount extends FleetManifestAccount {
 }
 
 /**
- * INJECTED: supplied by an adapter over the published fleet manifest.
- *
- * Answers an empty fleet for a manifest that is not there, and THROWS for one that is there and unreadable.
- * Every caller therefore fails closed by default.
- */
-export interface AccountInventoryPort {
-  accounts(): Promise<readonly CoreAccount[]>;
-}
-
-/**
  * Look an account up by the executable name a usage row or a running session carries. Ambiguity is
  * refused rather than resolved: two accounts sharing an executable name is a manifest defect, and
  * silently picking the first was how the source attached one account's quota to another's session.

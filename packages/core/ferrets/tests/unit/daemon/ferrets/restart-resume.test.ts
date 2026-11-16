@@ -30,6 +30,7 @@ const request = (over: Partial<RestartRelaunch> = {}): RestartRelaunch => ({
   message: undefined,
   expectHandle: '%1',
   conversation: { kind: 'resume' },
+  committed: async () => {},
   ...over,
 });
 
@@ -114,6 +115,43 @@ describe('a Restart’s relaunch', () => {
     await expect(refused).rejects.toBeInstanceOf(ResumeRefused);
     await expect(refused).rejects.toThrow('no runtime recorded');
     expect(asked).toHaveLength(0);
+  });
+
+  test('a MOVE names its target: the runtime, the model and effort it planned and the conversation to resume, on the ferret’s own harness', async () => {
+    const { asked, relaunch } = fixture();
+
+    await relaunch(
+      request({ onto: { runtime: 'claude-two', model: 'claude-opus-5', effort: 'high', conversation: 'conv-lead' } }),
+    );
+
+    expect(asked[0]?.options.target).toEqual({
+      runtime: 'claude-two',
+      harness: 'claude-code',
+      model: 'claude-opus-5',
+      effort: 'high',
+      conversation: 'conv-lead',
+    });
+    expect(asked[0]?.options.replaceLiveTerminal).toBe(true);
+    expect(asked[0]?.options.expect?.({ handle: '%1' } as never)).toBe(true);
+  });
+
+  test('a MOVE that starts fresh, or whose runtime names no model, carries no conversation, model or effort', async () => {
+    const { asked, relaunch } = fixture();
+
+    await relaunch(
+      request({ conversation: { kind: 'fresh' }, onto: { runtime: 'claude-two', conversation: 'conv-lead' } }),
+    );
+
+    expect(asked[0]?.options.target).toEqual({ runtime: 'claude-two', harness: 'claude-code' });
+  });
+
+  test('the service is handed the move’s own `committed` step, to run once its refusals have passed', async () => {
+    const { asked, relaunch } = fixture();
+    const committed = async () => {};
+
+    await relaunch(request({ committed }));
+
+    expect(asked[0]?.options.committed).toBe(committed);
   });
 
   test('the service’s own refusal reaches the Restart as a ResumeRefused with its sentence', async () => {

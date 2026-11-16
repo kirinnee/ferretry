@@ -1,8 +1,18 @@
 import type { CallContext } from '@ferretry/kernel/contract';
 import { milliseconds } from '@ferretry/std';
-import { type FerretId, type RunnerHandle, Harnesses, Runners } from '../../contract/index.ts';
+import {
+  type FerretId,
+  type RunnerHandle,
+  type RuntimeStartResolution,
+  Harnesses,
+  RUNTIME_START_DEADLINE_MS,
+  RUNTIME_START_KEY,
+  Runners,
+  RuntimeStart,
+} from '../../contract/index.ts';
 import type { SessionId } from '../lib/session-id.ts';
-import { ferretsMoveResume, ferretsRestartResume, movedTarget } from '../lib/ferrets/move-resume.ts';
+import { boundConversation } from '../lib/ferrets/bound-conversation.ts';
+import { ferretsRestartResume } from '../lib/ferrets/move-resume.ts';
 import { paneIdentityKey } from '../lib/moves/pane-identity.ts';
 import type { MovePane } from '../lib/moves/process-inventory-port.ts';
 import { createSessionDirectory } from '../lib/session/directory/index.ts';
@@ -49,6 +59,25 @@ function register(f: FerretsContext): FeatureContribution | undefined {
       return await runner.lastScreen(record.handle as RunnerHandle);
     },
   });
+  // What Runtimes answers a move, bounded on the kernel clock as a start's own resolution is: an answer that never settles
+  // must not hold the ferret's move lock. A late answer is dropped; the move then says it could not check.
+  const runtimes = () => {
+    const found = hooks.provider(RuntimeStart, RUNTIME_START_KEY);
+    return found === 'unavailable' ? undefined : found;
+  };
+  const withinDeadline = async <T>(answer: Promise<T>, late: T): Promise<T> => {
+    let cancel: () => void = () => {};
+    const expired = new Promise<T>(resolve => {
+      cancel = kernel.clock.after(milliseconds(RUNTIME_START_DEADLINE_MS), () => {
+        resolve(late);
+      });
+    });
+    try {
+      return await Promise.race([answer, expired]);
+    } finally {
+      cancel();
+    }
+  };
   // ONE reader of a ferret's documents as every other surface reads them (as the runtime control builds it).
   const directory = createSessionDirectory({
     sessions: () => sessionStore.listSessions(),
@@ -77,22 +106,45 @@ function register(f: FerretsContext): FeatureContribution | undefined {
         // (the fail-closed answer a session with no transcript always gave).
         transcripts: { tail: async () => [] },
         restart: {
+          // The facts only the registry owns: the runtime it is on (a ferret with none can be moved but not restarted), the
+          // harness a move must stay on, and the pane the gate judges.
           record: id => {
             const record = registry.get(id as unknown as FerretId);
-            // A ferret with no runtime recorded names none to restart on, so the move answers as it does for any other runtime.
-            return record?.runtime === undefined ? undefined : { runtime: record.runtime, handle: record.handle };
+            return record === undefined
+              ? undefined
+              : { runtime: record.runtime, harness: record.harness, handle: record.handle };
           },
           relaunch: ferretsRestartResume(service, ferret => registry.get(ferret)),
+        },
+        // A move onto another login: Runtimes resolves and describes the target; the ferret's own harness says whether the
+        // conversation it is bound to is still in its home.
+        login: {
+          resolve: async (runtime): Promise<RuntimeStartResolution> => {
+            const source = runtimes();
+            return source === undefined
+              ? {
+                  ok: false,
+                  sentence: `runtime ${runtime} cannot be started: the Runtimes plugin is not running, so its login cannot be found`,
+                }
+              : await withinDeadline(source.resolve(runtime), {
+                  ok: false,
+                  sentence: `could not check runtime ${runtime} in time; try again`,
+                });
+          },
+          catalog: async runtime => {
+            const source = runtimes();
+            return source?.catalog === undefined ? undefined : await withinDeadline(source.catalog(runtime), undefined);
+          },
+          conversation: async id => {
+            const record = registry.get(id as unknown as FerretId);
+            if (record === undefined) return { id: undefined, present: undefined };
+            const found = hooks.provider(Harnesses, record.harness);
+            return await boundConversation(record, found === 'unavailable' ? undefined : found);
+          },
         },
       },
       environment: sessionFiles.environment,
       createLifecycle: sessionFiles.createLifecycle,
-      // A move's relaunch is a resume of THIS service, so it goes through the ordinary launch (home, token, environment).
-      resume: ferretsMoveResume(
-        service,
-        ferret => registry.get(ferret),
-        async ferret => await movedTarget(async () => await sessionStore.readConfig(ferret as unknown as SessionId)),
-      ),
       // The relaunch-settings read (W2-c, RULING #27 Q9): the ferret's own harness compares what it launched under with
       // its settings now; Ferrets reads no harness file. The caller check is `mayAct` below, as for every move route.
       launch: relaunchSettings({
