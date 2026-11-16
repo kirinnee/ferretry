@@ -486,6 +486,8 @@ export interface OpeningFile {
 export interface BoundLaunchFolder {
   /** The folder is (or is reached through a link into) the daemon's state home: an agent never starts there. */
   readonly insideStateHome: boolean;
+  /** The directory the launch will really be in, every link resolved (what `start.decide` judges WHERE by). */
+  readonly realPath?: string | undefined;
   /** Ok while it is still the folder that was checked (same directory, same side of the state home); never throws. */
   verify(): Promise<Result<void, string>>;
 }
@@ -1034,11 +1036,13 @@ export class FerretsService implements FerretsApi {
       ...(runtimeName === undefined ? {} : { runtime: runtimeName }),
       ...(login === undefined ? {} : { login }),
       folder: folder.value,
+      ...(bound.value?.realPath === undefined ? {} : { realFolder: bound.value.realPath }),
       by: request.by,
       ...(request.options?.model === undefined ? {} : { model: request.options.model }),
       ...(request.options?.fast === undefined ? {} : { fast: request.options.fast }),
       // A start's own compaction trigger is judged by the taker that knows the model's window; a relaunch asks none.
       ...(request.options?.compactAt === undefined ? {} : { compactAt: request.options.compactAt }),
+      ...(request.options?.allowScratch === undefined ? {} : { allowScratch: request.options.allowScratch }),
     });
     // A refusal here is BEFORE the first write (details, record, token): `start()` gives the name back.
     if (!decision.allow) return refusedBy(decision);
@@ -1047,7 +1051,7 @@ export class FerretsService implements FerretsApi {
     if (!opening.ok) return opening;
     if (request.options !== undefined) {
       // The opening attachments are this start's request alone: their bytes are never written into `details.json`.
-      const { title, initialAttachments: _attached, ...options } = request.options;
+      const { title, initialAttachments: _attached, allowScratch: _scratch, ...options } = request.options;
       await this.saveDetails(id, {
         ...(Object.keys(options).length === 0 ? {} : { options }),
         ...(title === undefined ? {} : { title }),

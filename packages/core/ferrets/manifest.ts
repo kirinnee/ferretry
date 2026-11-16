@@ -602,6 +602,12 @@ export default definePlugin({
             flag: '--auto',
             help: 'let Ferretry choose the runtime: the models the routing prompt names, in its order; do not name a runtime with it',
           },
+          { flag: '--allow-scratch', help: 'run it in a temporary or scratch folder anyway (refused otherwise)' },
+          {
+            flag: '--continue',
+            help: 'same as `fy link [words]`: list the conversations to continue (starts no helper; takes only --since and --harness)',
+          },
+          { flag: '--since <dur>', help: 'same as `fy link --since <n>d|h|w`: only conversations active since then' },
           {
             flag: '--mode <mode>',
             help: 'auto for an autonomous teammate (the default), interactive for a human terminal',

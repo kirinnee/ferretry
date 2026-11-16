@@ -1,0 +1,7 @@
+{
+  "entry": ["scripts/built-ins.ts"],
+  "project": ["**/*.{ts,tsx}", "!tests/**"],
+  "allowed": {
+    "entry:scripts/built-ins.ts": "the developer-run generator of daemon/lib/built-ins.json (the built-in catalogs as data, not Bun macros: no-macros); nothing in the product imports it, its unit test runs it."
+  }
+}

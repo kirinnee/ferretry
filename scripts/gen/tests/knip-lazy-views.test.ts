@@ -3,7 +3,8 @@
  *
  * A plugin's `app/index.ts` loads its React views through a dynamic `import(`./views/${name}.tsx`)` (a Vite
  * dynamic-import variable, so the registry generator never loads React). Knip cannot follow a template specifier, so
- * the workspace's `entry` in `knip.production.json` must name those files, or the whole view tree reads as dead.
+ * the workspace's `entry` in the plugin's own `knip.production.json` must name those files, or the whole view tree
+ * reads as dead.
  *
  * The entries are per workspace (a single `app/views/*.tsx` on the `packages/plugins/*` block would raise a "no
  * matches" config hint for every plugin without the folder). This test is what stops a plugin added later from
@@ -35,7 +36,8 @@ const lazyGlobs = (indexSource: string): string[] =>
 const entriesFor = (config: KnipConfig, plugin: string): readonly string[] =>
   (config.workspaces[`packages/plugins/${plugin}`] ?? config.workspaces[WILDCARD])?.entry ?? [];
 
-const config = (await Bun.file(join(root, 'knip.production.json')).json()) as KnipConfig;
+// The config knip runs: `knip.production.ts` composed with every package's `knip.production.json`.
+const config = (await import(join(root, 'knip.production.ts'))).default as KnipConfig;
 const plugins = (await scan('*/app/index.ts', pluginsDir)).map(file => file.split('/')[0] ?? '');
 
 describe('production knip: lazy-loaded plugin views', () => {

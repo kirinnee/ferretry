@@ -207,7 +207,8 @@ describe('packs: no helper start, and what a finished ferret reported', () => {
     expect(verbs).not.toContain('new [words...]');
     expect(verbs).not.toContain('wait <id>');
     expect(verbs).toContain('recommend [task...]');
-    expect(manifest.permissions).toEqual({ roots: [], network: [], spawn: [], secrets: [] });
+    // `checkDirectory` is the one thing it may ask the kernel: the temporary-folder check resolves roots through links.
+    expect(manifest.permissions).toEqual({ roots: [], network: [], spawn: [], secrets: [], checkDirectory: true });
     await h.stop();
   });
 

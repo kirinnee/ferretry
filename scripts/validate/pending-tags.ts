@@ -1,6 +1,6 @@
 /**
- * `pending-tags`: the ways the dead-code gates (`knip.json`, `knip.production.json`) are told to keep something stay
- * honest.
+ * `pending-tags`: the ways the dead-code gates (`knip.ts`, `knip.production.ts` and the per-package `knip.json` /
+ * `knip.production.json` they compose, see `scripts/gen/lib/knip-config.ts`) are told to keep something stay honest.
  *
  * - `@pending <owner>: <gap>` keeps ported code that waits for its wire. `<owner>` is the package's own subsystem id,
  *   that id is still listed in `ports-pending.json` `pending`, and `<gap>` is at least 3 words and 16 characters that
@@ -13,10 +13,14 @@
  *   package is a finding. The CLI, the app shell and std have no port to wait for, so an `ignore` path under a key
  *   that matches only them (or the root) must instead be named on `ALLOWED_KNIP` with its reason (ruling #29: every
  *   ignore carries a GAP line or a reason).
+ * - A package's knip settings live in its own folder (`<package>/knip.json`, `<package>/knip.production.json`); a root
+ *   config holds only the rules, the tags, `.` and the two globs. A package key in a root config, a part file outside a
+ *   package folder, or a root config that is not `composeKnip` of its globals is a finding. The checks below read the
+ *   composed config, the one knip runs.
  * - Every other knip key that keeps code alive (`ignoreFiles`, `ignoreIssues`, `ignoreMembers`,
  *   `ignoreExportsUsedInFile`, a top-level `ignore`, `ignoreWorkspaces`, an `entry` that is no test, view or bin file,
- *   any key this check does not know) is a finding unless `ALLOWED_KNIP` names it with a reason. That map only shrinks:
- *   an entry whose config line is gone is a finding too. `project` globs and the `rules` levels are not checked.
+ *   any key this check does not know) is a finding unless `ALLOWED_KNIP` (root settings) or the package's own `allowed`
+ *   object (its settings) names it with a reason. Those only shrink: an entry whose config line is gone is a finding too. `project` globs and the `rules` levels are not checked.
  * - `@public <why>` keeps a real use knip cannot see. In a subsystem `<why>` is the id of a kept (or split) row of
  *   `docs/rebuild/guarantees.tsv` whose owner (or `with`) is this package, or `surface <name>` where `<name>` is written
  *   in the package's manifest. The app shell and the CLI own guarantee rows too (`app-shell`, `fy-shell`); with no
@@ -27,9 +31,20 @@
  * finding, not a skip.
  */
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
 import { parser } from '../gen/lib/imports.ts';
+import {
+  composeKnipFrom,
+  type KnipGlobals,
+  type KnipPart,
+  KNIP_RUNS,
+  knipFilePaths,
+  OWNED_DIR,
+  readKnipParts,
+  ROOT_WORKSPACES,
+} from '../gen/lib/knip-config.ts';
 import { loadWorkspace, sourceFiles } from '../gen/lib/workspace.ts';
 import { type GuaranteeRow, readRows } from './guarantees.ts';
 import { type PortsPending, readPending } from './ports-pending.ts';
@@ -44,121 +59,18 @@ const NAME = 'pending-tags';
 export const ALLOWED_PUBLIC: ReadonlyMap<string, string> = new Map([]);
 
 /**
- * Knip settings that keep code alive without a pending-port tie, by `<config>#<where>`, each with the reason it is
- * honest today. This list only shrinks; a new entry needs the review lead's sign-off.
+ * Knip settings of the ROOT configs (`knip.ts`, `knip.production.ts`) that keep code alive without a pending-port tie,
+ * by `<config>#<where>`, each with the reason it is honest today. A PACKAGE's own settings (an entry no test, view or bin
+ * file explains, a kept dependency, an ignored issue) name their reason in that package's `allowed` object next to the
+ * setting, in `<package>/knip.json` or `<package>/knip.production.json`, so a feature never edits this file. Both lists
+ * only shrink; a new entry needs the review lead's sign-off.
  */
 export const ALLOWED_KNIP: ReadonlyMap<string, string> = new Map([
   [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:sherpa-glue',
-    'sherpa-glue is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the sherpa worker is unlisted to knip by nature.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/voice"].ignoreDependencies:sherpa-runtime-wasm',
-    'sherpa-runtime-wasm is a bundler alias, not a package (the shell vite.config.ts takes it from app/vite-voice.ts voiceBuild), so the import of it in the speech assets module is unlisted to knip by nature.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/logins"].entry:scripts/built-ins.ts',
-    'the developer-run generator of daemon/lib/built-ins.json (the built-in catalogs as data, not Bun macros: no-macros); nothing in the product imports it, its unit test runs it.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/mcp"].entry:app/views/surfaces.tsx',
-    'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/skills"].entry:app/views/surfaces.tsx',
-    'loaded lazily by `import(`./views/${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
-  ],
-  [
-    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-diff.ts"]',
-    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `CatalogChangeFlagSchema`, built into the diff shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
-  ],
-  [
-    'knip.json#ignoreIssues["packages/plugins/catalogs/contract/wire/shared-catalog-owner.ts"]',
-    'Every export of this frozen wire file (`contract/wire`), not one name: the ignore is file-wide. Today the one knip reports is `OwnedSharedItemVersionSchema`, built into the owner shapes in the same file and a named word of the contract vocabulary a consumer may import. The contract is not edited after day 1 (a per-name `@public` tag would be a contract edit), so its exports stay and knip is told they are intended; a new export here needs the lead anyway. Not a pending-port gap.',
-  ],
-  [
-    'knip.json#ignoreIssues["packages/plugins/shells/contract/wire.ts"]',
-    '`ShellCacheKeySchema` (wire.ts) is a second name for `NarHashSchema`, kept as its own word of the cache vocabulary; knip reports that alias as a duplicate export. Not a pending-port gap.',
-  ],
-  [
-    'knip.json#workspaces["."].entry:scripts/test/*.ts',
+    'knip.ts#workspaces["."].entry:scripts/test/*.ts',
     'the repo test tooling (ci-sets, leak-sweep, partition-files, tmux-sweep, …) is run by path from tasks and CI, never imported.',
   ],
-  [
-    'knip.json#workspaces["packages/app"].entry:src/main.tsx',
-    'the browser entry point the app shell build bundles from index.html; nothing imports it.',
-  ],
-  [
-    'knip.json#workspaces["packages/plugins/connections"].entry:worker/src/adapters/worker.ts',
-    'the Cloudflare Worker entry named by `main` in wrangler.jsonc; deployed by path, imported by nothing.',
-  ],
-  [
-    'knip.json#workspaces["packages/plugins/catalogs"].entry:worker/src/adapters/link-store-worker.ts',
-    'the link-store Cloudflare Worker entry named by `main` in wrangler.link-store.jsonc; deployed by path, imported by nothing.',
-  ],
-  [
-    'knip.json#workspaces["packages/plugins/conversation"].entry:app/surfaces.tsx',
-    'loaded lazily by `import(`./${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].entry:src/main.tsx',
-    'the browser entry point the app shell build bundles from index.html; nothing imports it.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/connections"].entry:worker/src/adapters/worker.ts',
-    'the Cloudflare Worker entry named by `main` in wrangler.jsonc; deployed by path, imported by nothing.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/catalogs"].entry:worker/src/adapters/link-store-worker.ts',
-    'the link-store Cloudflare Worker entry named by `main` in wrangler.link-store.jsonc; deployed by path, imported by nothing.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/plugins/conversation"].entry:app/surfaces.tsx',
-    'loaded lazily by `import(`./${"surfaces"}.tsx`)` in app/index.ts, a template import knip cannot follow.',
-  ],
-  [
-    'knip.json#workspaces["packages/app"].entry:src/worker/service-worker.ts',
-    'the service worker is compiled by packages/app/scripts/build-release.ts from this path and registered by URL; nothing imports it.',
-  ],
-  [
-    'knip.json#workspaces["packages/app"].entry:scripts/**/*.ts',
-    'the app shell build scripts (build-release, build-fy-render-libs) are run by path from package.json scripts; nothing imports them.',
-  ],
-  [
-    'knip.json#workspaces["packages/app"].ignore:tests/support/dom-leak-guard.ts',
-    'a bun test preload named by path in bunfig.unit.toml; nothing imports it.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].ignore:src/worker/service-worker.ts',
-    'the service worker is its own bundle: packages/app/scripts/build-release.ts compiles it from this path (sw.verified.js) and the shell registers it by URL.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].ignore:src/worker/notifications.ts',
-    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].ignore:src/release/keeper.ts',
-    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].ignore:src/worker/filter-document.ts',
-    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/app"].ignore:src/release/storage.ts',
-    'reached only from src/worker/service-worker.ts, the separate worker bundle the production entry never imports.',
-  ],
-  [
-    'knip.production.json#workspaces["packages/cli"].ignore:src/lib/tool-client.ts',
-    'GAP(mcp): the agent-tool client behind `fy mcp serve`; reached when the MCP cli half lands (ports-pending.json pendingHalves.mcp ["cli"]); only its tests reach it until then (nelly).',
-  ],
-  [
-    'knip.production.json#workspaces["packages/cli"].ignore:src/lib/update/status.ts',
-    'GAP(cli): the update line of `fy daemon status` (today rebuild-ref packages/cli/bin/program.ts:656 builds DaemonUpdateStatusReader, read at src/lib/daemon/controller.ts:630); no 5.0 verb renders it yet (nelly).',
-  ],
 ]);
-
-export const KNIP_CONFIGS = ['knip.json', 'knip.production.json'] as const;
 
 /** One source file as the rules read it. */
 export interface TaggedFile {
@@ -447,6 +359,8 @@ export function knipShapeFindings(
   configs: readonly KnipConfig[],
   packages: readonly PackageRef[],
   allowed: ReadonlyMap<string, string> = ALLOWED_KNIP,
+  /** Where an allowed id is written, when not in this file: a package's own knip file. */
+  origins: ReadonlyMap<string, string> = new Map(),
 ): Finding[] {
   const findings: Finding[] = [];
   const used = new Set<string>();
@@ -505,22 +419,99 @@ export function knipShapeFindings(
     if (!used.has(id))
       findings.push({
         check: NAME,
-        where: 'scripts/validate/pending-tags.ts',
-        message: `ALLOWED_KNIP "${id}" matches no knip setting any more; delete the entry`,
+        where: origins.get(id) ?? 'scripts/validate/pending-tags.ts',
+        message: `${origins.has(id) ? 'allowed' : 'ALLOWED_KNIP'} "${id}" matches no knip setting any more; delete the entry`,
       });
   return findings;
 }
 
-function readKnipConfigs(root: string): KnipConfig[] | Finding {
-  const configs: KnipConfig[] = [];
-  for (const config of KNIP_CONFIGS) {
+/** One knip run as the root config and the package files give it. */
+export interface KnipRun {
+  readonly config: string;
+  readonly part: string;
+  /** What the root config holds itself (its `globals` export). */
+  readonly globals: KnipGlobals;
+  /** What the root config exports: the config knip runs. */
+  readonly composed: unknown;
+  readonly parts: readonly KnipPart[];
+}
+
+/** The settings that keep code alive in each package's part files, by composed id, with the file that wrote each. */
+export function partAllowed(runs: readonly KnipRun[]): { allowed: Map<string, string>; origins: Map<string, string> } {
+  const allowed = new Map<string, string>();
+  const origins = new Map<string, string>();
+  for (const run of runs)
+    for (const part of run.parts)
+      for (const [setting, why] of Object.entries(part.allowed)) {
+        const id = `${run.config}#workspaces[${JSON.stringify(part.dir)}].${setting}`;
+        allowed.set(id, why);
+        origins.set(id, part.where);
+      }
+  return { allowed, origins };
+}
+
+/**
+ * Where knip settings may live: a root config keeps no package key and exports exactly the composition of its globals
+ * with the package files; a part file sits in a package folder (`OWNED_DIR`), and no `knip.json` is left at the root
+ * to take the place of the root config.
+ */
+export function knipPlacementFindings(runs: readonly KnipRun[], files: readonly string[]): Finding[] {
+  const findings: Finding[] = [];
+  for (const run of runs) {
+    for (const key of Object.keys(run.globals.workspaces))
+      if (!ROOT_WORKSPACES.includes(key))
+        findings.push({
+          check: NAME,
+          where: `${run.config} workspaces["${key}"]`,
+          message: `a package's own knip settings belong in ${key}/${run.part}, not in the root config (the root keeps only ${ROOT_WORKSPACES.join(', ')})`,
+        });
+    let expected: unknown;
     try {
-      configs.push({ config, json: JSON.parse(readFileSync(join(root, config), 'utf8')) as unknown });
+      expected = composeKnipFrom(run.globals, run.parts);
+    } catch {
+      continue; // a key both in the root and in a package file: the key finding above already says where it belongs
+    }
+    if (JSON.stringify(run.composed) !== JSON.stringify(expected))
+      findings.push({
+        check: NAME,
+        where: run.config,
+        message: `must export composeKnip(root, '${run.part}', globals) and nothing more: the config it exports is not the composition of its globals with the ${run.part} files`,
+      });
+  }
+  for (const file of files) {
+    const dir = dirname(file);
+    if (dir === '.')
+      findings.push({
+        check: NAME,
+        where: file,
+        message: `a root ${file} would replace the composed root config; keep the globals in ${KNIP_RUNS.find(run => run.part === file)?.config ?? 'knip.ts'} and each package's settings in its own folder`,
+      });
+    else if (!OWNED_DIR.test(dir))
+      findings.push({
+        check: NAME,
+        where: file,
+        message: `is in no package folder that owns knip settings (packages/std, packages/cli, packages/app, packages/core/<id>, packages/plugins/<id>); move it into its package`,
+      });
+  }
+  return findings;
+}
+
+async function readKnipRuns(root: string): Promise<KnipRun[] | Finding> {
+  const runs: KnipRun[] = [];
+  for (const { config, part } of KNIP_RUNS) {
+    try {
+      const module = (await import(pathToFileURL(join(root, config)).href)) as {
+        globals?: KnipGlobals;
+        default?: unknown;
+      };
+      if (module.globals === undefined)
+        return { check: NAME, where: config, message: 'must export its `globals` (the settings it holds itself)' };
+      runs.push({ config, part, globals: module.globals, composed: module.default, parts: readKnipParts(root, part) });
     } catch (error) {
       return { check: NAME, where: config, message: error instanceof Error ? error.message : String(error) };
     }
   }
-  return configs;
+  return runs;
 }
 
 // ─── the check ─────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -561,8 +552,11 @@ export const checkWith = (allowedKnip: ReadonlyMap<string, string>): Check => ({
         });
       }
     }
-    const configs = readKnipConfigs(ctx.root);
-    if (!Array.isArray(configs)) return [configs];
+    const runs = await readKnipRuns(ctx.root);
+    if (!Array.isArray(runs)) return [runs];
+    const configs: KnipConfig[] = runs.map(run => ({ config: run.config, json: run.composed }));
+    const fromParts = partAllowed(runs);
+    const allowed = new Map([...allowedKnip, ...fromParts.allowed]);
     const packages = ws.packages.map(pkg => ({ rel: pkg.rel, id: pkg.id }));
     return [
       ...tagFindings({
@@ -572,7 +566,8 @@ export const checkWith = (allowedKnip: ReadonlyMap<string, string>): Check => ({
         keptRows,
         docExists: path => existsSync(join(ctx.root, path)),
       }),
-      ...knipShapeFindings(configs, packages, allowedKnip),
+      ...knipShapeFindings(configs, packages, allowed, fromParts.origins),
+      ...knipPlacementFindings(runs, knipFilePaths(ctx.root)),
     ];
   },
 });
