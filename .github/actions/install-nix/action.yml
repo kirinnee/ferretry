@@ -3,7 +3,7 @@
 # below are written once. On Namespace the action also mounts the `/nix` cache volume itself, so a job
 # no longer mounts it first.
 name: Install Nix
-description: Set up Nix with AtomiCloud/actions.setup-nix, then realise the job's dev shell, retrying network failures.
+description: Set up Nix with the vendored setup-nix (.github/actions/setup-nix), then realise the job's dev shell, retrying network failures.
 inputs:
   shell:
     description: The flake dev shell the job enters, realised here so a failed download is retried before the job's real step.
@@ -22,7 +22,7 @@ runs:
     # mounted volume. A warm Namespace job never downloads an installer at all.
     - id: first
       continue-on-error: true
-      uses: AtomiCloud/actions.setup-nix@6d7c1e0710ce2fbda572edd6c3a473ea8210b4c0 # v4.0.0
+      uses: ./.github/actions/setup-nix
       with:
         namespacelabs: ${{ runner.environment == 'self-hosted' && 'true' || 'false' }}
         checkout: 'false'
@@ -31,7 +31,7 @@ runs:
       shell: bash
       run: echo "::warning::installing Nix failed once; trying again in 60s" && sleep 60
     - if: steps.first.outcome == 'failure'
-      uses: AtomiCloud/actions.setup-nix@6d7c1e0710ce2fbda572edd6c3a473ea8210b4c0 # v4.0.0
+      uses: ./.github/actions/setup-nix
       with:
         namespacelabs: 'false'
         checkout: 'false'

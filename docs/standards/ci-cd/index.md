@@ -916,7 +916,7 @@ that nothing downstream needed; a new step in this chain states what it makes la
 Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
 `CD`), never an installer action directly. It is the one bespoke setup action (the other local
 action, `download-binaries`, is described under the SIT bullet above). It wraps
-`AtomiCloud/actions.setup-nix` (pinned to a SHA, `non-trusted` in `config/action-trust.json`) with
+`AtomiCloud/actions.setup-nix` v4.0.0, **vendored** into `.github/actions/setup-nix` (see below) with
 `checkout: 'false'` (the job's own checkout step owns `persist-credentials`) and `github-slug: 'false'`,
 and adds what the network demanded, including on `main`, where a red CI skips a release:
 
@@ -968,11 +968,17 @@ run that **may commit the volume** has finished: `main` alone commits (`nscloud-
 install plus 3.6 s to realise) until `main` has run this action. durian-shell's dev-shell cache hit (0.19 s) did not
 beat sourcing the env `nix-realise.sh` printed (0.21 s), so it is not used.
 
-**A declared GAP in the pin rule.** The SHA pins what `install-nix` names, not what `setup-nix` runs: its
-composite step calls `DeterminateSystems/nix-installer-action@main` and `namespacelabs/nscloud-cache-action@v1`
-(floating refs), and `actions/create-github-app-token@v3` (skipped, but downloaded). A job that holds a
-long-lived secret (`pwa-pages`, `CD`, `Release`) therefore runs an action it did not pin. Closing it means
-asking AtomiCloud to pin those inside `setup-nix`, or keeping the old installer for the secret-holding jobs.
+**Vendored so the pins reach inside it (owner ruling, !A537).** A consumer cannot pin what a third-party composite
+action runs: upstream's `setup-nix` calls `DeterminateSystems/nix-installer-action@main` (runs on every job),
+`namespacelabs/nscloud-cache-action@v1`, `actions/checkout@v6` and `actions/create-github-app-token@v3` (the last two
+are skipped with our inputs but still downloaded) and a remote store-guard hook. So `.github/actions/setup-nix` is a
+mechanical copy of upstream commit `6d7c1e0710ce` whose nine `uses:` lines are pinned to full 40-character SHAs with their
+tags, the hook pointing at the vendored copy; `install-nix` calls it as `./.github/actions/setup-nix`, and no external
+`setup-nix` reference is left. `scripts/validate/action-pins.sh` reads the vendored file like any other, so
+`config/action-trust.json` classifies the actions it runs (`DeterminateSystems/nix-installer-action` and
+`actions/create-github-app-token` are `non-trusted`, so exact SHAs). `.github/actions/setup-nix/PROVENANCE.md` names the
+source, commit, date, the edited lines and the exact re-vendoring steps. Review a re-vendor as a diff against the
+upstream commit, not as new code. Cost: a copy to keep current.
 
 **The cache tag changed to `ferretry-nix-d`.** A volume written by this action is **not** readable by the old
 installer: `cachix/install-nix-action` over it stops with `directory /nix exists, but is not writable by you`
@@ -986,7 +992,8 @@ or `non-trusted`):
 
 - **Trusted** actions pin a major tag (`actions/checkout@v5`). Currently trusted:
   `actions/checkout`, `actions/upload-artifact`, `actions/download-artifact`,
-  `namespacelabs/nscloud-cache-action`. `AtomiCloud/actions.setup-nix` is `non-trusted` (exact SHA).
+  `namespacelabs/nscloud-cache-action`. `DeterminateSystems/nix-installer-action` and `actions/create-github-app-token` (run inside the
+  vendored `setup-nix`) are `non-trusted` (exact SHA).
 - **A job that holds a long-lived secret** pins EVERY action it runs to an exact SHA, trusted ones
   included (`pwa-pages.yaml`, whose jobs hold the release signing key and the Cloudflare token). A
   tag can be moved; a SHA cannot.
