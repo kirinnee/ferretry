@@ -1897,9 +1897,11 @@ kernel's own reads and writes never follow a pool link out of the root (`link_es
   the "pool entry swapped by a ferret" gap above.
 - **The testing host has no identities.** A name in a home that is an alias of a private place (`fenced` in production) is
   `exists` on the testing host, as for `linkCredential`; every other refusal here is mirrored (`history-pool-parity.test.ts`).
-- **Fitness test.** The new `RootHandle` member is a new link operation, so it is recorded in
+- **Fitness test.** `linkHistory` and the new `moveToHistoryPool` extend the `RootHandle` authority surface and are recorded in
   `scripts/gen/tests/fleet-link-callers.snapshot.json` with its guard: the `agent-homes` handle only, the plugin's own pool
-  only, and no other root.
+  only, and no other root. The move is separately guarded to regular history leaves and atomic no-replace moves into the
+  minted pool; it does not relax the generic credential-home link rule. Its snapshot addition was independently reviewed
+  against these guards.
 
 ## Sign-in tokens the usage read sends
 

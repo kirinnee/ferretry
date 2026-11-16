@@ -482,3 +482,15 @@ describe('Claude Code and the shared history pool', () => {
     expect(await exists(pool('projects/-work'))).toBe(false);
   });
 });
+
+test('copy-on-link with an unavailable pool refuses without changing the owner transcript', async () => {
+  await mkdir(join(owner, 'projects/-work'), { recursive: true });
+  const source = join(owner, `projects/-work/${CONVERSATION}.jsonl`);
+  const original = '{"type":"user","message":{"role":"user","content":"owner original"}}\n';
+  await writeFile(source, original);
+  const { harness } = build({ pooled: false });
+  expect(
+    await harness.importConversation({ id: CONVERSATION, source: `projects/-work/${CONVERSATION}.jsonl` }),
+  ).toEqual({ ok: false, error: { reason: 'The conversation could not be copied.' } });
+  expect(await readFile(source, 'utf8')).toBe(original);
+});

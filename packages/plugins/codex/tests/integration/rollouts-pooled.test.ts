@@ -42,7 +42,7 @@ const NOW = Date.parse('2026-11-16T12:00:00.000Z');
 const nameOf = (id: string, day = '2026/11/16') =>
   `sessions/${day}/rollout-${day.replaceAll('/', '-')}T09-00-00-${id}.jsonl`;
 
-async function world() {
+async function world(options: { historyHome?: () => Promise<string | undefined> } = {}) {
   const parent = await mkdtemp(join(tmpdir(), 'ferretry-codex-pooled-'));
   parents.push(parent);
   const home = join(parent, 'fy');
@@ -92,7 +92,7 @@ async function world() {
       sleep: async () => undefined,
     },
   } as unknown as KernelPorts;
-  const rollouts = new CodexRollouts(kernel, async () => owner);
+  const rollouts = new CodexRollouts(kernel, options.historyHome ?? (async () => owner));
   const specOf = (ferret: string): LaunchSpec =>
     ({ ferret: ferret as FerretId, home: agent(ferret) as FencedPath }) as LaunchSpec;
   /** Links every history entry of both homes to the pool, as a launch does. */
@@ -214,5 +214,25 @@ describe('Codex rollouts through the shared pool', () => {
       expect((await w.rollouts.import({ id: A, source })).ok).toBe(false);
     expect((await w.rollouts.import({ id: A, source: nameOf(A) })).ok).toBe(false);
     expect(await readdir(w.pool('sessions'))).toEqual([]);
+  });
+});
+
+test('copy-on-link refuses an unknown history home without making a pool copy', async () => {
+  const w = await world({ historyHome: async () => undefined });
+  expect(await w.rollouts.import({ id: A, source: nameOf(A) })).toEqual({
+    ok: false,
+    error: { reason: "Codex's history folder is not known on this machine." },
+  });
+});
+
+test('copy-on-link hides a history-home failure instead of leaking an exception', async () => {
+  const w = await world({
+    historyHome: async () => {
+      throw new Error('private failure detail');
+    },
+  });
+  expect(await w.rollouts.import({ id: A, source: nameOf(A) })).toEqual({
+    ok: false,
+    error: { reason: 'The rollout could not be copied.' },
   });
 });
