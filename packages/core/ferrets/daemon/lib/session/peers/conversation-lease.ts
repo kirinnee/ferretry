@@ -1,15 +1,16 @@
 /**
- * PEER: today's `packages/daemon/src/lib/session/conversation-lease.ts` (owner: conversation) — the launch path's
- * port only. The leases themselves (`ConversationLeases`, over the fleet's shared lease store) stay the
- * conversation plugin's.
+ * The launch path's port for conversation leases: what the session lifecycle needs to claim a conversation before a pane
+ * exists and to free it once the session is over.
  *
- * Ferrets is core and cannot import a plugin's code (§2.1); this is the part the session code reads, injected by the
- * host.
+ * The rules (what makes a lease stale, which argv names which conversation, the refusal sentence) are the contract's
+ * (`contract/conversation-lease.ts`), shared with `fy history claim`; the daemon's binding is
+ * `daemon/lib/session/lifecycle/conversation-leases.ts` over `daemon/adapters/session/lifecycle/conversation-lease-disk.ts`,
+ * composed by the root and handed to the session files.
  */
 
 /** INJECTED: what a launch path needs — claim before a pane exists, release once the session is over. */
 export interface SessionConversationLeases {
-  /** Throws when another live writer holds the conversation. */
+  /** Throws `ConversationLeaseHeldError` when another live writer holds the conversation. */
   claim(sessionId: string, command: readonly string[]): Promise<void>;
   release(sessionId: string): Promise<void>;
 }
