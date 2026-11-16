@@ -244,10 +244,12 @@ export default definePlugin({
         audit: { skip: 'a start recovery read records nothing, as today' },
         guard: { none: 'one ferret identity record, for the caller that proves it sent the start' },
       }),
-      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act.
+      // Pins (today's mounts/session-pin.ts and mounts/pins.ts, renamed): the owner's sidebar pin is a person's act. It answers
+      // the ferret's whole identity record and takes any ferret by name, so a device narrowed off fleet use is refused (c58-sec2).
       route('POST /v1/ferrets/:ferretId/pin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar pin records nothing, as today' },
         guard: { none: 'one ferret identity record with its pin instant' },
@@ -255,6 +257,7 @@ export default definePlugin({
       route('POST /v1/ferrets/:ferretId/unpin', {
         minimum: 'operator',
         caller: 'person',
+        capability: FLEET_USE,
         noStore: true,
         audit: { skip: 'a sidebar unpin records nothing, as today' },
         guard: { none: 'one ferret identity record' },

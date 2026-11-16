@@ -60,10 +60,31 @@ for (const key of PIN_WRITES) {
   });
 }
 
-test('c58-sec2 the owner-sidebar pin and unpin stay capability-free: a reviewed decision (docs/grants.md), who acts guards them', async () => {
-  for (const key of ['POST /v1/ferrets/:ferretId/pin', 'POST /v1/ferrets/:ferretId/unpin']) {
+// The owner's sidebar pin and unpin answer the ferret's WHOLE identity record (folder, login, transcript location, attribution
+// token) and take any ferret by name or id, so they are a read of a ferret too: a device narrowed off fleet use must not get
+// that record through them, nor revive an archived ferret. `caller: 'person'` keeps every ferret out (the pin is a person's act).
+const SIDEBAR_PINS = ['POST /v1/ferrets/:ferretId/pin', 'POST /v1/ferrets/:ferretId/unpin'] as const;
+
+for (const key of SIDEBAR_PINS) {
+  test(`c58-sec2 ${key} asks fleet.use: a device narrowed off it is refused before the body is read, a holder is admitted`, async () => {
     const route = await declaredRoute(key);
-    expect(route.capability).toBeUndefined();
+    expect(route.capability).toMatchObject({ capability: 'fleet', axis: 'use' });
     expect(route.caller).toBe('person');
-  }
-});
+    const w = world();
+    w.enrol('narrowed', NO_FLEET_USE);
+    w.enrol('full', FULL_DEVICE_GRANTS);
+    w.enrol('limited', FLEET_USE_ONLY);
+    const refused = admit(w, route, { device: 'narrowed' });
+    expect(refused.outcome).toBe('403 grant_device_not_granted');
+    expect(refused.call.bodyRead()).toBe(false);
+    expect(admit(w, route, { device: 'full' }).outcome).toBe('admitted');
+    expect(admit(w, route, { device: 'limited' }).outcome).toBe('admitted');
+  });
+
+  test(`c58-sec2 ${key} still admits the owner's loopback admin token and still refuses a ferret's own credential`, async () => {
+    const route = await declaredRoute(key);
+    const w = world();
+    expect(admit(w, route, { bearer: ADMIN, arrival: local() }).outcome).toBe('admitted');
+    expect(admit(w, route, { bearer: FERRET_TOKEN, arrival: local(true) }).outcome).not.toBe('admitted');
+  });
+}
