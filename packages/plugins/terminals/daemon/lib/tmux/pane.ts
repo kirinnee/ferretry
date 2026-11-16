@@ -178,6 +178,13 @@ function showsStatus(lower: string): boolean {
 const STATUS_SHAPED = /^[^\S\n]*[✻✳✶✽✢∗·*•◦⏺]\s[^(\n]*(\([^\n]*)$/u;
 
 /**
+ * Codex's status header with its animation off (`tui.animations = false`, or progress effects disabled): the same
+ * `Working (2s • esc to interrupt)` with NO bullet, drawn from the first column (Codex 0.163
+ * `status_indicator_widget.rs`). Its own prose is a `•` bullet or an indented continuation, never this.
+ */
+const CODEX_BARE_STATUS = /^Working\s*\(/u;
+
+/**
  * Whether the visible pane shows a turn's live status: anywhere in the {@link liveRegion}, and above it only on a
  * {@link STATUS_SHAPED} line. The words alone are NOT evidence there: they are the agent's own prose as often as the
  * harness's — a transcript that quotes `esc to interrupt` held an idle ferret at "busy", and nothing was typed for it.
@@ -187,6 +194,7 @@ function paneShowsLiveStatus(pane: string): boolean {
   const start = liveRegionStart(lines);
   if (showsStatus(lines.slice(start).join('\n').toLowerCase())) return true;
   return lines.slice(0, start).some(line => {
+    if (CODEX_BARE_STATUS.test(line)) return true;
     const shaped = STATUS_SHAPED.exec(line);
     if (shaped === null) return false;
     const lower = line.toLowerCase();

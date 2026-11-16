@@ -592,6 +592,16 @@ describe('the words of a busy or blocked screen, read only where the harness dra
     should(actual).deepEqual(['status', 'status', 'status']);
   });
 
+  it('should still read Codex’s status header drawn without its bullet (animations off) as a turn', () => {
+    // Arrange — Codex 0.163 hides the glyph under `tui.animations = false`; the header still starts the row.
+    const { frame, x, y } = fixture('codex-0.163.0-busy-empty');
+    const bare = frame.replace(/^• Working \(/mu, 'Working (');
+
+    // Act / Assert
+    should(bare).not.equal(frame);
+    should(read(bare, x, y)).deepEqual({ ready: false, idle: false, work: 'status' });
+  });
+
   it('should not read a bullet of prose that mentions the interrupt hint as a turn', () => {
     // Arrange — Codex draws its own messages as `•` bullets too; only a status line's parenthetical counts.
     const { frame, x, y } = fixture('codex-0.156.1-idle-empty');
