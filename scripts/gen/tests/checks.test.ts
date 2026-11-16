@@ -386,6 +386,24 @@ describe('context-imports', () => {
     expect(found).toContain('alpha/daemon/build.ts:2: ./generated/other.ts');
   });
 
+  test('a cli half may import its own generated verb list and no other generated file', async () => {
+    const f = ws([
+      {
+        id: 'alpha',
+        files: {
+          'cli/verbs/one.verb.ts': 'export default {};\n',
+          'cli/generated/verbs.ts': "import one from '../verbs/one.verb.ts';\nexport default [one];\n",
+          'cli/generated/other.ts': 'export {};\n',
+          'cli/build.ts':
+            "import verbs from './generated/verbs.ts';\nimport './generated/other.ts';\nexport { verbs };\n",
+        },
+      },
+    ]);
+    const found = messages(await run(contextImports, f));
+    expect(found).not.toContain('./generated/verbs.ts');
+    expect(found).toContain('alpha/cli/build.ts:2: ./generated/other.ts');
+  });
+
   test('planted: a half reaches another package past its contract; a contract imports node:fs; a manifest imports a half', async () => {
     const f = ws(
       [
