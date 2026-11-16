@@ -41,6 +41,7 @@ describe('move in-flight reporting', () => {
     // Act
     const actual = assembleInflightReport({
       status: 'thinking',
+      turnState: 'working',
       turn: 1,
       openTools: [],
       processes: seen(),
@@ -58,8 +59,14 @@ describe('move in-flight reporting', () => {
   it('should keep every busy status mid-turn, and an idle one not', () => {
     for (const status of ['starting', 'running', 'thinking', 'tool_running', 'retrying'] as const)
       should(
-        assembleInflightReport({ status, turn: 1, openTools: [], processes: seen(), codexBackgroundTerminals: 0 })
-          .midTurn,
+        assembleInflightReport({
+          status,
+          turnState: 'working',
+          turn: 1,
+          openTools: [],
+          processes: seen(),
+          codexBackgroundTerminals: 0,
+        }).midTurn,
       ).be.true();
     should(
       assembleInflightReport({
@@ -70,6 +77,73 @@ describe('move in-flight reporting', () => {
         codexBackgroundTerminals: 0,
       }).midTurn,
     ).be.false();
+  });
+
+  describe('mid-turn is decided by whose turn it is, over what the agent itself started', () => {
+    // Every real ferret has `fy mcp serve` below its pane, and the harness's own helpers say nothing about the turn.
+    const helper: ProcessInfo = {
+      pid: 7,
+      argv: 'fy mcp serve',
+      verdict: 'safe_to_kill',
+      known: { kind: 'ferretry-tools', label: 'The Ferretry tools server' },
+    };
+    const input = (
+      turnState: 'working' | 'your-turn' | 'needs-input' | undefined,
+      ...below: readonly ProcessInfo[]
+    ) => ({
+      status: 'running' as const,
+      ...(turnState === undefined ? {} : { turnState }),
+      turn: 3,
+      openTools: [],
+      processes: seen(...below),
+      codexBackgroundTerminals: 0,
+    });
+
+    it('should be mid-turn with a known helper below the pane, when the turn is working', () => {
+      const actual = assembleInflightReport(input('working', helper));
+
+      should(actual.midTurn).be.true();
+      should(actual.blindSpots).deepEqual([]);
+      should(actual.worstVerdict).equal('re_armable');
+      should(gateInflight(actual).proceed).be.true();
+    });
+
+    it('should NOT be mid-turn when the session sits at its prompt, though 5.0 calls that status running', () => {
+      for (const turnState of ['your-turn', 'needs-input'] as const) {
+        for (const below of [[], [helper]]) {
+          const actual = assembleInflightReport(input(turnState, ...below));
+
+          // Not told to "continue from there": nothing was in progress, and nothing is hidden either.
+          should(actual.midTurn).be.false();
+          should(actual.blindSpots).deepEqual([]);
+          should(actual.worstVerdict).equal('safe_to_kill');
+          should(gateInflight(actual).proceed).be.true();
+        }
+      }
+    });
+
+    it('should stay a blind spot when the turn watch has no answer, rather than guess the session is idle or working', () => {
+      const actual = assembleInflightReport(input(undefined, helper));
+
+      should(actual.midTurn).be.false();
+      should(actual.blindSpots).deepEqual(['the session reports running work but nothing was observable in its pane']);
+      should(gateInflight(actual).proceed).be.false();
+    });
+
+    it('should not be mid-turn when the agent started something, helper or not', () => {
+      const actual = assembleInflightReport(input('working', helper, process('re_armable')));
+
+      should(actual.midTurn).be.false();
+      should(actual.blindSpots).deepEqual([]);
+      should(actual.worstVerdict).equal('re_armable');
+    });
+
+    it('should still refuse a working session with a helper whose unknown command is below it', () => {
+      const actual = assembleInflightReport(input('working', helper, process('unknown')));
+
+      should(actual.midTurn).be.false();
+      should(gateInflight(actual).proceed).be.false();
+    });
   });
 
   it('should still refuse a busy session whose process table could not be read', () => {

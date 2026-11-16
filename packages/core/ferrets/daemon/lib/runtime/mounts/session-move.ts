@@ -145,7 +145,7 @@ export interface SessionMoveSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
-      /** The `fy` process that made the request, when it sent its pid: see `requesterCall`. Never set by a non-CLI caller. */
+      /** The `fy` process that made the request, when it sent its pid: see `requesterCall`. Honoured only for a self-move (`movedBy` is `session:<this session>`). */
       readonly requesterPid?: number;
       /** Omitted, the bound conversation is resumed or the move refused. */
       readonly conversation?: MoveConversation;

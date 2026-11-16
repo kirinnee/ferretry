@@ -165,7 +165,10 @@ display. A contract test (`tests/unit/no-prepend-notices.test.ts`) holds every n
 
 A **restart or same-harness migrate** resumes the same conversation, so it sends a notice only when the
 session was mid-turn AND the in-flight inventory held something not classified safe (re-armable,
-destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Ferretry restarted you, and nothing was interrupted.` instead. When sent it reads
+destructive or unknown, or a blind spot), OR the agent had a command running that the restart stopped — a read-only one
+(`fy wait <child>`, `rg …`) included, because its output is lost: that notice names what was stopped and says to re-run it (to
+wait again for a `fy wait`), and is never the "nothing was interrupted" one. A session at its prompt (`turnState` `your-turn`)
+is not mid-turn, whatever its status. Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Ferretry restarted you, and nothing was interrupted.` instead. When sent it reads
 `Restarted mid-turn — 1 command was interrupted · details`, and the agent is told it came from Ferretry,
 not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/migrate/restart-notice.ts`).
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once

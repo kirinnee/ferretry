@@ -143,6 +143,7 @@ describe('renderInflightReport', () => {
     // Arrange
     const thinking = assembleInflightReport({
       status: 'thinking',
+      turnState: 'working',
       turn: 2,
       openTools: [],
       processes: { kind: 'observed', processes: [] },

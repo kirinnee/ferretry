@@ -10,6 +10,7 @@ import {
 const report = (input: Partial<AssembleInflightReportInput>) =>
   assembleInflightReport({
     status: 'waiting',
+    turnState: 'working',
     turn: 13,
     openTools: [],
     processes: { kind: 'observed', processes: [] },
@@ -150,9 +151,11 @@ describe('the in-flight inventory, in plain words', () => {
     // Arrange — the owner's refusal: status running, turn 13, only `fy mcp serve` below the pane.
     const actual = report({ status: 'running', turn: 13, processes: seen(ownTools) });
 
-    // Assert
-    should(actual.worstVerdict).equal('safe_to_kill');
-    should(describeInflight(actual).items).deepEqual([]);
+    // Assert — the helper is not counted as something the turn was doing, so the session is mid-turn (re-armable) and
+    // the helper is only the CLI relaunch it always is.
+    should(actual.midTurn).be.true();
+    should(actual.worstVerdict).equal('re_armable');
+    should(describeInflight(actual).items.map(item => [item.kind, item.blocks])).deepEqual([['turn', false]]);
     should(describeInflight(actual).restartsWithCli).equal(1);
   });
 

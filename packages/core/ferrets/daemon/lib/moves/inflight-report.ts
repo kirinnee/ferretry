@@ -1,4 +1,5 @@
 import type { SessionStatus } from '../protocol/session-base.ts';
+import type { SessionTurnState } from '../protocol/session.ts';
 import type { KnownProcess } from './harness-provenance.ts';
 import { refusalSentence } from './inflight-describe.ts';
 import { type InflightVerdict, verdictBlocksMove, worstVerdict } from './verdict.ts';
@@ -64,6 +65,11 @@ export interface InflightReport {
 
 export interface AssembleInflightReportInput {
   readonly status: SessionStatus;
+  /**
+   * Whose turn it is, from the session's turn watch. 5.0's status `running` covers a session sitting at its prompt as well
+   * as one mid-turn, so ONLY `working` means a turn is in progress. Absent when the watch has no answer yet.
+   */
+  readonly turnState?: SessionTurnState;
   readonly turn: number;
   readonly openTools: readonly OpenToolInfo[];
   readonly processes: ProcessObservation;
@@ -99,13 +105,19 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   const processes = inspection.kind === 'observed' ? inspection.processes : [];
   const blindSpots: string[] = [...(input.blindSpots ?? [])];
   if (inspection.kind === 'unobservable') blindSpots.push(inspection.reason);
-  const claimsWork = busyStatuses.has(input.status) || input.subprocessSince !== undefined;
-  const observedItems = input.openTools.length + processes.length + discrepancy;
+  // A session at its prompt is not working: `running` is also what 5.0 reports while waiting for the owner.
+  const atPrompt = input.status === 'running' && (input.turnState === 'your-turn' || input.turnState === 'needs-input');
+  const claimsWork = (busyStatuses.has(input.status) && !atPrompt) || input.subprocessSince !== undefined;
+  // What was really there: the harness's own helpers (`fy mcp serve`, the statusline) are in every ferret's pane and say
+  // nothing about what the turn was doing, so they are not counted — only what the agent itself started is.
+  const observedItems =
+    input.openTools.length + processes.filter(entry => entry.known === undefined).length + discrepancy;
   // A busy status with nothing open is a turn in progress between tool calls — re-armable — but ONLY when every
   // inspection ran: an unreadable table, a failed tmux read or a caller-supplied blind spot means "could not look",
   // and a harness-reported subprocess the walk cannot find is a real discrepancy, so both stay blind spots.
   const midTurn =
     inspection.kind === 'observed' &&
+    input.turnState === 'working' &&
     busyStatuses.has(input.status) &&
     input.subprocessSince === undefined &&
     blindSpots.length === 0 &&

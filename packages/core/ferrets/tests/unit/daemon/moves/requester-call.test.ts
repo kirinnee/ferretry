@@ -133,3 +133,86 @@ describe('a ferret moving itself', () => {
     should(preflight.gate(report).proceed).be.false();
   });
 });
+
+describe('what may stand between the `fy` process and its tool shell', () => {
+  const inspectRows = async (rows: readonly ProcRow[]) => {
+    const preflight = new MovePreflight(new StubInventory(observe(rows)), panes);
+    return { preflight, report: await preflight.inspect(view(), [], { requesterPid: 320 }) };
+  };
+
+  it('should NOT exclude a long-running script that calls `fy migrate me` (a slot-watch loop)', async () => {
+    // Arrange — tool shell → `bash slot-watch.sh` (loops, retrying the migrate) → `fy migrate me`.
+    const rows = [
+      row(200, PANE, 'claude --resume x', 5000),
+      row(300, 200, wrap('bash slot-watch.sh')),
+      row(310, 300, 'bash slot-watch.sh', 900),
+      row(320, 310, 'fy migrate me --agent claude-llm3'),
+    ];
+    const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
+
+    // Act
+    const { preflight, report } = await inspectRows(rows);
+
+    // Assert — the walk stops at the script: nothing is excluded, and the gate sees all of it.
+    should(requesterCall(processes, 320)).deepEqual([]);
+    should(report.requesterCall).be.undefined();
+    should(report.processes.map(entry => entry.pid)).containEql(310);
+    should(preflight.gate(report).proceed).be.false();
+  });
+
+  it('should NOT exclude an interpreter, `watch` or `timeout` between them either', () => {
+    for (const between of ['node loop.js', 'python3 retry.py', 'watch -n 5 fy migrate me', 'bun run try-advance.ts']) {
+      const rows = [
+        row(200, PANE, 'claude --resume x', 5000),
+        row(300, 200, wrap('x')),
+        row(310, 300, between, 900),
+        row(320, 310, 'fy migrate me --agent claude-llm3'),
+      ];
+      const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
+      should(requesterCall(processes, 320)).deepEqual([]);
+    }
+  });
+
+  it('should still exclude a pipeline subshell (the tool shell’s own command line) and a `sh -c` between them', () => {
+    const forked = [
+      row(200, PANE, 'claude --resume x', 5000),
+      row(300, 200, wrap('fy migrate me | tail')),
+      row(310, 300, wrap('fy migrate me | tail')),
+      row(320, 310, 'fy migrate me --agent claude-llm3'),
+    ];
+    const dashC = [
+      row(200, PANE, 'claude --resume x', 5000),
+      row(300, 200, wrap('sh -c "fy migrate me"')),
+      row(310, 300, 'sh -c fy migrate me'),
+      row(320, 310, 'fy migrate me --agent claude-llm3'),
+    ];
+    for (const rows of [forked, dashC]) {
+      const { processes } = observe(rows) as { processes: readonly ProcessInfo[] };
+      should(requesterCall(processes, 320)).deepEqual([320, 310, 300]);
+    }
+  });
+
+  it('should leave the pipeline’s other stages to the gate, each judged by what it is', async () => {
+    // Arrange — the consumers are direct children of the pipeline shell; a `bun` stage there is not read-only.
+    const rows = [...selfMoveRows, row(324, 310, 'bun run deploy.ts', 400)];
+
+    // Act
+    const { preflight, report } = await inspectRows(rows);
+
+    // Assert
+    should(report.processes.map(entry => entry.pid)).containEql(324);
+    should(preflight.gate(report).proceed).be.false();
+  });
+});
+
+describe('the report carries whose turn it is to the gate', () => {
+  it('should tell a session at its prompt apart from one mid-turn', async () => {
+    const preflight = new MovePreflight(new StubInventory({ kind: 'observed', processes: [] }), panes);
+
+    const working = await preflight.inspect(view({ status: 'running', turnState: 'working' }));
+    const prompt = await preflight.inspect(view({ status: 'running', turnState: 'your-turn' }));
+
+    should(working.midTurn).be.true();
+    should(prompt.midTurn).be.false();
+  });
+});

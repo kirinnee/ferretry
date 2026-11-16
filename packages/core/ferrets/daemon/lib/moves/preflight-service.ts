@@ -1,5 +1,6 @@
 import { commandLabel } from '@ferretry/std';
 import type { SessionStatus } from '../protocol/session-base.ts';
+import type { SessionTurnState } from '../protocol/session.ts';
 import type { MoveRefusal } from '../../../contract/move.ts';
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
@@ -27,6 +28,8 @@ export interface MoveTargetView {
   readonly harness: string;
   readonly tmuxSession: string;
   readonly status: SessionStatus;
+  /** Whose turn it is (the turn watch's answer); only `working` means a turn is in progress. See {@link InflightReport.midTurn}. */
+  readonly turnState?: SessionTurnState;
   readonly turn: number;
   readonly openTools: readonly string[];
   readonly subprocessSince?: string;
@@ -97,6 +100,7 @@ export class MovePreflight {
     const openTools = withoutRequesterTool(joinOpenTools(view.openTools, chatTail), call);
     const report = assembleInflightReport({
       status: view.status,
+      ...(view.turnState === undefined ? {} : { turnState: view.turnState }),
       turn: view.turn,
       openTools,
       processes,

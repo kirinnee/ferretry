@@ -584,6 +584,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
         harness: config.harness,
         tmuxSession,
         status: state.status,
+        ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
         turn: state.turn,
         // The state document's own record of the tool calls this session has open.
         openTools: state.openTools ?? [],
@@ -765,7 +766,11 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await inspect(id, { config, state, tmuxSession, command }, request.requesterPid);
+    const report = await inspect(
+      id,
+      { config, state, tmuxSession, command },
+      trustedRequesterPid(parts.log, id, request),
+    );
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed) {
       // EVERY REFUSAL IS COUNTED. A 409 used to be recorded nowhere, so nobody could say how often the gate said no or
@@ -1216,6 +1221,27 @@ function blockersOf(described: {
   return described.items
     .filter(item => item.blocks)
     .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) }));
+}
+
+/**
+ * The `fy` pid the gate may leave out as the requesting call — only from the session ITSELF moving itself (`movedBy` is
+ * the admitted session credential's own `session:<id>`, never a field of the body). Any other caller (the owner, another
+ * ferret, a script) names a pid for no call of this session's, so it is ignored, and said so: a pid from elsewhere would
+ * otherwise exempt a running job from the gate without a trace.
+ */
+export function trustedRequesterPid(
+  log: Pick<Log, 'warn'>,
+  id: SessionId,
+  request: { readonly requesterPid?: number; readonly movedBy?: string },
+): number | undefined {
+  if (request.requesterPid === undefined) return undefined;
+  if (request.movedBy === `session:${id}`) return request.requesterPid;
+  log.warn('a move named a requesting pid but is not a self-move; the pid is ignored and the gate sees every process', {
+    session: id,
+    by: request.movedBy ?? 'owner',
+    requesterPid: request.requesterPid,
+  });
+  return undefined;
 }
 
 /**

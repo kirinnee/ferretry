@@ -7,10 +7,11 @@ export const prefixes = words('sudo doas env time nice ionice nohup setsid comma
 
 /**
  * Read-only or ephemeral commands. Interpreters (`bash`, `sed`, `find`, `tmux`) are deliberately
- * absent: what they do is decided by their arguments, so they get argument-aware classifiers.
+ * absent, and so are the read-only programs that can write or run something through one option (`rg --pre`, `yq -i`,
+ * `sort -o`, `tree -o`, `uniq <in> <out>`, `fd -x`, `ugrep --save-config`): the classifier's `guardedHeads` judge those by their arguments.
  */
 export const safeHeads = words(
-  'rg grep egrep fgrep ugrep ug eza ag ack fd locate ls ll cat bat head tail jq yq wc echo printf pwd whoami date printenv stat file du df tree which type sort uniq cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
+  'grep egrep fgrep eza ag ack locate ls ll cat bat head tail jq wc echo printf pwd whoami date printenv stat file du df which type cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
 );
 
 export const rearmableHeads = words(
@@ -74,16 +75,36 @@ export const safeToolNames = words(
 export const rearmableToolNames = words('Write Edit MultiEdit NotebookEdit');
 
 /**
- * `fy` verbs that only read fleet state or send a message, so killing the process loses nothing: the work they
- * stand for (`wait` polls, `send` queues, `status` prints) is either redone by running the verb again or already
- * the daemon's. Decided verb by verb from the CLI definitions (`fy <verb> --help`), never by prefix: a verb absent
- * here — `migrate`, `restart`, `start`, `new`, `stop`, `signal`, `config`, `daemon`, `task move` … — stays
- * unclassified and refuses the move. `wait` stops the session it awaited only when that session settles, which the
- * waiter being killed cannot cause.
+ * `fy` verbs that only read fleet state, so killing the process loses nothing — each entry a verb line EXACTLY as a
+ * manifest declares it (`verb('guide inventory', …)`), so a test can prove none of them is invented. Decided verb by verb
+ * from the manifests, never by prefix: `guide` is safe only bare, as `guide show` or as `guide inventory` (`accept`,
+ * `undo`, `clean-up` and `write` rewrite the routing prompt or start a model run), and `card show` / `card note` are the
+ * read and the append-only note (every other `card` verb moves or rewrites a card). `wait` stops the session it awaited
+ * only when that session settles, which the waiter being killed cannot cause. A verb absent here — `migrate`,
+ * `restart`, `start`, `new`, `stop`, `signal`, `config`, `daemon` … — stays unclassified and refuses the move.
  */
-export const safeFyVerbs = words('wait ps status logs snapshot events view recommend guide search send');
-/** `fy task <sub>`: the read and the append-only note; every other sub-verb moves or rewrites a card. */
-export const safeFyTaskVerbs = words('show note');
+export const safeFyVerbLines: readonly string[] = [
+  'wait',
+  'ps',
+  'status',
+  'logs',
+  'recommend',
+  'search',
+  'guide',
+  'guide show',
+  'guide inventory',
+  'card show',
+  'card note',
+];
+/** Verbs that have sub-verbs in {@link safeFyVerbLines}: the word after them must be one listed, or none. */
+export const fyVerbsWithSubverbs = words('guide card');
+/**
+ * `fy send` queues a message, so a killed send is a message to say again (`re_armable`) — except with a flag that
+ * interrupts the peer (`--now`), parks this session until it answers (`--ask`) or waits on delivery (`--wait`), which
+ * are never safe to cut off.
+ */
+export const fySendVerb = 'send';
+export const fySendHoldingFlags = words('--now --ask --wait');
 /** The only option `fy` accepts before its verb that this classifier trusts. */
 export const fyGlobalFlags = words('--as-owner');
 

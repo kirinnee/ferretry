@@ -6,7 +6,13 @@ export interface ProcRow {
   readonly pid: number;
   readonly ppid: number;
   readonly startedSecondsAgo: number;
+  /** The command line as a person reads it: control characters (newlines included) are `?`, as `ps` prints them. */
   readonly argv: string;
+  /**
+   * The command line EXACTLY — the kernel's NUL separated words joined by spaces, newlines and tabs kept. Present only
+   * where the kernel gave the words (procfs); a `ps` row has already lost them, and is judged as the lossy text it is.
+   */
+  readonly command?: string;
 }
 
 const ELAPSED_SECONDS_PER_UNIT = [1, 60, 3600] as const;
@@ -77,7 +83,12 @@ export function inventoryProcesses(
       argv: row.argv,
       startedSecondsAgo: row.startedSecondsAgo,
       cwd: cwdByPid.get(row.pid),
-      verdict: own === undefined ? classifyProcessArgv(row.argv) : 'safe_to_kill',
+      verdict:
+        own === undefined
+          ? row.command === undefined
+            ? classifyProcessArgv(row.argv, 'lossy')
+            : classifyProcessArgv(row.command, 'exact')
+          : 'safe_to_kill',
       ...(own === undefined ? {} : { known: own }),
       ppid: row.ppid,
       ...(listening.has(row.pid) ? { listening: true as const } : {}),
