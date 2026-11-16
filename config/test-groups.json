@@ -6,10 +6,6 @@
       "prefixes": ["packages/plugins/runtimes/"]
     },
     {
-      "name": "kernel-host-config",
-      "prefixes": ["packages/core/kernel/tests/unit/host-config/"]
-    },
-    {
       "name": "conversation-voice",
       "prefixes": ["packages/plugins/conversation/", "packages/plugins/voice/"]
     },

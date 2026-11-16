@@ -50,7 +50,7 @@ cancel a running set.
 
 | Set / job                                                | PR runner           | Other events                           | Work                                                        |
 | -------------------------------------------------------- | ------------------- | -------------------------------------- | ----------------------------------------------------------- |
-| Quick Checks                                             | Namespace 8x16      | Namespace 8x16 on main; dispatch picks | six unit groups + scripts tests side by side; unit ledger   |
+| Quick Checks                                             | Namespace 8x16      | Namespace 8x16 on main; dispatch picks | five unit groups + scripts tests side by side; unit ledger  |
 | Static Checks                                            | Namespace 8x16      | Namespace 8x16                         | format, every pre-commit gate, build checks                 |
 | Integration Tests                                        | Namespace 8x16      | Namespace 8x16                         | six isolated groups, then the integration ledger            |
 | Full Gates                                               | Namespace 4x8       | GitHub                                 | both Knip checks and route agreement (Knip needs >4GB)      |
@@ -111,12 +111,14 @@ Quick and label-triggered Full sets replace that shape; PR CI runs supply the ne
   run doubled the archive unit test from 3.819 to 8.371 seconds when gates shared its cores; that is why they moved
   instead of interleaving. Quick's summary names each group's slowest test and duration from JUnit, with
   `unit-timings.tsv` in the part artifact.
-- **Why six unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
+- **Why five unit groups (measured 2026-11-16, owner ask "speed it up significantly").** One `all` group ran 3,398
   files / 52,909 tests in ONE bun process: 794 s of Quick's 925 s step, on one core of an 8x16. By package: kernel
   260 s (its `tests/unit/host-config/` alone 147 s), runtimes 149, voice 75, conversation 58, catalogs 31, std 24,
   browsers 23, terminals 23, board 20, ferrets 20, everything else ~118. The groups balance by those seconds:
-  `runtimes` (~150), `kernel-host-config` (~145), `conversation-voice` (~133), `kernel` (the rest, ~110), `plugins-a`
-  (catalogs, browsers, terminals, std: ~100) and `everything-else` (~160). A plugin package stays whole (the ledger
+  `runtimes` (~150), `conversation-voice` (~133), `kernel` (~110), `plugins-a` (catalogs, browsers, terminals,
+  std: ~100) and `everything-else` (~160). The kernel's `tests/unit/host-config/` was a sixth group (~145 s) until its
+  speed budgets moved to the perf tier (PR 1715); it then ran in 13 s, so it went back into `kernel` (~112 s), and
+  five groups plus the scripts tests are exactly the pool of six: no part waits for a slot. A plugin package stays whole (the ledger
   passes a file only when ONE group covers it 100%); the kernel is split by test folder because it has a single
   `lib/` file (`app/lib/`), which its `kernel` group covers alone, so the split cannot move a judged file between
   groups. **Board stays in `everything-else`**: its watcher-stall test (no synchronous slice of 100 ms while a 3,600-card
@@ -227,7 +229,7 @@ run ...` with one `run` / `skip` line per plugin and why, or `CI scope: FULL - <
   their own. Local typechecks keep their ordinary non-incremental default.
   The Quick summary records the cache action's exact hit/miss output (or unknown),
   so partial/missing cache paths remain visible rather than inferred from speed.
-  Main's Quick uses the pull-request 8x16 too. The six unit groups and the scripts tests do
+  Main's Quick uses the pull-request 8x16 too. The five unit groups and the scripts tests do
   not fit a 4x8: dispatch run 43825305638 took 8.4 min with three parts at once and the
   real-tree TypeScript guard (`scripts/gen/tests/fleet-link-callers.test.ts`) hit its 180 s
   timeout, where the 8x16 ran the same parts in 3.8 min. Main's Quick runs only when no pull
@@ -403,7 +405,7 @@ main](#proof-reuse-on-main)).
 | Job              | Check name                           | Work                                                                                                                                                                   |
 | ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `proof`          | Proof Reuse                          | every event that runs anything: `proof-reuse.sh` answers `proved=true\|false` (always `false` off `main`); GitHub, no Nix; [Proof reuse on main](#proof-reuse-on-main) |
-| `quick`          | Quick Checks                         | `quick.sh`: six unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                     |
+| `quick`          | Quick Checks                         | `quick.sh`: five unit groups and the scripts tests side by side, then the unit ledger and the guarantee/tick proofs                                                    |
 | `static`         | Static Checks                        | `quick.sh --static`: format, gates, Nix install bundle, four Worker dry-runs, PWA build                                                                                |
 | `full-pending`   | Full CI Pending                      | immediately posts pending `Full CI` on `github.event.pull_request.head.sha`                                                                                            |
 | `int`            | Integration Tests                    | `integration.sh`: six groups in parallel and their 100% ledger                                                                                                         |
