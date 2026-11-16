@@ -139,7 +139,7 @@ class KeyRecordingSerial implements SerialExecutor {
   }
 }
 
-function build(targets: readonly ResumeTarget[], options: { leases?: boolean } = {}) {
+function build(targets: readonly ResumeTarget[], options: { leases?: boolean; cap?: number } = {}) {
   const repository = new MemoryRepository(targets);
   const panes = new FakePanes();
   const gate = new FakeGate();
@@ -152,6 +152,7 @@ function build(targets: readonly ResumeTarget[], options: { leases?: boolean } =
     serial,
     ...(options.leases === false ? {} : { leases }),
     clock: { now: () => NOW },
+    ...(options.cap === undefined ? {} : { cap: options.cap }),
   });
   return { repository, panes, gate, leases, serial, reconciler };
 }
@@ -235,6 +236,27 @@ describe('InterruptedLaunchReconciler', () => {
     should(INTERRUPTED_LAUNCH_REASON).equal('launch interrupted by a daemon restart');
     should(leases.released).deepEqual([STARTING, CREATED]);
     should(serial.keys).deepEqual([STARTING, CREATED]);
+  });
+
+  it('should record at most its cap of launches failed and keep the rest for the next pass, over-cap', async () => {
+    // Arrange
+    const { repository, reconciler } = build(
+      [target(STARTING, 'starting'), target(CREATED, 'created', 0), target(RESUMING, 'starting', 3)],
+      { cap: 1 },
+    );
+
+    // Act
+    const outcome = await reconciler.reconcile();
+
+    // Assert
+    should(outcome).deepEqual({
+      failed: [STARTING],
+      kept: [
+        { id: CREATED, why: 'over-cap' },
+        { id: RESUMING, why: 'over-cap' },
+      ],
+    });
+    should([repository.status(CREATED), repository.status(RESUMING)]).deepEqual(['created', 'starting']);
   });
 
   it('should settle a pane whose agent is gone, and keep one with a live agent in it', async () => {

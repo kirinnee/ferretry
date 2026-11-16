@@ -12,6 +12,8 @@
  */
 import {
   type Alias,
+  Composer,
+  CST,
   type Document,
   type ErrorCode,
   isAlias,
@@ -23,9 +25,10 @@ import {
   isSeq,
   LineCounter,
   type Node,
-  parseDocument,
+  Parser,
   stringify,
   type YAMLMap,
+  YAMLParseError,
   type YAMLSeq,
 } from 'yaml';
 
@@ -98,6 +101,74 @@ function directiveFlood(text: string): number | undefined {
     return text.slice(0, at).split(/\r\n|\r|\n/u).length;
   }
   return undefined;
+}
+
+/**
+ * The most collections (a mapping, a list, a `[ ]` or a `{ }`) a file may nest. A real configuration nests a handful
+ * (the deepest shipped default is under ten) and the library composes recursively, so a file nested thousands deep
+ * overflows the stack — at a depth that depends on the machine's stack and on how warm the JIT is. A refusal decided
+ * by the environment is not a refusal, so the depth is measured before anything is composed and bounded by this fixed
+ * number, far under any stack and far over any file a person writes. The library's own catch of a stack overflow stays
+ * as a backstop for a shape the measure does not see.
+ */
+export const MAX_NESTING_DEPTH = 256;
+
+/**
+ * The offset of the first collection that nests more than {@link MAX_NESTING_DEPTH} deep, or `undefined` when none does.
+ * One walk over the parsed tokens with an explicit stack (never recursion): each token is visited once.
+ */
+function firstTooDeep(documents: readonly CST.Token[]): number | undefined {
+  const pending: { readonly token: CST.Token; readonly depth: number }[] = documents
+    .map(token => ({ token, depth: 0 }))
+    .reverse();
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const { token } = next;
+    const depth = CST.isCollection(token) ? next.depth + 1 : next.depth;
+    if (depth > MAX_NESTING_DEPTH) return token.offset;
+    const children: (CST.Token | null | undefined)[] = [];
+    if (token.type === 'document') children.push(token.value);
+    else if (CST.isCollection(token)) {
+      for (const item of token.items) children.push(item.key, item.value);
+    }
+    for (let index = children.length - 1; index >= 0; index -= 1) {
+      const child = children[index];
+      if (child !== null && child !== undefined) pending.push({ token: child, depth });
+    }
+  }
+  return undefined;
+}
+
+/** An empty document: an empty text is within every bound, so it always parses. */
+function emptyDocument(): Document {
+  const parsed = parseBounded('', PARSE_OPTIONS);
+  if ('document' in parsed) return parsed.document;
+  throw new Error('an empty text is not nested');
+}
+
+/** A text parsed to its first document — or, when it nests past {@link MAX_NESTING_DEPTH}, where it first does. */
+type Parsed = { readonly document: Document } | { readonly tooDeepAt: number };
+
+/**
+ * `parseDocument`, but a text nested past {@link MAX_NESTING_DEPTH} is refused before anything is composed. The same
+ * steps the library takes (parse to tokens, compose the first document, flag a second one) with the measure between:
+ * the tokens are parsed once and the composer is handed them, so the bound costs one linear walk, not a second parse.
+ */
+function parseBounded(text: string, options: typeof PARSE_OPTIONS & { readonly lineCounter?: LineCounter }): Parsed {
+  const tokens = [...new Parser(options.lineCounter?.addNewLine).parse(text)];
+  const tooDeepAt = firstTooDeep(tokens);
+  if (tooDeepAt !== undefined) return { tooDeepAt };
+  let document: Document | undefined;
+  for (const composed of new Composer(options).compose(tokens, true, text.length)) {
+    if (document === undefined) document = composed;
+    else {
+      document.errors.push(
+        new YAMLParseError(composed.range.slice(0, 2) as [number, number], 'MULTIPLE_DOCS', 'more than one document'),
+      );
+      break;
+    }
+  }
+  // The composer always ends with a document when it is asked to (`forceDoc`).
+  return { document: document as Document };
 }
 
 /** A 1-based place in a file. */
@@ -372,7 +443,20 @@ function readText(text: string): { readonly read: ConfigTextRead; readonly whole
     };
   }
   const lineCounter = new LineCounter();
-  const document = parseDocument(text, { ...PARSE_OPTIONS, lineCounter });
+  const parsed = parseBounded(text, { ...PARSE_OPTIONS, lineCounter });
+  if ('tooDeepAt' in parsed) {
+    const position = lineCounter.linePos(parsed.tooDeepAt);
+    return {
+      whole: true,
+      read: {
+        ok: false,
+        errors: [
+          { message: SYNTAX_SENTENCES.RESOURCE_EXHAUSTION, position: { line: position.line, column: position.col } },
+        ],
+      },
+    };
+  }
+  const { document } = parsed;
   if (document.errors.length > 0) {
     // Only the errors that are listed are located: the rest are counted.
     const listed = document.errors.slice(0, MAX_SYNTAX_ERRORS).map(error => {
@@ -571,8 +655,10 @@ export function editConfigText(
 ): string {
   // A text over the cap, or with a flood of directives, is never parsed: like one that does not parse, it is replaced whole.
   const readable = existing !== undefined && !configTextTooLarge(existing) && directiveFlood(existing) === undefined;
-  let document: Document = parseDocument(readable ? existing : '', PARSE_OPTIONS);
-  if (document.errors.length > 0 || duplicateKeys(document).length > 0) document = parseDocument('', PARSE_OPTIONS);
+  const parsed = parseBounded(readable ? existing : '', PARSE_OPTIONS);
+  // A text nested too deep is replaced whole, like one that does not parse.
+  let document: Document = 'document' in parsed ? parsed.document : emptyDocument();
+  if (document.errors.length > 0 || duplicateKeys(document).length > 0) document = emptyDocument();
   if (!isMap(document.contents)) document.contents = document.createNode({});
   editValue(document, [], target, current);
   // The parser attaches a comment directly above the first key to that key, not to the document, so
@@ -603,7 +689,9 @@ export function editConfigText(
 export function setConfigKey(text: string, key: string, value: unknown): string {
   if (configTextTooLarge(text)) throw new Error(`the file does not parse: ${CONFIG_TOO_LARGE}`);
   if (directiveFlood(text) !== undefined) throw new Error(`the file does not parse: ${SYNTAX_SENTENCES.BAD_DIRECTIVE}`);
-  const document: Document = parseDocument(text, PARSE_OPTIONS);
+  const parsed = parseBounded(text, PARSE_OPTIONS);
+  if ('tooDeepAt' in parsed) throw new Error(`the file does not parse: ${SYNTAX_SENTENCES.RESOURCE_EXHAUSTION}`);
+  const { document } = parsed;
   // The parser's message quotes the file; the line is enough for a person to find it.
   const error = document.errors[0];
   if (error !== undefined)
