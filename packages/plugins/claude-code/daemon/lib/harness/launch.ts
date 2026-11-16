@@ -1,5 +1,5 @@
 import type { LaunchPart } from '@ferretry/core-ferrets/contract';
-import type { HarnessConfig, HooksItem, SettingsItem } from '../../../contract/index.ts';
+import { type HarnessConfig, type HooksItem, launchFlagsKept, type SettingsItem } from '../../../contract/index.ts';
 import { seededCommand } from './api-key-seed.ts';
 import {
   CLAUDE_HOME_ENV,
@@ -100,8 +100,17 @@ export function homeText(inputs: HomeInputs): HomeText {
   };
 }
 
+/**
+ * The launch flags the selected settings items carry, item by item in name order (the order their settings merge in, so
+ * the later item's flag comes later on the command line). Every word is its own argv word, whatever it holds.
+ */
+export const settingsFlags = (settings: ReadonlyMap<string, SettingsItem>): readonly string[] =>
+  byName(settings).flatMap(item => item.flags ?? []);
+
 export interface CommandInputs {
   readonly binary: string;
+  /** The settings items' launch flags ({@link settingsFlags}): passed first, so every flag the launch sets wins. */
+  readonly flags?: readonly string[] | undefined;
   /** The ferret's home, which is Claude's `CLAUDE_CONFIG_DIR`. */
   readonly home: string;
   readonly permissionMode: HarnessConfig['permissionMode'];
@@ -151,8 +160,15 @@ export function launchCommand(inputs: CommandInputs): readonly string[] {
 
 /** Claude itself and its flags: what the seed `exec`s. */
 function claudeCommand(inputs: CommandInputs): readonly string[] {
+  const itemFlags = launchFlagsKept(inputs.flags ?? []);
   return [
     inputs.binary,
+    // The items' flags come BEFORE every flag the launch sets: Claude takes the last of a repeated flag, and the ones the
+    // launch decides (permission mode, conversation, settings and MCP files) are dropped from them (`launchFlagsKept`).
+    ...itemFlags,
+    // A flag the items leave valueless at their end (`--model`, `--add-dir`) takes the NEXT word whatever it is. This
+    // disposable copy of the overlay, one attached word, is what it takes; the real pair after it is never eaten.
+    ...(itemFlags.length === 0 ? [] : [`--settings=${inputs.home}/${HOME_FILES.overlay}`]),
     '--settings',
     `${inputs.home}/${HOME_FILES.overlay}`,
     '--permission-mode',
