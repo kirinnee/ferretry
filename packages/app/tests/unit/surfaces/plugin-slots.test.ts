@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   ACTIONS_ROW_SLOT,
   FERRET_ACCOUNT_SLOTS,
+  FERRET_LIST_ROW_MARK_SLOT,
   FERRET_SLOTS,
   FILES_SEARCH_SLOT,
 } from '../../../../core/ferrets/contract/slots.ts';
@@ -45,7 +46,7 @@ describe('the slots Ferrets offers', () => {
     const contributed = entries.flatMap(entry =>
       (entry.manifest.ui?.panels ?? []).map(panel => panel.slot as string).filter(slot => slot.startsWith('ferrets.')),
     );
-    // Runtimes' two account pickers, the Warden's, Conversation's, MCP's (Add MCP server) and Catalogs' (Add skills) rows in the Actions ▾ menu, and Conversation's file search.
+    // Runtimes' two account pickers, the Warden's, Conversation's, MCP's (Add MCP server) and Catalogs' (Add skills) rows in the Actions ▾ menu, Conversation's file search, and Usage's quota mark on a list row.
     expect([...contributed].sort()).toEqual(
       [
         ...FERRET_ACCOUNT_SLOTS,
@@ -54,6 +55,7 @@ describe('the slots Ferrets offers', () => {
         ACTIONS_ROW_SLOT,
         ACTIONS_ROW_SLOT,
         FILES_SEARCH_SLOT,
+        FERRET_LIST_ROW_MARK_SLOT,
       ].sort(),
     );
     for (const slot of contributed) expect(named).toContain(slot);
