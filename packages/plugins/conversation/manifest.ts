@@ -80,6 +80,12 @@ const OWN_DRAFT = {
   guard: { none: "the owner's own draft, person caller only, served raw as today: positional edits need the raw text" },
 } as const;
 const READ = { audit: { skip: 'read' } } as const;
+/**
+ * Reading a ferret's words (its log, messages, question, send ledger, queue, handoffs, images, attachments) is `fleet.use`
+ * (c58-sec1): a device the owner narrowed off it is refused, as it is on `GET /v1/ferrets/:ferretId`. Only a DEVICE is
+ * governed: a ferret's own credential is never grant-governed and the owner's loopback token is ungoverned.
+ */
+const FLEET_USE = { capability: cap('fleet', 'use') } as const;
 const ACK = { guard: { none: 'answers an acknowledgement; no pane, page or vault text' } } as const;
 
 /**
@@ -125,8 +131,8 @@ export default definePlugin({
         },
       }),
       route('POST /v1/ferrets/:ferretId/interrupt', { ...FERRET, audit: { record: TURN_INTERRUPTED_AUDIT }, ...ACK }),
-      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/sends', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/queue', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('PATCH /v1/ferrets/:ferretId/queue/:messageId', {
         ...FERRET,
         audit: { record: QUEUE_EDITED_AUDIT },
@@ -137,8 +143,8 @@ export default definePlugin({
         audit: { record: QUEUE_CANCELLED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/sends/:sendId', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/handoffs/:name', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       // A person's alone: a retry is the one act that clears an update-unconfirmed send's mark and types it again.
       route('POST /v1/ferrets/:ferretId/sends/:sendId/retry', {
         ...PERSON,
@@ -167,10 +173,10 @@ export default definePlugin({
       }),
 
       // ── reading (session-reads) ───────────────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...READ, ...SECRETS }), // R265: strong etag over redacted text
-      route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...READ, ...SECRETS }), // R266 (kept half)
-      route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...READ, ...SECRETS }),
-      route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...READ, ...SECRETS }), // G41: bounded fragments
+      route('GET /v1/ferrets/:ferretId/logs', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R265: strong etag over redacted text
+      route('GET /v1/ferrets/:ferretId/log-page', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // R266 (kept half)
+      route('GET /v1/ferrets/:ferretId/log-search', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/messages', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }), // G41: bounded fragments
       // The composer's reference menus (lead decision Q6): each prefix's owner provides its entries through `reference.catalog`.
       // Ungoverned itself, but each provider's own demand (files, terminals, pages) is asked of the caller before it answers.
       route('GET /v1/ferrets/:ferretId/references', { ...FERRET, ...READ, ...SECRETS, consultsGrants: true }),
@@ -178,12 +184,13 @@ export default definePlugin({
       route('GET /v1/ferrets/:ferretId/transcript-images/:handle', {
         minimum: 'operator',
         caller: 'any',
+        ...FLEET_USE,
         ...READ,
         ...SECRETS,
       }),
 
       // ── questions, compaction, hypermedia ─────────────────────────────────────────────────────
-      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/question', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/answer', {
         ...PERSON,
         // DELIBERATE PARITY CORRECTION: v4 declared no capability here (R-0335 `capability=none`). On 5.0 the route
@@ -212,7 +219,7 @@ export default definePlugin({
         audit: { record: ATTACHMENT_ADDED_AUDIT },
         ...SECRETS,
       }),
-      route('GET /v1/ferrets/:ferretId/attachments/:attachmentId', { ...FERRET, ...READ, ...SECRETS }),
+      route('GET /v1/ferrets/:ferretId/attachments/:attachmentId', { ...FERRET, ...FLEET_USE, ...READ, ...SECRETS }),
       route('POST /v1/ferrets/:ferretId/attachments/:attachmentId/unlock', {
         ...FERRET,
         audit: { record: ATTACHMENT_UNLOCKED_AUDIT },

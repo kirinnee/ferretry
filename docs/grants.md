@@ -219,11 +219,34 @@ act alone (turning automatic install off never needs one). See [updating.md](upd
 **A lead's table of its sub-ferrets is `fleet.use`.** `GET /v1/ferrets/:ferretId/subtree` (`fy status --subtree`,
 [pack-mode.md](pack-mode.md#checking-on-your-sub-ferrets)) reads the sessions registry, the board's cards and PR
 cache and each descendant's outbox, so a remote caller whose `fleet.use` is narrowed is refused with
-`grant_not_granted` before anything is read. Plain session reads are ungoverned; this one is not, because it
-surfaces card notes, PR state and messages for a whole subtree in one answer rather than one session's own record. Its excerpts pass the same fail-closed secret redactor as an operator transcript read (before the cut to one line; `[excerpt withheld]` if it cannot run), and its per-table outbox work is bounded ([pack-mode.md](pack-mode.md)).
+`grant_not_granted` before anything is read. It surfaces card notes, PR state and messages for a whole subtree in one
+answer rather than one session's own record. Its excerpts pass the same fail-closed secret redactor as an operator transcript read (before the cut to one line; `[excerpt withheld]` if it cannot run), and its per-table outbox work is bounded ([pack-mode.md](pack-mode.md)).
 It writes nothing and takes no lineage from the request: the descendants are the registry's `parent` links.
 Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
 /v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.
+
+**Reading a ferret's record is `fleet.use`.** A ferret record is more than a name: it carries the folder it works in,
+the login it runs on, where its transcript lives (with the daemon's attribution token) and the harness's own conversation
+id. So `GET /v1/ferrets`, `GET /v1/ferrets/:ferretId`, `GET /v1/ferrets/by-request/:requestId`,
+`GET /v1/archived-sessions`, `GET /v1/ferrets/:ferretId/pins`, `GET /v1/restarts`,
+`GET /v1/ferrets/:ferretId/handover`, `GET /v1/ferrets/:ferretId/relaunch-settings` and the `GET /v1/events` journal
+stream all ask `fleet.use`. So does what a ferret SAID, was SENT, ASKED or REPORTED: `GET /v1/ferrets/:ferretId/logs`,
+`/log-page`, `/log-search`, `/messages` (its transcript), `/transcript-images/:handle`, `/question` (the pending
+question), `/sends`, `/sends/:sendId`, `/queue`, `/handoffs/:name`, `/attachments/:attachmentId` and `/result` (what a
+finished ferret reported), and `GET /v1/lessons/directory`, which names every ferret's id, name and folder. A remote caller whose `fleet.use` is narrowed is refused (a device: 403
+`grant_device_not_granted`) before anything is read. (4.x left every one of them that it had ungoverned, and this page said so; a device the owner had
+narrowed off fleet use still read the whole fleet.) The gate is the **device's** only: a ferret's own credential is never
+grant-governed (`presentation.local`) and the host's admin token over loopback is ungoverned, so the owner's `fy` and
+the app of a device holding `fleet.use` (every default device, and a `--limited` one) read exactly what they did.
+This list is what that change touched and no more: it says nothing about any other route that names a ferret (the
+asks and agenda reads, `/v1/gc`, the skills inventory, `/v1/projects`, `/v1/links/history`, `/v1/renders`), which are
+neither opened nor closed by it.
+**Declared GAP — what an agent reads of ANOTHER ferret is 4.x's and is not fenced here.** A ferret calling these routes
+gets the full record, archive, pin board, journal, transcript, question and result of an unrelated ferret, as 4.x gave it: `fy ps -a`, `fy status <id>`,
+`fy wait <peer>` and `fy ask` rely on it to resolve and address peers and other projects' leads (`fy send` resolves a
+callsign inside the daemon and does not call these routes). Only the move reads (`handover`, `relaunch-settings`),
+the subtree and the live/transcript follow keep a ferret to itself and its helpers. Fencing the rest by lineage, or
+projecting an unrelated ferret to its name and state, is an owner decision.
 
 **Opening a link on this computer is local-only.** `POST /v1/system/open-url` hands one http(s) address to the
 operating system's own opener (macOS `open`, `xdg-open`, the Windows URL handler), so a router such as Finicky
@@ -966,10 +989,10 @@ command says so at the moment somebody might be tempted to do that instead.
   `admin` scope rather than the grant read’s `warden`, because it names DEVICES; it is bounded to a
   64 KiB window of the file and the newest 50 records; and a line it cannot parse is **counted and
   reported**, never dropped — a truncated or tampered journal must not read as a clean history.
-- **The daemon's fleet event stream (`GET /v1/events`) is not governed.** It carries session events
-  the whole UI depends on rather than fleet configuration, so tying it to the `fleet` capability
-  would make revoking `fleet` break the session list. If a future event kind carries fleet
-  configuration, it needs its own decision.
+- **The daemon's fleet event stream (`GET /v1/events`) asks `fleet.use`** (c58-sec1; it was ungoverned, on the
+  reasoning that the UI depends on it). Its journal frames carry free text — a ferret's question to the owner, a stop
+  reason, the harness conversation id — and the session list it feeds is itself `fleet.use` now, so a device with
+  fleet use narrowed away has no session list for the stream to break. A ferret's own credential is unaffected.
   Its `live` frames (`?live=1`, a working turn's verb, clock start and token counts) are read off
   the same pane and transcript `GET /v1/ferrets/:ferretId/snapshot` and `/logs` already return at the same
   `operator` minimum, so they widen nothing.
