@@ -21,7 +21,7 @@
 // ledger — the reader would see no trace of a message that exists. So unknown
 // values degrade field by field, and the row survives.
 
-import type { PluginClient } from '@ferretry/kernel/manifest';
+import { heldRead, type PluginClient } from '@ferretry/kernel/manifest';
 import type { z } from 'zod';
 import type {
   SendCancelEffectSchema,
@@ -196,14 +196,18 @@ export const ledgerFeed = (
  * The rows come back UNPARSED, because the session cache keeps them as the daemon sent them — a row
  * this bundle cannot read may be one the next bundle can. `parseLedgerSendsResponse` reads them.
  *
+ * THE POLL COSTS NOTHING WHEN NOTHING MOVED. The chat reads this every few seconds and a lead's ledger is megabytes,
+ * so the read goes through the held-read memory (`heldRead`): it sends the etag of the answer it holds, a `304` is that
+ * answer again, and a send settling is a new etag and a whole new answer.
+ *
  * GAP(app-shell): today this read had its own 20-second bound, shorter than the client's default; the plugin client's
  * `call` takes no per-call timeout, so the read is bounded by the shell's.
  */
 export const readLedgerSends = async (
-  client: Pick<PluginClient, 'call'>,
+  client: Pick<PluginClient, 'call' | 'conditional'>,
   ferretId: string,
 ): Promise<readonly unknown[]> =>
-  ledgerRows(await client.call('GET /v1/ferrets/:ferretId/sends', { params: { ferretId } }));
+  ledgerRows((await heldRead(client, 'GET /v1/ferrets/:ferretId/sends', { params: { ferretId } })).body);
 
 const FATES: ReadonlySet<string> = new Set<SendFate>([
   'accepted',

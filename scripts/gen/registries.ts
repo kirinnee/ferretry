@@ -440,9 +440,44 @@ function hashesJson(model: Model): string {
   return `${JSON.stringify({ format: 1, hashes: record }, null, 2)}\n`;
 }
 
+/** A package's feature folder: every `*.feature.ts` in it is one feature the package's daemon half registers. */
+export const FEATURES_DIR = 'daemon/features';
+export const featureRegistryPath = (pkgRel: string): string => `${pkgRel}/daemon/generated/features.ts`;
+
+/**
+ * `<package>/daemon/generated/features.ts`, one per package that has `daemon/features/*.feature.ts`: the files that
+ * folder holds, by file name, so a feature is added by adding a file and no list is edited. Each file default-exports
+ * one feature; the package's `build()` registers the lot.
+ */
+export function featureRegistries(model: Model): ReadonlyMap<string, string> {
+  const out = new Map<string, string>();
+  for (const pkg of model.ws.packages) {
+    const dir = join(pkg.dir, FEATURES_DIR);
+    if (!existsSync(dir)) continue;
+    const files = [...new Bun.Glob('*.feature.ts').scanSync({ cwd: dir, onlyFiles: true })].sort();
+    if (files.length === 0) continue;
+    const outRel = featureRegistryPath(pkg.rel);
+    const target = join(model.ws.root, outRel);
+    const names = files.map(file => ident('feature', file.replace(/\.feature\.ts$/, '')));
+    out.set(
+      outRel,
+      [
+        HEADER,
+        ...files.map((file, at) => `import ${names[at]} from '${importPath(target, join(dir, file))}';`),
+        '',
+        `/** Every feature of this package's daemon half, by file name (${FEATURES_DIR}/*.feature.ts). */`,
+        `export default [${names.join(', ')}] as const;`,
+        '',
+      ].join('\n'),
+    );
+  }
+  return out;
+}
+
 /** The global registries, keyed by root-relative path. */
 export function generateGlobal(model: Model): ReadonlyMap<string, string> {
   return new Map<string, string>([
+    ...featureRegistries(model),
     [
       GENERATED.plugins,
       halfRegistry(model, GENERATED.plugins, 'daemon', 'DaemonImplementation', 'daemonImplementations'),

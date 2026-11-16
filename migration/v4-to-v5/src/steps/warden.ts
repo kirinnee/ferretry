@@ -26,10 +26,12 @@ import { failureNote, isRecord, readV4Json, V4InputError } from '../v4/documents
 import { rebaseV4Path } from '../v4/rebase.ts';
 import {
   V4_JEV_CHECK_FILE,
+  V4_WARDEN_AUTO_MIGRATE,
   V4_WARDEN_DIR,
   V4_WARDEN_JEV_CHECKS,
   V4_WARDEN_REPORTS,
   V4_WARDEN_STATE,
+  V4AutoMigrateSession,
   V4Blessing,
 } from '../v4/warden.ts';
 import type { Step } from './index.ts';
@@ -64,7 +66,7 @@ export const wardenStep: Step = {
   id: 'warden',
   title: 'Warden history (sweep memory, blessings, reports, Jev checks)',
   owner: ['plugin-warden'],
-  reads: [V4_WARDEN_STATE, `${V4_WARDEN_REPORTS}/*`, `${V4_WARDEN_JEV_CHECKS}/<day>.jsonl`],
+  reads: [V4_WARDEN_STATE, V4_WARDEN_AUTO_MIGRATE, `${V4_WARDEN_REPORTS}/*`, `${V4_WARDEN_JEV_CHECKS}/<day>.jsonl`],
   sealed: [],
   notCarried: [
     {
@@ -76,8 +78,8 @@ export const wardenStep: Step = {
       why: 'WardenBlessingViewSchema keeps ferret, kinds, expiresAt, by, streak and untilChange only',
     },
     {
-      what: 'state/warden/auto-migrate.json (the login-move ledger)',
-      why: 'Warden declares no v5 file for it; it remembers only the last hour of moves, so at worst one extra move happens in the first hour',
+      what: 'a damaged entry of state/warden/auto-migrate.json (the login-move ledger)',
+      why: 'the ledger remembers only the last hour of moves, so at worst one extra move happens in the first hour',
     },
     {
       what: 'state/warden-{auto-move-failed,orphans,input-stuck,inbox-stuck}.json and state/machine-agenda-members.json',
@@ -109,7 +111,29 @@ export const wardenStep: Step = {
         return { ...rest, reportPath: ctx.v5.resolve(join(V5_WARDEN_REPORTS, path)) };
       };
 
+      // The login-move ledger: v5's mover keeps the same shape under `autoMoveMemory` of state.json, so a ferret moved
+      // in the last hour is not moved again, and a standing reason the owner was told is not told twice.
+      const ledger = await readV4Json(home, join(home, V4_WARDEN_AUTO_MIGRATE));
+      const moveSessions: Record<string, unknown> = {};
+      let ledgerSkipped = 0;
+      if (isRecord(ledger) && isRecord(ledger.sessions)) {
+        for (const [id, entry] of Object.entries(ledger.sessions).sort(([a], [b]) => a.localeCompare(b))) {
+          const parsed = V4AutoMigrateSession.safeParse(entry);
+          if (parsed.success) moveSessions[id] = parsed.data;
+          else ledgerSkipped++;
+        }
+      } else if (ledger !== undefined) ledgerSkipped++;
+      if (ledgerSkipped > 0) notes.push(`${String(ledgerSkipped)} damaged login-move ledger entr(ies) not carried`);
+      const moveMemory = Object.keys(moveSessions).length === 0 ? {} : { autoMoveMemory: { sessions: moveSessions } };
+      if (Object.keys(moveSessions).length > 0)
+        kept.push({ what: 'login-move ledger entries', count: Object.keys(moveSessions).length });
+
       const state = await readV4Json(home, join(home, V4_WARDEN_STATE));
+      if (state === undefined && Object.keys(moveMemory).length > 0)
+        await ctx.v5.json(
+          { path: V5_WARDEN_STATE, format: 1, schema: WardenStateFileSchema },
+          WardenStateFileSchema.parse({ format: 1, ...moveMemory }),
+        );
       if (state !== undefined) {
         if (!isRecord(state)) throw new V4InputError(`${V4_WARDEN_STATE}: is not a JSON object`);
         const { blessings, assignments: _secret, format: _none, investigations, sweepCoverage, ...rest } = state;
@@ -139,6 +163,7 @@ export const wardenStep: Step = {
         const document = WardenStateFileSchema.parse({
           format: 1,
           ...rest,
+          ...moveMemory,
           ...(Array.isArray(investigations) ? { investigations: investigations.filter(isRecord).map(rebase) } : {}),
           ...(isRecord(sweepCoverage) ? { sweepCoverage: rebase(sweepCoverage) } : {}),
         });

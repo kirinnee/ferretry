@@ -4,7 +4,9 @@
  *
  * THE OWNER'S RULES, AND WHERE EACH ONE LIVES:
  *
- * - Off unless the owner switched it on, and only for the triggers they listed ({@link moveTriggers}).
+ * - On unless the owner wrote `autoMove.enabled: false`, and only for the triggers listed ({@link moveTriggers}).
+ * - A non-empty `targets` is a HARD list: the ferret goes to a login on it or nowhere, however much room another login has
+ *   ({@link rankMoveTargets}, {@link chooseFailoverTarget}).
  * - Only to a login of the SAME harness. A move is the move `fy move` makes, and crossing harnesses
  *   would be a conversion nobody asked for ({@link chooseMoveTarget}).
  * - Only to a login that is ready: an agent runtime, its CLI installed, signed in, not switched off, not
@@ -35,7 +37,7 @@ import {
 import { z } from 'zod';
 import { QUOTA_RANK, quotaOf } from './foreign.ts';
 import { type PackFleetFacts, runtimeRefusal } from './foreign.ts';
-import { instantMs } from './time.ts';
+import { instantMs, resetInstantMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';
 
 type HarnessKind = FleetRuntimeView['harness'];
@@ -56,6 +58,8 @@ export interface AutoMoveSubject {
   readonly harness: HarnessKind;
   readonly mode: 'auto' | 'interactive';
   readonly trigger: WardenAutoMoveTrigger;
+  /** When the limit it sits on resets (epoch ms), as the ferret's state records it. Absent: no reset time was shown. */
+  readonly resetAt?: number;
 }
 
 /** A Warden, or anything a Warden started, is never moved: it is supervision, not work. */
@@ -80,7 +84,15 @@ export function rateLimitedSubjects(
 export function subjectOf(view: WardenSessionView, trigger: WardenAutoMoveTrigger): AutoMoveSubject | undefined {
   const { agent, harness } = view.config;
   if (agent === undefined || harness === undefined) return undefined;
-  return { id: view.config.id, agent, harness, mode: view.config.mode, trigger };
+  const resetAt = resetInstantMs(view.state.quota?.resetAt);
+  return {
+    id: view.config.id,
+    agent,
+    harness,
+    mode: view.config.mode,
+    trigger,
+    ...(resetAt === undefined ? {} : { resetAt }),
+  };
 }
 
 // ── Where to ─────────────────────────────────────────────────────────────────────────────────────
@@ -276,6 +288,13 @@ export interface AutoMoveSessionMemory {
   };
   /** The last reason it was held for the owner ({@link autoMoveHoldKey}): a standing reason is told once. */
   readonly held?: string;
+  /** The limit reset (an ISO instant) this ferret was already resumed at: one automatic resume per reset. */
+  readonly resumed?: string;
+  /**
+   * The reset (an ISO instant) a ferret with nowhere to go is waiting for. Ferrets stops reporting a pane limit the
+   * moment its reset passes, so this is how the Warden finds the ferret again then ({@link waitingFerrets}).
+   */
+  readonly waiting?: string;
 }
 
 export interface AutoMoveMemory {
@@ -299,6 +318,11 @@ export function sessionMemory(memory: AutoMoveMemory, sessionId: string): AutoMo
   return memoryOf(memory, sessionId);
 }
 
+/** The ferrets remembered as waiting for a limit to reset: the ones to look at again once Ferrets stops showing it. */
+export function waitingFerrets(memory: AutoMoveMemory): readonly string[] {
+  return Object.entries(memory.sessions).flatMap(([id, session]) => (session.waiting === undefined ? [] : [id]));
+}
+
 const recent = (moves: readonly string[], nowMs: number): readonly string[] =>
   moves.filter(at => nowMs - (instantMs(at) ?? 0) < HOUR_MS);
 
@@ -319,7 +343,14 @@ export function pruneAutoMoveMemory(memory: AutoMoveMemory, live: ReadonlySet<st
   for (const [id, session] of Object.entries(memory.sessions)) {
     if (!live.has(id)) continue;
     const moves = recent(session.moves, nowMs);
-    if (moves.length === 0 && session.asked === undefined && session.held === undefined) continue;
+    if (
+      moves.length === 0 &&
+      session.asked === undefined &&
+      session.held === undefined &&
+      session.resumed === undefined &&
+      session.waiting === undefined
+    )
+      continue;
     sessions[id] = { ...session, moves };
   }
   return { sessions };
@@ -348,6 +379,8 @@ const AutoMoveMemorySchema = z.object({
       moves: z.array(Instant).default([]),
       asked: z.object({ at: Instant, trigger: WardenAutoMoveTriggerSchema, from: z.string().min(1) }).optional(),
       held: z.string().min(1).optional(),
+      resumed: z.string().min(1).optional(),
+      waiting: z.string().min(1).optional(),
     }),
   ),
 });

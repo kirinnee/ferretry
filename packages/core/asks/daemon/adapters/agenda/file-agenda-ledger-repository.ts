@@ -181,6 +181,19 @@ export class FileAgendaLedgerRepository implements AgendaLedgerRepository {
     });
   }
 
+  /**
+   * What the board is now: the identity of its file (a stat through the state port), `absent` when there is none. Taken on
+   * the session's lane after any unfinished version change is recovered, exactly where a read takes its own, so the token
+   * and a read agree on what the file is.
+   */
+  async stamp(sessionId: string): Promise<string> {
+    this.assertSessionId(sessionId);
+    return this.serial(sessionId, async () => {
+      await this.recoverVersions(sessionId);
+      return (await this.files.identity(sessionId, AGENDA_FILES.ledger)) ?? 'absent';
+    });
+  }
+
   private async load(sessionId: string): Promise<AgendaLedger | null> {
     return (await this.loadDigested(sessionId))?.ledger ?? null;
   }
