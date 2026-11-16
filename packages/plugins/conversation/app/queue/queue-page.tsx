@@ -370,7 +370,7 @@ export function QueuePageView({
   );
 }
 
-const POLL_MS = 5000;
+export const POLL_MS = 5000;
 /** How often an older page is asked again after a poll restarted the walk under it. */
 const OLDER_ATTEMPTS = 3;
 
@@ -387,13 +387,18 @@ const readFerretName = async (client: Pick<PluginClient, 'call'>, ferretId: stri
   }
 };
 
+/** No entries; ONE array, because `useSyncExternalStore` re-renders for ever on a snapshot that is a new array each read. */
+const NO_ENTRIES: ReturnType<SendOutbox['snapshot']> = [];
 /** The never-changing outbox stand-in while the composer half has none for this daemon. */
-const NO_OUTBOX: Pick<SendOutbox, 'subscribe' | 'snapshot'> = { subscribe: () => () => undefined, snapshot: () => [] };
+export const NO_OUTBOX: Pick<SendOutbox, 'subscribe' | 'snapshot'> = {
+  subscribe: () => () => undefined,
+  snapshot: () => NO_ENTRIES,
+};
 
 /**
  * THE `queue` PANEL (slot `ferret.side`, order 10): today's queue page for one ferret, on the daemon this half was
- * built for. Today's "All queues" read every machine this browser paired; a half reaches one daemon, so the panel is
- * one ferret's queue and that view is not offered (GAP: no screen declares it).
+ * built for. Its "All queues" button opens the `queues` screen (`all-queues-screen.tsx`), every ferret's queue on this
+ * machine; today's read every machine this browser paired, a half reaches one daemon.
  */
 export function QueuePanel({ subject }: { readonly subject?: string }) {
   const client = useConversationClient();
@@ -535,6 +540,10 @@ function QueuePage({
       onLoadOlder={() => void loadOlder()}
       onOpenFerret={group => {
         const to = href(daemon, 'conversation', 'chat', { ferret: group.ferretId });
+        if (to !== undefined) router?.navigate(to);
+      }}
+      onShowAll={() => {
+        const to = href(daemon, 'conversation', 'queues');
         if (to !== undefined) router?.navigate(to);
       }}
       showMachine={false}
