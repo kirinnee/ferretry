@@ -2,6 +2,7 @@ import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import { CompactAtSchema } from '../view/compact-at.ts';
 import { FerretIdSchema, FerretRoleSchema, HarnessKeySchema } from '../ids.ts';
+import { DECIDE_ASK_TIMEOUT_MS } from './decide-timeout.ts';
 
 /** What `start.decide` takers are asked: a ferret is about to start. The first no wins, with its reason. */
 export const StartDecideInputSchema = z.strictObject({
@@ -49,4 +50,9 @@ export type StartRefusalCode = z.infer<typeof StartRefusalCodeSchema>;
  * admission (ruling #43): Ferrets starts a child only on it. No other taker can pose as Packs, because plugin ids are
  * unique (the graph refuses a duplicate) and the registry is generated at build time.
  */
-export const StartDecide = defineHook('start.decide', { mode: 'decide', input: StartDecideInputSchema });
+export const StartDecide = defineHook('start.decide', {
+  mode: 'decide',
+  input: StartDecideInputSchema,
+  // A taker reads a file to answer (Runtimes: the published manifest); the 200 ms default refused healthy starts under load.
+  timeoutMs: DECIDE_ASK_TIMEOUT_MS,
+});

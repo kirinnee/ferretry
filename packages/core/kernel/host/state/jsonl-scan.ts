@@ -4,7 +4,8 @@
  * size cap, so one huge or torn line cannot hold memory, and a crash that left half a record at the end of the file
  * is told apart from a bad record in the middle.
  *
- * Pure: bytes in, lines out.
+ * Pure: bytes in, lines out. {@link JsonlScanner} takes the bytes a chunk at a time (a boot check of a journal of
+ * any size holds one record, not the file); {@link scanJsonl} is the same scanner fed one buffer.
  */
 
 /** Maximum encoded size of one record: a line excluding its newline. The appender enforces the same bound. */
@@ -53,6 +54,14 @@ export interface JsonlScanOptions {
   readonly maxRecordBytes?: number;
 }
 
+/** What a scan reports, one call per line, in file order. */
+export interface JsonlSink {
+  record(record: JsonlRecord): void;
+  problem(problem: JsonlProblem): void;
+  /** The last line had no newline and did not parse (see {@link JsonlScan.tornTail}). */
+  tornTail(): void;
+}
+
 function decodeLine(bytes: Uint8Array): string | undefined {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -61,41 +70,105 @@ function decodeLine(bytes: Uint8Array): string | undefined {
   }
 }
 
-export function scanJsonl(bytes: Uint8Array, options: JsonlScanOptions = {}): JsonlScan {
-  const cap = options.maxRecordBytes ?? MAX_JSONL_RECORD_BYTES;
-  const records: JsonlRecord[] = [];
-  const problems: JsonlProblem[] = [];
-  let tornTail = false;
-  let line = 1;
-  let lineStart = 0;
+function concat(parts: readonly Uint8Array[], total: number): Uint8Array {
+  const joined = new Uint8Array(total);
+  let at = 0;
+  for (const part of parts) {
+    joined.set(part, at);
+    at += part.byteLength;
+  }
+  return joined;
+}
 
-  const inspect = (lineEnd: number, terminated: boolean): void => {
-    const raw = bytes.subarray(lineStart, lineEnd);
-    const byteOffset = lineStart;
-    if (raw.byteLength > cap) {
-      problems.push({ line, byteOffset, message: `record exceeds the maximum encoded size of ${cap} bytes` });
+/**
+ * The line scan as a state machine fed one chunk at a time, so a file of any size is judged holding at most one
+ * record (the cap) plus the chunk in hand. `push` takes bytes the caller may reuse afterwards: a partial line is
+ * copied. A line over the cap is counted, never held. {@link scanJsonl} is this scanner fed one whole buffer, so
+ * both agree on every verdict.
+ */
+export class JsonlScanner {
+  readonly #sink: JsonlSink;
+  readonly #cap: number;
+  #held: Uint8Array[] = [];
+  /** Bytes of the line in progress, held or not. */
+  #lineBytes = 0;
+  #line = 1;
+  #lineOffset = 0;
+
+  constructor(sink: JsonlSink, options: JsonlScanOptions = {}) {
+    this.#sink = sink;
+    this.#cap = options.maxRecordBytes ?? MAX_JSONL_RECORD_BYTES;
+  }
+
+  push(chunk: Uint8Array): void {
+    let from = 0;
+    for (let index = chunk.indexOf(0x0a); index >= 0; index = chunk.indexOf(0x0a, from)) {
+      this.#finish(chunk.subarray(from, index), true);
+      from = index + 1;
+    }
+    if (from < chunk.byteLength) this.#hold(chunk.subarray(from));
+  }
+
+  /** The end of the file: a last line with no newline is judged as a possibly torn one. */
+  end(): void {
+    if (this.#lineBytes > 0) this.#finish(new Uint8Array(), false);
+  }
+
+  #hold(rest: Uint8Array): void {
+    this.#lineBytes += rest.byteLength;
+    if (this.#lineBytes > this.#cap) this.#held = [];
+    else this.#held.push(rest.slice());
+  }
+
+  #finish(rest: Uint8Array, terminated: boolean): void {
+    const total = this.#lineBytes + rest.byteLength;
+    const line = this.#line;
+    const byteOffset = this.#lineOffset;
+    const held = this.#held;
+    this.#held = [];
+    this.#lineBytes = 0;
+    this.#line += 1;
+    this.#lineOffset += total + 1;
+    if (total > this.#cap) {
+      this.#sink.problem({
+        line,
+        byteOffset,
+        message: `record exceeds the maximum encoded size of ${this.#cap} bytes`,
+      });
       return;
     }
+    const raw = held.length === 0 ? rest : concat([...held, rest], total);
     const text = decodeLine(raw);
     if (text === undefined) {
-      if (terminated) problems.push({ line, byteOffset, message: 'record is not valid UTF-8' });
-      else tornTail = true;
+      if (terminated) this.#sink.problem({ line, byteOffset, message: 'record is not valid UTF-8' });
+      else this.#sink.tornTail();
       return;
     }
     if (text.trim().length === 0) return;
     try {
-      records.push({ line, byteOffset, value: JSON.parse(text) });
+      this.#sink.record({ line, byteOffset, value: JSON.parse(text) });
     } catch {
-      if (terminated) problems.push({ line, byteOffset, message: 'record is not valid JSON' });
-      else tornTail = true;
+      if (terminated) this.#sink.problem({ line, byteOffset, message: 'record is not valid JSON' });
+      else this.#sink.tornTail();
     }
-  };
-
-  for (let index = bytes.indexOf(0x0a); index >= 0; index = bytes.indexOf(0x0a, index + 1)) {
-    inspect(index, true);
-    lineStart = index + 1;
-    line += 1;
   }
-  if (lineStart < bytes.byteLength) inspect(bytes.byteLength, false);
+}
+
+export function scanJsonl(bytes: Uint8Array, options: JsonlScanOptions = {}): JsonlScan {
+  const records: JsonlRecord[] = [];
+  const problems: JsonlProblem[] = [];
+  let tornTail = false;
+  const scanner = new JsonlScanner(
+    {
+      record: record => void records.push(record),
+      problem: problem => void problems.push(problem),
+      tornTail: () => {
+        tornTail = true;
+      },
+    },
+    options,
+  );
+  scanner.push(bytes);
+  scanner.end();
   return { records, problems, tornTail };
 }
