@@ -155,6 +155,7 @@ const DECLARED: Readonly<Record<string, string>> = {
   'account site recipe': 'account site recipe show',
   'account factor': 'account factor ls',
   config: 'config check',
+  pin: 'pin add',
 };
 
 describe('the real registry', () => {

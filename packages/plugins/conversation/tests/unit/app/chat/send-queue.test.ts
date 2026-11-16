@@ -690,3 +690,51 @@ describe('withdrawReplyVia', () => {
     expect(take({ daemon: 'laptop', ferret: 's1' }, 'm1')).rejects.toThrow('no longer paired');
   });
 });
+
+describe('the queue poll costs a 304 when nothing moved', () => {
+  const polling = () => {
+    const state = { version: 1, asked: [] as Array<{ ifNoneMatch?: string; query?: unknown }> };
+    const client = {
+      call: async () => {
+        throw new Error('the queue is polled through the conditional read');
+      },
+      conditional: async (
+        _route: string,
+        _params: unknown,
+        init?: { readonly ifNoneMatch?: string; readonly query?: unknown },
+      ) => {
+        state.asked.push({
+          ...(init?.ifNoneMatch === undefined ? {} : { ifNoneMatch: init.ifNoneMatch }),
+          query: init?.query,
+        });
+        const etag = `"queue-${String(state.version)}"`;
+        return init?.ifNoneMatch === etag
+          ? ({ status: 304, etag } as const)
+          : ({
+              status: 200,
+              etag,
+              body: { messages: [message({ id: `m${String(state.version)}` })], nextCursor: null },
+            } as const);
+      },
+    };
+    return { client, state };
+  };
+
+  test('a 304 keeps the page already held', async () => {
+    const { client, state } = polling();
+    const first = await readFerretQueuePage(client, 'f1');
+    const again = await readFerretQueuePage(client, 'f1');
+    expect(again).toEqual(first);
+    expect(again.messages.map(each => each.id)).toEqual(['m1']);
+    expect(state.asked.map(each => each.ifNoneMatch)).toEqual([undefined, '"queue-1"']);
+  });
+
+  test('a 200 replaces it, and a page asked for with its own cursor is held on its own', async () => {
+    const { client, state } = polling();
+    await readFerretQueuePage(client, 'f1');
+    state.version = 2;
+    expect((await readFerretQueue(client, 'f1')).map(each => each.id)).toEqual(['m2']);
+    await readFerretQueuePage(client, 'f1', { before: 'cursor', limit: 5 });
+    expect(state.asked.at(-1)).toEqual({ query: { before: 'cursor', limit: '5' } });
+  });
+});

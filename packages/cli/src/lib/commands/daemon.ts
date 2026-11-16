@@ -7,6 +7,7 @@ import type { DaemonController } from '../daemon/controller.ts';
 import { ClientResetInventory } from '../daemon/reset-inventory.ts';
 import { EXIT } from '../errors.ts';
 import { judgePlugin } from '../guard.ts';
+import { downLines, readSupervisor, supervisorJson, supervisorLines } from './daemon-supervisor.ts';
 import { MidTurnUnreadableError } from '../update/mid-turn.ts';
 import type { ShellContext, ShellVerb } from '../shell-context.ts';
 
@@ -39,20 +40,24 @@ async function limitsLines(ctx: ShellContext): Promise<readonly string[]> {
 export const daemonStatus: ShellVerb = async ctx => {
   const { io, identity } = ctx.world;
   const probe = await ctx.world.probe();
+  const supervisor = await readSupervisor(ctx);
   // V-0243: `--json` is the machine-readable answer; it carries the probe's own facts and reads no plugin inventory.
+  // 5.0's keys {running, baseUrl, version|why, protocol} stay, and today's {daemon, reachability, orphan, supervisor, ...} join them.
   if (optionOn(ctx.invocation, 'json')) {
+    const seen = probe.state === 'down' ? undefined : probe.health;
     io.out(
-      `${JSON.stringify(
-        probe.state === 'down'
+      `${JSON.stringify({
+        ...(probe.state === 'down'
           ? { running: false, baseUrl: probe.baseUrl, why: probe.why }
-          : { running: true, baseUrl: probe.baseUrl, version: probe.health.version, protocol: probe.health.protocol },
-      )}\n`,
+          : { running: true, baseUrl: probe.baseUrl, version: probe.health.version, protocol: probe.health.protocol }),
+        ...supervisorJson(supervisor, { up: seen !== undefined, health: seen }),
+      })}\n`,
     );
     return probe.state === 'down' ? EXIT.failure : EXIT.ok;
   }
   if (probe.state === 'down') {
     io.err(
-      `daemon  not running at ${probe.baseUrl} (${probe.why})\nstart it with \`${identity.binary} daemon start\`\n`,
+      `daemon  not running at ${probe.baseUrl} (${probe.why})\n${downLines(supervisor, identity.binary).join('\n')}\nstart it with \`${identity.binary} daemon start\`\n`,
     );
     return EXIT.failure;
   }
@@ -78,7 +83,10 @@ export const daemonStatus: ShellVerb = async ctx => {
     lines.push(`plugins  not read: ${error instanceof Error ? error.message : String(error)}`);
   }
   lines.push(...(await limitsLines(ctx)));
-  io.out(`${lines.join('\n')}\n`);
+  const { lines: supervised, remedy } = supervisorLines(supervisor, identity.binary);
+  io.out(`${[...lines, ...supervised].join('\n')}\n`);
+  // Still exit 0: an orphan serves, which is the question a script asks. The remedy is said instead, on the error stream.
+  if (remedy !== undefined) io.err(`${remedy}\n`);
   return EXIT.ok;
 };
 
