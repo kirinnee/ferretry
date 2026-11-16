@@ -21,6 +21,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { rowsOf } from '../../packages/core/kernel/testing/parity.ts';
 import { contextFor } from '../gen/lib/check.ts';
+import { readPendingMerged } from '../gen/lib/pending-files.ts';
 import { sourceFiles } from '../gen/lib/workspace.ts';
 import { movedPairs } from '../validate/descriptor-parity.ts';
 import {
@@ -137,11 +138,11 @@ export async function report(root: string): Promise<string> {
   const rows = readLedger(readFileSync(join(root, LEDGER), 'utf8')).filter(
     (r: LedgerRow) => r.kind === 'R' && !r.status.startsWith('[x]') && !r.status.startsWith('removed by design'),
   );
-  const pendingFile = join(root, 'ports-pending.json');
-  const pendingReasons = existsSync(pendingFile)
-    ? ((JSON.parse(readFileSync(pendingFile, 'utf8')) as { pendingReasons?: Record<string, string[]> })
-        .pendingReasons ?? {})
-    : {};
+  const pendingText = readPendingMerged(root);
+  const pendingReasons =
+    pendingText === undefined
+      ? {}
+      : ((JSON.parse(pendingText) as { pendingReasons?: Record<string, string[]> }).pendingReasons ?? {});
   const owner = new Map<string, (typeof model.loaded)[number]>();
   for (const s of model.loaded) for (const r of rowsOf(s.manifest)) owner.set(`${r.table}\t${r.key}`, s);
   const cache = new Map<string, { rel: string; text: string }[]>();

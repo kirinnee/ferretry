@@ -1,5 +1,6 @@
 /**
- * `ports-pending` (§7.9, spine §7): `ports-pending.json` grows (against the base ref, default `origin/rebuild/5.0`),
+ * `ports-pending` (§7.9, spine §7): the pending lists (one `ports-pending.json` per owning package, plus a small root
+ * file; the rule is in `scripts/gen/lib/pending-files.ts`) grow (against the base ref, default `origin/rebuild/5.0`),
  * names an id that is no subsystem, or lists a plugin none of whose halves is a skeleton any more. A port removes its
  * own line in the same branch.
  *
@@ -12,11 +13,15 @@
  * exist). `pendingHalves` also only shrinks against the base, apart from the one-time corrections in
  * `ONE_TIME_HALF_ALLOWANCE`.
  */
-import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { isSkeleton } from '../gen/lib/halves.ts';
 import { type Check, type Finding, runMain } from '../gen/lib/check.ts';
+import {
+  OWNED_FILE,
+  PENDING_FILE,
+  readPendingMerged,
+  readPendingMergedBase,
+  readPendingTexts,
+} from '../gen/lib/pending-files.ts';
 import { readPendingApps } from '../gen/lib/pending-apps.ts';
 import { HALVES, loadHalf } from '../gen/lib/workspace.ts';
 
@@ -108,21 +113,83 @@ export function parsePending(text: string, where: string): PortsPending {
   return { format: 1, pending: value.pending as string[], reasons, halves };
 }
 
+/** Every pending file of the tree, merged: a line named in two files throws. */
 export function readPending(root: string): PortsPending {
-  const file = join(root, 'ports-pending.json');
-  if (!existsSync(file)) return { format: 1, pending: [], reasons: {}, halves: {} };
-  return parsePending(readFileSync(file, 'utf8'), 'ports-pending.json');
+  const text = readPendingMerged(root);
+  if (text === undefined) return { format: 1, pending: [], reasons: {}, halves: {} };
+  return parsePending(text, PENDING_FILE);
 }
 
-/** The base list: a git ref's committed `ports-pending.json`, or `file:<path>` (tests, and a release compare). */
+/** The base lists: a git ref's committed pending files, or `file:<path>` (a file or a tree; tests, a release compare). */
 function readBase(root: string, ref: string): PortsPending | undefined {
-  if (ref.startsWith('file:')) {
-    const file = ref.slice(5);
-    return existsSync(file) ? parsePending(readFileSync(file, 'utf8'), file) : undefined;
+  try {
+    const text = readPendingMergedBase(root, ref);
+    return text === undefined ? undefined : parsePending(text, `${ref}:${PENDING_FILE}`);
+  } catch {
+    return undefined; // an unreadable base proves nothing here
   }
-  const shown = spawnSync('git', ['show', `${ref}:ports-pending.json`], { cwd: root, encoding: 'utf8' });
-  if (shown.status !== 0) return undefined;
-  return parsePending(shown.stdout, `${ref}:ports-pending.json`);
+}
+
+/** An `unwired` seam that names a file inside a package: `code:packages/<core|plugins>/<id>/…`. Group 1 is the owner. */
+const PACKAGE_SEAM = /^code:packages\/(?:core|plugins)\/([^/]+)\//u;
+
+const OWNED_KEYS = ['format', 'pending', 'pendingReasons', 'pendingHalves', 'pendingAppPorts', 'unwired'];
+
+/** Findings for a file outside the rule, or one that holds a line some other owner keeps. */
+export function ownershipFindings(root: string): Finding[] {
+  const check = 'ports-pending';
+  const findings: Finding[] = [];
+  for (const { where, text } of readPendingTexts(root)) {
+    let doc: Record<string, unknown>;
+    try {
+      doc = JSON.parse(text) as Record<string, unknown>;
+    } catch {
+      continue; // readPending names the parse error
+    }
+    const owner = OWNED_FILE.exec(where)?.[1];
+    const add = (message: string): number => findings.push({ check, where, message });
+    if (where !== PENDING_FILE && owner === undefined) {
+      add('is outside the rule: a pending file is the root one or packages/<core|plugins>/<id>/ports-pending.json');
+      continue;
+    }
+    for (const key of Object.keys(doc)) if (!OWNED_KEYS.includes(key)) add(`unknown key "${key}"`);
+    const ids = [
+      ...(Array.isArray(doc.pending) ? (doc.pending as string[]) : []),
+      ...Object.keys((doc.pendingReasons as object | undefined) ?? {}),
+      ...Object.keys((doc.pendingHalves as object | undefined) ?? {}),
+      ...(Array.isArray(doc.pendingAppPorts)
+        ? (doc.pendingAppPorts as { plugin?: string }[]).map(p => p.plugin ?? '')
+        : []),
+    ];
+    for (const id of new Set(ids))
+      if (id !== owner)
+        add(
+          owner === undefined
+            ? `holds ${id}'s lines; the root file keeps only repo-wide "unwired" seams, move them to ${id}'s own ports-pending.json`
+            : `holds ${id}'s lines; this file is ${owner}'s, move them to ${id}'s own ports-pending.json`,
+        );
+    if (doc.unwired === undefined) continue;
+    if (!Array.isArray(doc.unwired)) {
+      add('"unwired" is not a list');
+      continue;
+    }
+    for (const entry of doc.unwired as unknown[]) {
+      const seam = (entry as { seam?: unknown } | null)?.seam;
+      if (typeof seam !== 'string') {
+        add('an "unwired" entry has no "seam" text');
+        continue;
+      }
+      // A seam naming a file inside a package belongs to that package's file; hooks and the like are repo-wide.
+      const seamOwner = PACKAGE_SEAM.exec(seam)?.[1];
+      if (seamOwner !== undefined && seamOwner !== owner)
+        add(
+          `holds the "unwired" seam ${seam}, which is ${seamOwner}'s; ${
+            owner === undefined ? 'the root file keeps only repo-wide seams' : `this file is ${owner}'s`
+          }, move it to ${seamOwner}'s own ports-pending.json`,
+        );
+    }
+  }
+  return findings;
 }
 
 export const check: Check = {
@@ -137,11 +204,8 @@ export const check: Check = {
     } catch (error) {
       return [{ check, where: 'ports-pending.json', message: error instanceof Error ? error.message : String(error) }];
     }
-    const seen = new Set<string>();
-    for (const id of current.pending) {
-      if (seen.has(id)) findings.push({ check, where: 'ports-pending.json', message: `${id} listed twice` });
-      seen.add(id);
-    }
+    findings.push(...ownershipFindings(ctx.root));
+    const seen = new Set(current.pending); // a name listed twice already threw in the merge
     for (const id of Object.keys(current.reasons))
       if (!seen.has(id))
         findings.push({
