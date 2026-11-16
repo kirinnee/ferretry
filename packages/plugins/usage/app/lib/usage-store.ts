@@ -195,9 +195,10 @@ export class DaemonUsageStore {
    *
    * The first consumer reads immediately and starts the shared timer; every
    * later one joins that timer AND the read already made or in flight, so N
-   * rows cost one `GET /v1/usage`, not N. Only a changed connection reads
-   * again: a re-paired connection takes over rather than leaving a stale one
-   * in the closure. The timer stops when the last consumer releases; the
+   * rows cost one `GET /v1/usage`, not N, whichever connection object each
+   * passes: the join is keyed by `daemonId`. The latest connection object is
+   * the one the timer reads with, and a cleared daemon is read again by the
+   * next joiner. The timer stops when the last consumer releases; the
    * release is idempotent so a double unmount cannot free another consumer's
    * hold.
    */
@@ -205,7 +206,10 @@ export class DaemonUsageStore {
     const id = daemon.daemonId;
     const existing = this.#watches.get(id);
     if (existing !== undefined) {
-      if (existing.daemon !== daemon) void this.refresh(daemon);
+      // Keyed by daemonId, never by object identity: every row builds its own `{ daemonId }`, and a new object for
+      // the same daemon is not a reconnect. A real reconnect rebuilds the half (a new store) or clears the daemon,
+      // and a joiner after a clear finds no held answer and reads again.
+      if (!this.#reading.has(id) && !this.#entries.has(id)) void this.refresh(daemon);
       existing.count += 1;
       existing.daemon = daemon;
     } else {

@@ -312,18 +312,95 @@ describe('DaemonUsageStore.watch', () => {
       ),
       { isHidden: () => false },
     );
-    const releases = Array.from({ length: 25 }, () => store.watch(laptop));
+    // Every row builds its OWN `{ daemonId }` (`useDaemonConnection` memoises per component): distinct objects.
+    const releases = Array.from({ length: 25 }, () => store.watch({ daemonId: 'daemon/laptop' }));
     await settled();
     expect(reads).toBe(1);
     expect(store.usage(laptop.daemonId).status).toBe('ready');
     // A row that mounts later joins the answer already held: no new read.
-    releases.push(store.watch(laptop));
+    releases.push(store.watch({ daemonId: 'daemon/laptop' }));
     await settled();
     expect(reads).toBe(1);
     for (const release of releases) release();
   });
 
-  it('joins a read still in flight when the rows remount, and reads again for a changed connection', async () => {
+  it('reads once per daemon: two daemons watched by distinct objects make two reads', async () => {
+    const reads: string[] = [];
+    const answer = (id: string) => async () => {
+      reads.push(id);
+      return feed(40);
+    };
+    const store = new DaemonUsageStore(
+      portFor(
+        new Map([
+          [laptop.daemonId, answer(laptop.daemonId)],
+          [workstation.daemonId, answer(workstation.daemonId)],
+        ]),
+      ),
+      { isHidden: () => false },
+    );
+    const releases = [
+      ...Array.from({ length: 5 }, () => store.watch({ daemonId: laptop.daemonId })),
+      ...Array.from({ length: 5 }, () => store.watch({ daemonId: workstation.daemonId })),
+    ];
+    await settled();
+    expect([...reads].sort()).toEqual([laptop.daemonId, workstation.daemonId]);
+    for (const release of releases) release();
+  });
+
+  it('reads again for the next joiner after the daemon is cleared, and not before', async () => {
+    let reads = 0;
+    const store = new DaemonUsageStore(
+      portFor(
+        new Map([
+          [
+            laptop.daemonId,
+            async () => {
+              reads += 1;
+              return feed(40);
+            },
+          ],
+        ]),
+      ),
+      { isHidden: () => false },
+    );
+    const held = store.watch({ daemonId: laptop.daemonId });
+    await settled();
+    expect(reads).toBe(1);
+    store.clearDaemon(laptop.daemonId); // the shell dropped this daemon's feed (unpair / reconnect)
+    const joined = store.watch({ daemonId: laptop.daemonId });
+    await settled();
+    expect(reads).toBe(2);
+    expect(store.usage(laptop.daemonId).status).toBe('ready');
+    held();
+    joined();
+  });
+
+  it('a rebuilt half is a new store and reads again', async () => {
+    let reads = 0;
+    const port = portFor(
+      new Map([
+        [
+          laptop.daemonId,
+          async () => {
+            reads += 1;
+            return feed(40);
+          },
+        ],
+      ]),
+    );
+    const first = new DaemonUsageStore(port, { isHidden: () => false });
+    const stopFirst = first.watch({ daemonId: laptop.daemonId });
+    await settled();
+    const rebuilt = new DaemonUsageStore(port, { isHidden: () => false });
+    const stopRebuilt = rebuilt.watch({ daemonId: laptop.daemonId });
+    await settled();
+    expect(reads).toBe(2);
+    stopFirst();
+    stopRebuilt();
+  });
+
+  it('joins a read still in flight when the rows remount, and a newer connection object for the same daemon is not a reconnect', async () => {
     let reads = 0;
     const finishers: (() => void)[] = [];
     const store = new DaemonUsageStore(
@@ -348,15 +425,13 @@ describe('DaemonUsageStore.watch', () => {
     expect(reads).toBe(1);
     const held = store.watch(laptop);
     const repaired = daemonConnection({ daemonId: laptop.daemonId, baseUrl: 'https://laptop-2.example.test' });
-    const next = store.watch(repaired); // a re-paired connection reads again
-    expect(reads).toBe(2);
-    // The newer read answers first; the older one settling after it must not clear anything of the newer.
-    expect(finishers).toHaveLength(2);
-    finishers[1]?.();
-    await settled();
+    const next = store.watch(repaired); // a new object with the same daemonId joins the read in flight
+    expect(reads).toBe(1);
+    expect(finishers).toHaveLength(1);
     finishers[0]?.();
     await settled();
     expect(store.usage(laptop.daemonId).status).toBe('ready');
+    expect(reads).toBe(1);
     held();
     next();
   });
