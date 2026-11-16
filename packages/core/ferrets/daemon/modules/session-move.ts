@@ -577,7 +577,7 @@ async function decideRelaunchConversation(
  */
 function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsystem & AgentJobControl {
   /** The preflight's look at a session, shared by the move and by the ask that clears its way. */
-  const inspect = async (id: SessionId, { config, state, tmuxSession }: MoveSubject) =>
+  const inspect = async (id: SessionId, { config, state, tmuxSession }: MoveSubject, requesterPid?: number) =>
     await parts.preflight.inspect(
       {
         sessionId: id,
@@ -594,6 +594,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
       // the move — the same fail-closed answer this call gave before, now reached only when
       // the evidence is genuinely absent rather than always.
       await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
+      requesterPid === undefined ? {} : { requesterPid },
     );
 
   /** Both documents plus the tmux address, or a stated refusal. A session whose pair does not parse
@@ -764,7 +765,7 @@ function createSessionMoveSubsystem(parts: SessionMoveParts): SessionMoveSubsyst
           'Re-run with --allow-context-downgrade to accept that.',
         { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
-    const report = await inspect(id, { config, state, tmuxSession, command });
+    const report = await inspect(id, { config, state, tmuxSession, command }, request.requesterPid);
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed) {
       // EVERY REFUSAL IS COUNTED. A 409 used to be recorded nowhere, so nobody could say how often the gate said no or

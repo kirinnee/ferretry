@@ -10,7 +10,7 @@ export const prefixes = words('sudo doas env time nice ionice nohup setsid comma
  * absent: what they do is decided by their arguments, so they get argument-aware classifiers.
  */
 export const safeHeads = words(
-  'rg grep egrep fgrep ag ack fd locate ls ll cat bat head tail jq yq wc echo printf pwd whoami date printenv stat file du df tree which type sort uniq cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
+  'rg grep egrep fgrep ugrep ug eza ag ack fd locate ls ll cat bat head tail jq yq wc echo printf pwd whoami date printenv stat file du df tree which type sort uniq cut tr column nl tac rev realpath dirname basename readlink sleep true false test hostname uname id ps top htop free uptime less more diff cmp md5sum sha256sum seq',
 );
 
 export const rearmableHeads = words(
@@ -72,3 +72,23 @@ export const safeToolNames = words(
   'Read Grep Glob LS NotebookRead WebFetch WebSearch TodoWrite BashOutput KillBash KillShell',
 );
 export const rearmableToolNames = words('Write Edit MultiEdit NotebookEdit');
+
+/**
+ * `fy` verbs that only read fleet state or send a message, so killing the process loses nothing: the work they
+ * stand for (`wait` polls, `send` queues, `status` prints) is either redone by running the verb again or already
+ * the daemon's. Decided verb by verb from the CLI definitions (`fy <verb> --help`), never by prefix: a verb absent
+ * here — `migrate`, `restart`, `start`, `new`, `stop`, `signal`, `config`, `daemon`, `task move` … — stays
+ * unclassified and refuses the move. `wait` stops the session it awaited only when that session settles, which the
+ * waiter being killed cannot cause.
+ */
+export const safeFyVerbs = words('wait ps status logs snapshot events view recommend guide search send');
+/** `fy task <sub>`: the read and the append-only note; every other sub-verb moves or rewrites a card. */
+export const safeFyTaskVerbs = words('show note');
+/** The only option `fy` accepts before its verb that this classifier trusts. */
+export const fyGlobalFlags = words('--as-owner');
+
+/**
+ * Redirects that provably touch no file: a descriptor duplicated onto another, or output thrown into `/dev/null`.
+ * Each must be followed by whitespace or the end of the text, so `>/dev/null/../x` and `>/dev/nullx` do not match.
+ */
+export const harmlessRedirect = /(?<=^|\s)(?:[12&]?>\s?\/dev\/null|[12]?>&[12]|<\s?\/dev\/null)(?=\s|$)/gu;

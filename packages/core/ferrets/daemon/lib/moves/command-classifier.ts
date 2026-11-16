@@ -1,9 +1,12 @@
+import { claudeToolShellPayload } from '@ferretry/std';
 import {
   destructiveHeads,
   destructivePackageCommands,
   destructiveScripts,
   findExecActions,
   findWritingActions,
+  fyGlobalFlags,
+  harmlessRedirect,
   httpHeads,
   inPlaceFlag,
   mutatingHttp,
@@ -17,6 +20,8 @@ import {
   rearmableScripts,
   rearmableToolNames,
   runCommands,
+  safeFyTaskVerbs,
+  safeFyVerbs,
   safeHeads,
   safeToolNames,
   shellCommandFlags,
@@ -170,6 +175,19 @@ function classifyPackageManager(head: string, values: readonly string[]): Inflig
   return 'unknown';
 }
 
+/**
+ * `fy <verb>`: safe only for the verbs {@link safeFyVerbs} names (and `task show|note`). The verb is the first word
+ * after the binary, past the one global flag; anything else — another flag first, a verb not listed — is unknown.
+ */
+function classifyFy(values: readonly string[]): InflightVerdict {
+  const index = headIndex(values, 'fy');
+  let position = index + 1;
+  while (fyGlobalFlags.has(values[position] ?? '')) position++;
+  const verb = values[position] ?? '';
+  if (verb === 'task') return safeFyTaskVerbs.has(values[position + 1] ?? '') ? 'safe_to_kill' : 'unknown';
+  return safeFyVerbs.has(verb) ? 'safe_to_kill' : 'unknown';
+}
+
 function classifySegment(segment: string): InflightVerdict {
   // Shell expansions and output redirects can hide writes. They cannot be safely classified from argv text.
   if (/[`]|\$\(|[<>]/.test(segment)) return 'unknown';
@@ -177,6 +195,7 @@ function classifySegment(segment: string): InflightVerdict {
   const head = commandHead(values);
   if (!head) return 'unknown';
   if (head === 'git') return classifyGit(values);
+  if (head === 'fy') return classifyFy(values);
   if (shellHeads.has(head)) return classifyShell(head, values);
   if (head === 'find') return classifyFind(values);
   if (head === 'tmux') return classifyTmux(values);
@@ -188,9 +207,18 @@ function classifySegment(segment: string): InflightVerdict {
   return safeHeads.has(head) ? 'safe_to_kill' : 'unknown';
 }
 
-/** Safely classify a shell command; ambiguous syntax deliberately refuses move. */
+/**
+ * Safely classify a shell command; ambiguous syntax deliberately refuses move.
+ *
+ * A command that is EXACTLY a Claude Code Bash tool shell is classified by the command inside it: the wrapper's fixed
+ * boilerplate (`2>/dev/null`, `< /dev/null`, `pwd -P >| …-cwd`) is not the agent's, while the payload's own redirects
+ * and expansions still count, exactly as if it had been typed alone. A wrapper that is not exactly that shape is
+ * classified as the opaque shell it then is. Codex's `bash -lc <command>` is {@link classifyShell}'s.
+ */
 export function classifyCommand(command: string): InflightVerdict {
-  const segments = splitSegments(command.trim());
+  const payload = claudeToolShellPayload(command);
+  if (payload !== undefined) return classifyCommand(payload);
+  const segments = splitSegments(command.replace(harmlessRedirect, '').trim());
   return segments.length === 0 ? 'unknown' : worstVerdict(segments.map(classifySegment));
 }
 
@@ -198,4 +226,19 @@ export function classifyCommand(command: string): InflightVerdict {
 export function classifyToolName(name: string): InflightVerdict {
   if (safeToolNames.has(name)) return 'safe_to_kill';
   return rearmableToolNames.has(name) ? 're_armable' : 'unknown';
+}
+
+/**
+ * Classifies one running process from its argv as the process table shows it.
+ *
+ * Two things differ from {@link classifyCommand}, which reads command TEXT a shell would still parse. A process
+ * whose first word is a read-only program was exec'd directly — no shell stands between, so a `|`, `;`, `>` or
+ * `$(` in its arguments is a literal argument (`ugrep -E ✖|refused`, the shell having already taken the quotes off),
+ * and the program is what decides. Everything else, including every shell and every harness wrapper, is the
+ * command-text classification.
+ */
+export function classifyProcessArgv(argv: string): InflightVerdict {
+  const first = basename(unquote(tokens(argv.trim())[0] ?? ''));
+  if (!shellHeads.has(first) && !prefixes.has(first) && safeHeads.has(first)) return 'safe_to_kill';
+  return classifyCommand(argv);
 }

@@ -54,6 +54,7 @@ const report = (processes: readonly ProcessInfo[]): InflightReport => ({
   codexBackgroundTerminals: 0,
   discrepancy: 0,
   blindSpots: [],
+  midTurn: false,
   worstVerdict: 'unknown',
 });
 

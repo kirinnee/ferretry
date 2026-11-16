@@ -37,7 +37,58 @@ describe('move in-flight reporting', () => {
     should(gateInflight(actual)).deepEqual({ proceed: true, forced: false, reason: 'no in-flight work' });
   });
 
-  it('should refuse an active session whose pane shows no work at all', () => {
+  it('should let a busy session with nothing open through as re-armable — it is mid-turn, thinking', () => {
+    // Act
+    const actual = assembleInflightReport({
+      status: 'thinking',
+      turn: 1,
+      openTools: [],
+      processes: seen(),
+      codexBackgroundTerminals: 0,
+    });
+
+    // Assert — the turn is interrupted and picked up again; nothing was observed to lose, and nothing is hidden.
+    should(actual.midTurn).be.true();
+    should(actual.empty).be.false();
+    should(actual.blindSpots).deepEqual([]);
+    should(actual.worstVerdict).equal('re_armable');
+    should(gateInflight(actual)).deepEqual({ proceed: true, forced: false, reason: 'in-flight work is re_armable' });
+  });
+
+  it('should keep every busy status mid-turn, and an idle one not', () => {
+    for (const status of ['starting', 'running', 'thinking', 'tool_running', 'retrying'] as const)
+      should(
+        assembleInflightReport({ status, turn: 1, openTools: [], processes: seen(), codexBackgroundTerminals: 0 })
+          .midTurn,
+      ).be.true();
+    should(
+      assembleInflightReport({
+        status: 'waiting',
+        turn: 1,
+        openTools: [],
+        processes: seen(),
+        codexBackgroundTerminals: 0,
+      }).midTurn,
+    ).be.false();
+  });
+
+  it('should still refuse a busy session whose process table could not be read', () => {
+    // Act
+    const actual = assembleInflightReport({
+      status: 'running',
+      turn: 1,
+      openTools: [],
+      processes: blind('the process table could not be read: ps exited 1'),
+      codexBackgroundTerminals: 0,
+    });
+
+    // Assert — "could not look" is never "nothing there".
+    should(actual.midTurn).be.false();
+    should(actual.worstVerdict).equal('unknown');
+    should(gateInflight(actual).proceed).be.false();
+  });
+
+  it('should still refuse a busy session when a caller-supplied signal (tmux, the codex footer) failed', () => {
     // Act
     const actual = assembleInflightReport({
       status: 'running',
@@ -45,24 +96,45 @@ describe('move in-flight reporting', () => {
       openTools: [],
       processes: seen(),
       codexBackgroundTerminals: 0,
+      blindSpots: ['the codex pane footer could not be read: no server running'],
     });
 
-    // Assert — a running session with nothing visible is a blind spot, not an idle session.
-    should(actual.empty).be.false();
-    should(actual.blindSpots).deepEqual(['the session reports running work but nothing was observable in its pane']);
+    // Assert
+    should(actual.midTurn).be.false();
+    should(gateInflight(actual).proceed).be.false();
+  });
+
+  it('should still refuse a busy session that has a codex background terminal', () => {
+    // Act
+    const actual = assembleInflightReport({
+      status: 'running',
+      turn: 1,
+      openTools: [],
+      processes: seen(),
+      codexBackgroundTerminals: 1,
+    });
+
+    // Assert
+    should(actual.midTurn).be.false();
     should(actual.worstVerdict).equal('unknown');
-    should(gateInflight(actual)).deepEqual({
-      proceed: false,
-      forced: false,
-      reason:
-        'refused: The agent says it is working, but Ferretry can’t see what it is running — the session reports running work but nothing was observable in its pane',
+    should(gateInflight(actual).proceed).be.false();
+  });
+
+  it('should still refuse a busy session that reports a subprocess the pane walk cannot find', () => {
+    // Act
+    const actual = assembleInflightReport({
+      status: 'running',
+      turn: 1,
+      openTools: [],
+      processes: seen(),
+      codexBackgroundTerminals: 0,
+      subprocessSince: '2026-07-31T00:00:00.000Z',
     });
-    should(gateInflight(actual, { force: true })).deepEqual({
-      proceed: true,
-      forced: true,
-      reason:
-        'forced past The agent says it is working, but Ferretry can’t see what it is running — the session reports running work but nothing was observable in its pane',
-    });
+
+    // Assert
+    should(actual.midTurn).be.false();
+    should(actual.blindSpots).deepEqual(['the session reports running work but nothing was observable in its pane']);
+    should(gateInflight(actual).proceed).be.false();
   });
 
   it('should refuse a session that reports a subprocess the pane walk cannot find', () => {

@@ -145,6 +145,8 @@ export interface SessionMoveSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
+      /** The `fy` process that made the request, when it sent its pid: see `requesterCall`. Never set by a non-CLI caller. */
+      readonly requesterPid?: number;
       /** Omitted, the bound conversation is resumed or the move refused. */
       readonly conversation?: MoveConversation;
       /** Words that open the turn the relaunched agent is handed — why it was moved. Never set by the route. */
@@ -299,6 +301,7 @@ async function move(
     ...(request.model === undefined ? {} : { model: request.model }),
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
+    ...(request.requesterPid === undefined ? {} : { requesterPid: request.requesterPid }),
     ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
     movedBy: moverOf(context),
     origin: launchOriginOf(context),

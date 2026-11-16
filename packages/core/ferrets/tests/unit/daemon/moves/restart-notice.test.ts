@@ -53,6 +53,31 @@ describe('restartNotice', () => {
     should(restartNotice(safe, REPORT, 'interactive')).be.undefined();
   });
 
+  it('should tell a session that was mid-turn with nothing open that its turn was interrupted, to re-read and continue', () => {
+    for (const mode of ['interactive', 'auto'] as const) {
+      // Arrange
+      const thinking = report({ status: 'thinking' });
+
+      // Act
+      const notice = restartNotice(thinking, REPORT, mode);
+
+      // Assert
+      should(thinking.midTurn).be.true();
+      should(notice).equal(
+        'Ferretry restarted you mid-turn, and nothing you were running was lost. Your previous turn was interrupted mid-way: re-read the end of the conversation to see where it stopped, then continue from there.',
+      );
+    }
+  });
+
+  it('should add the same pick-up sentence when commands were interrupted too', () => {
+    // Act
+    const notice = restartNotice(report({ openTools: [tool('destructive_to_interrupt')] }), REPORT, 'interactive');
+
+    // Assert
+    should(notice).match(/Your previous turn was interrupted mid-way: re-read the end of the conversation/);
+    should(notice).match(/read \/state\/sessions\/session-1\/move-inflight\.md/);
+  });
+
   it('should still tell an auto session, whose resume would otherwise type "continue the assigned task"', () => {
     // Arrange
     const idle = report({ status: 'waiting' });

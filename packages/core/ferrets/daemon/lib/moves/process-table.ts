@@ -1,4 +1,4 @@
-import { classifyCommand } from './command-classifier.ts';
+import { classifyProcessArgv } from './command-classifier.ts';
 import type { KnownProcess } from './harness-provenance.ts';
 import type { ProcessInfo } from './inflight-report.ts';
 
@@ -77,7 +77,7 @@ export function inventoryProcesses(
       argv: row.argv,
       startedSecondsAgo: row.startedSecondsAgo,
       cwd: cwdByPid.get(row.pid),
-      verdict: own === undefined ? classifyCommand(row.argv) : 'safe_to_kill',
+      verdict: own === undefined ? classifyProcessArgv(row.argv) : 'safe_to_kill',
       ...(own === undefined ? {} : { known: own }),
       ppid: row.ppid,
       ...(listening.has(row.pid) ? { listening: true as const } : {}),

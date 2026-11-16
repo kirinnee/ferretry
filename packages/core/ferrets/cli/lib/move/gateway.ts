@@ -18,6 +18,8 @@ export class ClientMoveGateway implements IMoveGateway {
   constructor(
     private readonly client: PluginClient,
     private readonly mintRequestId: () => string,
+    /** This process's own pid, sent with a move so a ferret moving ITSELF is not blocked by its own call (`requesterCall`). */
+    private readonly requesterPid?: number,
   ) {}
 
   async move(
@@ -34,6 +36,7 @@ export class ClientMoveGateway implements IMoveGateway {
       model,
       allowContextDowngrade,
       forceInflight,
+      ...(this.requesterPid === undefined ? {} : { requesterPid: this.requesterPid }),
       ...(conversation === undefined ? {} : { conversation }),
     });
     const answer = await this.client.call<unknown>('POST /v1/ferrets/:ferretId/move', {

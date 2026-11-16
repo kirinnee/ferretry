@@ -93,7 +93,8 @@ describe('the in-flight inventory, in plain words', () => {
     const ps = describeInflight(
       report({ processes: { kind: 'unobservable', reason: 'the process table could not be read: ps exited 1' } }),
     );
-    const quiet = describeInflight(report({ status: 'running' }));
+    // A harness-reported subprocess the walk cannot find (a busy status alone is now a re-armable turn).
+    const quiet = describeInflight(report({ status: 'running', subprocessSince: '2026-07-31T00:00:00.000Z' }));
     const other = describeInflight(report({ processes: { kind: 'unobservable', reason: 'tmux would not answer' } }));
 
     // Assert
@@ -153,5 +154,20 @@ describe('the in-flight inventory, in plain words', () => {
     should(actual.worstVerdict).equal('safe_to_kill');
     should(describeInflight(actual).items).deepEqual([]);
     should(describeInflight(actual).restartsWithCli).equal(1);
+  });
+
+  it('should list a busy session with nothing open as a re-armable turn that does not block', () => {
+    // Arrange
+    const actual = report({ status: 'thinking', processes: seen() });
+
+    // Assert
+    should(describeInflight(actual).items).deepEqual([
+      {
+        kind: 'turn',
+        verdict: 're_armable',
+        title: 'The agent is mid-turn, thinking — moving interrupts this turn; the new session is told to pick it up',
+        blocks: false,
+      },
+    ]);
   });
 });

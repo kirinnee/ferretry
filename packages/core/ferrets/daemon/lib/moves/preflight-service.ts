@@ -1,12 +1,22 @@
+import { commandLabel } from '@ferretry/std';
 import type { SessionStatus } from '../protocol/session-base.ts';
 import type { MoveRefusal } from '../../../contract/move.ts';
 import { type AgentJob, blockingAgentJobs } from './agent-jobs.ts';
 import { backgroundTerminalCount } from './background-terminals.ts';
 import { describeInflight } from './inflight-describe.ts';
-import { assembleInflightReport, type GateDecision, gateInflight, type InflightReport } from './inflight-report.ts';
+import {
+  assembleInflightReport,
+  type GateDecision,
+  gateInflight,
+  type InflightReport,
+  type OpenToolInfo,
+  type ProcessInfo,
+  type ProcessObservation,
+} from './inflight-report.ts';
 import { type MoveOutcome, renderMoveOutcome } from './outcome-render.ts';
 import type { ProcessInventoryPort } from './process-inventory-port.ts';
 import { type ReportMeta, renderInflightCli, renderInflightReport } from './report-render.ts';
+import { requesterCall } from './requester-call.ts';
 import { restartNotice } from './restart-notice.ts';
 import { joinOpenTools } from './tool-inventory.ts';
 
@@ -37,6 +47,19 @@ export interface PaneSnapshotPort {
 
 const CODEX_HARNESS = 'codex';
 
+/**
+ * The open tool call that IS the requesting call: the harness records the command the agent wrote, and the proven tool
+ * shell's argv carries that same command inside its wrapper, so the ONE Bash call whose text equals it is the call
+ * that asked. No call = no match = nothing is left out, and the move refuses as before.
+ */
+function withoutRequesterTool(tools: readonly OpenToolInfo[], call: readonly ProcessInfo[]): readonly OpenToolInfo[] {
+  const shell = call.find(entry => entry.toolShell === entry.pid);
+  const command = shell === undefined ? undefined : commandLabel(shell.argv);
+  if (command === undefined) return tools;
+  const index = tools.findIndex(tool => tool.name === 'Bash' && tool.summary === command);
+  return index === -1 ? tools : tools.filter((_, position) => position !== index);
+}
+
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -56,18 +79,32 @@ export class MovePreflight {
   ) {}
 
   /** `chatTail` is the transcript window the session's open tool ids are joined against. */
-  async inspect(view: MoveTargetView, chatTail: readonly unknown[] = []): Promise<InflightReport> {
-    const processes = await this.inventory.collect(view.tmuxSession);
+  async inspect(
+    view: MoveTargetView,
+    chatTail: readonly unknown[] = [],
+    options: { readonly requesterPid?: number } = {},
+  ): Promise<InflightReport> {
+    const collected = await this.inventory.collect(view.tmuxSession);
+    // The call that asked for the move is not work the move interrupts; see requesterCall for the proof it needs.
+    const chain = collected.kind === 'observed' ? requesterCall(collected.processes, options.requesterPid) : [];
+    const own = new Set(chain);
+    const call = collected.kind === 'observed' ? collected.processes.filter(entry => own.has(entry.pid)) : [];
+    const processes: ProcessObservation =
+      collected.kind === 'observed' && call.length > 0
+        ? { kind: 'observed', processes: collected.processes.filter(entry => !own.has(entry.pid)) }
+        : collected;
     const codex = await this.countBackgroundTerminals(view);
-    return assembleInflightReport({
+    const openTools = withoutRequesterTool(joinOpenTools(view.openTools, chatTail), call);
+    const report = assembleInflightReport({
       status: view.status,
       turn: view.turn,
-      openTools: joinOpenTools(view.openTools, chatTail),
+      openTools,
       processes,
       codexBackgroundTerminals: codex.count,
       subprocessSince: view.subprocessSince,
       blindSpots: codex.blindSpots,
     });
+    return call.length > 0 ? { ...report, requesterCall: call } : report;
   }
 
   private async countBackgroundTerminals(

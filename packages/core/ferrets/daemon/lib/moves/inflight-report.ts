@@ -47,6 +47,15 @@ export interface InflightReport {
   readonly processes: readonly ProcessInfo[];
   readonly codexBackgroundTerminals: number;
   readonly discrepancy: number;
+  /**
+   * The session reports a turn in progress and the inspection, which ran and read everything it could, found NO open
+   * tool, NO process and NO codex background terminal: the agent is between tool calls, thinking or writing. A move
+   * interrupts that turn and the new session is told to pick it up (`re_armable`); it does not block. Never set when
+   * any inspection failed — that is a blind spot.
+   */
+  readonly midTurn: boolean;
+  /** The call that asked for this move, left out of {@link processes}: see `requesterCall`. */
+  readonly requesterCall?: readonly ProcessInfo[];
   /** Everything the inspection could not rule out, in the order it was discovered. */
   readonly blindSpots: readonly string[];
   readonly worstVerdict: InflightVerdict;
@@ -80,8 +89,9 @@ export function isBusyStatus(status: SessionStatus): boolean {
 /**
  * Combines observable signals into a fail-closed move safety report.
  *
- * A blind spot — an inspection that failed, or a session that reports work while the inspection
- * sees none — contributes an `unknown` verdict, because the gate must refuse what it cannot see.
+ * A blind spot — an inspection that failed, or a session that reports a subprocess the inspection cannot
+ * find — contributes an `unknown` verdict, because the gate must refuse what it cannot see. A session that
+ * is merely mid-turn with nothing open is {@link InflightReport.midTurn}, `re_armable`, and does not block.
  */
 export function assembleInflightReport(input: AssembleInflightReportInput): InflightReport {
   const discrepancy = Math.max(0, input.codexBackgroundTerminals);
@@ -91,12 +101,22 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   if (inspection.kind === 'unobservable') blindSpots.push(inspection.reason);
   const claimsWork = busyStatuses.has(input.status) || input.subprocessSince !== undefined;
   const observedItems = input.openTools.length + processes.length + discrepancy;
-  if (inspection.kind === 'observed' && claimsWork && observedItems === 0)
+  // A busy status with nothing open is a turn in progress between tool calls — re-armable — but ONLY when every
+  // inspection ran: an unreadable table, a failed tmux read or a caller-supplied blind spot means "could not look",
+  // and a harness-reported subprocess the walk cannot find is a real discrepancy, so both stay blind spots.
+  const midTurn =
+    inspection.kind === 'observed' &&
+    busyStatuses.has(input.status) &&
+    input.subprocessSince === undefined &&
+    blindSpots.length === 0 &&
+    observedItems === 0;
+  if (inspection.kind === 'observed' && claimsWork && observedItems === 0 && !midTurn)
     blindSpots.push(`the session reports ${input.status} work but nothing was observable in its pane`);
   const verdicts: InflightVerdict[] = [
     ...input.openTools.map(tool => tool.verdict),
     ...processes.map(entry => entry.verdict),
   ];
+  if (midTurn) verdicts.push('re_armable');
   if (blindSpots.length > 0) verdicts.push('unknown');
   if (discrepancy > 0) verdicts.push('unknown');
   const hasInflight =
@@ -112,6 +132,7 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
     processes,
     codexBackgroundTerminals: discrepancy,
     discrepancy,
+    midTurn,
     blindSpots,
     worstVerdict: verdicts.length === 0 ? 'safe_to_kill' : worstVerdict(verdicts),
     subprocessSince: input.subprocessSince,
