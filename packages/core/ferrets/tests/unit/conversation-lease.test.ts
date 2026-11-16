@@ -188,6 +188,32 @@ describe('conversationLeaseRefusal', () => {
     );
   });
 
+  it('should print a holder session and runtime without any control, line-separator or bidi character a lease file can carry', () => {
+    // Arrange — escape, C1, a line separator, bidi override/isolate/mark: each can redraw or reorder a terminal line
+    const hostile = (name: string): string => `${name}\u001b[2K\u009b ‮⁦‎؜\u0007\u007f\r\n`;
+    const existing = lease({ pid: 10, session: hostile('s-1'), runtime: hostile('claude-review') });
+
+    // Act
+    const sentence = conversationLeaseRefusal(existing);
+
+    // Assert — only the visible text is left, in both places the session is named
+    should(sentence).equal(
+      `conversation ${CONVERSATION} is being written by session s-1[2K on claude-review[2K since 2026-10-13 14:02 UTC: stop or resume session s-1[2K instead; only one writer may hold a conversation at a time`,
+    );
+    should(/[\p{Cc}\p{Bidi_Control}\p{Zl}\p{Zp}]/u.test(sentence)).be.false();
+  });
+
+  it('should leave an ordinary session and runtime exactly as written, including non-latin text', () => {
+    // Arrange
+    const existing = lease({ pid: 10, session: 'sé-ß-日本', runtime: 'claude review' });
+
+    // Act
+    const sentence = conversationLeaseRefusal(existing);
+
+    // Assert
+    should(sentence).containEql('session sé-ß-日本 on claude review since');
+  });
+
   it('should name a session with no runtime', () => {
     // Arrange
     const existing = lease({ pid: 10, session: 's-1' });
