@@ -605,7 +605,7 @@ lines" — never read. A fence is a diagram exactly when the renderer says so (`
 | Table                                 | "A table with 4 rows. Columns: name, status, cost."                                                                                         |
 | `fy-render` block                     | Its required `alt`: "A diagram: login flow from browser to daemon." (a broken block is a code block)                                        |
 | Image                                 | "An image: {alt}"                                                                                                                           |
-| `@file`, `:agent`, `&F12`, `!A3`      | "file.ts", "ferret dev", "task F12", "agenda item A3" — the one reference grammar, not a second one                                         |
+| `@file`, `:agent`, `&F12`, `^A3`      | "file.ts", "ferret dev", "task F12", "agenda item A3" — the one reference grammar, not a second one                                         |
 | Commit hashes, UUIDs                  | "a commit", "an ID"; numbers and versions ("4.277.0") are read as they are                                                                  |
 | Emoji, HTML, comments                 | Dropped; tags stripped; `<!-- … -->` is silent                                                                                              |
 | Blockquote                            | "Quote:" then the words                                                                                                                     |

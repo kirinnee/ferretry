@@ -74,12 +74,12 @@ describe('the owner’s chat as `fy agenda log` reads it', () => {
   });
 
   test('copies what the owner typed after a chat reply heading, not the heading', () => {
-    expect(typedWords('[re !A5 «Which db?»] use postgres')).toBe('use postgres');
+    expect(typedWords('[re ^A5 «Which db?»] use postgres')).toBe('use postgres');
   });
 
   test('leaves a text that only starts like a heading, or holds more than one reply, whole', () => {
     expect(typedWords('[re the thing] is what I meant')).toBe('[re the thing] is what I meant');
-    const batch = '[re !A5 «Which db?»] use postgres\n\n[re !A6 «Which os?»] use linux';
+    const batch = '[re ^A5 «Which db?»] use postgres\n\n[re ^A6 «Which os?»] use linux';
     expect(typedWords(batch)).toBe(batch);
   });
 });

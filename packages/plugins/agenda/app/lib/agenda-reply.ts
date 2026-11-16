@@ -7,6 +7,7 @@
 
 import type { AgendaItem } from '@ferretry/core-asks/contract';
 import type { InboxAction } from './agenda-answers.ts';
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 /**
  * An answer picked on a card (or an ask in the chat) with the composer's text riding along: the text becomes the
@@ -31,8 +32,10 @@ export const withComposerNote = (action: InboxAction, text: string): InboxAction
  * (one already typed is not repeated). Nothing is guessed — only the chips the owner added.
  */
 export const withReferences = (text: string, ids: readonly AgendaItem['id'][]): string => {
-  const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
-  return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
+  const missing = [...new Set(ids)].filter(
+    id => !new RegExp(`(?:^|\\s)${ASK_REFERENCE_SIGIL_CLASS}${id}(?=$|[\\s.,;:!?)])`, 'u').test(text),
+  );
+  return missing.length === 0 ? text : `${missing.map(id => `${ASK_REFERENCE_SIGIL}${id}`).join(' ')} ${text}`;
 };
 
 /**

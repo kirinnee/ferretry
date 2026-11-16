@@ -3,6 +3,7 @@
  * (nothing is made) and says how to go on; anything weaker, or no answer at all, lets the create through, because the
  * check must never be the reason work goes unfiled. The matches are Conversation's (`POST /v1/search/related`).
  */
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 import { refuse } from './errors.ts';
 
 /** The most weak matches a refusal lists beside the strong ones. */
@@ -55,7 +56,7 @@ function listedMatches(response: RelatedResponse): readonly RelatedMatch[] {
 
 /** The matches as aligned lines: `&F303  card  In progress  Title — the matching line`. */
 function relatedLines(matches: readonly RelatedMatch[], own: string | undefined): string[] {
-  const rows = matches.map(({ hit }) => ({ hit, ref: `${hit.kind === 'card' ? '&' : '!'}${hit.id}` }));
+  const rows = matches.map(({ hit }) => ({ hit, ref: `${hit.kind === 'card' ? '&' : ASK_REFERENCE_SIGIL}${hit.id}` }));
   const refWidth = Math.max(0, ...rows.map(row => row.ref.length));
   const standingWidth = Math.max(0, ...rows.map(row => row.hit.standing.length));
   return rows.map(({ hit, ref }) => {

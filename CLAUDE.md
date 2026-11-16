@@ -139,7 +139,7 @@ login is shared in place and never seeded. A `config.yaml` that is not `version:
 never converted** — the sentence tells the person to move it aside and set the machine up again.
 There is no switch, no old reader and no migration: the old account system is deleted.
 
-`packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `!attention`, `/skill` or
+`packages/pwa` reads every reference — `:agent`, `@file`, `&task`, `^attention` (the old `!A3` is still read, never written: `!` is shell mode in agent composers), `/skill` or
 `$skill`, `%terminal:<key>`, `%browser:<key>` — through one grammar, one proof-before-link gate, one
 renderer and one click behaviour. The authoring and implementation contract is
 [docs/reference-standard.md](docs/reference-standard.md) — implement against that document, and

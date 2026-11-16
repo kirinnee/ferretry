@@ -21,7 +21,7 @@ import {
 /**
  * Jev's decision tree: yes/no questions, facts first, ending in one action. The owner asked for it on
  * 2026-10-31 ("is it running or dead? if its running => is it stuck? … so that the confidence level is
- * not spread among too many options") and approved this tree (!A120).
+ * not spread among too many options") and approved this tree (^A120).
  */
 
 const NOW = Date.parse('2026-10-31T12:00:00.000Z');

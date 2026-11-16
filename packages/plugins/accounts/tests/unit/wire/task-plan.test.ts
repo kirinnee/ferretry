@@ -596,7 +596,7 @@ describe('approving: the owner only narrows (invariant 9)', () => {
     should(refused({ lines: [{ line: 0, signIn: GITHUB_A, totp: true }] }, codeOnly)).equal('accepted');
   });
 
-  it('should ask for the passkey whenever any line is ticked, a paste line too, and never for a decline (!A244)', () => {
+  it('should ask for the passkey whenever any line is ticked, a paste line too, and never for a decline (^A244)', () => {
     const needs = (approval: TaskPlanApproval) => {
       const selection = taskPlanSelection(plan(), approval);
       return selection.ok && taskPlanSelectionNeedsPasskey(selection.lines);

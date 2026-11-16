@@ -8,7 +8,7 @@ subject; the pages it links own their own facts.
 | Subject                         | Owner                                          |
 | ------------------------------- | ---------------------------------------------- |
 | Importing the old task files    | [board-import.md](board-import.md)             |
-| `&F412` and `!A48` references   | [reference-standard.md](reference-standard.md) |
+| `&F412` and `^A48` references   | [reference-standard.md](reference-standard.md) |
 | The agenda and its items        | [agenda.md](agenda.md)                         |
 | Who may call the board's routes | [grants.md](grants.md)                         |
 
@@ -25,7 +25,7 @@ only when
 1. the project's board is on (`fy board status`),
 2. the card goes under a live card on that board it holds (`--parent`: its own, or one its lead handed it with
    `fy new`), or
-3. the owner said **Yes** to its agenda question "Track this on the board?" (`--approval !A<n>`).
+3. the owner said **Yes** to its agenda question "Track this on the board?" (`--approval ^A<n>`).
 
 Otherwise it asks first: one agenda yes/no, "Track this on the board?". A card a ferret holds works as it always did,
 whatever the switch says. **The daemon enforces this** ([below](#the-daemon-refuses-a-card-nobody-asked-for)): words
@@ -50,7 +50,7 @@ card through:
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | The board is on        | the switch of the board the card lands on. A switch that cannot be read is off.                                                                                                                                                                                                                                                                                                         |
 | A live parent it holds | `--parent` (a refile: the card's parent) is a card on **that same board**, neither dropped nor closed, that the ferret may adopt under (owner, assignee or ancestor standing) — it is splitting work already on the board.                                                                                                                                                              |
-| The owner's Yes        | `--approval !A<n>`: an item on the ferret's **own** agenda, raised by it, asking exactly Yes or No, whose title or ask is "Track … on the board?", closed by the **owner** with **Yes**. The card stores it (`approval`). **One Yes makes one card**: two creates on one Yes are decided one after the other, and the second is refused. A refile carries the Yes the card was made on. |
+| The owner's Yes        | `--approval ^A<n>`: an item on the ferret's **own** agenda, raised by it, asking exactly Yes or No, whose title or ask is "Track … on the board?", closed by the **owner** with **Yes**. The card stores it (`approval`). **One Yes makes one card**: two creates on one Yes are decided one after the other, and the second is refused. A refile carries the Yes the card was made on. |
 
 **The owner's words are no proof.** An earlier draft let a card through whose ask matched the owner's message when
 that message named a card, the board or tracking. Its security review showed "track down the bug" and "the credit card
@@ -60,10 +60,10 @@ tap and has no such hole.
 Otherwise the create (or refile) is refused (`403 forbidden`) with one message that says what to do instead:
 
 ```text
-The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" — then, once the owner says Yes, fy task create … --approval !A<n>.
+The ferretry board is off, so this work needs no card: put only what the owner must decide or do on your agenda (fy agenda add …). To track it anyway, ask first: fy agenda add -k yesno "Track this on the board?" — then, once the owner says Yes, fy task create … --approval ^A<n>.
 ```
 
-A named approval that does not count adds why (`The approval does not count: the owner did not answer Yes to !A12.`).
+A named approval that does not count adds why (`The approval does not count: the owner did not answer Yes to ^A12.`).
 An agenda that cannot be read counts as no Yes, so the rule fails closed.
 
 **`fy new` asks the same of the card it makes for a sub-ferret**, of the board the **child** will work on (its own folder's
@@ -154,10 +154,10 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval !A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
+Board: opt-in, enforced; overrides other task rules. Card only if `fy board status` is on, under your card (`--parent`), or on the owner's Yes (`--approval ^A<n>`). Public=the owner's asks ("status of all I asked?"): top-level, never `--private`; private=your sub-cards. Cards (&F412) never ask: answers, tests, Done ride its agenda, which moves it. One outcome, no umbrellas; add to a related card. Planning is a phase. Title+summary=what it's doing (sitrep). Each step: `fy task show <id> --yaml`, rewrite stale title, summary, status (PRs in doneSoFar), howToTest (where/do/see) before try, then `fy task patch <id> --file f`. `fy task move <id> <lane> --reason "<why>"`. Blocked: `fy task depend`/`block`. Owner's bug: `fy task reopen <id> --to <lane> --ask "<words>"`. PRs, merges, `fy signal done` self-move.
 ```
 
-Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
+Tasks are `&F412` and agenda items are `^A48`; nothing prints the retired `#F412`
 ([reference-standard.md](reference-standard.md)). The card-writing part is the owner's (2026-10-31): a title of at
 most five words, a one-line summary, premise and context as short bullets, and — before a card reaches Released or Ready to try — a
 How to test written for the owner ([How a card reads](#how-a-card-reads)). Registering a project by hand is no
@@ -635,7 +635,7 @@ The view adds fields that are never stored:
 | `origin`                     | `human` (the owner asked for it) or `agent`; see below             |
 | `humanParent`                | the nearest ancestor card whose origin is `human`, or none         |
 
-A card is referenced as `&F412`, an agenda item as `!A48`. The retired `#F12` is still accepted as input, and
+A card is referenced as `&F412`, an agenda item as `^A48`. The retired `#F12` is still accepted as input, and
 never printed ([reference-standard.md](reference-standard.md)).
 
 ### Patch: a card as one document
@@ -1494,7 +1494,7 @@ or an `*_ask_owner` tool) that is open on a card **currently** in a gate lane, a
 agenda carries that card's open ask, the ferret gets one queued message per item:
 
 ```text
-&F412 already asks the owner on !A31, which carries the card: put yours on it (fy agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !A44: fy agenda dismiss !A44
+&F412 already asks the owner on ^A31, which carries the card: put yours on it (fy agenda edit A31 --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ^A44: fy agenda dismiss ^A44
 ```
 
 - **Once per item.** The send id carries the item, so a turn end seen twice is one message.
@@ -1602,7 +1602,7 @@ wherever it appears ([reference-standard.md](reference-standard.md)). It is **re
   only once every machine and app runs this release.
 
 - **Only `&F412` is a link in a card's text.** The card detail sits outside any session, and the reference
-  surface is assembled per session (`components/reference-surface.tsx`), so `!A48` and `@file` in a card's Markdown
+  surface is assembled per session (`components/reference-surface.tsx`), so `^A48` and `@file` in a card's Markdown
   stay prose until the Board builds a surface of its own — the same as an agenda card read in the Inbox. A task
   reference links on both, through `DaemonTaskReferences`: any card on the machine, per
   [reference-standard.md](reference-standard.md) §6.

@@ -1,6 +1,6 @@
 /**
  * THE MACHINE-WIDE INBOX DEALS EVERY MACHINE'S ASKS OVER ONE PAGE'S REFERENCE FACTS. Those facts (the fleet `:kim` is proved
- * against, the board's `&F12`, the ledger's `!A3`, the listed `@file`) belong to the PAGE'S daemon, so a card of another
+ * against, the board's `&F12`, the ledger's `^A3`, the listed `@file`) belong to the PAGE'S daemon, so a card of another
  * machine proves nothing from them: its references stay prose, never a live link to this machine's kim or card
  * (docs/reference-standard.md: a reference in one daemon's transcript can never open a same-named session on another).
  * A card of the page's own machine still links.
@@ -34,7 +34,7 @@ const LAPTOP = daemonId('laptop');
 const DESK = daemonId('desk');
 const NOW = Date.parse('2026-08-01T12:00:00.000Z');
 
-const WORDS = 'Ask :kim to rebase, see !A3, read @src/a.ts and &F12.';
+const WORDS = 'Ask :kim to rebase, see ^A3, read @src/a.ts and &F12.';
 const words = agendaItem('A5', { subject: 'Rebase?', why: WORDS });
 const cardOn = (daemon: typeof LAPTOP, machine: string) =>
   inboxCard(
@@ -44,7 +44,7 @@ const cardOn = (daemon: typeof LAPTOP, machine: string) =>
     daemon,
   );
 
-/** The page's facts: this laptop has a ferret named kim, `!A3` on the ferret's ledger, `src/a.ts`, and its board has `F12`. */
+/** The page's facts: this laptop has a ferret named kim, `^A3` on the ferret's ledger, `src/a.ts`, and its board has `F12`. */
 const facts: AgendaReferenceFacts = {
   daemonId: LAPTOP,
   fleet: [{ config: { id: 'kim-on-laptop', teammate: 'kim', cwd: '/repo' }, state: { status: 'working' } }] as never,
@@ -86,7 +86,7 @@ const settleAll = () =>
 /** The reference links drawn under `root`, as [text, href] (plain data, so a failure prints readably). */
 const linksIn = (root: ParentNode): ReadonlyArray<readonly [string, string | null]> =>
   [...root.querySelectorAll<HTMLAnchorElement>('a')]
-    .filter(link => /^[:&!@]/u.test(link.textContent ?? ''))
+    .filter(link => /^[:&^@]/u.test(link.textContent ?? ''))
     .map(link => [link.textContent ?? '', link.getAttribute('href')] as const);
 
 /** The page the screen draws: per-card Board, the way `createAgendaScreen` binds it. */
@@ -188,31 +188,31 @@ const resolvedView = async (daemon: typeof LAPTOP) => {
   return linksIn(root);
 };
 
-const OWN = [':kim', '!A3', '@src/a.ts', '&F12'];
+const OWN = [':kim', '^A3', '@src/a.ts', '&F12'];
 
 describe('a card of ANOTHER machine, on this machine’s Inbox: nothing proved for this machine is live', () => {
-  it('the Needs-you deck card keeps :kim, !A3, @file and &F12 as prose', async () => {
+  it('the Needs-you deck card keeps :kim, ^A3, @file and &F12 as prose', async () => {
     expect(await listCard(cardOn(DESK, 'Desk'))).toEqual([]);
   });
 
-  it('the open card (under that machine’s own Board) keeps :kim, !A3, @file and &F12 as prose', async () => {
+  it('the open card (under that machine’s own Board) keeps :kim, ^A3, @file and &F12 as prose', async () => {
     expect(await openCard(cardOn(DESK, 'Desk'))).toEqual([]);
   });
 
-  it('the resolved machine view keeps :kim, !A3, @file and &F12 as prose', async () => {
+  it('the resolved machine view keeps :kim, ^A3, @file and &F12 as prose', async () => {
     expect(await resolvedView(DESK)).toEqual([]);
   });
 });
 
 describe('a card of the page’s own machine', () => {
-  it('links :kim, !A3, @file and &F12 in the Needs-you deck', async () => {
+  it('links :kim, ^A3, @file and &F12 in the Needs-you deck', async () => {
     const links = await listCard(cardOn(LAPTOP, 'Laptop'));
 
     expect(links.map(([text]) => text)).toEqual(OWN);
     expect(links[0]?.[1]).toBe('/d/laptop/session/kim-on-laptop');
   });
 
-  it('links :kim, !A3, @file and &F12 in the open card, though it sits under its own machine’s Board', async () => {
+  it('links :kim, ^A3, @file and &F12 in the open card, though it sits under its own machine’s Board', async () => {
     const links = await openCard(cardOn(LAPTOP, 'Laptop'));
 
     expect(links.map(([text]) => text)).toEqual(OWN);

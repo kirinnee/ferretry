@@ -355,7 +355,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expect(statSync(overlay).mode & 0o777).toBe(0o600);
   };
 
-  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the PROJECT wins, the start is not refused, and no credential is in an argv (!A500)', async () => {
+  test('(d) Claude env login in a project whose .claude/settings.local.json blanks ANTHROPIC_BASE_URL: the PROJECT wins, the start is not refused, and no credential is in an argv (^A500)', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {
@@ -382,7 +382,7 @@ describe('a ferret authenticates end to end (merge bar 7)', () => {
     expectNoCredentialAnywhere(daemon, launched?.argv);
   });
 
-  test('(d2) Claude env login whose store-held token the project also sets: not refused, the project’s value wins, no credential in an argv (!A500)', async () => {
+  test('(d2) Claude env login whose store-held token the project also sets: not refused, the project’s value wins, no credential in an argv (^A500)', async () => {
     const provider = startFakeProvider(FAKE_TOKEN);
     cleanups.push(() => provider.stop());
     const daemon = await boot(provider, () => ({}), FAKE_TOKEN, undefined, {

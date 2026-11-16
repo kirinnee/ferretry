@@ -526,7 +526,7 @@ describe('fy card new', () => {
     const { controller, gateway, log } = harness(new FakeGateway(), DENISHA);
 
     // Act
-    await controller.create([], { ...base, approval: '!A12' });
+    await controller.create([], { ...base, approval: '^A12' });
 
     // Assert
     should(gateway.createCalls[0]?.request).containEql({ approval: 'A12' });
@@ -538,7 +538,7 @@ describe('fy card new', () => {
     const { controller, gateway } = harness(new FakeGateway(), DENISHA);
 
     // Act
-    await controller.create([], { ...base, thread: '!A12' });
+    await controller.create([], { ...base, thread: '^A12' });
     const error = await controller.create([], { ...base, thread: 'F12' }).then(
       () => undefined,
       (thrown: unknown) => thrown,
@@ -1380,7 +1380,7 @@ describe('fy card new — related work', () => {
     const listed = log.find(line => line.startsWith('diag: Related cards')) ?? '';
     should(listed).containEql('prefer adding to one (a note, nothing created)');
     should(listed).containEql('&F303');
-    should(listed).not.containEql('!A3');
+    should(listed).not.containEql('^A3');
     should(listed).containEql('fy card new … --related F12');
   });
 

@@ -2,6 +2,7 @@ import { type CardId, type CardRef, type CardResponse, type Lane, laneStage } fr
 import type { TranscriptEvent } from './transcript-events.ts';
 import { BoardError } from './errors.ts';
 import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
+import { ASK_REFERENCE_SIGIL, ASK_REFERENCE_SIGIL_CLASS } from '@ferretry/core-asks/contract';
 
 /**
  * THE BACKSTOP UNDER "ONE ASK PER THING" (docs/board.md § Cards show progress; docs/agenda.md § Card asks).
@@ -23,7 +24,8 @@ import { BOARD_CHECK_TAIL, lastTurn } from './turn-check.ts';
  * Pure except {@link BoardGateCheck}, which reads and sends through its ports.
  */
 
-const GATE_CHECK_OPENING = /^&\S+ already asks the owner on !/u;
+// Either sigil: a nudge worded before the change says `!A31`, and it is still the check's own.
+const GATE_CHECK_OPENING = new RegExp(`^&\\S+ already asks the owner on ${ASK_REFERENCE_SIGIL_CLASS}`, 'u');
 
 /**
  * Whether a tool call raised an ask: the CLI under whatever binary name (`ask add|edit|answer`, `notify`), a Ferretry
@@ -91,7 +93,7 @@ export const gateCheckMessage = (duplicates: readonly DuplicateGateItem[], binar
   duplicates
     .map(
       ({ card, gateItem, item }) =>
-        `&${card} already asks the owner on !${gateItem}, which carries the card: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop !${item}: ${binary} ask dismiss !${item}`,
+        `&${card} already asks the owner on ${ASK_REFERENCE_SIGIL}${gateItem}, which carries the card: put yours on it (${binary} ask edit ${gateItem} --where "<each existing point>" --where "<what you need>"; --where replaces them all, so repeat the ones already there), then drop ${ASK_REFERENCE_SIGIL}${item}: ${binary} ask dismiss ${ASK_REFERENCE_SIGIL}${item}`,
     )
     .join('\n');
 

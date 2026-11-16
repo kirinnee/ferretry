@@ -309,16 +309,16 @@ describe('swipes', () => {
 
 describe('replies', () => {
   test('says what it is holding', () => {
-    expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed !A3');
-    expect(actionSentence(UNSNOOZE_ACTION, 'A3')).toBe('!A3 is back on your list');
+    expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed ^A3');
+    expect(actionSentence(UNSNOOZE_ACTION, 'A3')).toBe('^A3 is back on your list');
     expect(
       actionSentence(snoozeAction(new Date(2026, 9, 30, 15).toISOString()), 'A3', new Date(2026, 9, 30, 9).getTime()),
-    ).toBe('Snoozed !A3 until 15:00');
-    expect(actionSentence(snoozeAction('nonsense'), 'A3')).toBe('Snoozed !A3 until later');
-    expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
-    expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to !A3');
+    ).toBe('Snoozed ^A3 until 15:00');
+    expect(actionSentence(snoozeAction('nonsense'), 'A3')).toBe('Snoozed ^A3 until later');
+    expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked ^A3 done');
+    expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to ^A3');
     expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
-      'Answered !A3: Go',
+      'Answered ^A3: Go',
     );
   });
 });
@@ -362,7 +362,7 @@ describe('Discuss', () => {
   });
 
   test('still says what an old discuss held, for an answer that was in flight', () => {
-    expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
+    expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss ^A3');
   });
 
   test('puts "You asked to discuss" in the history line', () => {

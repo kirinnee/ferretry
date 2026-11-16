@@ -161,7 +161,7 @@ describe('a reply from an Inbox card moves the Inbox on', () => {
 
     await send(run.mounted);
 
-    expect(run.sent).toEqual([{ sessionId: 'sess-2', message: '!A2 only after lunch' }]);
+    expect(run.sent).toEqual([{ sessionId: 'sess-2', message: '^A2 only after lunch' }]);
     const inbox = run.latest();
     expect(keys(inbox.cards)).toEqual([rebase.key]);
     expect(inbox.total).toBe(1);

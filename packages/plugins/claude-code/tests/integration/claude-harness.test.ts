@@ -716,7 +716,7 @@ describe('ClaudeHarness', () => {
     expect(panes.require(FERRET)).toBe('%7');
   });
 
-  describe('the settings items’ launch flags (any flag, owner decision !A525)', () => {
+  describe('the settings items’ launch flags (any flag, owner decision ^A525)', () => {
     const withItems = (items: ReadonlyMap<string, unknown>) =>
       build({
         config: {
@@ -1758,7 +1758,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     expect(await harness.launchSettings(FERRET)).toEqual({ kind: 'current' });
   });
 
-  describe('!A525 the default permission mode is bypass: a harness file that says nothing skips every prompt', () => {
+  describe('^A525 the default permission mode is bypass: a harness file that says nothing skips every prompt', () => {
     const modeOf = (command: readonly string[] | undefined): string | undefined =>
       command?.[(command?.indexOf('--permission-mode') ?? -1) + 1];
     const launchedWith = async (file: () => unknown, call: 'start' | 'resume' = 'start') => {
@@ -1809,7 +1809,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
     });
   });
 
-  describe('the question tool (!A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
+  describe('the question tool (^A527: withheld from every ferret unless config/harness-claude-code.yaml opts in)', () => {
     const NO_QUESTIONS = '--disallowed-tools=AskUserQuestion';
     const optedIn = {
       file: () => ({ searchPaths: [], permissionMode: 'auto', questionTool: true }),
@@ -1966,7 +1966,7 @@ describe('F-0422 Claude Code records what a launch ran under and compares it wit
   });
 });
 
-// ─── skills: Skills' shared folders linked into the ferret home (kernel batch #10, owner decision !A466) ─────────────
+// ─── skills: Skills' shared folders linked into the ferret home (kernel batch #10, owner decision ^A466) ─────────────
 
 describe('F-0006 prepareHome links the selected skills into the ferret home', () => {
   async function minted(name: string) {

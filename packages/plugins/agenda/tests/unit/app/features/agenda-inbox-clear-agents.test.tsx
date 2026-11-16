@@ -78,7 +78,9 @@ const mountPage = async (withPort: boolean, down: readonly string[] = [], calls:
   const button = () => view.container.querySelector<HTMLButtonElement>('[data-agenda-clear-agents-button]');
   const dialog = () => view.container.querySelector('[data-clear-dialog]');
   const rows = (): string[] =>
-    [...view.container.querySelectorAll('[data-agenda-row]')].map(row => row.textContent?.match(/!(A\d+)/u)?.[1] ?? '');
+    [...view.container.querySelectorAll('[data-agenda-row]')].map(
+      row => row.textContent?.match(/\^(A\d+)/u)?.[1] ?? '',
+    );
   return { view, kind, button, dialog, rows, calls };
 };
 

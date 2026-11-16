@@ -88,7 +88,7 @@ describe('AgendaBoard', () => {
 
 describe('attention helpers and transport', () => {
   it('uses explicit attention copy and never makes a long context open by default', () => {
-    expect(agendaReference('A3')).toBe('!A3');
+    expect(agendaReference('A3')).toBe('^A3');
     expect(agendaAge('2026-07-31T11:30:00.000Z', Date.parse('2026-07-31T12:00:00.000Z'))).toBe('waiting 30m');
     expect(collapsesByDefault('x'.repeat(221))).toBe(true);
     expect(

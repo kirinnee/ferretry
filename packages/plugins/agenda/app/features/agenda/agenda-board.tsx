@@ -17,6 +17,7 @@ import {
   ShieldQuestion,
   UserRoundCheck,
 } from 'lucide-react';
+import { ASK_REFERENCE_SIGIL } from '@ferretry/core-asks/contract';
 
 export type AgendaTone = AgendaAsk['kind'] | 'none' | 'unknown';
 
@@ -79,7 +80,7 @@ export const agendaKindMeta = (
 const sourceLabel = (source: AgendaItem['source']): string =>
   ({ task: 'Blocked task', question: 'Question', 'agent-raised': 'Agent request' })[source] ?? 'Unknown source';
 
-export const agendaReference = (id: string): string => `!${id}`;
+export const agendaReference = (id: string): string => `${ASK_REFERENCE_SIGIL}${id}`;
 export const agendaAge = (waitingSince: string, now = Date.now()): string => {
   const minutes = Math.max(0, Math.floor((now - Date.parse(waitingSince)) / 60_000));
   if (minutes < 1) return 'waiting now';

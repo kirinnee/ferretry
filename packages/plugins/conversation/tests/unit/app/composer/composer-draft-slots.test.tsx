@@ -233,7 +233,7 @@ describe('a draft slot (B142)', () => {
   });
 
   test('typing in an Inbox card never reaches the chat draft, and typing in the chat never reaches the card', async () => {
-    // Arrange — the chat box and the card of !A5, one ferret, one machine.
+    // Arrange — the chat box and the card of ^A5, one ferret, one machine.
     const machine = new Daemon();
     const drafts = store();
     const chat = await box(machine, drafts);

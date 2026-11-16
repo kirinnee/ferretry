@@ -39,7 +39,7 @@ const LABELLED_PEER = `[message · fyi from ferret sada (session mvuzx42l-a9f7db
 const shapes: readonly (readonly [string, string, string | undefined, string])[] = [
   ['board', '[ferretry] [board] Task F12 moved to review', 'Ferretry · Board', 'Task F12 moved to review'],
   ['warden', '[ferretry] [warden] Blocked a push', 'Ferretry · Warden', 'Blocked a push'],
-  ['agenda reply', '[re !A12 — Ship it?] yes, ship', 'Agenda', 'yes, ship'],
+  ['agenda reply', '[re ^A12 — Ship it?] yes, ship', 'Agenda', 'yes, ship'],
   ['peer', PEER, 'Sada', 'the build is green'],
   ['one-line peer', ONE_LINE_PEER, 'Sada', 'the build is green'],
   ['labelled peer', LABELLED_PEER, 'Sada', 'the build is green'],
@@ -100,7 +100,7 @@ describe('stripFraming', () => {
     });
   });
   test('answer-to and agenda tags name the agenda', () => {
-    expect(stripFraming('[answer to !A3 x] ok').feature).toBe('Agenda');
+    expect(stripFraming('[answer to ^A3 x] ok').feature).toBe('Agenda');
     expect(stripFraming('[agenda] ok')).toEqual({ body: 'ok', feature: 'Agenda', ferretry: false });
   });
   test('plain text is untouched', () => {

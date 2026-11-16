@@ -263,7 +263,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
 
   test('an absent provider is an empty list, not an error; a ferret not on this daemon is 404', async () => {
     const s = await setup();
-    const none = await ask(s, '!', 'owner');
+    const none = await ask(s, '^', 'owner');
     expect(none.status).toBe(200);
     expect(none.json()).toMatchObject({ provided: false, entries: [] });
     const missing = await s.host.request('GET', '/v1/ferrets/f9/references', { query: { prefix: '&' }, ...OWNER });
@@ -299,7 +299,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
             throw new Error(`board offline at /home/x with ${SECRET}`);
           },
         },
-        '!': { entries: async () => ({ not: 'an array' }) as never },
+        '^': { entries: async () => ({ not: 'an array' }) as never },
         '/': {
           entries: async () => {
             throw new ApiError(403, 'not yours', 'forbidden');
@@ -307,7 +307,7 @@ describe('GET /v1/ferrets/:ferretId/references keeps the grants of the facts it 
         },
       },
     });
-    for (const prefix of ['&', '!']) {
+    for (const prefix of ['&', '^']) {
       const response = await ask(s, prefix, 'owner');
       expect(response.status).toBe(502);
       const body = response.json<{ code: string; error: string }>();

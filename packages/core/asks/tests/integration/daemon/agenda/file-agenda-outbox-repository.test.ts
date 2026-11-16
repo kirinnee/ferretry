@@ -34,7 +34,7 @@ describe('FileAgendaOutboxRepository', () => {
     const { repository, directory } = await createRepository();
     const outbox = {
       ...emptyAgendaOutbox(SESSION),
-      pending: [{ id: 'A1', message: '[answer to !A1 «Ship?»] Yes', at: AT }],
+      pending: [{ id: 'A1', message: '[answer to ^A1 «Ship?»] Yes', at: AT }],
     };
 
     // Act
@@ -58,7 +58,7 @@ describe('FileAgendaOutboxRepository', () => {
       pending: [
         {
           id: 'A3~2',
-          message: '[needs more info !A3 «Log in»] Which account?',
+          message: '[needs more info ^A3 «Log in»] Which account?',
           at: AT,
         },
       ],
@@ -147,7 +147,7 @@ describe('FileAgendaOutboxRepository', () => {
         now: () => AT,
       },
     );
-    await first.add(SESSION, 'A1', '[answer to !A1 «Ship?»] Yes');
+    await first.add(SESSION, 'A1', '[answer to ^A1 «Ship?»] Yes');
 
     // Act — the next daemon, over the same files, resumes and then flushes twice.
     const second = new AgendaReplyBatcher(

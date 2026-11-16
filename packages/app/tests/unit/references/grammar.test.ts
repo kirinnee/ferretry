@@ -56,7 +56,7 @@ describe('parseReferenceToken', () => {
     ['@src/api.ts:120-120', { kind: 'file', path: 'src/api.ts', line: 120, endLine: 120 }],
     ['&F12', { kind: 'task', id: 'F12' }],
     ['&f12', { kind: 'task', id: 'F12' }],
-    ['!A3', { kind: 'attention', id: 'A3' }],
+    ['^A3', { kind: 'attention', id: 'A3' }],
     ['/liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
     ['$liftoff-ops', { kind: 'skill', name: 'liftoff-ops' }],
   ];
@@ -92,7 +92,7 @@ describe('parseReferenceToken', () => {
     ':1zelda',
     ':zelda_name',
     '&A3',
-    '!A0',
+    '^A0',
     'pin:thing',
     '/',
     '$',
@@ -138,7 +138,7 @@ describe('findReferences', () => {
   test('should find all four kinds at exact offsets and leave non-boundaries alone', () => {
     // Arrange
     const text =
-      'Ping :zelda; inspect @src/api.ts:120-140, then &F12 and !A3. Ignore x:link, word&F2, !!A4, @@@, #F9, ?A8.';
+      'Ping :zelda; inspect @src/api.ts:120-140, then &F12 and ^A3. Ignore x:link, word&F2, !^A4, @@@, #F9, ?A8.';
 
     // Act
     const actual = findReferences(text);
@@ -165,11 +165,27 @@ describe('findReferences', () => {
       },
       {
         reference: { kind: 'attention', id: 'A3' },
-        raw: '!A3',
-        start: text.indexOf('!A3'),
-        end: text.indexOf('!A3') + '!A3'.length,
+        raw: '^A3',
+        start: text.indexOf('^A3'),
+        end: text.indexOf('^A3') + '^A3'.length,
       },
     ]);
+  });
+
+  test('should still READ the legacy !A3 as an attention reference, and write only ^A3', () => {
+    // Arrange — `!` opens shell mode in the agent composers, so it is an alias that is read and never emitted.
+    const text = 'see !A3 and ^A5, not x!A7';
+
+    // Act
+    const actual = findReferences(text);
+
+    // Assert
+    should(parseReferenceToken('!A3')).deepEqual({ kind: 'attention', id: 'A3' });
+    should(actual.map(each => each.raw)).deepEqual(['!A3', '^A5']);
+    should(actual.map(each => formatReference(each.reference))).deepEqual(['^A3', '^A5']);
+    should(parseReferenceToken('!a3')).be.null();
+    should(acceptsDirectReferenceQuery('^', 'A')).be.true();
+    should(DIRECT_REFERENCE_SIGILS as readonly string[]).not.containEql('!');
   });
 
   test('should skip a lexical candidate the grammar then refuses', () => {
@@ -194,7 +210,7 @@ describe('formatReference', () => {
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12 })).equal('@src/api.ts:12');
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 })).equal('@src/api.ts:12-20');
     should(formatReference({ kind: 'task', id: 'f12' })).equal('&F12');
-    should(formatReference({ kind: 'attention', id: 'A3' as AgendaId })).equal('!A3');
+    should(formatReference({ kind: 'attention', id: 'A3' as AgendaId })).equal('^A3');
   });
 
   test('should refuse to render a reference the grammar would not accept', () => {
@@ -608,7 +624,7 @@ describe('remarkReferences', () => {
 
   test('should title agent and agenda links in their own voice', () => {
     // Arrange
-    const tree = paragraph('ask :zelda about !A3');
+    const tree = paragraph('ask :zelda about ^A3');
 
     // Act
     remarkReferences({ resolvers })(tree);
@@ -618,7 +634,7 @@ describe('remarkReferences', () => {
       kids(kids(tree)[0])
         .filter(node => node.type === 'link')
         .map(node => node.title),
-    ).deepEqual(["Open :zelda's session", 'Open agenda item !A3']);
+    ).deepEqual(["Open :zelda's session", 'Open agenda item ^A3']);
   });
 
   test('should never rewrite inside code, inline code, raw HTML or an existing link', () => {
@@ -1000,7 +1016,7 @@ describe('the composer-facing half of the grammar', () => {
   describe('acceptsDirectReferenceQuery', () => {
     test('should name exactly the four sigils that open a family of their own', () => {
       // Assert — `@`, `%` and `/` are composer triggers, not token prefixes.
-      should([...DIRECT_REFERENCE_SIGILS]).deepEqual([':', '&', '!', '$']);
+      should([...DIRECT_REFERENCE_SIGILS]).deepEqual([':', '&', '^', '$']);
     });
 
     test('should accept every prefix of a complete token, and the bare sigil', () => {
@@ -1009,7 +1025,7 @@ describe('the composer-facing half of the grammar', () => {
       const complete: readonly [(typeof DIRECT_REFERENCE_SIGILS)[number], string][] = [
         [':', 'zelda'],
         ['&', 'F12'],
-        ['!', 'A31'],
+        ['^', 'A31'],
         ['$', 'summary'],
       ];
 
@@ -1024,12 +1040,12 @@ describe('the composer-facing half of the grammar', () => {
 
     test('should refuse a query no token of that family could ever start with', () => {
       // Act & Assert — `$HOME` is the reason skills are lowercase-only, and
-      // `!a3` is the reason attention is not case-folded.
+      // `^a3` is the reason attention is not case-folded.
       should(acceptsDirectReferenceQuery('$', 'HOME')).be.false();
       should(acceptsDirectReferenceQuery('$', 'PATH')).be.false();
-      should(acceptsDirectReferenceQuery('!', 'a3')).be.false();
-      should(acceptsDirectReferenceQuery('!', 'B3')).be.false();
-      should(acceptsDirectReferenceQuery('!', 'A0')).be.false();
+      should(acceptsDirectReferenceQuery('^', 'a3')).be.false();
+      should(acceptsDirectReferenceQuery('^', 'B3')).be.false();
+      should(acceptsDirectReferenceQuery('^', 'A0')).be.false();
       should(acceptsDirectReferenceQuery('&', 'x1')).be.false();
       should(acceptsDirectReferenceQuery('&', 'F1234567890')).be.false();
       should(acceptsDirectReferenceQuery(':', '1zelda')).be.false();

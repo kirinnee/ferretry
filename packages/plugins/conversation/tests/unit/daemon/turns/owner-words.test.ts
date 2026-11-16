@@ -140,7 +140,7 @@ describe('the owner’s words from the queue and the send ledger', () => {
   test('ownerPartOf drops a ferret’s message whole and Ferretry’s notices by paragraph', () => {
     expect(ownerPartOf('[reply from ferret a] ok')).toBeNull();
     expect(ownerPartOf('The Warden stopped you.\n\nkeep going')).toBe('keep going');
-    expect(ownerPartOf('[answer to !A3] yes')).toBe('[answer to !A3] yes');
+    expect(ownerPartOf('[answer to ^A3] yes')).toBe('[answer to ^A3] yes');
   });
 
   test('no turn documents are written yet, so the words come from the queue and the ledger alone', async () => {
