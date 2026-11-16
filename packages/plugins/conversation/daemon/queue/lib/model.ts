@@ -71,18 +71,46 @@ function applied(message: QueuedMessage, event: Exclude<QueueEvent, { kind: 'enq
 }
 
 /**
+ * Where one fold of a log ended: how many events it applied, the last of them, the messages as they stood and
+ * the answer it gave. A later fold of the same log GROWN — the same event objects, more after them — carries
+ * on from here instead of starting over.
+ */
+interface FoldPoint {
+  readonly count: number;
+  readonly last: QueueEvent;
+  readonly messages: Map<string, QueuedMessage>;
+  readonly answer: readonly QueuedMessage[];
+}
+
+/**
+ * The folds already made, keyed by a log's FIRST event object. Weak, so a log nobody holds takes its fold with it.
+ *
+ * FOLDED ONCE (&F4319). The store keeps the events it parsed and hands the same objects back with the new ones
+ * after them, and a long-lived session's log runs to hundreds of thousands of lines: folding it from the start on
+ * every one of the deliverer's several reads per look cost ~140 ms each. A fold whose input still holds the very
+ * event object a kept fold ended on, at the same place, is that log grown, so only the events after it are applied.
+ * Anything else — a shorter log, a different object there — is folded from the start. The answer is the same
+ * either way: the fold is a pure left fold, and every message in it is replaced, never changed in place.
+ */
+const folds = new WeakMap<QueueEvent, FoldPoint>();
+
+/**
  * The messages a log describes, in the order they were first accepted.
  *
  * An `enqueued` line for an id already held is a retried request and changes nothing; any other line for
  * an id never enqueued is ignored, since there is no message for it to move.
  */
 export function foldQueue(events: readonly QueueEvent[]): readonly QueuedMessage[] {
-  const messages = new Map<string, QueuedMessage>();
+  const first = events[0];
+  if (first === undefined) return [];
+  const kept = folds.get(first);
+  const resumable = kept !== undefined && kept.count <= events.length && events[kept.count - 1] === kept.last;
+  if (resumable && kept.count === events.length) return kept.answer;
+  const messages = resumable ? new Map(kept.messages) : new Map<string, QueuedMessage>();
   // `version` is the 1-based position in the log of the latest line that CHANGED the message: the log is append-only,
   // so it only grows, and unlike a clock it is never shared by two changes.
-  let position = 0;
-  for (const event of events) {
-    position += 1;
+  for (let position = resumable ? kept.count + 1 : 1; position <= events.length; position += 1) {
+    const event = events[position - 1] as QueueEvent;
     if (event.kind === 'enqueued') {
       if (!messages.has(event.message.id)) messages.set(event.message.id, { ...event.message, version: position });
       continue;
@@ -92,5 +120,7 @@ export function foldQueue(events: readonly QueueEvent[]): readonly QueuedMessage
     const next = applied(current, event);
     messages.set(event.id, next === current ? current : { ...next, version: position });
   }
-  return [...messages.values()];
+  const answer = [...messages.values()];
+  folds.set(first, { count: events.length, last: events[events.length - 1] as QueueEvent, messages, answer });
+  return answer;
 }
