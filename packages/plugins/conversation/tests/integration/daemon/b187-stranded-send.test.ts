@@ -192,10 +192,11 @@ describe('B187 a stranded direct send', () => {
     await world.api().send(F1, { kind: 'ferret', ferret: F2 }, { message: 'FIXTURE later B', sendId: 's-b' });
     await advance(5 * MINUTE);
 
-    // The two sends met a box holding text, so they were KEPT untyped (nothing was typed behind the ghost); the first of them
-    // finished the stranded text with ONE Enter, and the harness's record proved it.
-    expect(world.events().filter(event => event === 'control.send_deferred')).toHaveLength(2);
-    expect(world.events()).toContain('control.send_resubmitted');
+    // The two sends wait in the mailbox (an action is held a minute to ride together), so nothing is typed behind the ghost
+    // and no ledger row is kept untyped for them; the look at the box finished the stranded text with ONE Enter, and the
+    // harness's record proved it.
+    expect(world.events().filter(event => event === 'control.send_deferred')).toHaveLength(0);
+    expect(world.events().filter(event => event === 'control.send_resubmitted')).toHaveLength(1);
     expect(ferrets.pane.submitted).toEqual([text]);
     expect(await world.stored('s-nelly')).toMatchObject({ fate: 'delivered' });
     expect(ferrets.pane.draft).toBeUndefined();
