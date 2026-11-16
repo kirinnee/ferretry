@@ -2828,6 +2828,103 @@ describe('a ferret’s message to a Claude ferret goes through its channel', () 
   const row = async (api: Awaited<ReturnType<typeof conversation>>['api'], sendId: string) =>
     (await rows(api, sendId)).find(entry => entry.withdrawn !== true);
 
+  /** Two sends on one lane: the first claimed at 0s and never received, the second claimed at 11s (its grant still live when the first expires at 12s). */
+  const expiredFirstLiveSecond = async () => {
+    const world = await conversation();
+    const { host, ferrets, api, clock } = world;
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'first', sendId: 'lead-1' });
+    await poll(host);
+    expect(await claim(host, 'lead-1')).toMatchObject({ data: { claimed: true } });
+    ferrets.reviewEntries = [unrelated];
+    await pass(clock, 11_000);
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'second', sendId: 'lead-2' });
+    await poll(host);
+    expect(await claim(host, 'lead-2')).toMatchObject({
+      data: { claimed: true, writeBudgetMs: CHANNEL_WRITE_BUDGET_MS },
+    });
+    return world;
+  };
+
+  test('REGRESSION: one expired claim preserves another live grant — the second send is not typed under its own live claim', async () => {
+    const { host, ferrets, api, clock } = await expiredFirstLiveSecond();
+    try {
+      // The first expires at 12s (its tracker look lands a second later): the lane is broken and the first is typed; the
+      // second's grant (11s) is still live, so it is neither typed nor read as never claimed.
+      await pass(clock, 2_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'accepted' });
+      // The second waits out its own grant + write budget + receipt window (11s + 2s + 10s), then is typed exactly once.
+      await pass(clock, 9_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+      await pass(clock, 1_000);
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([
+        `${banner('message')}first`,
+        `${banner('message')}second`,
+      ]);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'direct' });
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('REGRESSION: the second send, still granted when the lane breaks, is delivered by its own receipt and never typed', async () => {
+    const { host, ferrets, api, clock } = await expiredFirstLiveSecond();
+    try {
+      await pass(clock, 1_000);
+      const entries = [
+        unrelated,
+        {
+          ...receipt,
+          id: 'queue-operation:2',
+          at: '2026-11-08T09:00:12.500Z',
+          text: `${banner('message')}second`,
+          data: { ...receipt.data, channelSendId: 'lead-2' },
+        },
+        {
+          ...delivery,
+          id: 'u-2',
+          at: '2026-11-08T09:00:12.700Z',
+          text: `${banner('message')}second`,
+          data: { channelSendId: 'lead-2' },
+        },
+      ];
+      ferrets.reviewEntries = entries;
+      // The look at the second send is its own deadline (11s + 2s + 10s): the receipt is read then, and it is delivered.
+      await pass(clock, 12_000);
+      expect(await row(api, 'lead-2')).toMatchObject({ path: 'channel', fate: 'delivered' });
+      expect(ferrets.delivered.map(entry => entry.text)).toEqual([`${banner('message')}first`]);
+    } finally {
+      await host.stop();
+    }
+  });
+
+  test('REGRESSION: both identical channel sends require and receive their own user proof', async () => {
+    const { host, ferrets, api, clock } = await conversation();
+    await poll(host);
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-1' });
+    await api().send(F1, LEAD, { message: 'ship the report', sendId: 'lead-2' });
+    await poll(host);
+    await claim(host, 'lead-1');
+    await claim(host, 'lead-2');
+    ferrets.reviewEntries = [
+      unrelated,
+      receipt,
+      delivery,
+      { ...receipt, id: 'queue-operation:2', data: { ...receipt.data, channelSendId: 'lead-2' } },
+      { ...delivery, id: 'u-2', data: { channelSendId: 'lead-2' } },
+    ];
+    await pass(clock, 2_000);
+    try {
+      expect(await row(api, 'lead-1')).toMatchObject({ fate: 'delivered', path: 'channel' });
+      expect(await row(api, 'lead-2')).toMatchObject({ fate: 'delivered', path: 'channel' });
+      expect(ferrets.delivered).toEqual([]);
+    } finally {
+      await host.stop();
+    }
+  });
+
   test('an agent send to a connected Claude ferret is handed to the channel, typed nowhere, then proven by the transcript', async () => {
     const { host, ferrets, api, clock } = await conversation();
     await poll(host);

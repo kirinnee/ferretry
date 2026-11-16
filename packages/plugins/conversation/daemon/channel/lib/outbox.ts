@@ -192,14 +192,15 @@ export class ChannelOutbox {
   /**
    * A claimed message was never received within the window: Claude is not taking channel messages (the launch flag was
    * dropped, or an organisation policy refuses them). Nothing more is routed through it until a new subscriber, and what
-   * was waiting is dropped (each such send's own ledger row falls back to typing).
+   * was waiting is dropped (each such send's own ledger row falls back to typing). Claims already GRANTED are kept, each
+   * with its own instant: a server may still be writing that send, so it is never read as "never claimed" and waits out
+   * its own grant, write budget and receipt window before it is typed.
    */
   markBroken(ferret: string): void {
     const lane = this.lane(ferret);
     lane.broken = true;
     lane.pending = [];
     lane.offered.clear();
-    lane.claimed.clear();
     lane.poller?.finish([]);
   }
 

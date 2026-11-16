@@ -207,7 +207,9 @@ describe('the Claude channel outbox', () => {
       should(outbox.broken('f1')).be.true();
       should(outbox.connected('f1')).be.false();
       should(outbox.claim('f1', G1, 'offered')).be.false();
-      should(outbox.claimedAt('f1', 'claimed')).be.undefined();
+      // A grant already given is kept with its own instant: the server may still be writing it.
+      should(outbox.claimedAt('f1', 'claimed')).equal(clock.nowMs());
+      should(outbox.withdraw('f1', 'claimed')).equal('claimed');
       // A server still polling a broken channel is held (it must not spin) and is offered nothing, even when pushed to.
       const held = outbox.poll('f1', G1, 5_000);
       outbox.push('f1', message('after'));
