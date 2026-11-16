@@ -220,8 +220,9 @@ grant's answer; what a read shows has no "raw" class. The owner at the machine r
 - **Comments, key order and layout stay.** Only the changed scalars are rewritten. The YAML library's round trip
   normalises the spacing of a flow list and the spacing before a trailing comment. A text with nothing to hide is
   returned byte for byte.
-- **The etag is the sha256 of the text on disk**, not of what is shown, so a read of a masked file still names the
-  file a write must match (`If-Match`).
+- **The etag is a keyed digest (HMAC-SHA256) of the text on disk**, not of what is shown, so a read of a masked file
+  still names the file a write must match (`If-Match`). The key is the daemon's own and no reader holds it, so an
+  etag cannot be used to test a guess at a hidden value (`docs/secrets.md`).
 - **A masked text saved back is refused.** A write that holds more `‹hidden›` than the file on disk, or a value that
   holds one where the disk value at the same place does not, is refused as a `schema` issue at its line ("a value hidden
   from the device or agent that read this file is still ‹hidden› here; nothing was written"), so the mask is never

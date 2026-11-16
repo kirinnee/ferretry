@@ -3,21 +3,13 @@ import { identifyAgentJobs } from '../../lib/moves/agent-jobs.ts';
 import { type ConfiguredServersPort, configuredServersOf } from '../../lib/moves/configured-servers.ts';
 import { identifyKnownProcesses } from '../../lib/moves/harness-provenance.ts';
 import type { ProcessObservation } from '../../lib/moves/inflight-report.ts';
-import type { PaneSnapshotPort } from '../../lib/moves/preflight-service.ts';
 import type {
+  MovePane,
   ProcessInventoryPort,
   ProcessProbePort,
   ProcessTableRead,
 } from '../../lib/moves/process-inventory-port.ts';
 import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/moves/process-table.ts';
-import { capturePaneArguments } from '../../lib/moves/pane-commands.ts';
-import {
-  hasSessionArguments,
-  isEmptyPaneAnswer,
-  paneProofArguments,
-  parsePaneSighting,
-  type TmuxCommandPort,
-} from '../../lib/session/peers/tmux-lifecycle.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etime=,args='] as const;
 
@@ -262,12 +254,11 @@ export function listeningInodes(table: string): readonly string[] {
 /**
  * Reads a pane's descendant tree.
  *
- * tmux is reached through the socket-scoped {@link TmuxCommandPort} rather than a bare command, so
- * this can only ever address the daemon's own private server — never the machine's default socket.
+ * The pane is the ferret's own, reached through its runner ({@link MovePane}): this reads what the runner identifies and
+ * the process table below that root, and never names a tmux session or a socket.
  */
 export class PaneProcessInventory implements ProcessInventoryPort {
   constructor(
-    private readonly tmux: TmuxCommandPort,
     private readonly probe: ProcessProbePort,
     private readonly provenance: {
       readonly binaryName: string;
@@ -277,33 +268,18 @@ export class PaneProcessInventory implements ProcessInventoryPort {
     },
   ) {}
 
-  async collect(tmuxSession: string): Promise<ProcessObservation> {
+  async collect(pane: MovePane): Promise<ProcessObservation> {
     try {
-      const pane = await this.tmux.execute(paneProofArguments(tmuxSession));
-      if (pane.code !== 0) {
-        // ASK A SECOND QUESTION BEFORE CALLING THIS A BLIND SPOT. A failed pane-pid read used to be
-        // unobservable unconditionally, which is right when tmux may be hiding something and wrong
-        // for the commonest move there is: a session whose account died has no pane at all, and
-        // "I could not look" then blocks the very move the operator is trying to make. tmux is asked
-        // outright whether the session exists, and only a session it CONFIRMS is gone becomes an
-        // empty observation — a server that will not answer either question stays a blind spot.
-        if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
-        return unobservable(`the pane pid could not be resolved: ${pane.stderr.trim() || `tmux exited ${pane.code}`}`);
-      }
-      // tmux 3.8 answers a target that resolves to nothing with exit 0 and every field empty (`|||`), not an error.
-      // That is the same second question as a failed read: only a session tmux CONFIRMS is gone is empty.
-      if (isEmptyPaneAnswer(pane.stdout)) {
-        if (await this.paneConfirmedAbsent(tmuxSession)) return { kind: 'observed', processes: [] };
-        return unobservable(
-          'tmux gave an empty answer for the pane but still lists its session, so what the agent runs could not be checked',
-        );
-      }
-      const sighting = parsePaneSighting(pane.stdout);
-      if (sighting === undefined)
-        return unobservable(`tmux reported an unusable pane pid ${JSON.stringify(pane.stdout.trim())}`);
-      // A dead pane runs nothing. tmux 3.8 says so with no pid at all; older releases keep the dead one.
-      if (sighting.pid === undefined) return { kind: 'observed', processes: [] };
-      const panePid = sighting.pid;
+      // THREE ANSWERS, NOT TWO. A pane the runner PROVES gone ran nothing (an empty observation: a session whose account died
+      // has no pane, and "I could not look" would block the very move the operator is trying to make). A runner that cannot
+      // tell, or a pane with no root process it can name, is a blind spot the gate refuses on: losing a signal must never
+      // look like the absence of work.
+      const identity = await pane.identify();
+      if (identity === 'gone') return { kind: 'observed', processes: [] };
+      if (identity === undefined) return unobservable('the runner could not say which process the pane runs');
+      // A dead pane the runner keeps has no root process, and runs nothing.
+      if (identity.pid === undefined) return { kind: 'observed', processes: [] };
+      const panePid = identity.pid;
       const subtree = await this.probe.descendants?.(panePid);
       let rows: readonly ProcRow[];
       if (subtree !== undefined) rows = subtree;
@@ -334,47 +310,10 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }
   }
-
-  private async paneConfirmedAbsent(tmuxSession: string): Promise<boolean> {
-    return await paneConfirmedAbsent(this.tmux, tmuxSession);
-  }
 }
 
 function unobservable(reason: string): ProcessObservation {
   return { kind: 'unobservable', reason };
-}
-
-/**
- * Whether tmux positively reports that this session does not exist.
- *
- * `has-session` is the only question tmux answers unambiguously about absence: a non-zero exit means
- * no such session on this socket — including the case where the private server is not running at
- * all, which means no managed pane exists to hold work. Anything that stops the question being asked
- * (a tmux that will not spawn, an address the validator refuses) throws or answers zero, and the
- * caller then keeps its blind spot rather than reading a failure as an absence.
- */
-async function paneConfirmedAbsent(tmux: TmuxCommandPort, tmuxSession: string): Promise<boolean> {
-  const probe = await tmux.execute(hasSessionArguments(tmuxSession));
-  return probe.code !== 0;
-}
-
-/**
- * Reads a pane's visible text through the socket-scoped tmux port, so the codex footer can be
- * counted without the move subsystem ever naming a command of its own.
- *
- * A capture that fails is asked the same second question the inventory above asks, and for the same
- * reason: a session tmux confirms is gone has no footer to read, and raising there would turn every
- * stopped codex session into a blind spot that refuses its own move.
- */
-export class TmuxPaneSnapshot implements PaneSnapshotPort {
-  constructor(private readonly tmux: TmuxCommandPort) {}
-
-  async visible(tmuxSession: string): Promise<string | undefined> {
-    const result = await this.tmux.execute(capturePaneArguments(tmuxSession, false));
-    if (result.code === 0) return result.stdout;
-    if (await paneConfirmedAbsent(this.tmux, tmuxSession)) return undefined;
-    throw new Error(`tmux could not capture the pane: ${result.stderr.trim() || `exited ${result.code}`}`);
-  }
 }
 
 /** Reads a project file by absolute path, or answers nothing when it is missing or not the daemon's to read. */

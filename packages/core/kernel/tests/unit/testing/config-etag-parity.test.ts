@@ -13,7 +13,7 @@ import { createConfigFiles } from '../../../host/config/service.ts';
 import { createMemoryHostFs, type MemoryHostFs } from '../../../host/state/memory-fs.ts';
 import { definePlugin, implementDaemon } from '../../../manifest/index.ts';
 import { testHost } from '../../../testing/index.ts';
-import { captureLog, HOME, manualClock } from '../host-config/support.ts';
+import { captureLog, HOME, manualClock, TEST_ETAG_KEY, testEtag } from '../host-config/support.ts';
 
 const limitsDef = defineConfig({
   file: 'limits.yaml',
@@ -92,6 +92,7 @@ async function real(): Promise<Side & { readonly fs: MemoryHostFs }> {
     clock: manualClock(),
     log: captureLog(),
     binary: 'fy',
+    etagKey: TEST_ETAG_KEY,
     defs: [
       { plugin: 'runtimes', def: limitsDef },
       { plugin: 'runtimes', def: itemsDef },
@@ -210,13 +211,13 @@ describe('ConfigPort.etag — the real config service only', () => {
     const after = await side.config.etag(limitsDef);
 
     expect(after).not.toBe(before);
-    // sha256 of the TEXT, as every write reckons it
-    expect(after).toBe(new Bun.CryptoHasher('sha256').update('limit: 8\n').digest('hex'));
+    // the keyed digest of the TEXT, as every write reckons it
+    expect(after).toBe(testEtag('limit: 8\n'));
   });
 
   test('the etag is over the decoded text the writer compares: a BOM is not part of it, a CRLF is', async () => {
     const side = await real();
-    const sha = (text: string): string => new Bun.CryptoHasher('sha256').update(text).digest('hex');
+    const sha = testEtag;
 
     side.disk?.edit('limits.yaml', '﻿limit: 8\r\n');
     const answer = await side.config.etag(limitsDef);
@@ -239,7 +240,7 @@ describe('ConfigPort.etag — the real config service only', () => {
 
     expect(again).toBe(first);
     expect(moved).not.toBe(first);
-    expect(moved).toBe(new Bun.CryptoHasher('sha256').update('limit: 9\n').digest('hex'));
+    expect(moved).toBe(testEtag('limit: 9\n'));
   });
 
   /** The service on a disk that says which files were read, and the world's two items already there. */
@@ -265,6 +266,7 @@ describe('ConfigPort.etag — the real config service only', () => {
       clock: manualClock(),
       log: captureLog(),
       binary: 'fy',
+      etagKey: TEST_ETAG_KEY,
       defs: [
         { plugin: 'runtimes', def: limitsDef },
         { plugin: 'runtimes', def: itemsDef },
@@ -293,7 +295,7 @@ describe('ConfigPort.etag — the real config service only', () => {
     const etag = await side.config.etag(itemsDef, 'beta');
     const landed = await side.config.write(itemsDef, 'beta', { patch: { budget: 7 } }, { ifMatch: etag });
 
-    expect(etag).toBe(new Bun.CryptoHasher('sha256').update('budget: 1\n').digest('hex'));
+    expect(etag).toBe(testEtag('budget: 1\n'));
     expect(landed.kind).toBe('written');
   });
 
