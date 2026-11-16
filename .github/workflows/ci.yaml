@@ -151,6 +151,7 @@ jobs:
           FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           # Only a push's `before`: a pull request's own earlier head is never the base (check-base.sh says why).
           FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          FY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: ./scripts/ci/check-base.sh
       # The merge-base the changed-plugin scope diffs against; best effort, a miss makes the scope FULL.
       - name: Fetch the history the changed-plugin scope diffs
@@ -235,6 +236,7 @@ jobs:
         env:
           FY_PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           FY_PUSH_BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+          FY_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: ./scripts/ci/check-base.sh
       - name: Run the static parts
         env:
