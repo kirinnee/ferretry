@@ -4,6 +4,8 @@ import type { Instant, JsonValue, Result } from '@ferretry/std';
 import type { HarnessKey, LoginKindKey } from '../ids.ts';
 import type { HarnessHistorySource } from '../history.ts';
 import type { LaunchSpec } from './launch.ts';
+import type { AdoptedConversation, PortableConversation } from './portable-conversation.ts';
+import type { HarnessRuntimeSwitch, RuntimeSwitchPane } from './runtime-switch.ts';
 import type { HarnessStop, Runner, RunnerHandle, RunningFerret, StartRefusal } from './runner.ts';
 
 // ─── harness (§4.3) ───────────────────────────────────────────────────────────────────────────────────────────────
@@ -344,6 +346,29 @@ export interface Harness {
     ferret: FerretId,
   ): Promise<{ readonly id: string; readonly file: string; readonly home: string } | undefined>;
   fork?(from: FerretId, at?: TurnRef): Promise<ForkPlan>;
+  /**
+   * Additive (c58-37, the cross-harness move, SOURCE side): this ferret's conversation in the harness-neutral form
+   * ({@link PortableConversation}), at most `budgetTokens` of it (the oldest turns are left out and counted), or one
+   * plain sentence saying why it cannot be read. It reads the ferret's OWN home only and writes nothing. Absent: the
+   * harness cannot be moved FROM, and a move that would convert it refuses with that sentence.
+   */
+  exportConversation?(
+    ferret: FerretId,
+    conversation: string,
+    budgetTokens: number,
+  ): Promise<Result<PortableConversation, { readonly reason: string }>>;
+  /**
+   * Additive (c58-37, the cross-harness move, TARGET side): writes `from` into THIS ferret's home in this harness's own
+   * format, and proves this harness's own CLI resumes it (today's conversion check, run in a throwaway home) before it
+   * answers `ok`. `dryRun` writes nothing and answers the summary the preview shows (`conversation` absent). Refuses with
+   * one plain sentence, nothing written, for a version it was not tested on or a conversation that does not resume.
+   * Absent: the harness cannot be moved TO.
+   */
+  adoptConversation?(
+    spec: LaunchSpec,
+    from: PortableConversation,
+    options: { readonly dryRun: boolean },
+  ): Promise<Result<AdoptedConversation, { readonly reason: string }>>;
   stop(ferret: FerretId, handle: RunnerHandle, runner: Runner, how: 'polite' | 'now'): Promise<void>;
   deliver(ferret: FerretId, handle: RunnerHandle, message: OutboundMessage): Promise<Delivery>;
   /**
@@ -402,6 +427,13 @@ export interface Harness {
    * Total: a tree that cannot be reached is left out, never an error. Absent: this harness lists no history.
    */
   historySources?(): Promise<readonly HarnessHistorySource[]>;
+  /**
+   * Additive (runtime control): this harness's part of changing the model, reasoning level or fast mode of a RUNNING ferret
+   * (`POST /v1/ferrets/:id/runtime`), built for ONE ferret's pane. Ferrets' runtime-control service asks it for the plan, the
+   * catalog and the picker recovery and never names the harness; absent: the harness cannot be switched live, and the answer
+   * is `422 runtime_control_unsupported`.
+   */
+  runtimeSwitch?(pane: RuntimeSwitchPane): HarnessRuntimeSwitch;
   readonly transcript: TranscriptReader;
   readonly usage: UsageReader;
   readonly dialogs?: DialogReader;

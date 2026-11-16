@@ -28,6 +28,8 @@ export function reasonForWaiting(view: DeliveryView): QueueWaitReason | undefine
   if (view.launching) return 'launching';
   if (view.target.pendingQuestion !== undefined) return 'question';
   if (!view.pane.alive || view.pane.dead) return undefined;
+  // The harness is compacting its context: a typed message must wait for it, not ride the busy turn's own queue.
+  if (view.pane.compacting === true) return 'compacting';
   if (view.pane.blockingPrompt !== undefined) return 'dialog';
   // Codex is holding an earlier submission until its startup ends: the pane is still starting, whatever the
   // composer shows.

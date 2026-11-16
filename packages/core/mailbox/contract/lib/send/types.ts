@@ -463,7 +463,7 @@ export class SendScreenUnreadable extends SendRefused {
 export class SendNotReady extends SendRefused {
   constructor(
     message: string,
-    readonly reason: 'busy' | 'dialog' | 'stopped',
+    readonly reason: 'busy' | 'dialog' | 'stopped' | 'compacting',
   ) {
     super(message);
     this.name = 'SendNotReady';

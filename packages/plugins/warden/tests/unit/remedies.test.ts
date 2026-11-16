@@ -312,6 +312,42 @@ describe('a resume Ferrets did not answer cleanly', () => {
     should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
   });
 
+  it('should answer ok false, never a revive, when Ferrets answered 503 helper_admission_unavailable (Packs gave no answer: nothing was written or launched)', async () => {
+    // Arrange: the 503 is thrown from start.decide, before the relaunch is committed (no `decided` is told).
+    const { ferrets, resume, acted } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () =>
+      await Promise.reject(
+        Object.assign(new Error('Packs did not answer for this helper, so it is not started'), {
+          name: 'ApiError',
+          status: 503,
+          code: 'helper_admission_unavailable',
+        }),
+      );
+
+    // Act
+    const refused = await resume('f1', 'carry on', AGENT_ORIGIN);
+
+    // Assert: not counted (no cooldown, no crash_repeat, no breaker); the sentence is Ferrets' own.
+    should(refused).eql({ ok: false, reason: 'Packs did not answer for this helper, so it is not started' });
+    should(acted).eql([]);
+  });
+
+  it('should still count a revive for any other 503, whose code does not say nothing started', async () => {
+    // Arrange
+    const { ferrets, resume } = subject();
+    ferrets.add({ id: ferretId('f1'), state: 'stopped' });
+    ferrets.resume = async () =>
+      await Promise.reject(Object.assign(new Error('busy'), { status: 503, code: 'unavailable' }));
+
+    // Act
+    const revived = await resume('f1', 'carry on', AGENT_ORIGIN);
+
+    // Assert
+    should(revived.ok).be.true();
+    should((revived as { caveat?: string }).caveat).containEql('counts as a revive');
+  });
+
   it('should answer ok false when Ferrets itself refused the resume (nothing started)', async () => {
     // Arrange
     const { ferrets, resume } = subject();

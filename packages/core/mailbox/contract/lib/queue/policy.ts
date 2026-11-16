@@ -1,6 +1,7 @@
 import type { InteractionMode } from '../../ferret-types.ts';
 import type { PeerMessageLabel } from '../../peer-messages.ts';
 import type { QueuedMessage } from '../../wire-send.ts';
+import { laneOf } from './lane.ts';
 import type { SendSenderKind } from '../../stores.ts';
 import { type SendTarget, TERMINAL_SEND_STATUSES } from '../send/types.ts';
 import type { QueueCoalesceSettings } from './settings.ts';
@@ -43,24 +44,32 @@ function answersWait(message: QueuedMessage, target: SendTarget): boolean {
 }
 
 /**
- * How a ferret's message is to be treated NOW. A blocker, an interrupt (`--now`), the answer its receiver
- * is parked on, a question (a reply is expected) and every message while the kill switch is off all go at
- * once — a question is never held, as news or to be combined. No label is an action.
+ * Whether a ferret's message goes as URGENT only because it answers what its receiver waits on: its lane is
+ * action or fyi and the kill switch is on. The row keeps that lane and gains `promoted: urgent`.
+ */
+export function promotedToUrgent(
+  message: QueuedMessage,
+  target: SendTarget,
+  settings: Pick<QueueCoalesceSettings, 'coalesce'>,
+): boolean {
+  const lane = message.lane ?? laneOf(message);
+  return settings.coalesce && (lane === 'action' || lane === 'fyi') && answersWait(message, target);
+}
+
+/**
+ * How a ferret's message is to be treated NOW, from the lane stored when it was accepted (never worked out
+ * again): the urgent lane (a blocker, an interrupt `--now`, a question), the answer its receiver is parked on
+ * (a promotion) and every message while the kill switch is off all go at once — a question is never held, as
+ * news or to be combined. An old line with no lane has it derived once.
  */
 export function effectiveLabel(
   message: QueuedMessage,
   target: SendTarget,
   settings: Pick<QueueCoalesceSettings, 'coalesce'>,
 ): EffectiveLabel {
-  if (
-    !settings.coalesce ||
-    message.label === 'blocker' ||
-    message.interrupt === true ||
-    message.replyExpected === true ||
-    answersWait(message, target)
-  )
-    return 'blocker';
-  return message.label === 'fyi' ? 'fyi' : 'action';
+  const lane = message.lane ?? laneOf(message);
+  if (!settings.coalesce || lane === 'urgent' || promotedToUrgent(message, target, settings)) return 'blocker';
+  return lane === 'fyi' ? 'fyi' : 'action';
 }
 
 /** Whether the receiver ended a turn after this message arrived. A turn end BEFORE it does not count. */

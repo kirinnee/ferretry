@@ -1,6 +1,7 @@
 import { defineHook } from '@ferretry/kernel/contract';
 import { z } from 'zod';
 import type { HarnessKeySchema } from '../ids.ts';
+import type { RuntimeModelCatalog } from '../view/runtime-control.ts';
 
 /** What a start needs of the runtime it names: the harness it runs and the login it spends. */
 export type RuntimeStartResolution =
@@ -25,6 +26,14 @@ export interface RuntimeStartSource {
    * it and passes the SAME login gate. Optional: a source that does not say leaves such a start as it was.
    */
   defaultRuntime?(): Promise<string | undefined>;
+  /**
+   * Additive (c58-37, Move and handover): what the runtime NAMED serves, for planning the model a move or handover lands
+   * on: its servable models (with each one's context window and reasoning efforts) and the default. It is the ONE
+   * {@link RuntimeModelCatalog} the runtime control also reads (`contract/view/runtime-control.ts`), so there is no second
+   * spelling of "what models a login serves". Read-only and values-free: no credential, no path. `undefined`: no such
+   * runtime, or it cannot say. Absent: a move onto another runtime refuses with the sentence that it is not built yet.
+   */
+  catalog?(runtime: string): Promise<RuntimeModelCatalog | undefined>;
 }
 
 /** The one key `runtime.start` is provided under: a runtime has exactly one owner. */

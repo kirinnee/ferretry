@@ -29,7 +29,6 @@
     "daemon/lib/session/restart/index.ts",
     "daemon/adapters/session/archive/index.ts",
     "daemon/lib/session/directory/session-directory.ts",
-    "daemon/lib/session/runtime-control/index.ts",
     "daemon/lib/session/runtime-control/service.ts"
   ],
   "allowed": {
